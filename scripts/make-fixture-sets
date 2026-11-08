@@ -1,0 +1,106 @@
+#!/usr/bin/python3
+"""Build the standard Clove test folders from the fixture cache.
+
+Reads ``fixtures/sets.json`` and ``fixtures/generated.json``, then recreates
+every set under ``${CLOVE_FIXTURES_DIR:-/Volumes/T7/Projects/.clove-fixtures}/sets/``.
+Each set folder is deleted first, so the file list is the same on every run.
+
+Run ``scripts/fetch-fixtures`` first; this script never touches the network.
+
+Usage:
+    /usr/bin/python3 scripts/make-fixture-sets [--cache DIR] [--only SET]
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import fixtures_lib as fx
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Build the standard Clove test folders from the fixture cache.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "The cache defaults to $CLOVE_FIXTURES_DIR, or %s.\n"
+            "Run scripts/fetch-fixtures first." % fx.DEFAULT_CACHE_DIR
+        ),
+    )
+    parser.add_argument(
+        "--cache",
+        metavar="DIR",
+        help="fixture cache root (default: $%s or %s)"
+        % (fx.CACHE_ENV, fx.DEFAULT_CACHE_DIR),
+    )
+    parser.add_argument(
+        "--sets",
+        metavar="FILE",
+        default=fx.SETS_PATH,
+        help="set definitions (default: fixtures/sets.json)",
+    )
+    parser.add_argument(
+        "--only",
+        metavar="SET",
+        action="append",
+        help="build only this set; repeat for several",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    cache = fx.cache_root(args.cache)
+    files = fx.files_dir(cache)
+    generated = fx.generated_dir(cache)
+    target = fx.sets_dir(cache)
+
+    try:
+        entries = fx.validate_manifest(fx.load_json(fx.MANIFEST_PATH))
+        recipes = fx.validate_recipes(fx.load_json(fx.GENERATED_PATH))
+        resolved = fx.resolve_sets(
+            fx.load_json(args.sets),
+            entries,
+            recipes,
+            files,
+            fx.XMP_DIR,
+            generated,
+        )
+    except fx.FixtureError as error:
+        print("error: %s" % error, file=sys.stderr)
+        return 2
+
+    if args.only:
+        wanted = set(args.only)
+        known = {spec["name"] for spec in resolved}
+        unknown = sorted(wanted - known)
+        if unknown:
+            print(
+                "error: unknown set(s): %s (known: %s)"
+                % (", ".join(unknown), ", ".join(sorted(known))),
+                file=sys.stderr,
+            )
+            return 2
+        resolved = [spec for spec in resolved if spec["name"] in wanted]
+
+    print("Cache: %s" % cache)
+    print("Sets:  %s" % target)
+    print("")
+
+    try:
+        report = fx.build_sets(resolved, target)
+    except fx.FixtureError as error:
+        print("error: %s" % error, file=sys.stderr)
+        return 1
+
+    print("")
+    for name, count in report:
+        print("%-14s %3d files" % (name, count))
+    print("%-14s %3d files in %d sets" % ("total", sum(count for _, count in report), len(report)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

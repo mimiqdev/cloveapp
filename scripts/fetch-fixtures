@@ -1,0 +1,90 @@
+#!/usr/bin/python3
+"""Download and verify the pinned Clove test fixtures.
+
+Reads ``fixtures/manifest.json`` and makes sure every file is present in
+``${CLOVE_FIXTURES_DIR:-/Volumes/T7/Projects/.clove-fixtures}/files/`` with the
+recorded SHA-256. A second run downloads nothing; a corrupted file is deleted
+and downloaded again.
+
+Usage:
+    /usr/bin/python3 scripts/fetch-fixtures [--cache DIR] [--manifest FILE]
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import fixtures_lib as fx
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Download and verify the pinned Clove test fixtures.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "The cache defaults to $CLOVE_FIXTURES_DIR, or %s.\n"
+            "No binary file is ever written into the repository." % fx.DEFAULT_CACHE_DIR
+        ),
+    )
+    parser.add_argument(
+        "--cache",
+        metavar="DIR",
+        help="fixture cache root (default: $%s or %s)"
+        % (fx.CACHE_ENV, fx.DEFAULT_CACHE_DIR),
+    )
+    parser.add_argument(
+        "--manifest",
+        metavar="FILE",
+        default=fx.MANIFEST_PATH,
+        help="manifest to read (default: fixtures/manifest.json)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    cache = fx.cache_root(args.cache)
+    directory = fx.files_dir(cache)
+
+    try:
+        entries = fx.validate_manifest(fx.load_json(args.manifest))
+    except fx.FixtureError as error:
+        print("error: %s" % error, file=sys.stderr)
+        return 2
+
+    total = sum(entry["bytes"] for entry in entries)
+    print("Manifest: %s" % os.path.relpath(args.manifest, os.getcwd()))
+    print("Cache:    %s" % directory)
+    print("%d files, %s in total" % (len(entries), fx.human_bytes(total)))
+    print("")
+
+    summary, failures = fx.sync_files(entries, directory)
+
+    print("")
+    print(
+        "Summary: %d cached, %d downloaded, %d repaired, %d failed (%s transferred)"
+        % (
+            summary["cached"],
+            summary["downloaded"],
+            summary["repaired"],
+            summary["failed"],
+            fx.human_bytes(summary["bytes"]),
+        )
+    )
+    if failures:
+        print("")
+        for entry_id, message in failures:
+            print("error: %s: %s" % (entry_id, message), file=sys.stderr)
+        print(
+            "error: %d file(s) could not be verified; see the messages above"
+            % len(failures),
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
