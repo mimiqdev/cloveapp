@@ -24,7 +24,11 @@ checklist. G1 remains open; physical-media results belong to part 2.
 - No photo fixtures were needed; the existing shared sets were present. Nothing
   was written into the fixture cache's `files/` directory.
 
-Reports (untracked under `.build/s1/`; JSON is supplied on issue #12):
+Reports (untracked under `.build/s1/`; full JSON is preserved in
+[issue #12's evidence comment](https://github.com/mimiqdev/cloveapp/issues/12#issuecomment-6724403114)).
+Measurements used source revision `1feb372`; the final code additionally guards
+external-disconnect classification with a volume-root check, covered by a
+regression test.
 
 | Run | Report |
 | --- | --- |
