@@ -35,7 +35,23 @@ struct MetadataExperimentTests {
                     #expect(result.before?.jpegEXIFPreviews == result.after?.jpegEXIFPreviews)
                     // Native JPEG copying normalizes some EXIF rationals/GPS. Keep that
                     // evidence visible rather than treating byte-identical pixels as preservation.
-                    if !result.file.lowercased().hasSuffix(".jpg") {
+                    if result.file.lowercased().hasSuffix(".jpg")
+                        && result.control == "camera-original"
+                    {
+                        let observedNormalizations: Set<String> = [
+                            "exif:ApertureValue", "exif:FocalPlaneXResolution",
+                            "exif:FocalPlaneYResolution",
+                            "exif:GPSAltitude", "exif:GPSLatitude", "exif:ShutterSpeedValue",
+                            "exifEX:LensSpecification", "exifEX:LensSpecification[2]",
+                            "exifEX:LensSpecification[3]",
+                            "properties.{Exif}.ApertureValue",
+                            "properties.{Exif}.ShutterSpeedValue",
+                            "properties.{GPS}.Latitude",
+                        ]
+                        #expect(
+                            Set(result.changedExistingMetadata).isSubset(of: observedNormalizations)
+                        )
+                    } else {
                         #expect(result.changedExistingMetadata.isEmpty)
                     }
                     if result.control == "seeded-other-app" {
