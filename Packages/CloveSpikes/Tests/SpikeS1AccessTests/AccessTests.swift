@@ -30,6 +30,29 @@ private func temporaryFolder() throws -> URL {
     }
 }
 
+@Test func movedBookmarkIsRefreshedAfterSuccessfulRead() async throws {
+    let root = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let original = root.appendingPathComponent("original")
+    let moved = root.appendingPathComponent("moved")
+    try FileManager.default.createDirectory(at: original, withIntermediateDirectories: true)
+    let store = root.appendingPathComponent("recents.json")
+    let experiment = AccessExperiment(storeURL: store)
+    _ = await experiment.load()
+    let picked = await experiment.pick(original, media: .local)
+    let record = try #require(picked.recents.first)
+    try FileManager.default.moveItem(at: original, to: moved)
+    let reopened = await experiment.reopen(record.id)
+    #expect(
+        reopened.events.contains {
+            $0.phase == .bookmarkCreate && $0.detail.contains("Re-created stale")
+        })
+    let saved = try #require(AccessRecents.load(from: store).records.first)
+    let resolved = try AccessBookmark.resolve(saved.bookmark)
+    #expect(!resolved.stale)
+    #expect(resolved.url.standardizedFileURL == moved.standardizedFileURL)
+}
+
 @Test func corruptBookmarkFailsRatherThanResolvingAnUnrelatedPath() {
     #expect(throws: (any Error).self) { try AccessBookmark.resolve(Data("invalid bookmark".utf8)) }
 }
@@ -146,26 +169,4 @@ func errorMapping(domain: String, code: Int, expected: AccessFailure) {
         snapshot.events.contains {
             $0.phase == .watch && $0.detail.contains("Remembered location unavailable")
         })
-}
-
-/// Opt-in measurements on a disposable disk image mounted by the worker. Never points at fixture files/.
-@Test func s1VolumeMeasurement() async throws {
-    guard let path = ProcessInfo.processInfo.environment["CLOVE_S1_TEST_VOLUME"],
-        let reportPath = ProcessInfo.processInfo.environment["CLOVE_S1_REPORT_PATH"]
-    else { return }
-    let folder = URL(fileURLWithPath: path)
-    let experiment = AccessExperiment(storeURL: folder.appendingPathComponent("recents.json"))
-    _ = await experiment.load()
-    let selected = await experiment.pick(folder, media: .local)
-    if let record = selected.recents.first { _ = await experiment.reopen(record.id) }
-    _ = await experiment.probe(
-        write: true, scenario: "mounted disposable disk image; shared loaded macOS host")
-    if ProcessInfo.processInfo.environment["CLOVE_S1_FILL"] == "1" {
-        _ = await experiment.fill()
-        _ = await experiment.probe(
-            write: true, scenario: "full disposable disk image after bounded fill")
-    }
-    let result = await experiment.snapshot()
-    try result.report.write(to: URL(fileURLWithPath: reportPath))
-    print("S1 disk-image report: \(reportPath)")
 }

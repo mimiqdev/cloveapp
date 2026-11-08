@@ -119,17 +119,24 @@ public enum AccessProbes {
         return try fresh.checkResourceIsReachable()
     }
 
-    public static func milliseconds(since instant: ContinuousClock.Instant) -> Double {
-        let parts = instant.duration(to: .now).components
+    public static func milliseconds(
+        since instant: ContinuousClock.Instant, until end: ContinuousClock.Instant = .now
+    ) -> Double {
+        let parts = instant.duration(to: end).components
         return Double(parts.seconds) * 1_000 + Double(parts.attoseconds) / 1e15
     }
+}
+
+public struct AccessPresenterObservation: Sendable {
+    public var event: AccessEvent
+    public var instant: ContinuousClock.Instant
 }
 
 /// File presenter callbacks are advisory. The lock protects the URL and callback log across queues.
 public final class AccessPresenter: NSObject, NSFilePresenter, @unchecked Sendable {
     private let lock = NSLock()
     private var url: URL
-    private var events: [AccessEvent] = []
+    private var events: [AccessPresenterObservation] = []
     public let presentedItemOperationQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -139,7 +146,7 @@ public final class AccessPresenter: NSObject, NSFilePresenter, @unchecked Sendab
     public init(url: URL) { self.url = url }
     public var presentedItemURL: URL? { lock.withLock { url } }
 
-    public func drain() -> [AccessEvent] {
+    public func drain() -> [AccessPresenterObservation] {
         lock.withLock {
             defer { events.removeAll() }
             return events
@@ -147,7 +154,11 @@ public final class AccessPresenter: NSObject, NSFilePresenter, @unchecked Sendab
     }
 
     private func record(_ text: String) {
-        lock.withLock { events.append(AccessEvent(.watch, "file-presenter: \(text)")) }
+        lock.withLock {
+            events.append(
+                AccessPresenterObservation(
+                    event: AccessEvent(.watch, "file-presenter: \(text)"), instant: .now))
+        }
     }
 
     public func presentedItemDidChange() { record("item changed (not proof of disconnect)") }

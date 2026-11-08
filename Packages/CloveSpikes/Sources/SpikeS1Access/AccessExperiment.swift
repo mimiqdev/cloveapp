@@ -60,12 +60,18 @@ public actor AccessExperiment {
                 volumeUUID: values?.volumeUUIDString, media: media)
             // Never deduplicate by volume name; two cards may share a label.
             recents.records.removeAll {
-                $0.pathSummary == url.path && $0.volumeUUID == record.volumeUUID
+                record.volumeUUID != nil && $0.pathSummary == url.path
+                    && $0.volumeUUID == record.volumeUUID
             }
             recents.records.insert(record, at: 0)
-            try persist()
             events.append(
-                AccessEvent(.bookmarkCreate, "Default bookmark saved (\(data.count) bytes)"))
+                AccessEvent(.bookmarkCreate, "Default bookmark created (\(data.count) bytes)"))
+            do {
+                try persist()
+                events.append(AccessEvent(.storage, "Default bookmark saved to Lab Recents"))
+            } catch {
+                events.append(AccessEvent(.storage, "Save Lab Recents failed", error: error))
+            }
             do {
                 let minimal = try AccessBookmark.encode(url, minimal: true)
                 let resolved = try AccessBookmark.resolve(minimal)
@@ -79,7 +85,7 @@ public actor AccessExperiment {
                     AccessEvent(.bookmarkResolve, "Minimal comparison failed", error: error))
             }
         } catch {
-            events.append(AccessEvent(.bookmarkCreate, "Create/save bookmark failed", error: error))
+            events.append(AccessEvent(.bookmarkCreate, "Create bookmark failed", error: error))
         }
         return snapshot()
     }
@@ -150,7 +156,11 @@ public actor AccessExperiment {
         events += result.events
         context.merge(result.context) { _, new in new }
         context["scenario"] = scenario
-        measurements += result.measurements
+        measurements += result.measurements.map { measurement in
+            var tagged = measurement
+            tagged.tags = ["scenario": scenario, "path": selected.path, "media": media.rawValue]
+            return tagged
+        }
         return snapshot()
     }
 
@@ -187,17 +197,7 @@ public actor AccessExperiment {
 
     public func poll() -> AccessSnapshot {
         guard let watchURL, let watchStart else { return snapshot() }
-        for event in presenter?.drain() ?? [] {
-            events.append(event)
-            measurements.append(
-                LabMeasurement(
-                    name: "presenter-callback-since-watch-start",
-                    value: AccessProbes.milliseconds(since: watchStart), unit: "ms",
-                    tags: [
-                        "event": event.detail,
-                        "timing": "callback drained at poll; see event wall timestamp",
-                    ]))
-        }
+        drainPresenter(since: watchStart)
         guard !detected else { return snapshot() }
         let pollStart = ContinuousClock.now
         do {
@@ -217,6 +217,29 @@ public actor AccessExperiment {
                 LabMeasurement(name: "reachability-call", value: duration, unit: "ms"))
         }
         return snapshot()
+    }
+
+    private func drainPresenter(since start: ContinuousClock.Instant) {
+        for observation in presenter?.drain() ?? [] {
+            events.append(observation.event)
+            measurements.append(
+                LabMeasurement(
+                    name: "presenter-callback-since-watch-start",
+                    value: AccessProbes.milliseconds(since: start, until: observation.instant),
+                    unit: "ms",
+                    tags: ["event": observation.event.detail]))
+            if let marker, observation.instant >= marker {
+                measurements.append(
+                    LabMeasurement(
+                        name: "presenter-callback-since-operator-marker",
+                        value: AccessProbes.milliseconds(since: marker, until: observation.instant),
+                        unit: "ms",
+                        tags: [
+                            "event": observation.event.detail,
+                            "caveat": "callback may be unrelated to disconnect",
+                        ]))
+            }
+        }
     }
 
     private func detect(error: Error?, detail: String) {
@@ -247,7 +270,7 @@ public actor AccessExperiment {
     public func stopWatch() {
         if let presenter {
             NSFileCoordinator.removeFilePresenter(presenter)
-            events += presenter.drain()
+            if let watchStart { drainPresenter(since: watchStart) }
             events.append(AccessEvent(.watch, "Watch stopped; file presenter removed"))
         }
         if watchScope, let watchURL { watchURL.stopAccessingSecurityScopedResource() }
