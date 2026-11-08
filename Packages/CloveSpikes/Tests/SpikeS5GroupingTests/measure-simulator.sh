@@ -25,7 +25,8 @@ with open(sys.argv[1], 'wb') as stream:
     plistlib.dump(dict(CFBundleExecutable='S5Probe', CFBundleIdentifier='com.mimiqdev.clove.s5probe',
                       CFBundleName='S5Probe', CFBundlePackageType='APPL', CFBundleVersion='1',
                       CFBundleShortVersionString='0.1', MinimumOSVersion='18.0',
-                      LSRequiresIPhoneOS=True, UILaunchScreen={}), stream)
+                      LSRequiresIPhoneOS=True, UILaunchScreen={},
+                      UIApplicationSceneManifest=dict(UIApplicationSupportsMultipleScenes=False)), stream)
 PY
 udid="$(xcrun simctl create "Clove S5 measurement $$" 'iPhone 17 Pro' com.apple.CoreSimulator.SimRuntime.iOS-27-0)"
 launch_pid=""
@@ -44,13 +45,23 @@ ditto "${CLOVE_FIXTURES_DIR:-/Volumes/T7/Projects/.clove-fixtures}/sets/formats"
 xcrun simctl launch --console "$udid" com.mimiqdev.clove.s5probe \
     "$container/Documents/formats" > "$output/console.log" 2>&1 &
 launch_pid="$!"
-for attempt in {1..45}; do
+echo "S5 simulator container: $container"
+for attempt in {1..180}; do
     if [ -f "$container/Documents/simulator.json" ]; then
         cp "$container/Documents/simulator.json" "$root/.build/s5/simulator.json"
         echo 'S5 simulator: .build/s5/simulator.json saved'
         exit 0
     fi
+    if [ -f "$container/Documents/failure.txt" ]; then
+        cp "$container/Documents/failure.txt" "$output/failure.txt"
+        exit 1
+    fi
     sleep 1
 done
-echo "S5 simulator: timed out; see $output/console.log" >&2
+if [ -f "$container/Documents/progress.txt" ]; then
+    cp "$container/Documents/progress.txt" "$output/progress.txt"
+fi
+xcrun simctl spawn "$udid" log show --last 3m --style compact \
+    --predicate 'process == "S5Probe"' > "$output/process.log" 2>&1 || true
+echo "S5 simulator: timed out; see $output/console.log and process.log" >&2
 exit 1

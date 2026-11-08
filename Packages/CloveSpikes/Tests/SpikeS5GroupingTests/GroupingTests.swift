@@ -80,6 +80,7 @@ private func photo(_ id: String, _ time: Double?, model: String? = "Camera", ser
     for (time, fraction, offset) in [
         ("bad", "1", "+00:00"), ("2026:02:30 00:00:00", "1", "+00:00"),
         ("2026:11:13 00:00:00", "abc", "+00:00"), ("2026:11:13 00:00:00", "1", "+99:99"),
+        ("2026:11:13 00:00:00", "1", "+-1:00"), ("2026:11:13 00:00:00", "1", "+01:-1"),
     ] {
         #expect(
             GroupingMetadataReader.captureTime(time, subsecond: fraction, offset: offset) == nil)

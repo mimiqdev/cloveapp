@@ -109,6 +109,8 @@ public enum GroupingMetadataReader {
             let characters = Array(offset)
             guard characters.count == 6, characters[0] == "+" || characters[0] == "-",
                 characters[3] == ":",
+                characters[1...2].allSatisfy({ $0.isASCII && $0.isNumber }),
+                characters[4...5].allSatisfy({ $0.isASCII && $0.isNumber }),
                 let hours = Int(String(characters[1...2])),
                 let minutes = Int(String(characters[4...5])), hours <= 23, minutes <= 59
             else { return nil }
