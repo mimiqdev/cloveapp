@@ -70,3 +70,11 @@ fastlane/test_output
 .clove-fixtures/
 __pycache__/
 *.pyc
+
+# Clove
+*.xcodeproj/
+.build/
+Config/Local.xcconfig
+Config/TestFlight.local.json
+.DS_Store
+*.xcresult

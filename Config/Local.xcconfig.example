@@ -1,0 +1,3 @@
+// Copy this file to Config/Local.xcconfig and fill in the development team.
+// Config/Local.xcconfig is gitignored; never commit a team ID.
+DEVELOPMENT_TEAM =

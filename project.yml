@@ -1,0 +1,100 @@
+---
+name: Clove
+
+options:
+  minimumXcodeGenVersion: 2.46.0
+  bundleIdPrefix: com.mimiqdev
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+configFiles:
+  Debug: Config/Shared.xcconfig
+  Release: Config/Shared.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: "YES"
+
+packages:
+  CloveCore:
+    path: Packages/CloveCore
+  CloveImaging:
+    path: Packages/CloveImaging
+
+targets:
+  Clove:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Clove
+    dependencies:
+      - package: CloveCore
+      - package: CloveImaging
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mimiqdev.clove
+        PRODUCT_NAME: Clove
+        INFOPLIST_KEY_CFBundleDisplayName: Clove
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
+        SUPPORTS_MACCATALYST: "NO"
+
+  CloveLab:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: CloveLab
+    dependencies:
+      - package: CloveCore
+      - package: CloveImaging
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mimiqdev.clove.lab
+        PRODUCT_NAME: CloveLab
+        INFOPLIST_KEY_CFBundleDisplayName: Clove Lab
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
+        SUPPORTS_MACCATALYST: "NO"
+
+  CloveUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: CloveUITests
+    dependencies:
+      - target: Clove
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mimiqdev.clove.uitests
+        TEST_TARGET_NAME: Clove
+
+schemes:
+  Clove:
+    build:
+      targets:
+        Clove: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - CloveUITests
+  CloveLab:
+    build:
+      targets:
+        CloveLab: all
+    run:
+      config: Debug
