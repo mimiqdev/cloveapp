@@ -42,6 +42,13 @@ string in `notes` retains the complete before/after hashes, source properties,
 recursive XMP tags (including qualifiers), changed paths, errors, and failure
 integrity checks. Device reports will be attached to #15 in part 2.
 
+Part 1 checks: `mise install` and `mise run verify` pass; the final simulator run
+passes all 9 S4 tests. The required validation-only release command was attempted,
+but stopped before archive/signing/validation because UTC build `26110817` is
+already visible in TestFlight. The script refuses to reuse an hourly build
+number. The supervisor must rerun it in a later available UTC hour (earliest
+2026-11-08 18:00 UTC); S4 does not bypass that guard or upload a build.
+
 The repository calls the JPEG a camera JPEG. Its actual embedded packet contains
 `Image::ExifTool 10.27`, Adobe Camera Raw settings, and an XMP history entry saying
 it was converted from `image/x-canon-cr2` to `image/jpeg`. This is useful
