@@ -60,3 +60,13 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Fixtures
+#
+# The fixture cache lives outside the repository, at
+# ${CLOVE_FIXTURES_DIR:-/Volumes/T7/Projects/.clove-fixtures}, so parallel
+# checkouts share one download and no binary file is ever committed. The
+# entries below only matter if CLOVE_FIXTURES_DIR points inside the checkout.
+.clove-fixtures/
+__pycache__/
+*.pyc
