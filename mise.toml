@@ -1,0 +1,59 @@
+[settings]
+lockfile = true
+
+[tools]
+xcodegen = "2.46.0"
+
+[tasks.generate]
+description = "Generate Clove.xcodeproj from project.yml"
+run = "./scripts/generate-xcodeproj.sh"
+
+[tasks.lint]
+description = "Lint Swift sources with swift-format"
+run = "swift format lint --strict --recursive --configuration .swift-format Clove CloveLab CloveUITests Packages"
+
+[tasks.format]
+description = "Format Swift sources in place with swift-format"
+run = "swift format format --in-place --recursive --configuration .swift-format Clove CloveLab CloveUITests Packages"
+
+[tasks.test-core]
+description = "Run CloveCore package tests on macOS"
+run = "swift test --package-path Packages/CloveCore"
+
+[tasks.test-imaging]
+description = "Run CloveImaging package tests on macOS"
+run = "swift test --package-path Packages/CloveImaging"
+
+[tasks.build]
+description = "Build Clove and CloveLab for the iOS Simulator"
+run = """
+set -eu
+xcodebuild build \
+    -project Clove.xcodeproj \
+    -scheme Clove \
+    -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath .build/DerivedData \
+    CODE_SIGNING_ALLOWED=NO
+xcodebuild build \
+    -project Clove.xcodeproj \
+    -scheme CloveLab \
+    -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath .build/DerivedData \
+    CODE_SIGNING_ALLOWED=NO
+"""
+
+[tasks.smoke]
+description = "Run the Clove UI smoke test on a throwaway simulator"
+run = "./scripts/smoke.sh"
+
+[tasks.verify]
+description = "Generate, lint, run both package test suites, build both apps, run the smoke test"
+run = """
+set -eu
+mise run generate
+mise run lint
+mise run test-core
+mise run test-imaging
+mise run build
+mise run smoke
+"""
