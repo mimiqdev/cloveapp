@@ -5,6 +5,7 @@
 #   CLOVE_SIM_TAG          device name suffix (default: branch name + PID)
 #   CLOVE_SIM_DEVICE_TYPE  simulator device type (default: iPhone 17 Pro)
 #   CLOVE_SIM_RUNTIME      simulator runtime (default: newest installed iOS)
+#   CLOVE_SMOKE_ATTEMPTS   attempts on UI-test-runner bootstrap failure (default: 4)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -39,18 +40,61 @@ print(newest["identifier"])
     )
 fi
 
-echo "Creating simulator 'Clove smoke $tag' ($device_type, $runtime)"
-udid=$(xcrun simctl create "Clove smoke $tag" "$device_type" "$runtime")
+udid=""
+log=$(mktemp -t clove-smoke)
 
 cleanup() {
-    xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
-    xcrun simctl delete "$udid" >/dev/null 2>&1 || true
+    if [ -n "$udid" ]; then
+        xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+        xcrun simctl delete "$udid" >/dev/null 2>&1 || true
+    fi
+    rm -f "$log"
 }
 trap cleanup EXIT
 
-xcodebuild test \
-    -project Clove.xcodeproj \
-    -scheme Clove \
-    -only-testing:CloveUITests \
-    -destination "id=$udid" \
-    -derivedDataPath .build/DerivedData
+# The UI test runner intermittently fails to attach before the assertion runs.
+# Those failures are infrastructure, not test results, so retry them on a fresh
+# simulator; assertion failures are reported immediately.
+is_runner_failure() {
+    grep -q \
+        -e "failed to initialize for UI testing" \
+        -e "Timed out waiting for AX loaded notification" \
+        -e "operation never finished bootstrapping" \
+        -e "test runner crashed while preparing to run tests" \
+        "$log"
+}
+
+max_attempts="${CLOVE_SMOKE_ATTEMPTS:-4}"
+attempt=1
+while [ "$attempt" -le "$max_attempts" ]; do
+    echo "Creating simulator 'Clove smoke $tag' ($device_type, $runtime), attempt $attempt"
+    udid=$(xcrun simctl create "Clove smoke $tag" "$device_type" "$runtime")
+
+    # Let the simulator and its accessibility service finish starting; launching
+    # the UI test runner too early fails on some runtimes.
+    xcrun simctl bootstatus "$udid" -b
+
+    : >"$log"
+    set +e
+    xcodebuild test \
+        -project Clove.xcodeproj \
+        -scheme Clove \
+        -only-testing:CloveUITests \
+        -destination "id=$udid" \
+        -derivedDataPath .build/DerivedData 2>&1 | tee "$log"
+    code=$?
+    set -e
+
+    if [ "$code" -eq 0 ]; then
+        break
+    fi
+    if [ "$attempt" -ge "$max_attempts" ] || ! is_runner_failure; then
+        exit "$code"
+    fi
+
+    echo "UI test runner failed to initialize; retrying on a fresh simulator" >&2
+    xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+    xcrun simctl delete "$udid" >/dev/null 2>&1 || true
+    udid=""
+    attempt=$((attempt + 1))
+done

@@ -58,7 +58,10 @@ XcodeGen. Every task is listed here.
   creates its own `Clove smoke <tag>` device, tags it with `CLOVE_SIM_TAG` or the
   branch name plus PID, and always deletes it with `trap` — including on failure.
   `CLOVE_SIM_DEVICE_TYPE` and `CLOVE_SIM_RUNTIME` override the defaults
-  (iPhone 17 Pro on the newest installed iOS runtime).
+  (iPhone 17 Pro on the newest installed iOS runtime). If the UI test runner
+  fails to attach before any test runs (an XCTest/simulator bootstrap failure),
+  the script retries on a fresh simulator; `CLOVE_SMOKE_ATTEMPTS` changes the
+  attempt count (default 4). Real assertion failures fail immediately.
 
 ## Secrets and signing
 
