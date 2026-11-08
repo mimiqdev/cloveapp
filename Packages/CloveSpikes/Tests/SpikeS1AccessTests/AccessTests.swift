@@ -105,7 +105,10 @@ func errorMapping(domain: String, code: Int, expected: AccessFailure) {
     let missing = AccessError(NSError(domain: NSPOSIXErrorDomain, code: 2))
     #expect(missing.classify(knownExternal: true) == .missingLocation)
     #expect(missing.classify(previouslyReachable: true) == .missingLocation)
-    #expect(missing.classify(knownExternal: true, previouslyReachable: true) == .disconnected)
+    #expect(missing.classify(knownExternal: true, previouslyReachable: true) == .missingLocation)
+    #expect(
+        missing.classify(knownExternal: true, previouslyReachable: true, volumeUnavailable: true)
+            == .disconnected)
     #expect(
         AccessError(NSError(domain: NSPOSIXErrorDomain, code: 5)).classify(
             knownExternal: true, previouslyReachable: true) == .unknown)
@@ -153,12 +156,13 @@ func errorMapping(domain: String, code: Int, expected: AccessFailure) {
     print("S1 deleted-folder read: \(error.summary)")
 }
 
-@Test func watchRequiresPriorSuccessAndDetectsRemovedFolder() async throws {
+@Test func watchDoesNotCallFolderDeletionADisconnectedExternalVolume() async throws {
     let folder = try temporaryFolder()
     defer { try? FileManager.default.removeItem(at: folder) }
     let experiment = AccessExperiment(storeURL: folder.appendingPathComponent("recents.json"))
     _ = await experiment.load()
-    _ = await experiment.pick(folder, media: .local)
+    // Label this local folder external to exercise the connected-volume guard.
+    _ = await experiment.pick(folder, media: .sdCard)
     _ = await experiment.startWatch()
     _ = await experiment.markDisconnect()
     try FileManager.default.removeItem(at: folder)

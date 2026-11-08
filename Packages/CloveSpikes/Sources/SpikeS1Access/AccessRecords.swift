@@ -44,9 +44,12 @@ public struct AccessError: Codable, Sendable, Equatable {
             .joined(separator: "; ")
     }
 
-    /// Missing paths become a disconnect only with prior success on known external media.
+    /// Missing paths become a disconnect only with prior success and an unavailable external volume.
     /// EACCES/EPERM do not prove revocation; EROFS alone establishes read-only storage.
-    public func classify(knownExternal: Bool = false, previouslyReachable: Bool = false)
+    public func classify(
+        knownExternal: Bool = false, previouslyReachable: Bool = false,
+        volumeUnavailable: Bool = false
+    )
         -> AccessFailure
     {
         let chain = [self] + flattenedChildren
@@ -61,7 +64,8 @@ public struct AccessError: Codable, Sendable, Equatable {
             ($0.domain == NSPOSIXErrorDomain && [2, 6, 19].contains($0.code))
                 || ($0.domain == NSCocoaErrorDomain && [4, 260].contains($0.code))
         }) {
-            return knownExternal && previouslyReachable ? .disconnected : .missingLocation
+            return knownExternal && previouslyReachable && volumeUnavailable
+                ? .disconnected : .missingLocation
         }
         return .unknown
     }

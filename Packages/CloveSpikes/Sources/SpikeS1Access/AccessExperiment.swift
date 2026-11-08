@@ -22,6 +22,7 @@ public actor AccessExperiment {
     private var presenter: AccessPresenter?
     private var watchScope = false
     private var watchURL: URL?
+    private var watchVolumeURL: URL?
     private var watchStart: ContinuousClock.Instant?
     private var marker: ContinuousClock.Instant?
     private var lastSuccess: ContinuousClock.Instant?
@@ -169,6 +170,7 @@ public actor AccessExperiment {
         guard let selected else { return snapshot() }
         watchURL = selected
         watchScope = selected.startAccessingSecurityScopedResource()
+        watchVolumeURL = try? selected.resourceValues(forKeys: [.volumeURLKey]).volume
         watchStart = .now
         marker = nil
         lastSuccess = nil
@@ -247,7 +249,8 @@ public actor AccessExperiment {
         let row =
             error.map {
                 AccessError($0 as NSError).classify(
-                    knownExternal: media.isExternal, previouslyReachable: lastSuccess != nil
+                    knownExternal: media.isExternal, previouslyReachable: lastSuccess != nil,
+                    volumeUnavailable: volumeIsUnavailable()
                 ).proposedCopyRow
             } ?? "Unavailable; cause unconfirmed"
         events.append(AccessEvent(.watch, "\(detail); proposed row: \(row)", error: error))
@@ -267,6 +270,15 @@ public actor AccessExperiment {
         }
     }
 
+    private func volumeIsUnavailable() -> Bool {
+        guard let watchVolumeURL else { return false }
+        do {
+            return try !AccessProbes.reachable(watchVolumeURL)
+        } catch {
+            return AccessError(error as NSError).classify() == .missingLocation
+        }
+    }
+
     public func stopWatch() {
         if let presenter {
             NSFileCoordinator.removeFilePresenter(presenter)
@@ -276,6 +288,7 @@ public actor AccessExperiment {
         if watchScope, let watchURL { watchURL.stopAccessingSecurityScopedResource() }
         presenter = nil
         watchURL = nil
+        watchVolumeURL = nil
         watchScope = false
         watchStart = nil
     }
