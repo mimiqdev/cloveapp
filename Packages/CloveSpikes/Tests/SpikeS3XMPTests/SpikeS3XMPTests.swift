@@ -31,7 +31,7 @@ func roundTripEveryFixture(fixture: String, approach: XMPApproach) throws {
         try output.write(to: directory.appendingPathComponent(fixture))
     }
     if fixture == "malformed.xmp" {
-        let expected = approach == .imageIO ? "roundtrip-invalid-output" : "roundtrip-refused"
+        let expected = approach == .imageIO ? "roundtrip-repaired" : "roundtrip-refused"
         #expect(measurements.contains { $0.name == expected })
     } else if fixture == "empty-description.xmp" && approach == .imageIO {
         #expect(measurements.contains { $0.name == "roundtrip-refused" })

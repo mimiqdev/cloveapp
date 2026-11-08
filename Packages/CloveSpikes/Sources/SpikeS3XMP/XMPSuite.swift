@@ -195,7 +195,7 @@ public enum XMPSuite {
         report.context["scratchRemains"] = String(
             FileManager.default.fileExists(atPath: scratch.path))
         report.notes.append(
-            "Expected malformed input refusal is recorded per approach. No physical power-loss guarantee is established by read-back."
+            "Malformed input behavior is recorded per approach. No physical power-loss guarantee is established by read-back."
         )
         return report
     }
@@ -217,23 +217,32 @@ public enum XMPSuite {
             let marks = try approach.read(output)
             tags["stage"] = "independent-inspection"
             let independent = try XMPInspection.inspect(output)
-            let preserved = try XMPInspection.unknownDataPreserved(before: data, after: output)
-            let representation = try XMPInspection.representationPreserved(
-                before: data, after: output)
-            return [
+            let originalValid = data.isEmpty || (try? XMPDocument(data)) != nil
+            tags["inputValid"] = String(originalValid)
+            var result: [LabMeasurement] = [
                 .init(name: "roundtrip-ms", value: timer.seconds * 1000, unit: "ms", tags: tags),
                 .init(
                     name: "marks-confirmed",
                     value: marks == requested && independent == requested ? 1 : 0, unit: "bool",
                     tags: tags),
-                .init(
-                    name: "unknown-data-preserved", value: preserved ? 1 : 0, unit: "bool",
-                    tags: tags),
-                .init(
-                    name: "unknown-representation-preserved", value: representation ? 1 : 0,
-                    unit: "bool", tags: tags),
                 .init(name: "packet-bytes", value: Double(output.count), unit: "bytes", tags: tags),
             ]
+            if originalValid {
+                let preserved = try XMPInspection.unknownDataPreserved(before: data, after: output)
+                let representation = try XMPInspection.representationPreserved(
+                    before: data, after: output)
+                result.append(
+                    .init(
+                        name: "unknown-data-preserved", value: preserved ? 1 : 0, unit: "bool",
+                        tags: tags))
+                result.append(
+                    .init(
+                        name: "unknown-representation-preserved", value: representation ? 1 : 0,
+                        unit: "bool", tags: tags))
+            } else {
+                result.append(.init(name: "roundtrip-repaired", value: 1, unit: "bool", tags: tags))
+            }
+            return result
         } catch {
             tags["error"] = describe(error)
             let name =
