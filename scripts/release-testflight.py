@@ -349,6 +349,10 @@ def release_config(path, app):
                 "distributionP12Path", "distributionP12PasswordFile"):
         if not isinstance(config.get(key), str) or not config[key]:
             raise ReleaseError(f"Incomplete TestFlight config: {path} needs {key}")
+    # Register these before any path is checked: the API key file name usually
+    # contains the key ID, and path errors print the path.
+    register_secret(config["apiKeyId"])
+    register_secret(config["issuerId"])
     group = config.get("betaGroup", DEFAULT_BETA_GROUP)
     if not isinstance(group, str) or not group.strip():
         raise ReleaseError(f"Incomplete TestFlight config: {path} has an empty betaGroup")
@@ -360,8 +364,6 @@ def release_config(path, app):
                                                          "distributionP12PasswordFile", secret=True)
     config["profilePath"] = signing_file(profiles[app.key],
                                          f"appStoreProfiles[{app.key!r}]", secret=False)
-    register_secret(config["apiKeyId"])
-    register_secret(config["issuerId"])
     config["p12Password"] = config["distributionP12PasswordFile"].read_text().rstrip("\r\n")
     if not config["p12Password"]:
         raise ReleaseError("Empty distribution .p12 password file")

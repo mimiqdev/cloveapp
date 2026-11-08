@@ -615,5 +615,27 @@ class ConfigExampleTests(QuietTestCase):
             self.assertTrue(value.startswith("YOUR_"), value)
 
 
+class KeyIdInPathTests(unittest.TestCase):
+    def test_missing_key_file_error_redacts_key_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            config_path = temp / "config.json"
+            config_path.write_text(json.dumps({
+                "apiKeyId": "KEYID12345",
+                "issuerId": "issuer-for-test",
+                "apiKeyPath": str(temp / "AuthKey_KEYID12345.p8"),
+                "distributionP12Path": str(temp / "dist.p12"),
+                "distributionP12PasswordFile": str(temp / "p12.pass"),
+                "appStoreProfiles": {"clove": str(temp / "a.mobileprovision"),
+                                     "lab": str(temp / "b.mobileprovision")},
+            }))
+            config_path.chmod(0o600)
+            with self.assertRaises(release.ReleaseError) as raised:
+                release.release_config(config_path, release.APPS["lab"])
+            message = release.scrub(raised.exception)
+            self.assertIn("apiKeyPath", message)
+            self.assertNotIn("KEYID12345", message)
+
+
 if __name__ == "__main__":
     unittest.main()
