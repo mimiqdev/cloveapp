@@ -98,7 +98,11 @@ def main(argv=None):
     print("")
     for name, count in report:
         print("%-14s %3d files" % (name, count))
-    print("%-14s %3d files in %d sets" % ("total", sum(count for _, count in report), len(report)))
+    total_files = sum(count for _, count in report)
+    print(
+        "%-14s %3d files in %d %s"
+        % ("total", total_files, len(report), "set" if len(report) == 1 else "sets")
+    )
     return 0
 
 

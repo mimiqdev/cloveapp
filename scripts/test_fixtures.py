@@ -11,8 +11,8 @@ before a task ever downloads anything.
 """
 
 import hashlib
-import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -131,7 +131,7 @@ class ManifestValidationTests(unittest.TestCase):
 class VerificationTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.mkdtemp(prefix="clove-verify-")
-        self.addCleanup(lambda: fx.shutil.rmtree(self.directory, ignore_errors=True))
+        self.addCleanup(lambda: shutil.rmtree(self.directory, ignore_errors=True))
         self.payload = b"verified bytes"
         self.entry = make_entry(payload=self.payload)
         self.path = os.path.join(self.directory, "file.cr3")
@@ -163,7 +163,7 @@ class VerificationTests(unittest.TestCase):
 class SyncTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.mkdtemp(prefix="clove-sync-")
-        self.addCleanup(lambda: fx.shutil.rmtree(self.directory, ignore_errors=True))
+        self.addCleanup(lambda: shutil.rmtree(self.directory, ignore_errors=True))
         self.payload = b"downloaded fixture bytes"
         self.entry = make_entry(payload=self.payload)
         self.destination = os.path.join(self.directory, "sample-file.cr3")
@@ -259,7 +259,7 @@ class SyncTests(unittest.TestCase):
 class SetTests(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="clove-sets-")
-        self.addCleanup(lambda: fx.shutil.rmtree(self.root, ignore_errors=True))
+        self.addCleanup(lambda: shutil.rmtree(self.root, ignore_errors=True))
         self.files = os.path.join(self.root, "files")
         self.generated = os.path.join(self.root, "generated")
         self.xmp = os.path.join(self.root, "xmp")
