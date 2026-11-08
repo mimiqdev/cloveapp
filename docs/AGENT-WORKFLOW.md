@@ -15,7 +15,7 @@ How tasks in the [development plan](DEV-PLAN.md) move from a GitHub issue to a m
 - **Host:** the Mac mini, linked to T3 at full access. Workers always run in `full-access` mode, so commands never wait for approval.
 - **Repository:** `/Volumes/T7/Projects/cloveapp` on the T7 external SSD. Each worker gets its own checkout under `~/.t3/worktrees/cloveapp/`, which links to `/Volumes/T7/Projects/.t3-worktrees/cloveapp/`. The T7 must stay connected while workers run.
 - **Tools** come from mise (`mise.toml` in the repository pins xcodegen). Run project commands through `mise run <task>` or `mise exec --`.
-- **Build output** stays inside the checkout (`-derivedDataPath .build/DerivedData`), so it lands on the T7 and is removed with the checkout.
+- **Build output** stays inside the checkout (`-derivedDataPath .build/DerivedData.noindex`; Spotlight skips folders ending in `.noindex`), so it lands on the T7 and is removed with the checkout.
 - **Simulators:** each worker creates its own simulator device named `Clove <task ID>` and deletes it when done, so parallel test runs never share a device.
 - **Signing** files live in `~/.config/apple/` on the Mac and are referenced from gitignored local config. They never enter the repository, a log, an issue, or a pull request.
 

@@ -15,7 +15,7 @@ Packages/CloveCore/       Domain model, scanning, XMP, writes (local Swift packa
 Packages/CloveImaging/    Previews, RAW decoding, image features (local Swift package)
 Config/Shared.xcconfig    Shared build settings; includes Local.xcconfig if present
 Config/Local.xcconfig     Local development team, gitignored, never committed
-scripts/                  Project generation and simulator smoke test
+scripts/                  Project generation, simulator smoke test, fixture tooling
 project.yml               XcodeGen definition; Clove.xcodeproj is generated, not committed
 mise.toml / mise.lock     Pinned tools and project tasks
 ```
@@ -30,11 +30,14 @@ XcodeGen. Every task is listed here.
 | `mise run generate` | Runs `scripts/generate-xcodeproj.sh` (`xcodegen generate`) and writes `Clove.xcodeproj`. | After changing `project.yml`, adding sources, or changing packages. |
 | `mise run lint` | `swift format lint --strict` over `Clove`, `CloveLab`, `CloveUITests`, and `Packages`. | Before every commit. |
 | `mise run format` | The same swift-format rules, applied in place. | To fix lint findings. |
+| `mise run test-fixtures` | `scripts/test_fixtures.py`: fixture tooling tests, logic only, no network. | After changing anything under `fixtures/` or the fixture scripts. |
+| `mise run fixtures-fetch` | `scripts/fetch-fixtures`: downloads and verifies the pinned fixtures into the shared cache (`docs/fixtures.md`). | Once per machine, and after `fixtures/manifest.json` changes. |
+| `mise run fixtures-sets` | Runs `fixtures-fetch`, then `scripts/make-fixture-sets` to rebuild the standard test folders in the cache. | Before tests that read the fixture sets. |
 | `mise run test-core` | `swift test --package-path Packages/CloveCore`. | While editing `CloveCore`; runs on macOS, no simulator. |
 | `mise run test-imaging` | `swift test --package-path Packages/CloveImaging`. | While editing `CloveImaging`; runs on macOS, no simulator. |
 | `mise run build` | `xcodebuild build` for the `Clove` and `CloveLab` schemes, iOS Simulator, no signing. | After project, app, or package changes. |
 | `mise run smoke` | Creates a throwaway simulator, runs `CloveUITests` with `xcodebuild test`, deletes the simulator on exit. | After changing UI or the smoke test, and as part of verify. |
-| `mise run verify` | `generate`, `lint`, `test-core`, `test-imaging`, `build`, `smoke`, in order, stopping at the first failure. | Before opening or updating a pull request; it is the acceptance gate. |
+| `mise run verify` | `generate`, `lint`, `test-fixtures`, `test-core`, `test-imaging`, `build`, `smoke`, in order, stopping at the first failure. | Before opening or updating a pull request; it is the acceptance gate. |
 
 ## Conventions
 
@@ -52,8 +55,9 @@ XcodeGen. Every task is listed here.
 
 ## Build output and simulators
 
-- Build output goes inside the checkout: `.build/DerivedData`, passed with
-  `-derivedDataPath`. Do not use the default DerivedData location or `/tmp`.
+- Build output goes inside the checkout: `.build/DerivedData.noindex`, passed
+  with `-derivedDataPath`. The `.noindex` suffix keeps Spotlight from indexing
+  build products. Do not use the default DerivedData location or `/tmp`.
 - Never reuse or boot an existing simulator for automation. `scripts/smoke.sh`
   creates its own `Clove smoke <tag>` device, tags it with `CLOVE_SIM_TAG` or the
   branch name plus PID, and always deletes it with `trap` — including on failure.

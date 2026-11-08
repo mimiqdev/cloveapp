@@ -16,10 +16,12 @@ Both use only the Python standard library and run with `/usr/bin/python3`.
 ## Quick start
 
 ```sh
-/usr/bin/python3 scripts/fetch-fixtures     # about 165 MB, once per machine
-/usr/bin/python3 scripts/make-fixture-sets  # about 1 GB of set folders
-/usr/bin/python3 scripts/test_fixtures.py   # logic-only tests, no network
+mise run fixtures-fetch   # scripts/fetch-fixtures: about 165 MB, once per machine
+mise run fixtures-sets    # fetch, then scripts/make-fixture-sets: about 1 GB of set folders
+mise run test-fixtures    # scripts/test_fixtures.py: logic-only tests, no network
 ```
+
+The scripts also run directly with `/usr/bin/python3`, and accept `--help`.
 
 Then open any folder under `${CLOVE_FIXTURES_DIR:-/Volumes/T7/Projects/.clove-fixtures}/sets/`
 in the app or in a test.

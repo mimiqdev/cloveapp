@@ -81,7 +81,7 @@ while [ "$attempt" -le "$max_attempts" ]; do
         -scheme Clove \
         -only-testing:CloveUITests \
         -destination "id=$udid" \
-        -derivedDataPath .build/DerivedData 2>&1 | tee "$log"
+        -derivedDataPath .build/DerivedData.noindex 2>&1 | tee "$log"
     code=$?
     set -e
 
