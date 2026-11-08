@@ -24,6 +24,10 @@ run = "swift test --package-path Packages/CloveCore"
 description = "Run CloveImaging package tests on macOS"
 run = "swift test --package-path Packages/CloveImaging"
 
+[tasks.test-spikes]
+description = "Run the CloveSpikes package tests on macOS"
+run = "swift test --package-path Packages/CloveSpikes"
+
 [tasks.test-fixtures]
 description = "Run the fixture tooling tests (logic only, no network)"
 run = "/usr/bin/python3 scripts/test_fixtures.py"
@@ -77,6 +81,7 @@ mise run test-fixtures
 mise run test-release
 mise run test-core
 mise run test-imaging
+mise run test-spikes
 mise run build
 mise run smoke
 """
