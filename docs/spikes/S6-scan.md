@@ -152,8 +152,8 @@ First observation notes that matter for C2:
   metadata. On `readdir` the walk-and-filter variant costs 29 ms more.
 - **Streaming arrives early:** the first 64-file batch is produced in 4–9 ms and
   the first 100 accepted files in 4–9 ms, while the complete scan takes
-  64–150 ms. The consumer received the first batch within 0.1 ms of the producer
-  emitting it, so the delivery mechanism is not the cost.
+  64–150 ms. The consumer received the first batch within about 0.2 ms of the
+  producer emitting it, so the delivery mechanism is not the cost.
 
 ### Simulator run
 
