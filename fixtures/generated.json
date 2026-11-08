@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "comment": "Files built locally from a verified download, marked generated rather than downloaded. They carry no pinned checksum because the output depends on the macOS sips version; they are rebuilt into ${CLOVE_FIXTURES_DIR}/generated/ when missing and never committed.",
+  "recipes": [
+    {
+      "id": "jpeg-from-raw",
+      "format": "JPEG",
+      "extension": ".jpg",
+      "tool": "sips",
+      "args": ["-s", "format", "jpeg", "-s", "formatOptions", "best"],
+      "notes": "Full-size JPEG rendered from a RAW file, standing in for the in-camera JPEG of a RAW+JPG pair. The camera wrote no JPEG for these files, so the pixels are a system render, not the camera's own JPEG engine."
+    },
+    {
+      "id": "heic-from-raw",
+      "format": "HEIC",
+      "extension": ".heic",
+      "tool": "sips",
+      "args": ["-s", "format", "heic"],
+      "notes": "HEIC rendered from a RAW file, so the HEIC path can be tested without a committed binary."
+    }
+  ]
+}

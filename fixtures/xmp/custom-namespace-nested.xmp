@@ -1,0 +1,62 @@
+<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="ACME Photo Suite 4.1">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:acme="https://example.com/ns/clove-fixture/acme/1.0/"
+   xmp:Rating="2"
+   xmp:Label="Blue"
+   xmp:CreatorTool="ACME Photo Suite 4.1 (a fixture tool that does not exist)">
+   <acme:Project rdf:parseType="Resource">
+    <acme:Name>Fixture Nested Project</acme:Name>
+    <acme:Revision>7</acme:Revision>
+    <acme:Active>true</acme:Active>
+    <acme:Tags>
+     <rdf:Bag>
+      <rdf:li>alpha</rdf:li>
+      <rdf:li>beta</rdf:li>
+      <rdf:li>gamma</rdf:li>
+     </rdf:Bag>
+    </acme:Tags>
+    <acme:Pipeline rdf:parseType="Resource">
+     <acme:Stage>develop</acme:Stage>
+     <acme:Steps>
+      <rdf:Seq>
+       <rdf:li rdf:parseType="Resource">
+        <acme:StepName>denoise</acme:StepName>
+        <acme:StepVersion>2.1</acme:StepVersion>
+        <acme:StepParameters rdf:parseType="Resource">
+         <acme:Strength>0.62</acme:Strength>
+         <acme:Method>wavelet</acme:Method>
+        </acme:StepParameters>
+       </rdf:li>
+       <rdf:li rdf:parseType="Resource">
+        <acme:StepName>sharpen</acme:StepName>
+        <acme:StepVersion>1.0</acme:StepVersion>
+        <acme:StepParameters rdf:parseType="Resource">
+         <acme:Radius>0.8</acme:Radius>
+         <acme:Amount>140</acme:Amount>
+        </acme:StepParameters>
+       </rdf:li>
+      </rdf:Seq>
+     </acme:Steps>
+    </acme:Pipeline>
+    <acme:Settings>
+     <rdf:Bag>
+      <rdf:li rdf:parseType="Resource">
+       <acme:Key>export.preset</acme:Key>
+       <acme:Value>web-large</acme:Value>
+      </rdf:li>
+      <rdf:li rdf:parseType="Resource">
+       <acme:Key>export.sharpening</acme:Key>
+       <acme:Value>screen</acme:Value>
+      </rdf:li>
+     </rdf:Bag>
+    </acme:Settings>
+   </acme:Project>
+   <acme:OpaqueBlob rdf:datatype="http://www.w3.org/2001/XMLSchema#base64Binary">AAECAwQFBgcICQoLDA0ODw==</acme:OpaqueBlob>
+   <acme:Comment>Unknown to Clove, must survive a rating or label write untouched.</acme:Comment>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>
