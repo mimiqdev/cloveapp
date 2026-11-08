@@ -29,6 +29,8 @@ packages:
     path: Packages/CloveCore
   CloveImaging:
     path: Packages/CloveImaging
+  CloveSpikes:
+    path: Packages/CloveSpikes
 
 targets:
   Clove:
@@ -62,6 +64,16 @@ targets:
     dependencies:
       - package: CloveCore
       - package: CloveImaging
+      # Only Clove Lab links the spike harness; the Clove app must not.
+      - package: CloveSpikes
+    # Report JSON appears in Files under "On My iPhone › Clove Lab".
+    # UIFileSharingEnabled is not one of Xcode's INFOPLIST_KEY_ settings, so
+    # these two keys come from a generated Info.plist instead.
+    info:
+      path: CloveLab/Info.plist
+      properties:
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mimiqdev.clove.lab

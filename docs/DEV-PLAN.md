@@ -94,10 +94,11 @@ graph LR
 
 ## M1 Spikes
 
-All depend on T0.2 and T0.3 and can run in parallel. Each ends with a report, collected for G1.
+All depend on T0.2 and T0.3. S0 builds the shared harness; S1–S7 depend on it and can run in parallel. Each ends with a report, collected for G1.
 
 | ID | Question | What to test | Output | Size | Device |
 | --- | --- | --- | --- | --- | --- |
+| S0 | Spike harness | Clove Lab lists S1–S7; shared folder picker, stopwatch, and JSON report tooling; report written into the tested folder and Documents; fixture sets resolved from the shared cache | Harness for S1–S7; report template and schema in `docs/spikes/README.md` | S | No |
 | S1 | Can folder access be remembered and restored reliably? | Pick SD card, external SSD, and local folders; save bookmarks, kill the app, and reopen; record the errors for an unplugged drive, a write-protected card, a full volume, and lost permission; check how quickly a disconnect is detected | Error-to-PRD-copy mapping; bookmark and Recents approach; disconnect detection approach | M | Yes |
 | S2 | Are previews fast enough? | Embedded preview extraction time, size, and memory per format; fallback when no embedded preview exists; `CIRAWFilter` full decode time on the 17 Pro Max and iPad Pro | Thumbnail and detail image strategy; cache design; recommended performance targets | M | Yes |
 | S3 | How should XMP be read and written? | Compare ImageIO's XMP APIs, Adobe XMP Toolkit, and custom XML parsing: read and write `xmp:Rating`, `xmp:Label`, and the Clove-specific field; round-trip the T0.3 fixtures and check that unknown namespaces and structures survive unchanged; do atomic write-to-temp-and-replace on an exFAT SD card | Decision in `docs/decisions/`; sidecar naming rule | M | Yes (exFAT) |
