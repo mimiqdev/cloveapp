@@ -10,9 +10,12 @@ in [docs/DEV-PLAN.md](docs/DEV-PLAN.md) and [docs/PRD.en.md](docs/PRD.en.md).
 ```text
 Clove/                    Clove app target (SwiftUI, placeholder UI for now)
 CloveLab/                 CloveLab debug app target used for device verification
+CloveLab/Shared/          Harness for the spikes: folder picker, report export, footer
+CloveLab/Spikes/Sx/       One folder per M1 spike, replaced only by that spike
 CloveUITests/             UI smoke test for Clove
 Packages/CloveCore/       Domain model, scanning, XMP, writes (local Swift package)
 Packages/CloveImaging/    Previews, RAW decoding, image features (local Swift package)
+Packages/CloveSpikes/     M1 spike harness: report tooling plus one module per spike
 Config/Shared.xcconfig    Shared build settings; includes Local.xcconfig if present
 Config/Local.xcconfig     Local development team, gitignored, never committed
 Config/TestFlight.local.json  Local signing config for the release script, gitignored
@@ -38,9 +41,10 @@ XcodeGen. Every task is listed here.
 | `mise run fixtures-sets` | Runs `fixtures-fetch`, then `scripts/make-fixture-sets` to rebuild the standard test folders in the cache. | Before tests that read the fixture sets. |
 | `mise run test-core` | `swift test --package-path Packages/CloveCore`. | While editing `CloveCore`; runs on macOS, no simulator. |
 | `mise run test-imaging` | `swift test --package-path Packages/CloveImaging`. | While editing `CloveImaging`; runs on macOS, no simulator. |
+| `mise run test-spikes` | `swift test --package-path Packages/CloveSpikes`: the spike harness and one trivial test per spike module. Fixture tests skip when a set is missing. | While editing `Packages/CloveSpikes`; runs on macOS, no simulator. |
 | `mise run build` | `xcodebuild build` for the `Clove` and `CloveLab` schemes, iOS Simulator, no signing. | After project, app, or package changes. |
 | `mise run smoke` | Creates a throwaway simulator, runs `CloveUITests` with `xcodebuild test`, deletes the simulator on exit. | After changing UI or the smoke test, and as part of verify. |
-| `mise run verify` | `generate`, `lint`, `test-fixtures`, `test-release`, `test-core`, `test-imaging`, `build`, `smoke`, in order, stopping at the first failure. | Before opening or updating a pull request; it is the acceptance gate. |
+| `mise run verify` | `generate`, `lint`, `test-fixtures`, `test-release`, `test-core`, `test-imaging`, `test-spikes`, `build`, `smoke`, in order, stopping at the first failure. | Before opening or updating a pull request; it is the acceptance gate. |
 
 ## Conventions
 
