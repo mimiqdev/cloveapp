@@ -1,0 +1,90 @@
+import Foundation
+import SpikeSupport
+import Testing
+
+@testable import SpikeS4Metadata
+
+@Suite(.serialized)
+struct MetadataExperimentTests {
+    @Test(.enabled(if: Fixtures.set("formats") != nil))
+    func fixtureWritesAndPreservation() throws {
+        let folder = try #require(Fixtures.set("formats"))
+        let files = try FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: nil
+        )
+        .filter { ["jpg", "heic", "dng"].contains($0.pathExtension.lowercased()) }
+        let originalHashes = try Dictionary(
+            uniqueKeysWithValues: files.map { ($0, PayloadDigest.hash(try Data(contentsOf: $0))) })
+        let (report, results) = try MetadataExperiment.run(folder: folder)
+        #expect(results.count == 14)
+        for result in results {
+            print(
+                "S4 \(result.file) \(result.control) \(result.method.rawValue): error=\(result.error ?? "none") payload=\(result.payloadUnchanged) pixels=\(result.pixelsUnchanged) marks=\(result.marksReadBack) candidate=\(result.losslessCandidate) ms=\(result.milliseconds ?? -1) delta=\(result.after.map { $0.fileBytes - (result.before?.fileBytes ?? 0) } ?? 0) changedExisting=\(result.changedExistingMetadata)"
+            )
+            if result.error != nil {
+                #expect(result.failureLeftFileUnchanged == true)
+            } else {
+                #expect(result.before != nil)
+                #expect(result.after != nil)
+                #expect(result.marksReadBack)
+                if result.method == .copyImageSource {
+                    #expect(result.payloadUnchanged)
+                    #expect(result.pixelsUnchanged)
+                    #expect(result.before?.makerNotes == result.after?.makerNotes)
+                    #expect(result.before?.imageCount == result.after?.imageCount)
+                    // Native JPEG copying normalizes some EXIF rationals/GPS. Keep that
+                    // evidence visible rather than treating byte-identical pixels as preservation.
+                    if !result.file.lowercased().hasSuffix(".jpg") {
+                        #expect(result.changedExistingMetadata.isEmpty)
+                    }
+                    if result.control == "seeded-other-app" {
+                        #expect(result.before?.preservationSeedPresent == true)
+                        #expect(result.after?.preservationSeedPresent == true)
+                    }
+                }
+            }
+        }
+        // Require both successful JPEG paths and the bounded splice's stronger metadata
+        // preservation. Unsupported DNG must be a recorded error rather than a silent skip.
+        let jpeg = results.filter {
+            $0.file.lowercased().hasSuffix(".jpg") && $0.method == .copyImageSource
+        }
+        #expect(jpeg.count == 2)
+        #expect(jpeg.allSatisfy { $0.error == nil && $0.payloadUnchanged && $0.pixelsUnchanged })
+        let spliced = results.filter { $0.method == .jpegXMPPacketSplice }
+        #expect(spliced.count == 2)
+        #expect(spliced.allSatisfy { $0.losslessCandidate })
+        for result in spliced {
+            #expect(result.before?.jpegNonXMPBytes != nil)
+            #expect(result.before?.jpegNonXMPBytes == result.after?.jpegNonXMPBytes)
+        }
+        let heic = results.filter {
+            $0.file.lowercased().hasSuffix(".heic") && $0.method == .copyImageSource
+        }
+        #expect(heic.count == 2)
+        #expect(heic.allSatisfy { $0.losslessCandidate })
+        for (file, hash) in originalHashes {
+            #expect(try PayloadDigest.hash(Data(contentsOf: file)) == hash)
+        }
+        if let path = ProcessInfo.processInfo.environment["S4_REPORT_PATH"] {
+            try report.write(to: URL(fileURLWithPath: path))
+            print("S4 report: \(path)")
+        }
+    }
+
+    @Test func failedWriteLeavesOriginalAndNoTemporaryFile() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("broken.jpg")
+        let original = Data("not an image".utf8)
+        try original.write(to: url)
+        #expect(throws: (any Error).self) {
+            try MetadataWriter.write(to: url, method: .copyImageSource)
+        }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["broken.jpg"])
+    }
+}
