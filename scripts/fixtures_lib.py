@@ -383,7 +383,7 @@ def resolve_sets(document, entries, recipes, files_directory, xmp_directory, gen
     """Validate ``fixtures/sets.json`` and resolve every entry to a source.
 
     Returns a list of ``{"name": str, "entries": [...]}`` where each entry has
-    ``to``, ``kind`` (``copy``, ``text`` or ``generate``) and its source.
+    ``to``, ``kind`` (``copy``, ``text``, ``bytes`` or ``generate``) and its source.
     """
     if not isinstance(document, dict):
         raise FixtureError("sets.json must be a JSON object")
@@ -433,6 +433,8 @@ def resolve_sets(document, entries, recipes, files_directory, xmp_directory, gen
                     "%s needs exactly one of 'from', 'fromXmp', 'text' or 'hex'"
                     % item_where
                 )
+            if "recipe" in item and not has_file:
+                raise FixtureError("%s uses 'recipe' without 'from'" % item_where)
 
             if has_file:
                 source_id = item["from"]
