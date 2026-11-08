@@ -210,8 +210,11 @@ def asc_pages(path, params, token):
 
 def lookup_app(token, app):
     data = asc_get("apps", {"filter[bundleId]": app.bundle_id,
-                            "fields[apps]": "bundleId,name", "limit": 2}, token)
-    records = data.get("data") or []
+                            "fields[apps]": "bundleId,name", "limit": 10}, token)
+    # The API filter matches a prefix, so com.mimiqdev.clove also returns
+    # com.mimiqdev.clove.lab. Keep the exact record only.
+    records = [record for record in data.get("data") or []
+               if (record.get("attributes") or {}).get("bundleId") == app.bundle_id]
     if len(records) != 1:
         raise ReleaseError(f"Expected exactly one App Store Connect app for "
                            f"{app.bundle_id}, found {len(records)}")

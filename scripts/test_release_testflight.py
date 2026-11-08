@@ -401,6 +401,7 @@ class ProfileDetailsTests(QuietTestCase):
 
 class VerifyIPATests(QuietTestCase):
     def setUp(self):
+        super().setUp()
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.ipa = Path(self.temporary.name) / "CloveLab.ipa"
@@ -516,15 +517,30 @@ class AppStoreConnectTests(QuietTestCase):
         self.assertNotIn("secret-looking-output", str(raised.exception))
 
     def test_requires_exactly_one_app_for_the_bundle_id(self):
-        for page in ({"data": []}, {"data": [{"id": "a"}, {"id": "b"}]}):
+        empty = {"data": []}
+        duplicate = {"data": [
+            {"id": "a", "attributes": {"bundleId": LAB.bundle_id}},
+            {"id": "b", "attributes": {"bundleId": LAB.bundle_id}},
+        ]}
+        for page in (empty, duplicate):
             with (
                 patch.object(release, "asc_get", return_value=page),
                 self.assertRaisesRegex(release.ReleaseError, LAB.bundle_id),
             ):
                 release.lookup_app("token", LAB)
 
+    def test_ignores_apps_whose_bundle_id_only_starts_the_same(self):
+        # The API bundle ID filter is a prefix match: Clove returns Clove Lab too.
+        page = {"data": [
+            {"id": "lab-app", "attributes": {"bundleId": LAB.bundle_id, "name": "Clove Lab"}},
+            {"id": "clove-app", "attributes": {"bundleId": CLOVE.bundle_id, "name": "Clove"}},
+        ]}
+        with patch.object(release, "asc_get", return_value=page):
+            self.assertEqual(release.lookup_app("token", CLOVE), "clove-app")
+
     def test_reads_the_app_id_and_name(self):
-        page = {"data": [{"id": "app-id", "attributes": {"name": "Clove Lab"}}]}
+        page = {"data": [{"id": "app-id", "attributes": {"bundleId": LAB.bundle_id,
+                                                          "name": "Clove Lab"}}]}
         with patch.object(release, "asc_get", return_value=page):
             self.assertEqual(release.lookup_app("token", LAB), "app-id")
 
@@ -580,6 +596,7 @@ class ScrubTests(QuietTestCase):
 
 class ConfigExampleTests(QuietTestCase):
     def setUp(self):
+        super().setUp()
         self.path = ROOT / "Config" / "TestFlight.local.json.example"
         if not self.path.is_file():
             self.skipTest("Config/TestFlight.local.json.example is missing")
