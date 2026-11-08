@@ -24,6 +24,19 @@ run = "swift test --package-path Packages/CloveCore"
 description = "Run CloveImaging package tests on macOS"
 run = "swift test --package-path Packages/CloveImaging"
 
+[tasks.test-fixtures]
+description = "Run the fixture tooling tests (logic only, no network)"
+run = "/usr/bin/python3 scripts/test_fixtures.py"
+
+[tasks.fixtures-fetch]
+description = "Download and verify the pinned fixtures into the shared cache"
+run = "/usr/bin/python3 scripts/fetch-fixtures"
+
+[tasks.fixtures-sets]
+description = "Rebuild the standard fixture sets from the shared cache"
+depends = ["fixtures-fetch"]
+run = "/usr/bin/python3 scripts/make-fixture-sets"
+
 [tasks.build]
 description = "Build Clove and CloveLab for the iOS Simulator"
 run = """
@@ -32,13 +45,13 @@ xcodebuild build \
     -project Clove.xcodeproj \
     -scheme Clove \
     -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath .build/DerivedData \
+    -derivedDataPath .build/DerivedData.noindex \
     CODE_SIGNING_ALLOWED=NO
 xcodebuild build \
     -project Clove.xcodeproj \
     -scheme CloveLab \
     -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath .build/DerivedData \
+    -derivedDataPath .build/DerivedData.noindex \
     CODE_SIGNING_ALLOWED=NO
 """
 
@@ -47,11 +60,12 @@ description = "Run the Clove UI smoke test on a throwaway simulator"
 run = "./scripts/smoke.sh"
 
 [tasks.verify]
-description = "Generate, lint, run both package test suites, build both apps, run the smoke test"
+description = "Generate, lint, run the fixture and package test suites, build both apps, run the smoke test"
 run = """
 set -eu
 mise run generate
 mise run lint
+mise run test-fixtures
 mise run test-core
 mise run test-imaging
 mise run build
