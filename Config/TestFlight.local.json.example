@@ -1,0 +1,12 @@
+{
+  "apiKeyId": "YOUR_APP_STORE_CONNECT_KEY_ID",
+  "issuerId": "YOUR_APP_STORE_CONNECT_ISSUER_ID",
+  "apiKeyPath": "~/.config/apple/appstore-connect-key.p8",
+  "distributionP12Path": "~/.config/apple/clove-distribution.p12",
+  "distributionP12PasswordFile": "~/.config/apple/clove-distribution-password",
+  "appStoreProfiles": {
+    "clove": "~/.config/apple/clove-app-store.mobileprovision",
+    "lab": "~/.config/apple/clove-lab-app-store.mobileprovision"
+  },
+  "betaGroup": "Clove Lab Internal"
+}
