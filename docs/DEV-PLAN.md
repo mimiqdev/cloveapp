@@ -6,10 +6,12 @@ Status: draft. Based on the [PRD](PRD.en.md) (P0-01 through P0-15). This documen
 
 All development is done by agents. The product owner handles real-device verification, the Apple account and signing, and decisions at each gate. UI visuals are designed by someone else. Engineering implements behavior with system components first and swaps in the visual design when it arrives.
 
+[AGENT-WORKFLOW.md](AGENT-WORKFLOW.md) describes the roles, the issue-to-PR handoff, the worker report format, and who merges what.
+
 ### Agent rules
 
-- One task, one branch, one PR. PR titles start with the task ID, for example `[C3] XMP codec`.
-- Every PR includes tests and merges only after CI passes (build, unit tests, simulator smoke test).
+- One task, one issue, one branch, one PR. Issue and PR titles start with the task ID, for example `[C3] XMP codec`.
+- Every PR includes tests and merges only after verification passes on the Mac mini: build, unit tests, and simulator smoke test, all run by `mise run verify`. The supervisor re-runs it before merging. There is no hosted CI for launch.
 - Stay within the task's scope. Open an issue for anything outside it instead of fixing it in passing.
 - A spike's output is a report at `docs/spikes/Sx-name.md` (what was tested, data, conclusion, recommendation) plus reusable verification code. Spikes do not ship product features.
 - Where a decision is needed, list the options and a recommendation in the report or PR. The product owner decides at the gate.
@@ -21,21 +23,17 @@ All development is done by agents. The product owner handles real-device verific
 Agents cannot operate physical devices. Tasks marked "Device" follow this loop:
 
 1. The agent builds the verification logic into **Clove Lab**, a debug app that is a separate target in the same repository.
-2. CI uploads Clove Lab to TestFlight for internal testing, which needs no review.
+2. The release script on the Mac mini uploads Clove Lab to TestFlight for internal testing, which needs no review.
 3. The product owner installs it on the device and follows the task's checklist. Clove Lab writes measurements to a JSON report, saved into the tested folder or sent through the share sheet.
 4. The report goes back to the agent for analysis and into the spike report.
 
 Test devices: iPhone 17 Pro Max, iPad Pro, iPhone Duo, an SD card reader, and a USB-C external SSD.
 
-## Prerequisites (product owner)
+## Prerequisites (done 2026-11-08)
 
-T0.1 cannot finish until these exist:
-
-- **macOS build environment.** iOS development requires macOS and Xcode. One or both of:
-  - A Mac with Xcode connected to T3 as an agent environment. Recommended, because agents can then build and run the simulator locally.
-  - GitHub Actions macOS runners for CI and TestFlight uploads.
-- **Apple Developer account.** Decide the bundle ID (for example `com.mimiqdev.clove`) and team ID.
-- **App Store Connect API key** for CI uploads to TestFlight, stored as a repository secret and never committed.
+- **Build host.** A Mac mini with Xcode 27.1 and Swift 6.4 is linked to T3 as the agent environment. The repository and worker checkouts live on its T7 external SSD. Details are in [AGENT-WORKFLOW.md](AGENT-WORKFLOW.md#environment).
+- **Bundle IDs and app records.** `com.mimiqdev.clove` (Clove) and `com.mimiqdev.clove.lab` (Clove Lab) are registered, each with an App Store provisioning profile and an App Store Connect app record. Clove Lab is used only for internal TestFlight testing, through the `Clove Lab Internal` group.
+- **App Store Connect API key and distribution certificate** stay on the Mac mini in `~/.config/apple/`. They are referenced from gitignored local config and never committed or stored in GitHub.
 
 ## Technical baseline
 
@@ -58,7 +56,7 @@ T0.1 cannot finish until these exist:
 
 | Milestone | Scope | Exit gate |
 | --- | --- | --- |
-| M0 | Environment, repository skeleton, test fixtures | CI green; Clove Lab installs on a device |
+| M0 | Repository skeleton, test fixtures, TestFlight release | `mise run verify` passes on the Mac mini; Clove Lab installs from TestFlight on a device |
 | M1 | Spikes S1–S7 | **G1**: review spike reports and choose the technical approach; revise the PRD if needed |
 | M2 | Core engine, `CloveCore` | Unit tests cover the PRD's persistence rules |
 | M3 | Imaging pipeline, `CloveImaging` | Grid scrolling and preview speed meet the targets set at G1 on device |
@@ -90,9 +88,9 @@ graph LR
 
 | ID | Task | Output and acceptance | Depends on | Size | Device |
 | --- | --- | --- | --- | --- | --- |
-| T0.1 | Build and signing environment | A Mac or macOS runner builds the project; signing comes from environment variables and secrets; CI uploads Clove Lab to TestFlight | Prerequisites | M | Yes (install once to confirm) |
-| T0.2 | Repository skeleton | `project.yml` with App and CloveLab targets (iPhone and iPad, iOS 18); both local packages; swift-format configuration; GitHub Actions running build, `swift test`, and a simulator smoke test; `AGENTS.md`; complete `.gitignore` | — | M | No |
-| T0.3 | Test fixtures | `scripts/fetch-fixtures` downloads RAW files from public sources such as raw.pixls.us (CR3, NEF, ARW, RAF, ORF, RW2, DNG, iPhone ProRAW) plus JPEG and HEIC, with checksums and license records, without committing binaries. Generates standard test folders: multiple `DCIM/100XXXXX` subfolders, RAW+JPG pairs, standalone JPEG/HEIC/DNG, AppleDouble `._` files, an existing `_Rejected` folder, and hand-written Lightroom-, Capture One-, and Photo Mechanic-style XMP including unknown namespaces. CI caches the fixtures. | — | M | No |
+| T0.1 | TestFlight release | `Tools/release-testflight.py`, adapted from the one in the sibling Mudi app: archive, sign locally with the distribution certificate and the App Store profile, validate, and upload, for either app. Configuration comes from gitignored `Config/TestFlight.local.json`, which points at the signing files in `~/.config/apple/`. Build numbers come from UTC time and must be higher than any build already in TestFlight. Upload refuses a dirty working tree. The script confirms that the internal TestFlight group `Clove Lab Internal` (already created, with access to all builds) exists before uploading. Logic-only unit tests for the script, with no network and no signing. | T0.2 | M | Yes (install once to confirm) |
+| T0.2 | Repository skeleton | `project.yml` with App and CloveLab targets (iPhone and iPad, iOS 18); both local packages; `mise.toml` pinning xcodegen with a lockfile, plus tasks `generate`, `test-core`, `test-imaging`, `build`, `smoke`, and `verify` (all of the above); `scripts/generate-xcodeproj.sh` keeping the team ID out of git; build output in the checkout (`.build/DerivedData`); each run uses its own simulator device; swift-format configuration; `AGENTS.md`; complete `.gitignore` | — | M | No |
+| T0.3 | Test fixtures | `scripts/fetch-fixtures` downloads RAW files from public sources such as raw.pixls.us (CR3, NEF, ARW, RAF, ORF, RW2, DNG, iPhone ProRAW) plus JPEG and HEIC, with checksums and license records, without committing binaries. Generates standard test folders: multiple `DCIM/100XXXXX` subfolders, RAW+JPG pairs, standalone JPEG/HEIC/DNG, AppleDouble `._` files, an existing `_Rejected` folder, and hand-written Lightroom-, Capture One-, and Photo Mechanic-style XMP including unknown namespaces. Downloads go to a shared cache outside the repository (default `/Volumes/T7/Projects/.clove-fixtures`, overridable with `CLOVE_FIXTURES_DIR`), so parallel checkouts never download twice. | — | M | No |
 
 ## M1 Spikes
 
@@ -189,7 +187,7 @@ Between gates, these lanes can go to different agents at the same time:
 
 | Phase | Parallel lanes |
 | --- | --- |
-| M0 | T0.2 skeleton ‖ T0.3 fixtures (T0.1 needs the product owner) |
+| M0 | T0.2 skeleton ‖ T0.3 fixtures, then T0.1 TestFlight release |
 | M1 | S1 ‖ S2 ‖ S3 ‖ S4 ‖ S5 ‖ S6 ‖ S7 |
 | M2+M3 | Write lane (C3 → C4 → C5, C6, C7) ‖ scan lane (C2, C8, C11) ‖ grouping lane (C9 → C10, with I3) ‖ imaging lane (I1 → I2, I4) ‖ rules lane (C12 → C13) |
 | M4 | Grid lane (U3 → U4, U10) ‖ detail lane (U5 → U6, U8, U9) ‖ entry and settings (U2, U11) ‖ state lane (U7) |
