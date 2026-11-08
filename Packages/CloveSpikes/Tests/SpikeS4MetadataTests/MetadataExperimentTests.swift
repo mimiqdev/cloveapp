@@ -32,6 +32,7 @@ struct MetadataExperimentTests {
                     #expect(result.pixelsUnchanged)
                     #expect(result.before?.makerNotes == result.after?.makerNotes)
                     #expect(result.before?.imageCount == result.after?.imageCount)
+                    #expect(result.before?.jpegEXIFPreviews == result.after?.jpegEXIFPreviews)
                     // Native JPEG copying normalizes some EXIF rationals/GPS. Keep that
                     // evidence visible rather than treating byte-identical pixels as preservation.
                     if !result.file.lowercased().hasSuffix(".jpg") {
@@ -70,6 +71,30 @@ struct MetadataExperimentTests {
             try report.write(to: URL(fileURLWithPath: path))
             print("S4 report: \(path)")
         }
+    }
+
+    @Test func interruptedCandidateLeavesOriginalAndSuccessfulRenameReplacesIt() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("photo.jpg")
+        let original = Data("original".utf8)
+        try original.write(to: url)
+        #expect(throws: (any Error).self) {
+            try AtomicReplacement.write(to: url) { candidate in
+                try Data("partial".utf8).write(to: candidate)
+                throw MetadataProbeError.invalid("Injected failure after creating candidate")
+            }
+        }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["photo.jpg"])
+        let replacement = Data("complete".utf8)
+        try AtomicReplacement.write(to: url) { try replacement.write(to: $0) }
+        #expect(try Data(contentsOf: url) == replacement)
+        #expect(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["photo.jpg"])
     }
 
     @Test func failedWriteLeavesOriginalAndNoTemporaryFile() throws {

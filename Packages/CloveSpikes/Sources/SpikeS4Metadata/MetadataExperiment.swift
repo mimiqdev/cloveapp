@@ -30,6 +30,7 @@ public struct EmbeddedWriteResult: Codable, Sendable {
         error == nil && marksReadBack && payloadUnchanged && pixelsUnchanged
             && changedExistingMetadata.isEmpty && before?.makerNotes == after?.makerNotes
             && before?.imageCount == after?.imageCount
+            && before?.jpegEXIFPreviews == after?.jpegEXIFPreviews
     }
 }
 

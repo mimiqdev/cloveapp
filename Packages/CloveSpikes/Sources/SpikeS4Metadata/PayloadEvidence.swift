@@ -48,6 +48,15 @@ public enum PayloadEvidence {
         return result
     }
 
+    public static func jpegEXIFPreviews(_ data: Data) throws -> [PayloadDigest] {
+        for segment in try jpegSegments(data) where segment.marker == 0xE1 {
+            if segment.data.starts(with: Data("Exif\0\0".utf8)) {
+                return try TIFF(data: Data(segment.data.dropFirst(6))).payloads(requireRaw: false)
+            }
+        }
+        return []
+    }
+
     public static func makerNotes(_ data: Data, extension fileExtension: String) throws
         -> [PayloadDigest]
     {
@@ -370,7 +379,7 @@ private struct TIFF {
         return result
     }
 
-    func payloads() throws -> [PayloadDigest] {
+    func payloads(requireRaw: Bool = true) throws -> [PayloadDigest] {
         var result: [PayloadDigest] = []
         for (path, entries) in try directories() {
             for (offsetTag, sizeTag, kind) in [
@@ -393,7 +402,7 @@ private struct TIFF {
                 }
             }
         }
-        guard result.contains(where: { $0.role.contains("/raw/") }) else {
+        guard !requireRaw || result.contains(where: { $0.role.contains("/raw/") }) else {
             throw MetadataProbeError.invalid("DNG has no identified CFA/LinearRaw payload")
         }
         return result

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import ImageIO
 import SpikeSupport
@@ -37,20 +36,16 @@ public enum MetadataWriter {
             let original = try Data(contentsOf: url)
             let metadata = try JPEGPacket.metadata(in: original)
             try setMarks(marks, on: metadata)
-            let temporary = url.deletingLastPathComponent().appendingPathComponent(
-                ".s4-\(UUID().uuidString).tmp")
-            defer { try? FileManager.default.removeItem(at: temporary) }
-            try JPEGPacket.replacingMetadata(in: original, with: metadata).write(to: temporary)
-            guard rename(temporary.path, url.path) == 0 else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            try AtomicReplacement.write(to: url) { temporary in
+                try JPEGPacket.replacingMetadata(in: original, with: metadata).write(to: temporary)
             }
             return clock.seconds * 1000
         }
         let source = try source(url)
         let metadata: CGMutableImageMetadata
         if method == .copyImageSource {
-            // Only supply the delta. Round-tripping ImageIO's synthesized EXIF
-            // as XMP can normalize rationals and round existing GPS coordinates.
+            // Supply only the delta. Even with this minimal input, native JPEG
+            // copying normalizes some existing EXIF rationals and GPS coordinates.
             metadata = CGImageMetadataCreateMutable()
         } else {
             guard
@@ -65,8 +60,8 @@ public enum MetadataWriter {
         return clock.seconds * 1000
     }
 
-    /// Adds a controlled other-app XMP packet, including nested unknown data, GPS,
-    /// IPTC/DC caption and keywords. The caller verifies these sentinels actually landed.
+    /// Adds nested unknown XMP, IPTC/DC caption and keywords, and requests GPS.
+    /// GPS lands on JPEG but not on the HEIC control; existing JPEG GPS is checked separately.
     public static func seedPreservationControl(at url: URL) throws {
         let xml = """
             <x:xmpmeta xmlns:x="adobe:ns:meta/">
@@ -119,42 +114,39 @@ public enum MetadataWriter {
         guard let type = CGImageSourceGetType(source) else {
             throw MetadataProbeError.invalid("ImageIO source has no type")
         }
-        let temporary = url.deletingLastPathComponent().appendingPathComponent(
-            ".s4-\(UUID().uuidString).tmp")
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        guard let destination = CGImageDestinationCreateWithURL(temporary as CFURL, type, 1, nil)
-        else {
-            throw MetadataProbeError.invalid("ImageIO has no destination for \(type)")
-        }
-        switch method {
-        case .copyImageSource:
-            var error: Unmanaged<CFError>?
-            let options =
-                [
-                    kCGImageDestinationMetadata: metadata,
-                    kCGImageDestinationMergeMetadata: true,
-                ] as CFDictionary
-            guard CGImageDestinationCopyImageSource(destination, source, options, &error) else {
-                let detail =
-                    error.map { String(describing: $0.takeRetainedValue()) }
-                    ?? "no CFError returned"
-                throw MetadataProbeError.invalid("CopyImageSource failed: \(detail)")
+        try AtomicReplacement.write(to: url) { temporary in
+            guard
+                let destination = CGImageDestinationCreateWithURL(temporary as CFURL, type, 1, nil)
+            else {
+                throw MetadataProbeError.invalid("ImageIO has no destination for \(type)")
             }
-        // The copy function writes the destination itself. Do not finalize it again.
-        case .jpegXMPPacketSplice:
-            throw MetadataProbeError.invalid(
-                "JPEG packet splice does not use an ImageIO destination")
-        case .decodeAndAddImageAndMetadata:
-            guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-                throw MetadataProbeError.invalid("ImageIO decode failed")
+            switch method {
+            case .copyImageSource:
+                var error: Unmanaged<CFError>?
+                let options =
+                    [
+                        kCGImageDestinationMetadata: metadata,
+                        kCGImageDestinationMergeMetadata: true,
+                    ] as CFDictionary
+                guard CGImageDestinationCopyImageSource(destination, source, options, &error) else {
+                    let detail =
+                        error.map { String(describing: $0.takeRetainedValue()) }
+                        ?? "no CFError returned"
+                    throw MetadataProbeError.invalid("CopyImageSource failed: \(detail)")
+                }
+            // The copy function writes the destination itself. Do not finalize it again.
+            case .jpegXMPPacketSplice:
+                throw MetadataProbeError.invalid(
+                    "JPEG packet splice does not use an ImageIO destination")
+            case .decodeAndAddImageAndMetadata:
+                guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                    throw MetadataProbeError.invalid("ImageIO decode failed")
+                }
+                CGImageDestinationAddImageAndMetadata(destination, image, metadata, nil)
+                guard CGImageDestinationFinalize(destination) else {
+                    throw MetadataProbeError.invalid("AddImageAndMetadata finalize failed")
+                }
             }
-            CGImageDestinationAddImageAndMetadata(destination, image, metadata, nil)
-            guard CGImageDestinationFinalize(destination) else {
-                throw MetadataProbeError.invalid("AddImageAndMetadata finalize failed")
-            }
-        }
-        guard rename(temporary.path, url.path) == 0 else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
     }
 }

@@ -8,6 +8,7 @@ public struct MetadataSnapshot: Codable, Equatable, Sendable {
     public var payloads: [PayloadDigest]
     public var makerNotes: [PayloadDigest]
     public var jpegNonXMPBytes: PayloadDigest?
+    public var jpegEXIFPreviews: [PayloadDigest]
     public var decodedPixels: PayloadDigest?
     public var decodeError: String?
     public var imageCount: Int
@@ -46,6 +47,8 @@ public struct MetadataSnapshot: Codable, Equatable, Sendable {
                 ? try PayloadDigest(
                     role: "JPEG/all-bytes-except-standard-XMP", data: JPEGPacket.nonXMPData(data))
                 : nil,
+            jpegEXIFPreviews: ["jpg", "jpeg"].contains(url.pathExtension.lowercased())
+                ? try PayloadEvidence.jpegEXIFPreviews(data) : [],
             decodedPixels: pixelDigest,
             decodeError: decodeError,
             imageCount: CGImageSourceGetCount(source),
