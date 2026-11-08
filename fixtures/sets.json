@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "comment": "Standard test folders built by scripts/make-fixture-sets. Each set folder is deleted and recreated on every run. Entry keys: 'from' copies a manifest download (add 'recipe' to generate from it instead), 'fromXmp' copies a hand-written sidecar from fixtures/xmp/, 'text' writes an inline text stub, 'hex' writes inline bytes from a hex string (used for AppleDouble stubs, so no binary is committed).",
+  "sets": [
+    {
+      "name": "card-basic",
+      "comment": "An SD-card layout: two DCIM folders, RAW+JPG pairs, standalone JPEG/HEIC/DNG, AppleDouble and hidden files, unsupported files, and a rejects folder that already holds a photo.",
+      "entries": [
+        { "to": "DCIM/100CANON/IMG_0001.CR3", "from": "canon-eos-r6-cr3" },
+        { "to": "DCIM/100CANON/IMG_0001.JPG", "from": "canon-eos-r6-cr3", "recipe": "jpeg-from-raw" },
+        { "to": "DCIM/100CANON/IMG_0002.NEF", "from": "nikon-d500-nef" },
+        { "to": "DCIM/100CANON/IMG_0002.JPG", "from": "nikon-d500-nef", "recipe": "jpeg-from-raw" },
+        { "to": "DCIM/100CANON/IMG_0003.JPG", "from": "canon-eos-6d-jpeg" },
+        { "to": "DCIM/100CANON/IMG_0004.HEIC", "from": "sony-ilce-7s-arw", "recipe": "heic-from-raw" },
+        { "to": "DCIM/100CANON/IMG_0005.DNG", "from": "pentax-k-5-ii-s-dng" },
+        { "to": "DCIM/100CANON/._IMG_0001.CR3", "hex": "0005160700020000000000000000000000000000000000000000" },
+        { "to": "DCIM/100CANON/._IMG_0003.JPG", "hex": "0005160700020000000000000000000000000000000000000000" },
+        { "to": "DCIM/100CANON/.DS_Store", "text": "Clove fixture stub, not a real .DS_Store.\n" },
+        { "to": "DCIM/100CANON/MVI_0006.MOV", "text": "Clove fixture stub: an unsupported movie file on the card.\n" },
+        { "to": "DCIM/100CANON/NOTES.txt", "text": "Clove fixture stub: an unsupported text file on the card.\n" },
+        { "to": "DCIM/100CANON/_Rejected/IMG_9000.JPG", "from": "canon-eos-6d-jpeg" },
+        { "to": "DCIM/101CANON/IMG_0100.ARW", "from": "sony-ilce-7s-arw" },
+        { "to": "DCIM/101CANON/IMG_0101.RAF", "from": "fujifilm-x-s10-raf" },
+        { "to": "DCIM/101CANON/IMG_0102.ORF", "from": "olympus-e-m1markii-orf" },
+        { "to": "DCIM/101CANON/IMG_0103.RW2", "from": "panasonic-dmc-gh4-rw2" },
+        { "to": "DCIM/101CANON/IMG_0104.DNG", "from": "apple-iphone-12-pro-proraw-dng" },
+        { "to": "DCIM/101CANON/IMG_0104.XMP", "fromXmp": "lightroom-full.xmp" },
+        { "to": ".Trashes/IMG_0105.JPG", "from": "canon-eos-6d-jpeg" },
+        { "to": ".DS_Store", "text": "Clove fixture stub, not a real .DS_Store.\n" }
+      ]
+    },
+    {
+      "name": "xmp-interop",
+      "comment": "One RAW per sidecar style, so C3 and S3 can round-trip every fixtures/xmp sidecar and check that unknown content survives.",
+      "entries": [
+        { "to": "lightroom/IMG_0001.CR3", "from": "canon-eos-r6-cr3" },
+        { "to": "lightroom/IMG_0001.XMP", "fromXmp": "lightroom-full.xmp" },
+        { "to": "capture-one/IMG_0002.NEF", "from": "nikon-d500-nef" },
+        { "to": "capture-one/IMG_0002.XMP", "fromXmp": "capture-one.xmp" },
+        { "to": "photo-mechanic/IMG_0003.ARW", "from": "sony-ilce-7s-arw" },
+        { "to": "photo-mechanic/IMG_0003.XMP", "fromXmp": "photo-mechanic.xmp" },
+        { "to": "custom-namespace/IMG_0004.RAF", "from": "fujifilm-x-s10-raf" },
+        { "to": "custom-namespace/IMG_0004.XMP", "fromXmp": "custom-namespace-nested.xmp" },
+        { "to": "label-orange/IMG_0005.ORF", "from": "olympus-e-m1markii-orf" },
+        { "to": "label-orange/IMG_0005.XMP", "fromXmp": "label-orange.xmp" },
+        { "to": "label-pink/IMG_0006.RW2", "from": "panasonic-dmc-gh4-rw2" },
+        { "to": "label-pink/IMG_0006.XMP", "fromXmp": "label-pink.xmp" },
+        { "to": "rating-minus-one/IMG_0007.DNG", "from": "pentax-k-5-ii-s-dng" },
+        { "to": "rating-minus-one/IMG_0007.XMP", "fromXmp": "rating-minus-one.xmp" },
+        { "to": "empty/IMG_0008.DNG", "from": "apple-iphone-12-pro-proraw-dng" },
+        { "to": "empty/IMG_0008.XMP", "fromXmp": "empty.xmp" },
+        { "to": "empty-description/IMG_0009.ARW", "from": "sony-ilce-7s-arw" },
+        { "to": "empty-description/IMG_0009.XMP", "fromXmp": "empty-description.xmp" },
+        { "to": "malformed/IMG_0010.ARW", "from": "sony-ilce-7s-arw" },
+        { "to": "malformed/IMG_0010.XMP", "fromXmp": "malformed.xmp" },
+        { "to": "pair/IMG_0011.CR3", "from": "canon-eos-r6-cr3" },
+        { "to": "pair/IMG_0011.JPG", "from": "canon-eos-r6-cr3", "recipe": "jpeg-from-raw" },
+        { "to": "pair/IMG_0011.XMP", "fromXmp": "lightroom-full.xmp" }
+      ]
+    },
+    {
+      "name": "name-collision",
+      "comment": "Every active photo already has a file of the same name in _Rejected, so Move rejects (P0-10) has to add a suffix instead of overwriting.",
+      "entries": [
+        { "to": "DCIM/100CANON/IMG_0001.CR3", "from": "canon-eos-r6-cr3" },
+        { "to": "DCIM/100CANON/IMG_0001.JPG", "from": "canon-eos-r6-cr3", "recipe": "jpeg-from-raw" },
+        { "to": "DCIM/100CANON/IMG_0001.XMP", "fromXmp": "lightroom-full.xmp" },
+        { "to": "DCIM/100CANON/IMG_0002.DNG", "from": "pentax-k-5-ii-s-dng" },
+        { "to": "DCIM/100CANON/IMG_0003.ARW", "from": "sony-ilce-7s-arw" },
+        { "to": "DCIM/100CANON/IMG_0003.XMP", "fromXmp": "capture-one.xmp" },
+        { "to": "DCIM/100CANON/_Rejected/IMG_0001.CR3", "from": "canon-eos-r6-cr3" },
+        { "to": "DCIM/100CANON/_Rejected/IMG_0001.JPG", "from": "canon-eos-r6-cr3", "recipe": "jpeg-from-raw" },
+        { "to": "DCIM/100CANON/_Rejected/IMG_0001.XMP", "fromXmp": "photo-mechanic.xmp" },
+        { "to": "DCIM/100CANON/_Rejected/IMG_0002.DNG", "from": "pentax-k-5-ii-s-dng" },
+        { "to": "DCIM/100CANON/_Rejected/IMG_0003.ARW", "from": "sony-ilce-7s-arw" },
+        { "to": "DCIM/100CANON/_Rejected/IMG_0003.XMP", "fromXmp": "label-orange.xmp" },
+        { "to": "DCIM/101CANON/IMG_0100.RAF", "from": "fujifilm-x-s10-raf" },
+        { "to": "DCIM/101CANON/_Rejected/IMG_0100.RAF", "from": "fujifilm-x-s10-raf" }
+      ]
+    },
+    {
+      "name": "formats",
+      "comment": "One file per supported format, flat, for format detection and decode tests.",
+      "entries": [
+        { "to": "canon-eos-r6.CR3", "from": "canon-eos-r6-cr3" },
+        { "to": "nikon-d500.NEF", "from": "nikon-d500-nef" },
+        { "to": "sony-ilce-7s.ARW", "from": "sony-ilce-7s-arw" },
+        { "to": "fujifilm-x-s10.RAF", "from": "fujifilm-x-s10-raf" },
+        { "to": "olympus-e-m1markii.ORF", "from": "olympus-e-m1markii-orf" },
+        { "to": "panasonic-dmc-gh4.RW2", "from": "panasonic-dmc-gh4-rw2" },
+        { "to": "pentax-k-5-ii-s.DNG", "from": "pentax-k-5-ii-s-dng" },
+        { "to": "apple-iphone-12-pro.DNG", "from": "apple-iphone-12-pro-proraw-dng" },
+        { "to": "canon-eos-6d.JPG", "from": "canon-eos-6d-jpeg" },
+        { "to": "sony-ilce-7s.HEIC", "from": "sony-ilce-7s-arw", "recipe": "heic-from-raw" }
+      ]
+    }
+  ]
+}
