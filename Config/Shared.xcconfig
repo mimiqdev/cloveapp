@@ -1,0 +1,6 @@
+// Shared build configuration for every Clove target.
+//
+// The development team is never committed. Create Config/Local.xcconfig
+// (gitignored, never written into the repository) from
+// Config/Local.xcconfig.example and set DEVELOPMENT_TEAM there.
+#include? "Local.xcconfig"
