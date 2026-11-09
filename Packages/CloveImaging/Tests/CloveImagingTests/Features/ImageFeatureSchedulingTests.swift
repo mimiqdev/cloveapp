@@ -74,7 +74,8 @@ struct ImageFeatureSchedulingTests {
         let stream = await pipeline.run(try fixture.requests())
         try await awaitCondition("one read starts") { await previews.count == 1 }
         await pipeline.pause()
-        await previews.release()
+        let releaser = releaseHeldReads(previews)
+        defer { releaser.cancel() }
         let results = await collect(stream)
         // A read that already started is not thrown away; its result is delivered.
         #expect(results.count == 1)
@@ -156,7 +157,8 @@ struct ImageFeatureSchedulingTests {
         #expect(try features(of: first).differenceHash != nil)
         let queued = await pipeline.queuedCount
         #expect(queued >= 1)
-        await previews.setHolds(false)
+        let releaser = releaseHeldReads(previews)
+        defer { releaser.cancel() }
         var rest: [ImageFeatureResult] = []
         while let next = await iterator.next() { rest.append(next) }
         #expect(rest.count == 2)
@@ -176,8 +178,8 @@ struct ImageFeatureSchedulingTests {
         try await awaitCondition("both workers are busy") { await previews.count == 2 }
         let concurrent = await previews.maximumConcurrent
         #expect(concurrent <= 2)
-        await previews.setHolds(false)
-        await previews.release()
+        let releaser = releaseHeldReads(previews)
+        defer { releaser.cancel() }
         let results = await collect(stream)
         #expect(results.count == 5)
         let peak = await previews.maximumConcurrent

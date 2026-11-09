@@ -182,7 +182,16 @@ actor PreviewReadRecorder {
         digests.append(digest)
         active += 1
         maximumConcurrent = max(maximumConcurrent, active)
-        if holds { await withCheckedContinuation { waiters.append($0) } }
+        guard holds else { return }
+        // A read that is never released leaves its worker suspended for good, and the run then
+        // waits forever with no work left to do. The cap keeps a test mistake from hanging the
+        // whole suite; it is far longer than any deliberate hold in these tests.
+        let safety = Task {
+            try? await Task.sleep(for: .seconds(5))
+            await self.release()
+        }
+        await withCheckedContinuation { waiters.append($0) }
+        safety.cancel()
     }
 
     func end() {
@@ -302,18 +311,18 @@ func awaitCondition(
     try #require(await condition(), "Condition did not become true: \(description)")
 }
 
-/// Releases held preview reads until the requested number finished.
+/// Keeps releasing held preview reads until the returned task is cancelled.
 ///
-/// A single release can arrive before the next read waits, so this keeps releasing, as I2's
-/// scheduling tests do.
-func letPreviewReadsFinish(_ recorder: PreviewReadRecorder, count: Int) async throws {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-    while ContinuousClock.now < deadline {
-        if await recorder.finished >= count { break }
-        await recorder.release()
-        try await Task.sleep(for: .milliseconds(2))
+/// A single release races reads that start later, and a read left waiting suspends its worker
+/// for good: the batch never settles, the stream never finishes, and the whole test run waits
+/// forever. Releasing on a tick removes that race.
+func releaseHeldReads(_ recorder: PreviewReadRecorder) -> Task<Void, Never> {
+    Task {
+        while !Task.isCancelled {
+            await recorder.release()
+            try? await Task.sleep(for: .milliseconds(2))
+        }
     }
-    try #require(await recorder.finished >= count, "Held preview reads did not finish")
 }
 
 /// Collects a whole feature stream, so a test can assert on every photo's result.
