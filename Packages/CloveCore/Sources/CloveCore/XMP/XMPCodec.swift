@@ -53,7 +53,6 @@ public struct XMPCodec: Sendable {
     ///   so the previous packet is always the one on disk.
     public func write(_ edit: XMPEdit, into packet: Data?) throws -> Data {
         guard let packet else { return try Self.newPacket(for: edit) }
-
         return try XMPPacket(packet).applying(edit)
     }
 }
