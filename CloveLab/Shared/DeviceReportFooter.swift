@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Footer that names the last exported report and offers it through the share
-/// sheet. Spikes write reports with ``LabSession/export(_:toTestedFolder:)``.
+/// sheet. Probes write reports with ``LabSession/export(_:toTestedFolder:)``.
 struct DeviceReportFooter: View {
     @Environment(LabSession.self) private var session
 

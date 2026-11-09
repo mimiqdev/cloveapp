@@ -52,7 +52,7 @@ the owner's Sony A1 II ARW+HIF pairs, are the main target.
   temporary file, synchronizes/closes it, replaces an existing sidecar, reads
   back the exact bytes, inventories temporary files, and removes its scratch folder.
 - iPhone 17 Pro Max simulator, iOS 27.0 (24A434): a standalone executable compiled
-  from the same S3 and SpikeSupport sources runs the complete suite inside a new,
+  from the same S3 and LabSupport sources runs the complete suite inside a new,
   disposable simulator. It uses a local temporary folder on APFS. This measures
   iOS API behavior, **not** a document provider, picker interaction, or SD-card I/O.
   The Clove Lab screen is separately built by `mise run verify`; it uses the
@@ -75,7 +75,7 @@ Historical part-1 evidence, kept out of git and reproduced as JSON in issue #14 
 | `clove-lab-S3-sdk.json` | See JSON `createdAt` | Separate local Adobe run, independently inspected outputs |
 | `clove-lab-S3-simulator.json` | 2026-11-08 17:01:41 | Same two dependency-free approaches and replacements on iOS Simulator |
 
-Part 1 kept local copies and trimmed command logs under `.build/s3/`; those
+Part 1 kept local copies and trimmed command logs under `.build/xmp/`; those
 artifacts are not copied into this part-2 checkout. Physical-device evidence was
 read in place, with SHA-256 obtained using `shasum -a 256`:
 
@@ -310,25 +310,25 @@ external sidecar files](https://helpx.adobe.com/lightroom-classic/desktop/organi
 
 ### Reproducing the local Adobe comparison
 
-Run from the checkout root. All downloads and outputs stay in ignored `.build/s3`.
+Run from the checkout root. All downloads and outputs stay in ignored `.build/xmp`.
 CMake 4 requires the policy compatibility flag below. Only XMPCore is needed;
 XMPFiles and its zlib dependency are not built. No SDK source patches are needed.
 
 ```sh
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
-mkdir -p .build/s3
-git clone https://github.com/adobe/XMP-Toolkit-SDK.git .build/s3/XMP-Toolkit-SDK
-git -C .build/s3/XMP-Toolkit-SDK checkout 7093513bd3caaad29da01db0f275d88a39d6bcc2
-curl -fL https://github.com/libexpat/libexpat/releases/download/R_2_5_0/expat-2.5.0.tar.gz -o .build/s3/expat-2.5.0.tar.gz
-tar -xzf .build/s3/expat-2.5.0.tar.gz -C .build/s3
-cp -R .build/s3/expat-2.5.0/lib .build/s3/XMP-Toolkit-SDK/third-party/expat/lib
-cmake -S .build/s3/XMP-Toolkit-SDK/XMPCore/build -B .build/s3/sdk-core -G Xcode \
+mkdir -p .build/xmp
+git clone https://github.com/adobe/XMP-Toolkit-SDK.git .build/xmp/XMP-Toolkit-SDK
+git -C .build/xmp/XMP-Toolkit-SDK checkout 7093513bd3caaad29da01db0f275d88a39d6bcc2
+curl -fL https://github.com/libexpat/libexpat/releases/download/R_2_5_0/expat-2.5.0.tar.gz -o .build/xmp/expat-2.5.0.tar.gz
+tar -xzf .build/xmp/expat-2.5.0.tar.gz -C .build/xmp
+cp -R .build/xmp/expat-2.5.0/lib .build/xmp/XMP-Toolkit-SDK/third-party/expat/lib
+cmake -S .build/xmp/XMP-Toolkit-SDK/XMPCore/build -B .build/xmp/sdk-core -G Xcode \
   -DCMAKE_CL_64=ON -DXMP_BUILD_STATIC=ON -DCMAKE_LIBCPP=ON \
   -DXMP_OSX_SDK=27.2 -DXMP_OSX_TARGET=15.0 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-cmake --build .build/s3/sdk-core --config Release --target XMPCoreStatic -- -jobs 2 CODE_SIGNING_ALLOWED=NO
+cmake --build .build/xmp/sdk-core --config Release --target XMPCoreStatic -- -jobs 2 CODE_SIGNING_ALLOWED=NO
 ```
 
-Save the following as `.build/s3/sdk-roundtrip.cpp`:
+Save the following as `.build/xmp/sdk-roundtrip.cpp`:
 
 ```cpp
 #define MAC_ENV 1
@@ -383,28 +383,28 @@ int main(int argc, char** argv) {
 
 ```sh
 clang++ -std=c++17 -arch arm64 -DMAC_ENV=1 -DXMP_64=1 -DXMP_StaticBuild=1 \
-  -I .build/s3/XMP-Toolkit-SDK/public/include .build/s3/sdk-roundtrip.cpp \
-  .build/s3/XMP-Toolkit-SDK/public/libraries/macintosh/universal/Release/libXMPCoreStatic.a \
-  -framework CoreFoundation -framework Foundation -o .build/s3/sdk-roundtrip
-.build/s3/sdk-roundtrip fixtures/xmp .build/s3/sdk-output
-S3_REPORT_DIR="$PWD/.build/s3" S3_SDK_OUTPUT_DIR="$PWD/.build/s3/sdk-output" \
-  mise exec -- swift test --package-path Packages/CloveSpikes --filter SpikeS3XMPTests
+  -I .build/xmp/XMP-Toolkit-SDK/public/include .build/xmp/sdk-roundtrip.cpp \
+  .build/xmp/XMP-Toolkit-SDK/public/libraries/macintosh/universal/Release/libXMPCoreStatic.a \
+  -framework CoreFoundation -framework Foundation -o .build/xmp/sdk-roundtrip
+.build/xmp/sdk-roundtrip fixtures/xmp .build/xmp/sdk-output
+XMP_REPORT_DIR="$PWD/.build/xmp" XMP_SDK_OUTPUT_DIR="$PWD/.build/xmp/sdk-output" \
+  mise exec -- swift test --package-path Packages/CloveLabKit --filter XMPProbeTests
 ```
 
 The opt-in SDK test independently reads all ten saved outputs; its log reports
 semantic/form preservation, including the repaired malformed input. Ordinary
 `mise run verify` never downloads, links, or requires the SDK. The macOS JSON is
-written when `S3_REPORT_DIR` is set. The separate SDK JSON records the independently
+written when `XMP_REPORT_DIR` is set. The separate SDK JSON records the independently
 verified mark/preservation booleans and output sizes; SDK throughput was not measured.
 
-To reproduce the simulator data, compile the S3 and SpikeSupport Swift files for
+To reproduce the simulator data, compile the S3 and LabSupport Swift files for
 `arm64-apple-ios18.0-simulator` using the installed simulator SDK (remove the
-`import SpikeSupport` lines in temporary copies when combining into one executable).
+`import LabSupport` lines in temporary copies when combining into one executable).
 Its `@main` calls `XMPSuite.run(in:)` on an empty temporary directory, writes the
 returned `LabReport`, and removes the directory. Create a fresh iPhone 17 Pro Max
 with `xcrun simctl create`, boot it, run the executable with `simctl spawn`, and
-always shut down/delete that device. The run used `.build/s3/simulator-main.swift`
-and `.build/s3/run-simulator.sh`; the attached JSON identifies this runner rather
+always shut down/delete that device. The run used `.build/xmp/simulator-main.swift`
+and `.build/xmp/run-simulator.sh`; the attached JSON identifies this runner rather
 than claiming a Clove Lab UI run.
 
 ## Conclusion
@@ -546,12 +546,12 @@ uploaded Clove Lab TestFlight build containing S3.
    `Clove-S3-Test` folder on the card. Keep personal photos outside this folder.
 2. Open **Clove Lab → S3 · XMP → Choose folder**, select `Clove-S3-Test` on the
    SD card, then confirm the folder selection. The chosen folder name appears.
-3. Tap **Run S3 suite** and wait for Finished. Expect **12/12 replacement checks
+3. Tap **Run XMP suite** and wait for Finished. Expect **12/12 replacement checks
    confirmed**, file system **exfat/exFAT** (an unexpected value must be sent
    back), and **Scratch folder remains: false**. The suite copies its bundled
-   inputs into `clove-lab-s3` and removes that folder. Expected codec comparison
+   inputs into `clove-lab-xmp` and removes that folder. Expected codec comparison
    differences are in the JSON; they do not prevent the atomic checks.
-4. In Files, verify `clove-lab-s3` is gone and an S3 JSON report is present in
+4. In Files, verify `clove-lab-xmp` is gone and an S3 JSON report is present in
    `Clove-S3-Test`. The same report should appear in **On My iPhone/iPad → Clove
    Lab**. The footer shows `clove-lab-S3-<UTC timestamp>.json` and offers Export.
 5. If feasible, safely eject the card, lock its write-protection tab, reconnect,

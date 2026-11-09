@@ -41,7 +41,7 @@ and the unfinished part 2 are unchanged.
   items, a `_Rejected` folder with 150 JPEGs, 20 hidden entries (18 AppleDouble
   `._` files, `.DS_Store`, `.Trashes/`), and `.MOV`, `.txt`, and `.XMP` files the
   app does not open. The tree is written below a temporary directory in one
-  `Clove-S6-Scan` folder. With sparse sizes the tree is ~25.9 GB logical,
+  `Clove-Scan` folder. With sparse sizes the tree is ~25.9 GB logical,
   ~2 MB on disk.
 - **Deviation from the issue's wording:** the tree does not copy fixture
   photographs. 2,000 real 20 MB RAWs need about 40 GB, and a listing reads names
@@ -66,22 +66,22 @@ and the unfinished part 2 are unchanged.
   file, and streamed batches of 64 files over `AsyncStream` with timestamps in
   both the producer and the consumer.
 - **Reports:** `clove-lab-S6-…json` from the simulator runner and three
-  `macOS*.json` files from the test collector, untracked under `.build/s6/` in
+  `macOS*.json` files from the test collector, untracked under `.build/scan/` in
   the worker checkout. The macOS and simulator payloads are preserved gzip/base64
   with checksums in a comment on issue #17.
 
 Reproduce the macOS report (about 10 s, writes outside the tracked tree):
 
 ```sh
-mkdir -p .build/s6
-CLOVE_S6_REPORT="$PWD/.build/s6/macOS.json" \
-  mise exec -- swift test --package-path Packages/CloveSpikes \
+mkdir -p .build/scan
+CLOVE_SCAN_REPORT="$PWD/.build/scan/macOS.json" \
+  mise exec -- swift test --package-path Packages/CloveLabKit \
   --filter ScanBenchmarkTests.collectReport
 ```
 
-The simulator collector compiles `SpikeSupport`, `SpikeS6Scan`, and
-`S6LocalRunner.swift` for `arm64-apple-ios18.0-simulator` with
-`-D CLOVE_S6_LOCAL_RUNNER`, creates its own simulator, runs
+The simulator collector compiles `LabSupport`, `ScanProbe`, and
+`ScanLocalRunner.swift` for `arm64-apple-ios18.0-simulator` with
+`-D CLOVE_SCAN_LOCAL_RUNNER`, creates its own simulator, runs
 `xcrun simctl spawn <device> <runner> <output-directory>`, and deletes the
 device. `mise run verify` runs the functional tests (tree shape, three methods
 agreeing on one file set, filters, pairing, batches, cancellation, report
@@ -251,13 +251,13 @@ meet both. These are proposals for G1, not measured card numbers.
    `EOS_DIGITAL`. The screen shows the folder name.
 3. Tap **Generate test tree**. Expect a progress line counting to about 2,150
    files and then "Test tree ready: 2000 photo files". The card now has one
-   `Clove-S6-Scan` folder with `DCIM/100CANON` … `105PANASONIC`.
+   `Clove-Scan` folder with `DCIM/100CANON` … `105PANASONIC`.
 4. Tap **Run scan suite**. Expect about 135 scans in three passes, the status
    line naming the method and key set, and then
    "Finished: clove-lab-S6-<timestamp>.json". If the run takes much longer than
    15 minutes, cancel and note the card and reader model.
 5. Note the report file name on screen, then tap **Delete test tree** and confirm
-   the card has no `Clove-S6-Scan` folder left.
+   the card has no `Clove-Scan` folder left.
 6. Send the JSON back: attach the file to
    [#17](https://github.com/mimiqdev/cloveapp/issues/17), or use **Export** in
    the footer. Copies are also in Files › On My iPhone › Clove Lab.

@@ -48,7 +48,7 @@ At most **three workers run at once**, limited by the Mac's internal disk (simul
 
 - Stay within the issue's scope. Open a new issue for anything outside it.
 - Commit in small steps. Push the branch and open a pull request from the [template](../.github/pull_request_template.md), titled `[<ID>] <summary>` and containing `Closes #<issue>`.
-- Run every check the issue lists and paste the real output, trimmed to the relevant lines, into the pull request.
+- Run every check the issue lists and paste the real output, trimmed to the relevant lines, into the pull request. `mise run verify` includes the `CloveLabKit` probe tests (`mise run test-lab`).
 - Never merge, never push to `main`, never force-push a branch someone else is working on, and never touch signing files beyond reading them through the configured paths.
 
 **Stop and report** instead of guessing when:

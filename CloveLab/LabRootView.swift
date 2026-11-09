@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Root of the Clove Lab debug app: the M1 spikes and the device report footer.
+/// Root of the Clove Lab debug app: the lab probes and the device report footer.
 @MainActor
 struct LabRootView: View {
     @State private var session = LabSession()
@@ -14,7 +14,7 @@ struct LabRootView: View {
                             experiment.makeDestination()
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(experiment.id)
+                                Text(experiment.title)
                                     .font(.headline)
                                 Text(experiment.question)
                                     .font(.subheadline)

@@ -1,44 +1,49 @@
-import SpikeS1Access
-import SpikeS2Previews
-import SpikeS3XMP
-import SpikeS4Metadata
-import SpikeS5Grouping
-import SpikeS6Scan
-import SpikeS7Duo
-import SpikeSupport
+import FolderAccessProbe
+import PreviewProbe
+import XMPProbe
+import EmbeddedMetadataProbe
+import GroupingProbe
+import ScanProbe
+import FoldStateProbe
+import LabSupport
 import SwiftUI
 
-/// One M1 spike as Clove Lab lists it.
+/// One lab probe as Clove Lab lists it.
 @MainActor
 struct Experiment: Identifiable {
-    /// Spike identifier, for example `S2`.
+    /// Probe identifier, for example `S2`.
     let id: String
-    /// The spike's question, as written in `docs/DEV-PLAN.md`.
+    /// Checklist identifier shown together with the topic name.
+    let title: String
+    /// The probe's question, as written in `docs/DEV-PLAN.md`.
     let question: String
-    /// The screen the spike shows.
+    /// The screen the probe shows.
     let makeDestination: @MainActor () -> AnyView
 
     init(
-        _ descriptor: SpikeDescriptor,
+        _ descriptor: ProbeDescriptor, topic: String,
         @ViewBuilder destination: @escaping @MainActor () -> some View
     ) {
         self.id = descriptor.id
+        self.title = "\(descriptor.id) · \(topic)"
         self.question = descriptor.question
         self.makeDestination = { AnyView(destination()) }
     }
 }
 
-/// The M1 spike registry. All seven spikes are listed from the start, so a spike
-/// never edits this file: it replaces its own screen under `CloveLab/Spikes/Sx/`.
+/// The lab probe registry. All seven probes are listed from the start, so a probe
+/// never edits this file: it replaces its own screen under `CloveLab/Probes/<Topic>/`.
 @MainActor
 enum Experiments {
     static let all: [Experiment] = [
-        Experiment(SpikeS1Access.descriptor) { S1View() },
-        Experiment(SpikeS2Previews.descriptor) { S2View() },
-        Experiment(SpikeS3XMP.descriptor) { S3View() },
-        Experiment(SpikeS4Metadata.descriptor) { S4View() },
-        Experiment(SpikeS5Grouping.descriptor) { S5View() },
-        Experiment(SpikeS6Scan.descriptor) { S6View() },
-        Experiment(SpikeS7Duo.descriptor) { S7View() },
+        Experiment(FolderAccessProbe.descriptor, topic: "Folder access") { FolderAccessView() },
+        Experiment(PreviewProbe.descriptor, topic: "Previews") { PreviewsView() },
+        Experiment(XMPProbe.descriptor, topic: "XMP") { XMPView() },
+        Experiment(EmbeddedMetadataProbe.descriptor, topic: "Embedded metadata") {
+            EmbeddedMetadataView()
+        },
+        Experiment(GroupingProbe.descriptor, topic: "Grouping") { GroupingView() },
+        Experiment(ScanProbe.descriptor, topic: "Scan") { ScanView() },
+        Experiment(FoldStateProbe.descriptor, topic: "Fold state") { FoldStateView() },
     ]
 }

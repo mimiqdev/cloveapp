@@ -48,7 +48,8 @@ Test devices: iPhone 17 Pro Max, iPad Pro, iPhone Duo, an SD card reader, and a 
 | `CloveCore` (Swift package) | Domain model, scanning and pairing, XMP codec, write queue, undo, Move rejects, grouping algorithm, settings, Recents | Foundation (XMP depends on S3) |
 | `CloveImaging` (Swift package) | Preview extraction and caching, full RAW decoding, image feature computation | ImageIO, Core Image, Vision |
 | `Clove` (app) | UI, gestures, scene state | Both packages |
-| `CloveLab` (debug app) | Spike verification and device measurements | Both packages |
+| `CloveLabKit` (Swift package) | Topic-named lab probes and report tooling | Foundation, ImageIO, Core Image, Vision |
+| `CloveLab` (debug app) | Spike verification and device measurements | `CloveCore`, `CloveImaging`, `CloveLabKit` |
 
 `CloveCore` and `CloveImaging` tests run with `swift test` on macOS without a simulator, which gives agents the fastest iteration loop.
 
