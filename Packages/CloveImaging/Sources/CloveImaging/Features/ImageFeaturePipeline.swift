@@ -180,9 +180,12 @@ public actor ImageFeaturePipeline {
     }
 
     /// Drops one photo's queued or running work.
+    ///
+    /// The path is standardised like a request's is, so a caller's own spelling still matches.
     public func cancel(photo source: URL, in folder: String) {
+        let path = source.standardizedFileURL
         for job in Array(jobs.values)
-        where job.request.folderIdentity == folder && job.request.source == source {
+        where job.request.folderIdentity == folder && job.request.source == path {
             cancel(job.id)
         }
     }
