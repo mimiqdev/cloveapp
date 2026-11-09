@@ -35,9 +35,7 @@ struct MetadataExperimentTests {
                     #expect(result.before?.jpegEXIFPreviews == result.after?.jpegEXIFPreviews)
                     // Native JPEG copying normalizes some EXIF rationals/GPS. Keep that
                     // evidence visible rather than treating byte-identical pixels as preservation.
-                    if result.file.lowercased().hasSuffix(".jpg")
-                        && result.control == "camera-original"
-                    {
+                    if result.file.lowercased().hasSuffix(".jpg") {
                         let observedNormalizations: Set<String> = [
                             "exif:ApertureValue", "exif:FocalPlaneXResolution",
                             "exif:FocalPlaneYResolution",
@@ -48,8 +46,14 @@ struct MetadataExperimentTests {
                             "properties.{Exif}.ShutterSpeedValue",
                             "properties.{GPS}.Latitude",
                         ]
+                        // Splice seeding leaves original IPTC intact. Native copy can
+                        // reconcile its caption over the seeded XMP caption as well.
+                        let seededCaptionChanges: Set<String> =
+                            result.control == "seeded-other-app"
+                            ? ["dc:description", "dc:description[x-default]"] : []
                         #expect(
-                            Set(result.changedExistingMetadata).isSubset(of: observedNormalizations)
+                            Set(result.changedExistingMetadata).isSubset(
+                                of: observedNormalizations.union(seededCaptionChanges))
                         )
                     } else {
                         #expect(result.changedExistingMetadata.isEmpty)
@@ -86,6 +90,50 @@ struct MetadataExperimentTests {
         if let path = ProcessInfo.processInfo.environment["S4_REPORT_PATH"] {
             try report.write(to: URL(fileURLWithPath: path))
             print("S4 report: \(path)")
+        }
+    }
+
+    @Test func cameraHIFIsIncludedAndReportsExplainSeedLimitations() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["camera.HIF", "second.hif"] {
+            try Data("not an image".utf8).write(to: directory.appendingPathComponent(name))
+        }
+        let (report, results) = try MetadataExperiment.run(folder: directory)
+        #expect(report.context["files"] == "2")
+        #expect(results.count == 6)
+        #expect(results.allSatisfy { $0.error != nil && $0.failureLeftFileUnchanged == true })
+        #expect(
+            report.notes.contains {
+                $0.contains("does not show preservation against the camera original")
+            })
+        #expect(
+            results.filter { $0.control == "seeded-other-app" }.allSatisfy {
+                $0.seedDescription != nil
+            })
+    }
+
+    @Test(.enabled(if: Fixtures.set("formats") != nil))
+    func jpegSeedPreservesOriginalBytesOutsideXMP() throws {
+        let folder = try #require(Fixtures.set("formats"))
+        let source = folder.appendingPathComponent("canon-eos-6d.JPG")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("camera.jpg")
+        try FileManager.default.copyItem(at: source, to: url)
+        let original = try Data(contentsOf: url)
+        let originalMetadata = try MetadataSnapshot.read(url).metadata
+        try MetadataWriter.seedPreservationControl(at: url)
+        #expect(try JPEGPacket.nonXMPData(Data(contentsOf: url)) == JPEGPacket.nonXMPData(original))
+        let seeded = try MetadataSnapshot.read(url)
+        #expect(seeded.preservationSeedPresent)
+        // Existing Camera Raw edits survive merging the seed packet.
+        for (key, value) in originalMetadata where key.hasPrefix("crs:") {
+            #expect(seeded.metadata[key] == value)
         }
     }
 

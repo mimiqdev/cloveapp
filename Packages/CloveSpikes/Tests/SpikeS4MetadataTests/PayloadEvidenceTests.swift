@@ -27,13 +27,58 @@ struct PayloadEvidenceTests {
     @Test func heifComparesGridAndTilesWhileExcludingMetadataInsideMdat() throws {
         let original = heif(tile: 7, metadata: 11)
         let digests = try PayloadEvidence.read(original, extension: "heic")
-        #expect(digests.count == 2)
-        #expect(digests[0].role.contains("/grid/primary"))
-        #expect(digests[1].role.contains("/hvc1"))
+        #expect(digests.filter { $0.sourceItemID != nil }.count == 7)
+        #expect(digests.contains { $0.role == "HEIF/primary/grid" })
+        #expect(digests.contains { $0.role.contains("/dimg/out/0/hvc1") })
+        #expect(digests.contains { $0.role.contains("/auxl/in/0/hvc1") })
+        #expect(digests.contains { $0.role.contains("/thmb/in/0/hvc1") })
+        #expect(digests.contains { $0.role.contains("/dimg/in/0/tmap") })
         #expect(try PayloadEvidence.read(heif(tile: 7, metadata: 99), extension: "heic") == digests)
         #expect(try PayloadEvidence.read(heif(tile: 8, metadata: 11), extension: "heic") != digests)
         #expect(throws: (any Error).self) {
             try PayloadEvidence.read(Data(original.dropLast()), extension: "heic")
+        }
+    }
+
+    @Test func heifRenumberingKeepsContentButOrderOwnershipAndByteChangesFail() throws {
+        let original = try PayloadEvidence.read(heif(tile: 7, metadata: 11), extension: "HIF")
+        let renumbered = try PayloadEvidence.read(
+            heif(tile: 7, metadata: 99, renumbered: true), extension: "hif")
+        #expect(original != renumbered)  // source IDs are retained as diagnostics
+        #expect(PayloadEvidence.contentMatches(original, renumbered))
+        func snapshot(_ payloads: [PayloadDigest]) -> MetadataSnapshot {
+            MetadataSnapshot(
+                fileBytes: 1, fileSHA256: "unused", payloads: payloads, makerNotes: [],
+                jpegEXIFPreviews: [], imageCount: 1, metadata: [:], properties: [:])
+        }
+        var result = EmbeddedWriteResult(
+            file: "camera.HIF", control: "camera-original", method: .copyImageSource)
+        result.before = snapshot(original)
+        result.after = snapshot(renumbered)
+        #expect(result.payloadUnchanged && result.payloadRenumberedOnly)
+        result.after?.payloads[0].sha256 = "changed"
+        #expect(!result.payloadUnchanged && !result.payloadRenumberedOnly)
+        for changed in [
+            heif(tile: 8, metadata: 11, renumbered: true),
+            heif(tile: 7, metadata: 11, swapTiles: true),
+            heif(tile: 7, metadata: 11, auxiliaryOwner: 2),
+            heif(tile: 7, metadata: 11, auxiliaryByte: 99),
+            heif(tile: 7, metadata: 11, gainMapByte: 99),
+            heif(tile: 7, metadata: 11, thumbnailByte: 99),
+        ] {
+            #expect(
+                !PayloadEvidence.contentMatches(
+                    original, try PayloadEvidence.read(changed, extension: "hif")))
+        }
+        #expect(
+            try PayloadEvidence.makerNotes(heif(tile: 7, metadata: 11), extension: "HiF").isEmpty)
+        #expect(throws: (any Error).self) {
+            try PayloadEvidence.read(
+                heif(tile: 7, metadata: 11, auxiliaryOwner: 99), extension: "hif")
+        }
+        #expect(throws: (any Error).self) {
+            try PayloadEvidence.read(
+                heif(tile: 7, metadata: 11, disconnected: true), extension: "hif")
         }
     }
 
@@ -96,28 +141,55 @@ struct PayloadEvidenceTests {
         be(contents.count + 8, 4) + Data(type.utf8) + contents
     }
 
-    private func heif(tile: UInt8, metadata: UInt8) -> Data {
+    private func heif(
+        tile: UInt8, metadata: UInt8, renumbered: Bool = false, swapTiles: Bool = false,
+        auxiliaryOwner: Int = 1, auxiliaryByte: UInt8 = 21, gainMapByte: UInt8 = 31,
+        thumbnailByte: UInt8 = 41, disconnected: Bool = false
+    ) -> Data {
+        // Primary grid, two ordered tiles, auxiliary, thumbnail, tone map, gain map, XMP.
+        let types = ["grid", "hvc1", "hvc1", "hvc1", "hvc1", "tmap", "hvc1", "mime"]
+        let bytes: [[UInt8]] = [
+            [0, 1], [tile, tile], [8, 9], [auxiliaryByte, 22],
+            [thumbnailByte, 42], [0, 2], [gainMapByte, 32], [metadata, metadata],
+        ]
+        func id(_ index: Int) -> Int { renumbered ? index * 7 + 13 : index }
+        let order = renumbered ? Array(types.indices.reversed()) : Array(types.indices)
         let ftyp = box("ftyp", Data("heic".utf8) + be(0, 4))
-        let pitm = box("pitm", be(0, 4) + be(1, 2))
-        let types = ["grid", "hvc1", "mime"]
+        let pitm = box("pitm", be(0, 4) + be(id(1), 2))
         var infos = Data()
-        for (index, type) in types.enumerated() {
+        for index in order {
             infos += box(
                 "infe",
-                Data([2, 0, 0, 0]) + be(index + 1, 2) + be(0, 2) + Data(type.utf8) + Data([0]))
+                Data([2, 0, 0, 0]) + be(id(index + 1), 2) + be(0, 2)
+                    + Data(types[index].utf8) + Data([0]))
         }
-        let iinf = box("iinf", be(0, 4) + be(3, 2) + infos)
+        let iinf = box("iinf", be(0, 4) + be(types.count, 2) + infos)
+        func ref(_ type: String, _ from: Int, _ targets: [Int]) -> Data {
+            box(
+                type,
+                be(id(from), 2) + be(targets.count, 2)
+                    + targets.reduce(Data()) { $0 + be(id($1), 2) })
+        }
+        let references =
+            ref("dimg", 1, swapTiles ? [3, 2] : [2, 3])
+            + ref("auxl", 4, [auxiliaryOwner])
+            + (disconnected ? Data() : ref("thmb", 5, [1]))
+            + ref("dimg", 6, [1, 7])
+        let iref = box("iref", be(0, 4) + references)
         func locations(start: Int) -> Data {
-            var entries = Data([0, 0, 0, 0, 0x44, 0]) + be(3, 2)
-            for index in 0..<3 {
+            var entries = Data([0, 0, 0, 0, 0x44, 0]) + be(types.count, 2)
+            for (position, index) in order.enumerated() {
                 entries +=
-                    be(index + 1, 2) + be(0, 2) + be(1, 2) + be(start + index * 2, 4) + be(2, 4)
+                    be(id(index + 1), 2) + be(0, 2) + be(1, 2)
+                    + be(start + position * 2, 4) + be(2, 4)
             }
             return box("iloc", entries)
         }
-        let dummy = box("meta", be(0, 4) + pitm + iinf + locations(start: 0))
+        let dummy = box("meta", be(0, 4) + pitm + iinf + iref + locations(start: 0))
         let meta = box(
-            "meta", be(0, 4) + pitm + iinf + locations(start: ftyp.count + dummy.count + 8))
-        return ftyp + meta + box("mdat", Data([0, 1, tile, tile, metadata, metadata]))
+            "meta",
+            be(0, 4) + pitm + iinf + iref
+                + locations(start: ftyp.count + dummy.count + 8))
+        return ftyp + meta + box("mdat", Data(order.flatMap { bytes[$0] }))
     }
 }

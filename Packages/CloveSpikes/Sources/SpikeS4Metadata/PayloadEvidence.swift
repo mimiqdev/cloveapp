@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import SpikeSupport
 
 public enum MetadataProbeError: Error, CustomStringConvertible {
     case invalid(String)
@@ -16,11 +17,14 @@ public struct PayloadDigest: Codable, Equatable, Sendable {
     public var role: String
     public var bytes: Int
     public var sha256: String
+    /// Diagnostic only; HEIF content comparisons use reference roles, never item IDs.
+    public var sourceItemID: Int?
 
-    public init(role: String, data: Data) {
+    public init(role: String, data: Data, sourceItemID: Int? = nil) {
         self.role = role
         bytes = data.count
         sha256 = Self.hash(data)
+        self.sourceItemID = sourceItemID
     }
 
     public static func hash(_ data: Data) -> String {
@@ -36,16 +40,28 @@ public enum PayloadEvidence {
     public static func read(_ data: Data, extension fileExtension: String) throws -> [PayloadDigest]
     {
         let result: [PayloadDigest]
-        switch fileExtension.lowercased() {
-        case "jpg", "jpeg": result = try jpeg(data)
-        case "heic", "heif": result = try heif(data)
-        case "dng": result = try TIFF(data: data).payloads()
-        default: throw MetadataProbeError.invalid("Unsupported payload container: \(fileExtension)")
+        let ext = fileExtension.lowercased()
+        if PhotoExtensions.heif.contains(ext) {
+            result = try heif(data)
+        } else {
+            switch ext {
+            case "jpg", "jpeg": result = try jpeg(data)
+            case "dng": result = try TIFF(data: data).payloads()
+            default:
+                throw MetadataProbeError.invalid("Unsupported payload container: \(fileExtension)")
+            }
         }
         guard !result.isEmpty, result.allSatisfy({ $0.bytes > 0 }) else {
             throw MetadataProbeError.invalid("No nonempty image payload found")
         }
         return result
+    }
+
+    public static func contentMatches(_ before: [PayloadDigest], _ after: [PayloadDigest]) -> Bool {
+        !before.isEmpty && before.count == after.count
+            && zip(before, after).allSatisfy {
+                $0.role == $1.role && $0.bytes == $1.bytes && $0.sha256 == $1.sha256
+            }
     }
 
     public static func jpegEXIFPreviews(_ data: Data) throws -> [PayloadDigest] {
@@ -71,7 +87,7 @@ public enum PayloadEvidence {
                 }
             }
         }
-        if ["heic", "heif"].contains(fileExtension.lowercased()) {
+        if PhotoExtensions.heif.contains(fileExtension.lowercased()) {
             return try heif(data, returnMakerNotes: true)
         }
         return []
@@ -265,7 +281,7 @@ public enum PayloadEvidence {
                     throw MetadataProbeError.invalid("Empty or duplicate HEIF image item")
                 }
                 payloads[id] = PayloadDigest(
-                    role: "HEIF/item/\(id)/\(type)\(id == primary ? "/primary" : "")", data: payload
+                    role: type, data: payload, sourceItemID: id
                 )
             }
         }
@@ -284,7 +300,131 @@ public enum PayloadEvidence {
                 return try TIFF(data: exif.slice(4 + offset, bytes.count - 4 - offset)).makerNotes()
             }
         }
-        return payloads.keys.sorted().compactMap { payloads[$0] }
+        let references = try heifReferences(reader, children: children, types: types)
+        return try heifRoles(primary: primary, payloads: payloads, references: references)
+    }
+
+    private struct ItemReference {
+        var type: String
+        var from: Int
+        var to: [Int]
+    }
+
+    private static func heifReferences(_ reader: Bytes, children: [Box], types: [Int: String])
+        throws
+        -> [ItemReference]
+    {
+        guard let iref = children.first(where: { $0.type == "iref" }) else { return [] }
+        let version = try reader.uint(iref.start, 1)
+        guard version <= 1 else {
+            throw MetadataProbeError.invalid("Unsupported HEIF iref version")
+        }
+        let width = version == 0 ? 2 : 4
+        var result: [ItemReference] = []
+        var seen = Set<String>()
+        for box in try boxes(reader, start: iref.start + 4, end: iref.end) {
+            let from = try reader.uint(box.start, width)
+            let count = try reader.uint(box.start + width, 2)
+            guard count > 0, box.end - box.start == width + 2 + count * width,
+                types[from] != nil, seen.insert("\(from)/\(box.type)").inserted
+            else { throw MetadataProbeError.invalid("Invalid or duplicate HEIF reference") }
+            let to = try (0..<count).map {
+                try reader.uint(box.start + width + 2 + $0 * width, width)
+            }
+            guard to.allSatisfy({ types[$0] != nil && $0 != from }) else {
+                throw MetadataProbeError.invalid("Dangling or self-referencing HEIF item")
+            }
+            result.append(ItemReference(type: box.type, from: from, to: to))
+        }
+        return result
+    }
+
+    /// Root at pitm. Ordered outgoing dimg edges locate grid tiles and derived inputs.
+    /// Incoming auxl/thmb (and other image references) locate auxiliaries by owner.
+    /// A canonical edge digest also detects changed ownership/order of shared items.
+    private static func heifRoles(
+        primary: Int, payloads: [Int: PayloadDigest], references: [ItemReference]
+    ) throws -> [PayloadDigest] {
+        let imageReferences = references.filter { payloads[$0.from] != nil }.map { ref in
+            ItemReference(type: ref.type, from: ref.from, to: ref.to.filter { payloads[$0] != nil })
+        }
+        var signatures: [Int: String] = [:]
+        func signature(_ id: Int, ancestors: Set<Int> = []) throws -> String {
+            if let cached = signatures[id] { return cached }
+            guard !ancestors.contains(id), ancestors.count < 128, let payload = payloads[id] else {
+                throw MetadataProbeError.invalid("Cyclic or excessive HEIF derivation")
+            }
+            var parts = [payload.role, String(payload.bytes), payload.sha256]
+            for ref in imageReferences.filter({ $0.from == id && $0.type == "dimg" }) {
+                for target in ref.to {
+                    parts.append(try signature(target, ancestors: ancestors.union([id])))
+                }
+            }
+            let value = PayloadDigest.hash(Data(parts.joined(separator: "|").utf8))
+            signatures[id] = value
+            return value
+        }
+        for id in payloads.keys { _ = try signature(id) }
+        guard let primaryPayload = payloads[primary] else {
+            throw MetadataProbeError.invalid("Missing HEIF primary payload")
+        }
+        var roles = [primary: "HEIF/primary/\(primaryPayload.role)"]
+        func role(_ id: Int) throws -> String {
+            guard let value = roles[id] else {
+                throw MetadataProbeError.invalid("Missing HEIF reference role")
+            }
+            return value
+        }
+        var pending = [primary]
+        var cursor = 0
+        while cursor < pending.count {
+            let id = pending[cursor]
+            cursor += 1
+            let owner = try role(id)
+            var neighbors: [(String, Int)] = []
+            for ref in imageReferences.filter({ $0.from == id }).sorted(by: { $0.type < $1.type }) {
+                for (index, target) in ref.to.enumerated() {
+                    neighbors.append(("\(ref.type)/out/\(index)", target))
+                }
+            }
+            let incoming = imageReferences.filter { $0.to.contains(id) }
+            for type in Set(incoming.map(\.type)).sorted() {
+                let sources = incoming.filter { $0.type == type }.sorted {
+                    (signatures[$0.from] ?? "") < (signatures[$1.from] ?? "")
+                }
+                // Equal source subgraphs are indistinguishable: fail rather than assign by ID.
+                guard Set(sources.compactMap { signatures[$0.from] }).count == sources.count else {
+                    throw MetadataProbeError.invalid("Ambiguous HEIF image ownership")
+                }
+                for (index, ref) in sources.enumerated() {
+                    neighbors.append(("\(type)/in/\(index)", ref.from))
+                }
+            }
+            for (edge, target) in neighbors where roles[target] == nil {
+                guard let payload = payloads[target] else {
+                    throw MetadataProbeError.invalid("Missing HEIF referenced payload")
+                }
+                roles[target] = "\(owner)/\(edge)/\(payload.role)"
+                pending.append(target)
+            }
+        }
+        guard roles.count == payloads.count else {
+            throw MetadataProbeError.invalid(
+                "HEIF image item is not connected to the primary image")
+        }
+        var result = try payloads.map { id, payload in
+            var value = payload
+            value.role = try role(id)
+            return value
+        }.sorted { $0.role < $1.role }
+        let edges = try imageReferences.map { ref in
+            try "\(role(ref.from))/\(ref.type)="
+                + ref.to.map { try role($0) }.joined(separator: ",")
+        }.sorted().joined(separator: "\n")
+        if !edges.isEmpty {
+            result.append(PayloadDigest(role: "HEIF/reference-topology", data: Data(edges.utf8)))
+        }
+        return result
     }
 }
 

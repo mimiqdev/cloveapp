@@ -79,7 +79,26 @@ public enum MetadataWriter {
         guard let metadata = CGImageMetadataCreateFromXMPData(Data(xml.utf8) as CFData) else {
             throw MetadataProbeError.invalid("Cannot parse preservation seed XMP")
         }
-        try write(to: url, source: source(url), method: .copyImageSource, metadata: metadata)
+        if ["jpg", "jpeg"].contains(url.pathExtension.lowercased()) {
+            let original = try Data(contentsOf: url)
+            let merged = try JPEGPacket.metadata(in: original)
+            var mergedAll = true
+            CGImageMetadataEnumerateTagsUsingBlock(metadata, nil, nil) { path, tag in
+                guard let namespace = CGImageMetadataTagCopyNamespace(tag),
+                    let prefix = CGImageMetadataTagCopyPrefix(tag),
+                    CGImageMetadataRegisterNamespaceForPrefix(merged, namespace, prefix, nil),
+                    CGImageMetadataSetTagWithPath(merged, nil, path, tag)
+                else { mergedAll = false; return true }
+                return true
+            }
+            guard mergedAll else { throw MetadataProbeError.invalid("Cannot merge JPEG seed XMP") }
+            try AtomicReplacement.write(to: url) { temporary in
+                try JPEGPacket.replacingMetadata(in: original, with: merged).write(to: temporary)
+            }
+        } else {
+            // A native seed can normalize/discard camera metadata before the measured write.
+            try write(to: url, source: source(url), method: .copyImageSource, metadata: metadata)
+        }
     }
 
     static func source(_ url: URL) throws -> CGImageSource {
