@@ -16,7 +16,7 @@ struct S5View: View {
         Form {
             Section("Prepare") {
                 Text(
-                    "Connect the SD reader or external SSD. Choose a shooting folder, including its subfolders. RAW+JPEG pairs use the RAW file. Up to 600 photos are measured."
+                    "Connect the SD reader or external SSD. Choose a shooting folder, including its subfolders. RAW+JPEG and RAW+HIF pairs use the RAW file. Up to 600 photos are measured."
                 )
                 Text(
                     "Allow about 2–10 minutes for measurement, then 5–15 minutes to review burst boundaries. Keep the app open. Photos and XMP are unchanged."
@@ -52,7 +52,7 @@ struct S5View: View {
                 }
                 Section("Label boundaries") {
                     Text(
-                        "Review adjacent photos within each body. Start new group means different burst or composition. Confirm a correct suggestion, or change the toggle to fix a wrong split or merge. Only reviewed boundaries count as labels; you can save a partial review."
+                        "Review each preview pair. Keep together means both photos belong in the same group. New group here means the right photo starts a different burst or composition. Choose either action to save your label, even when the suggestion is correct. Only saved labels count; you can save a partial review."
                     )
                     Text(
                         "\(result.boundaries.filter { $0.expectedSplit != nil }.count) / \(result.boundaries.count) reviewed"
@@ -64,7 +64,7 @@ struct S5View: View {
                 Section("Save and send") {
                     Button("Save report with labels", action: export)
                     Text(
-                        "Use Export in the footer and attach the S5 JSON to issue #16. Copies appear in the tested folder and Files › On My iPhone/iPad › Clove Lab. Reports include file names and camera identifiers."
+                        "Use Export in the footer to send the S5 JSON privately to the supervisor for redaction and attachment to issue #29. Copies appear in the tested folder and Files › On My iPhone/iPad › Clove Lab. Reports include private paths, capture metadata and camera identifiers."
                     )
                     if let error = session.exportError { Text(error).foregroundStyle(.red) }
                 }
@@ -88,21 +88,23 @@ struct S5View: View {
                     "Gap \(boundary.gap, specifier: "%.3f") s · distance \(boundary.distance.map { String(format: "%.3f", $0) } ?? "unavailable")"
                 )
                 .font(.caption)
-                Toggle(
-                    "Start new group",
-                    isOn: Binding(
-                        get: {
-                            self.result?.boundaries[index].expectedSplit ?? boundary.proposedSplit
-                        },
-                        set: { self.result?.boundaries[index].expectedSplit = $0 }))
-                if boundary.expectedSplit == nil {
-                    Button("Confirm suggestion: \(boundary.proposedSplit ? "split" : "same group")")
-                    {
-                        self.result?.boundaries[index].expectedSplit = boundary.proposedSplit
+                Text("Suggestion: \(boundary.proposedSplit ? "New group here" : "Keep together")")
+                Text(
+                    "Saved label: \(boundary.expectedSplit.map { $0 ? "New group here" : "Keep together" } ?? "Not reviewed")"
+                )
+                .fontWeight(.semibold)
+                HStack {
+                    Button("Keep together") {
+                        self.result?.boundaries[index].expectedSplit = false
                     }
-                } else {
-                    Text("Reviewed").foregroundStyle(.secondary)
+                    Button("New group here") {
+                        self.result?.boundaries[index].expectedSplit = true
+                    }
+                }
+                .buttonStyle(.bordered)
+                if boundary.expectedSplit != nil {
                     Button("Clear label") { self.result?.boundaries[index].expectedSplit = nil }
+                        .buttonStyle(.borderless)
                 }
             }
         }
