@@ -31,8 +31,10 @@ public actor SimilarGrouping {
 
     /// The folder's photos, one per identity, as last supplied.
     private var inputs: [GroupingPhoto] = []
-    /// The inputs' revision, part of the cache key.
+    /// The inputs' revision, part of the cache key for what the fingerprint cannot see.
     private var revision = GroupingInputRevision(rawValue: "")
+    /// The grouper's own digest of the eligible inputs, part of the cache key.
+    private var inputFingerprint = GroupingInputFingerprint.digest(of: [])
     /// Whether similar groups are turned on (PRD P0-11, `AppSettings.similarGroupsEnabled`).
     private var isEnabled = true
     /// Incremented by every run, so a refinement pass that a later run superseded stops.
@@ -86,11 +88,13 @@ public actor SimilarGrouping {
 
     /// Replaces the folder's inputs and publishes step 2's groups (PRD Similar groups steps 1–2).
     ///
-    /// Call with the scanner's current photos and a revision token that changes whenever they
-    /// do. Opening a folder uses `reuseCache: true`, which publishes the cache's finished
-    /// result when the revision and thresholds still match. Run again (PRD Similar groups
-    /// rules, P0-11) passes `reuseCache: false` so the current inputs are recomputed; group
-    /// IDs stay put through the ancestry of the last finished result.
+    /// Call with the scanner's current photos and a revision token for anything the photos
+    /// themselves do not show, such as a feature or file revision; the grouper fingerprints
+    /// the eligible photos so a missed input change cannot restore a stale result. Opening a
+    /// folder uses `reuseCache: true`, which publishes the cache's finished result when the
+    /// revision, fingerprint and thresholds still match. Run again (PRD Similar groups rules,
+    /// P0-11) passes `reuseCache: false` so the current inputs are recomputed; group IDs stay
+    /// put through the ancestry of the last finished result.
     ///
     /// When `similarGroupsEnabled` is false the grouper publishes no groups, does no work and
     /// leaves the cache alone; turning similar groups back on starts from the cache or a fresh
@@ -105,6 +109,7 @@ public actor SimilarGrouping {
         isEnabled = similarGroupsEnabled
         self.revision = revision
         inputs = GroupingRuns.distinct(photos)
+        inputFingerprint = GroupingInputFingerprint.digest(of: inputs)
         folder = sharedFolder(of: inputs)
         decisions = [:]
         cacheIsAuthoritative = false
@@ -120,6 +125,7 @@ public actor SimilarGrouping {
             let groups = cache.load(
                 folderID: folder,
                 revision: revision,
+                fingerprint: inputFingerprint,
                 thresholds: thresholds,
                 photos: inputs)
         {
@@ -186,7 +192,11 @@ public actor SimilarGrouping {
         ancestryOrder = Self.order(of: groups)
         if let cache, let folder {
             cache.save(
-                groups, folderID: folder, revision: revision, thresholds: thresholds)
+                groups,
+                folderID: folder,
+                revision: revision,
+                fingerprint: inputFingerprint,
+                thresholds: thresholds)
         }
     }
 

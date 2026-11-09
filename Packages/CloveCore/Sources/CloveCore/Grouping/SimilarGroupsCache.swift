@@ -1,10 +1,12 @@
 import CryptoKit
 import Foundation
 
-/// The caller's token for the inputs a grouping ran on (PRD Similar groups rules).
+/// The caller's token for a grouping's inputs (PRD Similar groups rules).
 ///
-/// The cache is keyed by this value and the threshold set, so the caller changes the token
-/// whenever a photo's time, camera body, file name or membership changes. Nothing about the
+/// The cache is keyed by this value, the grouper's own input fingerprint and the threshold
+/// set, so the caller changes the token whenever something the fingerprint cannot see changes:
+/// a project or scan revision, or a feature or file revision. Photo membership, capture times,
+/// camera bodies and file names are already covered by the fingerprint. Nothing about the
 /// folder's marks enters the key, because grouping never reads or writes them (PRD P0-11).
 public struct GroupingInputRevision: RawRepresentable, Hashable, Sendable {
     /// The opaque revision token, for example a scan generation plus a photo count.
@@ -20,9 +22,10 @@ public struct GroupingInputRevision: RawRepresentable, Hashable, Sendable {
 ///
 /// PRD Similar groups, "Groups are cached only in Clove and never written to XMP", puts the
 /// cache in app-private storage beside the other Clove data, one file per folder identity. The
-/// file is keyed by the caller's ``GroupingInputRevision`` and the `GroupingThresholds`, so a
-/// changed input or a changed threshold invalidates it. Only finished results are stored, so a
-/// restored folder is already Analyzed.
+/// file is keyed by the caller's ``GroupingInputRevision``, the grouper's own input fingerprint
+/// and the `GroupingThresholds`, so a changed input, a changed threshold or a change the
+/// caller's revision missed invalidates it. Only finished results are stored, so a restored
+/// folder is already Analyzed.
 ///
 /// The location is injectable for tests; production passes ``applicationSupportDirectory()``.
 /// Cache writes and reads are best effort: a corrupt, foreign or stale file is ignored and the
@@ -51,21 +54,24 @@ public struct SimilarGroupsCache: Sendable {
     }
 
     /// The one file for a folder identity, named by a digest so no path enters a file name.
+    /// The name's version moves with ``StoredGroups/currentVersion``, so an older file is
+    /// simply never read.
     func fileURL(for folderID: FolderIdentity) -> URL {
         let digest = SHA256.hash(data: Data(folderID.rawValue.utf8))
         let name = digest.map { String(format: "%02x", $0) }.joined()
-        return directory.appendingPathComponent("groups-v1-\(name).json")
+        return directory.appendingPathComponent("groups-v2-\(name).json")
     }
 
     /// The cached finished groups, or nil when the cache is missing, stale or unusable.
     ///
-    /// A file counts as usable only when its version, folder identity, input revision and
-    /// threshold key all match and every stored member is one of the current photos, so a
-    /// cache written for another input can never leak into this result. A damaged file returns
-    /// nil and is rebuilt (PRD Similar groups rules).
+    /// A file counts as usable only when its version, folder identity, input revision, input
+    /// fingerprint and threshold key all match and every stored member is one of the current
+    /// photos, so a cache written for another input can never leak into this result. A damaged
+    /// file returns nil and is rebuilt (PRD Similar groups rules).
     func load(
         folderID: FolderIdentity,
         revision: GroupingInputRevision,
+        fingerprint: String,
         thresholds: GroupingThresholds,
         photos: [GroupingPhoto]
     ) -> [SimilarGroup]? {
@@ -74,6 +80,7 @@ public struct SimilarGroupsCache: Sendable {
             stored.version == StoredGroups.currentVersion,
             stored.folder == folderID.rawValue,
             stored.revision == revision.rawValue,
+            stored.fingerprint == fingerprint,
             stored.thresholds == thresholds.cacheKey
         else { return nil }
 
@@ -108,12 +115,14 @@ public struct SimilarGroupsCache: Sendable {
         _ groups: [SimilarGroup],
         folderID: FolderIdentity,
         revision: GroupingInputRevision,
+        fingerprint: String,
         thresholds: GroupingThresholds
     ) {
         let stored = StoredGroups(
             version: StoredGroups.currentVersion,
             folder: folderID.rawValue,
             revision: revision.rawValue,
+            fingerprint: fingerprint,
             thresholds: thresholds.cacheKey,
             groups: groups.map { group in
                 StoredGroups.Group(
@@ -137,15 +146,17 @@ public struct SimilarGroupsCache: Sendable {
 /// changed grouping rule needs; the folder is then grouped again rather than migrated.
 struct StoredGroups: Codable, Sendable {
     /// The only format this version reads and writes; bump it when a stored result would no
-    /// longer match what the current rule produces.
-    static let currentVersion = 1
+    /// longer match what the current rule produces. Version 2 adds the input fingerprint.
+    static let currentVersion = 2
 
     /// The format version, checked before anything else is trusted.
     var version: Int
     /// The folder identity the groups belong to, so a copied file is refused.
     var folder: String
-    /// The input revision the groups were computed from.
+    /// The caller's input revision the groups were computed from.
     var revision: String
+    /// The grouper's own fingerprint of the eligible inputs the groups were computed from.
+    var fingerprint: String
     /// The threshold key the groups were computed under.
     var thresholds: String
     /// The finished groups in grid order.
