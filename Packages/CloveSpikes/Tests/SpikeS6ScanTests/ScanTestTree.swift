@@ -46,6 +46,8 @@ enum ScanTestTree {
             "IMG_0004.CR3", "IMG_0004.jpeg",  // pair, lowercase JPEG extension
             "IMG_0005.NEF",  // standalone RAW
             "IMG_0006.CR3", "IMG_0006.XMP",  // sidecar next to a RAW, not a photo
+            "IMG_0007.ARW", "IMG_0007.HIF",  // Sony RAW+HEIF pair
+            "IMG_0008.ARW", "IMG_0008.JPG", "IMG_0008.hif",  // JPEG wins; HEIF is standalone
             "MVI_0007.MOV", "NOTES.txt", "._IMG_0001.CR3", ".DS_Store",
         ]
         for name in firstFiles {

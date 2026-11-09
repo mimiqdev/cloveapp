@@ -8,6 +8,10 @@ detail image strategy, cache design, and performance targets for G1. This is
 part 1 of [#13](https://github.com/mimiqdev/cloveapp/issues/13); device conclusions
 remain open for part 2.
 
+2026-11-09 — HIF support: `.HIF`/`.hif` camera HEIF files are now accepted by
+S2's recursive filter. Unit coverage checks mixed-case extensions. A device rerun
+with a Sony HIF is pending; this adds no camera-decoding or performance claim.
+
 ## What was tested
 
 - **macOS 27.0, Mac14,12 (Mac mini), Xcode 27.2 (27B52)**, Swift 6 debug

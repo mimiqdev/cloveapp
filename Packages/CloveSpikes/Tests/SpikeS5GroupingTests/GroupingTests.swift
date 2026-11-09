@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import SpikeSupport
 import Testing
 
@@ -111,6 +113,38 @@ private func photo(_ id: String, _ time: Double?, model: String? = "Camera", ser
     #expect(report.measurements.filter { $0.name == "boundary" }.count == 3)
     #expect(report.context["reviewedBoundaries"] == "2")
     #expect(report.measurements.contains { $0.tags["expectedSplit"] == "unreviewed" })
+}
+
+@Test func rawHEIFPairsUseOnlyRawAndStandaloneHIFUsesRasterPreview() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let subfolder = directory.appendingPathComponent("other")
+    try FileManager.default.createDirectory(at: subfolder, withIntermediateDirectories: true)
+    for name in ["pair.ARW", "pair.HIF", "triple.ARW", "triple.JPG", "triple.hif", "alone.HIF"] {
+        try Data([1]).write(to: directory.appendingPathComponent(name))
+    }
+    try Data([1]).write(to: subfolder.appendingPathComponent("pair.hif"))
+    let files = try GroupingSuite.files(in: directory)
+    #expect(
+        files.map(\.lastPathComponent).sorted() == [
+            "alone.HIF", "pair.ARW", "pair.hif", "triple.ARW",
+        ])
+    // The file has no embedded thumbnail: .HIF must take the raster creation path.
+    let url = directory.appendingPathComponent("alone.HIF")
+    let context = try #require(
+        CGContext(
+            data: nil, width: 32, height: 24, bitsPerComponent: 8, bytesPerRow: 128,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+    let image = try #require(context.makeImage())
+    let destination = try #require(
+        CGImageDestinationCreateWithURL(url as CFURL, "public.heic" as CFString, 1, nil))
+    CGImageDestinationAddImage(
+        destination, image, [kCGImageDestinationEmbedThumbnail: false] as CFDictionary)
+    #expect(CGImageDestinationFinalize(destination))
+    let preview = try GroupingFeatures.preview(url: url, maxPixel: 32)
+    #expect(preview.width == 32 && preview.height == 24)
 }
 
 @Test func fixtureMeasurementWhenRequested() async throws {

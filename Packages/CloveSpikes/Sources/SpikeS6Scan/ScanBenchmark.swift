@@ -343,7 +343,8 @@ public enum ScanBenchmark {
             "first-100 is the time until the walk accepted its 100th file, in traversal order, before sorting.",
             "The rejects comparison walks the rejects folder (post-filter) and then filters by path; skip-rejected is the same scan with the folder excluded.",
             "lazy-stat lists names, then asks each file for all six keys; its total adds that to the names scan. Compare with the all-key scan.",
-            "Streaming pairs inside each batch of \(options.batchSize) files, so a RAW+JPG pair split across two batches is not paired until the grid repairs it.",
+            "Streaming pairs inside each batch of \(options.batchSize) files, so a RAW+JPEG/HEIF pair split across two batches is not paired until the grid repairs it.",
+            "Proposal for G1: pair a same-name RAW+HEIF in the same folder. When both JPEG and HEIF exist, keep RAW+JPEG and leave HEIF as a standalone item. JPEG preference requires complete-folder pairing or later grid repair.",
             "File content is placeholder bytes unless the tree was built with realistic sizes; a listing reads names and metadata, not pixels.",
         ]
     }

@@ -16,7 +16,21 @@ public struct EmbeddedWriteResult: Codable, Sendable {
 
     public var payloadUnchanged: Bool {
         guard let before, let after else { return false }
-        return before.payloads == after.payloads && !before.payloads.isEmpty
+        return PayloadEvidence.contentMatches(before.payloads, after.payloads)
+    }
+
+    public var payloadRenumberedOnly: Bool {
+        guard payloadUnchanged, let before, let after else { return false }
+        return zip(before.payloads, after.payloads).contains {
+            $0.sourceItemID != nil && $1.sourceItemID != nil && $0.sourceItemID != $1.sourceItemID
+        }
+    }
+
+    public var seedDescription: String? {
+        guard control == "seeded-other-app" else { return nil }
+        return ["jpg", "jpeg"].contains((file as NSString).pathExtension.lowercased())
+            ? "JPEG seed uses packet splice, preserving bytes outside XMP. This result compares against the seeded file; use camera-original rows for preservation against the camera original."
+            : "Seed uses a native write that may already discard or normalize camera metadata. This seeded result does not show preservation against the camera original."
     }
 
     public var pixelsUnchanged: Bool {
@@ -42,12 +56,13 @@ public enum MetadataExperiment {
             at: folder, includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ).filter {
-            ["jpg", "jpeg", "heic", "heif", "dng"].contains($0.pathExtension.lowercased())
+            Set(["jpg", "jpeg", "dng"]).union(PhotoExtensions.heif).contains(
+                $0.pathExtension.lowercased())
                 && (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
         }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         guard !files.isEmpty else {
             throw MetadataProbeError.invalid(
-                "Choose a flat folder containing JPEG, HEIC and DNG fixture copies.")
+                "Choose a flat folder containing JPEG, HEIC/HEIF (.HIF) and DNG fixture copies.")
         }
         guard files.count <= 12 else {
             throw MetadataProbeError.invalid("Use a small fixture folder (at most 12 images).")
@@ -75,7 +90,8 @@ public enum MetadataExperiment {
         var measurements: [LabMeasurement] = []
         var notes = [
             "Writes use private copies; the picked files are never modified. Sibling temp + POSIX rename; no power-loss claim.",
-            "HEIF compares iloc-resolved image item bytes including primary/grid, tiles and auxiliaries, excluding Exif/XMP items. DNG compares all strips/tiles and JPEG previews.",
+            "HEIF follows pitm and ordered dimg references, comparing primary/grid, tile and auxiliary bytes by reference role and owner, plus reference topology. Item IDs are diagnostic only; renumbering is recorded separately from content changes. Exif/XMP items are excluded. Disconnected or ambiguous image graphs fail closed. DNG compares all strips/tiles and JPEG previews.",
+            "Seeded results compare against the seeded file, not the camera original. JPEG seed uses packet splice to retain original non-XMP bytes. Other seeds use native writes and may already have lost MakerNotes or normalized EXIF before the measured write; their success does not show preservation against the camera original.",
             "JPEG packet splice is a bounded comparison path: standard single APP1 XMP only; extended/duplicate packets are rejected. Native copy may normalize unrelated EXIF/GPS values; changed paths are retained.",
             "Decoded comparison: ImageIO default image at index 0 rendered at native dimensions to sRGB 8-bit RGBA; not a separate RAW renderer.",
             "Clove Reject uses the spike-only namespace urn:clove:spike:s4:1.0/. Production namespace remains open for G1/S3.",
@@ -96,6 +112,11 @@ public enum MetadataExperiment {
             record("write-succeeded", result.error == nil ? 1 : 0, "bool")
             record("marks-read-back", result.marksReadBack ? 1 : 0, "bool")
             record("compressed-payload-unchanged", result.payloadUnchanged ? 1 : 0, "bool")
+            record("heif-renumbered-only", result.payloadRenumberedOnly ? 1 : 0, "bool")
+            if result.before != nil && result.after != nil {
+                record("compressed-content-changed", result.payloadUnchanged ? 0 : 1, "bool")
+            }
+            if let seedDescription = result.seedDescription { notes.append(seedDescription) }
             record("decoded-pixels-unchanged", result.pixelsUnchanged ? 1 : 0, "bool")
             record("lossless-candidate", result.losslessCandidate ? 1 : 0, "bool")
             if let milliseconds = result.milliseconds { record("atomic-write", milliseconds, "ms") }

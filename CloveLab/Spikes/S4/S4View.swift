@@ -14,7 +14,7 @@ struct S4View: View {
         List {
             Section("Prepare") {
                 Text(
-                    "Use a flat folder with the camera JPEG, generated HEIC, Pentax DNG and iPhone ProRAW DNG. Allow about 1 minute."
+                    "Use a flat folder with JPEG, HEIC/HEIF (including camera .HIF), Pentax DNG and iPhone ProRAW DNG copies. Allow about 1 minute."
                 )
                 Text(
                     "The check works on temporary copies. Your selected images stay unchanged. The JSON report is added to the folder and Clove Lab Documents."
@@ -31,13 +31,22 @@ struct S4View: View {
                 Text(message)
                     .accessibilityIdentifier("clovelab.S4.status")
                 Text(
-                    "DNG writes are expected to be unavailable. The re-encoding comparison is expected to change pixels. JPEG's native copy can alter GPS precision; the packet comparison checks preservation separately."
+                    "DNG writes are expected to be unavailable. The re-encoding comparison is expected to change pixels. JPEG's native copy can drop MakerNotes and rewrite EXIF/GPS; the packet comparison checks preservation separately."
+                )
+                .font(.caption)
+            }
+            Section("Seeded control") {
+                Text(
+                    "A seeded result compares against the seeded file and does not show preservation against the camera original. JPEG now uses packet splice for seeding to keep original bytes outside XMP. HEIF uses a native seed, which may already discard or normalize camera metadata. Check camera-original rows too."
                 )
                 .font(.caption)
             }
             ForEach(Array(results.enumerated()), id: \.offset) { _, result in
                 Section(result.file) {
                     Text("\(result.control) · \(result.method.rawValue)").font(.caption)
+                    if let seedDescription = result.seedDescription {
+                        Text(seedDescription).font(.caption)
+                    }
                     if let error = result.error {
                         Text(error)
                     } else {
@@ -45,6 +54,10 @@ struct S4View: View {
                             "Marks read back", value: result.marksReadBack ? "Yes" : "No")
                         LabeledContent(
                             "Image bytes unchanged", value: result.payloadUnchanged ? "Yes" : "No")
+                        if result.payloadRenumberedOnly {
+                            Text("HEIF item IDs renumbered only; image content unchanged.")
+                                .font(.caption)
+                        }
                         LabeledContent(
                             "Pixels unchanged", value: result.pixelsUnchanged ? "Yes" : "No")
                         LabeledContent(

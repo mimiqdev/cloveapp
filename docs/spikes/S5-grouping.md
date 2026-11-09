@@ -9,6 +9,12 @@ trial time-gap/similarity thresholds; propose fallbacks for missing data.
 Part 1 of #16. Physical-device timing and real-burst calibration are **pending**.
 This is verification code for C9/C10/I3/I4, not production grouping or a G1 decision.
 
+2026-11-09 — HIF support: `.HIF`/`.hif` camera HEIF files are now accepted and
+use the raster-preview path. RAW+HEIF uses RAW only for grouping, just like
+RAW+JPEG; when RAW, JPEG and HEIF share a stem in one folder, both companions
+are excluded from analysis. Unit coverage checks these cases and a standalone
+HIF preview. A device rerun with a Sony HIF is pending; part 2 remains open.
+
 ## What was tested
 
 - Mac mini `Mac14,12`, macOS 27.0, Xcode 27.2 (27B52), Swift 6 mode.

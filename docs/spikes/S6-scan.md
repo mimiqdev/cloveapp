@@ -11,6 +11,14 @@ tree generator, three scanners, the pairing function, macOS and simulator
 measurements, and a draft recommendation. The card-reader numbers, and with them
 the finished recommendation for G1, belong to part 2.
 
+2026-11-09 — HIF support: `.HIF`/`.hif` camera HEIF files are now accepted.
+S6 pairs a same-name RAW+HEIF in the same folder, including Sony `.ARW`+`.HIF`.
+**Proposal for G1:** if JPEG and HEIF both share the RAW's stem, keep RAW+JPEG
+and leave HEIF as a separate standalone item. Pairing tests cover that rule,
+case-insensitive matching and folder boundaries across all three listers.
+A device rerun with a Sony HIF is pending; the historical measurements below
+and the unfinished part 2 are unchanged.
+
 ## What was tested
 
 - **Mac mini `Mac14,12` (M2 Pro), macOS 27.0 (26A428), Xcode 27.2 (27B52),
@@ -192,11 +200,13 @@ factor is unknown, so the absolute targets stay open until part 2.
    error handler that counts unreadable entries and continues.
 2. When a directory's name equals the configured rejects folder
    (`_Rejected` by default), call `skipDescendants()` and do not touch its files.
-3. Accept candidates by extension (RAW, JPEG, HEIC/HEIF); count unsupported files
+3. Accept candidates by extension (RAW, JPEG, HEIC/HEIF/HIF); count unsupported files
    for the visible state instead of asking the system for a UTI.
 4. Emit batches of 64–128 entries through `AsyncStream`. Pair a RAW with a
-   same-name JPEG in the same folder; carry a RAW over to the next batch when its
-   JPEG has not arrived yet, or pair once at the end (14 ms for 2,000 files).
+   same-name JPEG or HEIF in the same folder, preferring JPEG when both exist
+   and leaving HEIF standalone (proposal for G1). Carry a RAW over to the next
+   batch when its companion has not arrived yet, or pair once at the end
+   (the historical RAW+JPEG run took 14 ms for 2,000 files).
 5. Sort by capture time (C8) when the scan completes, or stream in path order and
    re-sort without moving the cell the user is looking at.
 6. Keep the POSIX walk for the verification tool, not for the product.

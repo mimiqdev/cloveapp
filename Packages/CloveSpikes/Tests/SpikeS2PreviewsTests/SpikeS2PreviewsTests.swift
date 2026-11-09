@@ -56,6 +56,20 @@ struct PreviewTests {
         #expect(files.contains { $0.pathExtension.lowercased() == "cr3" })
     }
 
+    @Test func cameraHIFExtensionsAreEnumerated() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["upper.HIF", "lower.hif", "mixed.HiF", "ignored.txt"] {
+            try Data([1]).write(to: directory.appendingPathComponent(name))
+        }
+        #expect(
+            try PreviewMeasurement.files(in: directory).map(\.lastPathComponent) == [
+                "lower.hif", "mixed.HiF", "upper.HIF",
+            ])
+    }
+
     @Test func fallbackOrientationAndCacheInvalidation() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "clove-s2-test-\(UUID())")
