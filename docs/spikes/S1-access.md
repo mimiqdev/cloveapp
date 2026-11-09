@@ -2,11 +2,36 @@
 
 ## Question
 
-Can folder access be remembered and restored reliably? Part 1 of #12 supplies
-reusable probes, local macOS/simulator observations, and the Clove Lab device
-checklist. G1 remains open; physical-media results belong to part 2.
+Can folder access be remembered and restored reliably? Part 1 of
+[#12](https://github.com/mimiqdev/cloveapp/issues/12), merged in
+[PR #21](https://github.com/mimiqdev/cloveapp/pull/21), supplied reusable probes,
+local macOS/simulator observations, and the Clove Lab device checklist. Part 2
+adds the returned local-storage device evidence and a recommendation for G1.
+The owner deferred the external-media checks to
+[#29](https://github.com/mimiqdev/cloveapp/issues/29); those questions remain open,
+and G1 can accept the dependent choices only provisionally.
 
 ## What was tested
+
+### Part 2: returned device evidence
+
+- iPhone 17 Pro Max (`iPhone19,4`), iOS 27.2, Clove Lab 0.1.0 build
+  `26110818`, local storage through the system folder picker. The owner's run 1
+  folder held one Sony A1 II ARW and one HIF. S1 enumerates directory entries;
+  it does not decode or pair photos. The run's historical `.HIF` skip in other
+  spikes predates PR #28 and is not a folder-access failure. Camera ARW+HIF
+  pairs remain the main target; iPhone HEIC is a deferred known gap in other
+  spikes, not an S1 blocker or a reason to change S1 code.
+- Source: `run-1-local/clove-lab-S1-20261109T021935Z.json`, read in place.
+  SHA-256: `9298cc45ff04c19e76f4bbf09694b4951ef45a1a1c23e536b75efa3305f3c972`.
+  The raw report stays outside git. Only measurements and sanitized observations
+  are quoted here; owner paths and identifiers are omitted.
+- There is **no S1 report in run 2** (`26110903`). Its ten Sony A1 II ARW+HIF
+  pairs do not add S1 evidence. No SD card, SSD, or iPad was tested in either
+  returned session. Force-quit/reboot persistence is not demonstrated by the
+  returned S1 report.
+
+### Part 1: local harness evidence
 
 - Mac mini `Mac14,12`, macOS 27.0 (26A428), Xcode 27.2 (27B52), Swift 6.
   Local temporary folders on APFS, with a sentinel text file. **macOS numbers
@@ -24,7 +49,7 @@ checklist. G1 remains open; physical-media results belong to part 2.
 - No photo fixtures were needed; the existing shared sets were present. Nothing
   was written into the fixture cache's `files/` directory.
 
-Reports (untracked under `.build/s1/`; full JSON is preserved in
+Part-1 reports (originally untracked under `.build/s1/`; full JSON is preserved in
 [issue #12's evidence comment](https://github.com/mimiqdev/cloveapp/issues/12#issuecomment-6724403114)).
 Measurements used source revision `1feb372`; the final code additionally guards
 external-disconnect classification with a volume-root check, covered by a
@@ -55,15 +80,51 @@ within 60 seconds. No exFAT volume was successfully mounted. A run that reached
 the ordinary mount-point directory after the failed attach was discarded;
 its data is not exFAT evidence. No full-volume measurement is claimed.
 
-**Pending:** SD lock switch, external SSD unplug/reinsert, exFAT resource values,
+**Deferred:** SD lock switch, external SSD unplug/reinsert, exFAT resource values,
 full-volume failures, true iOS permission revocation, picker grants after force
-quit/reboot, and replacement media with an identical volume label.
+quit/reboot, and replacement media with an identical volume label. See
+“Deferred device checks” below and #29. The local device baseline does not settle
+these cases.
 
 ## Data
 
+### Device findings
+
+All measured rows below come from **run 1**,
+`clove-lab-S1-20261109T021935Z.json` (hash above), on iPhone 17 Pro Max, iOS 27.2,
+local storage. Timings are individual samples, rounded to three decimals;
+there are no percentiles or external-media performance claims. Resource values
+are snapshots; the table uses the first baseline query rather than mixing
+successive samples.
+
+| Check | Status / run | Finding and limit |
+| --- | --- | --- |
+| Picker scope and default bookmark storage | **Measured — run 1** | Scope=true; default bookmark created (1,844 bytes) and saved to Lab Recents. Saving a record does not prove it survives relaunch with a usable grant. |
+| Minimal bookmark comparison | **Measured — run 1** | 1,868 bytes; immediate resolution succeeded with stale=false. This is the report's only bookmark-resolution event; it does not show the saved default bookmark being reopened. |
+| Coordinated directory reads | **Measured — run 1** | 3 entries in each of two reads, 2.252 ms and 1.410 ms. Entry count is not a supported-photo count. |
+| Small write, read-back, and cleanup | **Measured — run 1** | 31 bytes confirmed, own probe file removed; combined duration 7.678 ms. This confirms this probe only, not future XMP writes. |
+| Volume identity hints | **Measured — run 1** | Volume name and UUID present; localized format description unavailable (nil). Do not infer APFS or exFAT from a nil description. |
+| Permission hints | **Measured — run 1** | `volumeIsReadOnly=false`, `isWritable=true`; consistent with this successful write, but neither guarantees later writes. |
+| Capacity hints | **Measured — run 1** | Available 168,345,600,000 bytes; important-usage 183,629,520,727; opportunistic 158,836,806,560; total 510,888,710,144. No space reservation or full-volume result. |
+| Bounded fill and cleanup | **Measured — run 1** | Wrote and synchronized 268,435,456 bytes (256 MiB), then removed the fill file; cleanup reported other files retained. No insufficient-space error. Filling internal storage is not a useful full-card test; do not repeat it. Use a disposable card only. |
+| Foreground watch controls | **Measured — run 1** | Started 500 ms polling plus file presenter; two operator markers, then stopped. No physical unplug, failure, or latency measurement. Markers on local storage do not simulate a disconnect. |
+| Saved Recent after force quit/reboot; stale refresh on device | **Deferred — #29 / follow-up checklist** | No reopen, relaunch, reboot, or stale=true event in the returned report. Part 1 local tests remain the only stale-refresh evidence. |
+| SD unlocked/locked, exFAT hints and errors | **Deferred — #29** | No card/reader observations; lock enforcement and pre-write detection unknown. |
+| SSD, unplug/reinsert, physical detection latency | **Deferred — #29** | No external-drive observations; polling/presenter comparison and volume-root discrimination unvalidated. |
+| Card folder identity and same-label replacement | **Deferred — #29** | No rename/move/delete/recreate or replacement-card observations. |
+| Full disposable card and recovery | **Deferred — #29** | No full-card write/export failure or recovery observed. The internal fill did not reach full. |
+| True picker/provider permission revocation | **Deferred — follow-up checklist** | No permission failure in run 1; no proven iOS revocation procedure. |
+| iPad Pro matrix | **Deferred — #29** | No iPad report. |
+
+The device report records no NSError failure chain. The failure table below
+therefore retains part 1's local observations and synthetic candidates; none of
+its hardware error codes is promoted to a measured device result.
+
 ### Bookmark and identity behavior
 
-Local CLI observations; both environments are outside the Lab app's picker grant.
+Part 1 local CLI observations; both environments are outside the Lab app's picker
+grant. “Pending” in these historical tables means deferred device verification,
+not an outstanding part-2 delivery.
 
 | Operation | macOS | iOS simulator |
 | --- | --- | --- |
@@ -183,11 +244,15 @@ C4/C6/U7's per-item state; S1 alone cannot choose their counts or claim Saved.
   `.minimalBookmark` on each pick. The size results do not justify a space-saving
   claim for minimal bookmarks. `.withSecurityScope` and the corresponding resolve
   option are unavailable on iOS in the installed SDK; do not use macOS-only flags
-  as an iOS fix. Implicit-scope/reboot behavior must be checked on device.
+  as an iOS fix. The device run confirms immediate minimal resolution and saving
+  default data, but usable grants after relaunch/reboot still require device checks.
 - Resolve with `.withoutUI`, `.withoutMounting`, and
   `.withoutImplicitStartAccessing`. Explicitly acquire/release access to the
   returned URL. Capture `bookmarkDataIsStale`; re-create stale data while scope is
   held, only after a real read succeeds. Preserve the Recent's ID and photo count.
+  For production, validate identity before refreshing or scanning; Lab currently
+  refreshes after a read without enforcing a folder-identity comparison. The
+  replacement-directory experiment shows why a read alone is insufficient.
 - Store a versioned Codable envelope atomically at app-private Application
   Support `CloveLab/S1/recents-v1.json`: UUID, bookmark bytes, path summary, volume
   name and UUID when available, operator-selected media type, optional photo
@@ -219,33 +284,79 @@ background-presenter-removal requirements. Reference API pages:
 
 ## Conclusion
 
-Local macOS and simulator data support persisting bookmarks, resolving renamed
-folders, and refreshing stale data after a successful read. They also demonstrate
-that a replacement directory can resolve from an old bookmark. Picker-grant
-persistence, actual exFAT behavior, and physical disconnect timing are inconclusive
-until part 2. Read-only and capacity keys are advisory; confirmed write/read-back
-and exact per-operation errors remain necessary for P0-08.
+The iPhone local baseline confirms bookmark creation/storage, immediate minimal
+bookmark resolution, directory reads, and a small write with read-back and cleanup.
+Part 1 supports stale refresh after a successful read but also shows that an old
+bookmark can resolve a replacement directory. Neither dataset establishes usable
+grants after force quit/reboot, external folder identity, exFAT behavior, hardware
+failure codes, or physical disconnect latency. These remain deferred in #29;
+read-only/capacity hints are advisory and each write needs its own confirmation.
 
 ## Recommendation and options for G1
 
-**Recommendation, pending device evidence:** use the versioned bookmark record
-approach for C11, explicit scope lifetimes and coordinated I/O for C2/C4, and
-foreground 500 ms reachability polling as the baseline for disconnect observation.
-Add presenter callbacks for changes/early hints and validate the volume/identity
-before calling a missing path a disconnected drive. Refresh hints on reopen;
-stop trusting a previously successful write as soon as a later write fails.
-A provisional engineering target is an unavailable-location indication within
-one second of a disconnect while active, subject to measured provider call
-latency on hardware; this is not a PRD promise or a G1 decision.
+**Recommend the following safety rules for G1 with the available evidence.**
+They let C11/C2/C4 and U2/U7 proceed with explicit recovery while external-media
+behavior remains provisional. This is a recommendation, not a decision record.
+
+- **Bookmarks and Recents (C11/C2):** persist a versioned default bookmark record
+  in app-private Application Support, with the fields listed above. Resolve
+  without UI/mounting, explicitly balance scope, and confirm access with a real
+  coordinated read before scanning. Paths and volume labels are display hints,
+  never identity or write authorization. Immediate minimal resolution worked on
+  device; default bookmarks remain the candidate because minimal saved no space
+  and has no demonstrated persistence advantage.
+- **Stale rule (C11):** stale means bookmark data needs refreshing; it does not
+  mean permission was lost. After resolution, require a successful read and
+  identity consistent with the saved folder, or an explicit picker re-selection,
+  before re-creating the bookmark while scope is held. Preserve the Recent ID
+  and count. stale=false is also not proof of identity. Retain the old record on
+  failure and do not silently replace it with a same-path folder.
+- **Recovery (U2/U7):** preserve unavailable Recents and give an explicit action
+  to choose the folder again. Re-selection establishes the intended folder and
+  a new grant; then read/validate and update the record. Retry writes only after
+  reopening the intended location. Do not transfer pending writes to a different
+  card by matching its name or path. When identity cannot be established, require
+  re-selection before scanning or writing rather than guessing.
+- **Write confirmation (C4/U7):** keep pending/writing/failed state per change;
+  show Saved only after that change's write and read-back succeed. A bookmark,
+  scope=true, capacity estimate, or successful earlier probe cannot mark a later
+  write Saved. Retain requested marks on failure and offer Retry. Preserve the
+  exact error chain and phase; partial batches and moves report per-item results.
+- **Read-only handling (C4/C6/U7):** treat true read-only/false writable hints as
+  reasons to explain view-only access and offer a writable location. Nil hints
+  mean unknown; positive hints do not preauthorize writes. Keep browsing if reads
+  work; disable marks writes and Move rejects when write prohibition is known.
+  A real `EROFS`/Cocoa 642 failure supports the read-only row; an `ENOSPC`/Cocoa
+  640 failure supports the distinct insufficient-space row. Generic write or
+  access-denied errors do not establish either condition. Refresh hints and
+  actual access on recovery; never show a failed/unconfirmed change as Saved.
+- **Disconnect observation (provisional):** foreground 500 ms reachability polling
+  plus presenter callbacks is the baseline candidate. Confirm prior external
+  access and an unavailable volume root before calling a missing path a drive
+  disconnect. Otherwise use unavailable-location/reopen recovery with the exact
+  diagnostic retained. Stop/background cleanup must balance scope and remove
+  presenters. Provider calls can block: no measured device latency or guaranteed
+  detection deadline exists. The part-1 one-second idea remains an unvalidated
+  engineering target; fix targets only after #29's physical trials.
+
+The choices that depend on deferred device data are **default versus minimal
+bookmark persistence after relaunch/reboot/reinsert; volume and folder identity
+keys and fallback after media changes; trustworthy exFAT/read-only/capacity hints
+and exact error-to-copy mappings; polling interval versus presenter usefulness
+and any disconnect deadline; full-card write/export recovery; provider-revocation
+classification; and iPad parity**. The table below names the required runs and
+how each could change these choices. G1 may accept these choices provisionally
+while retaining the safety rules above.
 
 Options for the product owner:
 
-1. Default bookmark data + identity checks + polling/presenters. Best supported by
-   local observations, but wakeup cost, provider blocking, and reboot persistence
-   need device data before acceptance.
+1. Default bookmark data + identity checks + polling/presenters. Recommended as
+   the provisional baseline. The local device probe adds read/write evidence,
+   but wakeup cost, provider blocking, and reboot persistence remain unmeasured.
+   Production must add identity enforcement before reusing the Lab refresh flow.
 2. Minimal bookmark data with the same recovery flow. Simple iOS-compatible API,
    but no demonstrated size advantage here; requires the same full device matrix
-   before preferring it over default data.
+   before preferring it over default data; the device comparison was 24 bytes larger.
 3. Presenters only. Avoids periodic polling, but our uncoordinated local deletion
    produced no callback. Reject as the sole detector unless device results supply
    a reliable guarantee; polling can be adapted after measuring energy/latency.
@@ -253,7 +364,9 @@ Options for the product owner:
    one-tap Recents requirement. This would require a product-owner PRD decision;
    it is not adopted by this spike.
 
-No decision record or production code is changed. G1 stays open.
+No decision record or production code is changed. G1 stays open for the product
+owner; finishing #12 with the available data does not close #29 or establish
+external-media readiness.
 
 ## Open questions
 
@@ -272,12 +385,34 @@ No decision record or production code is changed. G1 stays open.
 - Should C11 refuse all folder/volume identity ambiguities, and what fallback is
   acceptable when the provider has no UUID/file ID? Product owner decides at G1.
 
-### Device checklist (part 2)
+## Deferred device checks
+
+The owner deferred the remaining runs on 2026-11-09; they are not urgent and do
+not block closing part 2. The external-media and iPad matrix is tracked in
+[#29](https://github.com/mimiqdev/cloveapp/issues/29). Local relaunch/staleness and
+true revocation also remain unmeasured, retained here in the follow-up checklist.
+No run below is claimed as completed. Complete dependent trials before fixing
+M3/Q3 performance targets, or earlier if G1 needs a firm answer.
+
+| Deferred check | What it would answer | Could it change the G1 recommendation? |
+| --- | --- | --- |
+| Local force quit/reboot and reopen; device stale refresh | Does the persisted default bookmark retain usable access across sessions, and can stale data be refreshed after identity validation/read? | **Yes, provisionally:** bookmark option or refresh flow may change. Keep explicit re-selection and the distinction between stale and inaccessible. |
+| Unlocked exFAT SD card through the intended reader; force quit/reboot/reinsert | Do reads/writes and reopened grants work, and which UUID/format/capacity/writable keys are supplied? | **Yes, provisionally:** bookmark choice, resource-hint use, and identity fallback may change. Local storage cannot answer this. |
+| Locked SD card, then unlock/reopen | Does the reader honor the switch; can read-only be detected before writing; what exact error chain appears and when? | **Yes, provisionally:** hint-based preflight and error mapping may change. Successful writes mean the reader did not enforce the lock. View-only handling and separate full-space copy remain required. |
+| External SSD baseline, force quit/reboot, absent Recent and reconnect | Are grants usable across sessions and removal, and does re-selection restore read/write access? | **Yes, provisionally:** bookmark/reconnect handling and unavailable versus permission mapping may change. Never resume writes based only on a label. |
+| Three SD and three SSD unplug-watch trials | What are poll/presenter behavior, exact phase/domain/code/underlying errors, marker-to-failure and last-success-to-failure intervals, and volume-root behavior? | **Yes, provisionally:** detector, polling interval, disconnect classification, and any latency target may change. No physical latency is measured yet. |
+| Card folder rename/move/delete/recreate | Does resolution follow identity or path, when is data stale, and can a replacement be distinguished before scan/write? | **Yes, provisionally:** file/volume identity keys and refresh checks may change. Successful resolution/read alone remains insufficient. |
+| Same-label replacement card with a different sentinel | Can the original Recent resolve the replacement; are UUID/file IDs present and distinct? | **Yes, provisionally:** automatic reopen and identity fallback may need stricter re-selection. Card labels never authorize writes. |
+| Full **disposable card only**, write/export and cleanup/retry | Which capacity keys are reliable, where does ENOSPC surface, does the Documents report survive target export failure, and does freeing space restore writes? | **Yes, provisionally:** capacity preflight, exact error mapping, and cleanup/retry may change. Never fill internal storage or a normal photo card. Separate insufficient-space handling and per-write confirmation remain required. |
+| True iOS picker/provider permission revocation, if safely reproducible | What actually revokes a grant, which phase fails, and does choosing the folder again recover? | **Yes, provisionally:** provider-specific permission mapping may change. Delete/recreate alone proves identity loss, not revocation. Re-selection remains the safe recovery. |
+| iPad Pro repeat of the matrix | Are bookmark, provider, lock, and disconnect behaviors consistent on iPad? | **Yes, provisionally:** platform-specific recovery/detector choices may be needed. The iPhone baseline establishes no iPad result. |
+
+### Device checklist (deferred follow-up)
 
 Repeat on the product owner's iPhone 17 Pro Max and iPad Pro, recording the actual
 model and iOS version. Use the supervisor's merged Clove Lab TestFlight build.
 Needed: an SD card with a lock switch and a reader that honors it, an external
-SSD, and a **disposable small card/partition** (ideally 64–256 MiB) for the full
+SSD, and a **disposable small card only** for the full
 case. Use dedicated empty `S1-test` folders. Do not fill a normal photo card or
 the device's internal storage. A second same-label card is needed only for that
 replacement test; if unavailable, mark the step pending.
@@ -348,7 +483,7 @@ replacement test; if unavailable, mark the step pending.
     disabled, describing exactly what you changed. Do not reset privacy settings
     or change an account for this test. True grant revocation stays pending if it
     cannot be induced on the available device.
-13. Connect the **disposable small test card/partition**. Choose its empty test
+13. Connect the **disposable small test card**. Choose its empty test
     folder with the correct media type. Run both probes and export a baseline.
     Tap **Add up to 256 MiB fill file… → Add fill file**. Each tap writes real
     bytes only into `clove-lab-s1/fill-s1-<UUID>.bin`; it stops at 256 MiB or an
@@ -363,8 +498,10 @@ replacement test; if unavailable, mark the step pending.
     events; other files stay. Run both probes again and export the recovered
     capacity/write result. If a cleanup fails, remove only the named S1 fill files
     using Files or a computer, then rerun/export recovery.
-16. Export the final S1 report, note its on-screen filename, and **attach the JSON
-    file to issue #12**. Attach the earlier per-case JSON files too, with a short
+16. Export the final S1 report and note its on-screen filename. **Attach the JSON
+    file to issue #29** for this deferred follow-up; #12 holds the part-1 evidence.
+    Review paths and identifiers before sharing on the public issue. Attach the
+    earlier per-case JSON files too, with a short
     list of media labels/filesystems, device/iOS versions, reader model, any steps
     skipped, and any behavior that differed from the expectations. Use the Lab
     home footer's share/export control or the Documents copies in Files.
