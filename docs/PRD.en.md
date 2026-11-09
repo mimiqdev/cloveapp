@@ -10,12 +10,12 @@ Sources: [2026-11-08 siftapp product positioning: pure culling, benchmarked agai
 
 ### Revision history
 
-2026-11-08 scope revision:
+2026-11-08 scope revision, aligned with the [approved G1 decision](decisions/G1-technical-approach.md) on 2026-11-09:
 
 - Removed Pick. The only marks are ratings, color labels, and Reject.
 - Reject is internal to Clove. The user runs Move rejects to move rejected photos into a `_Rejected` folder.
-- XMP interoperability is narrowed to ratings and color labels. RAW files get sidecars. Standalone JPEG, HEIC, and DNG files can optionally receive embedded metadata.
-- RAW+JPG pairs are one item and share one XMP sidecar.
+- XMP interoperability covers ratings and color labels only. RAW files, including standalone DNG, get sidecars. Standalone JPEG/HIF get no sidecar: embedded marks are read, and new marks stay in Clove. In-file JPEG writing is a later feature; HIF/HEIC in-file writing stays out.
+- RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets are one item with RAW as primary and one shared XMP sidecar.
 - Color labels default to Lightroom's five colors. Extended colors are optional. This closes the open orange-label question.
 - Added: recursive subfolder scanning, undo, an Unmarked filter, sorting, swipe-distance rating, enabled rating levels, double-tap zoom, auto-advance, and in-group culling.
 - Launch smart features are limited to similar groups, built from capture time plus visual similarity. AI best-shot suggestions and low-quality or blur suggestions move to 1.1.
@@ -24,13 +24,13 @@ Sources: [2026-11-08 siftapp product positioning: pure culling, benchmarked agai
 - No migration or user transition from the old Flutter siftapp.
 - No system photo library entry, neither primary nor secondary.
 - The Figma designs are not adopted. New concept designs will be produced.
-- Interoperability testing with Lightroom and other desktop apps is deferred. Items under Pending verification are working assumptions for now.
+- Desktop-app checks remain open and must run before C3 is called done. Removable media is not on the MVP critical path. G2 uses any folder Files can open on the iPhone 17 Pro Max: local storage, or the CFexpress Type A USB reader when available. External-media checks are non-blocking. See Pending verification.
 
 ---
 
 ## Product in one sentence
 
-Clove is an in-place photo-culling app for photographers on iPhone, iPad, and iPhone Duo. Browse photos in folders on SD cards, external drives, or Files, then rate, label, or reject them. Ratings and color labels go into XMP sidecars. After you confirm, rejected photos move into a `_Rejected` folder and are never deleted. Original image contents never change. Continue in Lightroom, Capture One, or Photo Mechanic at home, where you see only the photos you kept, with your ratings and labels.
+Clove is an in-place photo-culling app for photographers on iPhone, iPad, and iPhone Duo. Browse photos in folders on SD cards, external drives, or Files, then rate, label, or reject them. Ratings and color labels for RAW photo sets go into XMP sidecars; new standalone JPEG/HIF marks stay in Clove. After you confirm, rejected photos move into a `_Rejected` folder and are never deleted. Original image contents never change. Continue in Lightroom, Capture One, or Photo Mechanic at home, where you see only the photos you kept, with the RAW sets' XMP ratings and labels.
 
 Clove is not a photo-library manager, cloud backup service, social app, or color editor. Its reference product is the third-party [AI Photo Culling — PhotoPicker](https://apps.apple.com/us/app/ai-photo-culling-photopicker/id661470243), not the system photo picker.
 
@@ -38,7 +38,7 @@ Priority: a good manual-culling experience and correct XMP writes come before AI
 
 ## Users and jobs
 
-Target users are photographers who want to finish a first pass while away or on the journey home, shooting mostly RAW or RAW+JPG. Their photos are on SD cards, external SSDs, or folders accessible through Files. They need to browse, inspect focus, and leave marks that desktop software can read.
+Target users are photographers who want to finish a first pass while away or on the journey home, shooting mostly RAW, RAW+JPEG, or RAW+HIF, including RAW+JPEG+HIF sets. Their photos are on SD cards, external SSDs, or folders accessible through Files. They need to browse, inspect focus, and leave marks that desktop software can read.
 
 Main jobs:
 
@@ -51,22 +51,22 @@ Main jobs:
 
 ## Main flow
 
-Open a folder or reopen it from Recents → browse, filter, and sort the grid → inspect focus and navigate photos in detail → rate, label, or reject and write XMP → cull bursts by similar group → run Move rejects → leave and reopen with marks intact and original image contents unchanged.
+Open a folder or reopen it from Recents → browse, filter, and sort the grid → inspect focus and navigate photos in detail → rate or label (XMP for RAW sets, Clove storage for standalone JPEG/HIF) or reject (Clove storage) → cull bursts by similar group → run Move rejects → leave and reopen with marks intact and original image contents unchanged.
 
 ## Required for launch (P0)
 
 | ID | Requirement |
 | --- | --- |
-| P0-01 | Open and scan: use the system folder picker to open folders on SD readers, external drives, or Files. Scan all subfolders recursively, skipping the rejects folder. Scan JPEG, HEIC, and common RAW files the system can preview. Combine RAW and JPG files with the same name into one item. Do not copy photos into an app-owned library. |
+| P0-01 | Open and scan: use the system folder picker to open any folder Files can access, for example local storage, SD readers, or external drives. Removable media is not on the MVP critical path. Scan all subfolders recursively, skipping the rejects folder. Scan common RAW files and JPEG. Combine same-name RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF in the same folder into one item, with RAW as primary. HIF-only and iPhone HEIC appear when the system can preview them, with no extra format work; fuller support is deferred. JPEG+HIF without RAW is unsupported and follows generic rules. Do not copy photos into an app-owned library. |
 | P0-02 | Recents: show a path summary, media type, photo count, and last-opened time. Reopen with one tap. If a location is unavailable, explicitly ask the user to select it again rather than failing silently. |
-| P0-03 | Grid: prefer embedded previews in files for thumbnails. Smooth scrolling takes priority over immediately decoding full RAW images. Sort by capture time by default, or by filename. Filters: All, Unmarked, Rejected, and N stars or higher. |
+| P0-03 | Grid: prefer embedded previews in files for thumbnails. Smooth scrolling takes priority over immediately decoding full RAW images. Sort by capture time with subseconds by default, falling back to file creation time, then modification time; never show temporary filename order first. Photos using file times are not grouped. Filename order remains an option. Filters: All, Unmarked, Rejected, and N stars or higher. |
 | P0-04 | Detail: full-width preview, pinch zoom and double-tap to 100% for focus inspection, previous and next navigation, a filmstrip, and always-visible current marks. |
-| P0-05 | Marks: ratings from 0 to 5, color labels, and Reject. Reject is not deletion. Undo is available. |
+| P0-05 | Marks: ratings from 0 to 5, color labels, and Reject. Reject is stored only in Clove, keyed by folder identity and file until the reject move, and never written to XMP. Unmoved rejects do not survive reinstall or carry to another device. Reject is not deletion. Undo is available. |
 | P0-06 | Gestures and keyboard: swipe up to rate by distance, swipe down to reject, choose which rating levels are enabled, external-keyboard shortcuts, and auto-advance after marking. |
-| P0-07 | XMP reads, writes, and interoperability: read existing XMP when opening a folder. Write only sidecars for RAW files, with one sidecar shared by a RAW+JPG pair. Preserve unknown information written by other apps as far as possible. Lightroom, Capture One, and Photo Mechanic must read Clove's ratings and color labels. Reject is stored in a Clove-specific field and is not an interoperability promise. Standalone JPEG, HEIC, and DNG files can optionally receive embedded metadata, off by default. |
-| P0-08 | Save status is always visible and matches disk state. Show Saved only after a confirmed successful write. Allow retries after failure. Never report a failed write as successful. |
+| P0-07 | XMP reads, writes, and interoperability cover ratings and color labels only. Read existing XMP when opening a folder. RAW files, including standalone DNG, use one sidecar per photo set; JPEG/HIF companions are never changed. Preserve unknown information written by other apps as far as possible. Lightroom, Capture One, and Photo Mechanic must read Clove's XMP ratings and color labels. Standalone JPEG/HIF get no sidecar: read embedded marks and keep new marks in Clove, visibly Saved in Clove only. In-file JPEG writing is a later feature; HIF/HEIC in-file writing stays out. |
+| P0-08 | Save status is always visible and reflects the storage used. For XMP ratings and labels, show Saved only after the destination is read back and matches the requested change; for Move rejects, only after the move is confirmed. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Allow retries after failure. Never report a failed or unconfirmed change as successful. |
 | P0-09 | Long-press the grid to enter multi-select, then write ratings, labels, or Reject in batches. |
-| P0-10 | Move rejects: after user confirmation, move rejected photos with their paired files and XMP into `_Rejected` under the opened folder, preserving the subfolder structure. Never delete or overwrite any file. The folder name can be changed, or the feature turned off, in Settings. |
+| P0-10 | Move rejects: after user confirmation, move rejected photo sets as one unit, including RAW, JPEG and/or HIF companions, and the matching XMP, into `_Rejected` under the opened folder, preserving the subfolder structure. Never delete or overwrite any file. The folder name can be changed, or the feature turned off, in Settings. |
 | P0-11 | Similar groups: group photos automatically by capture time and visual similarity when a folder opens, and always offer Run again. Grouping itself never writes marks. It can be turned off. |
 | P0-12 | In-group culling: synchronized zoom for comparison, progressive elimination, Keep this, reject the rest, and Keep rated, reject the rest. Neither action ever rejects a photo that already has a rating or color label. |
 | P0-13 | Deliver the single-photo culling flow on both iPhone and iPad. Two-photo comparison on iPad is not in launch scope. |
@@ -107,14 +107,15 @@ The behavior below follows the product and UI conclusions and this revision. The
 
 - Scan every subfolder of the opened folder recursively. Photos in SD-card folders such as `DCIM/100XXXXX` and `101XXXXX` appear together.
 - Skip the rejects folder, `_Rejected` by default.
-- Combine a RAW and a JPG in the same folder whose names match without the extension into one item. It takes one grid cell, with RAW as the primary file, and marks apply to both.
+- Combine same-stem files case-insensitively within one folder: RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF each take one grid cell, with RAW as primary. Companions are reference files and are never changed; ratings and labels use the RAW's shared sidecar.
+- Support RAW alone and JPEG alone. Without RAW, JPEG is primary, then HIF. HIF-only and iPhone HEIC are shown when the system can preview them; fuller support is deferred. JPEG+HIF without RAW is unsupported, with generic handling accepted.
 - Unreadable or unsupported files have a visible state. A blank preview must not be presented as loaded.
 
 ### Grid
 
 - iPhone uses three columns. iPad uses five columns with a left sidebar for navigation and filters.
-- Cells overlay a Reject flag, ratings, and color dots. RAW+JPG pairs have a badge.
-- Sort by capture time by default, with subsecond precision, or by filename.
+- Cells overlay a Reject flag, ratings, and color dots. RAW sets with JPEG and/or HIF companions have a badge.
+- Sort by capture time by default, with subsecond precision, falling back to file creation time, then modification time. Never show temporary filename order first. Photos using fallback times are not grouped. Filename order remains an option.
 - Top filters are All, Unmarked, Rejected, and N stars or higher.
 - Similar-group display:
   - Expanded, the default: show every photo, with each group outlined in blue and labeled with its count.
@@ -140,7 +141,7 @@ Marking rules:
 | Color label | Red, yellow, green, blue, purple, and Clear by default. Settings can enable extended colors, orange and pink, matching Capture One. Use fixed English names in XMP, regardless of system language. |
 | Reject | A separate toggle, independent of the rating. Rejecting keeps the existing rating. Reject does not delete the original. |
 | Undo | Uses the system undo mechanism: a toolbar Undo button, ⌘Z on an external keyboard, and the iOS three-finger undo gestures. Undoing after auto-advance returns to the photo whose mark was undone. |
-| Save status | Writing…, Saved, or Write failed. Offer Retry after failure. Show Saved only after confirmed success. |
+| Save status | Writing…, Saved, or Write failed for XMP writes; Saved only after read-back confirmation. Confirm reject moves before showing success. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Offer Retry after failure. |
 
 ### Batch writes with multi-select
 
@@ -203,9 +204,9 @@ The only launch smart feature is similar groups, which put bursts and repeated c
 
 Grouping:
 
-1. Separate photos by camera body, using model and serial number, then sort by capture time with subsecond precision. Photos from two bodies shooting at the same time are not mixed into one group.
-2. Split into runs by time gap: adjacent photos less than a threshold apart join the same run. The initial threshold is about 2 seconds, to be calibrated with real samples, and is not a launch promise. This step reads only EXIF, so it can appear shortly after the folder opens.
-3. Split each run by visual similarity: compute on-device image features from embedded previews, and break the run where adjacent photos differ substantially, such as when the subject changes. This runs in the background and refines the groups when done.
+1. Separate photos by camera model, plus body serial when present, then sort by capture time with subsecond precision. When serial is missing, fall back to model. Two bodies of the same model shooting the same scene at the same moment are unsupported; no extra work, UI, or setting is added for that case.
+2. Split into runs by time gap: adjacent photos less than 2 seconds apart join the same run. This starting value is subject to real-sample checks, not a launch accuracy promise. This step reads only capture metadata, so it can appear shortly after the folder opens.
+3. Split each run by visual similarity: compute on-device Vision features from 400 px embedded previews (feature revision 2), and split where adjacent distance exceeds 0.5. If Vision is unavailable, use dHash with a 12-bit cut-off; split when no usable feature exists. This runs in the background and refines the groups when done.
 
 Rules:
 
@@ -252,15 +253,16 @@ Group completion:
 Reject exists only for culling. After moving rejects, desktop software sees only the photos that were kept and does not need to know what was rejected.
 
 - Trigger: the user taps Move rejects. It never runs automatically and can run at any time within a folder.
-- Confirmation: state how many photos will move, that paired JPGs and XMP move with them, and that originals are not deleted.
+- Reject state is stored in Clove, keyed by folder identity and file until the move. The move is the durable result; unmoved rejects do not carry over to a reinstall or another device.
+- Confirmation: state how many photos will move, that JPEG and/or HIF companions and XMP move with them, and that originals are not deleted.
 - Destination: `_Rejected/` under the opened folder. The name can be changed in Settings. Preserve the subfolder structure, so `DCIM/100XXXXX/IMG_0001.CR3` moves to `_Rejected/DCIM/100XXXXX/IMG_0001.CR3`.
-- Move together: the RAW, its paired JPG, and the matching XMP.
+- Move the photo set as one unit: the primary file, any JPEG and/or HIF companions, and the matching XMP.
 - Move only within the same volume. Never copy and then delete.
 - If a file with the same name exists at the destination, add a suffix. Never overwrite.
 - Count successes and failures per photo. On partial failure, moved photos stay moved, failed photos stay in place, and the user can retry only the failures.
 - Read-only locations cannot be organized. Reuse the view-only message.
 - Moved photos disappear from the grid, and later scans skip `_Rejected`.
-- Restore: the user moves files back. Their XMP still records Reject, so Clove shows them as rejected again. An in-app Restore action is not in launch scope.
+- Restore: the user moves files back. XMP contains ratings and labels only, so it cannot restore Reject. An in-app Restore action is not in launch scope.
 - Settings can turn Move rejects off. Reject still works for filtering, without the move.
 
 ### iPhone, iPad, and iPhone Duo
@@ -279,15 +281,15 @@ Duo is one of Clove's selling points. Launch gets these behaviors right first. F
 
 ## How marks reach disk
 
-XMP on disk is the source of truth for persisted marks. Saved means the write has actually completed on disk.
+XMP on disk is the source of truth for RAW photo sets' persisted ratings and labels. Reject and new standalone JPEG/HIF marks live in Clove's app storage. Saved refers to confirmed XMP writes and reject moves; standalone marks use Saved in Clove only.
 
-1. Read existing XMP before displaying ratings, labels, and Reject when a folder opens.
-2. Never modify original image contents. By default, write only XMP sidecars.
-3. Name sidecars by replacing the extension, so `IMG_0001.CR3` maps to `IMG_0001.xmp`. A RAW+JPG pair shares that sidecar. The exact naming must be confirmed with all three desktop apps.
+1. Read existing XMP for RAW sets and embedded ratings and labels for standalone JPEG/HIF before displaying persisted marks. Read Reject and Clove-stored marks from app storage.
+2. Never modify original image contents at launch. RAW sets write only XMP sidecars; their JPEG/HIF companions are never changed.
+3. Name sidecars by replacing the extension, so `IMG_0001.CR3` maps to `IMG_0001.xmp`. A RAW+JPEG, RAW+HIF, or RAW+JPEG+HIF set shares one sidecar. Reuse existing `.xmp`/`.XMP` spelling. Treat appended-extension names such as `IMG_0001.CR3.xmp` or competing packets as ambiguity; never create a second packet. Desktop-app checks remain required.
 4. Write ratings to the standard rating field and color labels to the standard label field.
-5. Store Reject in a Clove-specific XMP field that other apps ignore. Settings offers Also write Rating −1 when rejecting, for apps such as Bridge. It is off by default.
-6. Standalone JPEG, HEIC, and DNG files without a paired RAW: Lightroom reads embedded metadata for these formats and ignores sidecars. Settings offers Write metadata into files, off by default. When on, Clove changes only metadata and never re-encodes the image. If iOS cannot write a format's metadata without re-encoding, that format's option is disabled with an explanation.
-7. Treat a specific change to a specific photo as saved only after confirmed success. Pending, failed, or unconfirmed writes must not show Saved.
+5. Store Reject only in Clove, keyed by folder identity and file until the move to `_Rejected`. Never write Reject to XMP. The Clove XMP Reject field, Also write Rating −1 setting, and saved prior rating are removed. Unmoved rejects do not survive reinstall or carry to another device.
+6. Standalone JPEG/HIF, including previewable iPhone HEIC, get no sidecar. Read embedded ratings and labels; keep new marks in Clove with a visible Saved in Clove only status. In-file JPEG writing is a later feature; HIF/HEIC in-file writing stays out. Standalone DNG is RAW and uses a sidecar.
+7. Confirm each change in the storage it uses. Show Saved for XMP ratings and labels only after read-back matches; show success for a reject move only after confirmation. Standalone marks show Saved in Clove only after confirmed app storage. Pending, failed, or unconfirmed changes must not show success.
 8. Retain the user's requested marks after a write failure so they can retry. Do not treat them as saved before a successful retry.
 9. Preserve existing information that Clove does not recognize as far as possible. Writing a rating must not discard other software's data.
 10. Write fixed English label names to XMP, independent of interface language. The five default names are Red, Yellow, Green, Blue, and Purple.
@@ -308,7 +310,7 @@ The following user-facing strings are proposals, not approved copy. Their meanin
 | Partial Move rejects failure | Moved N photos. M photos couldn't be moved. | Retry unmoved items; Cancel | Hide unmoved photos from the grid |
 | Leaving a page or folder with unconfirmed writes | Some marks haven't finished saving. | Wait for writes; Leave anyway | Treat unconfirmed changes as saved after leaving |
 
-If users leave before writes finish, unconfirmed changes are not saved. The next open reads the actual XMP on disk.
+If users leave before writes finish, unconfirmed changes are not saved. The next open reads the actual XMP for RAW ratings and labels, embedded standalone marks, and confirmed Clove-stored state.
 
 ## Smart grouping and manual marks
 
@@ -328,22 +330,22 @@ Manual marks take precedence. Similar groups only group.
 
 ## Supported files
 
-The confirmed product scope is to scan JPEG, HEIC, and common RAW files, including DNG, after opening a folder. HEIC includes camera HEIF files with `.HEIC`, `.HEIF`, or `.HIF` extensions. RAW is the primary use case. No custom RAW decoder at launch.
+The primary input is camera files: RAW alone, RAW+JPEG, RAW+HIF, RAW+JPEG+HIF, and JPEG alone. RAW, including DNG, is primary when present; same-name JPEG/HIF files in the same folder are reference companions. Without RAW, JPEG is primary, then HIF. HIF-only and iPhone HEIC appear when the system can show a preview; fuller support is deferred, with no in-file writing or extra format work. JPEG+HIF without RAW is unsupported and follows generic rules. HEIF extensions include `.HEIC`, `.HEIF`, and `.HIF`. No custom RAW decoder at launch.
 
 The following are source-derived public facts, not a compatibility guarantee tested by Clove:
 
 - Prefer system image capabilities for grid and detail previews. Engineering research recommends embedded previews for the grid and full RAW processing only when needed for detail. Double-tap to 100% first enlarges the embedded preview, then decodes the full RAW when needed. See the [engineering research source](https://app.notion.com/p/41237873fb548107bd96d0f6838b1200).
 - Apple publishes iOS camera RAW support. Engineering research cites the [iOS 18 support page, dated July 2025](https://support.apple.com/en-us/120534). The list changes with OS updates. Apple provides basic DNG support for unlisted models. Some models support only uncompressed, lossless, or single-shot RAW.
-- Clove's promise is to open JPEG, HEIC, and common RAW files for which the system can generate previews. A RAW and a same-name HEIF in the same folder form a pair, treated like RAW+JPEG. Camera and compression-format support depends on the system on the user's device. This document does not create a guaranteed camera list.
-- DNG files, such as iPhone ProRAW, Leica, and Pentax, display as RAW. For writing marks, they fall under standalone JPEG, HEIC, and DNG files. See item 6 under How marks reach disk.
+- Clove opens the supported camera sets above when the system can generate previews; standalone HIF and iPhone HEIC are shown when possible as deferred features. Camera and compression-format support depends on the system on the user's device. This document does not create a guaranteed camera list.
+- DNG files, such as iPhone ProRAW, Leica, and Pentax, remain RAW for both display and sidecar writes. Broader iPhone-file work waits for photo library support. See item 6 under How marks reach disk.
 - Unsupported files or compression formats require a visible explanation. A blank preview must not be presented as loaded.
-- Typical folder size, preview speed, and detail-decoding speed have no approved numeric targets. Timing or photo-count targets remain pending measurement and are not launch promises.
+- [G1's starting performance targets](decisions/G1-technical-approach.md#starting-performance-targets-iphone-for-m3-and-q3) guide engineering checks for M3 and Q3. They are based on one iPhone with local storage, are revisited after the card and iPad checks, and are not launch promises or folder-size limits.
 
 Launch has no system photo library entry. If one is added later, it must not become a temporary viewing session without XMP writes, and it needs a separate decision.
 
 ## Privacy and offline use
 
-- The main flow works in the user's folders. Marks live in XMP in those folders.
+- The main flow works in the user's folders. RAW ratings and labels live in sidecars there. Reject and new standalone JPEG/HIF marks live in Clove's app storage.
 - Similar-group analysis runs on-device. No online cloud AI, CloudKit, or backup sync at launch.
 - Offline users must still be able to open folders they have permission to access, browse, mark, write XMP, and move rejects.
 - Earlier engineering research found no siftapp dependency on app cloud services. Clove launch does not introduce uploading originals to its own servers.
@@ -361,9 +363,9 @@ These strings cover failure and recovery. They refine the earlier draft shown to
 - Disconnected drive: The drive disconnected. Reconnect it, then reopen this folder.
 - Partial batch failure: Saved N photos. M photos couldn't be saved. Actions: Retry failed items / Cancel
 - Leaving before completion: Some marks haven't finished saving. Actions: Wait for writes / Leave anyway
-- Move confirmation: Move N rejected photos, with their paired JPGs and XMP, to the "_Rejected" folder? Originals won't be deleted. Actions: Move / Cancel
+- Move confirmation: Move N rejected photos, with their JPEG/HIF companions and XMP, to the "_Rejected" folder? Originals won't be deleted. Actions: Move / Cancel
 - Partial move failure: Moved N photos. M photos couldn't be moved. Actions: Retry unmoved items / Cancel
-- Embedded write unavailable: Marks can't be written into this file format yet. They'll be saved in an XMP file next to it.
+- Standalone marks: Saved in Clove only.
 
 ## Acceptance by P0 ID
 
@@ -371,23 +373,23 @@ These manual tests determine whether launch meets product requirements. They are
 
 | ID | Passing condition |
 | --- | --- |
-| P0-01 | Through Files, open folders on local storage, an SD reader, and an external drive. Photos from multiple subfolders under `DCIM` appear in the grid, and photos in `_Rejected` do not. A same-name RAW+JPG pair takes one cell. No imported copy of originals appears in the app's directory. |
+| P0-01 | Through Files, open any accessible folder on the iPhone 17 Pro Max: local storage, or the CFexpress Type A USB reader when available. SD readers and other external drives remain supported-media examples; removable-media checks do not block MVP acceptance. Photos from multiple subfolders under `DCIM` appear in the grid, and photos in `_Rejected` do not. Same-name RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets each take one cell with RAW as primary. RAW alone and JPEG alone appear; HIF-only and iPhone HEIC appear when previewable. JPEG+HIF without RAW has no special handling. No imported copy of originals appears in the app's directory. |
 | P0-02 | Fully quit the app, then reopen the same folder through Recents. After disconnecting the drive or revoking permission, the same action explains how to select the folder again rather than failing silently. |
-| P0-03 | Scroll a RAW folder with embedded previews and use its thumbnails to browse. Unreadable files have explicit states. A folder shot with two bodies sorts correctly by capture time and can switch to filename order. Each of the four filters shows only matching photos. |
+| P0-03 | Scroll a RAW folder with embedded previews and use its thumbnails to browse. Unreadable files have explicit states. A folder shot with two bodies sorts correctly by capture time with subseconds, using creation time then modification time when capture time is missing; fallback photos are not grouped. No temporary filename order appears first, and the user can switch to filename order. Each of the four filters shows only matching photos. |
 | P0-04 | In detail, pinch to zoom, or double-tap to 100% and double-tap back to fit. Edge taps navigate to previous and next photos, including while zoomed, without perceptible delay. Current ratings, Reject, and labels are visible away from the hand. |
-| P0-05 | Apply ratings, labels, and Reject separately. Original bytes remain unchanged and XMP appears or updates beside each original. Tapping the same rating in the rating bar clears it. Rejected originals remain in place with their existing rating. Undo restores the previous mark, and undoing after auto-advance returns to that photo. |
+| P0-05 | Apply ratings, labels, and Reject separately. Original bytes remain unchanged. RAW ratings and labels create or update the shared sidecar; standalone JPEG/HIF marks stay in Clove without a sidecar. Reject is stored only in Clove and creates no XMP field. Tapping the same rating in the rating bar clears it. Rejected originals remain in place with their existing rating. Undo restores the previous mark, and undoing after auto-advance returns to that photo. |
 | P0-06 | Swiping up different distances produces different ratings, with the current step visible and a haptic at each step. Returning to the start before release writes nothing. With only 1 through 3 enabled, the maximum applied rating is 3 and existing 5-star ratings still display. Keys work as listed. Auto-advance follows settings, and labels do not trigger it by default. |
-| P0-07 | Clove displays ratings and labels previously written by Lightroom, Capture One, or Photo Mechanic. Those apps read Clove's ratings and labels. A RAW+JPG pair has one XMP. Other preexisting XMP information survives the write. With default settings, other apps do not see Reject. With Write metadata into files on, Lightroom reads ratings and labels on a standalone JPEG, and the image is not re-encoded. |
-| P0-08 | Show Writing… during writes and Saved only after success. Force a write failure and verify a visible failure with Retry. The failed change never appears saved. |
+| P0-07 | Clove displays ratings and labels previously written by Lightroom, Capture One, or Photo Mechanic. Those apps read Clove's XMP ratings and labels for RAW sets. Each RAW set, including a RAW+JPEG+HIF triple, has one XMP; standalone DNG uses a sidecar too. Other preexisting XMP information survives the write, and companions remain unchanged. Reject never enters XMP. Standalone JPEG/HIF embedded marks are read; new marks create no sidecar or in-file change and show Saved in Clove only. |
+| P0-08 | Show Writing… during XMP writes and Saved only after read-back matches. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Reject-move success follows confirmed movement. Force a failure and verify a visible failure with Retry; failed or unconfirmed changes never appear saved. |
 | P0-09 | Long-press, select multiple photos, and rate them in a batch. Force some writes to fail. Report Saved N photos. M photos couldn't be saved. Successful items stay saved and failed items can be retried separately. |
-| P0-10 | Reject several photos, including RAW+JPG pairs across multiple subfolders, then run Move rejects. The confirmation shows the correct count. Afterward, the RAW, JPG, and XMP files are in the matching subfolders under `_Rejected`, no file was deleted or overwritten, and the photos no longer appear in the grid. Forced name collisions add a suffix, and forced partial failures report Moved N photos. M photos couldn't be moved. Running it on a read-only location shows the view-only message. |
-| P0-11 | Opening a folder with bursts starts grouping automatically: groups appear by time first, then refine, and Run again is available. The photo being viewed does not jump during grouping. Bursts from two bodies shooting at once are not mixed. All XMP is unchanged before and after grouping. Turning similar groups off hides entry points and blue outlines while the main flow still works. |
+| P0-10 | Reject several photos, including RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets across multiple subfolders, then run Move rejects. The confirmation shows the correct count. Afterward, every set's RAW, JPEG and/or HIF companions, and XMP are in the matching subfolders under `_Rejected`, no file was deleted or overwritten, and the photos no longer appear in the grid. Forced name collisions add a suffix, and forced partial failures report Moved N photos. M photos couldn't be moved. Running it on a read-only location shows the view-only message. |
+| P0-11 | Opening a folder with bursts starts grouping automatically: groups appear by time first, then refine, and Run again is available. The photo being viewed does not jump during grouping. Grouping separates by model and serial when present, falling back to model when serial is missing; two same-model bodies shooting the same scene at the same moment are unsupported. Photos with only fallback file times are excluded. Starting values are a gap below 2 seconds and a split above Vision distance 0.5. All XMP is unchanged before and after grouping. Turning similar groups off hides entry points and blue outlines while the main flow still works. |
 | P0-12 | In a group of 20 or more photos: zooming into an area keeps the same position while navigating. Undecided only skips marked photos. After Keep this, reject the rest, photos that already had ratings or labels are not rejected. Keep rated, reject the rest rejects only unmarked photos. A completed group advances to the next group according to settings. Finishing actions can be undone. |
 | P0-13 | Complete the flow on both iPhone and iPad: open folder → grid → mark in detail → cull a group → move rejects → quit and reopen with marks intact. |
 | P0-14 | Open and mark on the Duo cover screen. Unfold and retain the same folder, photo, marks, and group-view position, with grid and detail split by default. Half-folded filters, marking controls, and bottom bar never cross the hinge. |
 | P0-15 | Switching system appearance updates entry, grid, detail, similar groups, the group view, and all Duo postures between light and dark. |
 
-Additional interoperability acceptance: alternate between Clove and Photo Mechanic or Lightroom on the same folder. Each reads the other's ratings and labels.
+Additional interoperability acceptance: alternate between Clove and Photo Mechanic or Lightroom on the same RAW folder. Each reads the other's XMP ratings and labels.
 
 ## Engineering constraints (not product scope)
 
@@ -403,15 +405,14 @@ These constraints affect implementation without adding product features.
 
 ### Pending verification
 
-This document depends on the following facts, which have not yet been verified with real samples. Testing with Lightroom and other desktop apps is not scheduled during launch design and development, so these are working assumptions for now, and testing will be scheduled separately. The results may change the implementation but in principle not the product scope. If one does not hold, return it for a product decision.
+The [G1 decision](decisions/G1-technical-approach.md) settles the metadata-writing approach and starting grouping thresholds. The remaining desktop-app checks must run before C3 is called done. [#29](https://github.com/mimiqdev/cloveapp/issues/29) tracks the remaining external-media, iPad, and desktop-app checks. Removable media is not on the MVP critical path; external-media checks are non-blocking and use the CFexpress Type A USB reader first when convenient. iOS treats it as an external drive, like an SSD; SD cards are not the owner's workflow. G2 uses any folder Files can open on the iPhone 17 Pro Max, including local storage or that reader when available. [#18](https://github.com/mimiqdev/cloveapp/issues/18) keeps the Duo run open. Results can revise the implementation and starting targets; scope changes return to the product owner.
 
-- Lightroom reads only embedded metadata for JPEG, HEIC, and DNG and ignores sidecars.
-- How the three desktop apps handle sidecar naming (`IMG_0001.xmp` versus `IMG_0001.CR3.xmp`) and a sidecar shared by a RAW+JPG pair.
+- Lightroom reads embedded JPEG metadata, Photo Mechanic embeds JPEG ratings, and Capture One's standalone JPEG sidecar behavior remains unclear. G1 therefore keeps new standalone JPEG/HIF marks in Clove; DNG remains RAW with a sidecar.
+- Verify the three desktop apps' handling of replacement-extension sidecars and one sidecar shared by a RAW photo set, including JPEG/HIF companions.
 - The XMP English names for Capture One's extended colors, orange and pink, and how Lightroom and Photo Mechanic treat those values.
 - Whether non-English Lightroom localizes label names so fixed English names do not match. If so, help content must explain how to switch back to the default label set.
-- How Bridge and Lightroom treat `Rating = -1`.
-- Whether iOS can write metadata to JPEG, HEIC, and DNG without re-encoding the image.
-- Initial values for the time-gap threshold, similarity threshold, and swipe distance per rating step.
+- Metadata-writing feasibility is settled: JPEG supports a lossless packet splice, deferred to later C7; ImageIO HIF/HEIC writing drops data, and DNG has no writer. DNG therefore uses a sidecar.
+- Starting grouping values are settled: 2 seconds and Vision distance 0.5. The swipe distance per rating step still needs tuning.
 
 ## 1.1 candidates
 
