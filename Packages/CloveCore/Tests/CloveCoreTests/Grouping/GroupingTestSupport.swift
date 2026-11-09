@@ -62,9 +62,6 @@ actor ScriptedSimilarity: PhotoSimilarityProviding {
         }
     }
 
-    /// Every pair the grouper asked about, in ask order.
-    var askedPairs: [String] { asked }
-
     /// How many times the grouper asked for a distance.
     var askCount: Int { asked.count }
 
@@ -146,6 +143,3 @@ struct GroupingTestFolder: Sendable {
     /// Deletes the whole tree.
     func remove() { try? FileManager.default.removeItem(at: url) }
 }
-
-/// A fixed reference instant so scheduled and device runs report comparable numbers.
-let groupingTimingBase = Date(timeIntervalSince1970: 1_700_000_000)

@@ -67,9 +67,4 @@ public struct SimilarGroup: Identifiable, Hashable, Sendable {
 
     /// How many photos the group holds, for the grid's collapsed count (PRD Grid).
     public var count: Int { members.count }
-
-    /// Whether this group holds one photo (PRD P0-11).
-    public func contains(_ photo: PhotoIdentity) -> Bool {
-        members.contains(photo)
-    }
 }

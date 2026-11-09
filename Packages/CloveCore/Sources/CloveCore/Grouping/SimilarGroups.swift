@@ -49,9 +49,6 @@ public struct SimilarGroups: Hashable, Sendable {
         self.indexByPhoto = indexByPhoto
     }
 
-    /// Whether the folder has no group to show; single photos are never groups (PRD P0-11).
-    public var isEmpty: Bool { groups.isEmpty }
-
     /// The group holding one photo, or nil when the photo is not grouped.
     ///
     /// After a split or a regroup this is how the caller learns which group now holds the
