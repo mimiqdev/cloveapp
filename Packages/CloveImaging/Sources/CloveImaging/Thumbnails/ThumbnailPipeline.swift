@@ -1,13 +1,13 @@
 import Foundation
+import Synchronization
 
 /// Cancellation is signalled synchronously from onCancel, before its actor hop.
 /// This closes the race between queued native entry/completion and cancellation.
-private final class ThumbnailCancellation: @unchecked Sendable {
-    private let lock = NSLock()
-    private var cancelled = false
-    var isCancelled: Bool { lock.withLock { cancelled } }
-    func cancel() { lock.withLock { cancelled = true } }
-    func deliver(_ body: (Bool) -> Void) { lock.withLock { body(cancelled) } }
+private final class ThumbnailCancellation: Sendable {
+    private let cancelled = Mutex(false)
+    var isCancelled: Bool { cancelled.withLock { $0 } }
+    func cancel() { cancelled.withLock { $0 = true } }
+    func deliver(_ body: (Bool) -> Void) { cancelled.withLock { body($0) } }
 }
 
 public actor ThumbnailPipeline {

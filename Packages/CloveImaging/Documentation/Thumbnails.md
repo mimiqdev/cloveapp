@@ -42,6 +42,14 @@ also call `releaseMemory()`. Disk failures are best-effort and cannot turn usabl
 source pixels into a failed request. Corrupt entries are discarded. Failed
 extractions are cached in bounded memory only, so reopening a folder retries.
 
+The cache's state mutex covers memory/index bookkeeping and eviction selection.
+JPEG decoding, encoding, staging, file touches and deletion run outside it.
+Per-key gates coordinate only publication, touch and deletion of the same disk
+file, so a slow store cannot block hits or IO for unrelated keys. The last
+successful publication wins in both tiers. Disk reads recheck an entry generation
+after decoding and return a miss if it was evicted or replaced in the meantime.
+Eviction also checks the generation before deleting, preserving newer stores.
+
 Keys include location identity, standardized path, the caller's exact size and
 modification timestamp, target pixels, orientation transform, extraction route,
 and pipeline version. Increment `pipelineVersion` when extraction policy changes.
