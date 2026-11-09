@@ -8,8 +8,13 @@ the Clove-specific field; round-trip the T0.3 fixtures and check that unknown
 namespaces and structures survive unchanged; do atomic write-to-temp-and-replace
 on an exFAT SD card.
 
-This is **part 1 of #14**. G1 remains open. Physical exFAT, write-protection,
-full-card, and desktop-app results are **pending**.
+Part 2 of [#14](https://github.com/mimiqdev/cloveapp/issues/14), following
+[PR #22](https://github.com/mimiqdev/cloveapp/pull/22). The available device run
+confirms local APFS behavior. On 2026-11-09 the product owner deferred the
+remaining hardware and desktop checks to
+[#29](https://github.com/mimiqdev/cloveapp/issues/29). G1 remains open; this report
+recommends an approach without making the gate decision. Camera files, especially
+the owner's Sony A1 II ARW+HIF pairs, are the main target.
 
 ## What was tested
 
@@ -52,8 +57,17 @@ full-card, and desktop-app results are **pending**.
   iOS API behavior, **not** a document provider, picker interaction, or SD-card I/O.
   The Clove Lab screen is separately built by `mise run verify`; it uses the
   shared folder picker, security-scoped access, `LabSession`, exporter, and footer.
+- Physical iPhone 17 Pro Max (`iPhone19,4`), iOS 27.2, Clove Lab **26110818**,
+  run 1 on local **APFS** storage: the same ten bundled XMP fixtures and 12
+  replacement checks through the Lab folder picker. The selected session folder
+  contained one A1 II ARW and one HIF; S3 tests bundled packets, not embedded
+  metadata in those images. That build's HIF filter gap does not invalidate
+  these sidecar checks and is not evidence of RAW+HIF discovery or desktop interop.
+  There is **no S3 run-2 report**: the later session's ten ARW+HIF pairs add no S3
+  measurement. Physical exFAT, locked/full-card, iPhone Duo, iPad Pro and desktop
+  results remain deferred.
 
-Evidence files, kept out of git and reproduced as JSON in issue #14 comments:
+Historical part-1 evidence, kept out of git and reproduced as JSON in issue #14 comments:
 
 | Report | UTC run time | Contents |
 | --- | --- | --- |
@@ -61,8 +75,17 @@ Evidence files, kept out of git and reproduced as JSON in issue #14 comments:
 | `clove-lab-S3-sdk.json` | See JSON `createdAt` | Separate local Adobe run, independently inspected outputs |
 | `clove-lab-S3-simulator.json` | 2026-11-08 17:01:41 | Same two dependency-free approaches and replacements on iOS Simulator |
 
-Local copies and trimmed command logs are under `.build/s3/`. Device reports
-will use the shared exporter's `clove-lab-S3-<UTC timestamp>.json` name instead.
+Part 1 kept local copies and trimmed command logs under `.build/s3/`; those
+artifacts are not copied into this part-2 checkout. Physical-device evidence was
+read in place, with SHA-256 obtained using `shasum -a 256`:
+
+| Evidence ID | Report filename | SHA-256 |
+| --- | --- | --- |
+| Run 1 | `clove-lab-S3-20261109T022019Z.json` | `16661617ba9162fd34d1870a1d1974035e41284972161d0dc560d4c69bf1dc3a` |
+
+The owner's raw JSON is not committed. Capture timestamps, GPS, serial numbers
+and personal folder paths are omitted; the filename identifies the report.
+Part-2 verification output is recorded in the pull request.
 
 ## Data
 
@@ -173,17 +196,79 @@ scratch folder containing a sentinel that must never be removed. The writer
 refuses non-regular destinations and attempts to remove its temporary file on
 failure. The suite inventories residue and reports cleanup failure separately.
 
-| Physical condition | Result | What settles it |
+| Physical condition | Status / evidence | What settles it |
 | --- | --- | --- |
-| exFAT SD card, normal | **Pending** | Lab JSON with `context.fileSystem` reporting exFAT and all 12 replacement results |
-| Write-protected card | **Pending** | Run on locked card; capture actual error and Documents report |
-| Full/nearly-full card | **Pending, if feasible** | Disposable card with little free space; capture actual write/cleanup outcome |
-| Disconnect/power loss during replace | Not established | A separate controlled fault experiment; successful rereads do not prove crash durability |
+| Local APFS | **Measured — run 1** | All 12 replacements and cleanup confirmed; details below |
+| exFAT SD card, normal | **Deferred — #29** | Lab JSON with `context.fileSystem` reporting exFAT and all 12 replacement results |
+| Write-protected card | **Deferred — #29** | Run on locked card; capture actual error and Documents report |
+| Full/nearly-full card | **Deferred — #29, if feasible** | Disposable card with little free space; capture actual write/cleanup outcome |
+| Disconnect/power loss during replace | **Deferred — C4 validation** | A separate controlled fault experiment; successful rereads do not prove crash durability |
 
 No volume was filled or remounted read-only on the shared host. S1 owns the full
 error-to-product-message mapping. A protection/full-card run can fail before the
 atomic loop (for example, creating scratch); that is still exported as evidence,
 not counted as twelve successful replacements.
+
+### Physical-device confirmation
+
+All measured rows below come from **run 1**, iPhone 17 Pro Max (`iPhone19,4`),
+iOS 27.2, Clove Lab 26110818, local APFS. The JSON agrees with the supervisor's
+initial reading: **12/12** replacements confirmed, **0/12** staging files left,
+`temporary-residue-count = 0`, `scratchRemains = false`, and a note confirming
+removal of the owned scratch directory. Successful rereads establish observed
+replacement/read-back and cleanup, not crash durability or on-card atomicity.
+
+#### Device findings
+
+“Data” and “form” use the same independent comparator definitions as the host
+tables above. The JSON reports preservation booleans rather than serialized
+output; the specific History/datatype diagnosis comes from part 1's inspected
+XML. These are hand-written interop fixtures, not actual desktop-app round trips.
+
+| Status / evidence | Fixture / condition | Preserving editor | ImageIO |
+| --- | --- | --- | --- |
+| **Measured — run 1** | `capture-one.xmp` | Marks confirmed; data/form preserved | Marks confirmed; data preserved, form changed |
+| **Measured — run 1** | `custom-namespace-nested.xmp` | Marks confirmed; data/form preserved | Marks confirmed; data/form loss detected |
+| **Measured — run 1** | `empty-description.xmp` | Marks confirmed; valid empty description extended | Parse refused; no output |
+| **Measured — run 1** | `empty.xmp` | Marks confirmed; valid replacement packet | Marks confirmed; valid replacement packet |
+| **Measured — run 1** | `label-orange.xmp` | Marks confirmed; data/form preserved | Marks confirmed; data preserved, form changed |
+| **Measured — run 1** | `label-pink.xmp` | Marks confirmed; data/form preserved | Marks confirmed; data preserved, form changed |
+| **Measured — run 1** | `lightroom-full.xmp` | Marks confirmed; data/form preserved | Marks confirmed; data/form loss detected |
+| **Measured — run 1** | `malformed.xmp` | Refused at read; no output | Accepted/repaired; marks confirmed; invalid original cannot be compared |
+| **Measured — run 1** | `photo-mechanic.xmp` | Marks confirmed; data/form preserved | Marks confirmed; data preserved, form changed |
+| **Measured — run 1** | `rating-minus-one.xmp` | Initially −1; marks confirmed; data/form preserved | Initially −1; marks confirmed; data preserved, form changed |
+| **Measured — run 1** | New sidecar without existing packet | Valid XMP and standard packet wrapper | Valid XMP; packet wrapper absent |
+| **Measured — run 1** | Disk read-back of fixture writes | 9/9 marks confirmed; malformed input refused | 9/9 marks confirmed, including repaired malformed input; empty description refused |
+| **Measured — run 1** | Replacement and cleanup | Both methods, with/without coordination: 12/12 exact-byte confirmations, no staging/scratch residue | Shared writer test, independent of ImageIO serialization |
+| **Deferred — #29** | exFAT SD card / reader, locked card, full-card condition | No on-card replacement, failure or cleanup evidence | No on-card claim |
+| **Deferred — #29** | iPhone Duo and iPad Pro | No device/OS confirmation | No device/OS confirmation |
+| **Deferred — #29** | Lightroom Classic, Capture One, Photo Mechanic; RAW+JPEG and RAW+HIF naming/discovery | No real desktop read/sync or pair-precedence result | Fixture serialization is not a desktop interoperability check |
+
+The preserving editor passes **9/9** valid-input preservation comparisons,
+including the empty packet and empty description (which contain no unknown data),
+and refuses the malformed tenth packet. ImageIO changes representation in
+**7/8** comparable valid-input outputs; the eighth is the empty packet. It loses
+data in **2/8**, preserves it in **6/8**, refuses the valid empty description,
+and repairs the malformed input. Neither denominator includes that repaired
+input. Thus confirmed rating/label/Reject read-back does not establish preservation.
+Adobe was not run on device; its separate macOS comparison remains the evidence.
+
+#### Device replacement times
+
+Every row is **measured — run 1**; three samples per method/mode, milliseconds.
+Timing includes staging write, synchronization/close and replacement; excludes
+read-back. These small local samples are observations, not performance targets.
+
+| Status / evidence | Method | NSFileCoordinator | Confirmed | Median ms | Min–max ms | Temp remains |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Measured — run 1** | `FileManager.replaceItemAt` | No | 3/3 | 0.726 | 0.720–0.931 | 0/3 |
+| **Measured — run 1** | `FileManager.replaceItemAt` | Yes | 3/3 | 1.551 | 1.446–2.199 | 0/3 |
+| **Measured — run 1** | POSIX `rename` | No | 3/3 | 0.567 | 0.518–0.583 | 0/3 |
+| **Measured — run 1** | POSIX `rename` | Yes | 3/3 | 1.199 | 1.138–1.202 | 0/3 |
+
+Coordination is not needed for success on this local folder. These results do
+not settle document-provider requirements, external-volume attributes, reader
+write protection, interrupted writes or power-loss behavior.
 
 ### Sidecar naming and public documentation
 
