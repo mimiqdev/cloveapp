@@ -250,7 +250,8 @@ public actor RejectMover {
                 if let expected = sizes[file.source], size != expected {
                     return RejectMoveFailure(
                         reason: .notConfirmed,
-                        message: "\(file.destination.lastPathComponent) changed size during the move.")
+                        message:
+                            "\(file.destination.lastPathComponent) changed size during the move.")
                 }
             } catch {
                 return RejectMoveFailure(classifying: error)
@@ -278,21 +279,34 @@ public actor RejectMover {
         }
         let restored = moved.reduce(into: Set<URL>()) { $0.insert($1.source) }
         for file in plan.files {
-            let atSource = (try? fileSystem.exists(at: file.source)) == true
-            if !atSource {
+            let atSource: Bool
+            do {
+                atSource = try fileSystem.exists(at: file.source)
+            } catch {
+                // A check that could not run is not proof the file moved back, so it counts as
+                // a rollback this set cannot confirm (PRD P0-10).
+                rollbackFailures.append(RejectMoveFailure(classifying: error))
+                continue
+            }
+            guard atSource else {
                 rollbackFailures.append(
                     RejectMoveFailure(
                         reason: .notConfirmed,
                         message: "\(file.source.lastPathComponent) is not back at its source."))
                 continue
             }
-            if restored.contains(file.source),
-                (try? fileSystem.exists(at: file.destination)) == true
-            {
-                rollbackFailures.append(
-                    RejectMoveFailure(
-                        reason: .notConfirmed,
-                        message: "\(file.destination.lastPathComponent) is still at its destination."))
+            guard restored.contains(file.source) else { continue }
+            do {
+                if try fileSystem.exists(at: file.destination) {
+                    rollbackFailures.append(
+                        RejectMoveFailure(
+                            reason: .notConfirmed,
+                            message:
+                                "\(file.destination.lastPathComponent) is still at its destination."
+                        ))
+                }
+            } catch {
+                rollbackFailures.append(RejectMoveFailure(classifying: error))
             }
         }
         guard rollbackFailures.isEmpty else {
@@ -307,21 +321,41 @@ public actor RejectMover {
     }
 
     /// Reports every file's actual location after a failed move back (PRD P0-10).
+    ///
+    /// A moved file is looked for at the destination first and a file that never moved at its
+    /// source first, so a stale copy can never be mistaken for the file. A check that throws is
+    /// reported as ``RejectMoveFileLocation/Location/unknown`` rather than as a lost file.
     private func locations(
         of files: [RejectMoveFilePlan], moved: Set<RejectMoveFilePlan>
     ) -> [RejectMoveFileLocation] {
         files.map { file in
-            let atDestination = (try? fileSystem.exists(at: file.destination)) == true
-            let atSource = (try? fileSystem.exists(at: file.source)) == true
-            let location: RejectMoveFileLocation.Location
-            if moved.contains(file) {
-                location = atDestination ? .destination : (atSource ? .source : .missing)
-            } else {
-                location = atSource ? .source : (atDestination ? .destination : .missing)
-            }
+            let atDestination = try? fileSystem.exists(at: file.destination)
+            let atSource = try? fileSystem.exists(at: file.source)
+            let location = location(
+                source: atSource, destination: atDestination,
+                prefersDestination: moved.contains(file))
             return RejectMoveFileLocation(
                 role: file.role, source: file.source, destination: file.destination,
                 location: location)
+        }
+    }
+
+    /// Chooses one file's location from the two checks, or ``RejectMoveFileLocation``'s
+    /// unknown and missing cases when neither answers (PRD P0-10).
+    private func location(
+        source: Bool?, destination: Bool?, prefersDestination: Bool
+    ) -> RejectMoveFileLocation.Location {
+        let first = prefersDestination ? destination : source
+        let second = prefersDestination ? source : destination
+        let firstLocation: RejectMoveFileLocation.Location =
+            prefersDestination ? .destination : .source
+        let secondLocation: RejectMoveFileLocation.Location =
+            prefersDestination ? .source : .destination
+        switch (first, second) {
+        case (true, _): return firstLocation
+        case (false, true), (nil, true): return secondLocation
+        case (false, false): return .missing
+        case (false, nil), (nil, false), (nil, nil): return .unknown
         }
     }
 
@@ -384,7 +418,8 @@ public actor RejectMover {
     // MARK: - State plumbing
 
     /// Builds a skip outcome with a short developer-facing explanation (PRD P0-10).
-    private func skipped(_ identity: PhotoIdentity, reason: RejectMoveSkipReason) -> RejectMoveOutcome
+    private func skipped(_ identity: PhotoIdentity, reason: RejectMoveSkipReason)
+        -> RejectMoveOutcome
     {
         RejectMoveOutcome.skipped(
             RejectMoveSkippedSet(identity: identity, reason: reason, message: reason.message))
