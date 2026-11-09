@@ -29,27 +29,27 @@ preview; device run 2 confirms pair filtering, not standalone HIF grouping.
   nine downloaded images plus the generated Sony HEIC, ten primary files total.
   See [fixtures](../fixtures.md) for cameras, licenses and source provenance.
   No public real burst dataset was added. The sweep uses synthetic fixture repeats.
-- macOS report: `.build/s5/macos.json`, created `2026-11-08T17:25:06Z`.
+- macOS report: `.build/grouping/macos.json`, created `2026-11-08T17:25:06Z`.
   The full [macOS JSON is preserved on #16](https://github.com/mimiqdev/cloveapp/issues/16#issuecomment-6724765238)
   as a fenced report, outside git. Reproduce with:
 
   ```sh
   export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
-  mkdir -p .build/s5
-  CLOVE_S5_REPORT="$PWD/.build/s5/macos.json" mise run test-spikes
+  mkdir -p .build/grouping
+  CLOVE_GROUPING_REPORT="$PWD/.build/grouping/macos.json" mise run test-lab
   ```
 
 - Simulator: fresh iPhone 17 Pro (`iPhone18,1`), iOS 27.0, on the same shared
-  host. Report `.build/s5/simulator.json`, created `2026-11-08T17:43:41Z`;
+  host. Report `.build/grouping/simulator.json`, created `2026-11-08T17:43:41Z`;
   the full [simulator JSON is preserved on #16](https://github.com/mimiqdev/cloveapp/issues/16#issuecomment-6724861254).
   The dedicated runner uses optimized Swift and the same S5 module:
 
   ```sh
-  bash Packages/CloveSpikes/Tests/SpikeS5GroupingTests/measure-simulator.sh
+  bash Packages/CloveLabKit/Tests/GroupingProbeTests/measure-simulator.sh
   ```
 
   It creates/deletes its own simulator, copies fixtures into that app's sandbox,
-  and saves `.build/s5/simulator.json` inside this checkout. It never writes to
+  and saves `.build/grouping/simulator.json` inside this checkout. It never writes to
   the cache. The runner adopts the required UIScene lifecycle through SwiftUI.
   Earlier standalone probe launches failed before measurements; no numbers from
   those attempts are used.
@@ -441,7 +441,7 @@ for G1, while S5's measurements and initial recommendation are complete.
    original subfolders and RAW+HIF/RAW+JPEG names. Prefer 300–600 primary photos; the
    screen measures only the first 600 sorted paths. Repeat on iPad Pro and Duo
    where available; the JSON records the actual device/OS version.
-2. In Clove Lab, open **S5 · Grouping data**, tap **Choose folder**, choose the
+2. In Clove Lab, open **S5 · Grouping**, tap **Choose folder**, choose the
    shooting folder, then **Compute metadata and groups**. Keep the app open.
    Allow about **2–10 minutes**; the counter should reach the selected total,
    then a group count and excluded-time count appear. Cancel drains the current

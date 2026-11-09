@@ -102,7 +102,7 @@ Unable to create a device for device type: iPhone Duo ... runtime: iOS 27.0 ...
 The actual Lab screen was run in a disposable test host on **iPhone 17 Pro /
 iOS 27.0**, reported model `iPhone18,1`. The complete 20-event report is
 [`clove-lab-S7-20261109T040732Z.json` on issue #18](https://github.com/mimiqdev/cloveapp/issues/18#issuecomment-6732003889).
-The test host uses bundle `com.mimiqdev.clove.s7probe`, version `0.1.0`, build `1`;
+The test host uses bundle `com.mimiqdev.clove.foldstateprobe`, version `0.1.0`, build `1`;
 the validation-only release separately checks the normal Clove Lab app.
 
 | Observation | Portrait | Landscape | After leaving and reopening S7 |
@@ -124,18 +124,18 @@ what a fold or a system scene recreation does on Duo.
 Reproduce from the repository root (about 2–4 minutes on this shared host):
 
 ```sh
-bash Packages/CloveSpikes/Tests/SpikeS7DuoTests/measure-simulator.sh
+bash Packages/CloveLabKit/Tests/FoldStateProbeTests/measure-simulator.sh
 ```
 
-The helper generates a disposable Xcode project under `.build/s7/`, tests the
+The helper generates a disposable Xcode project under `.build/fold-state/`, tests the
 actual Lab sources without editing shared files, validates the exported JSON,
 and deletes its own simulator on exit. XCTest uses the explicitly created
-device with parallel cloning disabled. Outputs stay under `.build/s7/`; JSON is
+device with parallel cloning disabled. Outputs stay under `.build/fold-state/`; JSON is
 not committed. The standard `mise run verify` gate remains unchanged.
 
 ### Event and export semantics
 
-`SpikeS7Duo` owns the Codable event model, deduplication, deterministic text
+`FoldStateProbe` owns the Codable event model, deduplication, deterministic text
 formatting, and conversion to the shared schema-v1 `LabReport`. Unit tests cover
 geometry/safe-area/size-class changes, unsupported vs waiting vs absent vs closed
 hinges, angle units, forced checkpoints, journal restoration with lost State,
@@ -149,7 +149,7 @@ tags end in `.tlbr.pt`. Unsupported/missing hinge readings are `unavailable`,
 never zero. `sceneID` is a UIKit session's persistent identifier, not proof that
 the scene object instance survived. The State token detects view recreation.
 
-The Lab screen persists `s7-working-journal.json` atomically in Documents after
+The Lab screen persists `fold-state-working-journal.json` atomically in Documents after
 each changed snapshot or explicit checkpoint, preserving earlier observations
 if its view is recreated. **Start new run** clears that history and resets
 both counters to zero, without changing the identity tokens. For the device
@@ -219,7 +219,7 @@ the iOS version. No cable, photo fixtures, external drive, or folder selection.
 Start from a fresh Lab launch on the cover screen. All device results above
 remain pending until this run is returned.
 
-1. Open **Clove Lab → S7 → Start new run**, then tap **Increment both counters**
+1. Open **Clove Lab → S7 · Fold state → Start new run**, then tap **Increment both counters**
    once. Expect both counters to read **1**. In **Record checkpoint**, choose
    **Cover**.
 2. Unfold fully; choose **Unfolded**. Expect the live geometry/timestamp to

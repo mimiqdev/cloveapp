@@ -37,7 +37,7 @@ report. G1's choice remains with the product owner.
   Complete gzip/base64 payloads, SHA-256 checksums and retrieval instructions
   are preserved on issue #13 because `gh` cannot attach local files to issues;
   JSON is kept out of git. Local copies
-  and build/check logs are in this checkout's ignored `.build/s2/` directory.
+  and build/check logs are in this checkout's ignored `.build/previews/` directory.
 - **Physical iPhone 17 Pro Max (`iPhone19,4`), iOS 27.2**, Clove Lab 0.1.0,
   local storage through the folder picker, in two owner-returned runs:
   - **Run 1, build 26110818:** one Sony A1 II ARW (`MMQ05184.ARW`) measured.
@@ -108,9 +108,9 @@ shared host load; setup and report export add time.
 Reproduce the macOS JSON without running benchmarks in every verification:
 
 ```sh
-mkdir -p .build/s2
-CLOVE_S2_REPORT="$PWD/.build/s2/macOS.json" \
-  mise exec -- swift test --package-path Packages/CloveSpikes \
+mkdir -p .build/previews
+CLOVE_PREVIEWS_REPORT="$PWD/.build/previews/macOS.json" \
+  mise exec -- swift test --package-path Packages/CloveLabKit \
   --filter PreviewTests.collectReport
 ```
 
@@ -124,26 +124,26 @@ fixture directory directly. All generated files stay under the checkout.
 ```sh
 set -eu
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
-s2_out="$PWD/.build/s2-simulator"
-mkdir -p "$s2_out"
-s2_sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-xcrun --sdk iphonesimulator swiftc -sdk "$s2_sdk" \
+previews_out="$PWD/.build/previews-simulator"
+mkdir -p "$previews_out"
+previews_sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+xcrun --sdk iphonesimulator swiftc -sdk "$previews_sdk" \
   -target arm64-apple-ios18.0-simulator -swift-version 6 \
   -parse-as-library -whole-module-optimization -emit-object -emit-module \
-  -module-name SpikeSupport \
-  Packages/CloveSpikes/Sources/SpikeSupport/*.swift \
-  -emit-module-path "$s2_out/SpikeSupport.swiftmodule" \
-  -o "$s2_out/SpikeSupport.o"
-xcrun --sdk iphonesimulator swiftc -sdk "$s2_sdk" \
+  -module-name LabSupport \
+  Packages/CloveLabKit/Sources/LabSupport/*.swift \
+  -emit-module-path "$previews_out/LabSupport.swiftmodule" \
+  -o "$previews_out/LabSupport.o"
+xcrun --sdk iphonesimulator swiftc -sdk "$previews_sdk" \
   -target arm64-apple-ios18.0-simulator -swift-version 6 \
   -parse-as-library -whole-module-optimization -emit-object -emit-module \
-  -module-name SpikeS2Previews -I "$s2_out" \
-  Packages/CloveSpikes/Sources/SpikeS2Previews/*.swift \
-  -emit-module-path "$s2_out/SpikeS2Previews.swiftmodule" \
-  -o "$s2_out/SpikeS2Previews.o"
-cat > "$s2_out/Runner.swift" <<'SWIFT'
+  -module-name PreviewProbe -I "$previews_out" \
+  Packages/CloveLabKit/Sources/PreviewProbe/*.swift \
+  -emit-module-path "$previews_out/PreviewProbe.swiftmodule" \
+  -o "$previews_out/PreviewProbe.o"
+cat > "$previews_out/Runner.swift" <<'SWIFT'
 import Foundation
-import SpikeS2Previews
+import PreviewProbe
 
 @main struct Runner {
     static func main() async throws {
@@ -155,19 +155,19 @@ import SpikeS2Previews
     }
 }
 SWIFT
-xcrun --sdk iphonesimulator swiftc -sdk "$s2_sdk" \
+xcrun --sdk iphonesimulator swiftc -sdk "$previews_sdk" \
   -target arm64-apple-ios18.0-simulator -swift-version 6 \
-  -parse-as-library -I "$s2_out" "$s2_out/Runner.swift" \
-  "$s2_out/SpikeSupport.o" "$s2_out/SpikeS2Previews.o" -o "$s2_out/runner"
-s2_device="$(xcrun simctl create "Clove S2 measurement $$" \
+  -parse-as-library -I "$previews_out" "$previews_out/Runner.swift" \
+  "$previews_out/LabSupport.o" "$previews_out/PreviewProbe.o" -o "$previews_out/runner"
+previews_device="$(xcrun simctl create "Clove previews measurement $$" \
   com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max \
   com.apple.CoreSimulator.SimRuntime.iOS-27-0)"
-trap 'xcrun simctl delete "$s2_device" >/dev/null 2>&1 || true' EXIT
-xcrun simctl boot "$s2_device"
-xcrun simctl bootstatus "$s2_device" -b
-xcrun simctl spawn "$s2_device" "$s2_out/runner" \
+trap 'xcrun simctl delete "$previews_device" >/dev/null 2>&1 || true' EXIT
+xcrun simctl boot "$previews_device"
+xcrun simctl bootstatus "$previews_device" -b
+xcrun simctl spawn "$previews_device" "$previews_out/runner" \
   "${CLOVE_FIXTURES_DIR:-/Volumes/T7/Projects/.clove-fixtures}/sets/formats" \
-  "$s2_out/simulator.json"
+  "$previews_out/simulator.json"
 ```
 
 </details>
@@ -659,7 +659,7 @@ especially the owner's A1 II ARW+HIF, are the main target.
    sample in a separate small folder. Reports are the only writes to the
    selected folders; images are read without modification.
 3. Connect the SD card reader, unlock the phone, and confirm the folders appear
-   in Files. Open **Clove Lab → S2 · Are previews fast enough?** (the run screen
+   in Files. Open **Clove Lab → S2 · Previews** (the run screen
    is titled **S2 · Preview speed**). Tap **Choose folder**, select `formats`,
    and confirm its name appears under the picker.
 4. Leave **Include full-resolution RAW** on and tap **Run preview suite**.

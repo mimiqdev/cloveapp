@@ -3,20 +3,36 @@
 Spikes S1–S7 answer the questions in the M1 table of
 [DEV-PLAN.md](../DEV-PLAN.md#m1-spikes). A spike does not ship product features:
 its output is a report in this folder plus reusable verification code in Clove
-Lab and the `CloveSpikes` package.
+Lab and the `CloveLabKit` package.
 
 S0 built the harness every spike uses. A spike adds files only in its own
 folders:
 
 ```text
-CloveLab/Spikes/Sx/                       the spike's screens
-Packages/CloveSpikes/Sources/SpikeSxName/ the spike's verification code
-Packages/CloveSpikes/Tests/SpikeSxNameTests/
-docs/spikes/Sx-name.md                    the report
+CloveLab/Probes/<Topic>/                 the spike's screens
+Packages/CloveLabKit/Sources/<Module>/   the spike's verification code
+Packages/CloveLabKit/Tests/<Module>Tests/
+docs/spikes/Sx-name.md                  the report
 ```
 
+Code uses topic names; the plan IDs stay in these reports, the home-screen
+checklist labels, and the report JSON `spike` field and export file names.
+
+| Plan record | Screen folder under `CloveLab/Probes/` | Module in `CloveLabKit` |
+| --- | --- | --- |
+| S1 | `FolderAccess/` | `FolderAccessProbe` |
+| S2 | `Previews/` | `PreviewProbe` |
+| S3 | `XMP/` | `XMPProbe` |
+| S4 | `EmbeddedMetadata/` | `EmbeddedMetadataProbe` |
+| S5 | `Grouping/` | `GroupingProbe` |
+| S6 | `Scan/` | `ScanProbe` |
+| S7 | `FoldState/` | `FoldStateProbe` |
+
+Each module's test target is its name plus `Tests`. Shared report tooling lives
+in `LabSupport` and `LabSupportTests`.
+
 Shared files — `CloveLab/LabRootView.swift`, `CloveLab/Experiments.swift`,
-`CloveLab/Shared/`, `Packages/CloveSpikes/Sources/SpikeSupport/`,
+`CloveLab/Shared/`, `Packages/CloveLabKit/Sources/LabSupport/`,
 `project.yml`, `mise.toml` — are not edited by a spike. If a spike needs a
 shared change, open an issue for it instead.
 
@@ -24,10 +40,10 @@ shared change, open an issue for it instead.
 
 Clove Lab lists all seven spikes; each opens its own screen. The shared pieces:
 
-- `SpikeSupport.LabReport` and `LabDevice` / `LabApp` / `LabMeasurement`: the
+- `LabSupport.LabReport` and `LabDevice` / `LabApp` / `LabMeasurement`: the
   report a spike writes.
-- `SpikeSupport.Stopwatch`: timing on `ContinuousClock`, never the wall clock.
-- `SpikeSupport.Fixtures`: resolves the fixture sets in the shared cache; tests
+- `LabSupport.Stopwatch`: timing on `ContinuousClock`, never the wall clock.
+- `LabSupport.Fixtures`: resolves the fixture sets in the shared cache; tests
   skip when a set is missing.
 - `CloveLab/Shared/FolderPicker.swift`: the system folder picker, plus
   `FolderPickerButton`.
@@ -47,7 +63,7 @@ the Documents copies appear in Files under "On My iPhone › Clove Lab", and the
 share sheet can send them back.
 
 Clove Lab writes its reports on device; the tests in
-`Packages/CloveSpikes/Tests/` run on the Mac with `mise run test-spikes`.
+`Packages/CloveLabKit/Tests/` run on the Mac with `mise run test-lab`.
 
 ## Report schema
 
@@ -110,7 +126,7 @@ Every spike writes one JSON file per run. The file name is
 | `notes` | array of strings | Free-form observations; may be empty. |
 
 The encoder is in `LabReport.makeEncoder()`: pretty printed, sorted keys, ISO
-8601 UTC dates. `mise run test-spikes` checks the key names against this table,
+8601 UTC dates. `mise run test-lab` checks the key names against this table,
 so the two change together.
 
 ## The spike report

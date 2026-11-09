@@ -49,7 +49,7 @@ and G1 can accept the dependent choices only provisionally.
 - No photo fixtures were needed; the existing shared sets were present. Nothing
   was written into the fixture cache's `files/` directory.
 
-Part-1 reports (originally untracked under `.build/s1/`; full JSON is preserved in
+Part-1 reports (originally untracked under `.build/folder-access/`; full JSON is preserved in
 [issue #12's evidence comment](https://github.com/mimiqdev/cloveapp/issues/12#issuecomment-6724403114)).
 Measurements used source revision `1feb372`; the final code additionally guards
 external-disconnect classification with a volume-root check, covered by a
@@ -61,8 +61,8 @@ regression test.
 | simulator local, warm process | `sim/clove-lab-S1-20261108T165624Z.json` |
 | simulator local, first process after boot | `sim/clove-lab-S1-20261108T165610Z.json` |
 
-`S1LocalRunner.swift` in the S1 test folder is an opt-in executable, enabled with
-`-D CLOVE_S1_LOCAL_RUNNER`. Compile `SpikeSupport`, then `SpikeS1Access`, as static
+`FolderAccessLocalRunner.swift` in the S1 test folder is an opt-in executable, enabled with
+`-D CLOVE_FOLDER_ACCESS_LOCAL_RUNNER`. Compile `LabSupport`, then `FolderAccessProbe`, as static
 Swift modules, then link that runner against both. The targets used were
 `arm64-apple-macos15.0` with the macOS SDK and
 `arm64-apple-ios18.0-simulator` with the iPhoneSimulator SDK, using Swift 6 and
@@ -200,7 +200,7 @@ suppress the others. `unavailable (nil)` is distinct from false or zero.
 
 Important-usage capacity can exceed immediate free bytes on APFS. None of these
 keys reserves space. A permission hint cannot confirm a write. The Lab's explicit
-small write creates a unique file in `clove-lab-s1/`, verifies its bytes, and
+small write creates a unique file in `clove-lab-folder-access/`, verifies its bytes, and
 removes only that file. Failures during write or cleanup stay visible.
 
 ### Failure table and proposed PRD mapping
@@ -254,7 +254,7 @@ C4/C6/U7's per-item state; S1 alone cannot choose their counts or claim Saved.
   refreshes after a read without enforcing a folder-identity comparison. The
   replacement-directory experiment shows why a read alone is insufficient.
 - Store a versioned Codable envelope atomically at app-private Application
-  Support `CloveLab/S1/recents-v1.json`: UUID, bookmark bytes, path summary, volume
+  Support `CloveLab/FolderAccess/recents-v1.json`: UUID, bookmark bytes, path summary, volume
   name and UUID when available, operator-selected media type, optional photo
   count, and last successful open time. The bookmark is Data (base64 in JSON).
   S1 does not scan photos, so photo count stays nil. C2 would supply it to C11.
@@ -417,7 +417,7 @@ case. Use dedicated empty `S1-test` folders. Do not fill a normal photo card or
 the device's internal storage. A second same-label card is needed only for that
 replacement test; if unavailable, mark the step pending.
 
-1. Open **Clove Lab → S1**. With no external media, choose media **local** and
+1. Open **Clove Lab → S1 · Folder access**. With no external media, choose media **local** and
    **Choose folder**. In Files, create/select an empty `S1-test` folder under
    **On My iPhone/iPad**. Set the scenario text to `local baseline`.
    Tap **Read + capacity + read-only hints**, then **Write small file + read back
@@ -486,7 +486,7 @@ replacement test; if unavailable, mark the step pending.
 13. Connect the **disposable small test card**. Choose its empty test
     folder with the correct media type. Run both probes and export a baseline.
     Tap **Add up to 256 MiB fill file… → Add fill file**. Each tap writes real
-    bytes only into `clove-lab-s1/fill-s1-<UUID>.bin`; it stops at 256 MiB or an
+    bytes only into `clove-lab-folder-access/fill-folder-access-<UUID>.bin`; it stops at 256 MiB or an
     error. Repeat only on the small test volume until an insufficient-space error
     appears. Stop adding at the first error.
 14. With the volume full, run both probes. Capture capacity hints, exact
@@ -494,7 +494,7 @@ replacement test; if unavailable, mark the step pending.
     A fill failure alone need not make a 31-byte write fail. Export; a tested-folder
     export failure is expected if there is no room, but the Documents report and
     footer must work. Retain the error report before cleanup.
-15. Tap **Delete S1 fill files… → Delete S1 fill files**. Expect per-file cleanup
+15. Tap **Delete folder-access fill files… → Delete folder-access fill files**. Expect per-file cleanup
     events; other files stay. Run both probes again and export the recovered
     capacity/write result. If a cleanup fails, remove only the named S1 fill files
     using Files or a computer, then rerun/export recovery.

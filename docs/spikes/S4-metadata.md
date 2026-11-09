@@ -31,7 +31,7 @@ is pinned.
   observations, not throughput targets or device performance predictions.
 - A fresh iPhone 17 Pro simulator (`iPhone18,1`), iOS 27.0 (`24A434`), created and
   deleted for S4. The package's S4 tests run with `xcodebuild test -scheme
-  CloveSpikes -only-testing:SpikeS4MetadataTests`; they exercise the same plain
+  CloveLabKit -only-testing:EmbeddedMetadataProbeTests`; they exercise the same plain
   functions as the Lab screen.
 - The `formats` set in `/Volumes/T7/Projects/.clove-fixtures/sets/formats`, filtered
   to `canon-eos-6d.JPG`, `sony-ilce-7s.HEIC`, `pentax-k-5-ii-s.DNG`, and
@@ -53,11 +53,11 @@ is pinned.
 
 JSON reports stay out of git. Part 1 recorded these ignored local artifacts
 (they are not copied into the part-2 checkout):
-`.build/s4/clove-lab-S4-macos.json`,
-`.build/s4/clove-lab-S4-simulator.json` (timing samples), plus
-`.build/s4/clove-lab-S4-macos-verification.json`,
-`.build/s4/clove-lab-S4-simulator-verification.json` and
-`.build/s4/simulator.xcresult` (final checks including interruption/thumbnail tests).
+`.build/embedded-metadata/clove-lab-S4-macos.json`,
+`.build/embedded-metadata/clove-lab-S4-simulator.json` (timing samples), plus
+`.build/embedded-metadata/clove-lab-S4-macos-verification.json`,
+`.build/embedded-metadata/clove-lab-S4-simulator-verification.json` and
+`.build/embedded-metadata/simulator.xcresult` (final checks including interruption/thumbnail tests).
 They use `LabReport` schema 1: scalar results in `measurements`; each JSON object
 string in `notes` retains the complete before/after hashes, source properties,
 recursive XMP tags (including qualifiers), changed paths, errors, and failure
@@ -420,7 +420,7 @@ No new device run is required for this PR. When #29 is scheduled:
    use the supervisor's Clove Lab build. Repeat on **iPhone 17 Pro Max** and
    **iPad Pro**, recording installed OS versions. iPhone HEIC is optional and
    remains a known gap, not a required pass.
-2. Open **Clove Lab → S4 → Choose folder**, select **S4 fixtures**, then press
+2. Open **Clove Lab → S4 · Embedded metadata → Choose folder**, select **S4 fixtures**, then press
    **Run metadata check**. Allow about 1–2 minutes. These three files produce
    **11 attempts**: JPEG packet controls should preserve payloads/pixels and
    metadata; native JPEG/HIF should expose the documented losses; DNG should
