@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import SpikeSupport
+@testable import LabSupport
 
 /// 2026-11-13T10:15:30Z, the instant the schema examples use.
 private let fixedDate = Date(timeIntervalSince1970: 1_794_564_930)

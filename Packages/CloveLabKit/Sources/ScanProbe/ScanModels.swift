@@ -1,5 +1,5 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 
 /// How a scanner walks a folder tree.
 public enum ScanMethod: String, CaseIterable, Sendable {
@@ -196,7 +196,7 @@ public struct ScanListing: Sendable {
     }
 }
 
-/// Rules the scan lane applies, from P0-01 and C2.
+/// Rules applied when scanning photo folders; see the scan scope in `docs/PRD.en.md`.
 public enum ScanRule {
     /// Rejects folder name used when the settings have no override (`_Rejected`).
     public static let defaultRejectsFolderName = "_Rejected"
@@ -261,7 +261,7 @@ public struct ScannedPhoto: Sendable, Hashable {
     /// RAW when the item has a pair, otherwise the single file (JPEG, HEIC, or DNG).
     public var primary: URL
     /// Same-name JPEG or HEIF in the same folder, when the primary is a RAW.
-    /// The historical spike property name is retained for report consumers.
+    /// The historical probe property name is retained for report consumers.
     public var pairedJPEG: URL?
     /// Primary file name without its extension.
     public var baseName: String

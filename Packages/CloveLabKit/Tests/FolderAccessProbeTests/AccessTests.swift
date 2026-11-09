@@ -1,10 +1,11 @@
 import Foundation
 import Testing
 
-@testable import SpikeS1Access
+@testable import FolderAccessProbe
 
 private func temporaryFolder() throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent("clove-s1-\(UUID())")
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "clove-folder-access-\(UUID())")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }
@@ -117,7 +118,7 @@ func errorMapping(domain: String, code: Int, expected: AccessFailure) {
 @Test func writeProbeConfirmsBytesAndOnlyRemovesItsOwnFile() throws {
     let folder = try temporaryFolder()
     defer { try? FileManager.default.removeItem(at: folder) }
-    let lab = folder.appendingPathComponent("clove-lab-s1")
+    let lab = folder.appendingPathComponent("clove-lab-folder-access")
     try FileManager.default.createDirectory(at: lab, withIntermediateDirectories: true)
     let sentinel = lab.appendingPathComponent("keep.txt")
     try Data("keep".utf8).write(to: sentinel)
@@ -133,12 +134,12 @@ func errorMapping(domain: String, code: Int, expected: AccessFailure) {
     defer { try? FileManager.default.removeItem(at: folder) }
     let events = AccessFill.add(at: folder, maximumBytes: 2_048)
     #expect(events.allSatisfy { $0.error == nil })
-    let lab = folder.appendingPathComponent("clove-lab-s1")
+    let lab = folder.appendingPathComponent("clove-lab-folder-access")
     let files = try FileManager.default.contentsOfDirectory(
         at: lab, includingPropertiesForKeys: nil)
     let fill = try #require(files.first)
     #expect(try Data(contentsOf: fill).count == 2_048)
-    let sentinel = lab.appendingPathComponent("fill-s1-not-a-uuid.bin")
+    let sentinel = lab.appendingPathComponent("fill-folder-access-not-a-uuid.bin")
     try Data([1]).write(to: sentinel)
     #expect(AccessFill.clean(at: folder).allSatisfy { $0.error == nil })
     #expect(
@@ -153,7 +154,7 @@ func errorMapping(domain: String, code: Int, expected: AccessFailure) {
     let result = AccessProbes.run(at: folder, write: false)
     let error = try #require(result.events.first { $0.phase == .read }?.error)
     #expect(error.classify() == .missingLocation)
-    print("S1 deleted-folder read: \(error.summary)")
+    print("Folder access deleted-folder read: \(error.summary)")
 }
 
 @Test func watchDoesNotCallFolderDeletionADisconnectedExternalVolume() async throws {

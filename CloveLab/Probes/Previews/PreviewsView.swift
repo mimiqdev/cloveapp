@@ -1,8 +1,8 @@
-import SpikeS2Previews
-import SpikeSupport
+import PreviewProbe
+import LabSupport
 import SwiftUI
 
-struct S2View: View {
+struct PreviewsView: View {
     @Environment(LabSession.self) private var session
     @State private var folder: URL?
     @State private var includeFullRAW = true
@@ -50,7 +50,7 @@ struct S2View: View {
         }
         .navigationTitle("S2 · Preview speed")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("clovelab.spike.S2")
+        .accessibilityIdentifier("clovelab.probe.previews")
         .onDisappear { running?.cancel() }
     }
 
@@ -97,6 +97,6 @@ struct S2View: View {
 
 #Preview {
     NavigationStack {
-        S2View().environment(LabSession())
+        PreviewsView().environment(LabSession())
     }
 }

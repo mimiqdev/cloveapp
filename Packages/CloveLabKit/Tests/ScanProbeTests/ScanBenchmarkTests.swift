@@ -1,8 +1,8 @@
 import Foundation
 import Testing
 
-@testable import SpikeS6Scan
-import SpikeSupport
+@testable import ScanProbe
+import LabSupport
 
 @Suite(.serialized)
 struct ScanBenchmarkTests {
@@ -103,16 +103,16 @@ struct ScanBenchmarkTests {
     /// functional tests above instead.
     ///
     /// ```sh
-    /// CLOVE_S6_REPORT="$PWD/.build/s6/macOS.json" \
-    ///   mise exec -- swift test --package-path Packages/CloveSpikes \
+    /// CLOVE_SCAN_REPORT="$PWD/.build/scan/macOS.json" \
+    ///   mise exec -- swift test --package-path Packages/CloveLabKit \
     ///   --filter ScanBenchmarkTests.collectReport
     /// ```
     @Test(
-        .enabled(if: ProcessInfo.processInfo.environment["CLOVE_S6_REPORT"] != nil),
+        .enabled(if: ProcessInfo.processInfo.environment["CLOVE_SCAN_REPORT"] != nil),
         .timeLimit(.minutes(20))
     )
     func collectReport() async throws {
-        let path = try #require(ProcessInfo.processInfo.environment["CLOVE_S6_REPORT"])
+        let path = try #require(ProcessInfo.processInfo.environment["CLOVE_SCAN_REPORT"])
         let container = try ScanTestTree.container()
         defer { try? FileManager.default.removeItem(at: container) }
         let tree = try await ScanTree.makeTree(
@@ -135,6 +135,6 @@ struct ScanBenchmarkTests {
         try FileManager.default.createDirectory(
             at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
         try report.write(to: output)
-        print("S6 macOS report: \(output.path)")
+        print("Scan macOS report: \(output.path)")
     }
 }

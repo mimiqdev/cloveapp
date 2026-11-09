@@ -96,7 +96,7 @@ public struct MetadataSnapshot: Codable, Equatable, Sendable {
         let width = image.width
         let height = image.height
         guard width > 0, height > 0, width <= 20000, height <= 20000 else {
-            throw MetadataProbeError.invalid("Raster dimensions outside spike safety bound")
+            throw MetadataProbeError.invalid("Raster dimensions outside probe safety bound")
         }
         var data = Data(count: width * height * 4)
         let rendered = data.withUnsafeMutableBytes { bytes -> Bool in

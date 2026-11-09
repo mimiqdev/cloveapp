@@ -112,7 +112,7 @@ public struct AccessRecent: Codable, Sendable, Identifiable, Equatable {
     public var volumeName: String?
     public var volumeUUID: String?
     public var media: AccessMedia
-    /// S1 does not scan photos. Unknown counts must not look like an empty folder.
+    /// Folder access does not scan photos. Unknown counts must not look like an empty folder.
     public var photoCount: Int?
     public var lastOpened: Date
 

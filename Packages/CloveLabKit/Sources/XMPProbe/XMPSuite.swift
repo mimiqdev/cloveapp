@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import SpikeSupport
+import LabSupport
 
 public enum XMPAtomicMethod: String, CaseIterable, Sendable {
     case replaceItemAt
@@ -21,7 +21,7 @@ public enum XMPAtomicWriter {
             }
         }
         let temporary = destination.deletingLastPathComponent()
-            .appendingPathComponent(".s3-\(UUID().uuidString).tmp")
+            .appendingPathComponent(".xmp-\(UUID().uuidString).tmp")
         do {
             try data.write(to: temporary, options: .withoutOverwriting)
             let handle = try FileHandle(forWritingTo: temporary)
@@ -82,17 +82,17 @@ public enum XMPSuite {
         }
     }
 
-    /// All writes are confined to an exclusively created clove-lab-s3 directory.
+    /// All writes are confined to an exclusively created clove-lab-xmp directory.
     /// Failures (including directory creation and cleanup) still produce a report.
     public static func run(in folder: URL) -> LabReport {
         var report = LabReport(
             spike: "S3",
             context: [
                 "fileSystem": fileSystem(at: folder), "folder": folder.lastPathComponent,
-                "suite": "s3-v1", "fixtureCount": String(XMPFixtures.packets.count),
+                "suite": "xmp-v1", "fixtureCount": String(XMPFixtures.packets.count),
                 "coordination": "both uncoordinated and NSFileCoordinator",
             ])
-        let scratch = folder.appendingPathComponent("clove-lab-s3", isDirectory: true)
+        let scratch = folder.appendingPathComponent("clove-lab-xmp", isDirectory: true)
         var owned = false
         do {
             let status = Darwin.mkdir(scratch.path, 0o700)
@@ -189,7 +189,7 @@ public enum XMPSuite {
         if owned {
             do {
                 try FileManager.default.removeItem(at: scratch)
-                report.notes.append("Removed owned clove-lab-s3 directory.")
+                report.notes.append("Removed owned clove-lab-xmp directory.")
             } catch { report.notes.append("Scratch cleanup failed: \(describe(error))") }
         }
         report.context["scratchRemains"] = String(

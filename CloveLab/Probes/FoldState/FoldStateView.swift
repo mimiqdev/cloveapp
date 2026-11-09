@@ -1,22 +1,22 @@
-import SpikeS7Duo
+import FoldStateProbe
 import SwiftUI
 
-private struct S7Layout: Equatable {
+private struct FoldStateLayout: Equatable {
     var rect = DuoRect()
     var insets = DuoInsets()
 }
 
 /// Live observations only: no model-based fold inference or invented hinge.
-struct S7View: View {
+struct FoldStateView: View {
     @Environment(LabSession.self) private var session
     @Environment(\.scenePhase) private var phase
-    @SceneStorage("S7.counter") private var sceneCounter = 0
-    @SceneStorage("S7.identity") private var sceneIdentity = ""
+    @SceneStorage("FoldState.counter") private var sceneCounter = 0
+    @SceneStorage("FoldState.identity") private var sceneIdentity = ""
     @State private var stateCounter = 0
     @State private var stateIdentity = UUID().uuidString
-    @State private var journal = S7Journal()
+    @State private var journal = FoldStateJournal()
     @State private var uiKit = DuoSnapshot()
-    @State private var layout = S7Layout()
+    @State private var layout = FoldStateLayout()
 
     var body: some View {
         List {
@@ -35,7 +35,7 @@ struct S7View: View {
                     stateCounter += 1
                     record("increment both counters", force: true)
                 }
-                .accessibilityIdentifier("clovelab.s7.increment")
+                .accessibilityIdentifier("clovelab.fold-state.increment")
                 Menu("Record checkpoint") {
                     ForEach(
                         ["Cover", "Unfolded", "Half-fold 90°", "Rotated", "Folded back"], id: \.self
@@ -48,7 +48,7 @@ struct S7View: View {
                     session.export(journal.log.report())
                 }
                 .disabled(uiKit.sceneID == "unattached")
-                .accessibilityIdentifier("clovelab.s7.writeReport")
+                .accessibilityIdentifier("clovelab.fold-state.writeReport")
                 Text("Events: \(journal.log.events.count)")
                 if let error = journal.error {
                     Text(error).foregroundStyle(.red)
@@ -107,15 +107,15 @@ struct S7View: View {
             }
         }
         .background {
-            S7GeometryProbe { sample, reason in
+            FoldStateGeometryProbe { sample, reason in
                 if uiKit != sample { uiKit = sample }
                 record(reason)
             }
         }
-        .onGeometryChange(for: S7Layout.self) { proxy in
+        .onGeometryChange(for: FoldStateLayout.self) { proxy in
             let frame = proxy.frame(in: .global)
             let safe = proxy.safeAreaInsets
-            return S7Layout(
+            return FoldStateLayout(
                 rect: DuoRect(
                     x: frame.minX, y: frame.minY, width: frame.width, height: frame.height),
                 insets: DuoInsets(
@@ -130,9 +130,9 @@ struct S7View: View {
             record("probe appeared", force: true)
         }
         .onChange(of: phase) { _, _ in record("scene phase", force: true) }
-        .navigationTitle("S7 Duo probe")
+        .navigationTitle("S7 · Fold state")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("clovelab.spike.S7")
+        .accessibilityIdentifier("clovelab.probe.fold-state")
     }
 
     private var phaseText: String {
@@ -165,5 +165,5 @@ struct S7View: View {
 }
 
 #Preview {
-    NavigationStack { S7View() }.environment(LabSession())
+    NavigationStack { FoldStateView() }.environment(LabSession())
 }

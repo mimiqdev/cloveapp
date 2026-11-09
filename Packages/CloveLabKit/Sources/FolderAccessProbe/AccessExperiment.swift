@@ -1,5 +1,5 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 
 public struct AccessSnapshot: Sendable {
     public var recents: [AccessRecent]

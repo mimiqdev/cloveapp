@@ -1,5 +1,5 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 
 public struct EmbeddedWriteResult: Codable, Sendable {
     public var file: String
@@ -68,7 +68,7 @@ public enum MetadataExperiment {
             throw MetadataProbeError.invalid("Use a small fixture folder (at most 12 images).")
         }
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "S4-\(UUID().uuidString)")
+            "embedded-metadata-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
         var results: [EmbeddedWriteResult] = []
@@ -94,7 +94,7 @@ public enum MetadataExperiment {
             "Seeded results compare against the seeded file, not the camera original. JPEG seed uses packet splice to retain original non-XMP bytes. Other seeds use native writes and may already have lost MakerNotes or normalized EXIF before the measured write; their success does not show preservation against the camera original.",
             "JPEG packet splice is a bounded comparison path: standard single APP1 XMP only; extended/duplicate packets are rejected. Native copy may normalize unrelated EXIF/GPS values; changed paths are retained.",
             "Decoded comparison: ImageIO default image at index 0 rendered at native dimensions to sRGB 8-bit RGBA; not a separate RAW renderer.",
-            "Clove Reject uses the spike-only namespace urn:clove:spike:s4:1.0/. Production namespace remains open for G1/S3.",
+            "Clove Reject uses the spike-only namespace urn:clove:spike:s4:1.0/. The production XMP namespace remains undecided.",
         ]
         #if os(macOS)
             notes.append(

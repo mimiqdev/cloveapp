@@ -94,7 +94,7 @@ public struct LabApp: Codable, Sendable, Hashable {
     }
 }
 
-/// One named number a spike measured, with its unit and free-form tags.
+/// One named number a probe measured, with its unit and free-form tags.
 public struct LabMeasurement: Codable, Sendable, Hashable {
     /// What was measured, for example `embedded-preview-extraction`.
     public var name: String
@@ -113,7 +113,7 @@ public struct LabMeasurement: Codable, Sendable, Hashable {
     }
 }
 
-/// The JSON report a spike writes on device, analyzed back on the Mac.
+/// The JSON report a probe writes on device, analyzed back on the Mac.
 ///
 /// The key names are part of the schema in `docs/spikes/README.md`; change both
 /// together. Dates are ISO 8601 in UTC.
@@ -122,7 +122,7 @@ public struct LabReport: Codable, Sendable, Equatable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
-    /// Spike identifier, for example `S2`.
+    /// Probe identifier, for example `S2`.
     public var spike: String
     /// When the report was produced.
     public var createdAt: Date

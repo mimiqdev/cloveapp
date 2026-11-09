@@ -1,15 +1,15 @@
 import CoreGraphics
 import Foundation
 import ImageIO
-import SpikeSupport
+import LabSupport
 import Testing
 import UniformTypeIdentifiers
 
-@testable import SpikeS2Previews
+@testable import PreviewProbe
 
-@Test func s2DescriptorMatchesThePlan() {
-    #expect(SpikeS2Previews.descriptor.id == "S2")
-    #expect(!SpikeS2Previews.descriptor.question.isEmpty)
+@Test func previewsDescriptorMatchesThePlan() {
+    #expect(PreviewProbe.descriptor.id == "S2")
+    #expect(!PreviewProbe.descriptor.question.isEmpty)
 }
 
 @Suite(.serialized)
@@ -72,7 +72,7 @@ struct PreviewTests {
 
     @Test func fallbackOrientationAndCacheInvalidation() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "clove-s2-test-\(UUID())")
+            "clove-previews-test-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("oriented.jpg")
@@ -180,14 +180,14 @@ struct PreviewTests {
     /// verify exercises functions without running full-resolution benchmarks.
     @Test(
         .enabled(
-            if: ProcessInfo.processInfo.environment["CLOVE_S2_REPORT"] != nil
+            if: ProcessInfo.processInfo.environment["CLOVE_PREVIEWS_REPORT"] != nil
                 && Fixtures.set("formats") != nil))
     func collectReport() async throws {
         let folder = try #require(Fixtures.set("formats"))
         var report = try await PreviewSuite.run(folder: folder)
         report.notes.append(
             "macOS measurements taken on a shared, loaded host with two other spike workers.")
-        let path = try #require(ProcessInfo.processInfo.environment["CLOVE_S2_REPORT"])
+        let path = try #require(ProcessInfo.processInfo.environment["CLOVE_PREVIEWS_REPORT"])
         try report.write(to: URL(fileURLWithPath: path))
     }
 }

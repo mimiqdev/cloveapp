@@ -1,8 +1,8 @@
-import SpikeS3XMP
-import SpikeSupport
+import XMPProbe
+import LabSupport
 import SwiftUI
 
-struct S3View: View {
+struct XMPView: View {
     @Environment(LabSession.self) private var session
     @State private var folder: URL?
     @State private var running = false
@@ -13,17 +13,17 @@ struct S3View: View {
         List {
             Section("XMP and atomic replacement") {
                 Text(
-                    "Copies ten bundled sidecars into clove-lab-s3, tests two XMP approaches and two replacement methods, then removes that scratch folder."
+                    "Copies ten bundled sidecars into clove-lab-xmp, tests two XMP approaches and two replacement methods, then removes that scratch folder."
                 )
                 Text(
-                    "Original photos are never used. An existing clove-lab-s3 folder stops the run."
+                    "Original photos are never used. An existing clove-lab-xmp folder stops the run."
                 )
                 FolderPickerButton { folder = $0 }
                     .disabled(running)
                 if let folder { Text(folder.lastPathComponent) }
-                Button(running ? "Running…" : "Run S3 suite") { run() }
+                Button(running ? "Running…" : "Run XMP suite") { run() }
                     .disabled(folder == nil || running)
-                    .accessibilityIdentifier("clovelab.s3.run")
+                    .accessibilityIdentifier("clovelab.xmp.run")
                 // A simulator-accessible path also verifies the actual suite without
                 // relying on an external Files provider or shared simulator device.
                 Button("Run in app Documents") {
@@ -31,10 +31,10 @@ struct S3View: View {
                     run()
                 }
                 .disabled(running)
-                .accessibilityIdentifier("clovelab.s3.documents")
+                .accessibilityIdentifier("clovelab.xmp.documents")
                 if running { ProgressView() }
                 Text(summary)
-                    .accessibilityIdentifier("clovelab.s3.summary")
+                    .accessibilityIdentifier("clovelab.xmp.summary")
             }
             if let report {
                 Section("Results") {
@@ -60,7 +60,7 @@ struct S3View: View {
         }
         .navigationTitle("S3 · XMP")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("clovelab.spike.S3")
+        .accessibilityIdentifier("clovelab.probe.xmp")
     }
 
     private func run() {

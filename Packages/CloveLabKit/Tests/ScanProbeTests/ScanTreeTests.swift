@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import SpikeS6Scan
+@testable import ScanProbe
 
 @Suite(.serialized)
 struct ScanRuleTests {

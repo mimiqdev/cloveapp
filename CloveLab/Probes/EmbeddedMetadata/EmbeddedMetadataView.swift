@@ -1,9 +1,9 @@
-import SpikeS4Metadata
-import SpikeSupport
+import EmbeddedMetadataProbe
+import LabSupport
 import SwiftUI
 
-/// S4 confirmation uses the same verification code as the macOS fixture tests.
-struct S4View: View {
+/// Embedded metadata confirmation uses the same verification code as the macOS fixture tests.
+struct EmbeddedMetadataView: View {
     @Environment(LabSession.self) private var session
     @State private var folder: URL?
     @State private var isRunning = false
@@ -24,12 +24,12 @@ struct S4View: View {
                 if let folder { Text(folder.lastPathComponent).font(.caption) }
                 Button("Run metadata check") { run() }
                     .disabled(folder == nil || isRunning)
-                    .accessibilityIdentifier("clovelab.S4.run")
+                    .accessibilityIdentifier("clovelab.embedded-metadata.run")
             }
             Section("Result") {
                 if isRunning { ProgressView("Comparing image bytes, pixels and metadata…") }
                 Text(message)
-                    .accessibilityIdentifier("clovelab.S4.status")
+                    .accessibilityIdentifier("clovelab.embedded-metadata.status")
                 Text(
                     "DNG writes are expected to be unavailable. The re-encoding comparison is expected to change pixels. JPEG's native copy can drop MakerNotes and rewrite EXIF/GPS; the packet comparison checks preservation separately."
                 )
@@ -77,9 +77,9 @@ struct S4View: View {
             }
             if let error = session.exportError { Text("Report export failed: \(error)") }
         }
-        .navigationTitle("S4 Metadata")
+        .navigationTitle("S4 · Embedded metadata")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("clovelab.spike.S4")
+        .accessibilityIdentifier("clovelab.probe.embedded-metadata")
     }
 
     private func run() {
@@ -110,5 +110,5 @@ struct S4View: View {
 }
 
 #Preview {
-    NavigationStack { S4View().environment(LabSession()) }
+    NavigationStack { EmbeddedMetadataView().environment(LabSession()) }
 }

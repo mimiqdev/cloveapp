@@ -1,13 +1,13 @@
-import SpikeS6Scan
-import SpikeSupport
+import ScanProbe
+import LabSupport
 import SwiftUI
 
-/// S6 — How long does scanning take?
+/// Scan — How long does scanning take?
 ///
 /// Picks a card root, writes the generated 2,000-file test tree there, runs the
 /// scan suite three times over, and exports one `LabReport`. The heavy work runs
 /// off the main thread and holds the picked folder's security scope.
-struct S6View: View {
+struct ScanView: View {
     @Environment(LabSession.self) private var session
     @State private var folder: URL?
     @State private var tree: ScanTreeSummary?
@@ -22,7 +22,7 @@ struct S6View: View {
                 Text(
                     "Connect the SD card reader and pick the card's root folder, for "
                         + "example EOS_DIGITAL. The test tree is written inside one "
-                        + "Clove-S6-Scan folder; nothing else on the card is touched."
+                        + "Clove-Scan folder; nothing else on the card is touched."
                 )
                 FolderPickerButton { picked in
                     folder = picked
@@ -97,7 +97,7 @@ struct S6View: View {
         }
         .navigationTitle("S6 · Scan speed")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("clovelab.spike.S6")
+        .accessibilityIdentifier("clovelab.probe.scan")
         .onDisappear { running?.cancel() }
     }
 
@@ -191,6 +191,6 @@ struct S6View: View {
 
 #Preview {
     NavigationStack {
-        S6View().environment(LabSession())
+        ScanView().environment(LabSession())
     }
 }

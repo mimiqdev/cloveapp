@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import SpikeSupport
+@testable import LabSupport
 
 /// Directory URLs keep a trailing slash in their path; drop it for comparisons.
 private func filePath(_ url: URL) -> String {

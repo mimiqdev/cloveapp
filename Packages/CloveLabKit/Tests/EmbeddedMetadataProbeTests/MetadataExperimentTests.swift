@@ -1,8 +1,8 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 import Testing
 
-@testable import SpikeS4Metadata
+@testable import EmbeddedMetadataProbe
 
 @Suite(.serialized)
 struct MetadataExperimentTests {
@@ -19,7 +19,7 @@ struct MetadataExperimentTests {
         #expect(results.count == 14)
         for result in results {
             print(
-                "S4 \(result.file) \(result.control) \(result.method.rawValue): error=\(result.error ?? "none") payload=\(result.payloadUnchanged) pixels=\(result.pixelsUnchanged) marks=\(result.marksReadBack) candidate=\(result.losslessCandidate) ms=\(result.milliseconds ?? -1) delta=\(result.after.map { $0.fileBytes - (result.before?.fileBytes ?? 0) } ?? 0) changedExisting=\(result.changedExistingMetadata)"
+                "Embedded metadata \(result.file) \(result.control) \(result.method.rawValue): error=\(result.error ?? "none") payload=\(result.payloadUnchanged) pixels=\(result.pixelsUnchanged) marks=\(result.marksReadBack) candidate=\(result.losslessCandidate) ms=\(result.milliseconds ?? -1) delta=\(result.after.map { $0.fileBytes - (result.before?.fileBytes ?? 0) } ?? 0) changedExisting=\(result.changedExistingMetadata)"
             )
             if result.error != nil {
                 #expect(result.failureLeftFileUnchanged == true)
@@ -87,9 +87,9 @@ struct MetadataExperimentTests {
         for (file, hash) in originalHashes {
             #expect(try PayloadDigest.hash(Data(contentsOf: file)) == hash)
         }
-        if let path = ProcessInfo.processInfo.environment["S4_REPORT_PATH"] {
+        if let path = ProcessInfo.processInfo.environment["EMBEDDED_METADATA_REPORT_PATH"] {
             try report.write(to: URL(fileURLWithPath: path))
-            print("S4 report: \(path)")
+            print("Embedded metadata report: \(path)")
         }
     }
 

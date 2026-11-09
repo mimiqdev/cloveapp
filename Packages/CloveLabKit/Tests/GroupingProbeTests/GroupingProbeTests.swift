@@ -1,8 +1,8 @@
 import Testing
 
-@testable import SpikeS5Grouping
+@testable import GroupingProbe
 
-@Test func s5DescriptorMatchesThePlan() {
-    #expect(SpikeS5Grouping.descriptor.id == "S5")
-    #expect(!SpikeS5Grouping.descriptor.question.isEmpty)
+@Test func groupingDescriptorMatchesThePlan() {
+    #expect(GroupingProbe.descriptor.id == "S5")
+    #expect(!GroupingProbe.descriptor.question.isEmpty)
 }

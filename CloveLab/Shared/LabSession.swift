@@ -1,13 +1,13 @@
 import Foundation
 import Observation
-import SpikeSupport
+import LabSupport
 
 /// State shared by the Clove Lab screens: the last exported report and any
 /// export error. Inject it with `.environment(_:)`.
 @Observable
 @MainActor
 final class LabSession {
-    /// Most recent report written by any spike; the footer shares this file.
+    /// Most recent report written by any probe; the footer shares this file.
     private(set) var lastReportURL: URL?
 
     /// Why the last export failed, if it did.
@@ -31,7 +31,7 @@ final class LabSession {
     }
 
     /// Writes a device report on first launch, so the footer has a real file to
-    /// share before a spike records any measurements.
+    /// share before a probe records any measurements.
     func prepareDeviceReportIfNeeded() {
         guard lastReportURL == nil else { return }
         export(LabReport(spike: "S0", notes: ["Device report from Clove Lab."]))

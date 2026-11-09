@@ -11,7 +11,7 @@ public enum XMPError: Error, CustomStringConvertible {
         case .invalidPacket(let reason): "Invalid XMP: \(reason)"
         case .imageIO(let reason): "ImageIO: \(reason)"
         case .unsafeFolder:
-            "clove-lab-s3 already exists; choose another folder or remove the previous scratch folder."
+            "clove-lab-xmp already exists; choose another folder or remove the previous scratch folder."
         }
     }
 }
@@ -112,7 +112,7 @@ public enum XMPApproach: String, CaseIterable, Sendable {
         _ = try document.marks()
         guard document.descriptions.count == 1, let node = document.descriptions.first,
             node.attributes[XMPDocument.key(XMPDocument.rdf, "about")] == ""
-        else { throw XMPError.invalidPacket("Spike editor requires one empty-about description") }
+        else { throw XMPError.invalidPacket("Probe editor requires one empty-about description") }
         let source = String(decoding: data, as: UTF8.self) as NSString
         var edits: [(NSRange, String)] = []
         for (qualified, range) in node.rawAttributes {

@@ -1,8 +1,8 @@
-import SpikeS5Grouping
-import SpikeSupport
+import GroupingProbe
+import LabSupport
 import SwiftUI
 
-struct S5View: View {
+struct GroupingView: View {
     @Environment(LabSession.self) private var session
     @State private var folder: URL?
     @State private var result: GroupingRun?
@@ -72,7 +72,7 @@ struct S5View: View {
         }
         .navigationTitle("S5 · Grouping data")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("clovelab.spike.S5")
+        .accessibilityIdentifier("clovelab.probe.grouping")
         .onDisappear { running?.cancel() }
     }
 
@@ -170,5 +170,5 @@ struct S5View: View {
 }
 
 #Preview {
-    NavigationStack { S5View().environment(LabSession()) }
+    NavigationStack { GroupingView().environment(LabSession()) }
 }

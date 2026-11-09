@@ -1,15 +1,15 @@
 import Darwin
 import Foundation
 
-@testable import SpikeS6Scan
+@testable import ScanProbe
 
-/// Temporary trees for the S6 tests. Every helper writes below its own
+/// Temporary trees for the Scan tests. Every helper writes below its own
 /// UUID-named temporary folder and never into the fixture cache.
 enum ScanTestTree {
     /// A fresh container folder, plus a cleanup closure.
     static func container() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "clove-s6-test-\(UUID())", isDirectory: true)
+            "clove-scan-test-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

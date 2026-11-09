@@ -1,15 +1,15 @@
 // A tiny, unsigned simulator measurement app, compiled only with
-// -D S5_SIMULATOR_RUNNER. See the S5 report for the reproducible commands.
-#if S5_SIMULATOR_RUNNER && targetEnvironment(simulator)
+// -D GROUPING_SIMULATOR_RUNNER. See the Grouping report for the reproducible commands.
+#if GROUPING_SIMULATOR_RUNNER && targetEnvironment(simulator)
     import Foundation
-    import SpikeS5Grouping
+    import GroupingProbe
     import SwiftUI
 
     @main
-    struct S5SimulatorRunner: App {
+    struct GroupingSimulatorRunner: App {
         var body: some Scene {
             WindowGroup {
-                Text("S5 simulator measurement")
+                Text("Grouping simulator measurement")
                     .task {
                         let documents = FileManager.default.urls(
                             for: .documentDirectory, in: .userDomainMask)[0]
@@ -29,11 +29,11 @@
                             let run = try await worker.value
                             try run.labeledReport().write(
                                 to: documents.appendingPathComponent("simulator.json"))
-                            print("S5 simulator: report saved")
+                            print("Grouping simulator: report saved")
                         } catch {
                             try? Data(String(describing: error).utf8).write(
                                 to: documents.appendingPathComponent("failure.txt"))
-                            print("S5 simulator failed: \(error)")
+                            print("Grouping simulator failed: \(error)")
                         }
                     }
             }

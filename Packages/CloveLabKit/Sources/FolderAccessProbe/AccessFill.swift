@@ -11,8 +11,9 @@ public enum AccessFill {
         NSFileCoordinator().coordinate(
             writingItemAt: folder, options: [], error: &coordinationError
         ) { url in
-            let directory = url.appendingPathComponent("clove-lab-s1", isDirectory: true)
-            let file = directory.appendingPathComponent("fill-s1-\(UUID().uuidString).bin")
+            let directory = url.appendingPathComponent("clove-lab-folder-access", isDirectory: true)
+            let file = directory.appendingPathComponent(
+                "fill-folder-access-\(UUID().uuidString).bin")
             var written = 0
             do {
                 try FileManager.default.createDirectory(
@@ -52,8 +53,8 @@ public enum AccessFill {
 
     public static func isFillFile(_ url: URL) -> Bool {
         let name = url.deletingPathExtension().lastPathComponent
-        return url.pathExtension == "bin" && name.hasPrefix("fill-s1-")
-            && UUID(uuidString: String(name.dropFirst("fill-s1-".count))) != nil
+        return url.pathExtension == "bin" && name.hasPrefix("fill-folder-access-")
+            && UUID(uuidString: String(name.dropFirst("fill-folder-access-".count))) != nil
     }
 
     public static func clean(at folder: URL) -> [AccessEvent] {
@@ -64,7 +65,7 @@ public enum AccessFill {
         NSFileCoordinator().coordinate(
             writingItemAt: folder, options: [], error: &coordinationError
         ) { url in
-            let directory = url.appendingPathComponent("clove-lab-s1", isDirectory: true)
+            let directory = url.appendingPathComponent("clove-lab-folder-access", isDirectory: true)
             do {
                 let files = try FileManager.default.contentsOfDirectory(
                     at: directory, includingPropertiesForKeys: nil)

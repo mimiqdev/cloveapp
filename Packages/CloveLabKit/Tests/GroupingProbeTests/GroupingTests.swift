@@ -1,10 +1,10 @@
 import CoreGraphics
 import Foundation
 import ImageIO
-import SpikeSupport
+import LabSupport
 import Testing
 
-@testable import SpikeS5Grouping
+@testable import GroupingProbe
 
 private func photo(_ id: String, _ time: Double?, model: String? = "Camera", serial: String? = "A")
     -> GroupingPhoto
@@ -148,7 +148,7 @@ private func photo(_ id: String, _ time: Double?, model: String? = "Camera", ser
 }
 
 @Test func fixtureMeasurementWhenRequested() async throws {
-    guard let path = ProcessInfo.processInfo.environment["CLOVE_S5_REPORT"] else { return }
+    guard let path = ProcessInfo.processInfo.environment["CLOVE_GROUPING_REPORT"] else { return }
     let folder = try #require(Fixtures.set("formats"))
     let run = try await GroupingSuite.run(folder: folder, includeSyntheticFixtures: true)
     #expect(run.photos.count == 10)

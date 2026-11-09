@@ -1,12 +1,12 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 import Testing
 
-@testable import SpikeS3XMP
+@testable import XMPProbe
 
-@Test func s3DescriptorMatchesThePlan() {
-    #expect(SpikeS3XMP.descriptor.id == "S3")
-    #expect(!SpikeS3XMP.descriptor.question.isEmpty)
+@Test func xmpDescriptorMatchesThePlan() {
+    #expect(XMPProbe.descriptor.id == "S3")
+    #expect(!XMPProbe.descriptor.question.isEmpty)
 }
 
 @Test(arguments: XMPFixtures.packets.keys.sorted())
@@ -23,7 +23,7 @@ func bundledPacketsMatchRepository(fixture: String) throws {
 func roundTripEveryFixture(fixture: String, approach: XMPApproach) throws {
     let original = try #require(XMPFixtures.packets[fixture])
     let measurements = XMPSuite.roundTrip(original, fixture: fixture, approach: approach)
-    if let path = ProcessInfo.processInfo.environment["S3_REPORT_DIR"],
+    if let path = ProcessInfo.processInfo.environment["XMP_REPORT_DIR"],
         let output = try? approach.write(original, marks: XMPSuite.requested)
     {
         let directory = URL(fileURLWithPath: path).appendingPathComponent(approach.rawValue)
@@ -146,7 +146,7 @@ func roundTripEveryFixture(fixture: String, approach: XMPApproach) throws {
 }
 
 @Test func atomicSuiteAndFailureCleanup() throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("s3-\(UUID())")
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("xmp-\(UUID())")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
     let report = XMPSuite.run(in: root)
@@ -156,7 +156,7 @@ func roundTripEveryFixture(fixture: String, approach: XMPApproach) throws {
         report.measurements.filter { $0.name == "atomic-confirmed" && $0.value == 1 }.count == 12)
     #expect(
         report.measurements.filter { $0.name == "temporary-remains" && $0.value == 0 }.count == 12)
-    if let path = ProcessInfo.processInfo.environment["S3_REPORT_DIR"] {
+    if let path = ProcessInfo.processInfo.environment["XMP_REPORT_DIR"] {
         let directory = URL(fileURLWithPath: path)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try report.write(to: directory.appendingPathComponent("clove-lab-S3-macos.json"))
@@ -182,8 +182,8 @@ func roundTripEveryFixture(fixture: String, approach: XMPApproach) throws {
 }
 
 @Test func preexistingScratchIsNeverRemoved() throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("s3-\(UUID())")
-    let scratch = root.appendingPathComponent("clove-lab-s3")
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("xmp-\(UUID())")
+    let scratch = root.appendingPathComponent("clove-lab-xmp")
     try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let sentinel = scratch.appendingPathComponent("sentinel")
@@ -231,15 +231,15 @@ func cachedInteropSet() throws {
 }
 
 @Test func inspectLocalSDKOutputsWhenRequested() throws {
-    guard let path = ProcessInfo.processInfo.environment["S3_SDK_OUTPUT_DIR"] else { return }
+    guard let path = ProcessInfo.processInfo.environment["XMP_SDK_OUTPUT_DIR"] else { return }
     for (name, original) in XMPFixtures.packets.sorted(by: { $0.key < $1.key }) {
         let output = try Data(contentsOf: URL(fileURLWithPath: path).appendingPathComponent(name))
         #expect(try XMPInspection.inspect(output) == XMPSuite.requested)
         if name == "malformed.xmp" {
-            print("S3 SDK malformed.xmp: repaired to well-formed XML")
+            print("XMP SDK malformed.xmp: repaired to well-formed XML")
         } else {
             print(
-                "S3 SDK \(name): semantic=\(try XMPInspection.unknownDataPreserved(before: original, after: output)) representation=\(try XMPInspection.representationPreserved(before: original, after: output))"
+                "XMP SDK \(name): semantic=\(try XMPInspection.unknownDataPreserved(before: original, after: output)) representation=\(try XMPInspection.representationPreserved(before: original, after: output))"
             )
         }
     }

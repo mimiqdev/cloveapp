@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import SpikeSupport
+@testable import LabSupport
 
 @Test func stopwatchMeasuresElapsedTime() async throws {
     let stopwatch = Stopwatch()

@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import SpikeS4Metadata
+@testable import EmbeddedMetadataProbe
 
 struct PayloadEvidenceTests {
     @Test func jpegCoversProgressiveScansStuffingAndRestartMarkers() throws {

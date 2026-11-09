@@ -1,6 +1,6 @@
 import Foundation
 import ImageIO
-import SpikeSupport
+import LabSupport
 
 public enum EmbeddedWriteMethod: String, Codable, Sendable, CaseIterable {
     case copyImageSource
@@ -8,7 +8,7 @@ public enum EmbeddedWriteMethod: String, Codable, Sendable, CaseIterable {
     case jpegXMPPacketSplice
 }
 
-/// Spike-only namespace, pending G1/S3's production namespace decision.
+/// Lab-only namespace; the production namespace is decided separately.
 public struct EmbeddedMarks: Sendable {
     public var rating: Int
     public var label: String
@@ -26,7 +26,7 @@ public enum MetadataWriter {
 
     /// Writes a sibling temporary file then atomically renames it over `url`.
     /// Failure before rename leaves the original untouched; temp cleanup always runs.
-    /// This spike measures local rename atomicity, not power-loss durability or provider coordination.
+    /// This probe measures local rename atomicity, not power-loss durability or provider coordination.
     @discardableResult
     public static func write(
         to url: URL, method: EmbeddedWriteMethod, marks: EmbeddedMarks = EmbeddedMarks()

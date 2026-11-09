@@ -1,8 +1,8 @@
 import Testing
 
-@testable import SpikeS4Metadata
+@testable import EmbeddedMetadataProbe
 
-@Test func s4DescriptorMatchesThePlan() {
-    #expect(SpikeS4Metadata.descriptor.id == "S4")
-    #expect(!SpikeS4Metadata.descriptor.question.isEmpty)
+@Test func embeddedMetadataDescriptorMatchesThePlan() {
+    #expect(EmbeddedMetadataProbe.descriptor.id == "S4")
+    #expect(!EmbeddedMetadataProbe.descriptor.question.isEmpty)
 }

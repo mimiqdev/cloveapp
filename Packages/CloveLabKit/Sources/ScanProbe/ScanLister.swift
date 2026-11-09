@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import UniformTypeIdentifiers
 
-/// Lists a folder tree three ways with the same filters, so the spike can price
+/// Lists a folder tree three ways with the same filters, so the probe can price
 /// each method and key set.
 ///
 /// Every method returns photo candidates in traversal order. The rejects folder,

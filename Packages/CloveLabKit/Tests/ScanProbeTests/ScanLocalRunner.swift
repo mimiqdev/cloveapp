@@ -1,10 +1,10 @@
-#if CLOVE_S6_LOCAL_RUNNER
+#if CLOVE_SCAN_LOCAL_RUNNER
     import Foundation
-    import SpikeS6Scan
-    import SpikeSupport
+    import ScanProbe
+    import LabSupport
 
-    /// Compile separately with `-D CLOVE_S6_LOCAL_RUNNER` for the Mac or the iOS
-    /// Simulator, the way the S1 runner is built. Arguments: an existing report
+    /// Compile separately with `-D CLOVE_SCAN_LOCAL_RUNNER` for the Mac or the iOS
+    /// Simulator, the way the Folder access runner is built. Arguments: an existing report
     /// output directory, and an optional file count (default 2,000).
     ///
     /// The tree is built below the process's temporary directory and removed
@@ -12,7 +12,7 @@
     /// process reads the Mac's SSD through its own sandbox, so its numbers are
     /// functional evidence, not card-reader numbers.
     @main
-    struct S6LocalRunner {
+    struct ScanLocalRunner {
         static func main() async throws {
             let arguments = CommandLine.arguments
             guard arguments.count >= 2 else {
@@ -22,7 +22,7 @@
             let outputDirectory = URL(fileURLWithPath: arguments[1])
             let fileTarget = arguments.count >= 3 ? Int(arguments[2]) ?? 2_000 : 2_000
             let container = FileManager.default.temporaryDirectory.appendingPathComponent(
-                "clove-s6-local-\(UUID())", isDirectory: true)
+                "clove-scan-local-\(UUID())", isDirectory: true)
             try FileManager.default.createDirectory(
                 at: container, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: container) }
@@ -55,7 +55,7 @@
             let output = outputDirectory.appendingPathComponent(
                 "clove-lab-S6-\(timestamp.string(from: report.createdAt)).json")
             try report.write(to: output)
-            print("S6 report: \(output.path)")
+            print("Scan report: \(output.path)")
         }
     }
 #endif

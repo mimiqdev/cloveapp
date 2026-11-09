@@ -1,5 +1,5 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 
 public struct AccessProbeResult: Sendable {
     public var events: [AccessEvent] = []
@@ -73,12 +73,13 @@ public enum AccessProbes {
         var coordinationError: NSError?
         NSFileCoordinator().coordinate(writingItemAt: url, options: [], error: &coordinationError) {
             coordinated in
-            let directory = coordinated.appendingPathComponent("clove-lab-s1", isDirectory: true)
+            let directory = coordinated.appendingPathComponent(
+                "clove-lab-folder-access", isDirectory: true)
             let probe = directory.appendingPathComponent("probe-\(UUID().uuidString).txt")
             do {
                 try FileManager.default.createDirectory(
                     at: directory, withIntermediateDirectories: true)
-                let payload = Data("Clove S1 write/read-back probe\n".utf8)
+                let payload = Data("Clove Folder access write/read-back probe\n".utf8)
                 try payload.write(to: probe, options: [.withoutOverwriting])
                 let readback = try Data(contentsOf: probe)
                 guard readback == payload else { throw CocoaError(.fileReadCorruptFile) }

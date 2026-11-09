@@ -1,5 +1,5 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 
 /// Point values in the coordinate space named by the field (never pixels).
 public struct DuoRect: Codable, Sendable, Equatable {
@@ -60,7 +60,7 @@ public struct DuoHinge: Codable, Sendable, Equatable {
 }
 
 /// One complete observation, independent of UIKit so continuity and report
-/// semantics can be tested on macOS and reused by P3/P4.
+/// semantics can be tested on macOS and reused by adaptive layouts and state restoration.
 public struct DuoSnapshot: Codable, Sendable, Equatable {
     public var window = DuoRect()
     public var scene = DuoRect()

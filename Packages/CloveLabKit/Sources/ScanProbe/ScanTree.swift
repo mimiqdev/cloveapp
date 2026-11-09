@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Builds the DCIM-like folder tree the spike scans, and deletes it again.
+/// Builds the DCIM-like folder tree the probe scans, and deletes it again.
 ///
 /// The tree mimics a card after a shoot: several `DCIM/1xx…` folders, RAW+JPG
 /// pairs and standalone JPEG, HEIC, and DNG files, a `_Rejected` folder, hidden
@@ -17,7 +17,7 @@ import Foundation
 /// files (APFS); leave it off for a camera card.
 public enum ScanTree {
     /// Folder the generator creates below the chosen container.
-    public static let folderName = "Clove-S6-Scan"
+    public static let folderName = "Clove-Scan"
 
     /// Bytes written into every placeholder file.
     public static let placeholderBytes = 1_024

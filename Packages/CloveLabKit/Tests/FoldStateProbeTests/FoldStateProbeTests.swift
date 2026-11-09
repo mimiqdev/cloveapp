@@ -1,8 +1,8 @@
 import Testing
 
-@testable import SpikeS7Duo
+@testable import FoldStateProbe
 
-@Test func s7DescriptorMatchesThePlan() {
-    #expect(SpikeS7Duo.descriptor.id == "S7")
-    #expect(!SpikeS7Duo.descriptor.question.isEmpty)
+@Test func foldStateDescriptorMatchesThePlan() {
+    #expect(FoldStateProbe.descriptor.id == "S7")
+    #expect(!FoldStateProbe.descriptor.question.isEmpty)
 }

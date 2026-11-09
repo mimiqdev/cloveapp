@@ -1,7 +1,7 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 
-/// Writes spike reports into the tested folder and into the app's Documents
+/// Writes probe reports into the tested folder and into the app's Documents
 /// folder, so a report survives a crash and also appears in Files.
 enum ReportExporter {
     /// `clove-lab-<spike>-<UTC timestamp>.json`, for example

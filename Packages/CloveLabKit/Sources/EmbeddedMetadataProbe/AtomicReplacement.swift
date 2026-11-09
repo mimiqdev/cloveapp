@@ -7,7 +7,7 @@ import Foundation
 enum AtomicReplacement {
     static func write(to url: URL, candidate: (URL) throws -> Void) throws {
         let temporary = url.deletingLastPathComponent().appendingPathComponent(
-            ".s4-\(UUID().uuidString).tmp")
+            ".embedded-metadata-\(UUID().uuidString).tmp")
         defer { try? FileManager.default.removeItem(at: temporary) }
         try candidate(temporary)
         guard rename(temporary.path, url.path) == 0 else {

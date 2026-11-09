@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import SpikeSupport
+import LabSupport
 
 public enum MetadataProbeError: Error, CustomStringConvertible {
     case invalid(String)

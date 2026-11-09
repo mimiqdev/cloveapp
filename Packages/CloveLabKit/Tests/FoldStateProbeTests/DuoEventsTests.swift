@@ -1,8 +1,8 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 import Testing
 
-@testable import SpikeS7Duo
+@testable import FoldStateProbe
 
 @Test func geometryChangesAreLoggedButIdenticalLayoutCallbacksAreNot() {
     var log = DuoLog(runID: "test")

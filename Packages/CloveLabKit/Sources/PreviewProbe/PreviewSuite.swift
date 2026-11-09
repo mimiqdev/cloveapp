@@ -1,6 +1,6 @@
 import Foundation
 import ImageIO
-import SpikeSupport
+import LabSupport
 import UniformTypeIdentifiers
 
 public struct PreviewProgress: Sendable {
@@ -54,7 +54,7 @@ public enum PreviewSuite {
             completed += 1
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "clove-s2-\(UUID())")
+            "clove-previews-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         for file in detailed {

@@ -3,7 +3,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import ImageIO
-import SpikeSupport
+import LabSupport
 
 public enum PreviewMethod: String, CaseIterable, Sendable {
     /// Both creation flags false: diagnostic for what ImageIO exposes, not proof of provenance.
@@ -71,7 +71,7 @@ private final class ResidentSampler: @unchecked Sendable {
     init() {
         baseline = Self.resident()
         peak = baseline
-        timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "clove.s2.memory"))
+        timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "clove.previews.memory"))
         timer.schedule(deadline: .now(), repeating: .milliseconds(5))
         timer.setEventHandler { [weak self] in self?.sample() }
         timer.resume()
@@ -242,7 +242,7 @@ public enum PreviewCacheKey {
             url.standardizedFileURL.path, String(values.fileSize ?? 0),
             String((values.contentModificationDate ?? .distantPast).timeIntervalSince1970),
             request.method.rawValue, String(request.maxPixel), String(request.transform),
-            "s2-v1-srgb",
+            "previews-v1-srgb",
         ]
         let bytes = try JSONEncoder().encode(identity)
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()

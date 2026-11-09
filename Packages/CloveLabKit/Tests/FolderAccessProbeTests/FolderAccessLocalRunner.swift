@@ -1,16 +1,16 @@
-#if CLOVE_S1_LOCAL_RUNNER
+#if CLOVE_FOLDER_ACCESS_LOCAL_RUNNER
     import Foundation
-    import SpikeS1Access
-    import SpikeSupport
+    import FolderAccessProbe
+    import LabSupport
 
-    /// Compile separately with -D CLOVE_S1_LOCAL_RUNNER for macOS or iOS Simulator.
+    /// Compile separately with -D CLOVE_FOLDER_ACCESS_LOCAL_RUNNER for macOS or iOS Simulator.
     /// No document picker / sandbox entitlement claim can be made from this CLI process.
     @main
-    struct S1LocalRunner {
+    struct FolderAccessLocalRunner {
         static func main() async throws {
             let outputDirectory = URL(fileURLWithPath: CommandLine.arguments[1])
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-                "clove-s1-local-\(UUID())")
+                "clove-folder-access-local-\(UUID())")
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: root) }
             let folder = root.appendingPathComponent("picked")
@@ -68,7 +68,7 @@
             let output = outputDirectory.appendingPathComponent(
                 "clove-lab-S1-\(timestamp.string(from: report.createdAt)).json")
             try report.write(to: output)
-            print("S1 local report: \(output.path)")
+            print("Folder access local report: \(output.path)")
         }
     }
 #endif

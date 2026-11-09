@@ -1,5 +1,5 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 import Vision
 
 public struct GroupingRun: Sendable {

@@ -1,10 +1,10 @@
-import SpikeS1Access
-import SpikeSupport
+import FolderAccessProbe
+import LabSupport
 import SwiftUI
 
 @MainActor
 @Observable
-private final class S1Model {
+private final class FolderAccessModel {
     var snapshot: AccessSnapshot?
     var busy = false
     var media: AccessMedia = .local
@@ -16,7 +16,7 @@ private final class S1Model {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
             0]
         experiment = AccessExperiment(
-            storeURL: base.appendingPathComponent("CloveLab/S1/recents-v1.json"))
+            storeURL: base.appendingPathComponent("CloveLab/FolderAccess/recents-v1.json"))
     }
 
     func load() async { snapshot = await experiment.load() }
@@ -48,11 +48,11 @@ private final class S1Model {
     func stopWatch() { watch?.cancel() }
 }
 
-/// Lab-only Recents and measurements. All filesystem work is in the reusable S1 actor.
-struct S1View: View {
+/// Lab-only Recents and measurements. All filesystem work is in the reusable folder-access actor.
+struct FolderAccessView: View {
     @Environment(LabSession.self) private var session
     @Environment(\.scenePhase) private var scenePhase
-    @State private var model = S1Model()
+    @State private var model = FolderAccessModel()
     @State private var exportName: String?
     @State private var confirmFill = false
     @State private var confirmCleanup = false
@@ -90,13 +90,15 @@ struct S1View: View {
                 Button("Read + capacity + read-only hints") { probe(write: false) }
                 Button("Write small file + read back + remove") { probe(write: true) }
                 Text(
-                    "Writes use only clove-lab-s1/. Read-only and capacity values are hints; nil means unavailable. A write passes only after read-back."
+                    "Writes use only clove-lab-folder-access/. Read-only and capacity values are hints; nil means unavailable. A write passes only after read-back."
                 )
                 .font(.caption)
                 Button("Add up to 256 MiB fill file…", role: .destructive) { confirmFill = true }
-                Button("Delete S1 fill files…", role: .destructive) { confirmCleanup = true }
+                Button("Delete folder-access fill files…", role: .destructive) {
+                    confirmCleanup = true
+                }
                 Text(
-                    "Fill only a dedicated small test card or partition. Repeat to reach full; stop after the full error. Cleanup removes only S1 UUID-named fill files."
+                    "Fill only a dedicated small test card or partition. Repeat to reach full; stop after the full error. Cleanup removes only folder-access UUID-named fill files."
                 )
                 .font(.caption)
             }
@@ -135,7 +137,7 @@ struct S1View: View {
         }
         .navigationTitle("S1 · Folder access")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("clovelab.spike.S1")
+        .accessibilityIdentifier("clovelab.probe.folder-access")
         .task { if model.snapshot == nil { await model.load() } }
         .onDisappear { model.stopWatch() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { model.stopWatch() } }
@@ -148,8 +150,10 @@ struct S1View: View {
                 "Use a disposable small test card or partition. This can make other writes fail until you delete the fill files."
             )
         }
-        .confirmationDialog("Delete S1 fill files in this folder?", isPresented: $confirmCleanup) {
-            Button("Delete S1 fill files", role: .destructive) {
+        .confirmationDialog(
+            "Delete folder-access fill files in this folder?", isPresented: $confirmCleanup
+        ) {
+            Button("Delete folder-access fill files", role: .destructive) {
                 model.perform { await $0.cleanFill() }
             }
         }

@@ -1,8 +1,8 @@
 import Testing
 
-@testable import SpikeS1Access
+@testable import FolderAccessProbe
 
-@Test func s1DescriptorMatchesThePlan() {
-    #expect(SpikeS1Access.descriptor.id == "S1")
-    #expect(!SpikeS1Access.descriptor.question.isEmpty)
+@Test func folderAccessDescriptorMatchesThePlan() {
+    #expect(FolderAccessProbe.descriptor.id == "S1")
+    #expect(!FolderAccessProbe.descriptor.question.isEmpty)
 }

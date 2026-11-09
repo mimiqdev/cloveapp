@@ -1,5 +1,5 @@
 import Foundation
-import SpikeSupport
+import LabSupport
 
 /// Progress for the Clove Lab status line.
 public struct ScanProgress: Sendable, Hashable {
@@ -17,7 +17,7 @@ public struct ScanProgress: Sendable, Hashable {
     }
 }
 
-/// Runs the S6 comparison: three listing methods, every key set, three passes,
+/// Runs the Scan comparison: three listing methods, every key set, three passes,
 /// pairing, the rejects-folder variants, and streamed batches.
 ///
 /// All times are one observation per cell, with no percentile. The first pass is
@@ -344,7 +344,7 @@ public enum ScanBenchmark {
             "The rejects comparison walks the rejects folder (post-filter) and then filters by path; skip-rejected is the same scan with the folder excluded.",
             "lazy-stat lists names, then asks each file for all six keys; its total adds that to the names scan. Compare with the all-key scan.",
             "Streaming pairs inside each batch of \(options.batchSize) files, so a RAW+JPEG/HEIF pair split across two batches is not paired until the grid repairs it.",
-            "Proposal for G1: pair a same-name RAW+HEIF in the same folder. When both JPEG and HEIF exist, keep RAW+JPEG and leave HEIF as a standalone item. JPEG preference requires complete-folder pairing or later grid repair.",
+            "Proposal for the production decision: pair a same-name RAW+HEIF in the same folder. When both JPEG and HEIF exist, keep RAW+JPEG and leave HEIF as a standalone item. JPEG preference requires complete-folder pairing or later grid repair.",
             "File content is placeholder bytes unless the tree was built with realistic sizes; a listing reads names and metadata, not pixels.",
         ]
     }

@@ -1,27 +1,27 @@
-import SpikeS7Duo
+import FoldStateProbe
 import SwiftUI
 import UIKit
 
 /// Attached to the full probe viewport, not to a list cell. The window and
 /// scene are read from this view's hierarchy, never UIApplication's first scene.
-struct S7GeometryProbe: UIViewRepresentable {
+struct FoldStateGeometryProbe: UIViewRepresentable {
     var onSample: @MainActor (DuoSnapshot, String) -> Void
 
-    func makeUIView(context: Context) -> S7ProbeView {
-        let view = S7ProbeView()
+    func makeUIView(context: Context) -> FoldStateProbeView {
+        let view = FoldStateProbeView()
         view.onSample = onSample
         view.installHingeObservation()
         return view
     }
 
-    func updateUIView(_ uiView: S7ProbeView, context: Context) {
+    func updateUIView(_ uiView: FoldStateProbeView, context: Context) {
         uiView.onSample = onSample
         uiView.sample(reason: "SwiftUI update")
     }
 }
 
 @MainActor
-final class S7ProbeView: UIView {
+final class FoldStateProbeView: UIView {
     var onSample: (@MainActor (DuoSnapshot, String) -> Void)?
     private var hinge = DuoHinge(availability: .requiresIOS27_1)
 
@@ -29,7 +29,7 @@ final class S7ProbeView: UIView {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         registerForTraitChanges([UITraitHorizontalSizeClass.self, UITraitVerticalSizeClass.self]) {
-            (view: S7ProbeView, _: UITraitCollection) in
+            (view: FoldStateProbeView, _: UITraitCollection) in
             view.sample(reason: "size classes")
         }
     }
