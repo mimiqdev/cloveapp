@@ -5,12 +5,13 @@
 Are previews fast enough? Measure embedded preview extraction time, size, and
 memory per format, and `CIRAWFilter` full decoding, to recommend a thumbnail and
 detail image strategy, cache design, and performance targets for G1. This is
-part 1 of [#13](https://github.com/mimiqdev/cloveapp/issues/13); device conclusions
-remain open for part 2.
-
-2026-11-09 — HIF support: `.HIF`/`.hif` camera HEIF files are now accepted by
-S2's recursive filter. Unit coverage checks mixed-case extensions. A device rerun
-with a Sony HIF is pending; this adds no camera-decoding or performance claim.
+part 2 of [#13](https://github.com/mimiqdev/cloveapp/issues/13), following
+[part 1 / PR #20](https://github.com/mimiqdev/cloveapp/pull/20) and
+[HIF support / PR #28](https://github.com/mimiqdev/cloveapp/pull/28). It finishes
+with the available iPhone device evidence. The product owner deferred the
+remaining device checks on 2026-11-09 to
+[#29](https://github.com/mimiqdev/cloveapp/issues/29); they do not block this
+report. G1's choice remains with the product owner.
 
 ## What was tested
 
@@ -37,6 +38,27 @@ with a Sony HIF is pending; this adds no camera-decoding or performance claim.
   are preserved on issue #13 because `gh` cannot attach local files to issues;
   JSON is kept out of git. Local copies
   and build/check logs are in this checkout's ignored `.build/s2/` directory.
+- **Physical iPhone 17 Pro Max (`iPhone19,4`), iOS 27.2**, Clove Lab 0.1.0,
+  local storage through the folder picker, in two owner-returned runs:
+  - **Run 1, build 26110818:** one Sony A1 II ARW (`MMQ05184.ARW`) measured.
+    A companion HIF was present but skipped by the pre-PR-28 extension filter;
+    this is missing coverage, not a decoding failure.
+  - **Run 2, build 26110903:** ten Sony A1 II ARW+HIF burst pairs found (20
+    files); throughput covers all 20. Detailed variants and cache measurements
+    cover only the first 12 sorted files: six pairs, `MMQ02678`–`MMQ02683`,
+    with `.ARW` and `.HIF` extensions. The S4 folder from the same session is
+    outside S2's measurements. Native rendered output is 5760×8640 after
+    orientation (8640×5760 camera dimensions).
+  - Original reports were read in place without modification. The citations
+    below identify the exact private artifacts; raw JSON and owner folder
+    paths are not published. Only measurements and safe file/model names are
+    quoted. SHA-256 was computed with `shasum -a 256`:
+
+    | Run | Report file name | SHA-256 |
+    | --- | --- | --- |
+    | 1 | `clove-lab-S2-20261109T022003Z.json` | `357d1c22f066342c4ccb0da32d763e689f7e7b61c19a4db6e1609539aa8c436b` |
+    | 2 | `clove-lab-S2-20261109T033803Z.json` | `3aa36dee06a999ef13244fadb68e82672ff5f5faf05791f8d3d110ade931cc5e` |
+
 - A generated 2400×1600 JPEG with **no embedded thumbnail**, EXIF orientation 6,
   is created in a per-run temporary directory. It supplies the missing-preview
   and rotation control without changing a fixture. The test checks there is no
@@ -77,7 +99,8 @@ Run `formats` separately before a camera folder so every format is represented.
 Reports identify each file by relative path, including subfolders. Full RAW is
 on by default and can be turned off explicitly; `context.fullRAW` records it.
 Typical suite time should be allowed **2–10 minutes** on hardware, depending on
-RAW size/card speed; this is a planning allowance pending device measurement.
+RAW size/card speed; this remains a planning allowance for deferred card runs.
+The returned JSON does not measure end-to-end suite or export duration.
 The measured ten-file suite took about 9 s inside the warm macOS test process.
 The simulator's individually timed operations totalled about 57 s, under the
 shared host load; setup and report export add time.
@@ -322,12 +345,148 @@ version, account for Files-provider timestamp precision, and use atomic cache
 writes plus eviction. This spike's direct JPEG write goes only to a unique
 temporary directory; it is not a production disk cache.
 
-### Physical-device results — pending part 2
+### Physical device: local A1 II previews and native renders
 
-| Device / OS | Formats: time, output dimensions, memory | 200+ RAW: concurrency 1/2/4/8 | Cancellation / export |
+All rows below are **measured** on iPhone 17 Pro Max / iOS 27.2, with run
+provenance explicit. Times are milliseconds to materialized CPU pixels, not
+presentation. Run 1 is one observation per variant; run 2 uses the ordinary
+median (mean of the middle two of six observations), with min–max where shown.
+No p95, repeated-trial, or cold-I/O result follows from these small samples.
+`E` = `embeddedOnly`, `I` = `IfAbsent`, `A` = `Always`. All outputs here apply
+orientation. Decoded MiB is bitmap row bytes × height / 2²⁰.
+
+| Status | Format / request | Time ms (run 2: median; range) | Actual output | Decoded MiB |
+| --- | --- | --- | --- | --- |
+| Measured, run 1 | ARW E400, first variant | 122.6 | 267×400 | 0.409 |
+| Measured, run 1 | ARW I400 / A400 | 8.7 / 8.7 | 267×400 | 0.409 |
+| Measured, run 1 | ARW E2000 / I2000 / A2000 | 12.2 / 11.8 / 12.2 | 1080×1616 | 6.66 |
+| Measured, run 1 | ARW RAW 2000 / native | 717.4 / 502.7 | 1334×2000 / 5760×8640 | 10.19 / 189.84 |
+| Measured, run 2 | ARW E400 | 14.4; 13.4–36.5 | 267×400 | 0.409 |
+| Measured, run 2 | ARW I400 | 8.3; 7.9–12.6 | 267×400 | 0.409 |
+| Measured, run 2 | ARW A400 | 8.8; 8.4–11.6 | 267×400 | 0.409 |
+| Measured, run 2 | ARW E2000 / I2000 / A2000 | 12.2 / 12.4 / 12.7 | 1080×1616 | 6.66 |
+| Measured, run 2 | ARW RAW 2000 | 592.8; 578.9–676.2 | 1334×2000 | 10.19 |
+| Measured, run 2 | ARW RAW native | 529.1; 518.0–544.4 | 5760×8640 | 189.84 |
+| Measured, run 2 | HIF E400 | 16.0; 14.6–19.6 | 267×400 | 0.513 |
+| Measured, run 2 | HIF I400 | 10.5; 10.1–10.9 | 267×400 | 0.513 |
+| Measured, run 2 | HIF A400 | 53.2; 51.3–116.6 | 266×400 | 0.406 |
+| Measured, run 2 | HIF E2000 / I2000 | 7.2 / 6.4 | 1080×1616 | 6.66 |
+| Measured, run 2 | HIF A2000 | 55.6; 52.2–57.7 | 1334×2000 | 10.18 |
+| Measured, run 2 | HIF CIRAWFilter control 2000 | 1773.9; 1617.2–1937.4 | 1334×2000 | 10.19 |
+| Measured, run 2 | HIF CIRAWFilter control native | 1755.6; 1678.7–1852.5 | 5760×8640 | 189.84 |
+| Measured, runs 1 / 2 | ARW E20000 diagnostic | 12.1 / 12.3 | 1080×1616 | 6.66 |
+| Measured, run 2 | HIF E20000 diagnostic | 8.2 | 1080×1616 | 6.66 |
+| Measured, run 1 | ARW EXIF 6, I400 without / with transform | 8.0 / 8.7 | 400×267 / 267×400 | 0.407 / 0.409 |
+| Measured, run 2 | ARW / HIF EXIF 8, I400 without transform | 8.3 / 12.9 | 400×267 (both) | 0.407 / 0.509 |
+| Measured, runs 1 / 2 | Synthetic no-thumbnail JPEG, E400 | `noThumbnail` in both runs | No pixels, expected | 0 |
+| Measured, runs 1 / 2 | Synthetic JPEG I400 with transform | 3.6 / 3.7 | 267×400; untransformed 400×267 | 0.409 |
+
+Every detailed camera variant succeeded (10/10 in run 1, 120/120 in run 2).
+The synthetic control's two expected `noThumbnail` results per run are the only
+method failures. Orientation dimensions are correct for the measured EXIF 6/8
+samples; this does not establish visual color fidelity or every mirrored case.
+
+Both A1 II formats expose only **1616 px on the long side** through the
+embedded-only diagnostic, even at a 20000 px cap. A 2000 px `IfAbsent` request
+is a cap, not a guarantee of 2000 px detail. ARW source-property rows themselves
+report 1616×1080, so I2 must obtain native sensor dimensions from the RAW route
+rather than treating those ImageIO properties as native resolution. The native
+render demonstrates 8640×5760 before orientation. Neither `Always` on ARW nor
+upscaling the embedded image supplies more focus detail on this device.
+
+The first run's 122.6 ms E400 call precedes the 8.7 ms I/A400 calls. Fixed order
+and unflushed system caches prevent attributing that gap entirely to the flag.
+Run 2 likewise measures one variant per file, not six repeated cold trials.
+
+**HIF is rendered camera HEIF, not RAW.** Its `raw` tag denotes the suite's
+CIRAWFilter control. The approximately 1.8 s result must not be attributed to
+every HIF decoding route: ImageIO A2000 produced 2000 px in 55.6 ms. That is a
+separate generated-preview route; it does not establish native 100% quality or
+its memory at native size. For routine grid/loupe previews, retain the fast
+embedded path and never route HIF through a full-resolution decode. For an
+ARW+HIF pair, ARW supplies actual detail beyond the embedded 1616 px limit.
+
+### Physical device: sampled process memory
+
+Absolute sampled RSS includes prior operations, frameworks and app state, with
+a 5 ms sampling interval. It is a lower bound on the peak, not an isolated
+allocation budget. Run 2 renders ARW then HIF repeatedly and leaves a high
+baseline; subtracting the baseline is not a reliable working-set estimate.
+
+| Status | Method | Sampled peak RSS MiB (median / maximum) |
+| --- | --- | --- |
+| Measured, run 1 | ARW RAW 2000 | 413.1 / 413.1 |
+| Measured, run 1 | ARW RAW native | 632.0 / 632.0 |
+| Measured, run 2 | ARW RAW 2000 | 1047.7 / 1145.9 |
+| Measured, run 2 | ARW RAW native | 863.6 / 991.9 |
+| Measured, run 2 | HIF CIRAWFilter control 2000 | 932.0 / 1097.3 |
+| Measured, run 2 | HIF CIRAWFilter control native | 1304.3 / 1438.7 |
+
+The last row is **1.27 GiB median / 1.40 GiB maximum** (about 1.37 / 1.51 GB
+in decimal units). This is evidence against full HIF rendering for previews,
+not a safe process ceiling. A native A1 II bitmap alone is 189.84 MiB. The
+reports contain no memory-pressure notifications, post-run recovery trace,
+GPU allocation inventory or sustained-load test. Successful report export
+shows completion of these runs, not safety under repeated navigation.
+
+### Physical device: grid throughput and cancellation
+
+Run 2 uses all **20 files, ten ARW+HIF pairs**, as independent thumbnail jobs,
+with I400, no app cache, and pass order 1, 2, 4, 8. Every pass succeeded 20/20.
+This is neither 20 unique photos nor a pair-aware production pipeline.
+
+| Status | Concurrency | Elapsed ms | Successful file thumbnails/s |
 | --- | --- | --- | --- |
-| iPhone 17 Pro Max / record installed iOS version | **pending** | **pending** | **pending** |
-| iPad Pro / record model and installed iPadOS version | **pending** | **pending** | **pending** |
+| Measured, run 2 | 1 | 232.3 | 86.1 |
+| Measured, run 2 | 2 | 110.1 | 181.6 |
+| Measured, run 2 | 4 | 69.5 | 287.6 |
+| Measured, run 2 | 8 | 56.6 | 353.6 |
+
+Four workers give 1.58× the two-worker throughput; eight give another 1.23×.
+These very short passes cannot establish sustained thermal/memory behavior,
+pair-aware throughput or cold-card latency. Run 1 had only one file: its
+102–124/s results cannot measure concurrency scaling.
+
+| Status | Automatic cancellation probe | Drain ms | Result |
+| --- | --- | --- | --- |
+| Measured, run 1 | ARW I400 | 6.7 | Cancelled result discarded |
+| Measured, run 1 | ARW RAW **2000**, not native-size output | 455.3 | Cancelled result discarded |
+| Measured, run 2 | ARW I400 | 6.9 | Cancelled result discarded |
+| Measured, run 2 | ARW RAW **2000**, not native-size output | 544.3 | Cancelled result discarded |
+
+The preliminary reading's “full-RAW cancellation” describes demosaicing work;
+these probes request 2000 px output. They do not measure cancelling native-size
+output, HIF rendering, or the manual Cancel button's UI response. They confirm
+that an in-flight RAW can occupy its worker for roughly half a second after
+cancellation. Keep that slot occupied until native work drains; discard stale
+pixels and cancel queued requests before entry.
+
+### Physical device: thumbnail cache
+
+I400 inputs, NSCache warmed lookup and temporary JPEG quality-0.8 disk entries.
+Run 1 samples one ARW; run 2 samples six pairs (12 files). Reads are warm local
+filesystem reads including decode; cache directories are removed by the suite.
+
+| Status | Measurement | Median (range where useful) |
+| --- | --- | --- |
+| Measured, run 1 | Memory lookup / JPEG encode-write / read-decode | 0.000375 / 7.10 / 3.63 ms |
+| Measured, run 1 | Disk entry / decoded bitmap | 19507 / 428800 B |
+| Measured, run 2 | Memory lookup; hits | 0.000458 ms; 12/12 |
+| Measured, run 2 | JPEG encode + write | 0.96 ms (0.90–6.96) |
+| Measured, run 2 | Disk read + decode | 1.74 ms (1.34–2.07) |
+| Measured, run 2 | Disk entry | 40150 B (38746–41617); mean 40199 B |
+| Measured, run 2 | Decoded bitmap | ARW 428800 B; HIF 537600 B; mean 483200 B |
+
+Extrapolating run 2's mean to **2000 cached photo thumbnails** gives **76.7 MiB
+disk / 921.6 MiB decoded RAM**. With ARW chosen for paired grid thumbnails,
+2000 × 428800 B is **817.9 MiB** decoded; disk size remains scene-dependent.
+This is a storage estimate, not a 2000-photo device measurement. Cache one grid
+variant per logical pair, not both files. A 64 MiB decoded grid budget holds
+about 156 measured ARW thumbnails or 124 HIF thumbnails before overhead; a
+256 MiB disk budget has room for roughly 6677 entries at the mixed-sample mean.
+File/index overhead and eviction need headroom. These local cache results
+support the two-tier design; they do not settle timestamp/provider identity or
+card I/O behavior.
 
 ## Conclusion
 
