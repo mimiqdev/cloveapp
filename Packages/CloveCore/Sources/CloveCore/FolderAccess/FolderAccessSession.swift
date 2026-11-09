@@ -20,6 +20,7 @@ public actor FolderAccessSession {
     /// The Recent that owns this session (PRD P0-02).
     public nonisolated let recentID: UUID
     /// How this open established identity; `.weak` is accepted provisionally until #29.
+    /// A pick is verified when the folder supplied both keys, and weak when it did not.
     public nonisolated let identityCheck: FolderIdentityCheck
 
     private let scope: any FolderAccessScope

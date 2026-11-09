@@ -39,6 +39,11 @@ public struct FolderIdentityKeys: Codable, Hashable, Sendable {
         self.fileIdentifier = fileIdentifier
     }
 
+    /// Whether both keys are present, which is what a verified comparison needs.
+    public var isComplete: Bool {
+        volumeUUID != nil && fileIdentifier != nil
+    }
+
     /// Compares these saved keys with the keys read from the folder now.
     ///
     /// A comparable key that differs is a mismatch, never a silent switch (PRD P0-02). Complete

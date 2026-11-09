@@ -66,7 +66,8 @@ public actor FolderAccess {
     ///
     /// Access starts before the validating read, and the folder is only remembered after that read
     /// and the bookmark succeed. An existing record with the same identity keys keeps its ID, so
-    /// marks and caches stay keyed; a path or volume name alone never matches.
+    /// marks and caches stay keyed; a path or volume name alone never matches. A folder that cannot
+    /// supply both identity keys opens provisionally (`.weak`) until #29 reports which volumes do.
     public func pick(_ url: URL) -> FolderOpenResult {
         let scopeIsHeld = scope.startAccessing(url)
         func failure(_ failure: FolderAccessFailure) -> FolderOpenResult {
@@ -119,7 +120,9 @@ public actor FolderAccess {
             return failure(.storageUnavailable(Self.storeError(error)))
         }
         let session = makeSession(
-            for: recent, rootURL: url, identityCheck: .verified, scopeIsHeld: scopeIsHeld)
+            for: recent, rootURL: url,
+            identityCheck: facts.identityKeys.isComplete ? .verified : .weak,
+            scopeIsHeld: scopeIsHeld)
         return .opened(OpenedFolder(recent: recent, session: session))
     }
 

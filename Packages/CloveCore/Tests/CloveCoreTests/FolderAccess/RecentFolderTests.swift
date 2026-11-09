@@ -43,3 +43,10 @@ import CloveCore
     let data = try JSONEncoder().encode(record)
     #expect(try JSONDecoder().decode(RecentFolder.self, from: data) == record)
 }
+
+@Test func identityKeysAreCompleteOnlyWhenBothArePresent() {
+    #expect(FolderIdentityKeys(volumeUUID: "V", fileIdentifier: "F").isComplete)
+    #expect(!FolderIdentityKeys(volumeUUID: "V").isComplete)
+    #expect(!FolderIdentityKeys(fileIdentifier: "F").isComplete)
+    #expect(!FolderIdentityKeys().isComplete)
+}
