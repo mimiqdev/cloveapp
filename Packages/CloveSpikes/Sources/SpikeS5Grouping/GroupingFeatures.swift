@@ -9,7 +9,7 @@ public enum GroupingFeatureError: Error { case noPreview, noFeature, noBitmap }
 /// worker task. Only scalar results and bounded JPEG thumbnails reach the UI.
 public enum GroupingFeatures {
     public static func preview(url: URL, maxPixel: Int) throws -> CGImage {
-        let raster = ["jpg", "jpeg", "heic", "heif", "png"].contains(url.pathExtension.lowercased())
+        let raster = GroupingSuite.rasterExtensions.contains(url.pathExtension.lowercased())
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: raster,
             kCGImageSourceCreateThumbnailFromImageIfAbsent: false,

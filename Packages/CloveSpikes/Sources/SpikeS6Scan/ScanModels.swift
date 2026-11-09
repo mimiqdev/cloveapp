@@ -1,4 +1,5 @@
 import Foundation
+import SpikeSupport
 
 /// How a scanner walks a folder tree.
 public enum ScanMethod: String, CaseIterable, Sendable {
@@ -206,8 +207,8 @@ public enum ScanRule {
     ]
     /// JPEG extensions that pair with a same-name RAW.
     public static let jpegExtensions: Set<String> = ["jpg", "jpeg"]
-    /// HEIC/HEIF, always standalone because no camera writes a matching HEIC.
-    public static let heicExtensions: Set<String> = ["heic", "heif"]
+    /// HEIC/HEIF, including camera .HIF files that can pair with a same-name RAW.
+    public static let heicExtensions = PhotoExtensions.heif
 
     /// Every extension the scan returns as a photo.
     public static let photoExtensions: Set<String> =
@@ -255,11 +256,12 @@ public struct ScanOptions: Sendable, Hashable {
     }
 }
 
-/// A photo the grid shows: one primary file, plus the paired JPEG when there is one.
+/// A photo the grid shows: one primary file, plus a paired JPEG or HEIF when present.
 public struct ScannedPhoto: Sendable, Hashable {
     /// RAW when the item has a pair, otherwise the single file (JPEG, HEIC, or DNG).
     public var primary: URL
-    /// Same-name JPEG in the same folder, when the primary is a RAW.
+    /// Same-name JPEG or HEIF in the same folder, when the primary is a RAW.
+    /// The historical spike property name is retained for report consumers.
     public var pairedJPEG: URL?
     /// Primary file name without its extension.
     public var baseName: String
@@ -273,7 +275,7 @@ public struct ScannedPhoto: Sendable, Hashable {
         self.relativeDirectory = relativeDirectory
     }
 
-    /// `true` when a RAW and a JPEG share the item's cell.
+    /// `true` when a RAW and a JPEG or HEIF share the item's cell.
     public var isPaired: Bool {
         pairedJPEG != nil
     }

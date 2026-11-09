@@ -1,12 +1,12 @@
 import Foundation
 
-/// Pairs a RAW and a JPEG that share a base name in the same folder, and leaves
+/// Pairs a RAW and a JPEG or HEIF that share a base name in the same folder, and leaves
 /// everything else as a standalone photo (P0-01 "Scan scope").
 public enum ScanPairing {
     /// Turns listed files into grid photos.
     ///
-    /// A RAW and a same-name JPEG in one folder become one photo with the RAW as
-    /// the primary file. A JPEG, HEIC, or DNG without a partner stays one photo.
+    /// A RAW and a same-name JPEG or HEIF become one photo with RAW as primary.
+    /// JPEG wins when both companions exist; the HEIF remains standalone.
     /// Matching is case-insensitive in both the base name and the extension, and
     /// never crosses a folder boundary. Sidecars and other files are ignored.
     ///
@@ -18,7 +18,8 @@ public enum ScanPairing {
     public static func photos(
         from entries: [ScanEntry],
         rawExtensions: Set<String> = ScanRule.rawExtensions,
-        jpegExtensions: Set<String> = ScanRule.jpegExtensions
+        jpegExtensions: Set<String> = ScanRule.jpegExtensions,
+        heifExtensions: Set<String> = ScanRule.heicExtensions
     ) -> [ScannedPhoto] {
         struct Key: Hashable {
             var directory: String
@@ -27,6 +28,7 @@ public enum ScanPairing {
         struct Group {
             var raw: [ScanEntry] = []
             var jpeg: [ScanEntry] = []
+            var heif: [ScanEntry] = []
             var other: [ScanEntry] = []
         }
         var groups: [Key: Group] = [:]
@@ -37,6 +39,8 @@ public enum ScanPairing {
                 groups[key, default: Group()].raw.append(entry)
             } else if ScanRule.hasExtension(entry.relativePath, in: jpegExtensions) {
                 groups[key, default: Group()].jpeg.append(entry)
+            } else if ScanRule.hasExtension(entry.relativePath, in: heifExtensions) {
+                groups[key, default: Group()].heif.append(entry)
             } else {
                 groups[key, default: Group()].other.append(entry)
             }
@@ -46,11 +50,14 @@ public enum ScanPairing {
         for (key, group) in groups {
             let raws = group.raw.sorted { $0.relativePath < $1.relativePath }
             let jpegs = group.jpeg.sorted { $0.relativePath < $1.relativePath }
+            let heifs = group.heif.sorted { $0.relativePath < $1.relativePath }
             let others = group.other.sorted { $0.relativePath < $1.relativePath }
+            // Prefer JPEG, then HEIF. Only the first RAW consumes one companion.
+            let companions = jpegs + heifs
             if let raw = raws.first {
                 photos.append(
                     ScannedPhoto(
-                        primary: raw.url, pairedJPEG: jpegs.first?.url, baseName: raw.baseName,
+                        primary: raw.url, pairedJPEG: companions.first?.url, baseName: raw.baseName,
                         relativeDirectory: key.directory))
                 // A second file with the same base name is its own photo, not a
                 // silent overwrite of the first.
@@ -60,26 +67,25 @@ public enum ScanPairing {
                             primary: extra.url, baseName: extra.baseName,
                             relativeDirectory: key.directory))
                 }
-                for extra in jpegs.dropFirst() {
+                for extra in companions.dropFirst() {
                     photos.append(
                         ScannedPhoto(
                             primary: extra.url, baseName: extra.baseName,
                             relativeDirectory: key.directory))
                 }
-            } else if let jpeg = jpegs.first {
+            } else if let jpeg = companions.first {
                 photos.append(
                     ScannedPhoto(
                         primary: jpeg.url, baseName: jpeg.baseName,
                         relativeDirectory: key.directory))
-                for extra in jpegs.dropFirst() {
+                for extra in companions.dropFirst() {
                     photos.append(
                         ScannedPhoto(
                             primary: extra.url, baseName: extra.baseName,
                             relativeDirectory: key.directory))
                 }
             }
-            // HEIC and other standalone formats never pair, even with a same-name
-            // JPEG, because no camera writes that combination.
+            // Any remaining formats stay standalone.
             for entry in others {
                 photos.append(
                     ScannedPhoto(

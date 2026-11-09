@@ -45,6 +45,11 @@ public struct GroupingRun: Sendable {
 }
 
 public enum GroupingSuite {
+    static let rasterExtensions: Set<String> = Set(["jpg", "jpeg", "png"]).union(
+        PhotoExtensions.heif)
+    private static let pairedExtensions: Set<String> = Set(["jpg", "jpeg"]).union(
+        PhotoExtensions.heif)
+
     public static func files(in folder: URL) throws -> [URL] {
         let manager = FileManager.default
         var enumerationError: Error?
@@ -57,11 +62,12 @@ public enum GroupingSuite {
                 })
         else { throw CocoaError(.fileReadUnknown) }
         let raw = ["cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "dng"]
+        let extensions = Set(raw).union(pairedExtensions)
         var files: [URL] = []
         for case let file as URL in enumerator {
             if file.lastPathComponent == "_Rejected" { enumerator.skipDescendants(); continue }
             guard
-                (raw + ["jpg", "jpeg", "heic", "heif"]).contains(file.pathExtension.lowercased()),
+                extensions.contains(file.pathExtension.lowercased()),
                 try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
             else { continue }
             files.append(file)
@@ -72,7 +78,7 @@ public enum GroupingSuite {
                 $0.deletingPathExtension().path
             })
         return files.filter {
-            !(["jpg", "jpeg"].contains($0.pathExtension.lowercased())
+            !(pairedExtensions.contains($0.pathExtension.lowercased())
                 && rawStems.contains($0.deletingPathExtension().path))
         }.sorted { $0.path < $1.path }
     }
@@ -253,7 +259,7 @@ public enum GroupingSuite {
                     "Missing capture times excluded; missing serial falls back to model; unknown model/serial can mix unidentified bodies. No offset uses camera wall time in a UTC surrogate zone.",
                     "Synthetic fixture duplicates are not real bursts: exact repeats at 0.2s, same scene after 3s (split), unrelated scenes at 0.8s (split). No accuracy claim.",
                     "Only explicitly reviewed boundaries are labels. Unreviewed entries are excluded from the labeled sweep. No photo or XMP is modified.",
-                    "At most 600 primary photos; RAW+JPEG in same folder use RAW only. Missing feature conservatively splits. Device calibration pending.",
+                    "At most 600 primary photos; RAW+JPEG or RAW+HEIF in the same folder use RAW only, including when both companions exist. Missing feature conservatively splits. Device calibration pending.",
                 ]), photos: photos, thumbnails: thumbnails, boundaries: boundaries, groups: groups)
     }
 

@@ -101,9 +101,9 @@ private final class ResidentSampler: @unchecked Sendable {
 }
 
 public enum PreviewMeasurement {
-    public static let extensions: Set<String> = [
-        "cr3", "nef", "arw", "raf", "orf", "rw2", "dng", "jpg", "jpeg", "heic", "heif",
-    ]
+    public static let extensions: Set<String> = Set([
+        "cr3", "nef", "arw", "raf", "orf", "rw2", "dng", "jpg", "jpeg",
+    ]).union(PhotoExtensions.heif)
 
     /// Deterministic recursive list, excluding hidden files and the default rejects folder.
     public static func files(in folder: URL) throws -> [URL] {

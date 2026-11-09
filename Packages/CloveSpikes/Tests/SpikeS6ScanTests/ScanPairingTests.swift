@@ -12,11 +12,11 @@ struct ScanPairingTests {
         for method in ScanMethod.allCases {
             let listing = try ScanLister.list(folder: container, method: method, keySet: .all)
             let photos = ScanPairing.photos(from: listing.sortedByPath())
-            #expect(photos.count == 8, "\(method.displayName) paired a different way")
+            #expect(photos.count == 11, "\(method.displayName) paired a different way")
             #expect(
                 photos.map(\.baseName) == [
                     "IMG_0001", "IMG_0002", "IMG_0003", "IMG_0004", "IMG_0005", "IMG_0006",
-                    "IMG_0001", "IMG_0002",
+                    "IMG_0007", "IMG_0008", "IMG_0008", "IMG_0001", "IMG_0002",
                 ])
 
             let first = try #require(photos.first)
@@ -44,6 +44,14 @@ struct ScanPairingTests {
             let pairedLowercaseExtension = try #require(photos.first { $0.baseName == "IMG_0004" })
             #expect(pairedLowercaseExtension.primary.pathExtension == "CR3")
             #expect(pairedLowercaseExtension.pairedJPEG?.lastPathComponent == "IMG_0004.jpeg")
+
+            let sony = try #require(photos.first { $0.baseName == "IMG_0007" })
+            #expect(sony.primary.pathExtension == "ARW")
+            #expect(sony.pairedJPEG?.pathExtension == "HIF")
+            let triple = photos.filter { $0.baseName == "IMG_0008" }
+            #expect(triple.count == 2)
+            #expect(triple.first { $0.isPaired }?.pairedJPEG?.pathExtension == "JPG")
+            #expect(triple.first { !$0.isPaired }?.primary.pathExtension == "hif")
 
             // The sidecar and the unsupported files are not photos.
             #expect(!photos.contains { $0.primary.pathExtension == "XMP" })
@@ -76,6 +84,22 @@ struct ScanPairingTests {
         #expect(photos.count == 2)
         #expect(photos.filter(\.isPaired).count == 1)
         #expect(photos.first { $0.isPaired }?.primary.pathExtension == "CR3")
+    }
+
+    @Test func heifPairingIsCaseInsensitiveAndNeverCrossesFolders() {
+        let entries = [
+            entry("a/sony.ARW"), entry("a/SONY.HiF"), entry("b/sony.ARW"),
+            entry("c/sony.hif"), entry("a/triple.ARW"), entry("a/triple.HIF"),
+            entry("a/triple.JPG"),
+        ]
+        let forward = ScanPairing.photos(from: entries)
+        let reversed = ScanPairing.photos(from: entries.reversed())
+        #expect(forward == reversed)
+        #expect(forward.count == 5)
+        #expect(forward.filter(\.isPaired).count == 2)
+        #expect(
+            forward.first { $0.baseName == "sony" }?.pairedJPEG?.lastPathComponent == "SONY.HiF")
+        #expect(forward.filter { $0.relativeDirectory != "a" }.allSatisfy { !$0.isPaired })
     }
 
     @Test func photosAreOrderedByFolderThenBaseName() {
