@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// Where delivered pixels came from (G1 "Preview, detail (I2)").
-public enum DetailQuality: String, CaseIterable, Sendable {
+public enum DetailQuality: String, Sendable {
     /// A camera-rendered preview embedded in a RAW or HIF file.
     ///
     /// G1 "Preview, detail (I2)": the HIF's embedded preview is shown first for RAW + HIF,
@@ -21,7 +21,7 @@ public enum DetailQuality: String, CaseIterable, Sendable {
 ///
 /// PRD P0-04 requires a visible explanation instead of a blank image or a silent swap, so a
 /// shortfall is always reported with the pixels that stand in for it.
-public enum DetailLimitation: String, CaseIterable, Sendable {
+public enum DetailLimitation: String, Sendable {
     /// The full RAW render failed; the preview stays the best result (G1 "Preview, detail").
     case rawRenderFailed
     /// No route supplies more pixels: a HIF is never fully decoded (G1 "Preview, detail"),
@@ -34,7 +34,7 @@ public enum DetailLimitation: String, CaseIterable, Sendable {
 /// These are explicit states, never a blank image (PRD Supported files: "a blank preview
 /// must not be presented as loaded"). Cancellation is not a failure: a cancelled or
 /// superseded request throws `CancellationError` instead.
-public enum DetailFailure: String, CaseIterable, Sendable {
+public enum DetailFailure: String, Sendable {
     /// The file could not be opened as an image, for example a truncated or foreign file.
     case cannotOpen
     /// The file opened but holds no preview the pipeline may show without an unbounded
