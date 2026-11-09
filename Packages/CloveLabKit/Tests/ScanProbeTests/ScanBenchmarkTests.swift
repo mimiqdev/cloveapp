@@ -130,7 +130,8 @@ struct ScanBenchmarkTests {
             "placeholder bytes extended to plausible photo sizes with a sparse write on APFS"
         report.context["host"] = "macOS swift test, debug compilation"
         report.notes.append(
-            "macOS numbers were taken on a shared, loaded host with other spike workers running.")
+            "OS caches were not flushed; record host load and concurrent work alongside this report."
+        )
         let output = URL(fileURLWithPath: path)
         try FileManager.default.createDirectory(
             at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
