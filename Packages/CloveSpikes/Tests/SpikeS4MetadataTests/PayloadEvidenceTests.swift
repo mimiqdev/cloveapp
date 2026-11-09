@@ -76,10 +76,23 @@ struct PayloadEvidenceTests {
             try PayloadEvidence.read(
                 heif(tile: 7, metadata: 11, auxiliaryOwner: 99), extension: "hif")
         }
-        #expect(throws: (any Error).self) {
-            try PayloadEvidence.read(
-                heif(tile: 7, metadata: 11, disconnected: true), extension: "hif")
-        }
+        // An unreferenced item is compared by content, so renumbering still matches and
+        // a byte change in that item still fails.
+        let disconnected = try PayloadEvidence.read(
+            heif(tile: 7, metadata: 11, disconnected: true), extension: "hif")
+        #expect(disconnected.contains { $0.role.hasPrefix("HEIF/unreferenced/") })
+        #expect(
+            PayloadEvidence.contentMatches(
+                disconnected,
+                try PayloadEvidence.read(
+                    heif(tile: 7, metadata: 99, renumbered: true, disconnected: true),
+                    extension: "hif")))
+        #expect(
+            !PayloadEvidence.contentMatches(
+                disconnected,
+                try PayloadEvidence.read(
+                    heif(tile: 7, metadata: 11, thumbnailByte: 99, disconnected: true),
+                    extension: "hif")))
     }
 
     @Test(arguments: [false, true])

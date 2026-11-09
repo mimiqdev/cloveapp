@@ -377,7 +377,19 @@ public enum PayloadEvidence {
         }
         var pending = [primary]
         var cursor = 0
-        while cursor < pending.count {
+        while true {
+            if cursor == pending.count {
+                // An item not reachable from pitm (for example a camera preview with no
+                // reference) is keyed by its content signature, never by its item ID.
+                let unassigned = payloads.keys.filter { roles[$0] == nil }
+                guard
+                    let root = unassigned.min(by: {
+                        (signatures[$0] ?? "", $0) < (signatures[$1] ?? "", $1)
+                    }), let payload = payloads[root]
+                else { break }
+                roles[root] = "HEIF/unreferenced/\(signatures[root] ?? "")/\(payload.role)"
+                pending.append(root)
+            }
             let id = pending[cursor]
             cursor += 1
             let owner = try role(id)
@@ -407,10 +419,6 @@ public enum PayloadEvidence {
                 roles[target] = "\(owner)/\(edge)/\(payload.role)"
                 pending.append(target)
             }
-        }
-        guard roles.count == payloads.count else {
-            throw MetadataProbeError.invalid(
-                "HEIF image item is not connected to the primary image")
         }
         var result = try payloads.map { id, payload in
             var value = payload
