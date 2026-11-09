@@ -262,9 +262,10 @@ public actor MarkUndoHistory {
     ///
     /// G1 decision 5 makes Move rejects the durable Reject result: a moved photo's files are
     /// under `_Rejected` and restoring them is the user's job, so undo must never write to the
-    /// old path. Pass C6's moved identities; every entry loses those photos, an entry left with
-    /// no photos is removed, and a moving photo also blocks a step already in flight. A
-    /// finishing-action entry keeps its group record and restores only the photos it still has.
+    /// old path. Pass C6's ``RejectMoveResult/movedIdentities``; every entry loses those photos,
+    /// an entry left with no photos is removed, and a moving photo also blocks a step already in
+    /// flight. A finishing-action entry keeps its group record and restores only the photos it
+    /// still has.
     public func forgetMovedPhotos(_ photos: [PhotoIdentity]) {
         guard !photos.isEmpty else { return }
         let moved = Set(photos)
