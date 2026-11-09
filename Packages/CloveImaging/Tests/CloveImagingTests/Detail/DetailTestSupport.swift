@@ -241,16 +241,43 @@ func letEntriesFinish(_ gate: DetailReadGate, previews: Int = 0, natives: Int = 
     try #require(donePreviews >= previews && doneNatives >= natives)
 }
 
+/// An embedded-preview size a test substitutes for a named file.
+///
+/// The fixtures expose no usable camera HIF preview and no tiny RAW preview, so these two
+/// preview shapes are supplied here rather than by adding binaries to the cache.
+struct DetailPreviewSubstitution: Sendable {
+    /// The file name whose embedded preview this substitution replaces.
+    let file: String
+    let width: Int
+    let height: Int
+}
+
 /// Forwards reads to the real renderer while reporting each entry to a gate.
 struct GatedDetailReader: DetailReading {
     let gate: DetailReadGate
+    var substitutions: [DetailPreviewSubstitution] = []
     let delegate = DetailRenderer()
 
     func read(_ step: DetailPreviewStep, displayPixels: Int) async -> DetailReadOutcome {
         await gate.beginPreview(step.source)
-        let outcome = await delegate.read(step, displayPixels: displayPixels)
+        let outcome: DetailReadOutcome
+        if let substituted = substitute(step) {
+            outcome = .image(substituted)
+        } else {
+            outcome = await delegate.read(step, displayPixels: displayPixels)
+        }
         await gate.endPreview()
         return outcome
+    }
+
+    private func substitute(_ step: DetailPreviewStep) -> CGImage? {
+        guard case .embedded(let source) = step else { return nil }
+        guard
+            let substitution = substitutions.first(where: {
+                $0.file == source.url.lastPathComponent
+            })
+        else { return nil }
+        return try? makeDetailImage(width: substitution.width, height: substitution.height)
     }
 
     func fullRaster(_ source: DetailSource) async -> DetailReadOutcome {

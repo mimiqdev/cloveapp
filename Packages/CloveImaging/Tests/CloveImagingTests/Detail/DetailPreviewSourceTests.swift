@@ -77,6 +77,21 @@ struct DetailPreviewPlanTests {
             DetailPreviewStep.displayRaster(source).purpose(displayPixels: 1200)
                 == .displayRaster(1200))
     }
+
+    @Test func aTinyEmbeddedPreviewIsNotUsableButARasterAlwaysIs() throws {
+        let revision = ThumbnailRevision(size: 1, modificationTime: Date(timeIntervalSince1970: 1))
+        let source = DetailSource(url: URL(fileURLWithPath: "/photo/A.ARW"), revision: revision)
+        func image(_ pixels: Int, quality: DetailQuality = .preview) throws -> DetailImage {
+            DetailImage(
+                image: try makeDetailImage(width: pixels, height: 8), source: source,
+                quality: quality)
+        }
+        #expect(DetailPreviewPlan.minimumUsablePreviewPixels == 1024)
+        #expect(!DetailPreviewPlan.isUsable(try image(1023), from: .embedded(source)))
+        #expect(DetailPreviewPlan.isUsable(try image(1024), from: .embedded(source)))
+        // A display raster is decoded at the view's own size, so it never sends the plan on.
+        #expect(DetailPreviewPlan.isUsable(try image(320), from: .displayRaster(source)))
+    }
 }
 
 /// Preview sources, orientation and quality levels over the shared fixture sets (G1
@@ -87,33 +102,53 @@ struct DetailPreviewSourceTests {
         DetailPipeline(cache: cache)
     }
 
-    @Test func heifPreviewLeadsWhenTheHeifHasOne() async throws {
+    @Test func heifPreviewLeadsAndStopsThePlan() async throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
         let heif = try directory.image(name: "partner.HIF", type: .heic, embedded: true)
+        let gate = DetailReadGate()
+        // The generated HEIF thumbnail is 320 px, so a camera-sized HIF preview is
+        // substituted here; the tiny 320 px case has its own test below.
+        let pipeline = DetailPipeline(
+            cache: DetailCache(),
+            reader: GatedDetailReader(
+                gate: gate,
+                substitutions: [.init(file: "partner.HIF", width: 1616, height: 1080)]))
         let request = DetailRequest(
             raw: try detailSource(DetailFixtures.file("sony-ilce-7s.ARW")),
-            heif: try detailSource(heif), displayPixels: 300, locationIdentity: "folder")
-        let image = try availableDetail(try await pipeline().preview(for: request))
-        // G1: the HIF's embedded preview is the first source, at preview quality.
+            heif: try detailSource(heif),
+            // Larger than every embedded preview here: the pipeline must still stop at the
+            // HIF and leave the extra pixels to image(for:).
+            displayPixels: 2400, locationIdentity: "folder")
+        let image = try availableDetail(try await pipeline.preview(for: request))
+        // G1 "Preview, detail (I2)": the HIF's embedded preview is the first source, and a
+        // bigger view never makes navigation read the RAW's preview as well.
         #expect(image.source.url == heif.standardizedFileURL)
         #expect(image.quality == .preview)
-        // ImageIO's generated thumbnail is 320×212 and embedded-only never upscales it.
-        #expect(image.width == 320 && image.height == 212)
+        #expect(image.longEdge == 1616)
         #expect(image.limitation == nil)
+        #expect(await gate.previewPaths == [heif.standardizedFileURL.path])
     }
 
     @Test func heifWithoutPreviewFallsBackToTheRaw() async throws {
         // The generated HEIC fixture exposes no embedded preview, so this is the real
         // "HIF unreadable or with no preview" path from G1 "Preview, detail (I2)".
+        let gate = DetailReadGate()
+        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let raw = DetailFixtures.file("sony-ilce-7s.ARW")
+        let heif = DetailFixtures.file("sony-ilce-7s.HEIC")
         let request = DetailRequest(
-            raw: try detailSource(DetailFixtures.file("sony-ilce-7s.ARW")),
-            heif: try detailSource(DetailFixtures.file("sony-ilce-7s.HEIC")),
+            raw: try detailSource(raw), heif: try detailSource(heif),
             displayPixels: 1200, locationIdentity: "folder")
-        let image = try availableDetail(try await pipeline().preview(for: request))
-        #expect(image.source.url == DetailFixtures.file("sony-ilce-7s.ARW").standardizedFileURL)
+        let image = try availableDetail(try await pipeline.preview(for: request))
+        #expect(image.source.url == raw.standardizedFileURL)
         #expect(image.quality == .preview)
         #expect(image.width == 1616 && image.height == 1080)
+        // The HIF is tried first; only its missing preview makes the RAW read happen.
+        #expect(
+            await gate.previewPaths == [
+                heif.standardizedFileURL.path, raw.standardizedFileURL.path,
+            ])
     }
 
     @Test func tinyHeifPreviewFallsThroughToTheRaw() async throws {
@@ -138,27 +173,64 @@ struct DetailPreviewSourceTests {
 
     @Test(.enabled(if: DetailFixtures.hasCardBasic))
     func rawAndJpegUsesTheRawPreview() async throws {
+        let gate = DetailReadGate()
+        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let raw = DetailFixtures.cardFile("IMG_0001.CR3")
         let request = DetailRequest(
-            raw: try detailSource(DetailFixtures.cardFile("IMG_0001.CR3")),
+            raw: try detailSource(raw),
             jpeg: try detailSource(DetailFixtures.cardFile("IMG_0001.JPG")),
             displayPixels: 1200, locationIdentity: "folder")
-        let image = try availableDetail(try await pipeline().preview(for: request))
+        let image = try availableDetail(try await pipeline.preview(for: request))
         #expect(image.source.url.pathExtension == "CR3")
         #expect(image.quality == .preview)
         #expect(image.width == 2000 && image.height == 1333)
+        // The JPEG is a fallback for a missing or tiny RAW preview, not a second read.
+        #expect(await gate.previewPaths == [raw.standardizedFileURL.path])
     }
 
     @Test(.enabled(if: DetailFixtures.hasCardBasic))
-    func previewTooSmallForTheViewFallsThroughToTheJpeg() async throws {
+    func aViewLargerThanThePreviewNeverReadsAnotherSource() async throws {
+        let gate = DetailReadGate()
+        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let raw = DetailFixtures.cardFile("IMG_0001.CR3")
         let request = DetailRequest(
-            raw: try detailSource(DetailFixtures.cardFile("IMG_0001.CR3")),
+            raw: try detailSource(raw),
             jpeg: try detailSource(DetailFixtures.cardFile("IMG_0001.JPG")),
             displayPixels: 2400, locationIdentity: "folder")
-        let image = try availableDetail(try await pipeline().preview(for: request))
-        // The CR3 preview is capped at 2000 px, so the view's 2400 px need the JPEG raster.
-        #expect(image.source.url.pathExtension == "JPG")
+        let image = try availableDetail(try await pipeline.preview(for: request))
+        // G1 "Preview, detail (I2)": the CR3 preview is a usable 2000 px one, so navigation
+        // stops there. Extra pixels for a 2400 px view come from image(for:) only.
+        #expect(image.source.url == raw.standardizedFileURL)
+        #expect(image.quality == .preview)
+        #expect(image.longEdge == 2000)
+        #expect(await gate.previewPaths == [raw.standardizedFileURL.path])
+    }
+
+    @Test func tinyRawPreviewFallsBackToTheJpeg() async throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let jpeg = try directory.image(name: "partner.JPG", width: 3000, height: 2000)
+        let gate = DetailReadGate()
+        // No fixture has a RAW with an unusably small preview, so the ARW's embedded preview
+        // is shrunk through the read seam.
+        let pipeline = DetailPipeline(
+            cache: DetailCache(),
+            reader: GatedDetailReader(
+                gate: gate,
+                substitutions: [.init(file: "sony-ilce-7s.ARW", width: 640, height: 427)]))
+        let raw = DetailFixtures.file("sony-ilce-7s.ARW")
+        let request = DetailRequest(
+            raw: try detailSource(raw), jpeg: try detailSource(jpeg), displayPixels: 1200,
+            locationIdentity: "folder")
+        let image = try availableDetail(try await pipeline.preview(for: request))
+        // A 640 px preview is not a detail preview, so the JPEG answers at display size.
+        #expect(image.source.url == jpeg.standardizedFileURL)
         #expect(image.quality == .raster)
-        #expect(image.width == 2400)
+        #expect(image.width == 1200)
+        #expect(
+            await gate.previewPaths == [
+                raw.standardizedFileURL.path, jpeg.standardizedFileURL.path,
+            ])
     }
 
     @Test func jpegAloneDecodesAtDisplaySize() async throws {

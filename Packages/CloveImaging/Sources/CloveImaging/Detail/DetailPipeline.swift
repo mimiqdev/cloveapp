@@ -23,9 +23,10 @@ private final class DetailCancellation: Sendable {
 /// Shows one photo's detail pixels: a camera preview first, then native RAW only when the
 /// view needs more (PRD P0-04; G1 "Preview, detail (I2)" and "Scheduling and cache").
 ///
-/// Use ``preview(for:consumer:priority:)`` for the immediate fit-view image and
-/// ``image(for:consumer:)`` when the view is zoomed or asks for 100%; the second call reuses
-/// the first one's cached preview and only then renders. Both take a consumer ID per view:
+/// Fit-view navigation (a swipe or an edge tap, PRD P0-04) uses
+/// ``preview(for:consumer:priority:)``, which never renders. ``image(for:consumer:)`` is only
+/// for a zoom past the preview's pixels or an explicit double-tap to 100%: it reuses the first
+/// call's cached preview and then renders. Both take a consumer ID per view:
 /// a newer request from the same consumer supersedes the older one, which is cancelled
 /// before it enters a read or has its drained result discarded.
 ///
@@ -95,13 +96,20 @@ public actor DetailPipeline {
         self.reader = reader
     }
 
-    /// The best preview available for the request's pixel size, with no render.
+    /// Fit-view pixels for the photo on screen: fit-view navigation calls this and nothing
+    /// else (PRD P0-04 full-width preview).
     ///
-    /// The source order is G1 "Preview, detail (I2)": the HIF's embedded preview for
-    /// RAW + HIF, the RAW's embedded preview when the HIF has no preview, the RAW's embedded
-    /// preview for RAW alone or RAW + JPEG, a JPEG raster at display size when that preview
-    /// is missing or too small, the JPEG raster for JPEG alone, and the embedded preview only
-    /// for HIF alone (reported as ``DetailQuality/preview``).
+    /// The source order is G1 "Preview, detail (I2)" and it stops at the first usable
+    /// preview: the HIF's embedded preview for RAW + HIF, the RAW's embedded preview when the
+    /// HIF cannot be opened, has no preview or is tiny, the RAW's embedded preview for RAW
+    /// alone or RAW + JPEG, a JPEG raster at display size when that preview is missing or
+    /// tiny, the JPEG raster for JPEG alone, and the embedded preview only for HIF alone
+    /// (reported as ``DetailQuality/preview``).
+    ///
+    /// This never renders a RAW, whatever ``DetailRequest/wantsNativeResolution`` says, so a
+    /// swipe or edge tap can never start native work on a camera file. Swiping to the next
+    /// photo stays cheap because pixels beyond the preview come from
+    /// ``image(for:consumer:)`` only.
     ///
     /// Cancellation and supersession throw `CancellationError`; nothing else throws.
     public func preview(
@@ -111,7 +119,13 @@ public actor DetailPipeline {
             request, consumer: consumer, effort: .previewOnly, priority: priority)
     }
 
-    /// The best pixels for the request, rendering only when the view needs more.
+    /// More pixels for the photo on screen: zoom past what the preview holds, or the explicit
+    /// double-tap to 100% (PRD P0-04 "pinch zoom and double-tap to 100% for focus inspection").
+    ///
+    /// Call this only for those two cases. Fit-view navigation calls
+    /// ``preview(for:consumer:priority:)`` instead, because this call may render a RAW and G1
+    /// "Preview, detail (I2)" allows that only when the needed pixel size is larger than the
+    /// preview's or on an explicit 100% request — never for a swipe.
     ///
     /// G1 "Preview, detail (I2)": a RAW is rendered by `CIRAWFilter` at native size only when
     /// the needed pixel size is larger than the preview's, or on ``DetailRequest/wantsNativeResolution``.
@@ -316,11 +330,16 @@ public actor DetailPipeline {
                 }
             }
             guard let image else { continue }
-            if image.longEdge >= job.request.displayPixels {
+            // G1 "Preview, detail (I2)": stop at the first source with a usable preview. A
+            // later source is only tried when this one could not be opened, has no preview
+            // or is tiny; a bigger view never reads more preview sources by itself, because
+            // that is `image(for:)`'s render route, not navigation's.
+            if DetailPreviewPlan.isUsable(image, from: step) {
                 best = image
                 break
             }
-            if image.longEdge > (best?.longEdge ?? 0) { best = image }
+            // Every source is tiny: show the earliest preferred one rather than none.
+            if best == nil { best = image }
         }
 
         guard let preview = best else {
