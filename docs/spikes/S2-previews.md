@@ -5,12 +5,13 @@
 Are previews fast enough? Measure embedded preview extraction time, size, and
 memory per format, and `CIRAWFilter` full decoding, to recommend a thumbnail and
 detail image strategy, cache design, and performance targets for G1. This is
-part 1 of [#13](https://github.com/mimiqdev/cloveapp/issues/13); device conclusions
-remain open for part 2.
-
-2026-11-09 — HIF support: `.HIF`/`.hif` camera HEIF files are now accepted by
-S2's recursive filter. Unit coverage checks mixed-case extensions. A device rerun
-with a Sony HIF is pending; this adds no camera-decoding or performance claim.
+part 2 of [#13](https://github.com/mimiqdev/cloveapp/issues/13), following
+[part 1 / PR #20](https://github.com/mimiqdev/cloveapp/pull/20) and
+[HIF support / PR #28](https://github.com/mimiqdev/cloveapp/pull/28). It finishes
+with the available iPhone device evidence. The product owner deferred the
+remaining device checks on 2026-11-09 to
+[#29](https://github.com/mimiqdev/cloveapp/issues/29); they do not block this
+report. G1's choice remains with the product owner.
 
 ## What was tested
 
@@ -37,6 +38,27 @@ with a Sony HIF is pending; this adds no camera-decoding or performance claim.
   are preserved on issue #13 because `gh` cannot attach local files to issues;
   JSON is kept out of git. Local copies
   and build/check logs are in this checkout's ignored `.build/s2/` directory.
+- **Physical iPhone 17 Pro Max (`iPhone19,4`), iOS 27.2**, Clove Lab 0.1.0,
+  local storage through the folder picker, in two owner-returned runs:
+  - **Run 1, build 26110818:** one Sony A1 II ARW (`MMQ05184.ARW`) measured.
+    A companion HIF was present but skipped by the pre-PR-28 extension filter;
+    this is missing coverage, not a decoding failure.
+  - **Run 2, build 26110903:** ten Sony A1 II ARW+HIF burst pairs found (20
+    files); throughput covers all 20. Detailed variants and cache measurements
+    cover only the first 12 sorted files: six pairs, `MMQ02678`–`MMQ02683`,
+    with `.ARW` and `.HIF` extensions. The S4 folder from the same session is
+    outside S2's measurements. Native rendered output is 5760×8640 after
+    orientation (8640×5760 camera dimensions).
+  - Original reports were read in place without modification. The citations
+    below identify the exact private artifacts; raw JSON and owner folder
+    paths are not published. Only measurements and safe file/model names are
+    quoted. SHA-256 was computed with `shasum -a 256`:
+
+    | Run | Report file name | SHA-256 |
+    | --- | --- | --- |
+    | 1 | `clove-lab-S2-20261109T022003Z.json` | `357d1c22f066342c4ccb0da32d763e689f7e7b61c19a4db6e1609539aa8c436b` |
+    | 2 | `clove-lab-S2-20261109T033803Z.json` | `3aa36dee06a999ef13244fadb68e82672ff5f5faf05791f8d3d110ade931cc5e` |
+
 - A generated 2400×1600 JPEG with **no embedded thumbnail**, EXIF orientation 6,
   is created in a per-run temporary directory. It supplies the missing-preview
   and rotation control without changing a fixture. The test checks there is no
@@ -77,7 +99,8 @@ Run `formats` separately before a camera folder so every format is represented.
 Reports identify each file by relative path, including subfolders. Full RAW is
 on by default and can be turned off explicitly; `context.fullRAW` records it.
 Typical suite time should be allowed **2–10 minutes** on hardware, depending on
-RAW size/card speed; this is a planning allowance pending device measurement.
+RAW size/card speed; this remains a planning allowance for deferred card runs.
+The returned JSON does not measure end-to-end suite or export duration.
 The measured ten-file suite took about 9 s inside the warm macOS test process.
 The simulator's individually timed operations totalled about 57 s, under the
 shared host load; setup and report export add time.
@@ -322,109 +345,317 @@ version, account for Files-provider timestamp precision, and use atomic cache
 writes plus eviction. This spike's direct JPEG write goes only to a unique
 temporary directory; it is not a production disk cache.
 
-### Physical-device results — pending part 2
+### Physical device: local A1 II previews and native renders
 
-| Device / OS | Formats: time, output dimensions, memory | 200+ RAW: concurrency 1/2/4/8 | Cancellation / export |
+All rows below are **measured** on iPhone 17 Pro Max / iOS 27.2, with run
+provenance explicit. Times are milliseconds to materialized CPU pixels, not
+presentation. Run 1 is one observation per variant; run 2 uses the ordinary
+median (mean of the middle two of six observations), with min–max where shown.
+No p95, repeated-trial, or cold-I/O result follows from these small samples.
+`E` = `embeddedOnly`, `I` = `IfAbsent`, `A` = `Always`. All outputs here apply
+orientation. Decoded MiB is bitmap row bytes × height / 2²⁰.
+
+| Status | Format / request | Time ms (run 2: median; range) | Actual output | Decoded MiB |
+| --- | --- | --- | --- | --- |
+| Measured, run 1 | ARW E400, first variant | 122.6 | 267×400 | 0.409 |
+| Measured, run 1 | ARW I400 / A400 | 8.7 / 8.7 | 267×400 | 0.409 |
+| Measured, run 1 | ARW E2000 / I2000 / A2000 | 12.2 / 11.8 / 12.2 | 1080×1616 | 6.66 |
+| Measured, run 1 | ARW RAW 2000 / native | 717.4 / 502.7 | 1334×2000 / 5760×8640 | 10.19 / 189.84 |
+| Measured, run 2 | ARW E400 | 14.4; 13.4–36.5 | 267×400 | 0.409 |
+| Measured, run 2 | ARW I400 | 8.3; 7.9–12.6 | 267×400 | 0.409 |
+| Measured, run 2 | ARW A400 | 8.8; 8.4–11.6 | 267×400 | 0.409 |
+| Measured, run 2 | ARW E2000 / I2000 / A2000 | 12.2 / 12.4 / 12.7 | 1080×1616 | 6.66 |
+| Measured, run 2 | ARW RAW 2000 | 592.8; 578.9–676.2 | 1334×2000 | 10.19 |
+| Measured, run 2 | ARW RAW native | 529.1; 518.0–544.4 | 5760×8640 | 189.84 |
+| Measured, run 2 | HIF E400 | 16.0; 14.6–19.6 | 267×400 | 0.513 |
+| Measured, run 2 | HIF I400 | 10.5; 10.1–10.9 | 267×400 | 0.513 |
+| Measured, run 2 | HIF A400 | 53.2; 51.3–116.6 | 266×400 | 0.406 |
+| Measured, run 2 | HIF E2000 / I2000 | 7.2 / 6.4 | 1080×1616 | 6.66 |
+| Measured, run 2 | HIF A2000 | 55.6; 52.2–57.7 | 1334×2000 | 10.18 |
+| Measured, run 2 | HIF CIRAWFilter control 2000 | 1773.9; 1617.2–1937.4 | 1334×2000 | 10.19 |
+| Measured, run 2 | HIF CIRAWFilter control native | 1755.6; 1678.7–1852.5 | 5760×8640 | 189.84 |
+| Measured, runs 1 / 2 | ARW E20000 diagnostic | 12.1 / 12.3 | 1080×1616 | 6.66 |
+| Measured, run 2 | HIF E20000 diagnostic | 8.2 | 1080×1616 | 6.66 |
+| Measured, run 1 | ARW EXIF 6, I400 without / with transform | 8.0 / 8.7 | 400×267 / 267×400 | 0.407 / 0.409 |
+| Measured, run 2 | ARW / HIF EXIF 8, I400 without transform | 8.3 / 12.9 | 400×267 (both) | 0.407 / 0.509 |
+| Measured, runs 1 / 2 | Synthetic no-thumbnail JPEG, E400 | `noThumbnail` in both runs | No pixels, expected | 0 |
+| Measured, runs 1 / 2 | Synthetic JPEG I400 with transform | 3.6 / 3.7 | 267×400; untransformed 400×267 | 0.409 |
+
+Every detailed camera variant succeeded (10/10 in run 1, 120/120 in run 2).
+The synthetic control's two expected `noThumbnail` results per run are the only
+method failures. Orientation dimensions are correct for the measured EXIF 6/8
+samples; this does not establish visual color fidelity or every mirrored case.
+
+Both A1 II formats expose only **1616 px on the long side** through the
+embedded-only diagnostic, even at a 20000 px cap. A 2000 px `IfAbsent` request
+is a cap, not a guarantee of 2000 px detail. ARW source-property rows themselves
+report 1616×1080, so I2 must obtain native sensor dimensions from the RAW route
+rather than treating those ImageIO properties as native resolution. The native
+render demonstrates 8640×5760 before orientation. Neither `Always` on ARW nor
+upscaling the embedded image supplies more focus detail on this device.
+
+The first run's 122.6 ms E400 call precedes the 8.7 ms I/A400 calls. Fixed order
+and unflushed system caches prevent attributing that gap entirely to the flag.
+Run 2 likewise measures one variant per file, not six repeated cold trials.
+
+**HIF is rendered camera HEIF, not RAW.** Its `raw` tag denotes the suite's
+CIRAWFilter control. The approximately 1.8 s result must not be attributed to
+every HIF decoding route: ImageIO A2000 produced 2000 px in 55.6 ms. That is a
+separate generated-preview route; it does not establish native 100% quality or
+its memory at native size. For routine grid/loupe previews, retain the fast
+embedded path and never route HIF through a full-resolution decode. For an
+ARW+HIF pair, ARW supplies actual detail beyond the embedded 1616 px limit.
+
+### Physical device: sampled process memory
+
+Absolute sampled RSS includes prior operations, frameworks and app state, with
+a 5 ms sampling interval. It is a lower bound on the peak, not an isolated
+allocation budget. Run 2 renders ARW then HIF repeatedly and leaves a high
+baseline; subtracting the baseline is not a reliable working-set estimate.
+
+| Status | Method | Sampled peak RSS MiB (median / maximum) |
+| --- | --- | --- |
+| Measured, run 1 | ARW RAW 2000 | 413.1 / 413.1 |
+| Measured, run 1 | ARW RAW native | 632.0 / 632.0 |
+| Measured, run 2 | ARW RAW 2000 | 1047.7 / 1145.9 |
+| Measured, run 2 | ARW RAW native | 863.6 / 991.9 |
+| Measured, run 2 | HIF CIRAWFilter control 2000 | 932.0 / 1097.3 |
+| Measured, run 2 | HIF CIRAWFilter control native | 1304.3 / 1438.7 |
+
+The last row is **1.27 GiB median / 1.40 GiB maximum** (about 1.37 / 1.51 GB
+in decimal units). This is evidence against full HIF rendering for previews,
+not a safe process ceiling. A native A1 II bitmap alone is 189.84 MiB. The
+reports contain no memory-pressure notifications, post-run recovery trace,
+GPU allocation inventory or sustained-load test. Successful report export
+shows completion of these runs, not safety under repeated navigation.
+
+### Physical device: grid throughput and cancellation
+
+Run 2 uses all **20 files, ten ARW+HIF pairs**, as independent thumbnail jobs,
+with I400, no app cache, and pass order 1, 2, 4, 8. Every pass succeeded 20/20.
+This is neither 20 unique photos nor a pair-aware production pipeline.
+
+| Status | Concurrency | Elapsed ms | Successful file thumbnails/s |
 | --- | --- | --- | --- |
-| iPhone 17 Pro Max / record installed iOS version | **pending** | **pending** | **pending** |
-| iPad Pro / record model and installed iPadOS version | **pending** | **pending** | **pending** |
+| Measured, run 2 | 1 | 232.3 | 86.1 |
+| Measured, run 2 | 2 | 110.1 | 181.6 |
+| Measured, run 2 | 4 | 69.5 | 287.6 |
+| Measured, run 2 | 8 | 56.6 | 353.6 |
+
+Four workers give 1.58× the two-worker throughput; eight give another 1.23×.
+These very short passes cannot establish sustained thermal/memory behavior,
+pair-aware throughput or cold-card latency. Run 1 had only one file: its
+102–124/s results cannot measure concurrency scaling.
+
+| Status | Automatic cancellation probe | Drain ms | Result |
+| --- | --- | --- | --- |
+| Measured, run 1 | ARW I400 | 6.7 | Cancelled result discarded |
+| Measured, run 1 | ARW RAW **2000**, not native-size output | 455.3 | Cancelled result discarded |
+| Measured, run 2 | ARW I400 | 6.9 | Cancelled result discarded |
+| Measured, run 2 | ARW RAW **2000**, not native-size output | 544.3 | Cancelled result discarded |
+
+The preliminary reading's “full-RAW cancellation” describes demosaicing work;
+these probes request 2000 px output. They do not measure cancelling native-size
+output, HIF rendering, or the manual Cancel button's UI response. They confirm
+that an in-flight RAW can occupy its worker for roughly half a second after
+cancellation. Keep that slot occupied until native work drains; discard stale
+pixels and cancel queued requests before entry.
+
+### Physical device: thumbnail cache
+
+I400 inputs, NSCache warmed lookup and temporary JPEG quality-0.8 disk entries.
+Run 1 samples one ARW; run 2 samples six pairs (12 files). Reads are warm local
+filesystem reads including decode; cache directories are removed by the suite.
+
+| Status | Measurement | Median (range where useful) |
+| --- | --- | --- |
+| Measured, run 1 | Memory lookup / JPEG encode-write / read-decode | 0.000375 / 7.10 / 3.63 ms |
+| Measured, run 1 | Disk entry / decoded bitmap | 19507 / 428800 B |
+| Measured, run 2 | Memory lookup; hits | 0.000458 ms; 12/12 |
+| Measured, run 2 | JPEG encode + write | 0.96 ms (0.90–6.96) |
+| Measured, run 2 | Disk read + decode | 1.74 ms (1.34–2.07) |
+| Measured, run 2 | Disk entry | 40150 B (38746–41617); mean 40199 B |
+| Measured, run 2 | Decoded bitmap | ARW 428800 B; HIF 537600 B; mean 483200 B |
+
+Extrapolating run 2's mean to **2000 cached photo thumbnails** gives **76.7 MiB
+disk / 921.6 MiB decoded RAM**. With ARW chosen for paired grid thumbnails,
+2000 × 428800 B is **817.9 MiB** decoded; disk size remains scene-dependent.
+This is a storage estimate, not a 2000-photo device measurement. Cache one grid
+variant per logical pair, not both files. A 64 MiB decoded grid budget holds
+about 156 measured ARW thumbnails or 124 HIF thumbnails before overhead; a
+256 MiB disk budget has room for roughly 6677 entries at the mixed-sample mean.
+File/index overhead and eviction need headroom. These local cache results
+support the two-tier design; they do not settle timestamp/provider identity or
+card I/O behavior.
 
 ## Conclusion
 
-The macOS sample supports using a small system preview before full RAW, but
-`IfAbsent` alone is insufficient: it can return an undersized preview or fail
-on a readable HEIC. Both OS environments rendered every sampled RAW through
-Core Image, and the reusable Lab suite is ready to collect physical-device
-results. Preview throughput, thermal behavior, SD-card latency and a safe iOS
-memory budget remain inconclusive until part 2.
+The local iPhone evidence supports embedded previews for camera browsing and
+on-demand ARW rendering for focus inspection. On the owner's A1 II, both ARW
+and HIF expose 1616 px embedded detail; ARW I400 takes 8.3 ms, HIF's first loupe
+preview takes about 7 ms, and native ARW rendering takes 529.1 ms (run-2 medians).
+Neither an undersized preview nor an upscaled one satisfies native focus detail.
+Avoid full HIF decoding for previews. Cancellation discards obsolete results
+but does not promptly interrupt native RAW work. The two-tier cache is supported
+by local device data. Sustained throughput, card I/O, iPad behavior and a safe
+total process memory ceiling remain deferred, with their implications below.
 
 ## Recommendation and options for G1
 
-**Recommend a two-stage system pipeline and a bounded two-tier thumbnail cache**,
-subject to the device results and the product owner's G1 decision:
+**Recommend an embedded-first system pipeline, one on-demand RAW worker, and a
+bounded two-tier thumbnail cache.** This is a proposal for the product owner's
+G1 decision, not a production implementation or decision record.
 
-1. **Grid (I1):** request an orientation-applied roughly 400 px preview with
-   `IfAbsent`, inspect returned dimensions, and show usable pixels promptly.
-   On absence/failure, try `Always` at low concurrency. An undersized preview
-   can appear immediately while a better JPEG/HEIC thumbnail is prepared.
-   For RAW, avoid repeatedly invoking expensive fallback for cells that are no
-   longer visible; cache failure/quality state by source revision. If neither
-   path works, show an explicit cannot-preview state, consistent with P0-03.
-2. **Detail and 100% (I2):** display the available approximately 2000 px preview
-   first, retaining its actual pixel dimensions and source orientation. Small
-   JPEG previews need `Always`; small RAW previews need a separately validated
-   full RAW route for focus inspection. On zoom to 100%, render full RAW through
-   `CIRAWFilter` on demand, one request at a time, with visible loading/failure
-   state. Do not call a 1616 px embedded preview native sensor resolution.
-3. **Scheduling:** start with two grid workers and one full RAW worker; prioritize
-   current/visible photos over prefetch. Device data may justify four grid
-   workers. Eight improved this tiny Mac sample but is not yet a device default.
-   Cancel queued work before native entry; discard cancelled/stale in-flight
-   results when the synchronous call finishes. Avoid admitting another RAW
-   merely because an obsolete one has received a cancellation request.
-4. **Cache:** use a cost-limited NSCache (provisional **64 MiB grid**, around 150
-   sampled thumbnails), plus an app-private disk JPEG cache with a provisional
-   **256 MiB LRU budget**. Cache previews rather than originals, keyed by source
-   identity/path/size/modification time and rendering variant. Keep only two or
-   three detail images (provisional **32 MiB** separate budget), release on memory
-   warning, and retain at most one native RAW result. Full-decode temporary
-   memory needs a separate measured budget; NSCache limits are advisory.
+1. **Grid (I1):** request an orientation-applied roughly 400 px preview and
+   record the returned size. For the owner's **ARW+HIF pairs, use ARW I400**:
+   it is slightly faster (8.3 versus HIF I400's 10.5 ms), uses less decoded
+   memory (0.409 versus 0.513 MiB), and needs only one grid cache entry per
+   logical photo. Avoid HIF `Always` during scrolling (53.2 ms at 400 px).
+   For HIF-only photos, use `embeddedOnly` to enforce the no-full-decode preview
+   policy. Cache quality/failure state by source revision, prioritize usable
+   pixels, and show an explicit unavailable state if none can be obtained.
+   For ordinary JPEG or other tested raster inputs, `IfAbsent` then a bounded
+   `Always` fallback handles absent/tiny previews. Do not apply that fallback
+   indiscriminately to HIF or repeatedly start expensive RAW work for a cell.
+2. **First loupe/detail preview (I2):** for **ARW+HIF, prefer HIF's embedded
+   preview**, requested at about 2000 px via `embeddedOnly` (7.2 ms measured;
+   I2000 was 6.4 ms). It supplies camera-rendered pixels quickly, at the same
+   1080×1616 size and 6.66 MiB as ARW's approximately 12 ms preview. If the HIF
+   is missing/unreadable, use ARW's embedded preview. Keep the source identity,
+   actual dimensions and orientation in the cache/result so switching sources
+   cannot display another photo or confuse the quality level. A single-file
+   ARW path remains a reasonable alternative if card I/O or color consistency
+   outweighs the local few-ms saving; that comparison is deferred.
+3. **Sharper loupe and 100% (I2):** the pair's 1616 px embedded image is only
+   an immediate placeholder when the display/zoom needs more pixels. Render
+   **the ARW**, not the HIF, through `CIRAWFilter` on demand once demand exceeds
+   embedded resolution, including double-tap to native 100%. Preserve zoom
+   position/orientation during replacement and show loading/failure state.
+   A 2000 px RAW output is not a cheap draft decode (592.8 ms versus native
+   529.1 ms here); do not promise proportional savings from output scaling.
+   Native rendering is needed for sensor-pixel inspection; do not trigger it
+   for every fit-view navigation. Never fully decode HIF for routine previews:
+   its CIRAWFilter control costs about 1.8 s and a large working set. HIF-only
+   native 100% quality/memory is unverified; retain explicit preview-quality
+   state and validate a bounded raster zoom route in I2 before claiming it.
+4. **Scheduling:** start I1 evaluation with **four bounded grid workers** on
+   the measured iPhone/local camera input (287.6/s versus 181.6/s at two), with
+   a two-worker fallback for pressure/contention. Eight's extra 23% in a 57 ms
+   pass is insufficient to select it as the sustained default. Admit at most
+   **one RAW render**, prioritize current/visible items over prefetch, and
+   pause speculative work under pressure. Cancel queued work before native
+   entry and discard stale in-flight results. Keep the RAW worker occupied
+   until cancellation drains (455–544 ms measured for 2000 px), then render
+   the latest request; never accumulate obsolete RAW work.
+5. **Cache:** use a cost-limited **64 MiB NSCache for grid** and an app-private
+   **256 MiB LRU disk JPEG cache**, initially quality 0.8 as tested. Run 2
+   estimates 76.7 MiB disk for 2000 mixed camera thumbnails, versus 921.6 MiB
+   decoded RAM; memory-only storage is unsuitable. Store one grid variant per
+   pair. Include the chosen physical file/companion revision, location identity,
+   path, size, modification time, transform, target size, rendering method and
+   pipeline version in keys. Changing the fallback source must invalidate the
+   relevant variant. Use atomic writes/eviction in I1; do not reuse the spike's
+   temporary direct-write experiment as a production cache. Keep **32 MiB**
+   separately for a few embedded/detail bitmaps (about four at 6.66 MiB with
+   headroom), release on memory warning, and retain **at most one** native RAW
+   result (189.84 MiB for this A1 II) outside that small-preview budget. Release
+   the old native image before allocating the next. Cache limits are advisory;
+   the decoder/framework working set and UI require a separate pressure-tested
+   total budget. The sampled RSS does not justify setting that ceiling at G1.
 
 Alternatives for G1:
 
 | Option | Benefit | Cost / evidence |
 | --- | --- | --- |
-| Always generate every thumbnail | Simpler quality policy; fixes the HEIC case | Often much slower on macOS RAW; simulator differs; more work during fast scrolling |
-| Embedded/system-preview only | Lowest work for many RAW files | JPEG can stay 256 px, small ARW/RW2 previews limit focus checks, HEIC can fail |
-| Memory-only cache | No disk eviction/indexing | About 794 MiB for 2000 sampled thumbnails; frequent regeneration after eviction/relaunch |
-| Disk cache only | Small persistent thumbnail storage | A decode on every display; warmed lookup is slower than NSCache; still needs bounded decoded images |
-| Full RAW for every grid cell | Consistent native source rendering | Larger working set and latency; conflicts with the PRD priority for smooth browsing |
+| Always generate every thumbnail | Simple quality policy; works for the generated HEIC fixture | A1 II HIF A400 is about 5× I400; unnecessary work while scrolling |
+| Embedded/system-preview only | Low work for camera browsing | A1 II stops at 1616 px; insufficient for native focus inspection; tiny JPEG previews persist |
+| ARW for both paired grid and first loupe | One file/source path, consistent preview selection | Loupe about 12 ms versus HIF 7 ms locally; may win on a card; compare visual color too |
+| Generate HIF A2000 as an intermediate | 2000 px in 55.6 ms on this sample | Extra decode/cache variant, not native focus detail; not needed for the recommended ARW-pair route |
+| Memory-only cache | No disk eviction/indexing | About 922 MiB for 2000 run-2 thumbnails; frequent regeneration after eviction/relaunch |
+| Disk cache only | Small persistent thumbnail storage | Read/decode on each display (1.74 ms warm median); still needs bounded decoded images |
+| Full RAW for every grid cell | Native source rendering | About 0.5–0.7 s per A1 II ARW and large working set; conflicts with smooth browsing priority |
 
-**Proposed evaluation targets, not approved launch promises:** on the iPhone 17
-Pro Max and iPad Pro with the prepared SD card, aim for warm disk-cache grid
-p95 ≤ 20 ms per thumbnail, uncached embedded/system-preview grid p95 ≤ 150 ms,
-first detail preview p95 ≤ 300 ms, and on-demand full RAW p95 ≤ 2 s for the
-fixture-sized cameras. Aim for at least 30 successful 400 px thumbnails/s at the
-chosen device concurrency on 200+ RAW files, with no progressive memory growth
-across repeated runs. Pending requests should stop before decode; obsolete
-results must never replace the current photo. There is no proposed native-call
-interruption deadline. Confirm or revise these targets with repeated device
-runs; this single-observation suite does not establish p95. G1 should set the
-process memory ceiling only after device peak/pressure data, not equate 96 MiB
-of image caches with total process memory.
+**Proposed on-device evaluation targets, not approved launch promises:** retain
+the conservative part-1 targets below for I1/I2, now informed by the A1 II local
+measurements. Evaluate camera inputs on iPhone 17 Pro Max and iPad Pro; card
+and iPad performance remain unmeasured. These p95 targets require repeated trials
+and a broader file sample. Six observations per format do not establish p95.
+
+| Proposed target | Available local iPhone evidence | Validation still needed |
+| --- | --- | --- |
+| Warm disk grid read/decode p95 ≤ 20 ms | Run 2: 1.74 ms median, 2.07 ms maximum | Repeated cache hits, eviction/relaunch and iPad |
+| Uncached app-level embedded grid p95 ≤ 150 ms | ARW I400 8.3 ms; HIF I400 10.5 ms medians; first run E400 122.6 ms | Cold source/framework/card access; separate first-use from warm |
+| First detail preview p95 ≤ 300 ms | Run 2: embedded 6–13 ms, actual 1616 px | End-to-end presentation, external media, iPad |
+| On-demand RAW focus image p95 ≤ 2 s, including queue/drain wait | ARW native 529.1 ms median; obsolete RAW drain 544.3 ms in a separate probe | Repeated rapid navigation, native-size cancellation, iPad, card |
+| ≥ 30 successful 400 px thumbnails/s on a 240-file camera run | 20-file local pass: 287.6/s at four workers | 240 distinct files, pair-aware work, sustained load and reader/SSD |
+| Stable memory over repeated navigation; queued cancellations do no decode and stale results never display | Automatic probes discarded cancelled outputs; functional tests cover pre-entry cancellation | Pressure/recovery and UI checks; set a total memory ceiling before fixing M3/Q3 targets |
+
+The latency targets refer to separate stages and are not additive UI promises.
+ImageIO timings include metadata probes; they exclude display. There is no
+native-call interruption deadline: keep navigation responsive while the worker
+drains. Revisit numeric budgets before M3/Q3 targets are fixed using #29's
+checks; a reader may dominate I/O and favor fewer workers or one preview source.
+The embedded-first/on-demand-RAW architecture is supported already, without
+waiting for those checks. Do not equate 96 MiB of small-image caches with total
+process memory.
 
 No decision record is created by this spike. I4 can reuse the source-opening
 and properties probes, but metadata extraction policy remains its own task.
 
 ## Open questions
 
-- Repeat the suite on both physical devices with an SD reader and real camera
-  files, including a RAW known to have no usable embedded preview and an
-  unsupported camera/compression sample if available. Do both fallback routes
-  fail explicitly where expected? Support for an extension alone is not enough.
-- What concurrency remains stable over 200+ unique RAW files, repeated runs,
-  warming and thermal load? The ten-file Mac/simulator passes do not settle it.
-- What is the physical-device peak/pressure during native RAW render, and does
-  the process return to a stable baseline? Sampling RSS misses brief peaks and
-  does not measure GPU/private framework allocations comprehensively. Use
-  Instruments/device diagnostics if the JSON or a termination indicates pressure.
-- Do preview colors and orientation look correct for real rotated camera images?
-  The synthetic orientation test covers rotation dimensions, not visual color
-  fidelity or all mirrored EXIF orientations.
-- Files providers and cards can have coarse timestamps; determine whether I1
-  needs an additional content signature when path/size/mtime do not change.
+- Which total process memory ceiling is safe during repeated 50 MP RAW focus
+  inspection? Measure pressure and recovery, including the old displayed image
+  and GPU/private allocations; the JSON's process-wide RSS peaks cannot set it.
+- Are HIF and ARW embedded-preview colors visually consistent, and does switching
+  to system RAW alter appearance enough to distract from focus inspection?
+  Confirm with the owner; timing/dimension tests do not establish visual fidelity.
+- What bounded raster route can support native focus inspection of standalone
+  camera HIF without the expensive CIRAWFilter control? The measured ImageIO
+  A2000 path is an option for intermediate detail, not proof of native quality.
+- Do coarse Files-provider timestamps require a content signature beyond source
+  identity/path/size/mtime? Resolve during I1 cache invalidation testing.
+- System support remains camera/compression/OS-specific. Both device runs cover
+  only A1 II ARW/HIF; other formats have macOS/simulator evidence, not physical
+  iPhone compatibility or speed guarantees.
 
-### Device checklist (also copied into the PR)
+## Deferred device checks
+
+The product owner deferred further checks on 2026-11-09; track them in
+[#29](https://github.com/mimiqdev/cloveapp/issues/29). Finish S2 with the evidence
+above. These checks are not urgent or prerequisites for closing #13; perform
+them before M3/Q3 performance targets are fixed, or earlier if G1 depends on a
+particular answer. Each row explicitly identifies its unmeasured status.
+
+| Status | Check | What it would answer | Could it change the G1 recommendation? |
+| --- | --- | --- | --- |
+| Deferred, #29 | A1 II camera folder on an exFAT card through a reader | Cold reads, provider overhead, errors and latency versus local storage | Yes: numeric targets, worker count and ARW-only versus split ARW/HIF sourcing; embedded-first still avoids needless decode |
+| Deferred, #29 | 240 distinct camera files, repeated grid passes and rapid focus navigation | Sustained concurrency 1/2/4/8, thermal behavior, memory growth/recovery and manual cancellation responsiveness | Yes: four-worker default, prefetch/cache budgets and total memory ceiling; one bounded RAW worker remains the starting point |
+| Deferred, #29 | Same camera folder on external SSD, compared with card/local | Whether reader/media I/O or decode dominates, including opening a second companion file | Yes: I/O scheduling, source choice and targets; no evidence yet for a different decoder architecture |
+| Deferred, #29 (all spikes) | iPad Pro, record hardware/iPadOS, repeat formats/camera suites | Large-display embedded quality, decoder support, speed and pressure | Yes: when to upgrade beyond 1616 px, concurrency and memory/latency budgets; do not transfer iPhone numbers to iPad |
+| Deferred, follow-up with #29 | Physical-device `formats` set; real missing-preview/unsupported camera samples; visual rotated/color checks | Non-A1 II support, explicit failures and visual accuracy beyond synthetic orientation dimensions | Could change per-format fallback/source policy; current evidence still supports system APIs and explicit unavailable states |
+| Deferred, follow-up with #29 | Native-size ARW cancellation and repeated full-render pressure diagnostics | Whether native output drains differently and whether process memory stabilizes | Could tighten admission, retention and memory targets; not evidence that cancellation interrupts a native call |
+| Deferred / known gap, #29 | iPhone HEIC | Behavior of phone-specific HEIF beyond camera HIF | No blocker for this camera-focused recommendation; reconsider with photo-library support |
+
+The generated HEIC fixture's `IfAbsent` failure remains a known gap with a
+working macOS/simulator `Always` control; it is not an iPhone-HEIC device result.
+The S4 iPhone-HEIC failure mentioned in #29 concerns metadata ownership, not an
+S2 preview measurement. No iPhone-HEIC fix is part of this report. Camera files,
+especially the owner's A1 II ARW+HIF, are the main target.
+
+### Device checklist (deferred follow-up; also referenced in the PR)
 
 1. After the supervisor publishes the merged Lab build, install **Clove Lab**
    from TestFlight on **iPhone 17 Pro Max**. Record the installed iOS version;
    the report records the app build and hardware identifier automatically.
 2. Prepare an SD card with two **separate** folders: a copy of the complete
    **`formats`** fixture set (all ten files including HEIC and both DNGs), and
-   **at least 200 distinct RAW files from a real camera**, ideally including
-   rotated photos. Use a copy of your media for this measurement. Do not mix
-   the formats folder into the 200-file camera folder. If available, also
-   prepare a RAW with no usable embedded preview and an unsupported compression
+   **at least 240 distinct camera files** (preferably distinct A1 II photos with
+   ARW+HIF companions), ideally including rotated photos. Use a copy of your media for this measurement. Do not mix
+   the formats folder into the camera folder. The suite samples at most 240
+   files for throughput and the first 12 for detailed variants; pairs consume
+   two file slots. If available, also prepare a RAW with no usable embedded
+   preview and an unsupported compression
    sample in a separate small folder. Reports are the only writes to the
    selected folders; images are read without modification.
 3. Connect the SD card reader, unlock the phone, and confirm the folders appear
@@ -436,18 +667,18 @@ and properties probes, but metadata extraction policy remains its own task.
    progress count and **Finished: clove-lab-S2-<timestamp>.json**. The screen
    should remain responsive; individual unsupported methods are recorded in
    the JSON without stopping the whole run. If it terminates or takes over ten
-   minutes, record the last visible filename/progress and report that on #13;
+   minutes, record the last visible filename/progress and report that on #29;
    do not keep repeating a failing run.
 5. Go **Back** to the **Clove Lab** list, scroll below S7, and tap **Export**
    in the shared footer to save/share that S2 JSON. It also appears in the
    selected folder and in **Files → On My iPhone → Clove Lab**.
    If export reports a card-write error, look in the Documents location for
    the copy already saved there and include the error text.
-6. Open **S2** again. Choose the **200+ RAW camera folder**, keep full RAW on (only the first 12
-   files get detailed renders), and run again. Expect progress stages for
+6. Open **S2** again. Choose the **240+ file camera folder**, keep full RAW on
+   (only the first 12 files get detailed renders), and run again. Expect stages for
    **Grid concurrency 1, 2, 4, 8**, then cache measurements and a final report.
    Save that second JSON. Note the camera model, file count, card/reader model,
-   whether the device was charging/hot, and approximate elapsed time in #13.
+   whether the device was charging/hot, and approximate elapsed time in #29.
 7. Open **S2**, choose the camera folder and start one more run, tap **Cancel**
    while a file is being measured, and wait.
    Expect **Cancelled. Current decode drained; no new report exported.** The
@@ -461,8 +692,10 @@ and properties probes, but metadata extraction policy remains its own task.
 9. Repeat steps 1–8 on **iPad Pro**, recording its model and installed iPadOS
    version; Documents appears under **On My iPad → Clove Lab**. Reconnect the
    same card/reader for comparable input. If convenient, repeat on an external
-   SSD to distinguish decoding from card latency, identifying the media in #13.
-10. **Attach each `clove-lab-S2-<timestamp>.json` file to issue #13**, identifying
-    device, folder and run. Include cancellations/errors and any termination
-    observations. The later part-2 worker uses these reports to fill the pending
-    device table and revisit the G1 recommendations.
+   SSD to distinguish decoding from card latency, identifying the media in #29.
+10. **Attach each `clove-lab-S2-<timestamp>.json` file to issue #29**, identifying
+    device, media and run. Include cancellations/errors and any termination
+    observations. Reports can contain private folder paths: send the original
+    privately to the supervisor for redaction before any public attachment.
+    These follow-up results refine I1/I2 and M3/Q3 targets; they do not hold
+    part 2 or #13 open.
