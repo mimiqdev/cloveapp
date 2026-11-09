@@ -5,7 +5,20 @@
 Can metadata be changed without re-encoding?
 
 Part 1 of #15: collect macOS and iOS simulator evidence and prepare the Clove Lab
-confirmation. Physical-device results are **pending**. G1 remains open.
+confirmation. Full physical-device conclusions are **pending**; first-device
+observations from #27 are recorded below. G1 remains open.
+
+2026-11-09 — HIF support: `.HIF`/`.hif` camera HEIF files are now accepted by
+the file filter and HEIF payload/MakerNote readers. A device rerun with a Sony
+HIF is pending. The comparison now follows `pitm` → primary/grid → ordered
+`dimg` references and locates auxiliary/derived images by reference type and
+owner, including tone maps, gain maps, alpha/depth and thumbnails. A canonical
+reference-topology digest detects changed ordering/ownership even for shared
+items. Source item IDs remain diagnostic fields; `heif-renumbered-only` records
+ID changes separately from `compressed-content-changed`. Disconnected,
+ambiguous or unsupported image graphs fail closed. Synthetic tests cover
+renumbering, moved storage/table order, changed tile order/ownership and changed
+coded bytes. These are container tests, not a new pinned camera fixture.
 
 ## What was tested
 
@@ -23,7 +36,7 @@ confirmation. Physical-device results are **pending**. G1 remains open.
   a private temporary copy. Tests hash the picked fixtures before and after;
   neither the sets nor the cache's `files/` folder is written.
 - Fourteen attempts: native copy and a decoded re-encoding comparison for each
-  file, a native-copy seeded preservation control for each file, and two
+  file, a seeded preservation control for each file, and two
   JPEG-only XMP packet replacement comparisons (original and seeded).
 - Baseline writes use rating `3`, label `Green`, and Reject `True`. Seeded writes
   replace rating `1`/`Red` with rating `-1`/`Purple` and Reject `False`. The latter
@@ -125,6 +138,17 @@ necessarily re-encodes: that API was not used as a separate comparison.
   ImageIO XMP parse rejects this fixture's original packet; the image-source
   metadata reader supplies the comparison's fallback metadata. This fallback
   must not be generalized to arbitrary unreadable or unsupported XMP.
+- **Seeded-control boundary:** the historical results above used a native write
+  to create the seed. That write may already discard a camera MakerNote or
+  normalize EXIF rationals before the measured "before" snapshot. A successful
+  seeded result, including `lossless-candidate = 1`, does **not** show
+  preservation against the camera original. Since 2026-11-09, JPEG seeds merge
+  sentinels into existing XMP by packet splice; every original byte outside XMP
+  is retained (unit checked). Native copy of this stronger seeded JPEG still
+  exposes EXIF/GPS normalization and can reconcile the original IPTC caption
+  over the seeded XMP caption on macOS. Packet splice preserves the seed.
+  HEIF seeds still use native writes, with the same explicit limitation in the
+  JSON notes and Lab screen. Camera-original rows must also be consulted.
 - JPEG and HEIC seeded controls add an independent unknown namespace with scalar,
   nested resource, ordered array, caption/keywords and `xml:lang` qualifier; all
   source-exposed values survive. The JPEG seed also lands GPS. The HEIC seed's
@@ -134,7 +158,8 @@ necessarily re-encodes: that API was not used as a separate comparison.
   broader coverage before a production allowlist.
 - Raw maker-note bytes are hashed from TIFF/EXIF rather than inferred from
   decoded properties. The ProRAW source has a 1,268-byte maker note. No maker
-  note is found in the other three fixtures. No successful DNG write exists;
+  note is found in the other three pinned fixtures (the first device run below
+  uses a different Sony camera JPEG). No successful DNG write exists;
   source-integrity evidence is the whole-file digest on rejection.
 - JPEG evidence includes every SOS scan, stuffed bytes and restart markers;
   synthetic tests also mutate a later progressive scan. EXIF thumbnail ranges
@@ -159,6 +184,27 @@ necessarily re-encodes: that API was not used as a separate comparison.
   behavior. S3's device/storage results remain relevant to the later writer.
 
 ### Physical-device confirmation — pending
+
+#### First device run, iPhone 17 Pro Max, iOS 27.2
+
+Reported in [#27](https://github.com/mimiqdev/cloveapp/issues/27), from
+`clove-lab-S4-20261109T023845Z.json`; the supervisor holds the full report.
+These limited observations do not complete part 2:
+
+- **JPEG, Sony ILCE-1M2 (A1 II), 8640×5760:** native copy drops the entire
+  38,340-byte Sony MakerNote and rewrites 20 EXIF rationals, including `FNumber`
+  `28/10` → `14/5` and `ApertureValue` `2970854/1000000` → `43728/14719`.
+  Packet splice preserved everything in both original and seeded controls.
+  The historical native-seeded control had already lost the MakerNote, so its
+  native `lossless-candidate = 1` did not prove camera-original preservation.
+- **HEIC, iPhone camera:** all 127 coded items are byte-identical and decoded
+  pixels are unchanged after native copy. Only item IDs changed; for example,
+  the 36,929-byte tile moved from item 47 to item 48. The old ID-keyed comparison
+  falsely reported `compressed-payload-unchanged = 0`; the reference-based
+  comparison above is intended to distinguish this renumbering on rerun.
+- **ProRAW DNG:** ImageIO has no destination. The original stayed unchanged.
+
+#### Remaining device checklist
 
 1. Prepare a flat folder named **S4 fixtures** with copies of the four files
    listed above (about 54 MB). Put it in Files or on the USB-C SSD/card used for
@@ -218,11 +264,15 @@ Options for G1 (the product owner chooses):
    support is substantial new work. It was not implemented here. ImageIO's lack
    of a destination is not proof that every possible DNG writer is impossible.
 
-No product default, production writer, PRD text or decision record was changed.
-No performance target is proposed from this shared-host sample.
+No product default, production writer or decision record was changed. The HIF
+follow-up clarifies HEIF extensions and RAW+HEIF pairs in both PRDs' format
+sections. No performance target is proposed from this shared-host sample.
 
 ## Open questions
 
+- No public, licensed Sony HIF sample is pinned yet. Rerun with the owner's Sony
+  HIF to verify decoding, reference-based payload matching and native metadata
+  preservation; synthetic renumbering coverage cannot establish camera support.
 - **Pending part 2:** do the iPhone 17 Pro Max and iPad Pro JSON results confirm
   these capabilities and preservation warnings on their installed OS versions?
 - **G1:** choose the JPEG preservation approach and HEIC allowlist scope after

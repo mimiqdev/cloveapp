@@ -328,13 +328,13 @@ Manual marks take precedence. Similar groups only group.
 
 ## Supported files
 
-The confirmed product scope is to scan JPEG, HEIC, and common RAW files, including DNG, after opening a folder. RAW is the primary use case. No custom RAW decoder at launch.
+The confirmed product scope is to scan JPEG, HEIC, and common RAW files, including DNG, after opening a folder. HEIC includes camera HEIF files with `.HEIC`, `.HEIF`, or `.HIF` extensions. RAW is the primary use case. No custom RAW decoder at launch.
 
 The following are source-derived public facts, not a compatibility guarantee tested by Clove:
 
 - Prefer system image capabilities for grid and detail previews. Engineering research recommends embedded previews for the grid and full RAW processing only when needed for detail. Double-tap to 100% first enlarges the embedded preview, then decodes the full RAW when needed. See the [engineering research source](https://app.notion.com/p/41237873fb548107bd96d0f6838b1200).
 - Apple publishes iOS camera RAW support. Engineering research cites the [iOS 18 support page, dated July 2025](https://support.apple.com/en-us/120534). The list changes with OS updates. Apple provides basic DNG support for unlisted models. Some models support only uncompressed, lossless, or single-shot RAW.
-- Clove's promise is to open JPEG, HEIC, and common RAW files for which the system can generate previews. Camera and compression-format support depends on the system on the user's device. This document does not create a guaranteed camera list.
+- Clove's promise is to open JPEG, HEIC, and common RAW files for which the system can generate previews. A RAW and a same-name HEIF in the same folder form a pair, treated like RAW+JPEG. Camera and compression-format support depends on the system on the user's device. This document does not create a guaranteed camera list.
 - DNG files, such as iPhone ProRAW, Leica, and Pentax, display as RAW. For writing marks, they fall under standalone JPEG, HEIC, and DNG files. See item 6 under How marks reach disk.
 - Unsupported files or compression formats require a visible explanation. A blank preview must not be presented as loaded.
 - Typical folder size, preview speed, and detail-decoding speed have no approved numeric targets. Timing or photo-count targets remain pending measurement and are not launch promises.
