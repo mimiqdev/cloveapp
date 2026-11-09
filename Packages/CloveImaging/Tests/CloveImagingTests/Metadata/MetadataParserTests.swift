@@ -13,9 +13,12 @@ private func parseTime(
         properties: ["{Exif}": exif], creationDate: nil, modificationDate: nil)
 }
 
-@Test(arguments: ["0", "00", "7", "06", "089", "000001", "123456789", "123456789123"])
-func captureFractionRetainsDigits(_ digits: String) throws {
-    let metadata = parseTime(subseconds: digits)
+@Test(arguments: [
+    "0", "00", "7", "06", "089", "000001", "123456789", "123456789123", " 007 ", "007   ",
+])
+func captureFractionRetainsDigits(_ value: String) throws {
+    let digits = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let metadata = parseTime(subseconds: value)
     let capture = try #require(metadata.captureTime.value)
     let whole = try #require(parseTime().captureTime.value)
     #expect(
@@ -51,23 +54,56 @@ func malformedCaptureIsExplicit(_ value: String) {
     #expect(metadata.time == .unavailable)
 }
 
-@Test(arguments: ["", "1.2", "-1", "１２", "7x"])
-func malformedFractionIsExplicit(_ value: String) {
-    let metadata = parseTime(subseconds: value)
+@Test(arguments: ["1.2", "-1", "１２", "7x"])
+func malformedFractionIsExplicit(_ value: String) throws {
+    let metadata = parseTime(subseconds: value, offset: "+05:30")
     #expect(
         metadata.subseconds
             == .invalid(rawValue: value, source: .imageProperty("{Exif}.SubsecTimeOriginal")))
-    #expect(metadata.captureTime.value == nil)
-    #expect(metadata.time == .unavailable)
+    let capture = try #require(metadata.captureTime.value)
+    #expect(metadata.captureTime == parseTime(offset: "+05:30").captureTime)
+    #expect(capture.utcOffsetSeconds == 19800)
+    #expect(metadata.time == .captureMetadata(capture))
 }
 
-@Test(arguments: ["", "Z", "+24:00", "+00:60", "05:30", "+5:30", "+０５:30"])
-func malformedOffsetIsExplicit(_ value: String) {
-    let metadata = parseTime(offset: value)
+@Test(arguments: ["Z", "+24:00", "+00:60", "05:30", "+5:30", "+０５:30"])
+func malformedOffsetIsExplicit(_ value: String) throws {
+    let metadata = parseTime(subseconds: "007", offset: value)
     #expect(
         metadata.utcOffset
             == .invalid(rawValue: value, source: .imageProperty("{Exif}.OffsetTimeOriginal")))
-    #expect(metadata.captureTime.value == nil)
+    let capture = try #require(metadata.captureTime.value)
+    #expect(metadata.captureTime == parseTime(subseconds: "007").captureTime)
+    #expect(capture.utcOffsetSeconds == nil)
+    #expect(capture.timestamp == .cameraWallTime(capture.wallTime))
+    #expect(metadata.time == .captureMetadata(capture))
+}
+
+@Test(arguments: ["", " ", "     ", "   :  ", ":", " : : ", "\t\n"])
+func unknownTimeDetailsAreMissingAndKeepCapture(_ value: String) throws {
+    let metadata = parseTime(subseconds: value, offset: value)
+    let capture = try #require(metadata.captureTime.value)
+    #expect(metadata.subseconds == .missing)
+    #expect(metadata.utcOffset == .missing)
+    #expect(metadata.captureTime == parseTime().captureTime)
+    #expect(capture.utcOffsetSeconds == nil)
+    #expect(capture.timestamp == .cameraWallTime(capture.wallTime))
+    #expect(metadata.time == .captureMetadata(capture))
+}
+
+@Test(arguments: ["", "   :  ", "1.2", "7x", "+24:00", "+5:30"])
+func unusableTimeDetailsDoNotSelectFileDateFallback(_ value: String) throws {
+    let metadata = MetadataParser.parse(
+        properties: [
+            "{Exif}": [
+                "DateTimeOriginal": "2024:02:29 12:34:56",
+                "SubsecTimeOriginal": value, "OffsetTimeOriginal": value,
+            ]
+        ], creationDate: Date(timeIntervalSince1970: 100),
+        modificationDate: Date(timeIntervalSince1970: 200))
+    let capture = try #require(metadata.captureTime.value)
+    #expect(metadata.captureTime == parseTime().captureTime)
+    #expect(metadata.time == .captureMetadata(capture))
 }
 
 @Test func metadataIdentityPreferenceAndMissingStates() {

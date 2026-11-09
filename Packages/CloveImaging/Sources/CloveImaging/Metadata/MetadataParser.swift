@@ -7,8 +7,14 @@ enum MetadataParser {
         properties: [String: Any], creationDate: Date?, modificationDate: Date?
     ) -> ImageMetadata {
         let original = text(properties, paths: ["{Exif}.DateTimeOriginal"])
-        let subseconds = digits(text(properties, paths: ["{Exif}.SubsecTimeOriginal"]))
-        let offset = offset(text(properties, paths: ["{Exif}.OffsetTimeOriginal"]))
+        let subseconds = digits(
+            text(
+                properties, paths: ["{Exif}.SubsecTimeOriginal"], unknownPlaceholderIsMissing: true)
+        )
+        let offset = offset(
+            text(
+                properties, paths: ["{Exif}.OffsetTimeOriginal"], unknownPlaceholderIsMissing: true)
+        )
         let capture = capture(original, subseconds: subseconds, offset: offset)
         return ImageMetadata(
             captureTime: capture, subseconds: subseconds, utcOffset: offset,
@@ -26,8 +32,9 @@ enum MetadataParser {
             fileModificationTime: fileDate(modificationDate, source: .fileModification))
     }
 
-    private static func text(_ properties: [String: Any], paths: [String]) -> MetadataField<String>
-    {
+    private static func text(
+        _ properties: [String: Any], paths: [String], unknownPlaceholderIsMissing: Bool = false
+    ) -> MetadataField<String> {
         var firstInvalid: MetadataField<String>?
         for path in paths {
             let parts = path.split(separator: ".", maxSplits: 1).map(String.init)
@@ -43,6 +50,10 @@ enum MetadataParser {
             } else {
                 firstInvalid =
                     firstInvalid ?? .invalid(rawValue: String(describing: raw), source: source)
+                continue
+            }
+            // EXIF permits spaces for unknown optional time values, including "   :  ".
+            if unknownPlaceholderIsMissing, string.allSatisfy({ $0 == " " || $0 == ":" }) {
                 continue
             }
             guard !string.isEmpty else {
@@ -105,13 +116,8 @@ enum MetadataParser {
             else {
                 return .invalid(rawValue: value, source: source)
             }
-            // Invalid precision/zone must not silently become a usable capture time.
-            if case .invalid(let raw, let location) = subseconds {
-                return .invalid(rawValue: raw, source: location)
-            }
-            if case .invalid(let raw, let location) = offset {
-                return .invalid(rawValue: raw, source: location)
-            }
+            // Optional precision/zone failures remain visible on their own fields.
+            // A valid original date still supplies capture order and grouping time.
             if let digits = subseconds.value, let fraction = Double("0." + digits) {
                 wallTime.addTimeInterval(fraction)
             }

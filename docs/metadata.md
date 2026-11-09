@@ -41,8 +41,15 @@ UTC surrogate, including fractional seconds. It is not itself an absolute
 instant. `CaptureTime.timestamp` returns `.utc` only with an explicit offset;
 otherwise it returns `.cameraWallTime`. The original subsecond digits remain
 available so precision and zeroes are preserved beyond `Date`'s precision.
-Malformed subseconds or offsets make capture time unusable rather than silently
-removing precision or assigning a zone.
+A valid `DateTimeOriginal` remains usable when subseconds or offsets are unusable.
+An unusable subsecond contributes no fraction; an unusable offset leaves camera
+wall time with no UTC offset. Empty optional fields after trimming, or fields
+containing only spaces and colons (such as the EXIF unknown offset `"   :  "`),
+are `.missing`. Space-padded digits are trimmed and parsed normally. Other
+malformed text stays `.invalid` on the subsecond or offset field so callers can
+inspect it, without losing capture order or grouping eligibility. A malformed
+`DateTimeOriginal` still makes capture time invalid and selects a file-time
+fallback when available.
 
 `ImageMetadata.time` selects usable capture metadata, then file creation time,
 then file modification time, or `.unavailable`. TIFF `DateTime` is never used
