@@ -1,0 +1,184 @@
+import Foundation
+
+extension BrowsingState {
+    /// The encoded form's version, which a scene writes and reads back (PRD P0-14).
+    ///
+    /// Version 1 is the only shape this release understands. A launch reads it from the scene's
+    /// storage, so the form is treated as untrusted input: anything this version cannot read
+    /// exactly starts at entry rather than stopping the launch (PRD P0-14). Adding a field keeps
+    /// version 1 and decodes the field with its default when it is absent; changing what an
+    /// existing field means takes a new version and starts old scenes at entry.
+    public static let encodedVersion = 1
+
+    /// Encodes the state for one scene to store (PRD P0-14).
+    ///
+    /// Returns nil only when the value cannot be encoded at all; the caller then stores nothing
+    /// and the next launch starts at entry.
+    public func encoded() -> Data? {
+        try? JSONEncoder().encode(EncodedBrowsingState(self))
+    }
+
+    /// Reads a scene's stored state, or entry when there is nothing usable (PRD P0-14).
+    ///
+    /// Missing data, unreadable data, a form from another version and a spelling this release
+    /// does not know all return ``BrowsingState/entry``. The restored value still needs
+    /// ``BrowsingState/restored(from:)`` before a screen reads it, because the folder it names
+    /// may have changed.
+    public static func decoded(from data: Data?) -> BrowsingState {
+        guard let data,
+            let form = try? JSONDecoder().decode(EncodedBrowsingState.self, from: data),
+            let state = form.state
+        else { return .entry }
+        return state
+    }
+}
+
+/// The versioned form a scene stores; the only shape ``BrowsingState/encodedVersion`` writes.
+private struct EncodedBrowsingState: Codable {
+    var version: Int
+    var folder: String?
+    var currentPhoto: EncodedPhoto?
+    var filter: EncodedFilter
+    var order: String
+    var selection: [EncodedPhoto]
+    var groupPosition: EncodedGroupPosition?
+    var route: String
+
+    init(_ state: BrowsingState) {
+        version = BrowsingState.encodedVersion
+        folder = state.folder?.rawValue
+        currentPhoto = state.currentPhoto.map(EncodedPhoto.init)
+        filter = EncodedFilter(state.filter)
+        order = state.order.encodedSpelling
+        // The selection is unordered; sorting keeps the bytes stable for the same set.
+        selection = state.selection
+            .map(EncodedPhoto.init)
+            .sorted { ($0.folder, $0.path, $0.stem) < ($1.folder, $1.path, $1.stem) }
+        groupPosition = state.groupPosition.map(EncodedGroupPosition.init)
+        route = state.route.encodedSpelling
+    }
+
+    /// The state this form describes, or nil when it is not exactly readable.
+    var state: BrowsingState? {
+        guard version == BrowsingState.encodedVersion,
+            let route = BrowserRoute(encodedSpelling: route),
+            let order = PhotoOrder(encodedSpelling: order),
+            let filter = filter.filter
+        else { return nil }
+        return BrowsingState(
+            folder: folder.map { FolderIdentity(rawValue: $0) },
+            currentPhoto: currentPhoto?.photo,
+            filter: filter,
+            order: order,
+            selection: Set(selection.map(\.photo)),
+            groupPosition: groupPosition?.position,
+            route: route)
+    }
+}
+
+/// One photo identity in the stored form (PRD P0-01: the parts that make it stable).
+private struct EncodedPhoto: Codable, Hashable {
+    var folder: String
+    var path: String
+    var stem: String
+
+    init(_ photo: PhotoIdentity) {
+        folder = photo.folderID.rawValue
+        path = photo.relativeFolderPath
+        stem = photo.stem
+    }
+
+    var photo: PhotoIdentity {
+        PhotoIdentity(
+            folderID: FolderIdentity(rawValue: folder), relativeFolderPath: path, stem: stem)
+    }
+}
+
+/// The group view's place in the stored form (PRD P0-12).
+private struct EncodedGroupPosition: Codable {
+    var group: String
+    var photo: EncodedPhoto
+
+    init(_ position: BrowsingGroupPosition) {
+        group = position.group.rawValue
+        photo = EncodedPhoto(position.photo)
+    }
+
+    var position: BrowsingGroupPosition {
+        BrowsingGroupPosition(group: GroupID(rawValue: group), photo: photo.photo)
+    }
+}
+
+/// The grid filter in the stored form, with the rating minimum only where it applies
+/// (PRD P0-03).
+private struct EncodedFilter: Codable {
+    var kind: String
+    var minimum: Int?
+
+    init(_ filter: PhotoFilter) {
+        kind = filter.encodedSpelling
+        if case .ratedAtLeast(let rating) = filter { minimum = rating.rawValue }
+    }
+
+    var filter: PhotoFilter? {
+        switch kind {
+        case "all": .all
+        case "unmarked": .unmarked
+        case "rejected": .rejected
+        case "ratedAtLeast":
+            minimum.flatMap(Rating.init(rawValue:)).map(PhotoFilter.ratedAtLeast)
+        default: nil
+        }
+    }
+}
+
+private extension PhotoFilter {
+    var encodedSpelling: String {
+        switch self {
+        case .all: "all"
+        case .unmarked: "unmarked"
+        case .rejected: "rejected"
+        case .ratedAtLeast: "ratedAtLeast"
+        }
+    }
+}
+
+private extension PhotoOrder {
+    var encodedSpelling: String {
+        switch self {
+        case .captureTime: "captureTime"
+        case .fileName: "fileName"
+        }
+    }
+
+    init?(encodedSpelling: String) {
+        switch encodedSpelling {
+        case "captureTime": self = .captureTime
+        case "fileName": self = .fileName
+        default: return nil
+        }
+    }
+}
+
+private extension BrowserRoute {
+    var encodedSpelling: String {
+        switch self {
+        case .entry: "entry"
+        case .grid: "grid"
+        case .detail: "detail"
+        case .group: "group"
+        case .settings: "settings"
+        }
+    }
+
+    init?(encodedSpelling: String) {
+        switch encodedSpelling {
+        case "entry": self = .entry
+        case "grid": self = .grid
+        case "detail": self = .detail
+        case "group": self = .group
+        case "settings": self = .settings
+        default: return nil
+        }
+    }
+}
