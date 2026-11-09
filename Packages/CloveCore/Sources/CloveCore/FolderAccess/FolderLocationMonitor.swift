@@ -54,6 +54,7 @@ public actor FolderLocationMonitor {
     private var volumeRootURL: URL?
     private var pollTask: Task<Void, Never>?
     private var onLoss: (@Sendable (FolderLocationLoss) -> Void)?
+    private var isStarted = false
     private var hasReported = false
 
     /// Creates a monitor; the volume root is read from the folder unless the caller supplies one.
@@ -76,13 +77,16 @@ public actor FolderLocationMonitor {
     }
 
     /// Whether the timer and presenter are active (G1 folder access).
-    public var isWatching: Bool { pollTask != nil }
+    public var isWatching: Bool { isStarted }
 
     /// Starts polling and presenter callbacks, replacing any earlier watch.
     ///
-    /// The callback runs after the watch has stopped and must not wait on this monitor.
+    /// Each check waits one interval, so a slow provider call adds to the 500 ms baseline; S1 is
+    /// explicit that the interval is not a detection deadline. The callback runs after the watch
+    /// has stopped and must not wait on this monitor.
     public func start(reportingLossTo onLoss: @escaping @Sendable (FolderLocationLoss) -> Void) {
         stop()
+        isStarted = true
         self.onLoss = onLoss
         hasReported = false
         volumeRootURL = suppliedVolumeRootURL ?? reading.facts(for: rootURL).volumeRootURL
@@ -123,6 +127,7 @@ public actor FolderLocationMonitor {
 
     /// Stops the watch: removes the presenter, cancels the timer and forgets the callback.
     public func stop() {
+        isStarted = false
         presenting.stop()
         pollTask?.cancel()
         pollTask = nil
