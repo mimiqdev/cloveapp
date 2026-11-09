@@ -15,34 +15,50 @@ import CloveCore
     @Test func theSessionReportsRaisingAndLoweringAcrossBoundaries() {
         var session = SwipeRatingSession(enabledRatings: .all)
 
-        #expect(session.update(travel: 30) == nil)
-        #expect(session.update(travel: 45) == .raised(to: 1))
-        #expect(session.update(travel: 130) == .raised(to: 2))
-        #expect(session.update(travel: 135) == nil)
-        #expect(session.update(travel: 90) == .lowered(to: 1))
-        #expect(session.update(travel: 20) == .lowered(to: 0))
+        #expect(session.update(travel: 30) == [])
+        #expect(session.update(travel: 45) == [.raised(to: 1)])
+        #expect(session.update(travel: 130) == [.raised(to: 2)])
+        #expect(session.update(travel: 135) == [])
+        #expect(session.update(travel: 90) == [.lowered(to: 1)])
+        #expect(session.update(travel: 20) == [.lowered(to: 0)])
         #expect(session.step == 0)
         #expect(session.travel == 20)
+    }
+
+    @Test func aSampleThatSpansSeveralStepsReportsEachBoundary() {
+        var session = SwipeRatingSession(enabledRatings: .all)
+
+        #expect(
+            session.update(travel: 280)
+                == [.raised(to: 1), .raised(to: 2), .raised(to: 3), .raised(to: 4), .raised(to: 5)])
+        #expect(
+            session.update(travel: 0)
+                == [
+                    .lowered(to: 4), .lowered(to: 3), .lowered(to: 2), .lowered(to: 1),
+                    .lowered(to: 0),
+                ])
     }
 
     @Test func aReportedChangeCarriesTheNewStep() throws {
         var session = SwipeRatingSession(enabledRatings: .all)
 
         let raised = session.update(travel: 280)
-        #expect(raised?.step == 5)
-        #expect(raised == .raised(to: 5))
+        #expect(raised.last?.step == 5)
         #expect(session.rating == (try MarkingFixtures.stars(5)))
 
         let lowered = session.update(travel: 160)
-        #expect(lowered?.step == 3)
-        #expect(lowered == .lowered(to: 3))
+        #expect(lowered.last?.step == 3)
+        #expect(lowered.last == .lowered(to: 3))
     }
 
     @Test func theSessionNeverStepsPastTheEnabledLevels() {
         var session = SwipeRatingSession(enabledRatings: .all)
 
-        #expect(session.update(travel: 1_000) == .raised(to: 5))
-        #expect(session.update(travel: 2_000) == nil)
+        #expect(
+            session.update(travel: 1_000) == [
+                .raised(to: 1), .raised(to: 2), .raised(to: 3), .raised(to: 4), .raised(to: 5),
+            ])
+        #expect(session.update(travel: 2_000) == [])
         #expect(session.step == 5)
     }
 
@@ -71,7 +87,10 @@ import CloveCore
     @Test func theReleasePositionDecidesNotTheHighestTravel() {
         var session = SwipeRatingSession(enabledRatings: .all)
 
-        #expect(session.update(travel: 250) == .raised(to: 4))
+        #expect(
+            session.update(travel: 250) == [
+                .raised(to: 1), .raised(to: 2), .raised(to: 3), .raised(to: 4),
+            ])
         #expect(session.release(atTravel: 30) == nil)
         #expect(session.step == 0)
     }

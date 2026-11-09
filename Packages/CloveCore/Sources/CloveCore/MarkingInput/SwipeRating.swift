@@ -101,18 +101,22 @@ public struct SwipeRatingSession: Hashable, Sendable {
         rules.step(forTravel: travel, maximumStep: maximumStep)
     }
 
-    /// Moves the gesture to a new travel and reports the boundary it crossed, if any.
+    /// Moves the gesture to a new travel and reports every boundary it crossed, in order.
     ///
-    /// Swiping back lowers the step (PRD Rating by swipe distance). Crossing nothing is
-    /// reported as nil, so the UI only reacts at a boundary.
+    /// Swiping back lowers the step (PRD Rating by swipe distance). One report per crossed
+    /// boundary keeps the per-step haptic honest when a single travel sample spans more than one
+    /// step, so a jump from the dead zone to the top reports every step in between. A sample that
+    /// stays inside its step reports nothing.
     @discardableResult
-    public mutating func update(travel newTravel: Double) -> SwipeStepChange? {
-        travel = newTravel
-        let newStep = step(forTravel: newTravel)
-        guard newStep != step else { return nil }
+    public mutating func update(travel newTravel: Double) -> [SwipeStepChange] {
         let previousStep = step
-        step = newStep
-        return newStep > previousStep ? .raised(to: newStep) : .lowered(to: newStep)
+        travel = newTravel
+        step = step(forTravel: newTravel)
+        guard step != previousStep else { return [] }
+        if step > previousStep {
+            return ((previousStep + 1)...step).map { .raised(to: $0) }
+        }
+        return stride(from: previousStep - 1, through: step, by: -1).map { .lowered(to: $0) }
     }
 
     /// Ends the gesture at the release position and returns the rating to apply.

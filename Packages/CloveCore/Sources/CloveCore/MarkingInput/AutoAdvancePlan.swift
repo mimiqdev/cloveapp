@@ -19,6 +19,20 @@ public enum AutoAdvanceTarget: Hashable, Sendable {
     case groupUndecidedPhoto(PhotoIdentity)
 }
 
+/// The group view's own answer about its next undecided photo (PRD In-group culling).
+///
+/// The group's Undecided rule (no rating and no Reject) and what a completed group does next
+/// belong to the group view, so a group detail view supplies this answer instead of the marking
+/// rules deriving it. A regular detail view passes nil.
+public enum GroupAdvance: Hashable, Sendable {
+    /// The group's next undecided photo, the caller's answer.
+    case nextUndecidedPhoto(PhotoIdentity)
+
+    /// No undecided photo is left in the group, so the group view decides what comes next
+    /// (PRD P0-12: a completed group advances to the next group according to settings).
+    case complete
+}
+
 /// The move one written mark starts, and the photo undo has to return to (PRD Auto-advance).
 ///
 /// The UI waits `AutoAdvance.pause` before applying a target, so the user sees the mark take

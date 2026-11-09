@@ -106,7 +106,7 @@ import CloveCore
             settings: AppSettings(autoAdvance: AutoAdvance(destination: .nextUnmarkedPhoto)))
 
         let plan = rules.autoAdvancePlan(
-            after: .rating, from: b.id, photos: [a, b, c], nextUndecidedInGroup: c.id)
+            after: .rating, from: b.id, photos: [a, b, c], group: .nextUndecidedPhoto(c.id))
 
         #expect(plan.target == .groupUndecidedPhoto(c.id))
         #expect(plan.markedPhoto == b.id)
@@ -118,27 +118,39 @@ import CloveCore
             settings: AppSettings(autoAdvance: AutoAdvance(destination: .stay)))
 
         let plan = rules.autoAdvancePlan(
-            after: .rating, from: b.id, photos: [a, b, c], nextUndecidedInGroup: c.id)
+            after: .rating, from: b.id, photos: [a, b, c], group: .nextUndecidedPhoto(c.id))
 
         #expect(plan.target == .stay)
     }
 
-    @Test func aGroupViewWithoutAnotherUndecidedPhotoStays() throws {
+    @Test func aCompletedGroupStaysForTheGroupViewToFinish() throws {
         let (a, b, c) = try photos()
         let rules = MarkingInputRules()
 
+        // Later photos still exist, but the group is over: moving through them is the group
+        // view's completion job, not the ordinary next-photo policy (PRD P0-12).
         let plan = rules.autoAdvancePlan(
-            after: .rating, from: b.id, photos: [a, b, c], nextUndecidedInGroup: nil)
+            after: .rating, from: b.id, photos: [a, b, c], group: .complete)
 
-        #expect(plan.target == .nextPhoto(c.id))
+        #expect(plan.target == .stay)
+        #expect(plan.markedPhoto == b.id)
     }
 
-    @Test func theCallersOwnUndecidedPhotoIsNotAnAdvanceTarget() throws {
+    @Test func aGroupAnswerNamingTheCurrentPhotoIsNotAMove() throws {
         let (a, b, c) = try photos()
         let rules = MarkingInputRules()
 
         let plan = rules.autoAdvancePlan(
-            after: .rating, from: b.id, photos: [a, b, c], nextUndecidedInGroup: b.id)
+            after: .rating, from: b.id, photos: [a, b, c], group: .nextUndecidedPhoto(b.id))
+
+        #expect(plan.target == .stay)
+    }
+
+    @Test func aRegularDetailViewUsesThePolicyDestination() throws {
+        let (a, b, c) = try photos()
+        let rules = MarkingInputRules()
+
+        let plan = rules.autoAdvancePlan(after: .rating, from: b.id, photos: [a, b, c])
 
         #expect(plan.target == .nextPhoto(c.id))
     }
