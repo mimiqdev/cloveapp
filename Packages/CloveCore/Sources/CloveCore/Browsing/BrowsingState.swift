@@ -6,9 +6,14 @@
 /// view (PRD P0-14, G1 fold-state row).
 ///
 /// The value is the saved unit, never the authority. A folder changes between launches, so
-/// ``BrowsingState/restored(from:)-(FolderAvailability)`` narrows a saved state to what the
-/// folder holds now before any screen reads it (PRD P0-13).
-public struct BrowsingState: Hashable, Sendable {
+/// ``BrowsingState/restored(from:)`` narrows a saved state to what the folder holds now before
+/// any screen reads it (PRD P0-13). Its encoded form is versioned, and a form this release cannot
+/// read starts at entry (``BrowsingStateCoding``).
+///
+/// Write status is deliberately absent. PRD P0-14 preserves it across a fold, but it belongs to
+/// the save state (C4/U7) and lives on the observing model, so a stored navigation state can
+/// never claim an unfinished write was saved.
+public struct BrowsingState: Hashable, Sendable, Codable {
     /// The state of a launch that has nothing saved, and of a restore that cannot use its saved
     /// state (PRD P0-14: never fail because a saved state is unreadable).
     public static let entry = BrowsingState()
@@ -22,7 +27,8 @@ public struct BrowsingState: Hashable, Sendable {
     /// The photo the browser is on, kept while the grid and the detail share one screen.
     ///
     /// PRD P0-14 preserves the current photo across folding, unfolding, resizing and reopening.
-    /// The grid route reads it to avoid jumping, and the detail route needs it.
+    /// The detail route needs it, and the grid route keeps it so the grid can hold that photo in
+    /// place once the collection view lands (PRD P0-11).
     public var currentPhoto: PhotoIdentity?
 
     /// The grid's filter (PRD P0-03, P0-14). A filter never changes the order.

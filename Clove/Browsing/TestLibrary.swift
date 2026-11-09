@@ -21,10 +21,14 @@ final class TestLibrary: FolderLibrary {
         environment[launchVariable] == "1" ? sample : TestLibrary()
     }
 
-    /// The fake folder's durable key, spelled so a saved scene never looks like a real folder.
-    static let folderKey = FolderIdentity(rawValue: "clove.test-library")
+    /// The sample folder's durable key, spelled so a saved scene never looks like a real folder.
+    static let sampleFolderKey = FolderIdentity(rawValue: "clove.test-library")
 
-    let folder = TestLibrary.folderKey
+    /// The empty library's key: nothing is open, so a scene saved by the sample never applies
+    /// here (PRD P0-14).
+    static let emptyFolderKey = FolderIdentity(rawValue: "clove.empty-library")
+
+    let folder: FolderIdentity
     let groups: [BrowsingGroup]
 
     private var stored: [GridPhoto]
@@ -34,12 +38,14 @@ final class TestLibrary: FolderLibrary {
 
     /// An empty library: no folder holds anything until entry opens one.
     init() {
+        folder = TestLibrary.emptyFolderKey
         stored = []
         groups = []
     }
 
     /// A fixed library, for the sample below and the previews.
     init(photos: [GridPhoto], groups: [BrowsingGroup]) {
+        folder = TestLibrary.sampleFolderKey
         stored = photos
         self.groups = groups
     }
@@ -57,7 +63,7 @@ final class TestLibrary: FolderLibrary {
             let stem = String(format: "MMQ%05d", 2678 + index)
             let path = index < 18 ? "DCIM/100CAM" : "DCIM/101CAM"
             let id = PhotoIdentity(
-                folderID: folderKey, relativeFolderPath: path, stem: stem)
+                folderID: sampleFolderKey, relativeFolderPath: path, stem: stem)
             return GridPhoto(
                 id: id,
                 fileName: "\(stem).ARW",
@@ -86,7 +92,7 @@ final class TestLibrary: FolderLibrary {
     private static func samplePhotos(_ numbers: ClosedRange<Int>) -> [PhotoIdentity] {
         numbers.map { number in
             PhotoIdentity(
-                folderID: folderKey,
+                folderID: sampleFolderKey,
                 relativeFolderPath: number < 2696 ? "DCIM/100CAM" : "DCIM/101CAM",
                 stem: String(format: "MMQ%05d", number))
         }

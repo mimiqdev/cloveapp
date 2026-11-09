@@ -24,6 +24,9 @@ enum BrowsingFixtures {
     /// A group key the folder no longer publishes.
     static let vanishedBurst = GroupID(rawValue: "vanished-burst")
 
+    /// The group key a refinement split the burst into.
+    static let splitBurst = GroupID(rawValue: "split-burst")
+
     /// One group of alpha, beta and gamma; delta stays ungrouped.
     static var groups: [BrowsingGroup] {
         [BrowsingGroup(id: burst, members: [alpha, beta, gamma])]

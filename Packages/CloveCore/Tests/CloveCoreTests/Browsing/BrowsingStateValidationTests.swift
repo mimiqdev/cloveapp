@@ -43,8 +43,11 @@ import CloveCore
     }
 
     @Test func presentPhotoKeepsTheDetailRoute() {
-        let restored = BrowsingFixtures.saved.restored(from: .available(BrowsingFixtures.contents))
-        #expect(restored.state.route == .group)
+        var saved = BrowsingFixtures.saved
+        saved.route = .detail
+        saved.groupPosition = nil
+        let restored = saved.restored(from: .available(BrowsingFixtures.contents))
+        #expect(restored.state.route == .detail)
         #expect(restored.state.currentPhoto == BrowsingFixtures.beta)
     }
 
@@ -91,14 +94,13 @@ import CloveCore
             photos: [BrowsingFixtures.alpha, BrowsingFixtures.beta, BrowsingFixtures.delta],
             groups: [
                 BrowsingGroup(id: BrowsingFixtures.burst, members: [BrowsingFixtures.alpha]),
-                BrowsingGroup(
-                    id: BrowsingFixtures.vanishedBurst, members: [BrowsingFixtures.delta]),
+                BrowsingGroup(id: BrowsingFixtures.splitBurst, members: [BrowsingFixtures.delta]),
             ])
         let restored = saved.restored(from: .available(contents))
         #expect(
             restored.state.groupPosition
                 == BrowsingGroupPosition(
-                    group: BrowsingFixtures.vanishedBurst, photo: BrowsingFixtures.delta))
+                    group: BrowsingFixtures.splitBurst, photo: BrowsingFixtures.delta))
         #expect(restored.state.route == .group)
     }
 
@@ -107,6 +109,38 @@ import CloveCore
         saved.groupPosition = nil
         let restored = saved.restored(from: .available(BrowsingFixtures.contents))
         #expect(restored.state.route == .grid)
+    }
+
+    @Test func groupListingAPhotoTheFolderLostFallsBackToTheGrid() {
+        var saved = BrowsingFixtures.saved
+        saved.groupPosition = BrowsingGroupPosition(
+            group: BrowsingFixtures.burst, photo: BrowsingFixtures.gamma)
+        // Grouping has not caught up with the rescan, so the group still lists the gone photo.
+        let contents = FolderContents(
+            folder: BrowsingFixtures.folder,
+            photos: [BrowsingFixtures.alpha, BrowsingFixtures.beta],
+            groups: BrowsingFixtures.groups)
+        let restored = saved.restored(from: .available(contents))
+        #expect(restored.state.groupPosition == nil)
+        #expect(restored.state.route == .grid)
+    }
+
+    @Test func settingsWithoutAFolderAreRestored() {
+        var saved = BrowsingState.entry
+        saved.route = .settings
+        let restored = saved.restored(from: .available(BrowsingFixtures.contents))
+        #expect(restored.state.route == .settings)
+        #expect(restored.state.folder == nil)
+    }
+
+    @Test func settingsRestoredOverAnotherFolderDropThatFolder() {
+        var saved = BrowsingFixtures.saved
+        saved.route = .settings
+        let other = FolderContents(
+            folder: FolderIdentity(rawValue: "another-folder"), photos: [], groups: [])
+        let restored = saved.restored(from: .available(other))
+        #expect(restored.state.route == .settings)
+        #expect(restored.state.folder == nil)
     }
 
     @Test func entryStaysAtEntry() {

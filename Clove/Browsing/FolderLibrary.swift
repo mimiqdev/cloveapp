@@ -5,6 +5,10 @@ import CloveCore
 /// Folder access (C11), the scan (C2), the order (C8), writes (C4) and grouping (C9) arrive with
 /// U2 and U3. Until then ``TestLibrary`` stands in for them, and the screens read only these four
 /// things, so replacing the library does not change a screen or the browsing state.
+///
+/// This build reads the library when it opens a folder, restores a scene and applies a mark. A
+/// streamed scan and background grouping arrive as batches after those reads, so U2 and U3 add
+/// how the model receives them and keep the screens reading the model, not the library.
 @MainActor
 protocol FolderLibrary: AnyObject {
     /// The open folder's durable key, never a path or a name (G1 folder access, PRD P0-01).

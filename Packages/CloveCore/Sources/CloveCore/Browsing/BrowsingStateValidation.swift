@@ -24,10 +24,11 @@ extension BrowsingState {
     /// Restore validation: the saved state narrowed to what the folder actually holds now
     /// (PRD P0-14, P0-13).
     ///
-    /// A folder that cannot be opened falls back to entry and keeps the reason
-    /// (PRD P0-02). A saved state that belongs to another folder, or to no folder at all, never
-    /// applies to this one, so it also starts at entry: applying a saved photo to a folder that
-    /// does not hold it would show the wrong set.
+    /// A folder that cannot be opened falls back to entry and keeps the reason (PRD P0-02). A
+    /// destination that shows photos needs the folder those photos belong to, so a saved grid,
+    /// detail or group view for another folder starts at entry: applying a saved photo to a folder
+    /// that does not hold it would show the wrong set. Entry and settings show no photo, so they
+    /// restore as saved, without the folder identity when it is not the open one.
     ///
     /// A photo that no longer exists is dropped, so a detail route on it falls back to the grid;
     /// the multi-selection drops missing photos (PRD P0-09); the group-view position keeps the
@@ -46,9 +47,12 @@ extension BrowsingState {
 
     /// The saved state narrowed to one folder's contents, or entry when it does not apply.
     private func restored(in contents: FolderContents) -> BrowsingState {
-        guard folder == contents.folder else { return .entry }
+        let showsPhotos = route == .grid || route == .detail || route == .group
+        guard !showsPhotos || folder == contents.folder else { return .entry }
 
         var state = self
+        // A folder this state names but the launch did not open is not a folder it can show.
+        if state.folder != contents.folder { state.folder = nil }
         if let photo = state.currentPhoto, !contents.photos.contains(photo) {
             state.currentPhoto = nil
         }

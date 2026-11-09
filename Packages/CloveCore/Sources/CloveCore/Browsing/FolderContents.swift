@@ -53,10 +53,13 @@ public struct FolderContents: Hashable, Sendable {
     /// The group-view place the folder can still show, or nil when it can show none.
     ///
     /// PRD P0-14 keeps the group-view position across a fold or a relaunch, and PRD P0-11 lets
-    /// grouping refine between them. The saved group wins while it still holds the saved photo;
-    /// otherwise the group that holds that photo now is used, so the view stays on the same photo;
-    /// when neither exists the position is dropped and the caller returns to the grid.
+    /// grouping refine between them. The saved photo must still exist in the folder, because
+    /// grouping can publish a group that has not caught up with a rescan. The saved group wins
+    /// while it still holds that photo; otherwise the group that holds it now is used, so the view
+    /// stays on the same photo; when neither exists the position is dropped and the caller
+    /// returns to the grid.
     public func position(for saved: BrowsingGroupPosition) -> BrowsingGroupPosition? {
+        guard photos.contains(saved.photo) else { return nil }
         if let group = group(with: saved.group), group.members.contains(saved.photo) {
             return saved
         }

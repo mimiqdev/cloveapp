@@ -67,7 +67,11 @@ final class BrowsingModel {
     }
 
     /// Opens the library's folder and shows its grid (PRD Entry, P0-01).
+    ///
+    /// A folder that opens answers whatever the last failed open left on entry, so the message
+    /// goes with it (PRD P0-02).
     func openFolder() {
+        folderFailure = nil
         state.folder = library.folder
         state.currentPhoto = nil
         state.selection = []

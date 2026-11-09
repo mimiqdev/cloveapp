@@ -46,6 +46,15 @@ import CloveCore
         #expect(BrowsingState.decoded(from: data) == .entry)
     }
 
+    @Test func decodingDirectlyRefusesAnOlderForm() throws {
+        let data = try reversioned(BrowsingFixtures.saved, to: 0)
+        // The type itself never silently accepts another version; the launch path is what falls
+        // back to entry.
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(BrowsingState.self, from: data)
+        }
+    }
+
     @Test func selectionRoundTripsEveryMember() throws {
         var saved = BrowsingFixtures.saved
         saved.selection = [BrowsingFixtures.delta, BrowsingFixtures.alpha]
