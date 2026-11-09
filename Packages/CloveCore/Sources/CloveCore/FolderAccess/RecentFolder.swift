@@ -44,20 +44,33 @@ public struct FolderIdentityKeys: Codable, Hashable, Sendable {
         volumeUUID != nil && fileIdentifier != nil
     }
 
-    /// Compares these saved keys with the keys read from the folder now.
+    /// Compares this record's saved keys with the keys read from the folder now.
     ///
-    /// A comparable key that differs is a mismatch, never a silent switch (PRD P0-02). Complete
-    /// keys on both sides that agree are verified. Anything else is weak: S1's deferred device
-    /// checks in #29 may find volumes or providers that report no usable key.
+    /// G1 folder access allows weak acceptance only when neither side has the key. Per key:
+    /// - both sides have it: they must match (PRD P0-02 never switches silently);
+    /// - the record has it and the folder does not: mismatch, so a folder that lost its identity
+    ///   is never accepted as the remembered one;
+    /// - the record does not have it: weak, and `FolderAccess` merges a found key so a later open
+    ///   can compare it;
+    /// - neither side has it: weak.
+    ///
+    /// A mismatch on either key wins over a weak key. S1's deferred device checks in #29 may
+    /// revise which keys exFAT volumes and card readers report.
     public func checkIdentity(against found: FolderIdentityKeys) -> FolderIdentityCheck {
-        guard let savedVolume = volumeUUID, let foundVolume = found.volumeUUID else {
-            return .weak
+        var isVerified = true
+        for (saved, current) in [
+            (volumeUUID, found.volumeUUID), (fileIdentifier, found.fileIdentifier),
+        ] {
+            switch (saved, current) {
+            case let (saved?, current?):
+                guard saved == current else { return .mismatch }
+            case (_?, nil):
+                return .mismatch
+            case (nil, _):
+                isVerified = false
+            }
         }
-        guard savedVolume == foundVolume else { return .mismatch }
-        guard let savedFile = fileIdentifier, let foundFile = found.fileIdentifier else {
-            return .weak
-        }
-        return savedFile == foundFile ? .verified : .mismatch
+        return isVerified ? .verified : .weak
     }
 }
 
@@ -65,8 +78,9 @@ public struct FolderIdentityKeys: Codable, Hashable, Sendable {
 public enum FolderIdentityCheck: Hashable, Sendable {
     /// Both the volume UUID and the file identifier matched the remembered folder.
     case verified
-    /// Not enough keys existed on both sides to compare; accept provisionally until #29 reports
-    /// which volumes and providers supply identity keys. Never treat this as verified.
+    /// The record has no key for a value the folder may report, so identity cannot be proven;
+    /// accept provisionally until #29 reports which volumes and providers supply keys. Never
+    /// treat this as verified.
     case weak
     /// A comparable key differed, for example a different card with the same name or a folder
     /// replaced at the same path. The user must choose the folder again (PRD P0-02).
@@ -93,8 +107,9 @@ public struct RecentFolder: Identifiable, Codable, Hashable, Sendable {
     public var mediaType: FolderMediaType
     /// The logical photo count from the last successful scan; nil until C2 reports one (PRD P0-02).
     public var photoCount: Int?
-    /// Whether that scan was complete or partial (PRD P0-02).
-    public var scanStatus: FolderScanStatus
+    /// Whether that scan was complete or partial; nil until a scan has run, so P0-02 never shows
+    /// a scan that did not happen.
+    public var scanStatus: FolderScanStatus?
     /// When the folder last opened successfully; failed opens never change it (PRD P0-02).
     public var lastOpened: Date
 
@@ -107,7 +122,7 @@ public struct RecentFolder: Identifiable, Codable, Hashable, Sendable {
         identityKeys: FolderIdentityKeys = FolderIdentityKeys(),
         mediaType: FolderMediaType = .unknown,
         photoCount: Int? = nil,
-        scanStatus: FolderScanStatus = .complete,
+        scanStatus: FolderScanStatus? = nil,
         lastOpened: Date = Date()
     ) {
         self.id = id

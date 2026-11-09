@@ -46,6 +46,8 @@ private func makeFolder(named name: String, in parent: URL) throws -> URL {
     #expect(isSameLocation(first.session.rootURL, folder))
     #expect(first.session.identityCheck == .verified)
     #expect(first.recent.lastOpened == clock.now)
+    #expect(first.recent.photoCount == nil)
+    #expect(first.recent.scanStatus == nil)
     #expect(scope.startCount == 1)
     #expect(scope.stopCount == 0)
 
@@ -57,6 +59,7 @@ private func makeFolder(named name: String, in parent: URL) throws -> URL {
     #expect(second.recent.id == first.recent.id)
     #expect(second.recent.lastOpened == clock.now)
     #expect(second.session.identityCheck == .verified)
+    #expect(second.recent.scanStatus == nil)
     #expect(isSameLocation(second.session.rootURL, folder))
     await second.session.end()
     #expect(scope.startCount == 2)
