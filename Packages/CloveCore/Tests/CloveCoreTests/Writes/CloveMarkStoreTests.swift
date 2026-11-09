@@ -126,7 +126,7 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(stored.isRejected)
 }
 
-@Test func corruptStorageIsReportedAndNeverOverwritten() async throws {
+@Test func damagedMarkStorageIsReportedAndNeverOverwritten() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let store = makeStore(folder, WriteFileSystemDouble())
