@@ -59,7 +59,8 @@ struct RejectMovePlanTests {
                 == "_Rejected/DCIM/100AAAAA/IMG_0001.ARW")
         let standalonePlan = try #require(plan.readyEntries.first { $0.identity == standalone.id })
         #expect(standalonePlan.sidecars.isEmpty)
-        #expect(relativePath(of: standalonePlan.destinationFolder, in: fixture.folder) == "_Rejected")
+        #expect(
+            relativePath(of: standalonePlan.destinationFolder, in: fixture.folder) == "_Rejected")
     }
 
     /// A taken destination name gives the whole set one suffix and keeps extension case.
@@ -75,17 +76,19 @@ struct RejectMovePlanTests {
 
         let plan = try await fixture.plan([set])
         let entry = try #require(plan.readyEntries.first)
-        #expect(entry.files.map(\.destination.lastPathComponent) == [
-            "IMG_0001-1.ARW", "IMG_0001-1.JPG", "IMG_0001-1.xmp",
-        ])
+        #expect(
+            entry.files.map(\.destination.lastPathComponent) == [
+                "IMG_0001-1.ARW", "IMG_0001-1.JPG", "IMG_0001-1.xmp",
+            ])
         #expect(plan.photoCount == 1)
         #expect(plan.companionCount == 1)
         #expect(plan.sidecarCount == 1)
 
         let result = try await fixture.move(plan)
         #expect(result.movedCount == 1)
-        #expect(fixture.folder.contents(of: "_Rejected/DCIM/100AAAAA/IMG_0001.ARW")
-            == Data("already here".utf8))
+        #expect(
+            fixture.folder.contents(of: "_Rejected/DCIM/100AAAAA/IMG_0001.ARW")
+                == Data("already here".utf8))
         #expect(fixture.folder.exists("_Rejected/DCIM/100AAAAA/IMG_0001-1.ARW"))
         #expect(fixture.folder.exists("_Rejected/DCIM/100AAAAA/IMG_0001-1.JPG"))
         #expect(fixture.folder.exists("_Rejected/DCIM/100AAAAA/IMG_0001-1.xmp"))

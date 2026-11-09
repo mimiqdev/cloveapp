@@ -40,6 +40,16 @@ struct MoveTestFolder {
         return target
     }
 
+    /// Writes `data` to `relativePath`, creating its folders, and returns the URL.
+    @discardableResult
+    func write(_ data: Data, to relativePath: String) throws -> URL {
+        let target = file(relativePath)
+        try FileManager.default.createDirectory(
+            at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: target)
+        return target
+    }
+
     /// Writes `count` bytes of one byte value to `relativePath` and returns the URL.
     @discardableResult
     func write(bytes count: Int, to relativePath: String) throws -> URL {
@@ -107,7 +117,7 @@ func relativePath(of url: URL, in folder: MoveTestFolder) -> String {
 /// A test that waits for a seam call or a mark write uses this so a broken precondition ends
 /// the test after a short bound instead of hanging the suite. Polling is bounded by wall time,
 /// not by an iteration count, and sleeps one millisecond per turn.
-func waitUntil(
+func eventually(
     timeout: Duration = .seconds(5), _ condition: @Sendable () async -> Bool
 ) async -> Bool {
     let deadline = ContinuousClock.now + timeout
@@ -413,7 +423,8 @@ func makeMoveSet(
     formats: [PhotoFormat],
     sidecarName: String? = nil
 ) throws -> ScannedPhotoSet {
-    let directory = relativePath.isEmpty
+    let directory =
+        relativePath.isEmpty
         ? root : root.appendingPathComponent(relativePath, isDirectory: true)
     func member(_ pathExtension: String) -> URL {
         directory.appendingPathComponent(stem).appendingPathExtension(pathExtension)
@@ -433,16 +444,26 @@ func makeMoveSet(
     return ScannedPhotoSet(photoSet: set, sidecar: sidecar, imageFiles: imageFiles)
 }
 
-/// Writes every file of one set with distinct bytes, so a move can be checked byte for byte.
+/// The bytes one set member gets in a test: a valid packet for a sidecar, marker bytes otherwise.
 ///
-/// The bytes carry the source name, so a test can prove a destination holds the same content and
-/// that a collision never overwrote an existing file with different content.
+/// G1's Safe writes row reads the sidecar before writing, so a test sidecar must be a valid XMP
+/// packet; C3's codec builds one for an empty edit. Image contents are never read by the move,
+/// so their bytes just carry the source name, which lets a test prove a destination holds the
+/// same content and that a collision never overwrote an existing file.
+func moveTestBytes(for url: URL, in folder: MoveTestFolder) throws -> Data {
+    if url.pathExtension.lowercased() == "xmp" {
+        return try XMPCodec().write(XMPEdit(), into: nil)
+    }
+    return Data("contents of \(relativePath(of: url, in: folder))".utf8)
+}
+
+/// Writes every file of one set with distinct, valid bytes, so a move can be checked byte for
+/// byte and a later mark write can read its sidecar.
 func writeMoveSet(_ set: ScannedPhotoSet, in folder: MoveTestFolder) throws {
     for url in set.photoSet.fileURLs {
-        let relativePath = String(
-            url.path(percentEncoded: false).dropFirst(
-                folder.url.path(percentEncoded: false).count + 1))
-        try folder.write("contents of \(relativePath)", to: relativePath)
+        let relative = relativePath(of: url, in: folder)
+        let bytes = try moveTestBytes(for: url, in: folder)
+        try folder.write(bytes, to: relative)
     }
 }
 

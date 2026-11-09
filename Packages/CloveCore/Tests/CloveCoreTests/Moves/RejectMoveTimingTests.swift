@@ -4,16 +4,19 @@
 
     @testable import CloveCore
 
-    /// Records the median time to move 50 RAW+HIF+XMP sets.
+    /// Records the median time to move 50 RAW+HIF+XMP sets on the production file system.
     ///
     /// PRD P0-10 sets no move target, so this test only records numbers for the pull request;
-    /// it asserts that every set moved and cannot fail on a slow host. Each sample creates 50
-    /// sets in their own subfolder and runs the whole plan and move on a temporary folder, so
-    /// the number includes the plan's existence checks, the per-file confirmation and C4's
-    /// stored-Reject lookup.
+    /// it asserts that every set moved and cannot fail on a slow host. The mover and C4's queue
+    /// use the real `Foundation`/POSIX seam, so the number is not distorted by a test double's
+    /// recording. Each sample creates 50 sets in their own subfolder and runs the confirmed
+    /// move, so it includes the per-file confirmation and C4's stored-Reject lookup.
     @Test(.timeLimit(.minutes(1))) func reportsMedianTimeToMoveFiftySets() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
+        let queue = MarkWriteQueue(storeDirectory: fixture.folder.storage)
+        let mover = RejectMover(markQueue: queue)
+        let configuration = RejectMoveConfiguration(settings: moveSettings())
         let samples = 5
         let clock = ContinuousClock()
         var durations: [Double] = []
@@ -29,9 +32,11 @@
                 try writeMoveSet(set, in: fixture.folder)
                 sets.append(set)
             }
-            let plan = try await fixture.plan(sets)
+            let plan = try await mover.plan(
+                for: RejectMoveRequest(
+                    rootURL: fixture.folder.url, sets: sets, configuration: configuration))
             let start = clock.now
-            let result = try await fixture.mover.move(plan)
+            let result = try await mover.move(plan)
             let elapsed = clock.now - start
             #expect(result.movedCount == 50)
             durations.append(
@@ -41,7 +46,10 @@
         durations.sort()
         let median = durations[durations.count / 2]
         print("Move rejects timing on macOS (informational, no gate):")
-        print("  50 RAW+HIF+XMP sets, \(samples) samples: \(String(format: "%7.3f", median)) ms median")
-        print("  samples: \(durations.map { String(format: "%.3f", $0) }.joined(separator: ", ")) ms")
+        print(
+            "  50 RAW+HIF+XMP sets, \(samples) samples: \(String(format: "%7.3f", median)) ms median"
+        )
+        print(
+            "  samples: \(durations.map { String(format: "%.3f", $0) }.joined(separator: ", ")) ms")
     }
 #endif

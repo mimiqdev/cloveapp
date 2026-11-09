@@ -46,7 +46,7 @@ struct RejectMoverTests {
                 #expect(!fixture.folder.exists(source))
                 #expect(
                     fixture.folder.contents(of: "_Rejected/\(source)")
-                        == Data("contents of \(source)".utf8))
+                        == (try moveTestBytes(for: url, in: fixture.folder)))
             }
         }
         #expect(fixture.folder.files() == before.map { "_Rejected/\($0)" }.sorted())
@@ -76,7 +76,8 @@ struct RejectMoverTests {
         #expect(result.movedCount == 0)
         let failure = try #require(result.failed.first?.failure)
         #expect(failure.reason == .conflict)
-        #expect(failure.errorChain.contains { $0.domain == NSPOSIXErrorDomain && $0.code == EEXIST })
+        #expect(
+            failure.errorChain.contains { $0.domain == NSPOSIXErrorDomain && $0.code == EEXIST })
         #expect(fixture.folder.contents(of: "_Rejected/DCIM/IMG_0001.JPG") == Data("intruder".utf8))
         for url in set.photoSet.fileURLs {
             #expect(fixture.folder.exists(relativePath(of: url, in: fixture.folder)))
@@ -126,7 +127,8 @@ struct RejectMoverTests {
         #expect(failure.errorChain.contains { $0.domain == NSPOSIXErrorDomain && $0.code == EXDEV })
         for url in set.photoSet.fileURLs {
             #expect(fixture.folder.exists(relativePath(of: url, in: fixture.folder)))
-            #expect(!fixture.folder.exists("_Rejected/" + relativePath(of: url, in: fixture.folder)))
+            #expect(
+                !fixture.folder.exists("_Rejected/" + relativePath(of: url, in: fixture.folder)))
         }
         #expect(fixture.folder.fileCount() == before)
     }
@@ -245,7 +247,8 @@ struct RejectMoverTests {
         #expect(locations[.sidecar]?.location == .source)
         // Nothing was lost: the same number of files exists, in two places.
         #expect(fixture.folder.fileCount() == before)
-        #expect(fixture.folder.exists(relativePath(of: entry.files[0].destination, in: fixture.folder)))
+        #expect(
+            fixture.folder.exists(relativePath(of: entry.files[0].destination, in: fixture.folder)))
     }
 
     /// An ambiguous sidecar fails the set and leaves every candidate where it is.
@@ -280,8 +283,10 @@ struct RejectMoverTests {
         try writeMoveSet(set, in: fixture.folder)
         let plan = try await fixture.plan([set])
         let before = fixture.folder.files()
+        let sidecarFolder = fixture.folder.file("DCIM")
         fixture.markFileSystem.failWrites { url in
-            url.lastPathComponent == "IMG_0001.xmp" ? POSIXError(.EIO) : nil
+            RejectMovePath.matches(url.deletingLastPathComponent(), sidecarFolder)
+                ? POSIXError(.EIO) : nil
         }
         let rating = try #require(Rating(rawValue: 3))
         let change = await fixture.queue.apply(.rating(rating), to: set)
@@ -323,16 +328,18 @@ struct RejectMoverTests {
             if record.step == .move, record.url == movablePrimary { moveGate.wait() }
         }
         let writeGate = DispatchSemaphore(value: 0)
+        let writingFolder = fixture.folder.file("DCIM/B")
         fixture.markFileSystem.blockWrites { url in
-            url.lastPathComponent == "IMG_0002.xmp" ? writeGate : nil
+            RejectMovePath.matches(url.deletingLastPathComponent(), writingFolder)
+                ? writeGate : nil
         }
         let moveTask = Task { try await fixture.mover.move(plan) }
-        let started = await waitUntil {
-            fixture.fileSystem.allRecords.contains { $0.step == .move }
+        let started = await eventually {
+            fixture.fileSystem.allRecords.contains(where: { $0.step == .move })
         }
         let rating = try #require(Rating(rawValue: 2))
         let changeTask = Task { await fixture.queue.apply(.rating(rating), to: writing) }
-        let admitted = await waitUntil { await fixture.queue.unfinishedChanges().isEmpty == false }
+        let admitted = await eventually { await fixture.queue.unfinishedChanges().isEmpty == false }
         moveGate.signal()
         guard started, admitted else {
             writeGate.signal()
@@ -399,6 +406,76 @@ struct RejectMoverTests {
         #expect(fixture.fileSystem.count(of: .move) == 0)
     }
 
+    /// Every injected failure leaves the same files behind: no delete, no copy, no overwrite.
+    @Test func noFailureModeDeletesOrCopiesAFile() async throws {
+        for mode in FailureMode.allCases { try await checkNoFileIsLost(mode) }
+    }
+
+    /// The failure modes the sweep injects, one per seam step that can fail during a set.
+    private enum FailureMode: String, CaseIterable {
+        case createDirectory
+        case firstMove
+        case laterMove
+        case destinationCheck
+        case sourceCheck
+        case moveBack
+    }
+
+    /// Runs one failure mode and checks the folder's files and bytes are unchanged as a set.
+    private func checkNoFileIsLost(_ mode: FailureMode) async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let set = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM/100AAAAA", stem: "IMG_0001",
+            formats: [.raw, .jpeg, .heif], sidecarName: "IMG_0001.xmp")
+        try writeMoveSet(set, in: fixture.folder)
+        let before = contents(fixture.folder)
+        let plan = try await fixture.plan([set])
+        let entry = try #require(plan.readyEntries.first)
+        switch mode {
+        case .createDirectory:
+            fixture.fileSystem.fail(.createDirectory, with: POSIXError(.EACCES))
+        case .firstMove:
+            fixture.fileSystem.fail(
+                .move, at: entry.files[0].destination, with: POSIXError(.EXDEV))
+        case .laterMove:
+            fixture.fileSystem.fail(
+                .move, at: entry.files[2].destination, with: POSIXError(.ENOSPC))
+        case .destinationCheck:
+            fixture.fileSystem.fail(
+                .fileSize, at: entry.files[0].destination, with: POSIXError(.ENOSPC))
+        case .sourceCheck:
+            fixture.fileSystem.fail(.exists, at: entry.files[0].source, with: POSIXError(.EIO))
+        case .moveBack:
+            fixture.fileSystem.fail(
+                .move, at: entry.files[1].destination, with: POSIXError(.EACCES))
+            fixture.fileSystem.fail(.move, at: entry.files[0].source, with: POSIXError(.EACCES))
+        }
+
+        let result = try await fixture.mover.move(plan)
+
+        #expect(contents(fixture.folder) == before, "\(mode.rawValue) changed the folder's files")
+        switch mode {
+        case .createDirectory, .firstMove, .laterMove, .destinationCheck:
+            #expect(result.failedCount == 1, "\(mode.rawValue) should fail the set")
+            #expect(result.splitCount == 0)
+        case .moveBack:
+            #expect(result.splitCount == 1, "\(mode.rawValue) should report a split")
+            #expect(result.split.first?.files.allSatisfy { $0.location != .missing } == true)
+        case .sourceCheck:
+            // The injected check keeps failing, so the rollback cannot be confirmed. The set is
+            // split and the unreadable file is reported as unknown, never as lost.
+            #expect(result.splitCount == 1)
+            #expect(result.split.first?.files.first?.location == .unknown)
+        }
+    }
+
+    /// Every file's bytes, sorted, so a failure can be compared as a multiset of contents.
+    private func contents(_ folder: MoveTestFolder) -> [String] {
+        folder.files().compactMap { folder.contents(of: $0) }
+            .map { $0.base64EncodedString() }.sorted()
+    }
+
     /// Cancellation stops the run between sets and leaves the rest untouched.
     @Test func cancelsBetweenSetsOnly() async throws {
         let fixture = try MoveFixture()
@@ -426,7 +503,9 @@ struct RejectMoverTests {
         #expect(result.isCancelled)
         #expect(fixture.fileSystem.count(of: .move) == 1)
         for set in sets.dropFirst() {
-            #expect(fixture.folder.exists(relativePath(of: set.photoSet.primary.url, in: fixture.folder)))
+            #expect(
+                fixture.folder.exists(
+                    relativePath(of: set.photoSet.primary.url, in: fixture.folder)))
         }
     }
 }
