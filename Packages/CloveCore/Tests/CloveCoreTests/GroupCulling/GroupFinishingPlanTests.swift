@@ -200,6 +200,27 @@ struct GroupFinishingPlanTests {
             })
     }
 
+    @Test func keepThisIsUnavailableWhenTheCurrentPhotoIsOutsideTheGroup() {
+        let first = groupCullingPhoto("first")
+        let second = groupCullingPhoto("second")
+        let outsider = groupCullingPhoto("outsider")
+        let group = groupCullingGroup("outside", members: [first, second])
+        let plan = GroupFinishingPlan(
+            group: group,
+            action: .keepThis,
+            currentPhoto: outsider,
+            marks: [first: PhotoMarks(), second: PhotoMarks(), outsider: PhotoMarks()],
+            enabledRatings: groupCullingTwoAndFour)
+
+        // PRD P0-12: keeping nothing and rejecting the whole group is not Keep this, which can
+        // happen after C9 refinement moves the viewed photo (PRD P0-11).
+        #expect(plan.availability == .currentPhotoNotInGroup)
+        #expect(!plan.availability.isAvailable)
+        #expect(plan.isEmpty)
+        #expect(plan.keptPhoto == nil)
+        #expect(plan.rejects.isEmpty)
+    }
+
     @Test func plansNeverIncludePhotosOutsideTheGroup() {
         let first = groupCullingPhoto("first")
         let second = groupCullingPhoto("second")
@@ -211,12 +232,15 @@ struct GroupFinishingPlanTests {
             outsider: PhotoMarks(),
         ]
 
+        // The current photo is a member, so Keep this plans inside the group only.
         let keepThis = GroupFinishingPlan(
             group: group,
             action: .keepThis,
-            currentPhoto: outsider,
+            currentPhoto: first,
             marks: marks,
             enabledRatings: groupCullingTwoAndFour)
+        // Keep rated has no keep change, so an outside current photo does not make it
+        // unavailable; it still plans only members.
         let keepRated = GroupFinishingPlan(
             group: group,
             action: .keepRated,
@@ -224,8 +248,6 @@ struct GroupFinishingPlanTests {
             marks: marks,
             enabledRatings: groupCullingTwoAndFour)
 
-        // A photo outside the group is never kept and never rejected.
-        #expect(keepThis.keptPhoto == nil)
         #expect(keepThis.changes.map(\.photo) == [second])
         #expect(keepRated.changes.map(\.photo) == [second])
         for change in keepThis.changes + keepRated.changes {

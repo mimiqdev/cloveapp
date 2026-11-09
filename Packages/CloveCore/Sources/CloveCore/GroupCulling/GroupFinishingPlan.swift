@@ -9,7 +9,9 @@
 ///
 /// Keep this, reject the rest gives the current photo the lowest enabled rating when it has
 /// none, clears its Reject when it is rejected, and leaves an existing rating and label alone;
-/// every other unmarked member is rejected (PRD In-group culling, finishing actions).
+/// every other unmarked member is rejected (PRD In-group culling, finishing actions). It is
+/// unavailable when the current photo is not a member, because there would be nothing to keep
+/// (``GroupFinishingAvailability/currentPhotoNotInGroup``).
 /// Keep rated, reject the rest leaves rated photos unchanged and rejects the other unmarked
 /// members; it is unavailable when no member is rated
 /// (``GroupFinishingAvailability/noRatedPhoto``).
@@ -21,6 +23,8 @@ public struct GroupFinishingPlan: Hashable, Sendable {
     public let action: GroupFinishingAction
 
     /// The photo the group view is showing; C5's undo returns here (DEV-PLAN C5).
+    ///
+    /// Keep this needs it to be a member, so the action always keeps a photo in the group.
     public let currentPhoto: PhotoIdentity
 
     /// The rating Keep this gives an unrated current photo, C12's lowest enabled level
@@ -37,8 +41,9 @@ public struct GroupFinishingPlan: Hashable, Sendable {
     /// Plans one finishing action from the marks read now.
     ///
     /// A member with no entry in `marks` reads as unmarked (PRD P0-05). A photo outside the
-    /// group never enters the plan, and the current photo's own change is planned only when it
-    /// is a member (PRD In-group culling, finishing actions).
+    /// group never enters the plan. Keep this plans nothing at all when the current photo is
+    /// not a member, because rejecting the rest without keeping anything is not the action
+    /// (PRD In-group culling, finishing actions; PRD P0-11).
     public init(
         group: SimilarGroup,
         action: GroupFinishingAction,
@@ -61,16 +66,19 @@ public struct GroupFinishingPlan: Hashable, Sendable {
                             photo: currentPhoto, kind: .keep, marksBefore: current,
                             change: change))
                 }
+                for member in group.members where member != currentPhoto {
+                    let memberMarks = marksOf(member)
+                    guard memberMarks.isUnmarked else { continue }
+                    changes.append(
+                        GroupFinishingChange(
+                            photo: member, kind: .reject, marksBefore: memberMarks,
+                            change: MarkChange(reject: true)))
+                }
+                self.availability = .available
+            } else {
+                // Rejecting the whole group with nothing kept is not Keep this (PRD P0-12).
+                self.availability = .currentPhotoNotInGroup
             }
-            for member in group.members where member != currentPhoto {
-                let memberMarks = marksOf(member)
-                guard memberMarks.isUnmarked else { continue }
-                changes.append(
-                    GroupFinishingChange(
-                        photo: member, kind: .reject, marksBefore: memberMarks,
-                        change: MarkChange(reject: true)))
-            }
-            self.availability = .available
         case .keepRated:
             let hasRatedPhoto = group.members.contains {
                 marksOf($0).rating > .unrated

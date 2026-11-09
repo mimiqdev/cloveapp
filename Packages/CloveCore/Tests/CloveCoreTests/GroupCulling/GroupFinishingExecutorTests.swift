@@ -117,6 +117,44 @@ struct GroupFinishingExecutorTests {
         #expect(await completion.isComplete(group, marks: [:]))
     }
 
+    @Test func keepThisWithTheCurrentPhotoOutsideTheGroupWritesNothing() async throws {
+        let folder = try WriteTestFolder()
+        defer { folder.remove() }
+        let double = WriteFileSystemDouble()
+        let queue = MarkWriteQueue(storeDirectory: folder.file("store"), fileSystem: double)
+        let completion = GroupCompletionTracker()
+        let executor = GroupFinishingExecutor(queue: queue, completion: completion)
+        let sets = try makeSets(folder)
+        let members = sets.map(\.id)
+        let group = groupCullingGroup("outside", members: members)
+        let source = makeSource([:])
+        let outsider = groupCullingPhoto("outsider")
+        let plan = GroupFinishingPlan(
+            group: group,
+            action: .keepThis,
+            currentPhoto: outsider,
+            marks: [:],
+            enabledRatings: groupCullingTwoAndFour)
+
+        let result = await executor.execute(
+            plan,
+            photoSet: { identity in sets.first { $0.id == identity } },
+            latestMarks: { await source.marks(for: $0) })
+
+        // After a C9 refinement (PRD P0-11) the viewed photo can be outside the group; Keep
+        // this must not reject the whole group with nothing kept (PRD P0-12).
+        #expect(result.plan.availability == .currentPhotoNotInGroup)
+        #expect(result.outcomes.isEmpty)
+        #expect(result.droppedPhotos.isEmpty)
+        #expect(result.savedCount == 0)
+        #expect(result.undo.entries.isEmpty)
+        #expect(result.undo.photoToReturnTo == outsider)
+        #expect(double.allRecords.isEmpty)
+        // The action did not run, so it records no completion (PRD In-group culling).
+        #expect(!(await completion.hasFinishingAction(on: group.id)))
+        #expect(!(await completion.isComplete(group, marks: [:])))
+    }
+
     @Test func aPartialFailureReportsCountsAndRetriesOnlyTheFailedItems() async throws {
         let folder = try WriteTestFolder()
         defer { folder.remove() }

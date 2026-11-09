@@ -13,7 +13,7 @@ public enum GroupFinishingAction: String, CaseIterable, Hashable, Sendable {
     case keepRated
 }
 
-/// Whether a finishing action may run on a group, and the one reason it may not
+/// Whether a finishing action may run on a group, and the reason it may not
 /// (PRD In-group culling, finishing actions).
 public enum GroupFinishingAvailability: Hashable, Sendable {
     /// The action can run; its plan may still be empty when there is nothing to change.
@@ -22,6 +22,12 @@ public enum GroupFinishingAvailability: Hashable, Sendable {
     /// Keep rated, reject the rest needs at least one rated photo in the group
     /// (PRD In-group culling, finishing actions).
     case noRatedPhoto
+
+    /// Keep this, reject the rest needs the current photo to be a member, so there is
+    /// something to keep; without it the action would reject the whole group with nothing
+    /// kept. C9's refinement can move the viewed photo to another group (PRD P0-11), so this
+    /// is refused rather than guessed.
+    case currentPhotoNotInGroup
 
     /// Whether the action may run and record a completion (PRD P0-12).
     public var isAvailable: Bool { self == .available }

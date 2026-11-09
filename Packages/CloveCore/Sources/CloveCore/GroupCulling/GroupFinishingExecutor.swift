@@ -15,7 +15,8 @@
 /// The rejects go through C4's batch apply, which is what gives the PRD's per-photo results,
 /// the "Saved N photos. M photos couldn't be saved." counts and a retry of only the failed
 /// items (PRD P0-09; PRD Failure and recovery). An empty plan or an unavailable action writes
-/// nothing (PRD P0-12). Every executed plan returns C5's undo record (PRD P0-12; DEV-PLAN C5).
+/// nothing, and an unavailable action records no completion because it did not run
+/// (PRD P0-12). Every executed plan returns C5's undo record (PRD P0-12; DEV-PLAN C5).
 public struct GroupFinishingExecutor: Sendable {
     /// C4's queue, the only path a mark change takes (G1 Safe writes).
     private let queue: MarkWriteQueue
@@ -40,7 +41,9 @@ public struct GroupFinishingExecutor: Sendable {
     /// `photoSet` supplies C1/C2's scanned set for a member, which C4 needs for the write
     /// destinations; `latestMarks` is read at execution time, so a mark written after the plan
     /// was built is respected. A member whose set is not supplied is dropped from the write and
-    /// listed in ``GroupFinishingResult/droppedPhotos``.
+    /// listed in ``GroupFinishingResult/droppedPhotos``. An unavailable plan, such as Keep this
+    /// with the viewed photo outside the group, writes nothing and records no completion
+    /// (PRD P0-12; PRD P0-11).
     public func execute(
         _ plan: GroupFinishingPlan,
         photoSet: @Sendable (PhotoIdentity) async -> ScannedPhotoSet?,
