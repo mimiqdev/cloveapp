@@ -62,6 +62,65 @@ struct ScanPairingTests {
         }
     }
 
+    @Test(arguments: ScanMethod.allCases)
+    func sonyCameraFoldersPairEveryExtensionCaseAndSkipRejects(method: ScanMethod) throws {
+        let container = try ScanTestTree.container()
+        defer { try? FileManager.default.removeItem(at: container) }
+        let directory = "DCIM/100MSDCF"
+        let extensionPairs = [("ARW", "HIF"), ("ARW", "hif"), ("arw", "HIF"), ("arw", "hif")]
+        var expectedPaths: [String] = []
+        for (index, extensions) in extensionPairs.enumerated() {
+            let stem = "MMQ000\(index)"
+            expectedPaths += [
+                "\(directory)/\(stem).\(extensions.0)",
+                "\(directory)/\(stem.lowercased()).\(extensions.1)",
+            ]
+        }
+        expectedPaths += [
+            "\(directory)/MMQ0004.arw", "\(directory)/mmq0004.jpg",
+            "\(directory)/MMQ0005.ARW", "DCIM/101MSDCF/MMQ0005.hif",
+            "\(directory)/_Rejected2/MMQ0006.HIF",
+        ]
+        let excludedPaths = [
+            "_Rejected/DCIM/100MSDCF/MMQ0000.ARW",
+            "_Rejected/DCIM/100MSDCF/mmq0000.HIF",
+            "\(directory)/_Rejected/MMQ0004.arw",
+            "\(directory)/_Rejected/mmq0004.hif",
+            "\(directory)/._MMQ0000.HIF", "\(directory)/MMQ0000.XMP",
+        ]
+        for path in expectedPaths + excludedPaths {
+            let url = container.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: url)
+        }
+        for keys in [ScanKeySet.names, .nameTypeSizeModifiedDirectory] {
+            let listing = try ScanLister.list(folder: container, method: method, keySet: keys)
+            #expect(listing.entries.map(\.relativePath).sorted() == expectedPaths.sorted())
+            #expect(listing.rejectedSkipped == 2)
+            #expect(listing.errors == 0)
+            let photos = ScanPairing.photos(from: listing.entries)
+            #expect(photos.count == 8)
+            #expect(photos.filter(\.isPaired).count == 5)
+            for (index, extensions) in extensionPairs.enumerated() {
+                let stem = "MMQ000\(index)"
+                let photo = try #require(photos.first { $0.baseName == stem })
+                #expect(photo.relativeDirectory == directory)
+                #expect(photo.primary.lastPathComponent == "\(stem).\(extensions.0)")
+                #expect(
+                    photo.pairedJPEG?.lastPathComponent == "\(stem.lowercased()).\(extensions.1)")
+            }
+            let jpegPair = try #require(photos.first { $0.baseName == "MMQ0004" })
+            #expect(jpegPair.primary.pathExtension == "arw")
+            #expect(jpegPair.pairedJPEG?.lastPathComponent == "mmq0004.jpg")
+            #expect(photos.filter { $0.baseName == "MMQ0005" }.allSatisfy { !$0.isPaired })
+            #expect(
+                photos.contains {
+                    $0.relativeDirectory == "\(directory)/_Rejected2" && !$0.isPaired
+                })
+        }
+    }
+
     @Test func pairingUsesTheListingWithoutTouchingTheDisk() throws {
         let entries = [
             entry("DCIM/100CANON/IMG_0001.CR3"),
