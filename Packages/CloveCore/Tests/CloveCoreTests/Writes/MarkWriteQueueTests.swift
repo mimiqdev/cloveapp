@@ -390,6 +390,46 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(try folder.stagingNames().isEmpty)
 }
 
+@Test func aWriteUsesTheLatestPhotoSetAfterARescan() async throws {
+    let folder = try WriteTestFolder()
+    defer { folder.remove() }
+    let double = WriteFileSystemDouble()
+    let identity = makeFolderIdentity()
+    let first = try makeScannedSet(folder: identity, root: folder.url, stem: "MMQ05184")
+    let existing = folder.file("MMQ05184.XMP")
+    let appended = folder.file("MMQ05184.ARW.xmp")
+    try writeTestUnknownPacket.write(to: existing)
+    try writeTestUnknownPacket.write(to: appended)
+    // The rescan resolves the stem's sidecar as ambiguous after the first change was admitted.
+    let rescanned = try makeScannedSet(
+        folder: identity, root: folder.url, stem: "MMQ05184",
+        sidecar: .ambiguous([existing, appended]))
+    let sidecar = folder.file("MMQ05184.xmp")
+    let reached = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+    double.beforeOperation = { record in
+        guard record.step == .replace, record.url == sidecar, record.count == 1 else { return }
+        reached.signal()
+        _ = release.wait(timeout: .now() + 10)
+    }
+    let queue = makeQueue(folder, double)
+
+    async let firstChange = queue.apply(.rating(three), to: first)
+    #expect(waitForTestSignal(reached))
+    async let secondChange = queue.apply(.label(green), to: rescanned)
+    try await Task.sleep(for: .milliseconds(150))
+    release.signal()
+    let results = await [firstChange, secondChange]
+
+    // The change already writing finished with the set it started from.
+    #expect(results[0].state == .savedInSidecar)
+    // The next write took the newest set, so it refused the now-ambiguous sidecar instead of
+    // writing to the stale destination.
+    #expect(results[1].state.failure?.reason == .ambiguousSidecar)
+    #expect(double.count(of: .replace, at: sidecar) == 1)
+    #expect(try marks(at: sidecar) == XMPMarks(rating: .rated(three), label: .clear))
+}
+
 @Test func unfinishedChangesIncludeWaitingAndFailedChangesUntilTheyFinish() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }

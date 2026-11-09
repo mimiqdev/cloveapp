@@ -3,7 +3,7 @@ import Testing
 
 @testable import CloveCore
 
-/// S1's failure table drives U7's eight situations; each case checks one row.
+/// S1's failure table drives U7's situations; each case checks one row.
 @Test func posixErrorsMapToTheSituationsU7Shows() {
     let cases: [(POSIXErrorCode, MarkWriteFailureReason)] = [
         (.EACCES, .permissionLost),
@@ -86,12 +86,16 @@ import Testing
 
 @Test func aStorageRefusalKeepsItsTypedError() {
     let url = URL(fileURLWithPath: "/tmp/Clove-test-marks.json")
-    let failure = MarkWriteFailure(
+    let corrupt = MarkWriteFailure(
         classifying: CloveMarkStoreError.corruptStorage(url, reason: "not JSON"))
+    let unconfirmed = MarkWriteFailure(classifying: CloveMarkStoreError.readBackMismatch(url))
 
-    #expect(failure.reason == .unknown)
-    #expect(failure.storeError == .corruptStorage(url, reason: "not JSON"))
-    #expect(failure.codecError == nil)
+    #expect(corrupt.reason == .unknown)
+    #expect(corrupt.storeError == .corruptStorage(url, reason: "not JSON"))
+    #expect(corrupt.codecError == nil)
+    // PRD P0-08: a store write that did not read back is known and unconfirmed, not unknown.
+    #expect(unconfirmed.reason == .notConfirmed)
+    #expect(unconfirmed.storeError == .readBackMismatch(url))
 }
 
 @Test func anAmbiguousSidecarHasItsOwnReason() {
