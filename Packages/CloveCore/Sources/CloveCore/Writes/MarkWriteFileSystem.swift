@@ -94,10 +94,11 @@ public protocol MarkWriteFileSystem: Sendable {
     /// one. The caller keeps the permissions separately.
     func replace(_ destination: URL, withItemAt staging: URL) throws
 
-    /// Applies the destination's previous POSIX permissions after the replacement.
+    /// Applies the destination's previous POSIX permissions to the staging file.
     ///
-    /// G1's Safe writes row notes that `rename` installs the staging file's own inode, so a
-    /// write that did not re-apply the old mode would silently change the sidecar's access.
+    /// G1's Safe writes row notes that `rename` installs the staging file's own inode, so the
+    /// old sidecar's mode is set on the staging file before the replacement. The destination
+    /// itself is never chmod-ed; a failure here leaves it untouched.
     func setPermissions(_ permissions: UInt16, of url: URL) throws
 
     /// Removes `url`, treating an already absent file as success.
@@ -165,7 +166,7 @@ public struct FoundationMarkWriteFileSystem: MarkWriteFileSystem {
         guard status == 0 else { throw POSIXError(posixErrorCode()) }
     }
 
-    /// Applies the previous permission bits with `chmod(2)` after the replacement.
+    /// Applies the previous permission bits with `chmod(2)` to the staging file.
     public func setPermissions(_ permissions: UInt16, of url: URL) throws {
         guard chmod(url.path, mode_t(permissions)) == 0 else {
             throw POSIXError(posixErrorCode())

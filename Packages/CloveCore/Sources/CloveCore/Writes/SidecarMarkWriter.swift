@@ -32,7 +32,9 @@ public struct SidecarWriteResult: Hashable, Sendable {
 /// the same folder, synchronize it, POSIX `rename` it over the destination keeping the
 /// destination's spelling, then read the destination back and decode it. Only a read-back
 /// that equals the requested marks is saved (PRD P0-08). The staging file is removed on every
-/// failure path, and the previous packet stays in place until the `rename`.
+/// failure path, and the previous packet stays in place until the `rename`. The old
+/// sidecar's POSIX permissions are applied to the staging file before it replaces the
+/// destination, so a permission failure cannot report a change as failed after installing it.
 ///
 /// The writer is an actor so all writes to one sidecar are serialized (PRD How marks reach
 /// disk, rule 3; G1 Sidecar naming). Each write's read-modify-write runs without suspension
@@ -128,6 +130,14 @@ public actor SidecarMarkWriter {
             }
 
             try fileSystem.writeStaging(edited, to: staging)
+
+            // `rename` installs the staging file's inode, so the old sidecar's permissions
+            // are applied to the staging file before it replaces the destination. The
+            // destination is never chmod-ed: a failure here leaves it untouched (G1 Safe
+            // writes).
+            if let permissions = before?.permissions {
+                try fileSystem.setPermissions(permissions, of: staging)
+            }
             try fileSystem.synchronize(staging)
 
             // G1's conflict check runs immediately before the replacement, not after it, so
@@ -138,12 +148,6 @@ public actor SidecarMarkWriter {
             try fileSystem.replace(destination, withItemAt: staging)
             replaced = true
 
-            // `rename` installs the staging file's inode, so the old sidecar's permissions
-            // are re-applied (G1 Safe writes).
-            if let permissions = before?.permissions {
-                try fileSystem.setPermissions(permissions, of: destination)
-            }
-
             let readBack: Data?
             do {
                 readBack = try fileSystem.read(destination)
@@ -152,7 +156,7 @@ public actor SidecarMarkWriter {
             }
             guard let readBack else {
                 throw MarkWriteFailure(
-                    reason: .unknown,
+                    reason: .notConfirmed,
                     message: "The sidecar disappeared after Clove replaced it.")
             }
             let marks: XMPMarks
@@ -160,7 +164,7 @@ public actor SidecarMarkWriter {
                 marks = try codec.read(readBack)
             } catch let error as XMPCodecError {
                 throw MarkWriteFailure(
-                    reason: .unknown,
+                    reason: .notConfirmed,
                     message: "The written sidecar did not read back as an XMP packet.",
                     codecError: error)
             } catch {
@@ -168,7 +172,7 @@ public actor SidecarMarkWriter {
             }
             guard Self.matches(edit, marks) else {
                 throw MarkWriteFailure(
-                    reason: .unknown,
+                    reason: .notConfirmed,
                     message: "The sidecar did not read back as the requested marks.")
             }
             return .saved

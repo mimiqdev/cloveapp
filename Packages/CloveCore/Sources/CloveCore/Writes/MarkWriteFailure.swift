@@ -10,6 +10,9 @@ import Foundation
 /// G1's Safe writes row adds ``conflict`` for a destination that changed twice while Clove
 /// was writing it, and PRD How marks reach disk, rules 3 and 7, add ``packetRefused`` for a
 /// codec refusal and ``ambiguousSidecar`` for a stem with more than one candidate packet.
+/// PRD P0-08's read-back gate adds ``notConfirmed`` for a write that ran but could not be
+/// confirmed: a mismatched read-back, a read-back that is not a valid packet, or a sidecar
+/// that vanished after the replacement. That is a known situation, not ``unknown``.
 public enum MarkWriteFailureReason: String, CaseIterable, Hashable, Sendable {
     /// The folder or file can no longer be written: `EACCES`, `EPERM`, Cocoa 257 or 513.
     /// S1 maps this to "Lost folder permission" (PRD P0-02, P0-08).
@@ -26,12 +29,17 @@ public enum MarkWriteFailureReason: String, CaseIterable, Hashable, Sendable {
     /// C2 found more than one candidate packet, so Clove refuses to pick one or add a second
     /// (G1 Sidecar naming; PRD How marks reach disk, rule 3).
     case ambiguousSidecar
+    /// The write ran but its result could not be confirmed, so it is not saved
+    /// (PRD P0-08): the read-back mismatched, was not a valid packet, or the sidecar
+    /// disappeared after the replacement.
+    case notConfirmed
     /// The destination changed after Clove read it, twice in a row (G1 Safe writes).
     case conflict
     /// Anything else, kept with its exact error chain instead of a guessed cause (S1).
     case unknown
 
-    /// Maps an `NSError` chain to one of the eight situations, innermost evidence first.
+    /// Maps an `NSError` chain to one of the situations U7 shows, innermost evidence first.
+    /// ``notConfirmed`` is set by the write itself, never derived from an error chain.
     ///
     /// S1's table records the outer Cocoa code with a POSIX `errno` underneath. The deepest
     /// recognised code wins, so Cocoa 513 wrapping `EROFS` reports read-only storage rather
@@ -165,7 +173,12 @@ public struct MarkWriteFailure: Error, Hashable, Sendable, CustomStringConvertib
             self.codecError = codec
             self.storeError = nil
         } else if let store = error as? CloveMarkStoreError {
-            self.reason = .unknown
+            // A store read-back that does not match is the same unconfirmed save as a
+            // sidecar mismatch (PRD P0-08); damaged storage stays unknown.
+            switch store {
+            case .readBackMismatch: self.reason = .notConfirmed
+            case .corruptStorage: self.reason = .unknown
+            }
             self.codecError = nil
             self.storeError = store
         } else {

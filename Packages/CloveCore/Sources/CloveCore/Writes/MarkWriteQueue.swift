@@ -162,7 +162,7 @@ public actor MarkWriteQueue {
             await waitFor(id)
             return changes[id]
         case .failed:
-            guard let set = sets[id], let record = failed[status.identity],
+            guard sets[id] != nil, let record = failed[status.identity],
                 record.ids.contains(id)
             else {
                 return changes[id]
@@ -188,7 +188,7 @@ public actor MarkWriteQueue {
                 pending[status.identity] = PendingWrite(fields: record.fields, waiting: retryIDs)
             }
             latestByPhoto[status.identity] = id
-            startWriting(for: status.identity, set: set)
+            startWriting(for: status.identity)
             await waitFor(id)
             return changes[id]
         default:
@@ -359,24 +359,37 @@ public actor MarkWriteQueue {
         } else {
             pending[identity] = PendingWrite(fields: fields, waiting: [id])
         }
-        startWriting(for: identity, set: set)
+        startWriting(for: identity)
         return id
     }
 
     /// Starts the photo's write loop when it is not already running.
-    private func startWriting(for identity: PhotoIdentity, set: ScannedPhotoSet) {
+    private func startWriting(for identity: PhotoIdentity) {
         guard writeTasks[identity] == nil, pending[identity] != nil else { return }
-        writeTasks[identity] = Task { await self.runWrites(for: identity, set: set) }
+        writeTasks[identity] = Task { await self.runWrites(for: identity) }
+    }
+
+    /// The photo set of the newest admitted change for an identity.
+    ///
+    /// A rescan can resolve a sidecar's spelling or report it ambiguous after an earlier
+    /// change was admitted, and C2's sidecar state is the authority for the next write
+    /// (G1 Sidecar naming). Each write iteration therefore reads the latest set instead of
+    /// the one captured when the write loop started.
+    private func latestSet(for identity: PhotoIdentity) -> ScannedPhotoSet? {
+        guard let id = latestByPhoto[identity] else { return nil }
+        return sets[id]
     }
 
     /// Runs one write at a time for a photo until nothing is waiting, coalescing as it goes.
     ///
     /// G1's Safe writes row makes each write a full read-modify-write, so a request admitted
     /// during a write is not lost: it stays in ``pending`` and the next iteration writes the
-    /// latest cumulative marks. The attempted requests finish with this write's outcome; a
-    /// request whose fields a newer one overwrote was already superseded at admission.
-    private func runWrites(for identity: PhotoIdentity, set: ScannedPhotoSet) async {
+    /// latest cumulative marks with the newest set's destinations. The attempted requests
+    /// finish with this write's outcome; a request whose fields a newer one overwrote was
+    /// already superseded at admission.
+    private func runWrites(for identity: PhotoIdentity) async {
         while let current = pending[identity], !current.waiting.isEmpty {
+            guard let set = latestSet(for: identity) else { break }
             let attempted = current.waiting
             for id in attempted { transition(id, to: .writing) }
             let failure = await perform(current.fields, for: set)
