@@ -274,17 +274,29 @@ write protection, interrupted writes or power-loss behavior.
 
 PRD rule 3 remains the rule: **replace the primary extension**. Thus
 `IMG_0001.CR3` and its paired `IMG_0001.JPG` share `IMG_0001.xmp` in the same
-folder. `IMG_0001.CR3.xmp` is an alternate spelling to investigate, not a second
-sidecar Clove should silently start writing. Same stems in different folders
-remain independent. Multiple RAW extensions with the same stem are an ambiguity
-to expose during C2/C3; this spike does not invent a suffix policy.
+folder. Consistent with [S4](S4-metadata.md), Sony A1 II `MMQ05184.ARW` plus
+`MMQ05184.HIF` likewise share **`MMQ05184.xmp`**, containing one rating, label
+and Reject state for the pair. Neither pair member receives embedded writes,
+even when the standalone embedded option is enabled. This is the recommended
+pair persistence policy; actual desktop display/read behavior is still unverified.
+`IMG_0001.CR3.xmp` (or `MMQ05184.ARW.xmp`) is an alternate spelling to investigate,
+not a second sidecar Clove should silently start writing. Same stems in different
+folders remain independent. Multiple RAW extensions with the same stem are an
+ambiguity to expose during C2/C3; this spike does not invent a suffix policy.
 
 The cache actually contains `IMG_0001.XMP`, not an appended-extension variant.
 The test checks that real file by enumeration and compares the two candidate URL
 rules; it does not claim the set provides an app-exported `.CR3.xmp` sample.
-Production discovery should find case variants before creating a new `.xmp`,
-especially on a case-sensitive volume. If multiple variants disagree, preserve
-them and surface the ambiguity rather than overwrite one arbitrarily.
+Recommended C2/C3 discovery is a same-directory enumeration by stem and XMP
+extension, finding existing `.XMP`/case variants before creating lowercase `.xmp`.
+Reuse a unique matching sidecar's actual spelling; never create a second file
+solely because its extension case differs. Detect appended-extension candidates
+such as `NAME.ARW.xmp` as a compatibility ambiguity. Until the desktop checks
+settle their meaning, preserve them and require resolution before creating a
+competing canonical file or writing either candidate. Multiple case variants or
+competing packets must not be silently merged or arbitrarily overwritten.
+These are production requirements, not claims that the spike's URL helper
+already implements discovery or that real desktop apps use this precedence.
 
 | App | Naming / documented read-write behavior | Evidence and remaining check |
 | --- | --- | --- |
@@ -398,10 +410,12 @@ than claiming a Clove Lab UI run.
 ## Conclusion
 
 The preserving edit is the only tested approach that retains every unknown
-fixture byte while refusing the malformed input. ImageIO and the default Adobe
-SDK run both normalize XMP and lose specific unknown content, so a successful
-rating read-back alone is insufficient. Both atomic methods succeed on APFS;
-exFAT and provider behavior remain inconclusive until the device run.
+fixture byte while refusing the malformed input. The physical-device run agrees
+with the host/simulator comparison; ImageIO and the default Adobe SDK run cannot
+be accepted as whole-packet writers on this corpus. Both replacement methods,
+with and without coordination, succeed on local APFS on host, simulator and
+physical iPhone. exFAT/provider behavior and actual desktop naming/pair reads
+remain unverified and deferred, rather than inferred from local success.
 
 ## Recommendation and options for G1
 
@@ -411,7 +425,32 @@ as the production codec: resource-qualified marks, multiple descriptions,
 encoding/size limits, conflicting sidecars, and preservation diagnostics need
 explicit policies and tests. Refuse ambiguous or malformed input and retain the
 requested marks for retry; never silently repair another app's packet or mark a
-failed/unconfirmed write Saved. No performance target is proposed from this host.
+failed/unconfirmed write Saved. No performance target is proposed from these
+host/device samples.
+
+Recommend **one same-stem sidecar per RAW+HIF or RAW+JPEG pair**, using the
+naming/discovery rule above. This agrees with S4: the shared RAW sidecar avoids
+the observed native JPEG/HIF metadata losses and supplies one persisted set of
+pair marks. Keep original images unchanged. The recommendation holds as a
+preserving Clove persistence design while the desktop checks are deferred;
+it is **not yet a verified P0-07 interoperability result**. Public naming
+references and the PRD support it, but the device run tests neither naming
+variants nor which pair member desktop software reads.
+
+Before **C3's discovery/compatibility policy is finalized**, the desktop check
+must establish for all three apps: exact created filename/case, whether each
+candidate is read, what happens when both exist, and RAW+JPEG/**RAW+HIF** grouping
+and metadata precedence under the owner's preferences. It must separate the
+RAW's sidecar marks from the companion's embedded marks, using distinguishable
+values. If an app ignores the shared packet for a companion or expects a
+different name, return that evidence to G1 for an explicit compatibility choice;
+do not add a second writable sidecar or enable pair embedding silently.
+Before **C7 claims desktop interoperability**, also confirm the supported
+standalone JPEG embedded path's save/reload behavior and the sidecar versus
+embedded precedence. S4's standalone HIF/DNG Lightroom limitation remains
+visible; neither this recommendation nor the shared-pair rule resolves it.
+C7 should combine S4's eligible JPEG container splicing with the preserving XMP
+edit selected at G1, and exclude the lossy ImageIO whole-packet serializer.
 
 Alternatives remain open for the product owner's G1 decision:
 
@@ -444,25 +483,62 @@ The spike returns raw Rating −1 separately from the Clove Boolean; production
 mark interpretation and optional-mode state transitions are intentionally not
 implemented here.
 
-For C4, prefer same-directory staging plus `rename` as the simple candidate,
-with read-back confirmation, pending exFAT results. Retain `replaceItemAt` as
-an alternative if its attribute-preservation semantics matter. Decide whether
-coordination is needed from the provider/device results, not these APFS timings.
+For C4, recommend a unique **same-directory staging file**, validate the edited
+packet, synchronize and close the staging file, then use POSIX **`rename`** for
+replacement and independently read back the destination before showing Saved.
+Serialize writes to the shared pair sidecar so two members cannot race. On a
+failure, retain requested marks for retry, keep the previous packet whenever
+replacement has not happened, and remove only the writer's owned staging file;
+report cleanup failures. A read-back mismatch or interruption leaves the change
+unconfirmed. Successful synchronization/read-back does not prove crash durability.
+
+The local physical result strengthens this candidate but does not establish an
+exFAT guarantee. Retain `replaceItemAt` as an alternative if destination metadata
+preservation is required; C4 must explicitly handle permissions/attributes with
+`rename`. Use `NSFileCoordinator` as required by the selected Files provider and
+its access contract; no coordination requirement can be inferred from the local
+APFS samples. #29 can change the staging/replacement/coordination implementation
+or supported-storage policy if physical-card evidence differs.
 
 ## Open questions
 
 - Physical exFAT success/timing, residue, protected/full-card errors, and whether
-  coordination changes outcomes: collect the checklist JSON in part 2.
+  coordination changes outcomes: deferred to #29; local run 1 does not settle them.
 - Final namespace ownership and optional −1 restoration property: G1 decisions.
-- Exact desktop naming, shared-pair handling, localized label sets, extended
-  colors, Rating −1, and behavior with competing sidecars: desktop checks below.
+- Exact desktop naming, shared RAW+HIF/RAW+JPEG handling, embedded/sidecar
+  precedence, localized label sets, extended colors, Rating −1, and behavior
+  with competing sidecars: deferred desktop checks below, before C3/C7
+  compatibility claims. G1 may adopt the preserving design with this limitation
+  explicit; a contradictory desktop result requires returning to the gate.
 - Lightroom 15+ `.ACR` companions: should the later Move rejects task preserve
   and move them too? Public documentation introduces this question; no PRD or
   shared code was changed.
 
-### Device checklist (part 2)
+## Deferred device checks
 
-Repeat on **iPhone 17 Pro Max, iPad Pro, and iPhone Duo**, recording the installed
+On 2026-11-09 the owner deferred these checks to
+[#29](https://github.com/mimiqdev/cloveapp/issues/29). They do not block finishing
+#14 with the available evidence. Run them before M3/Q3 performance targets are
+fixed, or earlier if G1 needs their answers. Desktop results must settle the
+C3/C7 questions above before interoperability is claimed.
+
+| Deferred check | What it would answer | Could it change the G1 recommendation? |
+| --- | --- | --- |
+| exFAT SD card through the reader, both methods/modes | Actual same-directory replacement, timing, read-back, temp/scratch cleanup and provider coordination on the target storage | **Yes, writer/storage policy:** could change `rename` versus `replaceItemAt`, coordination or supported storage. It would not reverse the measured serializer losses or favor rewriting unknown XMP |
+| Locked card | Whether the reader honors protection; actual failure stage/error, original integrity, cleanup and Documents export | **Could change failure handling or storage support**, not the preserving codec or shared-sidecar naming recommendation |
+| Nearly-full disposable card, if feasible; interruption/crash follow-up in C4 | Whether staging/replacement failures keep the previous packet and clean owned temp files; durability needs a separate controlled experiment | **Could change writer/recovery requirements.** APFS read-back alone cannot justify crash-safety claims; do not fill the shared host or personal card |
+| iPhone Duo | Whether codec, replacement and coordination results agree on that device/OS | **Could narrow device/OS support or require writer changes** if results differ; no result is assumed from the iPhone 17 Pro Max |
+| iPad Pro | The same API, storage and timing confirmation on iPadOS | **Could change device/OS support or coordination**, not justify enabling a serializer already known to lose unknown content |
+| Lightroom Classic, Capture One, Photo Mechanic | Exact filename/case, appended-extension acceptance, conflicts, shared RAW+JPEG/RAW+HIF read/sync and embedded precedence; real exports' preservation and marks | **Yes, naming/interop policy:** a contradictory result requires G1 to revisit compatibility before C3/C7 claims. Fixture success cannot replace this check; no extra writable sidecar or pair embedding is authorized by this report |
+
+Camera files remain the focus. iPhone HEIC's known S4 ownership gap is recorded
+in [S4](S4-metadata.md) and #29 for photo library work; it adds no S3 measurement
+or blocker and is not fixed here.
+
+### Deferred device checklist
+
+No new device run is required for this part-2 PR. When #29 is scheduled, repeat
+on **iPhone 17 Pro Max, iPad Pro, and iPhone Duo**, recording the installed
 OS version in each run (the JSON records it automatically). Use a supervisor-
 uploaded Clove Lab TestFlight build containing S3.
 
@@ -487,15 +563,18 @@ uploaded Clove Lab TestFlight build containing S3.
    deleting personal files. Success is possible if enough space remains; failure
    should include a reason and scratch-cleanup outcome. Do not fill the card
    from Clove Lab. State when this condition was skipped or could not be induced.
-7. Attach **each S3 JSON file to [issue #14](https://github.com/mimiqdev/cloveapp/issues/14)**,
-   using the on-screen filename. Include the reader/card details, lock/full-card
-   conditions, and any mismatch from steps 3–6. Do not send photos or signing files.
+7. Attach **each S3 JSON file to [issue #29](https://github.com/mimiqdev/cloveapp/issues/29)**,
+   referencing #14 and using the on-screen filename. Include the reader/card
+   details, lock/full-card conditions, and any mismatch from steps 3–6. Do not
+   send photos or signing files.
 
 ### Desktop-app checklist (product owner)
 
-Use disposable copies of `xmp-interop` and `name-collision`; record app versions,
-OS, metadata preferences, and UI language. Do these steps separately in
-Lightroom Classic, Capture One, and Photo Mechanic; none was installed/tested here.
+Deferred to #29. Use disposable copies of `xmp-interop` and `name-collision`,
+plus owner-provided A1 II ARW+HIF and ARW+JPEG pair copies; do not add private
+camera files to the public fixtures. Record app versions, OS, metadata preferences,
+pair preferences and UI language. Do these steps separately in Lightroom Classic,
+Capture One and Photo Mechanic; none was installed/tested here.
 
 1. Start with a single `IMG_0001.CR3` and no sidecar. Apply 3 stars and Green,
    explicitly save/sync metadata, and record the exact filename/case created.
@@ -504,21 +583,34 @@ Lightroom Classic, Capture One, and Photo Mechanic; none was installed/tested he
    marks (2/Blue versus 4/Red). Reload/read metadata and record which is read.
    Then provide both together and record precedence/conflict behavior. Test `.XMP`
    case too. Never combine these conflicting samples with real work.
-3. Repeat with `IMG_0001.CR3` plus `IMG_0001.JPG`. Test the app's RAW+JPEG pair
-   preference and whether the RAW rating/label comes from the shared stem XMP;
-   record whether the JPEG uses embedded metadata instead. Change marks, save,
-   and note whether another sidecar is created or the originals are modified.
+3. Repeat with `IMG_0001.CR3` plus `IMG_0001.JPG`, then with A1 II ARW+JPEG
+   and **`MMQ05184.ARW` plus `MMQ05184.HIF`**. Use distinguishable embedded
+   companion marks and sidecar marks, each candidate name alone, then competing
+   names together. Test grouped/separate pair preferences, explicit read/sync
+   and a fresh import/reopen. Record whether RAW reads the shared stem packet,
+   which marks the rendered companion displays, and whether HIF is supported by
+   the app/version at all. Change marks, save, and note exact files created or
+   modified. A supported RAW sidecar does not prove companion interop; an
+   unsupported HIF must be recorded as such.
 4. Open copies containing each named fixture. Save marks from the desktop app,
    then edit them with the S3 preserving editor (or later C3 build) and reload
-   them in the app. Alternate writes in both directions. Confirm ratings/labels,
-   develop settings, history, keywords, nested custom metadata, and both caption
-   languages remain. Save the before/after XMP for analysis.
+   them in the app. Also test Clove-created new wrapped packets. Alternate writes
+   in both directions. Confirm ratings/labels, develop settings, history,
+   keywords, nested custom metadata, and both caption languages remain. Save the before/after XMP for analysis.
 5. With default English label presets, check Red/Yellow/Green/Blue/Purple and
    optional Orange/Pink. Repeat with the owner's usual non-English label set;
    record actual XMP strings and displayed colors rather than assuming translation.
 6. Check `clove:Reject=True` with an ordinary rating, then `Rating=-1` with and
    without that field. Record Bridge behavior too if available. Verify default
    Clove Reject does not alter another app's ordinary star rating.
-7. In Lightroom Classic 15+, use a disposable image with heavy edits, save its
-   metadata, and record `.ACR` naming/association. Return findings on issue #14
-   so G1 and C6 can address companion-file handling before Move rejects ships.
+7. Test standalone camera JPEG with S4's preservation-safe embedded packet
+   path (or later C7 build). Give embedded and sidecar packets distinguishable
+   marks; explicitly reload/read metadata, reopen and save in each app. Record
+   precedence and which files change. Keep standalone HIF/DNG Lightroom
+   limitations explicit; do not infer embedded-write eligibility from sidecars.
+8. In Lightroom Classic 15+, use a disposable image with heavy edits, save its
+   metadata, and record `.ACR` naming/association. Return findings on issue #29,
+   referencing #14, so G1 and C6 can address companion-file handling before Move
+   rejects ships. Return sanitized findings and before/after packets privately
+   when they contain personal metadata; do not publish capture timestamps, GPS,
+   serial numbers or owner folder paths.
