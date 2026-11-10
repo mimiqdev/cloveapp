@@ -80,6 +80,23 @@ struct DetailNativeSizeFixtureTests {
         #expect(preview.fullResolutionSize == CGSize(width: 5472, height: 3648))
     }
 
+    @Test func aCappedFullRasterReportsTheShortfall() async throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        // A JPEG wider than the raster cap: the full decode stops at the cap, so the route can
+        // give no more and says so instead of being asked again (PRD P0-04; G1 "Preview, detail").
+        let file = try directory.image(name: "huge.JPG", width: 40_000, height: 8)
+        let pipeline = DetailPipeline(cache: DetailCache())
+
+        let image = try availableDetail(
+            try await pipeline.image(for: try rasterRequest(file, native: true)))
+
+        #expect(image.quality == .raster)
+        #expect(image.longEdge == DetailRenderer.maximumRasterPixels)
+        #expect(image.limitation == .noHigherResolution)
+        #expect(!image.isFullResolution)
+    }
+
     @Test func aCachedCompanionPreviewTakesTheRequestsOwnSize() async throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
@@ -178,7 +195,9 @@ struct DetailNativeSizeTests {
         // A display raster below the photo's size and any preview can still improve.
         #expect(try !image(1200, 800, .raster, native).isFullResolution)
         #expect(try !image(1616, 1080, .preview, native).isFullResolution)
-        // A preview whose header is unknown may still find the render's size, so it asks.
+        // A raster or preview whose header is unknown may still find the render's size, so it
+        // asks rather than treating its own size as the photo's.
+        #expect(try !image(1616, 1080, .raster, nil).isFullResolution)
         #expect(try !image(1616, 1080, .preview, nil).isFullResolution)
     }
 

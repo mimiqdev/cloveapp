@@ -393,9 +393,18 @@ public actor DetailPipeline {
             if let cached = cache.preview(for: key) { return verified(.available(cached)) }
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             if case .image(let pixels) = await reader.fullRaster(jpeg) {
-                let decoded = DetailImage(
+                var decoded = DetailImage(
                     image: pixels, source: jpeg, quality: .raster,
                     fullResolutionSize: fullResolutionSize ?? pixelSize(pixels))
+                // A decode capped below the photo's size is all this route can give, so the
+                // shortfall is reported instead of asked for again (PRD P0-04; G1 "Preview,
+                // detail (I2)").
+                if let fullResolutionSize,
+                    max(fullResolutionSize.width, fullResolutionSize.height)
+                        > CGFloat(max(pixels.width, pixels.height))
+                {
+                    decoded = decoded.limited(by: .noHigherResolution)
+                }
                 cache.storePreview(decoded, for: key)
                 return verified(.available(decoded))
             }

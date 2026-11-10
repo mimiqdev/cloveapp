@@ -136,6 +136,10 @@ struct DetailMarkingView: View {
     /// The scale the last command asked for, so a user pinch is told apart from that command.
     @State private var commandedScale: CGFloat = 1
 
+    /// Whether this photo's 100% was asked for on this photo, so a header-less preview may find
+    /// its render's size once (PRD P0-04; G1 "Preview, detail (I2)").
+    @State private var didRequestFullResolution = false
+
     /// The zoom the preview should apply, or nil to leave the user's pinch alone.
     @State private var command: DetailZoomCommand?
 
@@ -299,6 +303,7 @@ struct DetailMarkingView: View {
         phase = .loading
         limitation = nil
         previewOnly = false
+        didRequestFullResolution = false
         await images.cancelPrefetch()
         // The first layout gives the view its size; a preview requested from a zero-sized view
         // would ask a JPEG only for a one-pixel raster.
@@ -353,7 +358,7 @@ struct DetailMarkingView: View {
         if let keptZoom {
             self.keptZoom = nil
             setZoom(.scale(keptZoom.scale, anchor: keptZoom.anchor.unitPoint))
-        } else if case .fullResolution = zoomMode, let previous,
+        } else if case .fullResolution = zoomMode, didRequestFullResolution, let previous,
             previous.fullResolutionSize == nil, image.fullResolutionSize != nil,
             viewSize.width > 0
         {
@@ -368,9 +373,11 @@ struct DetailMarkingView: View {
         // A retained zoom, in a group or in regular detail, needs the pixels that photo shows; a
         // fit view never renders, and pixels that already are the photo's full resolution cannot
         // be improved, so the same answer is never asked for twice (G1 "Preview, detail (I2)").
-        // A request the source cannot answer comes back with a limitation, which turns
-        // `previewOnly` on and ends the asking.
-        if scale > DetailFitScale.tolerance, !image.isFullResolution {
+        // The same bitmap arriving again cannot help either; a request the source cannot answer
+        // comes back with a limitation, which turns `previewOnly` on and ends the asking.
+        if scale > DetailFitScale.tolerance, !image.isFullResolution,
+            previous?.image !== image.image
+        {
             upgradeIfNeeded()
         }
     }
@@ -427,6 +434,7 @@ struct DetailMarkingView: View {
         guard settings.doubleTap == .zoom else { return }
         guard scale <= DetailFitScale.tolerance else {
             zoomMode = .fit
+            didRequestFullResolution = false
             setZoom(.fit)
             return
         }
@@ -435,6 +443,7 @@ struct DetailMarkingView: View {
             nativePixels: shown.fullResolutionPixels, shownPixels: pixelSize(shown),
             viewSize: viewSize, screenScale: displayScale)
         zoomMode = .fullResolution(anchor: DetailZoomAnchor(x: anchor.x, y: anchor.y))
+        didRequestFullResolution = true
         setZoom(.scale(target, anchor: anchor))
         upgradeTask?.cancel()
         upgradeTask = Task { await upgrade(need: .fullResolution) }
