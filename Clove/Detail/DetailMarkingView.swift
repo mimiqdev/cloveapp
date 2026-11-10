@@ -107,9 +107,6 @@ struct DetailMarkingView: View {
     /// Where an edge tap and a mark go, in the screen's own order (PRD P0-04; PRD P0-12).
     let actions: DetailMarkingActions
 
-    /// C5's undo through the one model call U8 adds; the button stays disabled until then.
-    var undo: () -> Void = {}
-
     @Environment(\.displayScale) private var displayScale
 
     /// The pixels on screen, or nil while the first preview loads (PRD P0-04).
@@ -173,7 +170,9 @@ struct DetailMarkingView: View {
                 rate: { rate($0) },
                 label: { choose($0) },
                 toggleReject: { toggleReject() },
-                undo: undo)
+                canUndo: browsing.canUndo,
+                undoFailure: browsing.lastUndoFailureSummary,
+                undo: { browsing.undo() })
             // The open folder's own save state, then this photo's failure with the PRD's Retry
             // and Cancel (PRD P0-08). The folder's row carries a location loss; the photo's row
             // carries one write that did not confirm.
@@ -194,6 +193,9 @@ struct DetailMarkingView: View {
         .folderPicker(isPresented: $isPickingFolder) { url in
             await browsing.openPickedFolder(url)
         }
+        // The scene's undo manager reaches this model here, so ⌘Z and the three-finger gestures
+        // undo the same history the HUD's button does (PRD P0-05).
+        .undoHistory(browsing: browsing)
         .task(id: photo.id) { await loadPreview(for: photo) }
         .onDisappear {
             // A render the user left behind must not keep reading the folder or write into a
@@ -520,8 +522,11 @@ struct DetailMarkingView: View {
             actions.step(-1)
         case .nextPhoto:
             actions.step(1)
-        case .undo, .noChange:
-            // C5's undo reaches the screen through U8; a no-change result does nothing.
+        case .undo:
+            // C13 reports the keyboard's ⌘Z as an undo request; it takes the same path as the
+            // toolbar button and the system gestures (PRD P0-05).
+            browsing.undo()
+        case .noChange:
             break
         }
     }

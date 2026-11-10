@@ -13,7 +13,8 @@ import SwiftUI
 ///
 /// Design placeholder: system buttons and a menu stand in for the design's glass HUD. The
 /// save-state line reads C4's confirmed state through ``BrowsingModel/saveText(for:)``, and the
-/// failure row with Retry belongs to the screen above this one (PRD P0-08). U8 enables Undo.
+/// failure row with Retry belongs to the screen above this one (PRD P0-08). Undo is enabled
+/// while the open folder's history has an action to undo (PRD P0-05).
 struct DetailMarkingHUD: View {
     /// The photo whose marks the HUD shows (PRD P0-04).
     let photo: GridPhoto
@@ -37,7 +38,14 @@ struct DetailMarkingHUD: View {
     /// Toggles Reject independently of the rating (PRD Marking rules).
     let toggleReject: () -> Void
 
-    /// C5's undo through the one model call U8 adds; the button stays disabled until then.
+    /// Whether the open folder has an action to undo, so the button is off with nothing to undo
+    /// (PRD P0-05).
+    let canUndo: Bool
+
+    /// The last undo's partial-failure line, or nil when it needed no retry (PRD P0-09).
+    let undoFailure: String?
+
+    /// Undoes the open folder's next action through the system undo path (PRD P0-05).
     let undo: () -> Void
 
     var body: some View {
@@ -103,14 +111,22 @@ struct DetailMarkingHUD: View {
             .accessibilityValue(photo.marks.isRejected ? "On" : "Off")
             .accessibilityIdentifier("clove.detail.reject")
             Button(action: undo) {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.title3)
-                    .frame(width: 34, height: 34)
+                // A failed step keeps its history entry, so the same button is the retry and the
+                // badge says why it is needed (PRD P0-08).
+                Image(
+                    systemName: undoFailure == nil
+                        ? "arrow.uturn.backward"
+                        : "arrow.uturn.backward.circle.badge.exclamationmark"
+                )
+                .font(.title3)
+                .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Undo")
+            .accessibilityValue(undoFailure ?? "")
             .accessibilityIdentifier("clove.detail.undo")
-            .disabled(true)
+            .help(undoFailure ?? "Undo the last mark")
+            .disabled(!canUndo)
         }
     }
 

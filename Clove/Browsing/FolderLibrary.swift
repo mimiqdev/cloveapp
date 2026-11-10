@@ -143,6 +143,39 @@ protocol FolderLibrary: AnyObject {
     /// retry. Nil means nothing has been requested for the photo, not that everything is saved.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus?
 
+    // MARK: - Undo
+
+    /// What the open folder's undo history offers the screens now (PRD P0-05).
+    ///
+    /// PRD P0-05's Undo row drives the toolbar button, ⌘Z and the three-finger gestures from one
+    /// history, so every screen asks this one question. The history belongs to the open folder
+    /// and is empty until something is recorded and again once the folder closes.
+    var undoAvailability: UndoAvailability { get }
+
+    /// Records one confirmed change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
+    ///
+    /// PRD P0-05's Undo row restores the previous mark, so the request carries what the change
+    /// replaced. A change the queue superseded and one that changed nothing record no step. The
+    /// answer says whether a step was recorded, so the caller only touches the system undo stack
+    /// for a real step.
+    func recordUndoStep(_ request: UndoRecordRequest) async -> Bool
+
+    /// Undoes the history's next action through C4's write queue (PRD P0-05).
+    ///
+    /// The queue is the only writer, so a restore shows PRD P0-08's save state, failure copy and
+    /// retry exactly like the change it reverts. A write that does not confirm keeps its history
+    /// entry, and the answer describes what the step restored, where the view goes back to and
+    /// which group's completion changed. Nil means there was nothing to undo, or the folder can
+    /// no longer write.
+    func undoMarkChange() async -> UndoStepResult?
+
+    /// Redoes the history's next undone action through C4's write queue (PRD P0-05).
+    ///
+    /// It re-applies the recorded change where each field still holds the value the undo
+    /// restored, so a mark written after the undo is never overwritten. Nil means there was
+    /// nothing to redo.
+    func redoMarkChange() async -> UndoStepResult?
+
     /// Resends one photo's latest failed change through C4 and reports its final state
     /// (PRD P0-08).
     ///
@@ -304,6 +337,15 @@ extension FolderLibrary {
 
     /// A library with no folder to close keeps the folder key it has.
     func closeFolder() async {}
+
+    /// A library with no history has nothing to undo or redo and records no step (PRD P0-05).
+    var undoAvailability: UndoAvailability { .none }
+
+    func recordUndoStep(_ request: UndoRecordRequest) async -> Bool { false }
+
+    func undoMarkChange() async -> UndoStepResult? { nil }
+
+    func redoMarkChange() async -> UndoStepResult? { nil }
     /// A library with no folder to write records no finishing action and completes no group
     /// (PRD In-group culling).
     func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {

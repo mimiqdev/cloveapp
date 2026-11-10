@@ -14,6 +14,13 @@ import SwiftUI
 /// (PRD P0-09). The selection itself lives in ``BrowsingState/selection``, so folding, resizing or
 /// relaunching keeps it with the rest of the scene (PRD P0-14).
 ///
+/// The toolbar holds Undo beside the grid's other actions, so a batch can be undone from the grid
+/// (PRD P0-05, P0-09); it is disabled while the open folder has nothing to undo, and an undo
+/// scrolls the photo it restored into view.
+///
+/// Design placeholder: system menus, symbols and colours stand in for the visual design's
+/// controls and overlays. The handoff's top bar holds Undo when V2 restyles this screen.
+///
 /// Design placeholder: system menus, symbols and colours stand in for the visual design's
 /// controls and overlays.
 struct GridScreen: View {
@@ -63,6 +70,7 @@ struct GridScreen: View {
                     shownPhotos: Set(photos.map(\.id)),
                     selection: browsing.state.selection,
                     thumbnails: thumbnails,
+                    reveal: browsing.gridReveal,
                     openPhoto: { browsing.openPhoto($0) },
                     openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },
@@ -72,6 +80,30 @@ struct GridScreen: View {
         .safeAreaInset(edge: .bottom) {
             if browsing.isSelecting {
                 GridBatchBar(browsing: browsing, cells: cells)
+            }
+        }
+        // The scene's undo manager reaches this model here, so ⌘Z and the three-finger gestures
+        // undo the same history the toolbar's button does (PRD P0-05).
+        .undoHistory(browsing: browsing)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                // Design placeholder: a system symbol button stands in for the handoff's top-bar
+                // Undo, which V2 restyles.
+                Button {
+                    browsing.undo()
+                } label: {
+                    // A failed step keeps its history entry, so the same button is the retry and
+                    // the badge says why it is needed (PRD P0-08).
+                    Label(
+                        "Undo",
+                        systemImage: browsing.lastUndoFailureSummary == nil
+                            ? "arrow.uturn.backward"
+                            : "arrow.uturn.backward.circle.badge.exclamationmark")
+                }
+                .disabled(!browsing.canUndo)
+                .accessibilityIdentifier("clove.grid.undo")
+                .accessibilityValue(browsing.lastUndoFailureSummary ?? "")
+                .help(browsing.lastUndoFailureSummary ?? "Undo the last mark")
             }
         }
         .accessibilityElement(children: .contain)

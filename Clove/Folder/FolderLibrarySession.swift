@@ -105,6 +105,22 @@ final class FolderLibrarySession: FolderLibrary {
     /// sidecars cannot be retried through this one.
     private var batches: [MarkBatchID: AppliedBatch] = [:]
 
+    /// The open folder's undo and redo history (PRD P0-05; DEV-PLAN C5).
+    ///
+    /// It is created with the folder and cleared when the folder closes, because PRD P0-05 does
+    /// not ask for a history across launches (``MarkUndoHistory``). It writes through this
+    /// library's C4 queue, so an undo shows the same save state, failure copy and retry as the
+    /// change it reverts, and it keeps the folder's own completion records, so undoing a
+    /// finishing action makes its group incomplete again (PRD P0-12).
+    private var undoHistory: MarkUndoHistory?
+
+    /// What ``undoHistory`` offers, mirrored for the screens (PRD P0-05).
+    ///
+    /// The history is an actor, so the screens cannot read it synchronously; the library keeps
+    /// this answer in step after every record, undo and redo, and the browsing model copies it
+    /// for the toolbar's enabled state.
+    private var undoState: UndoAvailability = .none
+
     /// The session holding the open folder's scope, ended when another folder opens.
     private var openSession: FolderAccessSession?
 
@@ -211,6 +227,87 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes.latest(for: photo) }
+
+    /// What the open folder's undo history offers now (PRD P0-05).
+    var undoAvailability: UndoAvailability { undoState }
+
+    /// Records one confirmed change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
+    ///
+    /// PRD P0-05's Undo row restores the previous mark, so each request carries what its change
+    /// replaced. Every kind of step is recorded after C4 admitted it: one photo's mark, one bar
+    /// action as one step, and one finishing action as one step. A change the queue superseded, or
+    /// one that changed no field, records nothing.
+    func recordUndoStep(_ request: UndoRecordRequest) async -> Bool {
+        guard let history = undoHistory else { return false }
+        let recorded: MarkUndoEntryID?
+        switch request {
+        case .mark(let status, let marksBefore):
+            recorded = await history.record(status, marksBefore: marksBefore)
+        case .batch(let result, let marksBefore):
+            recorded = await history.recordBatch(result, marksBefore: marksBefore)
+        case .groupFinishing(let undo):
+            recorded = await history.recordGroupFinishing(undo)
+        }
+        await refreshUndoAvailability(from: history)
+        return recorded != nil
+    }
+
+    /// Undoes the history's next action through C4's write queue (PRD P0-05).
+    ///
+    /// The step is admitted through C11's session like any other write, so the folder waits for
+    /// it before releasing the scope, and the queue is the only writer, so PRD P0-08's save
+    /// state, failure copy and retry describe an undo exactly as they describe a mark.
+    func undoMarkChange() async -> UndoStepResult? {
+        await restoreMarkChange { history, stores in
+            await history.undo(
+                photoSet: { [weak self] photo in await self?.finishingSet(for: photo) },
+                latestMarks: { [weak self] photo in
+                    await self?.finishingMarks(for: photo, in: stores.writes) ?? PhotoMarks()
+                })
+        }
+    }
+
+    /// Redoes the history's next undone action through C4's write queue (PRD P0-05).
+    func redoMarkChange() async -> UndoStepResult? {
+        await restoreMarkChange { history, stores in
+            await history.redo(
+                photoSet: { [weak self] photo in await self?.finishingSet(for: photo) },
+                latestMarks: { [weak self] photo in
+                    await self?.finishingMarks(for: photo, in: stores.writes) ?? PhotoMarks()
+                })
+        }
+    }
+
+    /// Runs one undo or redo step inside the open folder's session (PRD P0-05).
+    ///
+    /// The photo-set lookup and the marks read are the ones a finishing action uses: the folder's
+    /// current set, and the marks the queue has now, including a requested change C4 has not
+    /// confirmed yet. C5 therefore never overwrites a newer mark with the one it restores, and a
+    /// photo the folder no longer holds is reported instead of written somewhere else.
+    private func restoreMarkChange(
+        _ step: @Sendable (MarkUndoHistory, Stores) async -> MarkUndoResult?
+    ) async -> UndoStepResult? {
+        guard let history = undoHistory, let session = openSession else { return nil }
+        guard case .success(let stores) = await resolvedStores() else { return nil }
+        let result: MarkUndoResult?
+        do {
+            result = try await session.withAdmittedWork { await step(history, stores) }
+        } catch {
+            result = nil
+        }
+        await refreshUndoAvailability(from: history)
+        return result.map(UndoStepResult.init)
+    }
+
+    /// Copies the history's state for the toolbar and the system menu (PRD P0-05).
+    private func refreshUndoAvailability(from history: MarkUndoHistory) async {
+        let canUndo = await history.canUndo
+        let canRedo = await history.canRedo
+        let undoName = await history.nextUndoActionName
+        let redoName = await history.nextRedoActionName
+        undoState = UndoAvailability(
+            canUndo: canUndo, canRedo: canRedo, undoName: undoName, redoName: redoName)
+    }
 
     /// The open this library installed last, which changes on every install and close
     /// (PRD P0-02).
@@ -690,6 +787,11 @@ final class FolderLibrarySession: FolderLibrary {
         groupCompletionTracker = GroupCompletionTracker()
 
         batches = [:]
+        // PRD P0-05's history belongs to the folder that opens, so a new folder never offers an
+        // older folder's actions, and it keeps this folder's own completion records (PRD P0-12).
+        undoHistory = MarkUndoHistory(
+            queue: stores.writes, completion: groupCompletionTracker)
+        undoState = .none
         publishedGroups = []
         hasPublishedGroups = false
         publish(.photos([]))
@@ -767,6 +869,13 @@ final class FolderLibrarySession: FolderLibrary {
             if folder != Self.noFolder {
                 await stores.writes.forgetUnfinishedChanges(in: folder)
             }
+        }
+        // PRD P0-05 does not keep a history across folders, so a closed folder forgets every
+        // action it could undo; a step still running finishes its writes but cannot repopulate it.
+        if let history = undoHistory {
+            undoHistory = nil
+            undoState = .none
+            await history.clear()
         }
         guard let session = openSession else { return }
         openSession = nil

@@ -43,6 +43,14 @@ struct GridCollectionView: UIViewRepresentable {
     /// The thumbnails and companion badges the cells draw (PRD Grid, P0-03).
     let thumbnails: any GridThumbnailSource
 
+    /// The photo the grid must bring into view after an undo, with a token per request
+    /// (PRD P0-05's Undo row).
+    ///
+    /// Undoing a batch from the grid returns to the photos it restored (PRD P0-09), so the grid
+    /// scrolls that photo's cell into view. The token makes a repeated request for the same photo
+    /// a new one.
+    let reveal: GridRevealRequest?
+
     /// Opens one photo's detail (PRD Grid, P0-03). A single tap never waits for a second one.
     let openPhoto: (PhotoIdentity) -> Void
 
@@ -81,7 +89,7 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.toggleSelection = toggleSelection
         context.coordinator.apply(
             items: items, groups: groups, shownPhotos: shownPhotos,
-            currentPhoto: currentPhoto, selection: selection,
+            currentPhoto: currentPhoto, selection: selection, reveal: reveal,
             sizeClass: context.environment.horizontalSizeClass)
     }
 
@@ -136,6 +144,9 @@ extension GridCollectionView {
         private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
 
+        /// The last undo reveal this grid carried out, so one request scrolls once (PRD P0-05).
+        private var lastRevealToken: Int?
+
         init(
             thumbnails: any GridThumbnailSource,
             openPhoto: @escaping (PhotoIdentity) -> Void,
@@ -189,7 +200,8 @@ extension GridCollectionView {
         func apply(
             items newItems: [GridCellItem], groups newGroups: [BrowsingGroup],
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
-            selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?
+            selection newSelection: Set<PhotoIdentity>, reveal: GridRevealRequest?,
+            sizeClass: UserInterfaceSizeClass?
         ) {
             guard let collectionView, let dataSource else { return }
             if sizeClass != lastSizeClass {
@@ -205,12 +217,14 @@ extension GridCollectionView {
                 let restyled = items.compactMap { item in
                     before.showsSelected(item) == after.showsSelected(item) ? nil : item.id
                 }
-                guard !restyled.isEmpty else { return }
-                // Only the cells whose selection changed are redrawn, so a toggle never
-                // re-decodes a thumbnail (PRD P0-09, P0-03).
-                var snapshot = dataSource.snapshot()
-                snapshot.reconfigureItems(restyled)
-                dataSource.apply(snapshot, animatingDifferences: false)
+                if !restyled.isEmpty {
+                    // Only the cells whose selection changed are redrawn, so a toggle never
+                    // re-decodes a thumbnail (PRD P0-09, P0-03).
+                    var snapshot = dataSource.snapshot()
+                    snapshot.reconfigureItems(restyled)
+                    dataSource.apply(snapshot, animatingDifferences: false)
+                }
+                revealIfNeeded(reveal)
                 return
             }
 
@@ -223,7 +237,6 @@ extension GridCollectionView {
             shownPhotos = newShownPhotos
             selection = newSelection
             itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
-
             var snapshot = NSDiffableDataSourceSnapshot<Int, GridCellItem.ID>()
             snapshot.appendSections([0])
             snapshot.appendItems(newItems.map(\.id), toSection: 0)
@@ -235,7 +248,10 @@ extension GridCollectionView {
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
             dataSource.apply(snapshot, animatingDifferences: false)
 
-            guard let held else { return }
+            guard let held else {
+                revealIfNeeded(reveal)
+                return
+            }
             // The current photo may now be drawn by a different cell, such as a cover keyed by
             // a refined group; hold that cell where the photo's old cell was.
             if held.isCurrentPhoto, let currentPhoto,
@@ -245,6 +261,7 @@ extension GridCollectionView {
                 let index = newItems.firstIndex(where: { $0.id == cell })
             {
                 restore(index: index, offset: held.offset)
+                revealIfNeeded(reveal)
                 return
             }
             guard
@@ -252,6 +269,30 @@ extension GridCollectionView {
                     of: held.item, previous: previousIDs, in: newItems.map(\.id))
             else { return }
             restore(index: index, offset: held.offset)
+            revealIfNeeded(reveal)
+        }
+
+        /// Brings the photo one undo returned to into view, once per request (PRD P0-05).
+        ///
+        /// A photo the grid already shows in full is left where it is, so undoing a mark on a
+        /// visible cell never moves the grid; a cell out of view is scrolled to the middle, which
+        /// is where a batch's photos are easy to see again (PRD P0-09).
+        private func revealIfNeeded(_ reveal: GridRevealRequest?) {
+            guard let reveal, reveal.token != lastRevealToken, let collectionView else { return }
+            lastRevealToken = reveal.token
+            guard
+                let cell = GridCellItem.cell(
+                    for: reveal.photo, in: items, groups: groups, shown: shownPhotos),
+                let index = items.firstIndex(where: { $0.id == cell })
+            else { return }
+            collectionView.layoutIfNeeded()
+            let path = IndexPath(item: index, section: 0)
+            if let attributes = collectionView.layoutAttributesForItem(at: path),
+                collectionView.bounds.insetBy(dx: 0, dy: -1).contains(attributes.frame)
+            {
+                return
+            }
+            collectionView.scrollToItem(at: path, at: .centeredVertically, animated: true)
         }
 
         /// One cell tapped: multi-select toggles it, a collapsed cover opens its group, and any

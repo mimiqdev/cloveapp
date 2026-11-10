@@ -15,7 +15,7 @@ import Observation
 /// library or a write queue.
 @MainActor
 @Observable
-final class BrowsingModel {
+final class BrowsingModel: UndoHistoryHost {
     /// The seam the screens read through: folder access, the scan, the order and writes.
     private let library: any FolderLibrary
 
@@ -108,6 +108,33 @@ final class BrowsingModel {
     /// is dropped if the user navigates or opens another folder first.
     private var pendingRestore: PendingBrowsingRestore?
 
+    /// This scene's bridge to the system undo manager (PRD P0-05).
+    ///
+    /// It is created with the model and attached to the window's `UndoManager` by whichever
+    /// screen offers Undo, so the toolbar button, ⌘Z and the three-finger gestures all reach this
+    /// one history (``UndoHistoryBridge``).
+    private let undoBridge = UndoHistoryBridge()
+
+    /// What the open folder's undo history offers the toolbar (PRD P0-05).
+    ///
+    /// The library keeps the history and is not observable, so the model copies its answer here
+    /// after every record, undo and redo; that is what redraws a screen's Undo button.
+    private(set) var undoAvailability: UndoAvailability = .none
+
+    /// The last undo or redo step's partial-failure line, or nil (PRD P0-09).
+    ///
+    /// PRD P0-08's failure row and the folder indicator show the per-photo states themselves; this
+    /// keeps C5's counts reachable on the Undo button, which stays enabled for a failed step
+    /// because a failed restore keeps its entry.
+    private(set) var lastUndoFailureSummary: String?
+
+    /// The photo the grid must bring into view after an undo, with a token per request
+    /// (PRD P0-05's Undo row).
+    private(set) var gridReveal: GridRevealRequest?
+
+    /// How many grid reveals this scene asked for, so a repeated photo is a new request.
+    private var gridReveals = 0
+
     /// The task applying the library's updates on the main actor (PRD P0-03, P0-08).
     private var updateTask: Task<Void, Never>?
 
@@ -121,6 +148,9 @@ final class BrowsingModel {
         self.detailImages = library.detailImages
         self.recentFailures = [:]
         self.storedPhotos = library.photos
+        // The bridge asks this model for every step, so both entry points share one path to the
+        // open folder's history and the system undo manager.
+        undoBridge.host = self
         refresh()
         updateTask = Task { [weak self, updates = library.updates] in
             for await update in updates {
@@ -372,6 +402,9 @@ final class BrowsingModel {
         guard state.folder == folder else { return }
         lastGroupFinishing = result
         groupFinishingRuns += 1
+        // One finishing action is one undo step, from C10's own record of what it changed
+        // (PRD P0-12). A retry resends its failed changes and records nothing more.
+        await recordUndoStep(.groupFinishing(result.undo))
     }
 
     /// Retries only the changes that still need it, through C4 (PRD P0-09).
@@ -570,6 +603,8 @@ final class BrowsingModel {
         // after Done cleared the mode it belonged to.
         guard state.folder == folder else { return }
         lastBatch = BatchMarkApplication(result: result, marksBefore: marksBefore)
+        // One bar action is one undo step, whatever the number of photos it wrote (PRD P0-09).
+        await recordUndoStep(.batch(result: result, marksBefore: marksBefore))
         guard clearances == selectionClearances else { return }
         batchReport = BatchMarkReport(result)
     }
@@ -631,9 +666,154 @@ final class BrowsingModel {
     /// ordered stream, never from this call's return: a returned status can arrive after a newer
     /// change was admitted, which would let an older finished state paint over the newer one
     /// (``PhotoChangeStates``). A failed write therefore never shows a mark it did not confirm.
+    /// The returned status is still the authority for the undo record, so a change a newer one
+    /// superseded records no step (PRD P0-05).
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async {
         guard !change.isEmpty else { return }
-        _ = await library.apply(change, to: photo)
+        // PRD P0-05's Undo row restores the previous mark, so the marks on screen before the
+        // change are the ones undo puts back; a field the user did not see is never restored.
+        let marksBefore = storedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks()
+        let status = await library.apply(change, to: photo)
+        await recordUndoStep(.mark(status: status, marksBefore: marksBefore))
+    }
+
+    // MARK: - Undo
+
+    /// Whether the open folder has an action to undo (PRD P0-05).
+    ///
+    /// PRD P0-05's Undo row asks for a toolbar Undo that is disabled when there is nothing to
+    /// undo, and for the same answer on ⌘Z, so both read this one value.
+    var canUndo: Bool { undoAvailability.canUndo }
+
+    /// Whether there is an undone action to redo, which ⇧⌘Z and the redo gesture offer
+    /// (PRD P0-05).
+    var canRedo: Bool { undoAvailability.canRedo }
+
+    /// Attaches the scene's undo manager to this model's undo bridge (PRD P0-05).
+    ///
+    /// Every screen that offers Undo attaches the manager it finds; the bridge keeps the first one
+    /// for the scene, so the split layout's grid and detail registering the same manager changes
+    /// nothing and one action is never applied twice.
+    func attachUndoManager(_ manager: UndoManager?) {
+        undoBridge.attach(manager)
+    }
+
+    /// Undoes the open folder's next action, from a toolbar button (PRD P0-05).
+    ///
+    /// The bridge routes it through the scene's undo manager while that manager holds the same
+    /// step, so the button and ⌘Z are one path and one press is one action.
+    func undo() {
+        undoBridge.requestUndo()
+    }
+
+    /// Redoes the next undone action, for ⇧⌘Z and the three-finger redo gesture (PRD P0-05).
+    func redo() {
+        undoBridge.requestRedo()
+    }
+
+    /// Undoes the history's next action through the open folder and returns the view to its photo
+    /// (PRD P0-05).
+    func undoThroughHistory() async -> UndoStepResult? {
+        await applyUndoStep { await library.undoMarkChange() }
+    }
+
+    /// Redoes the history's next undone action through the open folder (PRD P0-05).
+    func redoThroughHistory() async -> UndoStepResult? {
+        await applyUndoStep { await library.redoMarkChange() }
+    }
+
+    /// Records one confirmed change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
+    ///
+    /// The model records every kind of step in the one place its call returned, so a single mark,
+    /// one bar action and one finishing action each land as one entry. A retry resends an already
+    /// recorded change, so it records nothing and never gives one action two entries.
+    private func recordUndoStep(_ request: UndoRecordRequest) async {
+        lastUndoFailureSummary = nil
+        guard await library.recordUndoStep(request) else {
+            undoAvailability = library.undoAvailability
+            return
+        }
+        undoAvailability = library.undoAvailability
+        // The history gained a step, so the system undo stack mirrors it once, here.
+        undoBridge.historyDidChange()
+    }
+
+    /// Runs one undo or redo through the library and applies its answer (PRD P0-05, P0-12).
+    private func applyUndoStep(
+        _ step: () async -> UndoStepResult?
+    ) async -> UndoStepResult? {
+        // The screen that asked decides where the view returns to, and the folder the step belongs
+        // to must still be the open one when it answers (PRD P0-14).
+        let folder = state.folder
+        let screen = undoReturnScreen
+        guard let result = await step() else {
+            undoAvailability = library.undoAvailability
+            return nil
+        }
+        guard state.folder == folder else { return nil }
+        undoAvailability = library.undoAvailability
+        lastUndoFailureSummary = result.failureSummary
+        clearFinishingRecord(after: result.completion)
+        returnToPhoto(after: result, from: screen)
+        return result
+    }
+
+    /// Applies the completion a finishing-action step changed (PRD P0-12).
+    ///
+    /// PRD In-group culling makes a group complete when a finishing action ran, so undoing that
+    /// action must stop the group view treating the group as finished; the marks the step restores
+    /// make it incomplete again on their own. Redoing the action records it again in the library,
+    /// so only a cleared record needs anything here.
+    private func clearFinishingRecord(after completion: UndoCompletionChange?) {
+        guard let completion, completion.isCleared,
+            lastGroupFinishing?.plan.groupID == completion.groupID
+        else { return }
+        lastGroupFinishing = nil
+        dismissedGroupFailure = nil
+    }
+
+    /// Returns the view to the photo the step restored (PRD P0-05's Undo row).
+    ///
+    /// The screen that asked decides the place: detail shows the photo again, the group view shows
+    /// it in its group — reopening a group that completed and moved the view on (PRD P0-12) — and
+    /// the grid brings its cell into view. Entry and settings show no photo and stay where they
+    /// are (``MarkUndoReturnPlan``).
+    private func returnToPhoto(after result: UndoStepResult, from screen: MarkUndoReturnScreen) {
+        let place = MarkUndoReturnPlan.place(
+            from: screen, photo: result.photoToReturnTo, in: library.contents)
+        switch place {
+        case .detail(let photo):
+            openPhoto(photo)
+        case .group(let group, let photo):
+            state.groupPosition = BrowsingGroupPosition(group: group, photo: photo)
+            state.route = .group
+        case .grid(let photo):
+            // A photo grouping no longer puts in a group has no group view to show, so the grid
+            // takes the place the group view would have had.
+            if state.route == .group {
+                state.groupPosition = nil
+                state.route = .grid
+            }
+            state.currentPhoto = photo
+            gridReveals += 1
+            gridReveal = GridRevealRequest(photo: photo, token: gridReveals)
+        case .stay:
+            break
+        }
+    }
+
+    /// The screen the undo was asked from, which decides where the view returns (PRD P0-05).
+    private var undoReturnScreen: MarkUndoReturnScreen {
+        switch state.route {
+        case .detail:
+            return .detail
+        case .group:
+            return .group
+        case .grid:
+            return .grid
+        case .entry, .settings:
+            return .elsewhere
+        }
     }
 
     // MARK: - Save state and recovery
@@ -834,6 +1014,11 @@ final class BrowsingModel {
         hasLeftFolder = true
         storedPhotos = []
         groups = []
+        // The folder's undo history goes with it (PRD P0-05), so no screen offers to undo an
+        // action from a folder the user left and the system stack forgets it too.
+        undoAvailability = .none
+        lastUndoFailureSummary = nil
+        undoBridge.historyDidChange()
         thumbnails = library.thumbnails
         detailImages = library.detailImages
     }
@@ -1022,6 +1207,11 @@ final class BrowsingModel {
         lastBatch = nil
         batchReport = nil
         selectionClearances += 1
+        // The folder's undo history starts empty, and continuing in the open folder keeps the one
+        // it already has (PRD P0-05).
+        undoAvailability = library.undoAvailability
+        lastUndoFailureSummary = nil
+        undoBridge.historyDidChange()
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).

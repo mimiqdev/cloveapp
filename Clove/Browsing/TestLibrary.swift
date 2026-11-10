@@ -143,6 +143,15 @@ final class TestLibrary: FolderLibrary {
     /// (PRD P0-09).
     private var batches: [MarkBatchID: [BatchMarkItem]] = [:]
 
+    /// The sample folder's undo and redo history (PRD P0-05; DEV-PLAN C5).
+    ///
+    /// The sample writes nothing, so it keeps its own small stack instead of C5's queue-backed
+    /// history. It records one step per action, restores each photo's recorded fields, and keeps
+    /// a step whose write failed so it can be tried again (PRD P0-08) — the behaviour the UI test
+    /// needs, with the same result shapes the real library answers.
+    private var undoStack: [SampleUndoStep] = []
+    private var undoRedoStack: [SampleUndoStep] = []
+
     /// How long the sample's write drain takes, so a UI test can see the waiting state
     /// (PRD P0-08).
     private let drainDelay: Duration
@@ -302,6 +311,123 @@ final class TestLibrary: FolderLibrary {
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes[photo] }
 
+    // MARK: - Undo
+
+    /// What the sample's undo history offers now (PRD P0-05).
+    var undoAvailability: UndoAvailability {
+        UndoAvailability(
+            canUndo: !undoStack.isEmpty, canRedo: !undoRedoStack.isEmpty,
+            undoName: undoStack.last?.actionName, redoName: undoRedoStack.last?.actionName)
+    }
+
+    /// Records one confirmed change on the sample's undo history (PRD P0-05, P0-09, P0-12).
+    ///
+    /// It follows C5's recording rules: a superseded change and one that names a field the photo
+    /// already held record nothing, a batch records each photo's own marks before it, and a
+    /// finishing action records one step from C10's undo record.
+    func recordUndoStep(_ request: UndoRecordRequest) async -> Bool {
+        let step: SampleUndoStep
+        switch request {
+        case .mark(let status, let marksBefore):
+            guard !status.state.isSuperseded else { return false }
+            step = SampleUndoStep(
+                photos: [
+                    SampleUndoPhoto(
+                        photo: status.identity, marksBefore: marksBefore,
+                        change: status.requested)
+                ],
+                photoToReturnTo: status.identity, group: nil)
+        case .batch(let result, let marksBefore):
+            var photos: [SampleUndoPhoto] = []
+            for outcome in result.outcomes where !outcome.state.isSuperseded {
+                let photo = SampleUndoPhoto(
+                    photo: outcome.identity,
+                    marksBefore: marksBefore[outcome.identity] ?? PhotoMarks(),
+                    change: outcome.requested)
+                guard !photos.contains(where: { $0.photo == photo.photo }) else { continue }
+                photos.append(photo)
+            }
+            guard let first = photos.first else { return false }
+            step = SampleUndoStep(photos: photos, photoToReturnTo: first.photo, group: nil)
+        case .groupFinishing(let undo):
+            var photos: [SampleUndoPhoto] = []
+            for entry in undo.entries {
+                let photo = SampleUndoPhoto(
+                    photo: entry.photo, marksBefore: entry.marksBefore, change: entry.change)
+                guard !photos.contains(where: { $0.photo == photo.photo }) else { continue }
+                photos.append(photo)
+            }
+            guard let first = photos.first else { return false }
+            let returnTo =
+                photos.contains { $0.photo == undo.photoToReturnTo }
+                ? undo.photoToReturnTo : first.photo
+            step = SampleUndoStep(
+                photos: photos, photoToReturnTo: returnTo,
+                group: (undo.groupID, undo.action))
+        }
+        guard step.changesSomething else { return false }
+        undoStack.append(step)
+        // PRD P0-05: a new action discards the redo future.
+        undoRedoStack.removeAll()
+        return true
+    }
+
+    /// Undoes the sample's next action and restores each photo's recorded fields (PRD P0-05).
+    func undoMarkChange() async -> UndoStepResult? {
+        guard let step = undoStack.popLast() else { return nil }
+        let result = await performStep(step, reverting: true)
+        if result.failureSummary == nil {
+            undoRedoStack.append(step)
+        } else {
+            // PRD P0-08: a failed write keeps its step, so the user can try again.
+            undoStack.append(step)
+        }
+        return result
+    }
+
+    /// Redoes the sample's next undone action and re-applies its change (PRD P0-05).
+    func redoMarkChange() async -> UndoStepResult? {
+        guard let step = undoRedoStack.popLast() else { return nil }
+        let result = await performStep(step, reverting: false)
+        if result.failureSummary == nil {
+            undoStack.append(step)
+        } else {
+            undoRedoStack.append(step)
+        }
+        return result
+    }
+
+    /// Applies one step's changes through the sample's own mark call (PRD P0-05, P0-12).
+    private func performStep(_ step: SampleUndoStep, reverting: Bool) async -> UndoStepResult {
+        if let group = step.group {
+            // PRD P0-12: undoing a finishing action makes the group incomplete again.
+            if reverting {
+                await groupCompletion.clearFinishingAction(on: group.id)
+            } else {
+                await groupCompletion.recordFinishingAction(on: group.id)
+            }
+        }
+        var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
+        var saved = 0
+        for photo in step.photos {
+            let change = reverting ? photo.restoredChange : photo.change
+            guard !change.isEmpty else { continue }
+            let status = await apply(change, to: photo.photo)
+            statuses[photo.photo] = status
+            if status.state.isConfirmed { saved += 1 }
+        }
+        let failed = statuses.values.filter { $0.state.isUnfinished }.count
+        return UndoStepResult(
+            photoToReturnTo: step.photoToReturnTo,
+            failureSummary: failed == 0
+                ? nil
+                : "Saved \(saved) photos. \(failed) photos couldn't be saved.",
+            completion: step.group.map {
+                UndoCompletionChange(groupID: $0.id, isCleared: reverting)
+            },
+            droppedFromHistory: false)
+    }
+
     /// Resends the photo's latest failed change, which the sample then saves (PRD P0-08).
     ///
     /// A forced failure happens once per photo, so Retry confirms the change the way C4's queue
@@ -348,6 +474,8 @@ final class TestLibrary: FolderLibrary {
         groups = []
         changes = [:]
         batches = [:]
+        undoStack = []
+        undoRedoStack = []
         openGeneration += 1
         updateContinuation.yield(.photos([]))
     }
@@ -557,5 +685,62 @@ final class TestLibrary: FolderLibrary {
             preconditionFailure("a sample rating must be within 0–5")
         }
         return rating
+    }
+}
+
+/// One photo's part of a sample undo step: its marks before the action and the change that ran
+/// (PRD P0-05; DEV-PLAN C5).
+private struct SampleUndoPhoto {
+    /// The photo the step touches (C1's stable identity).
+    let photo: PhotoIdentity
+    /// The marks the photo had before the action, which undo restores (PRD P0-05).
+    let marksBefore: PhotoMarks
+    /// The change the action applied, which redo applies again (PRD P0-05).
+    let change: MarkChange
+
+    /// The change that puts the recorded fields back, leaving fields the action did not name
+    /// alone (PRD P0-05: undoing a rating never rewrites a label).
+    var restoredChange: MarkChange {
+        MarkChange(
+            rating: change.rating.map { _ in marksBefore.rating },
+            label: change.label.map { _ in marksBefore.label },
+            reject: change.reject.map { _ in marksBefore.isRejected })
+    }
+
+    /// Whether the action changed a field, which C5's recording rule requires (PRD P0-06).
+    var changesSomething: Bool {
+        let ratingChanged = change.rating.map { $0 != marksBefore.rating } ?? false
+        let labelChanged = change.label.map { $0 != marksBefore.label } ?? false
+        let rejectChanged = change.reject.map { $0 != marksBefore.isRejected } ?? false
+        return ratingChanged || labelChanged || rejectChanged
+    }
+}
+
+/// One recorded sample action: the photos it changed and where the view returns (PRD P0-05).
+private struct SampleUndoStep {
+    /// One entry per photo the action changed, in the order it supplied them (PRD P0-09).
+    let photos: [SampleUndoPhoto]
+    /// The photo the view returns to (PRD P0-05's Undo row).
+    let photoToReturnTo: PhotoIdentity
+    /// The group and action when this step came from a finishing action (PRD P0-12).
+    let group: (id: GroupID, action: GroupFinishingAction)?
+
+    /// Whether the action changed any field, so a no-change action records no step (PRD P0-06).
+    var changesSomething: Bool {
+        photos.contains { $0.changesSomething }
+    }
+
+    /// The short name the system undo menu shows, following C5's wording (PRD P0-05).
+    var actionName: String {
+        switch group?.action {
+        case .keepThis: return "Keep this, reject the rest"
+        case .keepRated: return "Keep rated, reject the rest"
+        case nil: break
+        }
+        let change = photos.first?.change ?? MarkChange()
+        if change.rating != nil { return "Rating" }
+        if change.label != nil { return "Label" }
+        if change.reject != nil { return "Reject" }
+        return "Mark"
     }
 }
