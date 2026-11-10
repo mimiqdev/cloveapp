@@ -970,6 +970,9 @@ final class BrowsingModel {
         finishedScanFor = nil
         pendingRestore = nil
         hasLeftFolder = true
+        // The closed folder's completed move cannot be undone through its ended session.
+        lastRejectMove = nil
+        isRejectMoveToastVisible = false
         storedPhotos = []
         groups = []
         thumbnails = library.thumbnails
