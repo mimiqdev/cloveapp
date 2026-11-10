@@ -21,9 +21,14 @@ import SwiftUI
 /// settings screen applies the next time this screen draws; the screen reads no storage itself
 /// (PRD Gesture-related settings).
 ///
-/// Design placeholder: the HUD, filmstrip and preview use system components until the visual
-/// design lands. The save-state words are U1's summary, which U7 replaces; the Undo button is
-/// disabled until U8 supplies the one model call it should invoke.
+/// Every marking input — the swipe gesture, the HUD's rating bar, a label and the Reject toggle —
+/// resolves through C13's ``MarkingInputRules`` and then one mark path, which writes through
+/// ``BrowsingModel/apply(_:to:)`` and starts the auto-advance the mark asks for (PRD P0-06,
+/// PRD Auto-advance). P2's keyboard can call that same path.
+///
+/// Design placeholder: the HUD, filmstrip, preview and the swipe's badge use system components
+/// until the visual design lands. The save-state words are U1's summary, which U7 replaces; the
+/// Undo button is disabled until U8 supplies the one model call it should invoke.
 struct DetailScreen: View {
     /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
@@ -70,6 +75,12 @@ struct DetailScreen: View {
     /// The debounced render request a pinch may need (G1 "Scheduling and cache").
     @State private var upgradeTask: Task<Void, Never>?
 
+    /// The rating or Reject badge the marking swipe draws near the finger (PRD P0-06).
+    @State private var swipeFeedback = DetailSwipeFeedback()
+
+    /// The auto-advance a mark started, waiting out its pause (PRD Auto-advance).
+    @State private var autoAdvance = MarkAutoAdvance()
+
     /// C12's current settings: the double-tap behaviour, keep-zoom, the enabled ratings and the
     /// labels the HUD offers.
     private var settings: AppSettings { store.settings }
@@ -104,6 +115,9 @@ struct DetailScreen: View {
             // A render the user left behind must not keep reading the folder or write into a
             // screen that is gone; the neighbour prefetch is dropped too (G1 scheduling row).
             upgradeTask?.cancel()
+            // Leaving detail drops a pending advance, so coming back never jumps photos
+            // (PRD Auto-advance).
+            autoAdvance.cancel()
             Task { await images.cancelPrefetch() }
         }
     }
@@ -128,7 +142,7 @@ struct DetailScreen: View {
                 photos: browsing.photos,
                 current: photo.id,
                 thumbnails: browsing.thumbnails,
-                open: { browsing.openPhoto($0) })
+                open: { openPhoto($0) })
         }
     }
 
@@ -138,10 +152,15 @@ struct DetailScreen: View {
             image: shown?.image,
             command: command,
             doubleTapZoomEnabled: settings.doubleTap == .zoom,
+            gesturesEnabled: settings.gesturesEnabled,
+            rules: rules,
+            feedback: swipeFeedback,
             onZoomChange: { zoomChanged($0, on: photo) },
             onEdgeTap: { navigate($0) },
-            onDoubleTap: { doubleTap(at: $0, on: photo) }
+            onDoubleTap: { doubleTap(at: $0, on: photo) },
+            onMarkingSwipe: { applyMarkingSwipe($0, on: photo) }
         )
+        .overlay { DetailSwipeFeedbackBadge(feedback: swipeFeedback) }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { size in
@@ -365,35 +384,93 @@ struct DetailScreen: View {
         else { return }
         let target = index + offset
         guard photos.indices.contains(target) else { return }
-        browsing.openPhoto(photos[target].id)
+        openPhoto(photos[target].id)
+    }
+
+    /// Shows one photo and drops an advance that was still waiting to move (PRD Auto-advance).
+    private func openPhoto(_ photo: PhotoIdentity) {
+        autoAdvance.cancel()
+        browsing.openPhoto(photo)
     }
 
     // MARK: - Marking
 
     /// One rating tap, resolved by C13's rating-bar rule (PRD Marking rules).
     private func rate(_ rating: Rating, on photo: GridPhoto) {
-        switch rules.result(forRating: rating, marks: photo.marks) {
-        case .mark(let change, _):
-            Task { await browsing.apply(change, to: photo.id) }
-        case .noChange, .previousPhoto, .nextPhoto, .undo:
-            break
-        }
+        apply(rules.result(forRating: rating, marks: photo.marks), on: photo)
     }
 
     /// One label choice, resolved by C13's label rule (PRD Marking rules).
     private func choose(_ label: ColourLabel, on photo: GridPhoto) {
-        switch rules.result(forLabel: label, marks: photo.marks) {
-        case .mark(let change, _):
-            Task { await browsing.apply(change, to: photo.id) }
-        case .noChange, .previousPhoto, .nextPhoto, .undo:
-            break
-        }
+        apply(rules.result(forLabel: label, marks: photo.marks), on: photo)
     }
 
     /// Toggles Reject, which PRD Marking rules keeps independent of the rating.
     private func toggleReject(on photo: GridPhoto) {
-        let change = MarkChange(reject: !photo.marks.isRejected)
-        Task { await browsing.apply(change, to: photo.id) }
+        // The HUD's Reject is a toggle, while the `↓` key only turns Reject on, so the toggle
+        // builds its own change and reports the same mark kind for auto-advance (PRD Marking
+        // rules, PRD Auto-advance).
+        apply(.mark(MarkChange(reject: !photo.marks.isRejected), .reject), on: photo)
+    }
+
+    /// Resolves one finished marking swipe through C13's gesture rules (PRD P0-06).
+    ///
+    /// The preview only begins a marking swipe at fit, and a one-finger drag cannot change the
+    /// zoom, so the release is never the zoomed case those rules also guard against.
+    private func applyMarkingSwipe(_ end: DetailMarkingSwipeEnd, on photo: GridPhoto) {
+        switch end {
+        case .rating(let travel):
+            apply(
+                rules.result(forSwipeUpTravel: travel, marks: photo.marks, isZoomed: false),
+                on: photo)
+        case .reject(let travel):
+            apply(
+                rules.result(forSwipeDownTravel: travel, marks: photo.marks, isZoomed: false),
+                on: photo)
+        }
+    }
+
+    /// Applies one resolved marking input and starts the auto-advance its mark asks for
+    /// (PRD Auto-advance).
+    ///
+    /// The gesture, the HUD bar, a label and the Reject toggle all come through here, so the mark
+    /// path is one function and P2's keyboard can call the same one. A result that changes nothing
+    /// writes nothing and advances nothing (PRD P0-06 acceptance).
+    private func apply(_ result: MarkingResult, on photo: GridPhoto) {
+        switch result {
+        case .mark(let change, let kind):
+            // A new mark replaces whatever advance the last one was waiting to make.
+            autoAdvance.cancel()
+            Task { await browsing.apply(change, to: photo.id) }
+            startAutoAdvance(after: kind, from: photo)
+        case .previousPhoto:
+            showPhoto(offset: -1)
+        case .nextPhoto:
+            showPhoto(offset: 1)
+        case .undo, .noChange:
+            // C5's undo reaches the screen through U8; a no-change result does nothing.
+            break
+        }
+    }
+
+    /// Starts the pause-then-advance one written mark asks for (PRD Auto-advance).
+    ///
+    /// C13 decides where to go from the grid's current order and filter, so a filtered grid only
+    /// offers the photos it shows, and the plan carries the marked photo so undo can return there
+    /// (PRD Undo row). The model keeps that record. A group view answers with its own next
+    /// undecided photo through the same rules; that hook is U9's.
+    private func startAutoAdvance(after kind: MarkKind, from photo: GridPhoto) {
+        let plan = rules.autoAdvancePlan(after: kind, from: photo.id, photos: browsing.photos)
+        guard plan.advances else { return }
+        browsing.recordAutoAdvance(plan)
+        autoAdvance.schedule(plan) { target in
+            switch target {
+            case .stay:
+                break
+            case .nextPhoto(let next), .nextUnmarkedPhoto(let next), .groupUndecidedPhoto(let next):
+                browsing.openPhoto(next)
+            }
+        }
     }
 
     /// C5's undo, which U8 wires through the model's one undo call; the HUD disables it until then.
