@@ -153,6 +153,22 @@ final class BrowsingModel {
         return group.members.compactMap { byIdentity[$0] }
     }
 
+    /// The group the group view shows, from grouping's published groups (PRD P0-11, P0-12).
+    ///
+    /// The view keeps only the group's key and the photo it is on in ``state``, so a fold or a
+    /// relaunch reads the group back from the folder's publication rather than from a copy
+    /// (PRD P0-14).
+    var currentGroup: BrowsingGroup? {
+        guard let position = state.groupPosition else { return nil }
+        return groups.first { $0.id == position.group }
+    }
+
+    /// The photo the group view shows, with its current marks (PRD P0-12).
+    var groupPhoto: GridPhoto? {
+        guard let id = state.groupPosition?.photo else { return nil }
+        return groupPhotos.first { $0.id == id }
+    }
+
     /// Why one Recents item did not open, or nil when it did (PRD P0-02).
     func recentFailure(for recent: RecentFolder.ID) -> FolderAccessFailure? {
         recentFailures[recent]
@@ -238,6 +254,77 @@ final class BrowsingModel {
     func showGroupPhoto(_ photo: PhotoIdentity) {
         guard let position = state.groupPosition else { return }
         state.groupPosition = BrowsingGroupPosition(group: position.group, photo: photo)
+    }
+
+    // MARK: - In-group culling
+
+    /// The last finishing action the group view ran, with its result and C5's undo record
+    /// (PRD P0-12: finishing actions can be undone).
+    ///
+    /// The result carries ``GroupFinishingResult/undo``, so one property holds both what the
+    /// group view shows and what U8 records as one undo entry. A later action or a retry replaces
+    /// it.
+    private(set) var lastGroupFinishing: GroupFinishingResult?
+
+    /// The finishing action the user already dismissed, so its bar does not return on the next
+    /// redraw (PRD Failure and recovery: Cancel hides it without retrying).
+    private var dismissedGroupFailure: GroupFinishingResult?
+
+    /// The finishing action's result while it still has changes to retry, or nil
+    /// (PRD P0-09; PRD Failure and recovery).
+    ///
+    /// U4's batch bar and this one report the same counts, and a confirmed change is never part
+    /// of a retry. Dismissing hides the bar without retrying, which leaves the failed changes
+    /// unsaved (PRD P0-08).
+    var groupFinishingFailure: GroupFinishingResult? {
+        guard let result = lastGroupFinishing, result != dismissedGroupFailure,
+            result.failedCount > 0
+        else { return nil }
+        return result
+    }
+
+    /// Runs one finishing action's plan in the open folder session and keeps its result
+    /// (PRD In-group culling, finishing actions; PRD P0-12).
+    ///
+    /// The library applies C10's plan through C4's write queue, so per-photo results, the
+    /// partial-failure counts and a retry of only the failed items all come from one place
+    /// (PRD P0-09).
+    func runGroupFinishing(_ plan: GroupFinishingPlan) async {
+        dismissedGroupFailure = nil
+        lastGroupFinishing = await library.runGroupFinishing(plan)
+    }
+
+    /// Retries only the changes that still need it, through C4 (PRD P0-09).
+    func retryGroupFinishing() async {
+        guard let result = lastGroupFinishing else { return }
+        dismissedGroupFailure = nil
+        lastGroupFinishing = await library.retryGroupFinishing(result)
+    }
+
+    /// Hides the finishing action's failure without retrying it (PRD Failure and recovery).
+    func dismissGroupFinishingFailure() {
+        dismissedGroupFailure = lastGroupFinishing
+    }
+
+    /// Moves the group view on when its group is complete, following C12's setting
+    /// (PRD In-group culling, group completion; PRD P0-12).
+    ///
+    /// A complete group either stays (the setting says stay) or opens the next group in grid
+    /// order that is not complete, skipping completed ones. With no incomplete group left, the
+    /// view returns to the grid. The answer comes from the folder session's completion record,
+    /// which the finishing executor writes and the marks complete, so the view never derives a
+    /// second rule (``GroupViewCompletion``).
+    func advanceFromCompletedGroup(_ behaviour: GroupCompletionBehaviour) async {
+        guard state.route == .group, let position = state.groupPosition else { return }
+        switch await library.groupCompletion(for: position.group, behaviour: behaviour) {
+        case .inProgress, .stay:
+            break
+        case .nextGroup(let group):
+            openGroup(group)
+        case .grid:
+            state.groupPosition = nil
+            state.route = .grid
+        }
     }
 
     /// Shows Clove's settings (PRD Gesture-related settings).

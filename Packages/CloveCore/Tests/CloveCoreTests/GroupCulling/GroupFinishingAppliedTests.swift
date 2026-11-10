@@ -85,7 +85,8 @@ struct GroupFinishingAppliedTests {
         let plan = GroupFinishingPlan(
             group: group, action: .keepThis, currentPhoto: kept, marks: marks,
             enabledRatings: groupCullingTwoAndFour)
-        let failure = MarkWriteFailure(reason: .notConfirmed, message: "The sidecar did not read back.")
+        let failure = MarkWriteFailure(
+            reason: .notConfirmed, message: "The sidecar did not read back.")
         let statuses: [PhotoIdentity: MarkChangeStatus] = [
             kept: status(
                 kept, change: MarkChange(rating: groupCullingRating(2)),
