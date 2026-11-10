@@ -73,10 +73,10 @@ struct DetailScreen: View {
     private func content(for photo: GridPhoto) -> some View {
         VStack(spacing: 0) {
             DetailMarkingView(
+                browsing: browsing,
                 photo: photo,
                 settings: settings,
-                saveState: SaveStateSummary.text(
-                    for: browsing.latestChange(for: photo.id)?.state),
+                saveState: browsing.saveText(for: photo.id),
                 images: images,
                 zoomPolicy: .detail(settings),
                 order: browsing.photos,

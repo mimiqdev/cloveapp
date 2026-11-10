@@ -257,6 +257,52 @@ public actor MarkWriteQueue {
         return stream
     }
 
+    /// Forgets a folder's unfinished and failed changes once its work has drained
+    /// (PRD Failure and recovery).
+    ///
+    /// "Failure and recovery" is explicit: if users leave before writes finish, the unconfirmed
+    /// changes are not saved, and the next open reads the actual XMP. C4 therefore forgets the
+    /// folder's unfinished changes when it closes, so a later mark on the same file can never
+    /// carry fields the user abandoned (PRD disk rule 8), and a leaving question in a later
+    /// folder cannot count them.
+    ///
+    /// A confirmed change is untouched, because its storage already holds it. A change whose
+    /// write is still running is left alone too: it owns its result, and callers drain first
+    /// (``drain()``), so after a normal close only failed changes remain.
+    ///
+    /// The queue publishes nothing here. The reader that owned the folder drops its own copy of
+    /// the states, and a change that no longer exists has nothing left to report.
+    ///
+    /// - Parameter folder: the closed folder whose changes are forgotten.
+    /// - Returns: how many changes were forgotten.
+    @discardableResult
+    public func forgetUnfinishedChanges(in folder: FolderIdentity) -> Int {
+        var forgotten: [MarkChangeID] = []
+        for id in order {
+            guard let status = changes[id], status.identity.folderID == folder,
+                status.state.isUnfinished, writeTasks[status.identity] == nil
+            else { continue }
+            forgotten.append(id)
+        }
+        guard !forgotten.isEmpty else { return 0 }
+        for id in forgotten {
+            guard let status = changes[id] else { continue }
+            changes[id] = nil
+            sets[id] = nil
+            if latestByPhoto[status.identity] == id { latestByPhoto[status.identity] = nil }
+            failed[status.identity] = nil
+            if var record = pending[status.identity] {
+                record.waiting.removeAll { $0 == id }
+                pending[status.identity] = record.waiting.isEmpty ? nil : record
+            }
+        }
+        order.removeAll { changes[$0] == nil }
+        // A forgotten change is finished, so it has no waiter; resuming any that a caller left
+        // keeps nobody suspended on a change that no longer exists.
+        for id in forgotten { resumeWaiters(for: id) }
+        return forgotten.count
+    }
+
     /// Waits until every admitted write has finished, for C11's access session to end.
     ///
     /// G1's Folder access row holds security-scoped access until work drains, and PRD Failure

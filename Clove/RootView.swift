@@ -15,6 +15,10 @@ struct RootView: View {
     /// This scene's stored browsing state; the key is per scene, so scenes never share it.
     @SceneStorage("clove.browsing.state") private var storedState: Data?
 
+    /// Whether the scene is in front, which is when the open folder's location is checked again
+    /// (PRD P0-02, G1 folder access).
+    @Environment(\.scenePhase) private var scenePhase
+
     /// The app-wide settings this scene reads and the environment carries (PRD Gesture-related
     /// settings). The store belongs to the app, not to the scene.
     private let settings: SettingsStore
@@ -48,6 +52,13 @@ struct RootView: View {
                 // groups). It lives here rather than on the grid because a compact layout shows
                 // Settings instead of the grid while the toggle changes.
                 Task { await browsing.setSimilarGroupsEnabled(enabled) }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // G1 folder access watches with presenters plus a 500 ms foreground poll, so a
+                // scene that comes back asks at once instead of waiting one interval to learn
+                // the drive is gone (PRD P0-02).
+                guard phase == .active else { return }
+                Task { await browsing.checkFolderLocation() }
             }
             .environment(settings)
     }
