@@ -182,6 +182,35 @@ public struct RejectMoveUndoSplitPhoto: Hashable, Sendable, Identifiable {
     }
 }
 
+/// One photo set whose files are not all under the rejects folder when the undo starts.
+///
+/// PRD P0-10's Undo rule restores a completed move's files. A file the user already moved back
+/// by hand, or one that is gone, cannot be restored by an undo, so the set promises nothing about
+/// where its files are: it lists each file's actual location instead, and it is never offered for
+/// a retry because there is nothing left under the rejects folder to rename back.
+public struct RejectMoveUndoMissingFiles: Hashable, Sendable, Identifiable {
+    /// C1's stable identity of the set (PRD P0-10).
+    public let identity: PhotoIdentity
+    /// Every file's actual location, with ``RejectMoveFileLocation/Location/missing`` for a file
+    /// found at neither path and ``RejectMoveFileLocation/Location/unknown`` when a check could
+    /// not answer (PRD P0-10).
+    public let files: [RejectMoveFileLocation]
+    /// Why the set was left alone: ``RejectMoveFailureReason/locationUnavailable``.
+    public let failure: RejectMoveFailure
+
+    /// The set's id for a SwiftUI list (PRD P0-10).
+    public var id: PhotoIdentity { identity }
+
+    /// Describes one set whose rejects-folder files are not all there (PRD P0-10).
+    public init(
+        identity: PhotoIdentity, files: [RejectMoveFileLocation], failure: RejectMoveFailure
+    ) {
+        self.identity = identity
+        self.files = files
+        self.failure = failure
+    }
+}
+
 /// One photo's result after undoing a Move rejects run (PRD P0-10's Undo rule).
 public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
     /// The photo is back at its original path, or was kept and never moved, with Reject stored.
@@ -192,6 +221,8 @@ public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
     case failed(RejectMoveUndoFailedPhoto)
     /// The photo is in both places because the rollback into the rejects folder failed too.
     case split(RejectMoveUndoSplitPhoto)
+    /// The photo's files are no longer all under the rejects folder, so nothing was attempted.
+    case missingFiles(RejectMoveUndoMissingFiles)
 
     /// The photo's stable identity, whatever the result (G1 decision 5).
     public var identity: PhotoIdentity {
@@ -200,6 +231,7 @@ public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
         case .conflict(let photo): photo.identity
         case .failed(let photo): photo.identity
         case .split(let photo): photo.identity
+        case .missingFiles(let set): set.identity
         }
     }
 
@@ -262,6 +294,14 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
         }
     }
 
+    /// Photos whose rejects-folder files were not all there when the undo started (P0-10).
+    public var missingFiles: [RejectMoveUndoMissingFiles] {
+        outcomes.compactMap { outcome in
+            guard case .missingFiles(let set) = outcome else { return nil }
+            return set
+        }
+    }
+
     /// PRD P0-10's "Restored N photos".
     public var restoredCount: Int { restored.count }
 
@@ -277,8 +317,13 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
     /// Photos left in both places; a retry never resends these (PRD P0-10).
     public var splitCount: Int { split.count }
 
-    /// PRD P0-10's "M photos couldn't be restored": conflicts, failures and split photos.
-    public var unrestoredCount: Int { conflictCount + failedCount + splitCount }
+    /// Photos whose rejects-folder files were not all there (PRD P0-10).
+    public var missingFilesCount: Int { missingFiles.count }
+
+    /// PRD P0-10's "M photos couldn't be restored": everything but the restored photos.
+    public var unrestoredCount: Int {
+        conflictCount + failedCount + splitCount + missingFilesCount
+    }
 
     /// Every photo the grid shows again, in the caller's order (PRD P0-10's Undo rule).
     public var restoredIdentities: [PhotoIdentity] { restored.map(\.identity) }
@@ -303,13 +348,20 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
 ///
 /// PRD P0-10 asks for progress during a move, and an undo renames the same files and stores a
 /// Reject for every photo, so a run of hundreds takes as long as the move did. The stream yields
-/// each photo as it starts and finishes, then the attempt's result, so the toast can show
-/// movement without polling; a retry of failed photos publishes its own sequence.
+/// each photo as it starts and finishes, then the attempt's result; a retry of failed photos
+/// publishes its own sequence. Every event names the attempt or run it belongs to, so two
+/// attempts running at the same time can never be confused, and a refusal is its own terminal
+/// event so nothing waits for a photo that will never be restored.
 public enum RejectMoveUndoProgress: Hashable, Sendable {
-    /// A photo's files are about to be renamed back (PRD P0-10's Undo rule).
-    case photoStarted(PhotoIdentity)
-    /// A photo reached its final outcome (PRD P0-10's Undo rule).
-    case photoFinished(RejectMoveUndoOutcome)
-    /// The attempt ended; every requested photo has an outcome (PRD P0-10's Undo rule).
+    /// A photo's files are about to be renamed back; `attempt` is the attempt's own handle.
+    case photoStarted(attempt: RejectMoveUndoBatchID, photo: PhotoIdentity)
+    /// A photo reached its final outcome, for the attempt named by `attempt` (PRD P0-10).
+    case photoFinished(attempt: RejectMoveUndoBatchID, outcome: RejectMoveUndoOutcome)
+    /// The attempt ended; its result carries the same attempt handle (PRD P0-10's Undo rule).
     case finished(RejectMoveUndoResult)
+    /// The undo was refused before any attempt started; the refusal names the run.
+    ///
+    /// PRD P0-10's Undo rule closes a run once, so a refusal is final for that handle: a reader
+    /// can stop instead of waiting for a photo that will never come.
+    case refused(batch: RejectMoveBatchID, refusal: RejectMoveUndoRefusal)
 }
