@@ -202,6 +202,18 @@ final class BrowsingModel {
         return groupPhotos.first { $0.id == id }
     }
 
+    /// Loads an Entry preview from app-private storage only (handoff Entry).
+    func entryThumbnail(for photo: PhotoIdentity) async -> GridThumbnailOutcome {
+        await library.entryThumbnail(for: photo)
+    }
+
+    /// Remembers the open folder's confirmed progress and current photo (handoff Entry).
+    func recordEntryProgress() async {
+        await library.recordEntryProgress(
+            lastViewed: state.groupPosition?.photo ?? state.currentPhoto)
+        await reloadRecents()
+    }
+
     /// Why one Recents item did not open, or nil when it did (PRD P0-02).
     func recentFailure(for recent: RecentFolder.ID) -> FolderAccessFailure? {
         recentFailures[recent]
@@ -254,6 +266,19 @@ final class BrowsingModel {
         pendingRestore = nil
         guard askBeforeLeaving(.recent(recent)) else { return }
         await reopenNow(recent)
+    }
+
+    /// Reopens the hero at its saved photo through the scene's existing restore validation.
+    func resume(_ recent: RecentFolder) async {
+        await reopen(recent)
+        guard recentFailures[recent.id] == nil, state.folder == recent.identity,
+            let photo = recent.progress?.lastViewedPhoto
+        else { return }
+        var saved = state
+        saved.currentPhoto = photo
+        saved.route = .detail
+        pendingRestore = PendingBrowsingRestore(saved: saved, shown: state)
+        resolvePendingRestore(scanFinished: hasFinishedScan)
     }
 
     /// Reopens one remembered folder, once any leaving question is answered (PRD P0-02).
@@ -436,8 +461,11 @@ final class BrowsingModel {
         }
     }
 
+    private var settingsReturnRoute: BrowserRoute = .entry
+
     /// Shows Clove's settings (PRD Gesture-related settings).
     func showSettings() {
+        settingsReturnRoute = state.route == .entry ? .entry : .grid
         state.route = .settings
     }
 
@@ -453,8 +481,11 @@ final class BrowsingModel {
             break
         case .grid:
             guard askBeforeLeaving(.entry) else { return }
+            Task { await recordEntryProgress() }
             state.route = .entry
-        case .detail, .group, .settings:
+        case .settings:
+            state.route = settingsReturnRoute
+        case .detail, .group:
             state.route = state.folder == nil ? .entry : .grid
         }
     }
@@ -944,6 +975,8 @@ final class BrowsingModel {
         // The screen leaves the folder before anything that waits for its writes, so no
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
+        await library.recordEntryProgress(
+            lastViewed: state.groupPosition?.photo ?? state.currentPhoto)
         showEntryAfterLeaving()
         // Leaving closes the folder even when the next destination never opens, so its scan stops
         // and its scope is not held for a folder the user no longer sees (G1 folder access).
@@ -1125,6 +1158,9 @@ final class BrowsingModel {
             // opened again, so it only applies to the folder and the open this scene shows.
             guard folder == library.folder, generation == library.openGeneration else { return }
             folderLocationLoss = loss
+            if let index = recents.firstIndex(where: { $0.identity == folder }) {
+                recents[index].needsReconnect = true
+            }
         case .groups(let groups):
             self.groups = groups
             groupsPublishedFor = library.folder

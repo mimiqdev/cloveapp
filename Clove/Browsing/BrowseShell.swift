@@ -25,17 +25,7 @@ struct BrowseShell: View {
         }
         // PRD Failure and recovery asks before leaving a folder with unconfirmed writes, wherever
         // the leaving started: the back button, a pick or a Recents tap.
-        .sheet(item: leavePrompt) { _ in
-            LeaveFolderPromptView(browsing: browsing)
-        }
-    }
-
-    /// The leaving question the model is holding, with dismissal answering Cancel
-    /// (PRD Failure and recovery, last row).
-    private var leavePrompt: Binding<LeaveFolderPrompt?> {
-        Binding(
-            get: { browsing.leavePrompt },
-            set: { if $0 == nil { browsing.cancelLeave() } })
+        .modifier(LeaveFolderPromptView(browsing: browsing))
     }
 
     /// Compact width: one screen at a time (PRD single-screen iPhone).
@@ -131,15 +121,26 @@ extension View {
         self
             .navigationTitle(title)
             .toolbar {
-                if browsing.state.route != .entry {
+                if browsing.state.route != .entry && browsing.state.route != .settings {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Back", systemImage: "chevron.left") { browsing.back() }
                             .accessibilityIdentifier("clove.nav.back")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Settings", systemImage: "gear") { browsing.showSettings() }
-                        .accessibilityIdentifier("clove.nav.settings")
+                    if browsing.state.route == .settings {
+                        Button("Done") { browsing.back() }
+                            .accessibilityIdentifier("clove.nav.back")
+                    } else if browsing.state.route == .entry {
+                        GlassIconButton(
+                            label: "Settings", symbol: "gearshape", identifier: "clove.nav.settings"
+                        ) {
+                            browsing.showSettings()
+                        }
+                    } else {
+                        Button("Settings", systemImage: "gearshape") { browsing.showSettings() }
+                            .accessibilityIdentifier("clove.nav.settings")
+                    }
                 }
             }
     }

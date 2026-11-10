@@ -160,6 +160,10 @@ final class FolderLibrarySession: FolderLibrary {
     /// Which open a scan belongs to, so a replaced scan publishes nothing.
     private var scanGeneration = 0
 
+    /// Entry snapshots use only a finished scan's confirmed marks (handoff Entry).
+    private var completedScanStatus: FolderScanStatus?
+    private var lastViewedPhoto: PhotoIdentity?
+
     /// The last queued open transition, so two opens can never install out of order.
     private var openTransition: Task<Void, Never>?
 
@@ -670,6 +674,33 @@ final class FolderLibrarySession: FolderLibrary {
     }
     // MARK: - Entry
 
+    /// Persists confirmed marks and the resume photo; snapshots are made while the folder is open.
+    func recordEntryProgress(lastViewed: PhotoIdentity?) async {
+        if let lastViewed, lastViewed.folderID == folder { lastViewedPhoto = lastViewed }
+        guard let status = completedScanStatus, folder != Self.noFolder,
+            case .success(let stores) = await resolvedStores()
+        else { return }
+        let identity = folder
+        let generation = scanGeneration
+        let photos = store.photos
+        let previews = Array(photos.prefix(3).map(\.id))
+        let viewed = lastViewedPhoto ?? photos.first?.id
+        let progress = FolderProgress(
+            confirmedMarks: photos.map(\.marks), isComplete: status == .complete,
+            lastViewedPhoto: viewed, previewPhotos: previews)
+        try? await stores.access.recordProgress(progress, for: identity)
+        // Only four cheap grid previews; never enumerate or reopen a folder for Entry.
+        let source = thumbnails
+        let identities = Array(Set(previews + [viewed].compactMap { $0 }))
+        for photo in identities {
+            guard generation == scanGeneration else { break }
+            if case .image(let image) = await source.thumbnail(for: photo, priority: .prefetch) {
+                await EntryThumbnailStore.shared.store(image, for: photo, keeping: identities)
+            }
+        }
+        await reloadRecents()
+    }
+
     /// Re-reads C11's Recents list (PRD P0-02).
     ///
     /// A store that cannot be read keeps its file untouched and is reported, so entry explains it
@@ -759,6 +790,8 @@ final class FolderLibrarySession: FolderLibrary {
     /// Installs one opened folder: ends the previous one, then scans the new one.
     private func install(_ opened: OpenedFolder) async {
         await endOpenFolder()
+        completedScanStatus = nil
+        lastViewedPhoto = opened.recent.progress?.lastViewedPhoto
         guard case .success(let stores) = await resolvedStores() else {
             // Without the app-private stores the folder can be neither scanned nor written, so
             // its grant is released instead of being held by a folder nothing can use.
@@ -816,6 +849,8 @@ final class FolderLibrarySession: FolderLibrary {
     /// G1 folder access keeps the scope until the work that relies on it drains, so the queue is
     /// drained before the session ends. Ending waits for the scan's admitted work as well.
     private func endOpenFolder() async {
+        // Capture before invalidating the source; final counts are refreshed after writes drain.
+        await recordEntryProgress(lastViewed: lastViewedPhoto)
         scanGeneration += 1
         if let monitor = locationMonitor {
             locationMonitor = nil
@@ -851,6 +886,15 @@ final class FolderLibrarySession: FolderLibrary {
         }
         if case .success(let stores) = await resolvedStores() {
             await stores.writes.drain()
+            if completedScanStatus != nil {
+                let progress = FolderProgress(
+                    confirmedMarks: store.photos.map(\.marks),
+                    isComplete: completedScanStatus == .complete,
+                    lastViewedPhoto: lastViewedPhoto,
+                    previewPhotos: Array(store.photos.prefix(3).map(\.id)))
+                try? await stores.access.recordProgress(progress, for: folder)
+            }
+            completedScanStatus = nil
             // PRD Failure and recovery: a folder that closes takes its unconfirmed changes with
             // it, so the next open reads the actual XMP and no later leaving question counts
             // marks the user abandoned.
@@ -983,6 +1027,8 @@ final class FolderLibrarySession: FolderLibrary {
             photoCount: summary.logicalPhotoCount,
             status: summary.status == .complete ? .complete : .partial)
         try? await stores.access.recordScan(recorded, for: session)
+        completedScanStatus = recorded.status
+        await recordEntryProgress(lastViewed: lastViewedPhoto)
         await reloadRecents()
         await startGrouping(generation: generation)
         // The folder can be replaced while grouping runs above, so the report is re-checked
@@ -1258,6 +1304,10 @@ final class FolderLibrarySession: FolderLibrary {
     private func locationLost(_ loss: FolderLocationLoss, folder: FolderIdentity, generation: Int) {
         guard generation == scanGeneration else { return }
         publish(.locationLost(folder: folder, loss: loss, generation: generation))
+        Task { [stores] in
+            guard let access = try? await stores.value.access else { return }
+            try? await access.recordLocationLoss(for: folder)
+        }
     }
 
     // MARK: - Writes
@@ -1272,6 +1322,17 @@ final class FolderLibrarySession: FolderLibrary {
             store.apply(status.requested, to: status.identity)
             if let photo = store.photo(for: status.identity) {
                 publish(.reads(times: [:], marks: [status.identity: photo.marks]))
+                let progress = FolderProgress(
+                    confirmedMarks: store.photos.map(\.marks),
+                    isComplete: completedScanStatus == .complete,
+                    lastViewedPhoto: lastViewedPhoto,
+                    previewPhotos: Array(store.photos.prefix(3).map(\.id)))
+                if completedScanStatus != nil {
+                    Task { [stores, folder] in
+                        guard let access = try? await stores.value.access else { return }
+                        try? await access.recordProgress(progress, for: folder)
+                    }
+                }
             }
         }
         publish(.change(status))

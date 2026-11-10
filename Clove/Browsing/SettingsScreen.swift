@@ -1,16 +1,9 @@
 import CloveCore
 import SwiftUI
 
-/// Clove's settings: every launch setting C12 holds, with system controls (PRD Gesture-related
-/// settings, Enabled rating levels, Auto-advance, Similar groups, In-group culling, Move rejects).
-///
-/// Controls are grouped the way PRD Gestures and keyboard lists their settings. Each control
-/// writes through the app-wide ``SettingsStore``, so the open session follows a change at once and
-/// the next launch reads the stored value.
-///
-/// Design placeholder: system lists, pickers, toggles and fields stand in for the visual design,
-/// and the PRD's wording stands in for approved copy. The Appearance section is the design
-/// handoff's (`design/handoff/screens.md`, Settings).
+/// The handoff's three-section Settings list (screens.md §11; copy.md, Settings).
+/// Every change writes through SettingsStore; existing detailed controls remain reachable
+/// from the rating-scale row without expanding the main list.
 struct SettingsScreen: View {
     /// The app-wide settings every scene shares (PRD Gesture-related settings).
     @Environment(SettingsStore.self) private var store
@@ -30,16 +23,16 @@ struct SettingsScreen: View {
     var body: some View {
         List {
             appearanceSection
-            gesturesSection
-            autoAdvanceSection
-            doubleTapSection
-            zoomSection
-            colourLabelsSection
+            cullingSection
             moveRejectsSection
-            similarGroupsSection
             saveFailureSection
-            resetSection
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.clove.surface.sheet)
+        .foregroundStyle(Color.clove.text.primary)
+        .tint(theme.tokens.accent.color)
+        .navigationBarTitleDisplayMode(.large)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.settings")
         .onAppear { rejectsFolderNameDraft = store.settings.rejectsFolderName.rawValue }
@@ -70,6 +63,43 @@ struct SettingsScreen: View {
         } footer: {
             Text("Photos are never tinted. Only the app around them changes.")
         }
+        .listRowBackground(theme.tokens.card.color)
+    }
+
+    /// Culling controls in the main list (handoff Settings).
+    private var cullingSection: some View {
+        Section("Culling") {
+            Toggle("Similar groups", isOn: binding(\.similarGroupsEnabled))
+                .accessibilityIdentifier("clove.settings.similarGroupsEnabled")
+            Toggle(
+                "Auto-advance after marking",
+                isOn: Binding(
+                    get: { store.settings.autoAdvance.destination != .stay },
+                    set: { enabled in
+                        store.update { $0.autoAdvance.destination = enabled ? .nextPhoto : .stay }
+                    })
+            )
+            .accessibilityIdentifier("clove.settings.autoAdvanceEnabled")
+            NavigationLink {
+                List {
+                    gesturesSection
+                    autoAdvanceSection
+                    doubleTapSection
+                    zoomSection
+                    colourLabelsSection
+                    similarGroupsSection
+                    resetSection
+                }
+                .navigationTitle("Culling")
+                .scrollContentBackground(.hidden)
+                .background(Color.clove.surface.sheet)
+            } label: {
+                LabeledContent(
+                    "Rating scale", value: "\(store.settings.enabledRatings.count) stars")
+            }
+            .accessibilityIdentifier("clove.settings.ratingScale")
+        }
+        .listRowBackground(theme.tokens.card.color)
     }
 
     /// Gestures on or off, and the rating levels input may apply (PRD Gesture-related settings,
@@ -162,28 +192,33 @@ struct SettingsScreen: View {
     /// folder that opens.
     private var moveRejectsSection: some View {
         Section {
-            Toggle("Move rejects", isOn: binding(\.moveRejectsEnabled))
+            Toggle("Move Rejects", isOn: binding(\.moveRejectsEnabled))
                 .accessibilityIdentifier("clove.settings.moveRejectsEnabled")
-            TextField("Rejects folder", text: $rejectsFolderNameDraft)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .accessibilityIdentifier("clove.settings.rejectsFolderName")
-                .onChange(of: rejectsFolderNameDraft) { _, text in
-                    commitRejectsFolderName(text)
+            NavigationLink {
+                Form {
+                    TextField("Folder name", text: $rejectsFolderNameDraft)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .accessibilityIdentifier("clove.settings.rejectsFolderName")
+                        .onChange(of: rejectsFolderNameDraft) { _, text in
+                            commitRejectsFolderName(text)
+                        }
+                    if let problem = rejectsFolderNameProblem {
+                        Text(problem)
+                            .foregroundStyle(Color.clove.status.failed)
+                            .accessibilityIdentifier("clove.settings.rejectsFolderNameProblem")
+                    }
                 }
-            if let problem = rejectsFolderNameProblem {
-                Text(problem)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .accessibilityIdentifier("clove.settings.rejectsFolderNameProblem")
+                .navigationTitle("Folder name")
+            } label: {
+                LabeledContent("Folder name", value: store.settings.rejectsFolderName.rawValue)
             }
         } header: {
             Text("Move rejects")
         } footer: {
-            Text(
-                "Rejected photos move into this folder under the open folder, with their JPEG and HIF companions and XMP. Originals are never deleted."
-            )
+            Text("Rejected photos are moved, never deleted.")
         }
+        .listRowBackground(theme.tokens.card.color)
     }
 
     /// Similar groups on or off, how the grid draws them and what a completed group does
@@ -221,7 +256,7 @@ struct SettingsScreen: View {
         if let message = store.saveFailureMessage {
             Section {
                 Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.clove.status.failed)
                     .accessibilityIdentifier("clove.settings.saveFailure")
             }
         }

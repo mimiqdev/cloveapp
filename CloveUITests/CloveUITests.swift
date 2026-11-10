@@ -26,6 +26,7 @@ final class CloveUITests: XCTestCase {
             "The Clove root view did not appear"
         )
 
+        checkEntryAndSettings(in: app)
         openTestLibrary(in: app)
         checkGridOverlays(in: app)
         showOnlyRejectedThenAll(in: app)
@@ -103,13 +104,11 @@ final class CloveUITests: XCTestCase {
         )
         openTestLibrary(in: app)
 
-        let message = element(in: app, "clove.grid.saveState.failure.message")
-        XCTAssertTrue(message.waitForExistence(timeout: 10), "The grid did not explain the loss")
-        XCTAssertEqual(
-            message.label, "The drive disconnected. Reconnect it, then reopen this folder.",
-            "The disconnected-drive copy changed")
+        XCTAssertTrue(app.staticTexts["The drive disconnected."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Reconnect it, then reopen this folder."].exists)
+        XCTAssertEqual(element(in: app, "clove.grid.saveState.subtitle").label, "Not connected")
         XCTAssertTrue(
-            element(in: app, "clove.grid.saveState.failure.reopenFolder").exists,
+            element(in: app, "clove.grid.saveState.failure.action").exists,
             "The loss offered no Reconnect/reopen action")
         XCTAssertFalse(
             element(in: app, "clove.grid.saveState").exists,
@@ -214,38 +213,19 @@ final class CloveUITests: XCTestCase {
         )
         back(in: app)
 
-        let title = element(in: app, "clove.leavePrompt.title")
+        let title = app.alerts.staticTexts["Some marks haven't finished saving."]
         XCTAssertTrue(title.waitForExistence(timeout: 10), "Leaving did not ask first")
         XCTAssertEqual(title.label, "Some marks haven't finished saving.")
-        // Wait for writes drains C4 and, because the failed change is still unfinished, the
-        // question stays so the user can still choose Leave anyway (PRD Failure and recovery).
-        let wait = element(in: app, "clove.leavePrompt.wait")
-        XCTAssertTrue(wait.exists, "The question did not offer Wait for writes")
-        wait.tap()
-        // The waiting state is visible while C4 drains, and Leave anyway stays available
-        // (PRD Failure and recovery: the user can still choose it).
-        XCTAssertTrue(
-            waitForElement(element(in: app, "clove.leavePrompt.waiting"), timeout: 5),
-            "Wait for writes showed no waiting state")
-        let leave = element(in: app, "clove.leavePrompt.leaveAnyway")
-        XCTAssertTrue(leave.exists, "Waiting for writes took away the Leave anyway answer")
-        XCTAssertTrue(
-            waitForDisappearance(element(in: app, "clove.leavePrompt.waiting"), timeout: 10),
-            "The waiting state never finished")
-        // The failed change is still unfinished, so the question stays for an explicit answer.
-        XCTAssertTrue(
-            element(in: app, "clove.leavePrompt.title").exists,
-            "The question left while a change was still unfinished")
-        leave.tap()
+        // Wait drains the existing queue and rechecks. A failed change remains unfinished.
+        app.alerts.buttons["Wait"].tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 10), "Wait lost the unfinished question")
+        app.alerts.buttons["Leave anyway"].tap()
 
         XCTAssertTrue(
             element(in: app, "clove.entry").waitForExistence(timeout: 10),
             "Leave anyway did not show entry"
         )
-        XCTAssertTrue(
-            element(in: app, "clove.entry.noFolder").waitForExistence(timeout: 10),
-            "Leave anyway left the folder open"
-        )
+        XCTAssertFalse(element(in: app, "clove.grid").exists, "Leave anyway left the grid open")
     }
 
     /// Opens one sample photo's detail from the grid (PRD P0-03).
@@ -487,10 +467,25 @@ final class CloveUITests: XCTestCase {
 
     /// Entry opens the test library and the grid appears.
     @MainActor
+    private func checkEntryAndSettings(in app: XCUIApplication) {
+        XCTAssertTrue(element(in: app, "clove.entry.openFolder").exists)
+        XCTAssertTrue(app.staticTexts["Done"].exists)
+        XCTAssertTrue(app.staticTexts["Reconnect"].exists)
+        attachScreenshot(named: "entry-resume")
+        element(in: app, "clove.nav.settings").tap()
+        XCTAssertTrue(app.staticTexts["Appearance"].exists)
+        XCTAssertTrue(app.staticTexts["Culling"].exists)
+        XCTAssertTrue(app.staticTexts["Move rejects"].exists)
+        attachScreenshot(named: "settings-sections")
+        back(in: app)
+    }
+
+    @MainActor
     private func openTestLibrary(in app: XCUIApplication) {
         let open = element(in: app, "clove.entry.openFolder")
         XCTAssertTrue(open.waitForExistence(timeout: 10), "Entry did not offer the test library")
         open.tap()
+        if element(in: app, "clove.detail").waitForExistence(timeout: 2) { back(in: app) }
         XCTAssertTrue(
             element(in: app, "clove.grid").waitForExistence(timeout: 10),
             "The grid did not appear after opening the folder"
@@ -1038,6 +1033,7 @@ final class CloveUITests: XCTestCase {
     /// Chooses one grid group display value on the settings screen (PRD Grid).
     @MainActor
     private func setGridGroupDisplay(in app: XCUIApplication, to name: String) {
+        scrollToSettingsControl("clove.settings.ratingScale", in: app).tap()
         let picker = scrollToSettingsControl("clove.settings.gridGroupDisplay", in: app)
         XCTAssertTrue(picker.exists, "Settings had no grid display control")
         let option = picker.buttons[name]
@@ -1045,6 +1041,7 @@ final class CloveUITests: XCTestCase {
             option.waitForExistence(timeout: 10),
             "The grid display control offered no \(name) option")
         option.tap()
+        app.navigationBars.buttons.firstMatch.tap()
     }
 
     /// Scrolls the settings list until one control is on screen (PRD Gesture-related settings).

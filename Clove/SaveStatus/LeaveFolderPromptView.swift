@@ -1,59 +1,34 @@
 import CloveCore
 import SwiftUI
 
-/// The question before leaving a folder with unconfirmed writes (PRD Failure and recovery,
-/// last row).
-///
-/// PRD P0-08 requires the question and PRD Failure and recovery forbids treating unconfirmed
-/// changes as saved after leaving. The copy and the two action titles come from CloveCore's
-/// ``LeaveFolderConfirmation``. **Wait for writes** holds the question with a visible waiting
-/// state while C4 drains and still lets the user choose **Leave anyway**; **Leave anyway** closes
-/// the folder and goes where the user was heading.
-///
-/// Design placeholder: a plain stack with system buttons stands in for the design's confirmation.
-struct LeaveFolderPromptView: View {
-    /// The scene's browsing state, which owns the question and its answer.
+/// The system alert for unfinished marks (handoff Errors; PRD P0-08).
+/// Wait uses the existing drain/recheck path; Leave anyway uses the existing close path.
+struct LeaveFolderPromptView: ViewModifier {
     let browsing: BrowsingModel
+    @State private var isPresented = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(LeaveFolderConfirmation.message)
-                .font(.headline)
-                .accessibilityIdentifier("clove.leavePrompt.title")
-            Text(countText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("clove.leavePrompt.detail")
-            if browsing.isWaitingForWrites {
-                ProgressView("Waiting for writes…")
-                    .accessibilityIdentifier("clove.leavePrompt.waiting")
+    func body(content: Content) -> some View {
+        content
+            .alert("Some marks haven't finished saving.", isPresented: $isPresented) {
+                Button("Leave anyway", role: .destructive) {
+                    Task { await browsing.leaveAnyway() }
+                }
+                .accessibilityIdentifier("clove.leavePrompt.leaveAnyway")
+                Button("Wait") {
+                    Task {
+                        await browsing.waitForWrites()
+                        isPresented = browsing.leavePrompt != nil
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("clove.leavePrompt.wait")
+            } message: {
+                Text(
+                    "\(browsing.leaveConfirmation.unfinishedCount) changes aren't confirmed yet. Leaving now may lose them."
+                )
             }
-            Spacer(minLength: 0)
-            Button(browsing.leaveConfirmation.waitTitle) {
-                Task { await browsing.waitForWrites() }
+            .onChange(of: browsing.leavePrompt?.id, initial: true) { _, prompt in
+                isPresented = prompt != nil
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(browsing.isWaitingForWrites)
-            .accessibilityIdentifier("clove.leavePrompt.wait")
-            Button(browsing.leaveConfirmation.leaveTitle) {
-                Task { await browsing.leaveAnyway() }
-            }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("clove.leavePrompt.leaveAnyway")
-            Button(SaveAction.cancel.title) { browsing.cancelLeave() }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("clove.leavePrompt.cancel")
-        }
-        .padding(20)
-        .presentationDetents([.medium])
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.leavePrompt")
-    }
-
-    /// How many changes the question is about, so "Some marks" has a number (PRD P0-08).
-    private var countText: String {
-        let count = browsing.leaveConfirmation.unfinishedCount
-        return count == 1
-            ? "1 change isn't confirmed yet." : "\(count) changes aren't confirmed yet."
     }
 }
