@@ -18,8 +18,9 @@ import SwiftUI
 /// (PRD P0-05, P0-09); it is disabled while the open folder has nothing to undo, and an undo
 /// scrolls the photo it restored into view.
 ///
-/// Design placeholder: system menus, symbols and colours stand in for the visual design's
-/// controls and overlays. The handoff's top bar holds Undo when V2 restyles this screen.
+/// The toolbar also offers Move rejects while the setting is on and the folder holds a rejected
+/// photo (PRD P0-10). The action opens ``MoveRejectsSheet``, which plans, confirms, runs and
+/// reports the move; it never runs without the confirmation.
 ///
 /// Design placeholder: system menus, symbols and colours stand in for the visual design's
 /// controls and overlays.
@@ -30,6 +31,25 @@ struct GridScreen: View {
     /// The app-wide settings, read live so a change on the settings screen shows here at once
     /// (PRD Grid, Similar groups).
     @Environment(SettingsStore.self) private var store
+
+    /// The Move rejects sheet or its details sheet, or nil while both are closed (PRD P0-10).
+    ///
+    /// One item drives one sheet, so the confirmation and the failure details never try to
+    /// present at the same time.
+    @State private var moveSheet: MoveSheetRoute?
+
+    /// One Move rejects presentation: the confirmation flow or its failure details (P0-10).
+    private enum MoveSheetRoute: Identifiable {
+        case flow(MoveRejectsFlow)
+        case details(CompletedRejectMove)
+
+        var id: String {
+            switch self {
+            case .flow(let flow): "flow-\(flow.id)"
+            case .details(let completed): "details-\(completed.id)"
+            }
+        }
+    }
 
     /// The thumbnails the cells draw (PRD P0-03).
     ///
@@ -90,12 +110,18 @@ struct GridScreen: View {
         .safeAreaInset(edge: .bottom) {
             if browsing.isSelecting {
                 GridBatchBar(browsing: browsing, cells: cells)
+                    // PRD P0-10 blocks marking while a move runs; C6's rule is also enforced in
+                    // the model, and this keeps the bar from looking ready.
+                    .disabled(browsing.isMovingRejects)
             }
         }
         // The scene's undo manager reaches this model here, so ⌘Z and the three-finger gestures
         // undo the same history the toolbar's button does (PRD P0-05).
         .undoHistory(browsing: browsing)
         .toolbar {
+            // Undo sits beside the grid's other actions, so a batch can be undone from the grid
+            // (PRD P0-05, P0-09). It is off while the folder has nothing to undo and while a move
+            // runs, because PRD P0-10 blocks marking then (the model enforces that too).
             ToolbarItem(placement: .topBarTrailing) {
                 // Design placeholder: a system symbol button stands in for the handoff's top-bar
                 // Undo, which V2 restyles.
@@ -110,10 +136,51 @@ struct GridScreen: View {
                             ? "arrow.uturn.backward"
                             : "arrow.uturn.backward.circle.badge.exclamationmark")
                 }
-                .disabled(!browsing.canUndo)
+                .disabled(!browsing.canUndo || browsing.isMovingRejects)
                 .accessibilityIdentifier("clove.grid.undo")
                 .accessibilityValue(browsing.undoFailure?.summary ?? "")
                 .help(browsing.undoFailure?.summary ?? "Undo the last mark")
+            }
+            // The handoff hides Move Rejects while opening and when there is nothing to move,
+            // rather than leaving a disabled action on screen (design handoff, P0-10).
+            if store.settings.moveRejectsEnabled, browsing.rejectedPhotoCount > 0,
+                !browsing.isFolderOpening, !browsing.isMovingRejects
+            {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Move rejects", systemImage: "tray.and.arrow.up") {
+                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                    }
+                    .accessibilityIdentifier("clove.grid.moveRejects")
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let completed = browsing.lastRejectMove,
+                browsing.isRejectMoveToastVisible
+            {
+                MoveRejectsToast(completed: completed) {
+                    moveSheet = .details(completed)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+            }
+        }
+        .task(id: browsing.rejectMoveToastAttempt) {
+            guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
+            // Toast timings are still proposed in the handoff; the details remain reachable
+            // from the same result until this presentation ends.
+            try? await Task.sleep(for: .seconds(10))
+            // A newer move cancels this task; swallowing the sleep's cancellation must not
+            // dismiss the toast the newer result just showed.
+            guard !Task.isCancelled else { return }
+            browsing.dismissRejectMoveToast()
+        }
+        .sheet(item: $moveSheet) { route in
+            switch route {
+            case .flow(let flow):
+                MoveRejectsSheet(flow: flow)
+            case .details(let completed):
+                MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
             }
         }
         .accessibilityElement(children: .contain)

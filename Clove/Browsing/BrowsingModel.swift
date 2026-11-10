@@ -57,6 +57,14 @@ final class BrowsingModel: UndoHistoryHost {
     /// Whether the open folder's scan reported itself finished (PRD P0-01).
     private var hasFinishedScan: Bool { finishedScanFor == library.folder }
 
+    /// Whether the open folder is still opening, so the grid hides actions the handoff hides
+    /// until the scan finishes (design handoff, PRD P0-01).
+    var isFolderOpening: Bool { !hasFinishedScan }
+
+    /// The library's current open generation, which changes when the same folder is reopened
+    /// (PRD P0-02). A move that finishes across a change must not record against the new open.
+    var openGeneration: Int { library.openGeneration }
+
     /// The remembered folders entry lists, most recently opened first (PRD P0-02).
     private(set) var recents: [RecentFolder]
 
@@ -624,7 +632,7 @@ final class BrowsingModel: UndoHistoryHost {
     /// (PRD P0-08). A second action is refused while one runs, so both plans cannot read the same
     /// pre-batch marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings) async {
-        guard !isApplyingBatch else { return }
+        guard !isApplyingBatch, !isMovingRejects else { return }
         let targets = batchTargets
         let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
         guard !plan.items.isEmpty else { return }
@@ -655,7 +663,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// that can no longer retry, such as one whose folder closed, answers nil; the report then
     /// stays as it was, so the bar still names the photos that did not save (PRD P0-08).
     func retryFailedBatch() async {
-        guard !isApplyingBatch, let report = batchReport, report.canRetry else { return }
+        guard !isApplyingBatch, !isMovingRejects, let report = batchReport, report.canRetry
+        else { return }
         let folder = state.folder
         let clearances = selectionClearances
         let dismissals = reportDismissals
@@ -666,6 +675,143 @@ final class BrowsingModel: UndoHistoryHost {
             dismissals == reportDismissals
         else { return }
         batchReport = report.merging(result)
+    }
+
+    // MARK: - Move rejects
+
+    /// How many photos the open folder holds with Reject set (PRD P0-10).
+    ///
+    /// The grid offers Move rejects only while this is non-zero, the scan has finished and
+    /// C12's setting is on; the plan still decides which sets can actually move.
+    var rejectedPhotoCount: Int { storedPhotos.filter(\.marks.isRejected).count }
+
+    /// The latest completed Move rejects run, which C14's undo will use (PRD P0-10).
+    ///
+    /// It holds the run's result and the identities the person kept in the confirmation, plus the
+    /// folder name that run used. It stays after the toast goes, so a later undo has the whole
+    /// move; nothing in this task moves files back.
+    private(set) var lastRejectMove: CompletedRejectMove?
+
+    /// Whether the grid shows the latest move's toast (design handoff, PRD P0-10).
+    ///
+    /// Dismissing the toast keeps ``lastRejectMove``; only the presentation goes away.
+    private(set) var isRejectMoveToastVisible = false
+
+    /// How many times a move toast was shown, so a retry restarts its timer even when C14 keeps
+    /// the same batch ID (PRD P0-10).
+    private(set) var rejectMoveToastAttempt = 0
+
+    /// Whether a Move rejects run is in progress (PRD P0-10).
+    ///
+    /// C6 drains the mark queue before it moves and skips a set with an unfinished mark change,
+    /// so marking stays blocked for the whole run: the detail controls and the batch bar cannot
+    /// start a write that would target a path the move is about to change.
+    private(set) var isMovingRejects = false
+
+    /// The progress steps of the next or running Move rejects (PRD P0-10).
+    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
+        await library.rejectMoveProgress()
+    }
+
+    /// Plans Move rejects for the open folder's rejected photos (PRD P0-10).
+    ///
+    /// The plan is the confirmation sheet's input; nothing moves until ``runRejectMove(_:)``.
+    /// The configuration is read from settings by the caller at move time, so a renamed folder
+    /// applies without reopening the folder (PRD Move rejects, C12).
+    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
+        try await library.planRejectMove(configuration: configuration)
+    }
+
+    /// Runs a confirmed Move rejects plan (PRD P0-10).
+    ///
+    /// The library drops every confirmed set from its photos and publishes the change through
+    /// ``FolderLibrary/updates``, so the grid loses the moved photos and ``refresh()`` reconciles
+    /// the selection, current photo and group place with what remains. The flag is set before the
+    /// wait and cleared on every exit path, so a failed run never leaves marking blocked.
+    func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
+        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+        return try await library.runRejectMove(plan)
+    }
+
+    /// Records one completed move, so the toast can show it and C14 can undo it (PRD P0-10).
+    func recordRejectMove(
+        _ result: RejectMoveResult, keptIdentities: [PhotoIdentity],
+        rejectsFolderName: RejectsFolderName, folder: FolderIdentity?, openGeneration: Int
+    ) {
+        lastRejectMove = CompletedRejectMove(
+            result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
+            folder: folder, openGeneration: openGeneration)
+        isRejectMoveToastVisible = true
+        rejectMoveToastAttempt += 1
+    }
+
+    /// Hides the move toast while keeping the completed move for a later undo (PRD P0-10).
+    func dismissRejectMoveToast() {
+        isRejectMoveToastVisible = false
+    }
+
+    /// Retries a completed move's failed sets and keeps the moved ones in the record (P0-10).
+    ///
+    /// The retry's outcomes replace only the failures, so the toast and C14's record still count
+    /// every photo the run moved. A batch the library can no longer retry answers nil.
+    func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
+        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
+        // The details sheet can outlive its folder open. A record from another open must not
+        // clear Reject or move anything in the replacement, even when the folder identity is the
+        // same after a reopen (PRD P0-02, P0-10).
+        guard
+            completed.openGeneration == openGeneration, completed.folder == state.folder
+        else { return nil }
+        let folder = completed.folder
+        let generation = completed.openGeneration
+        let selection = RejectMoveRetrySelection(
+            result: completed.result,
+            keptIdentities: Set(completed.keptIdentities),
+            rejectedIdentities: Set(
+                storedPhotos.filter(\.marks.isRejected).map(\.id)))
+        guard
+            selection.hasRetryableMoves || !selection.clearFailures.isEmpty
+                || !selection.noLongerRejected.isEmpty
+        else { return nil }
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+
+        // C6 first, without the failures whose Reject was cleared. If its batch is gone, nothing
+        // else changes and the details sheet can report the failure.
+        var retried: RejectMoveResult?
+        if selection.hasRetryableMoves {
+            guard
+                let result = try await library.retryFailedRejects(
+                    in: completed.result.id, excluding: selection.excludedFromRetry)
+            else { return nil }
+            retried = result
+        }
+
+        guard state.folder == folder, openGeneration == generation else { return nil }
+
+        // A kept photo's Reject clear is a C4 write, not a C6 move, so it is retried through the
+        // same mark path. An unresolved one stays in the failure list for the next attempt.
+        var clearing = RejectMoveKeepClearing()
+        for set in selection.clearFailures {
+            guard state.folder == folder, openGeneration == generation else { return nil }
+            let status = await library.apply(.reject(false), to: set.identity)
+            clearing.record(status, for: set.identity, files: set.files)
+        }
+        guard state.folder == folder, openGeneration == generation else { return nil }
+
+        let combined = RejectMoveRetryMerge.result(
+            previous: completed.result, retried: retried,
+            unresolvedClearFailures: clearing.clearFailures,
+            noLongerRejected: selection.noLongerRejected.map(\.identity))
+        lastRejectMove = CompletedRejectMove(
+            result: combined, keptIdentities: completed.keptIdentities,
+            rejectsFolderName: completed.rejectsFolderName,
+            folder: completed.folder, openGeneration: completed.openGeneration)
+        isRejectMoveToastVisible = true
+        rejectMoveToastAttempt += 1
+        return combined
     }
 
     /// Dismisses the batch's report without retrying (PRD Failure and recovery: Cancel).
@@ -707,18 +853,18 @@ final class BrowsingModel: UndoHistoryHost {
     /// (``PhotoChangeStates``). A failed write therefore never shows a mark it did not confirm.
     /// The returned status is still the authority for the undo record, so a change a newer one
     /// superseded records no step (PRD P0-05).
-    func apply(_ change: MarkChange, to photo: PhotoIdentity) async {
-        guard !change.isEmpty else { return }
+    @discardableResult
+    func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus? {
+        guard !isMovingRejects, !change.isEmpty else { return nil }
         // PRD P0-05's Undo row restores the previous mark, so the marks on screen before the
         // change are the ones undo puts back; a field the user did not see is never restored.
         let folder = state.folder
         let marksBefore = storedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks()
-        // The step is recorded when C4 admits the change, before the write finishes: a mark whose
-        // write is still running can already be undone, and two writes that finish in another
-        // order cannot reorder the history the user is stepping back through.
+        // The action is recorded when it starts, so the history keeps the user's order and Undo is
+        // live while the write runs; a step waits for this scene's writes before it reads marks.
         await recordUndoStep(.mark(change: change, photo: photo, marksBefore: marksBefore))
-        guard state.folder == folder else { return }
-        _ = await runWrite { await library.apply(change, to: photo) }
+        guard state.folder == folder else { return nil }
+        return await runWrite { await library.apply(change, to: photo) }
     }
 
     /// Runs one library write and keeps the scene's in-flight count (PRD P0-05).
@@ -1114,6 +1260,9 @@ final class BrowsingModel: UndoHistoryHost {
         finishedScanFor = nil
         pendingRestore = nil
         hasLeftFolder = true
+        // The closed folder's completed move cannot be undone through its ended session.
+        lastRejectMove = nil
+        isRejectMoveToastVisible = false
         storedPhotos = []
         groups = []
         // The folder's undo history goes with it (PRD P0-05), so no screen offers to undo an
@@ -1239,6 +1388,12 @@ final class BrowsingModel: UndoHistoryHost {
         // (PRD P0-08's Leave anyway).
         guard !hasLeftFolder else { return }
         switch update {
+        case .scanStarted:
+            // A reopen of the same folder starts a new scan, so the old finished marker cannot
+            // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
+            finishedScanFor = nil
+            groupsPublishedFor = nil
+            refresh()
         case .photos, .reads:
             refresh()
             resolvePendingRestore(scanFinished: false)
@@ -1298,6 +1453,9 @@ final class BrowsingModel: UndoHistoryHost {
         state.selection = []
         state.groupPosition = nil
         state.route = .grid
+        // The previous folder's completed move cannot be undone through this folder's session.
+        lastRejectMove = nil
+        isRejectMoveToastVisible = false
         leavePrompt = nil
         isWaitingForWrites = false
         // The finishing action, its failure and its event count belong to the folder that is
@@ -1336,6 +1494,30 @@ final class BrowsingModel: UndoHistoryHost {
     private func refresh() {
         storedPhotos = library.photos
         groups = library.groups
+        reconcileRemovedPhotos()
+    }
+
+    /// Drops scene state that names a photo the folder no longer holds (PRD P0-10, P0-14).
+    ///
+    /// A confirmed move removes photos, so the selection, the current photo and the group place
+    /// must not point at one. The scan only adds photos, so this changes nothing during a normal
+    /// scan; a detail or group route whose photo is gone returns to the grid, the same fallback a
+    /// restore uses. Grouping's own update then keeps a surviving group's place.
+    private func reconcileRemovedPhotos() {
+        let present = Set(storedPhotos.map(\.id))
+        if !state.selection.isSubset(of: present) {
+            state.selection.formIntersection(present)
+            batchReport = nil
+            selectionClearances += 1
+        }
+        if let current = state.currentPhoto, !present.contains(current) {
+            state.currentPhoto = nil
+            if state.route == .detail { state.route = .grid }
+        }
+        if let position = state.groupPosition, !present.contains(position.photo) {
+            state.groupPosition = nil
+            if state.route == .group { state.route = .grid }
+        }
     }
 }
 
@@ -1352,4 +1534,25 @@ struct BatchMarkApplication: Sendable {
 
     /// Each targeted photo's marks before the batch, keyed by C1's identity (PRD P0-05).
     let marksBefore: [PhotoIdentity: PhotoMarks]
+}
+
+/// The latest completed Move rejects run, kept for the toast and C14's undo (PRD P0-10).
+///
+/// The result names every set the run moved, failed or skipped, and the kept identities are the
+/// photos the person kept in the confirmation. C14's undo will move the files back and restore
+/// Reject on both lists as one step; this task only keeps the value.
+struct CompletedRejectMove: Sendable, Identifiable {
+    /// The run's outcomes and its retry handle (PRD P0-10).
+    let result: RejectMoveResult
+    /// The ready sets the person kept, in the plan's order (PRD P0-10).
+    let keptIdentities: [PhotoIdentity]
+    /// The rejects folder name that run used, for the toast (PRD Move rejects).
+    let rejectsFolderName: RejectsFolderName
+    /// The folder open the run belonged to (PRD P0-02).
+    let folder: FolderIdentity?
+    /// The open generation the run belonged to, so a reopen invalidates it (PRD P0-02).
+    let openGeneration: Int
+
+    /// The run's id, so the grid can key the toast on it (PRD P0-10).
+    var id: RejectMoveBatchID { result.id }
 }

@@ -17,6 +17,30 @@ final class TestLibrary: FolderLibrary {
     /// The launch environment value that selects the sample library: set it to `1`.
     static let launchVariable = "CLOVE_TEST_LIBRARY"
 
+    /// The launch environment value that makes one sample set fail its first move (PRD P0-10).
+    ///
+    /// Its value is a stem suffix: a rejected photo whose stem ends with it reports a failed move
+    /// once, stays in the grid and keeps its Reject, and the next retry moves it. The UI smoke
+    /// test therefore forces a partial Move rejects failure without files.
+    static let forcedMoveFailureVariable = "CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX"
+
+    /// The launch environment value that makes the sample location read-only (PRD P0-10).
+    ///
+    /// Set it to `1` and the sample refuses every Move rejects request with the read-only
+    /// location the sheet explains, still without touching a file.
+    static let readOnlyVariable = "CLOVE_TEST_LIBRARY_READ_ONLY"
+
+    /// The launch environment value that keeps a sample move toast from auto-dismissing.
+    ///
+    /// The UI smoke test reads Details and the grid after a move; this holds the toast for that
+    /// check without lengthening the timer users get.
+    static let keepToastVariable = "CLOVE_TEST_LIBRARY_KEEP_TOAST"
+
+    /// Whether this launch keeps the sample move toast visible (PRD P0-10).
+    static var keepsMoveToast: Bool {
+        ProcessInfo.processInfo.environment[keepToastVariable] == "1"
+    }
+
     /// The launch environment value that makes sample photos fail their first write (PRD P0-09).
     ///
     /// Its value is a stem suffix: a photo whose stem ends with it reports a failed change once
@@ -66,6 +90,8 @@ final class TestLibrary: FolderLibrary {
             .filter { !$0.isEmpty }
         return sample(
             failingStemSuffix: environment[forcedFailureVariable],
+            failingMoveStemSuffix: environment[forcedMoveFailureVariable],
+            readOnly: environment[readOnlyVariable] == "1",
             failingStems: stems,
             failureReason: forcedFailureReason(named: environment[forcedFailureReasonVariable]),
             locationLoss: locationLoss(named: environment[locationLossVariable]),
@@ -106,7 +132,7 @@ final class TestLibrary: FolderLibrary {
     private(set) var groups: [BrowsingGroup]
 
     /// The groups the sample publishes again when similar groups are turned back on.
-    private let allGroups: [BrowsingGroup]
+    private var allGroups: [BrowsingGroup]
 
     /// The one update stream the browsing model consumes, so the sample browses through the same
     /// path as the real library (PRD P0-08, P0-13).
@@ -139,6 +165,9 @@ final class TestLibrary: FolderLibrary {
     /// The photos whose forced failure already happened, so a retry saves them (PRD P0-08, P0-09).
     private var alreadyFailed: Set<PhotoIdentity> = []
 
+    /// The photos whose forced move failure already happened, so a retry moves them (P0-10).
+    private var alreadyFailedMoves: Set<PhotoIdentity> = []
+
     /// The batches this library applied, so a retry touches only their failed photos
     /// (PRD P0-09).
     private var batches: [MarkBatchID: [BatchMarkItem]] = [:]
@@ -151,6 +180,21 @@ final class TestLibrary: FolderLibrary {
     /// needs, with the same result shapes the real library answers.
     private var undoStack: [SampleUndoStep] = []
     private var undoRedoStack: [SampleUndoStep] = []
+
+    /// The stem suffix whose rejected photos fail their first move, or nil when none does
+    /// (PRD P0-10).
+    private let failingMoveStemSuffix: String?
+
+    /// Whether this sample refuses Move rejects as a read-only location (PRD P0-10).
+    private let readOnly: Bool
+
+    /// The entries a retry may resend, one batch per run that had a failure (PRD P0-10).
+    private var rejectMoveBatches: [RejectMoveBatchID: [RejectMovePlanEntry]] = [:]
+
+    /// The progress stream the move sheet reads while a sample move runs (PRD P0-10).
+    ///
+    /// Each run gets its own stream, so a retry never reads the earlier run's finished step.
+    private var rejectMoveContinuation: AsyncStream<RejectMoveProgress>.Continuation?
 
     /// How long the sample's write drain takes, so a UI test can see the waiting state
     /// (PRD P0-08).
@@ -170,6 +214,8 @@ final class TestLibrary: FolderLibrary {
         allGroups = []
         changes = [:]
         failingStemSuffix = nil
+        failingMoveStemSuffix = nil
+        readOnly = false
         failingStems = []
         failureReason = .notConfirmed
         drainDelay = .zero
@@ -184,6 +230,8 @@ final class TestLibrary: FolderLibrary {
         groups: [BrowsingGroup],
         changes: [MarkChangeStatus] = [],
         failingStemSuffix: String? = nil,
+        failingMoveStemSuffix: String? = nil,
+        readOnly: Bool = false,
         detailImages: (any DetailImageSource)? = nil,
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
@@ -198,6 +246,8 @@ final class TestLibrary: FolderLibrary {
         for change in changes { byPhoto[change.identity] = change }
         self.changes = byPhoto
         self.failingStemSuffix = failingStemSuffix
+        self.failingMoveStemSuffix = failingMoveStemSuffix
+        self.readOnly = readOnly
         self.failingStems = failingStems.map { $0.lowercased() }
         self.failureReason = failureReason
         self.drainDelay = drainDelay
@@ -205,7 +255,7 @@ final class TestLibrary: FolderLibrary {
         self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         // The stream buffers these until the model starts reading it, so the sample opens with
-        // the save states and the loss it was built with (PRD P0-08, P0-02).
+        // the save states, the loss and the scan state it was built with (PRD P0-08, P0-02).
         for change in changes { updateContinuation.yield(.change(change)) }
         if let locationLoss {
             updateContinuation.yield(
@@ -213,6 +263,12 @@ final class TestLibrary: FolderLibrary {
                     folder: folder, loss: FolderLocationLoss(reason: locationLoss, date: Date()),
                     generation: openGeneration))
         }
+        // The sample is fully scanned when it opens, so the grid can show the actions the
+        // handoff hides during opening (design handoff, PRD P0-01).
+        updateContinuation.yield(.scanStarted)
+        updateContinuation.yield(
+            .scanFinished(
+                FolderScanSummary(photoCount: stored.count, status: .complete)))
     }
 
     /// Applies only the fields the change names and reports the state C4 would (PRD P0-08).
@@ -306,6 +362,205 @@ final class TestLibrary: FolderLibrary {
         updateContinuation.yield(.reads(times: [:], marks: [photo: marks]))
         updateContinuation.yield(.change(status))
         return status
+    }
+
+    // MARK: - Move rejects
+
+    /// Plans Move rejects from the sample's rejected photos (PRD P0-10).
+    ///
+    /// The plan is built in memory from the sample's marks, so the sheet shows the same counts,
+    /// companions, XMP files and folder name the real plan would, without checking or touching a
+    /// file. A read-only sample refuses the whole request, as PRD P0-10 requires.
+    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
+        try checkMoveRejects(configuration)
+        return makeRejectMovePlan(configuration)
+    }
+
+    /// Moves the sample's rejected photos and reports their outcomes (PRD P0-10).
+    ///
+    /// A photo whose stem matches the forced move failure stays in place once, with its Reject,
+    /// so the sheet shows PRD "Partial move failure" and its retry. Every other ready set leaves
+    /// the sample's photos and groups through the same update stream the real library publishes.
+    func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
+        try checkMoveRejects(plan.configuration)
+        return simulateMove(plan.entries)
+    }
+
+    /// Retries only the sample sets an earlier move could not move (PRD P0-10).
+    func retryFailedRejects(
+        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
+    ) async throws -> RejectMoveResult? {
+        guard let entries = rejectMoveBatches[batch], !readOnly else { return nil }
+        rejectMoveBatches[batch] = nil
+        return simulateMove(
+            entries.filter { !identities.contains($0.identity) }, batchID: batch)
+    }
+
+    /// The sample's progress steps for one run (PRD P0-10).
+    ///
+    /// A fresh stream per call keeps a retry from ending on the previous run's finished step.
+    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
+        let (stream, continuation) = AsyncStream.makeStream(of: RejectMoveProgress.self)
+        rejectMoveContinuation = continuation
+        return stream
+    }
+
+    /// Refuses a disabled or read-only sample request before anything changes (PRD P0-10).
+    private func checkMoveRejects(_ configuration: RejectMoveConfiguration) throws {
+        guard configuration.isEnabled else { throw RejectMoveRefusal.disabled }
+        guard !readOnly else {
+            throw RejectMoveRefusal.readOnlyLocation(
+                RejectMoveFailure(
+                    reason: .readOnlyStorage,
+                    message: "The sample library reports a read-only location."))
+        }
+    }
+
+    /// Builds the sample plan with one ready set per rejected photo (PRD P0-10).
+    private func makeRejectMovePlan(_ configuration: RejectMoveConfiguration) -> RejectMovePlan {
+        let root = URL(fileURLWithPath: "/clove-test-library", isDirectory: true)
+        let destination = root.appendingPathComponent(
+            configuration.rejectsFolderName.rawValue, isDirectory: true)
+        var sets: [ScannedPhotoSet] = []
+        var entries: [RejectMovePlanEntry] = []
+        for photo in stored where photo.marks.isRejected {
+            guard let set = scannedSet(for: photo) else { continue }
+            sets.append(set)
+            let folder =
+                set.id.relativeFolderPath.isEmpty
+                ? destination
+                : destination.appendingPathComponent(
+                    set.id.relativeFolderPath, isDirectory: true)
+            var files: [RejectMoveFilePlan] = []
+            for file in set.photoSet.imageFiles {
+                guard let role = set.photoSet.role(of: file) else { continue }
+                let moveRole: RejectMoveFileRole =
+                    switch role {
+                    case .primary: .primary
+                    case .jpegCompanion: .jpegCompanion
+                    case .heifCompanion: .heifCompanion
+                    }
+                files.append(
+                    RejectMoveFilePlan(
+                        role: moveRole, source: file.url,
+                        destination: folder.appendingPathComponent(file.url.lastPathComponent)))
+            }
+            if let sidecar = set.sidecar.resolvedURL ?? set.photoSet.sidecarURL {
+                files.append(
+                    RejectMoveFilePlan(
+                        role: .sidecar, source: sidecar,
+                        destination: folder.appendingPathComponent(sidecar.lastPathComponent)))
+            }
+            entries.append(
+                .ready(
+                    RejectMoveSetPlan(
+                        identity: set.id, relativeFolderPath: set.id.relativeFolderPath,
+                        destinationFolder: folder, files: files)))
+        }
+        return RejectMovePlan(
+            rootURL: root, configuration: configuration, sets: sets, entries: entries,
+            destinationURL: destination)
+    }
+
+    /// The sample's in-memory set behind one photo, with its companions and packet (P0-10).
+    private func scannedSet(for photo: GridPhoto) -> ScannedPhotoSet? {
+        let root = URL(fileURLWithPath: "/clove-test-library", isDirectory: true)
+        let folder =
+            photo.id.relativeFolderPath.isEmpty
+            ? root
+            : root.appendingPathComponent(photo.id.relativeFolderPath, isDirectory: true)
+        let stem = (photo.fileName as NSString).deletingPathExtension
+        let companions = TestLibrary.sampleCompanions[photo.id]
+        let sidecar = folder.appendingPathComponent("\(stem).xmp")
+        guard
+            let set = try? PhotoSet(
+                folderID: photo.id.folderID, relativeFolderPath: photo.id.relativeFolderPath,
+                rawURL: folder.appendingPathComponent("\(stem).ARW"),
+                jpegURL: companions?.hasJPEG == true
+                    ? folder.appendingPathComponent("\(stem).JPG") : nil,
+                heifURL: companions?.hasHEIF == true
+                    ? folder.appendingPathComponent("\(stem).HIF") : nil,
+                sidecarURL: sidecar)
+        else { return nil }
+        let images = set.imageFiles.map { file in
+            ScannedImageFile(file: file, size: nil, modificationDate: nil)
+        }
+        return ScannedPhotoSet(photoSet: set, sidecar: .resolved(sidecar), imageFiles: images)
+    }
+
+    /// Simulates one run, publishing progress and the photos that left the sample (P0-10).
+    private func simulateMove(
+        _ entries: [RejectMovePlanEntry], batchID: RejectMoveBatchID? = nil
+    ) -> RejectMoveResult {
+        var outcomes: [RejectMoveOutcome] = []
+        var moved: Set<PhotoIdentity> = []
+        for entry in entries {
+            rejectMoveContinuation?.yield(.setStarted(entry.identity))
+            let outcome = simulateMove(entry)
+            outcomes.append(outcome)
+            if case .moved(let set) = outcome { moved.insert(set.identity) }
+            rejectMoveContinuation?.yield(.setFinished(outcome))
+        }
+        if !moved.isEmpty {
+            stored.removeAll { moved.contains($0.id) }
+            changes = changes.filter { !moved.contains($0.key) }
+            updateGroupsAfterMove(moved)
+            updateContinuation.yield(.photos([]))
+        }
+        let result = RejectMoveResult(id: batchID ?? RejectMoveBatchID(), outcomes: outcomes)
+        let failed = Set(result.failed.map(\.identity))
+        let retryable = entries.filter { failed.contains($0.identity) }
+        if !retryable.isEmpty { rejectMoveBatches[result.id] = retryable }
+        rejectMoveContinuation?.yield(.finished(result))
+        rejectMoveContinuation = nil
+        return result
+    }
+
+    /// Simulates one entry, failing the requested stem's first attempt (PRD P0-10).
+    private func simulateMove(_ entry: RejectMovePlanEntry) -> RejectMoveOutcome {
+        switch entry {
+        case .ready(let plan):
+            if let failingMoveStemSuffix,
+                plan.identity.stem.hasSuffix(failingMoveStemSuffix),
+                alreadyFailedMoves.insert(plan.identity).inserted
+            {
+                return .failed(
+                    RejectMoveFailedSet(
+                        identity: plan.identity,
+                        failure: RejectMoveFailure(
+                            reason: .notConfirmed,
+                            message: "The sample library was told to fail this move."),
+                        files: plan.files))
+            }
+            return .moved(
+                RejectMoveMovedSet(
+                    identity: plan.identity, files: plan.files, removedStoredReject: true,
+                    staleRejectRecord: nil))
+        case .refused(let identity, let refusal):
+            guard let failure = refusal.failure else {
+                return .skipped(
+                    RejectMoveSkippedSet(
+                        identity: identity, reason: .insideRejectsFolder,
+                        message: "The photo set is already inside the rejects folder."))
+            }
+            return .failed(
+                RejectMoveFailedSet(identity: identity, failure: failure, files: []))
+        }
+    }
+
+    /// Drops moved photos from the sample's groups, keeping grouping's two-photo minimum.
+    private func updateGroupsAfterMove(_ moved: Set<PhotoIdentity>) {
+        func remaining(_ groups: [BrowsingGroup]) -> [BrowsingGroup] {
+            groups.compactMap { group in
+                let members = group.members.filter { !moved.contains($0) }
+                return members.count >= 2 ? BrowsingGroup(id: group.id, members: members) : nil
+            }
+        }
+        let next = remaining(groups)
+        allGroups = remaining(allGroups)
+        guard next != groups else { return }
+        groups = next
+        updateContinuation.yield(.groups(next))
     }
 
     /// The latest change to one photo with its save state (PRD P0-08).
@@ -583,10 +838,14 @@ final class TestLibrary: FolderLibrary {
     /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).
     static var sample: TestLibrary { sample() }
 
-    /// The sample, optionally with forced write failures, a lost location and a slow drain
-    /// (PRD P0-08, P0-09, P0-02).
+    /// The sample, with the launch's forced write and move failures, lost location and drain.
+    ///
+    /// The forced values keep the UI tests from needing files; the move failures and read-only
+    /// switch cover PRD P0-10, while the write failures, loss and drain cover PRD P0-08 and P0-02.
     static func sample(
         failingStemSuffix: String? = nil,
+        failingMoveStemSuffix: String? = nil,
+        readOnly: Bool = false,
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
         locationLoss: FolderLocationLoss.Reason? = nil,
@@ -607,9 +866,11 @@ final class TestLibrary: FolderLibrary {
         }
         return TestLibrary(
             photos: photos, groups: sampleGroups, changes: sampleChanges,
-            failingStemSuffix: failingStemSuffix, detailImages: sampleDetailImages,
-            failingStems: failingStems, failureReason: failureReason,
-            locationLoss: locationLoss, drainDelay: drainDelay)
+            failingStemSuffix: failingStemSuffix,
+            failingMoveStemSuffix: failingMoveStemSuffix, readOnly: readOnly,
+            detailImages: sampleDetailImages, failingStems: failingStems,
+            failureReason: failureReason, locationLoss: locationLoss,
+            drainDelay: drainDelay)
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).
