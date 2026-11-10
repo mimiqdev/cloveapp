@@ -274,7 +274,11 @@ final class FolderLibrarySession: FolderLibrary {
         case .groupFinishing(let undo):
             recorded = await history.recordGroupFinishing(undo)
         }
-        await refreshUndoAvailability(from: history)
+        // A folder can close or be replaced while the history call waits, and a new session's
+        // mirror must not be overwritten by the one that is gone (PRD P0-05, P0-14).
+        if undoHistory === history {
+            await refreshUndoAvailability(from: history)
+        }
         return recorded != nil
     }
 
@@ -321,7 +325,11 @@ final class FolderLibrarySession: FolderLibrary {
         } catch {
             result = nil
         }
-        await refreshUndoAvailability(from: history)
+        // The folder can close or be replaced while the step waits; the open folder's mirror is
+        // the only one this session may refresh (PRD P0-05, P0-14).
+        if undoHistory === history {
+            await refreshUndoAvailability(from: history)
+        }
         return result.map(UndoStepResult.init)
     }
 

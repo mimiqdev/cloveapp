@@ -170,8 +170,18 @@ final class BrowsingModel: UndoHistoryHost {
     /// Callers parked until one of this scene's conditions clears (PRD P0-05, P0-10).
     private var gateWaiters: [CheckedContinuation<Void, Never>] = []
 
-    /// Whether an undo or redo step is running, so Move rejects waits for it (PRD P0-10).
+    /// Whether an undo or redo step is running, so Move rejects waits for it (PRD P0-10) and
+    /// marking waits (PRD P0-05).
     private(set) var isUndoingStep = false
+
+    /// The mark requests this scene started and has not seen return, oldest first, by photo
+    /// (PRD P0-05's Undo row).
+    ///
+    /// C4 can have several requests for one photo in flight, and the status mirror only learns
+    /// about them when the queue's stream delivers. Keeping them here gives the marks the user
+    /// last saw their order: a request is added when its action starts and removed when its write
+    /// returns, so a failed one drops out of the fold.
+    private var inFlightRequests: [PhotoIdentity: [(token: UUID, change: MarkChange)]] = [:]
 
     /// The photo the grid must bring into view after an undo, with a token per request
     /// (PRD P0-05's Undo row).
@@ -444,12 +454,14 @@ final class BrowsingModel: UndoHistoryHost {
     func runGroupFinishing(_ plan: GroupFinishingPlan) async {
         guard !isRunningGroupFinishing else { return }
         let folder = state.folder
+        let generation = library.openGeneration
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
         let result = await runWrite { await library.runGroupFinishing(plan) }
         // The action happened, but its result must not land in another folder's group view or
-        // make U8 undo a mark in a folder it does not belong to (PRD P0-14).
-        if state.folder == folder {
+        // make U8 undo a mark in a folder it does not belong to (PRD P0-14). A reopen of the same
+        // folder is another session, so the open generation has to match too.
+        if state.folder == folder, library.openGeneration == generation {
             finishingResults[plan.groupID] = result
             clearedFinishingGroups.remove(plan.groupID)
             groupFinishingRuns += 1
@@ -646,7 +658,7 @@ final class BrowsingModel: UndoHistoryHost {
     /// (PRD P0-08). A second action is refused while one runs, so both plans cannot read the same
     /// pre-batch marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings) async {
-        guard !isApplyingBatch, !isMovingRejects else { return }
+        guard !isApplyingBatch, !isMovingRejects, !isUndoingStep else { return }
         let targets = batchTargets
         let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
         guard !plan.items.isEmpty else { return }
@@ -655,15 +667,23 @@ final class BrowsingModel: UndoHistoryHost {
         var marksBefore: [PhotoIdentity: PhotoMarks] = [:]
         for photo in targets { marksBefore[photo.id] = seenMarks(for: photo.id) }
         let folder = state.folder
+        let generation = library.openGeneration
         let clearances = selectionClearances
         isApplyingBatch = true
         defer { isApplyingBatch = false }
+        var tokens: [(photo: PhotoIdentity, token: UUID)] = []
+        for item in plan.items {
+            tokens.append((item.photo, addInFlightRequest(item.change, for: item.photo)))
+        }
+        defer {
+            for added in tokens { removeInFlightRequest(added.token, for: added.photo) }
+        }
         // One bar action is one undo step, whatever the number of photos it writes. It is recorded
         // when the action starts, so a slow write cannot put it after an action taken later, and
         // the in-flight count covers the record as well as the write (PRD P0-09, P0-05).
         let result = await runWrite { () -> MarkBatchResult? in
             await recordUndoStep(.batch(items: plan.items, marksBefore: marksBefore))
-            guard state.folder == folder else { return nil }
+            guard state.folder == folder, library.openGeneration == generation else { return nil }
             return await library.apply(plan.items)
         }
         guard let result else { return }
@@ -682,7 +702,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// that can no longer retry, such as one whose folder closed, answers nil; the report then
     /// stays as it was, so the bar still names the photos that did not save (PRD P0-08).
     func retryFailedBatch() async {
-        guard !isApplyingBatch, !isMovingRejects, let report = batchReport, report.canRetry
+        guard !isApplyingBatch, !isMovingRejects, !isUndoingStep, let report = batchReport,
+            report.canRetry
         else { return }
         let folder = state.folder
         let clearances = selectionClearances
@@ -754,8 +775,10 @@ final class BrowsingModel: UndoHistoryHost {
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
         // A step writes through C4 too, so the move waits for one that is already running instead
-        // of starting beside it (PRD P0-10's drain and marking block).
+        // of starting beside it (PRD P0-10's drain and marking block). The wait suspends, so two
+        // queued calls both re-check the flag before either sets it.
         await wait(while: isUndoingStep)
+        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
         isMovingRejects = true
         defer { isMovingRejects = false }
         return try await library.runRejectMove(plan)
@@ -783,6 +806,10 @@ final class BrowsingModel: UndoHistoryHost {
     /// The retry's outcomes replace only the failures, so the toast and C14's record still count
     /// every photo the run moved. A batch the library can no longer retry answers nil.
     func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
+        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
+        // A step writes through C4 too, so the retry waits for one that is already running, then
+        // re-checks everything the wait could have changed (PRD P0-02, P0-10).
+        await wait(while: isUndoingStep)
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
         // The details sheet can outlive its folder open. A record from another open must not
         // clear Reject or move anything in the replacement, even when the folder identity is the
@@ -877,11 +904,23 @@ final class BrowsingModel: UndoHistoryHost {
     /// and undo must restore it. Reading only the confirmed marks would make undo skip the value
     /// in between.
     private func seenMarks(for photo: PhotoIdentity) -> PhotoMarks {
-        // The library mirrors C4's statuses before the model's stream catches up, so it is the
-        // freshest answer for a mark that is still writing.
         MarkUndoSeenMarks.marks(
             confirmed: storedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks(),
-            latest: library.latestChange(for: photo))
+            requests: (inFlightRequests[photo] ?? []).map(\.change))
+    }
+
+    /// Adds one request to the photo's in-flight list and returns its token (PRD P0-05).
+    private func addInFlightRequest(_ change: MarkChange, for photo: PhotoIdentity) -> UUID {
+        let token = UUID()
+        inFlightRequests[photo, default: []].append((token, change))
+        return token
+    }
+
+    /// Removes one returned request from the photo's in-flight list (PRD P0-05).
+    private func removeInFlightRequest(_ token: UUID, for photo: PhotoIdentity) {
+        guard var requests = inFlightRequests[photo] else { return }
+        requests.removeAll { $0.token == token }
+        inFlightRequests[photo] = requests.isEmpty ? nil : requests
     }
 
     /// Applies one change to one photo through the library and shows its marks and save state
@@ -893,22 +932,31 @@ final class BrowsingModel: UndoHistoryHost {
     /// (``PhotoChangeStates``). A failed write therefore never shows a mark it did not confirm.
     @discardableResult
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus? {
-        guard !isMovingRejects, !change.isEmpty else { return nil }
+        // A step restores marks through the same queue, so a mark taken during one could be
+        // merged over by the restore; PRD P0-10 blocks marking for a move the same way (they
+        // never wait on each other, so this cannot deadlock).
+        guard !isMovingRejects, !isUndoingStep, !change.isEmpty else { return nil }
         // PRD P0-05's Undo row restores the previous mark, so the marks on screen before the
         // change are the ones undo puts back; a field the user did not see is never restored.
         let folder = state.folder
+        let generation = library.openGeneration
         let marksBefore = seenMarks(for: photo)
+        let token = addInFlightRequest(change, for: photo)
+        defer { removeInFlightRequest(token, for: photo) }
         // A finishing action re-reads each photo's marks as it runs, so a mark taken meanwhile has
-        // to reach C4 at once; only its undo entry waits for the action's record, which keeps the
-        // started order (PRD P0-12, P0-05).
+        // to reach C4 at once. Its write starts first, its undo entry waits for the action's
+        // record, and only then is the write awaited, so the history keeps the started order even
+        // when the write is slow (PRD P0-12, P0-05).
         if isRunningGroupFinishing {
             return await runWrite {
-                let status = await library.apply(change, to: photo)
+                let write = Task { await library.apply(change, to: photo) }
                 await wait(while: isRunningGroupFinishing)
-                guard state.folder == folder else { return status }
+                guard state.folder == folder, library.openGeneration == generation else {
+                    return await write.value
+                }
                 await recordUndoStep(
                     .mark(change: change, photo: photo, marksBefore: marksBefore))
-                return status
+                return await write.value
             }
         }
         // Otherwise the action is recorded when it starts, so the history keeps the user's order
@@ -916,7 +964,7 @@ final class BrowsingModel: UndoHistoryHost {
         // step never runs between that record and C4 admitting the write.
         return await runWrite {
             await recordUndoStep(.mark(change: change, photo: photo, marksBefore: marksBefore))
-            guard state.folder == folder else { return nil }
+            guard state.folder == folder, library.openGeneration == generation else { return nil }
             return await library.apply(change, to: photo)
         }
     }
@@ -950,6 +998,10 @@ final class BrowsingModel: UndoHistoryHost {
     }
 
     // MARK: - Undo
+
+    /// Which folder open the undo history belongs to, so a queued press from an earlier open is
+    /// dropped rather than run against this one (PRD P0-14).
+    var undoOpenGeneration: Int { library.openGeneration }
 
     /// Whether the open folder has an action to undo (PRD P0-05).
     ///

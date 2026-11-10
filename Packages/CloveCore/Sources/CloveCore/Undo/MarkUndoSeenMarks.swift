@@ -1,24 +1,23 @@
-/// The marks the user last saw for one photo, including a change C4 has not confirmed yet
-/// (PRD P0-05's Undo row).
+/// The marks the user last saw for one photo, with every request still being written folded over
+/// the confirmed marks in the order it was made (PRD P0-05's Undo row).
 ///
-/// PRD P0-05's Undo row restores "the previous mark". A mark that is still writing is already on
-/// the screen — the rating bar, the grid overlay and the swipe badge show the value the user asked
-/// for while C4 confirms it — so the previous mark is what the user saw, not the last confirmed
-/// value. Recording only the confirmed value would lose the value in between: with ★3 still
-/// writing, a second mark to ★4 would record "unrated" as what it replaces, and undo would then
-/// skip ★3 entirely.
+/// PRD P0-05's Undo row restores "the previous mark". A mark that is still writing already counts
+/// as the value the user asked for, and C4 can have more than one request for a photo in flight at
+/// once: on slow media a rating, a label and another rating can all be waiting. Folding them in
+/// order keeps the value in between — with ★3 still writing, a second mark to ★4 replaces ★3, so
+/// undo puts ★3 back rather than the confirmed value before it.
 ///
-/// A failed or superseded change was never on the screen: its value never landed, and the photo
-/// shows its confirmed marks with the failure beside them, so those are what the user saw and what
-/// undo restores.
+/// A request whose write failed is not part of the fold: the caller drops it when its write
+/// returns, because the photo shows its confirmed marks with the failure beside them. The same
+/// holds for a request a newer one superseded.
 public enum MarkUndoSeenMarks {
-    /// The marks one photo shows now, including a request still being written (PRD P0-05).
+    /// The marks one photo shows now, given what C4 confirmed and the requests still writing
+    /// (PRD P0-05).
     ///
     /// - Parameters:
     ///   - confirmed: The marks C4 has confirmed for the photo.
-    ///   - latest: The photo's latest change, or `nil` when nothing was requested.
-    public static func marks(confirmed: PhotoMarks, latest: MarkChangeStatus?) -> PhotoMarks {
-        guard let latest, latest.state.isInProgress else { return confirmed }
-        return confirmed.including(latest.requested)
+    ///   - requests: The photo's requests that have not returned yet, oldest first.
+    public static func marks(confirmed: PhotoMarks, requests: [MarkChange]) -> PhotoMarks {
+        requests.reduce(confirmed) { marks, change in marks.including(change) }
     }
 }

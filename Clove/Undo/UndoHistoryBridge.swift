@@ -9,6 +9,8 @@ import Foundation
 protocol UndoHistoryHost: AnyObject {
     /// What the open folder's history offers now (PRD P0-05).
     var undoAvailability: UndoAvailability { get }
+    /// Which folder open the history belongs to (PRD P0-14).
+    var undoOpenGeneration: Int { get }
     /// Undoes the history's next action through the open folder (PRD P0-05).
     func undoThroughHistory() async -> UndoStepResult?
     /// Redoes the history's next undone action through the open folder (PRD P0-05).
@@ -56,16 +58,23 @@ final class UndoHistoryBridge {
     /// Whether a step is running, so a second press cannot apply another action.
     private(set) var isStepping = false
 
-    /// A press that arrived while a step was running, run once that step finishes.
+    /// One press that arrived while a step was running, run once that step finishes.
     ///
     /// The system manager has already taken the press's entry by then, so dropping it would leave
-    /// ⌘Z and the three-finger gesture with nothing left to do while the history still has a step.
-    private enum StepDirection {
-        case undo
-        case redo
+    /// ⌘Z and the three-finger gesture with nothing left to do while the history still has steps.
+    /// The press remembers the folder open it was made in, because a queued press from a folder
+    /// that closed must never run against the folder that replaced it (PRD P0-14).
+    private struct QueuedPress {
+        enum Direction {
+            case undo
+            case redo
+        }
+
+        let direction: Direction
+        let openGeneration: Int
     }
 
-    private var queuedStep: StepDirection?
+    private var queuedPresses: [QueuedPress] = []
 
     /// Attaches the scene's undo manager and mirrors the history into it (PRD P0-05).
     ///
@@ -74,10 +83,9 @@ final class UndoHistoryBridge {
     func attach(_ manager: UndoManager?) {
         guard let manager, self.manager == nil else { return }
         self.manager = manager
-        // The window's undo manager is shared with UIKit text editing, so its event grouping stays
-        // as the system set it; this bridge wraps only its own registrations in a group. The folder
-        // session keeps C5's history to this many actions, so the system stack is bounded the same.
-        manager.levelsOfUndo = MarkUndoHistory.defaultDepthLimit
+        // The window's undo manager is shared with UIKit text editing, so its event grouping and
+        // its depth limit stay as the system set them; this bridge only wraps its own
+        // registrations in a group and only touches its own actions.
         rebuild()
     }
 
@@ -93,6 +101,8 @@ final class UndoHistoryBridge {
     /// Forgets every system step after the open folder's history was replaced or cleared
     /// (PRD P0-05).
     func historyDidReset() {
+        // Presses queued for the history that is gone must not run against the new one.
+        queuedPresses.removeAll()
         rebuild()
     }
 
@@ -102,7 +112,10 @@ final class UndoHistoryBridge {
     /// single operation that ⌘Z and the three-finger gesture run.
     func requestUndo() {
         guard let host, !isStepping, host.undoAvailability.canUndo else { return }
-        if let manager, manager.canUndo {
+        // The window's manager also holds a Settings text field's edits, so the button takes the
+        // manager's step only when its name is the one this bridge registered for the next mark;
+        // otherwise it runs the history directly and never undoes a text edit.
+        if let manager, manager.canUndo, manager.undoActionName == host.undoAvailability.undoName {
             manager.undo()
         } else {
             Task { await step(isUndo: true) }
@@ -112,7 +125,7 @@ final class UndoHistoryBridge {
     /// Redoes the history's next undone action, for ⇧⌘Z and the redo gesture (PRD P0-05).
     func requestRedo() {
         guard let host, !isStepping, host.undoAvailability.canRedo else { return }
-        if let manager, manager.canRedo {
+        if let manager, manager.canRedo, manager.redoActionName == host.undoAvailability.redoName {
             manager.redo()
         } else {
             Task { await step(isUndo: false) }
@@ -132,7 +145,8 @@ final class UndoHistoryBridge {
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemRedo() }
         manager.setActionName(name)
         guard beginStep() else {
-            queuedStep = .undo
+            queuedPresses.append(
+                QueuedPress(direction: .undo, openGeneration: host.undoOpenGeneration))
             return
         }
         Task { await finishStep(isUndo: true) }
@@ -146,7 +160,8 @@ final class UndoHistoryBridge {
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemUndo() }
         manager.setActionName(name)
         guard beginStep() else {
-            queuedStep = .redo
+            queuedPresses.append(
+                QueuedPress(direction: .redo, openGeneration: host.undoOpenGeneration))
             return
         }
         Task { await finishStep(isUndo: false) }
@@ -178,15 +193,23 @@ final class UndoHistoryBridge {
         await runQueuedStep()
     }
 
-    /// Runs the one press that arrived during a step, if any (PRD P0-05).
+    /// Runs the presses that arrived during a step, in the order they were made (PRD P0-05).
+    ///
+    /// A press queued in a folder that has since closed or been replaced is dropped: its entry
+    /// belonged to the history that is gone (PRD P0-14).
     private func runQueuedStep() async {
-        guard let queued = queuedStep else { return }
-        queuedStep = nil
+        guard !queuedPresses.isEmpty, let host else { return }
         guard beginStep() else { return }
+        let press = queuedPresses.removeFirst()
+        guard press.openGeneration == host.undoOpenGeneration else {
+            isStepping = false
+            await runQueuedStep()
+            return
+        }
         let result: UndoStepResult?
-        switch queued {
-        case .undo: result = await host?.undoThroughHistory()
-        case .redo: result = await host?.redoThroughHistory()
+        switch press.direction {
+        case .undo: result = await host.undoThroughHistory()
+        case .redo: result = await host.redoThroughHistory()
         }
         isStepping = false
         if result == nil { rebuild() }
@@ -220,7 +243,8 @@ final class UndoHistoryBridge {
     /// below it carry that name until they are applied.
     private func rebuild() {
         guard let manager, let host else { return }
-        manager.removeAllActions()
+        // Only this bridge's steps are removed, so a Settings text field keeps its undo history.
+        manager.removeAllActions(withTarget: self)
         guard host.undoAvailability.canUndo else { return }
         let name = host.undoAvailability.undoName
         for _ in 0..<undoDepth(of: host) {
