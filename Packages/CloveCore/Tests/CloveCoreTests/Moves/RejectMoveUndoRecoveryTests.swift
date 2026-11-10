@@ -464,6 +464,13 @@ struct RejectMoveUndoRecoveryTests {
         let entry = undoEntry(for: moveResult, returningTo: set.id)
         let gate = DispatchSemaphore(value: 0)
         fixture.markFileSystem.blockWrites { _ in gate }
+        // A regression that lets the second undo reach the store must still end the test, so the
+        // gate releases itself if the step below never does.
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(10))
+            for _ in 0..<2 { gate.signal() }
+        }
+        defer { watchdog.cancel() }
         let stream = await fixture.mover.undoProgressUpdates()
         let undoTask = Task { try await fixture.mover.undo(entry) }
         var iterator = stream.makeAsyncIterator()

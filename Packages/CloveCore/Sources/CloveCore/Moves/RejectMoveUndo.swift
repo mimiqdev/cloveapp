@@ -43,8 +43,7 @@ final class RejectMoveUndoRun {
     /// PRD P0-10 retries only the failed items, and those move under a handle of their own; the
     /// first attempt's record adopts them so a single undo restores everything. PRD P0-10's Undo
     /// rule undoes a run once, so a retry that moves more sets after the run was undone does not
-    /// reopen the step: the sets stay under the rejects folder, which is the move's durable
-    /// result (G1 decision 5), and restoring them by hand stays outside the undo history.
+    /// reopen the step; it keeps its own record instead, and those sets are their own step.
     func adopt(_ retry: RejectMoveUndoRun) {
         guard retry !== self, !retry.moved.isEmpty, !isUndone else { return }
         moved.append(contentsOf: retry.moved)
@@ -367,9 +366,9 @@ extension RejectMover {
     /// back, because they never moved. Folders the move created stay in place: undo deletes
     /// nothing (PRD P0-10).
     ///
-    /// A run is undone once: a second call is refused, and so is a handle for a retry of that
-    /// run. A retry that moves more sets after the undo does not reopen the step, because those
-    /// sets keep the move's durable result (G1 decision 5).
+    /// A run is undone once: a second call is refused, and so is every handle that resolves to
+    /// that step. A retry that moves more sets *after* the undo does not reopen it; those sets
+    /// keep their own handle and are restored once, separately.
     ///
     /// - Parameter entry: The step, as the move or its retry produced it.
     /// - Returns: One outcome per restored photo, with the counts and the failed photos a retry
