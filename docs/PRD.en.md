@@ -4,11 +4,20 @@
 
 Status: pending review. This document defines product scope and acceptance criteria. It is neither implementation authorization nor an architecture proposal.
 
-Visual source: [Culling UI — Native (canonical)](https://www.figma.com/design/qhGhxv3eRImQTXe3yzOD2G?node-id=33-2). After review by the product owner, these designs (Uxie's light and dark designs for iPhone, iPad, and iPhone Duo) are not adopted. New concept designs will be produced from this document and then refined. This document, not those designs, defines interface behavior.
+Visual source: the MVP design handoff in [`design/handoff/`](../design/handoff/README.md), adopted by the product owner on 2026-11-10. For screens, interactions, and copy, the handoff takes precedence over this document: where they differ, follow the handoff. The 2026-11-10 revision below lists the scope changes it brought. The earlier Uxie designs remain not adopted.
 
 Sources: [2026-11-08 siftapp product positioning: pure culling, benchmarked against PhotoPicker App](https://app.notion.com/p/41237873fb5481bc9a28c2681f42a322), [2026-11-08 siftapp culling main-flow UI](https://app.notion.com/p/41237873fb5481c9bd5afcf26ae0a296), [engineering research conclusions](https://app.notion.com/p/41237873fb548107bd96d0f6838b1200), and the 2026-11-08 launch-scope discussion with the product owner. Existing Notion pages still use siftapp. This document uses Clove as its replacement name.
 
 ### Revision history
+
+2026-11-10 design revision, with the product owner:
+
+- The MVP design handoff in `design/handoff/` is adopted and takes precedence over this document for screens, interactions, and copy. Items it tags (proposed) still need the owner's confirmation.
+- Move rejects can be undone in the app. Undo moves the files back and restores Reject on them, as one undo step. This replaces the earlier rule that the user restores moved files by hand.
+- The Move rejects confirmation lets the user keep individual rejects before moving. A keep is only staged until Move.
+- In-group culling has one finishing action, Reject N unmarked, in place of Keep this, reject the rest and Keep rated, reject the rest. To keep one photo and reject the rest, the user rates it and then uses Reject N unmarked.
+- Synchronized zoom is always on in groups, with no toggle.
+- The proposed copy in this document is superseded by `design/handoff/copy.md`.
 
 2026-11-08 scope revision, aligned with the [approved G1 decision](decisions/G1-technical-approach.md) on 2026-11-09:
 
@@ -66,9 +75,9 @@ Open a folder or reopen it from Recents → browse, filter, and sort the grid �
 | P0-07 | XMP reads, writes, and interoperability cover ratings and color labels only. Read existing XMP when opening a folder. RAW files, including standalone DNG, use one sidecar per photo set; JPEG/HIF companions are never changed. Preserve unknown information written by other apps as far as possible. Lightroom, Capture One, and Photo Mechanic must read Clove's XMP ratings and color labels. Standalone JPEG/HIF get no sidecar: read embedded marks and keep new marks in Clove, visibly Saved in Clove only. In-file JPEG writing is a later feature; HIF/HEIC in-file writing stays out. |
 | P0-08 | Save status is always visible and reflects the storage used. For XMP ratings and labels, show Saved only after the destination is read back and matches the requested change; for Move rejects, only after the move is confirmed. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Allow retries after failure. Never report a failed or unconfirmed change as successful. |
 | P0-09 | Long-press the grid to enter multi-select, then write ratings, labels, or Reject in batches. |
-| P0-10 | Move rejects: after user confirmation, move rejected photo sets as one unit, including RAW, JPEG and/or HIF companions, and the matching XMP, into `_Rejected` under the opened folder, preserving the subfolder structure. Never delete or overwrite any file. The folder name can be changed, or the feature turned off, in Settings. |
+| P0-10 | Move rejects: after user confirmation, move rejected photo sets as one unit, including RAW, JPEG and/or HIF companions, and the matching XMP, into `_Rejected` under the opened folder, preserving the subfolder structure. Never delete or overwrite any file. The user can keep individual rejects in the confirmation, and the move can be undone. The folder name can be changed, or the feature turned off, in Settings. |
 | P0-11 | Similar groups: group photos automatically by capture time and visual similarity when a folder opens, and always offer Run again. Grouping itself never writes marks. It can be turned off. |
-| P0-12 | In-group culling: synchronized zoom for comparison, progressive elimination, Keep this, reject the rest, and Keep rated, reject the rest. Neither action ever rejects a photo that already has a rating or color label. |
+| P0-12 | In-group culling: synchronized zoom for comparison, progressive elimination, and one finishing action, Reject N unmarked. It never rejects a photo that already has a rating or color label. |
 | P0-13 | Deliver the single-photo culling flow on both iPhone and iPad. Two-photo comparison on iPad is not in launch scope. |
 | P0-14 | iPhone Duo: use a compact cover-screen layout. Default to a split grid and detail view on the inner screen. Controls must not cross the hinge when half-folded. Preserve the folder, current photo, filters, selection, and write status across folding, unfolding, and window resizing. Overlay and a dedicated half-fold layout move to 1.1. |
 | P0-15 | Use system components with light and dark appearances that follow the system. Ratings use system orange. Reject uses system red. Color labels follow Lightroom color meanings. |
@@ -94,7 +103,7 @@ Open a folder or reopen it from Recents → browse, filter, and sort the grid �
 
 ## Screens and states
 
-The behavior below follows the product and UI conclusions and this revision. The old Figma designs are not adopted. New concept designs follow the behavior in this section.
+The behavior below follows the product and UI conclusions and the revisions above. Where it differs from the design handoff in `design/handoff/`, follow the handoff.
 
 ### Entry: Open and Recents
 
@@ -140,7 +149,7 @@ Marking rules:
 | Rating from 0 to 5 | Tap a rating in the rating bar. Tap the same rating again to clear it. Only enabled ratings appear. |
 | Color label | Red, yellow, green, blue, purple, and Clear by default. Settings can enable extended colors, orange and pink, matching Capture One. Use fixed English names in XMP, regardless of system language. |
 | Reject | A separate toggle, independent of the rating. Rejecting keeps the existing rating. Reject does not delete the original. |
-| Undo | Uses the system undo mechanism: a toolbar Undo button, ⌘Z on an external keyboard, and the iOS three-finger undo gestures. Undoing after auto-advance returns to the photo whose mark was undone. |
+| Undo | Uses the system undo mechanism: a toolbar Undo button, ⌘Z on an external keyboard, and the iOS three-finger undo gestures. Undoing after auto-advance returns to the photo whose mark was undone. Undo also covers Reject N unmarked and Move rejects, each as one step. |
 | Save status | Writing…, Saved, or Write failed for XMP writes; Saved only after read-back confirmation. Confirm reject moves before showing success. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Offer Retry after failure. |
 
 ### Batch writes with multi-select
@@ -229,19 +238,18 @@ Layout:
 
 Comparison and elimination:
 
-- Synchronized zoom: after zooming into an area in a group, navigating keeps the same zoom level and position. On by default in groups.
+- Synchronized zoom: after zooming into an area in a group, navigating keeps the same zoom level and position. Always on in groups, with no toggle.
 - Rejected photos are dimmed in the filmstrip. With Undecided only on, navigation skips rejected and rated photos.
 - After marking, advance to the next undecided photo in the group.
 
-Finishing actions:
+Finishing action:
 
 | Action | Result |
 | --- | --- |
-| Keep this, reject the rest | If the current photo has no rating, give it the lowest enabled rating. Reject the other unmarked photos in the group. |
-| Keep rated, reject the rest | Leave rated photos unchanged and reject the other unmarked photos in the group. Unavailable when no photo in the group is rated. |
+| Reject N unmarked | Reject every photo in the group that has no rating, no color label, and no Reject. Shown once any photo in the group is rated or labeled. To keep one photo and reject the rest, rate it, then use this action. |
 
-- Neither action ever rejects a photo that already has a rating or color label.
-- Both actions follow batch-write rules for success and failure, and both can be undone.
+- It never rejects a photo that already has a rating or color label.
+- It follows batch-write rules for success and failure, and it can be undone as one step.
 
 Group completion:
 
@@ -255,6 +263,7 @@ Reject exists only for culling. After moving rejects, desktop software sees only
 - Trigger: the user taps Move rejects. It never runs automatically and can run at any time within a folder.
 - Reject state is stored in Clove, keyed by folder identity and file until the move. The move is the durable result; unmoved rejects do not carry over to a reinstall or another device.
 - Confirmation: state how many photos will move, that JPEG and/or HIF companions and XMP move with them, and that originals are not deleted.
+- Keeping before the move: the confirmation can show the rejects, and the user can tap a photo to keep it, or tap again to un-keep. A keep is only staged: nothing is written until Move, and dismissing the confirmation discards the keeps. On Move, kept photos have their Reject cleared (rating and label untouched), and the rest move.
 - Destination: `_Rejected/` under the opened folder. The name can be changed in Settings. Preserve the subfolder structure, so `DCIM/100XXXXX/IMG_0001.CR3` moves to `_Rejected/DCIM/100XXXXX/IMG_0001.CR3`.
 - Move the photo set as one unit: the primary file, any JPEG and/or HIF companions, and the matching XMP.
 - Move only within the same volume. Never copy and then delete.
@@ -262,7 +271,7 @@ Reject exists only for culling. After moving rejects, desktop software sees only
 - Count successes and failures per photo. On partial failure, moved photos stay moved, failed photos stay in place, and the user can retry only the failures.
 - Read-only locations cannot be organized. Reuse the view-only message.
 - Moved photos disappear from the grid, and later scans skip `_Rejected`.
-- Restore: the user moves files back. XMP contains ratings and labels only, so it cannot restore Reject. An in-app Restore action is not in launch scope.
+- Undo: after a move, Undo moves the files back to their original paths and restores Reject on them and on any photos kept in the confirmation, as one undo step. It never overwrites a file that now occupies an original path; such a set stays in `_Rejected` and is reported. Restoring moves outside the undo history is not in launch scope: the user moves those files back, and since XMP holds ratings and labels only, their Reject is not restored.
 - Settings can turn Move rejects off. Reject still works for filtering, without the move.
 
 ### iPhone, iPad, and iPhone Duo
@@ -382,9 +391,9 @@ These manual tests determine whether launch meets product requirements. They are
 | P0-07 | Clove displays ratings and labels previously written by Lightroom, Capture One, or Photo Mechanic. Those apps read Clove's XMP ratings and labels for RAW sets. Each RAW set, including a RAW+JPEG+HIF triple, has one XMP; standalone DNG uses a sidecar too. Other preexisting XMP information survives the write, and companions remain unchanged. Reject never enters XMP. Standalone JPEG/HIF embedded marks are read; new marks create no sidecar or in-file change and show Saved in Clove only. |
 | P0-08 | Show Writing… during XMP writes and Saved only after read-back matches. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Reject-move success follows confirmed movement. Force a failure and verify a visible failure with Retry; failed or unconfirmed changes never appear saved. |
 | P0-09 | Long-press, select multiple photos, and rate them in a batch. Force some writes to fail. Report Saved N photos. M photos couldn't be saved. Successful items stay saved and failed items can be retried separately. |
-| P0-10 | Reject several photos, including RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets across multiple subfolders, then run Move rejects. The confirmation shows the correct count. Afterward, every set's RAW, JPEG and/or HIF companions, and XMP are in the matching subfolders under `_Rejected`, no file was deleted or overwritten, and the photos no longer appear in the grid. Forced name collisions add a suffix, and forced partial failures report Moved N photos. M photos couldn't be moved. Running it on a read-only location shows the view-only message. |
+| P0-10 | Reject several photos, including RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets across multiple subfolders, then run Move rejects. The confirmation shows the correct count. Afterward, every set's RAW, JPEG and/or HIF companions, and XMP are in the matching subfolders under `_Rejected`, no file was deleted or overwritten, and the photos no longer appear in the grid. Forced name collisions add a suffix, and forced partial failures report Moved N photos. M photos couldn't be moved. Running it on a read-only location shows the view-only message. A photo kept in the confirmation stays in place with its Reject cleared. Undo after the move returns every moved file to its original path and restores Reject. |
 | P0-11 | Opening a folder with bursts starts grouping automatically: groups appear by time first, then refine, and Run again is available. The photo being viewed does not jump during grouping. Grouping separates by model and serial when present, falling back to model when serial is missing; two same-model bodies shooting the same scene at the same moment are unsupported. Photos with only fallback file times are excluded. Starting values are a gap below 2 seconds and a split above Vision distance 0.5. All XMP is unchanged before and after grouping. Turning similar groups off hides entry points and blue outlines while the main flow still works. |
-| P0-12 | In a group of 20 or more photos: zooming into an area keeps the same position while navigating. Undecided only skips marked photos. After Keep this, reject the rest, photos that already had ratings or labels are not rejected. Keep rated, reject the rest rejects only unmarked photos. A completed group advances to the next group according to settings. Finishing actions can be undone. |
+| P0-12 | In a group of 20 or more photos: zooming into an area keeps the same position while navigating. Undecided only skips marked photos. Reject N unmarked rejects only photos with no rating, label, or Reject; photos that already had ratings or labels are not rejected. A completed group advances to the next group according to settings. Reject N unmarked can be undone as one step. |
 | P0-13 | Complete the flow on both iPhone and iPad: open folder → grid → mark in detail → cull a group → move rejects → quit and reopen with marks intact. |
 | P0-14 | Open and mark on the Duo cover screen. Unfold and retain the same folder, photo, marks, and group-view position, with grid and detail split by default. Half-folded filters, marking controls, and bottom bar never cross the hinge. |
 | P0-15 | Switching system appearance updates entry, grid, detail, similar groups, the group view, and all Duo postures between light and dark. |
@@ -420,7 +429,7 @@ The [G1 decision](decisions/G1-technical-approach.md) settles the metadata-writi
 - Low-quality and blur suggestions
 - Manually splitting similar groups, preserved across Run again
 - Duo Overlay and a dedicated Duo half-fold layout
-- An in-app Restore action for moved rejects
+- Restoring moved rejects outside the undo history
 - Double-tap to toggle a chosen color label, as an alternative double-tap behavior
 
 ## Open decisions
@@ -428,6 +437,6 @@ The [G1 decision](decisions/G1-technical-approach.md) settles the metadata-writi
 Only unresolved items that affect launch commitments are listed here.
 
 - Pricing. Sources contain no decision on free, one-time purchase, or subscription.
-- Final visuals. The old Figma designs are not adopted, and new concept designs are in progress.
+- The design handoff's (proposed) items: keyboard shortcuts, long press, auto-advance timing, toast timings, and icons.
 
 The following are not launch commitments or numeric acceptance criteria: performance timings, grouping accuracy, guaranteed camera or storage-brand lists, and folder-size limits. Any later targets require measurement and separate approval.
