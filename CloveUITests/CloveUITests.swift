@@ -19,6 +19,7 @@ final class CloveUITests: XCTestCase {
         openTestLibrary(in: app)
         checkGridOverlays(in: app)
         showOnlyRejectedThenAll(in: app)
+        rerunGrouping(in: app)
         openFirstPhoto(in: app)
         checkDoubleTapZoom(in: app)
         markThePhoto(in: app)
@@ -28,6 +29,7 @@ final class CloveUITests: XCTestCase {
         openSettings(in: app)
         showGroupsAsCollapsedCovers(in: app)
         showGroupsAsExpandedCells(in: app)
+        hideAndShowSimilarGroups(in: app)
     }
 
     /// Entry opens the test library and the grid appears.
@@ -84,6 +86,16 @@ final class CloveUITests: XCTestCase {
             element(in: app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 10),
             "The All filter did not bring the photos back"
         )
+    }
+
+    /// The grouping menu runs similar groups again and the grid keeps its group tag
+    /// (PRD P0-11: Run again is always available; the test library's groups stay as they are).
+    @MainActor
+    private func rerunGrouping(in app: XCUIApplication) {
+        selectMenuItem(in: app, "clove.grid.grouping", item: "clove.grid.grouping.runAgain")
+        let group = element(in: app, "clove.grid.group.burst-2678")
+        XCTAssertTrue(
+            group.waitForExistence(timeout: 10), "Run again dropped the grid's similar group")
     }
 
     /// Waits for an element's value with a tight poll, so an informational measurement is not
@@ -279,6 +291,89 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(
             element(in: app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 10),
             "The expanded grid did not show a group member as its own cell")
+    }
+
+    /// Turning similar groups off hides the grid's group and its Run again entry point, and
+    /// turning them back on restores them (PRD Similar groups: that hides the entry points and
+    /// blue outlines; the sample library answers the same call the real one does).
+    @MainActor
+    private func hideAndShowSimilarGroups(in app: XCUIApplication) {
+        openSettingsFromGrid(in: app)
+        setSimilarGroups(in: app, on: false)
+        backToGrid(in: app)
+        XCTAssertFalse(
+            element(in: app, "clove.grid.group.burst-2678").waitForExistence(timeout: 3),
+            "Turning similar groups off left the grid's similar group")
+        XCTAssertFalse(
+            element(in: app, "clove.grid.grouping").exists,
+            "Turning similar groups off left the Run again menu")
+
+        openSettingsFromGrid(in: app)
+        setSimilarGroups(in: app, on: true)
+        backToGrid(in: app)
+        XCTAssertTrue(
+            element(in: app, "clove.grid.group.burst-2678").waitForExistence(timeout: 10),
+            "Turning similar groups back on did not restore the grid's similar group")
+        XCTAssertTrue(
+            element(in: app, "clove.grid.grouping").exists,
+            "Turning similar groups back on did not restore the Run again menu")
+    }
+
+    /// Opens Settings from the grid (PRD Gesture-related settings).
+    @MainActor
+    private func openSettingsFromGrid(in app: XCUIApplication) {
+        let settings = element(in: app, "clove.nav.settings")
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), "The grid had no settings item")
+        settings.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.settings").waitForExistence(timeout: 10),
+            "Settings did not appear"
+        )
+    }
+
+    /// Taps the similar-groups switch; the sample starts with it on (PRD Similar groups).
+    ///
+    /// The switch is the last control of a long list, so it is scrolled fully into view before the
+    /// tap: the list reports a row at the screen's bottom edge as hittable, where a tap lands
+    /// outside the window.
+    @MainActor
+    private func setSimilarGroups(in app: XCUIApplication, on: Bool) {
+        let toggle = element(in: app, "clove.settings.similarGroupsEnabled")
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<8 {
+            if toggle.exists && toggle.isHittable, toggle.frame.maxY < window.maxY - 120 {
+                break
+            }
+            app.swipeUp()
+        }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "Settings had no similar-groups switch")
+        // A SwiftUI row toggle only flips on its switch, which sits at the trailing edge; a tap
+        // in the middle of the row lands on the label.
+        for _ in 0..<2 {
+            if switchValue(toggle) == (on ? "1" : "0") { return }
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertEqual(
+            switchValue(toggle), on ? "1" : "0",
+            "The similar-groups switch did not turn \(on ? "on" : "off")")
+    }
+
+    /// A toggle's accessibility value, "1" when it is on (PRD Similar groups).
+    @MainActor
+    private func switchValue(_ toggle: XCUIElement) -> String? {
+        toggle.value as? String
+    }
+
+    /// Returns from Settings to the grid (PRD P0-13).
+    @MainActor
+    private func backToGrid(in app: XCUIApplication) {
+        let back = element(in: app, "clove.nav.back")
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "Settings had no back button")
+        back.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.grid").waitForExistence(timeout: 10),
+            "Back did not return to the grid"
+        )
     }
 
     /// Chooses one grid group display value on the settings screen (PRD Grid).
