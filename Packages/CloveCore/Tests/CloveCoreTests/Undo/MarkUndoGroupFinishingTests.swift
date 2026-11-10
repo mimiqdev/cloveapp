@@ -127,7 +127,35 @@ struct MarkUndoGroupFinishingTests {
         #expect(undoResult.droppedFromHistory)
         #expect(undoResult.completion == nil)
         #expect(await completion.hasFinishingAction(on: group.id))
+        #expect(await fixture.history.canUndo == false)
+        #expect(await fixture.history.undoCount == 0)
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
+    }
+
+    /// Completion changes when a field already holds the target, even if none was written.
+    @Test func aCompletionClearsWhenAFieldIsAlreadyAtTheTarget() async throws {
+        let fixture = try UndoTestFixture(stems: ["A", "B"])
+        defer { fixture.remove() }
+        let photos = fixture.photoSets.map(\.id)
+        let completion = fixture.completion
+        let group = groupCullingGroup("mixed", members: photos)
+
+        let (result, _) = await run(
+            .keepThis, group: group, currentPhoto: photos[0], marks: [:],
+            fixture: fixture, completion: completion)
+        #expect(result.savedCount == 2)
+        // Another app puts the kept rating back to the target before the undo runs.
+        _ = await fixture.queue.apply(.rating(.unrated), to: fixture.photoSets[0])
+
+        let undoResult = try #require(await undoStep(fixture))
+        #expect(undoResult.droppedFromHistory == false)
+        #expect(undoResult.completion?.state == .cleared)
+        #expect(await completion.hasFinishingAction(on: group.id) == false)
+        #expect(await fixture.history.canRedo)
+        let kept = try #require(undoResult.outcomes.first { $0.photo == photos[0] })
+        #expect(kept.isAlreadyAtTarget)
+        let rejected = try #require(undoResult.outcomes.first { $0.photo == photos[1] })
+        #expect(rejected.isWritten)
     }
 
     /// Undoing a finishing action whose photos are gone leaves the completion alone too.
@@ -151,6 +179,8 @@ struct MarkUndoGroupFinishingTests {
         #expect(undoResult.completion == nil)
         #expect(undoResult.outcomes.allSatisfy { $0.isNotUndone })
         #expect(await completion.hasFinishingAction(on: group.id))
+        #expect(await fixture.history.canUndo == false)
+        #expect(await fixture.history.undoCount == 0)
     }
 
     /// A redo that restores nothing leaves the cleared completion cleared.
@@ -175,6 +205,8 @@ struct MarkUndoGroupFinishingTests {
         #expect(redoResult.droppedFromHistory)
         #expect(redoResult.completion == nil)
         #expect(await completion.hasFinishingAction(on: group.id) == false)
+        #expect(await fixture.history.canRedo == false)
+        #expect(await fixture.history.redoCount == 0)
     }
 
     /// An action that changes no marks records no entry, because there is no mark to restore.

@@ -12,9 +12,11 @@ import Foundation
 ///   ``clear()`` when the folder closes. Nothing survives a launch.
 /// - **Every step is a write through C4.** Undo and redo call ``MarkWriteQueue/apply(_:to:)``,
 ///   so PRD P0-08's save state, failure copy and retry come from the queue. A restore that
-///   fails is reported with its C4 status and stays visible in the queue; an entry whose step
-///   did not reach the target — a failed write or one a newer write superseded — stays where it
-///   was, so the user can try again or retry C4's change.
+///   fails keeps its entry and stays visible in the queue, so the user can try again or retry
+///   C4's change. A step that restored nothing and has no write left to retry is dropped from
+///   the history instead, reported by ``MarkUndoResult/droppedFromHistory``: keeping it would
+///   make the next undo hit the same entry again and never reach an older action (PRD P0-05's
+///   last-in, first-out undo).
 /// - **Newer marks win.** Before writing, each photo's latest marks are read from the caller's
 ///   source. A field that no longer holds the value the step was about to replace keeps its
 ///   newer value and is reported as left alone, never overwritten (PRD P0-05).
@@ -146,9 +148,10 @@ public actor MarkUndoHistory {
     /// ``GroupFinishingUndo`` already holds each changed photo's marks before the action and the
     /// change that ran, so the entry restores them like any other batch. Undoing the entry also
     /// clears the group's finishing-action record through ``GroupCompletionTracker``, and
-    /// redoing restores it (PRD P0-12: finishing actions can be undone). An action that changed
-    /// no marks — an empty plan, or every planned photo dropped — records nothing, because there
-    /// is no mark to restore.
+    /// redoing restores it, but only while at least one photo is written or already at the
+    /// target value; a step that restored nothing leaves the record alone (PRD P0-12: finishing
+    /// actions can be undone). An action that changed no marks — an empty plan, or every planned
+    /// photo dropped — records nothing, because there is no mark to restore.
     ///
     /// - Parameter undo: C10's record of the action that ran.
     /// - Returns: The entry's handle, or `nil` when nothing was recorded.
@@ -183,7 +186,8 @@ public actor MarkUndoHistory {
     /// mark from another app or a later action is kept and reported as not undone (PRD P0-05).
     /// Photos whose restore needs the same change are written together through C4's batch apply
     /// (PRD P0-09), which is what gives the per-photo results, save states and retry. A
-    /// finishing-action entry also clears its group's completion record (PRD P0-12).
+    /// finishing-action entry also clears its group's completion record when at least one photo
+    /// is written or already at the target value (PRD P0-12).
     ///
     /// - Parameters:
     ///   - photoSet: The folder session's current set for a photo, with C2's resolved sidecar
@@ -204,7 +208,8 @@ public actor MarkUndoHistory {
     /// Redo uses the same per-field check as ``undo(photoSet:latestMarks:)``: it re-applies the
     /// original change only where each field still holds the value undo restored, so a mark
     /// written after the undo is not overwritten. A finishing-action entry restores its group's
-    /// completion record (PRD P0-12).
+    /// completion record when at least one photo is written or already at the target value
+    /// (PRD P0-12).
     ///
     /// - Parameters:
     ///   - photoSet: The folder session's current set for a photo.
@@ -421,12 +426,14 @@ public actor MarkUndoHistory {
     /// dropped because the step restored nothing.
     ///
     /// A step with an unfinished or failed write keeps its entry, so the user can try again or
-    /// retry C4's change (PRD P0-08). A step that reached no field target and has no write left
-    /// to retry is dropped from both stacks: every field kept a newer mark or its photo was
-    /// unavailable, and keeping the entry would make the next undo hit the same entry forever
-    /// instead of reaching an older action (PRD P0-05's last-in, first-out undo). `recordedNew`
-    /// counts the actions recorded while the step waited: a new recorded action clears the redo
-    /// future (PRD P0-05), so a step that finishes after one must not resurrect it.
+    /// retry C4's change (PRD P0-08); a failed redo is the exception when a new action recorded
+    /// while it ran already cleared the redo future. A step that reached no field target and has
+    /// no write left to retry is dropped from both stacks: every field kept a newer mark or its
+    /// photo was unavailable, and keeping the entry would make the next undo hit the same entry
+    /// forever instead of reaching an older action (PRD P0-05's last-in, first-out undo).
+    /// `recordedNew` counts the actions recorded while the step waited: a new recorded action
+    /// clears the redo future (PRD P0-05), so a step that finishes after one must not resurrect
+    /// it.
     private func updateStacks(
         entry: MarkUndoEntry,
         step: Step,

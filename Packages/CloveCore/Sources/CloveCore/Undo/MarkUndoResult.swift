@@ -110,8 +110,9 @@ public struct MarkUndoResult: Hashable, Sendable {
     /// Every field kept a newer mark or its photo was unavailable, and no write is left to
     /// retry. The entry is on neither stack: keeping it would make the next undo hit the same
     /// entry again instead of reaching an older action (PRD P0-05's last-in, first-out undo).
-    /// U8 can use this to tell the user and take the action off the menu; a step that failed
-    /// keeps its entry instead.
+    /// U8 can use this to tell the user and take the action off the menu. A failed or unfinished
+    /// write keeps its entry instead, unless a new recorded action already cleared the redo
+    /// future while the step ran.
     public let droppedFromHistory: Bool
 
     /// Describes the result of one step; the history builds these.
