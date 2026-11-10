@@ -87,6 +87,22 @@ public struct SettingsPersistence: Sendable {
         setText(settings.groupCompletion.rawValue, .groupCompletion)
     }
 
+    /// Writes every key, then reads them back and reports whether storage kept the settings.
+    ///
+    /// The store that owns the live value keeps its in-memory copy either way and shows the
+    /// failure in plain text, because a setting the user just chose must not seem saved when
+    /// storage dropped it. The read-back goes through this same instance, so a store that silently
+    /// refuses or rewrites a value is caught (PRD Failure and recovery: never report an
+    /// unconfirmed change as successful).
+    ///
+    /// A value that equals its default cannot be distinguished from a dropped write, because
+    /// ``load()`` falls back to that same default; nothing observable is lost in that case.
+    @discardableResult
+    public func saveVerified(_ settings: AppSettings) -> Bool {
+        save(settings)
+        return load() == settings
+    }
+
     /// Reads text, or nil when the key is absent.
     private func text(_ key: SettingsKey) -> String? {
         storage.string(forKey: key.rawValue)

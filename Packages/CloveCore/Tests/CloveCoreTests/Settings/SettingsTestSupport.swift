@@ -20,6 +20,16 @@ final class InMemorySettingsStorage: SettingsStorage {
     }
 }
 
+/// A store that accepts every write and keeps nothing, like storage that is unavailable.
+///
+/// The persistence tests use it to prove that a dropped write is reported instead of appearing
+/// saved.
+final class DroppingSettingsStorage: SettingsStorage {
+    func string(forKey key: String) -> String? { nil }
+
+    func setString(_ text: String?, forKey key: String) {}
+}
+
 /// The exact persisted key set for this settings version; a test pins it.
 ///
 /// The literal, rather than `SettingsKey`, makes the test fail when a key is added, renamed, or

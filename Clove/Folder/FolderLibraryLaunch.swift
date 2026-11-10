@@ -14,7 +14,11 @@ import Foundation
 @MainActor
 enum FolderLibraryLaunch {
     /// The library for this launch, chosen by the launch environment (PRD P0-01, P0-13).
+    ///
+    /// The real library reads the rejects folder name from the settings store when a folder
+    /// opens, so a name changed in Settings applies to the next open (PRD Move rejects).
     static func make(
+        settings: SettingsStore,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> any FolderLibrary {
         if environment[TestLibrary.launchVariable] == "1" {
@@ -24,6 +28,6 @@ enum FolderLibraryLaunch {
             stores: Task.detached(priority: .userInitiated) {
                 try FolderLibrarySession.Stores.applicationSupport()
             },
-            settings: SettingsPersistence(storage: UserDefaultsSettingsStorage()).load())
+            rejectsFolderName: { settings.settings.rejectsFolderName })
     }
 }

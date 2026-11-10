@@ -116,6 +116,35 @@ import CloveCore
     #expect(storage.string(forKey: "future.editorSetting") == "from-a-later-version")
 }
 
+@Test func saveVerificationConfirmsEveryStoredSetting() throws {
+    let settings = try nonDefaultSettings()
+    let storage = InMemorySettingsStorage()
+    #expect(SettingsPersistence(storage: storage).saveVerified(settings))
+    // The check is a real read-back, not the write's own success: another instance sees it.
+    #expect(SettingsPersistence(storage: storage).load() == settings)
+}
+
+@Test func saveVerificationReportsStorageThatDropsTheWrite() throws {
+    let settings = try nonDefaultSettings()
+    let persistence = SettingsPersistence(storage: DroppingSettingsStorage())
+    #expect(!persistence.saveVerified(settings))
+    // Nothing reached storage, so the next launch sees the defaults rather than the change.
+    #expect(persistence.load() == AppSettings())
+}
+
+@Test func savingTheDefaultsResetsEveryStoredSetting() throws {
+    let storage = InMemorySettingsStorage()
+    let persistence = SettingsPersistence(storage: storage)
+    persistence.save(try nonDefaultSettings())
+    #expect(persistence.load() != AppSettings())
+
+    // The settings screen's Reset to defaults is this call: every key goes back to its launch
+    // value, and the change is confirmed the same way as any other.
+    #expect(persistence.saveVerified(AppSettings()))
+    #expect(SettingsPersistence(storage: storage).load() == AppSettings())
+    #expect(storage.storedKeys.sorted() == launchSettingKeys)
+}
+
 @Test func userDefaultsStorageRoundTripsUnderOneVersionedNamespace() throws {
     let suiteName = "clove.tests.settings.\(UUID().uuidString)"
     let suite = try #require(UserDefaults(suiteName: suiteName))
