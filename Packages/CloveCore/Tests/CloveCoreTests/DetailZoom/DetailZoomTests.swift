@@ -136,4 +136,66 @@ struct DetailZoomTests {
                 imagePixels: CGSize(width: 8640, height: 5760),
                 viewSize: CGSize(width: 393, height: 852), screenScale: 3) - 0.0001)
     }
+
+    /// 100% follows the photo's native size, not the smaller embedded preview on screen, so the
+    /// first double-tap already lands on 100% of the RAW (PRD P0-04; G1 "Preview, detail (I2)").
+    @Test func fullResolutionUsesTheNativeSizeWhileThePreviewIsShown() {
+        let native = CGSize(width: 8640, height: 5760)
+        let preview = CGSize(width: 2160, height: 1440)
+        let view = CGSize(width: 393, height: 852)
+
+        let scale = DetailZoom.fullResolutionScale(
+            nativePixels: native, shownPixels: preview, viewSize: view, screenScale: 3)
+
+        // The preview fills the 393 pt width at fit, so native 100% is 8640 image pixels across
+        // 1179 screen pixels.
+        #expect(abs(scale - 8640.0 / 1179.0) < 0.0001)
+        #expect(scale > DetailZoom.inspectionScale)
+        // A preview that is already its own full resolution answers the same way as before the
+        // native size was known, which is the fallback for an unreadable header.
+        #expect(
+            DetailZoom.fullResolutionScale(
+                nativePixels: .zero, shownPixels: preview, viewSize: view, screenScale: 3)
+                == DetailZoom.fullResolutionScale(
+                    imagePixels: preview, viewSize: view, screenScale: 3))
+    }
+
+    /// A pinch can reach native 100% while the preview is still shown, because the limit comes
+    /// from the photo's native size rather than the preview's (PRD P0-04; G1 "Preview, detail
+    /// (I2)").
+    @Test func maximumScaleReachesNativeFullResolutionFromThePreview() {
+        let native = CGSize(width: 8640, height: 5760)
+        let preview = CGSize(width: 1616, height: 1080)
+        let view = CGSize(width: 393, height: 852)
+
+        let maximum = DetailZoom.maximumScale(
+            nativePixels: native, shownPixels: preview, viewSize: view, screenScale: 3)
+        let nativeScale = DetailZoom.fullResolutionScale(
+            nativePixels: native, shownPixels: preview, viewSize: view, screenScale: 3)
+        let previewScale = DetailZoom.fullResolutionScale(
+            nativePixels: preview, shownPixels: preview, viewSize: view, screenScale: 3)
+
+        #expect(abs(maximum - nativeScale) < 0.0001)
+        #expect(maximum > DetailZoom.inspectionScale)
+        #expect(previewScale < maximum)
+    }
+
+    /// The RAW render replaces the preview without changing the 100% scale, so the view does not
+    /// zoom a second time when the pixels land (PRD P0-04; G1 "Preview, detail (I2)").
+    @Test func replacingASameAspectPreviewWithTheRenderKeepsTheScale() {
+        let native = CGSize(width: 8640, height: 5760)
+        let preview = CGSize(width: 2160, height: 1440)
+        let view = CGSize(width: 393, height: 852)
+
+        let before = DetailZoom.fullResolutionScale(
+            nativePixels: native, shownPixels: preview, viewSize: view, screenScale: 3)
+        let after = DetailZoom.fullResolutionScale(
+            nativePixels: native, shownPixels: native, viewSize: view, screenScale: 3)
+
+        #expect(abs(before - after) < 0.0001)
+        #expect(
+            DetailZoom.maximumScale(
+                nativePixels: native, shownPixels: preview, viewSize: view, screenScale: 3)
+                >= before)
+    }
 }
