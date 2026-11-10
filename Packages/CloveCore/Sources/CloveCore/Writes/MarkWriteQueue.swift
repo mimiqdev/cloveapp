@@ -52,6 +52,11 @@ public actor MarkWriteQueue {
     private var observers: [UUID: AsyncStream<MarkChangeStatus>.Continuation] = [:]
     /// Applied batches, for P0-09's retry of failed items only.
     private var batches: [MarkBatchID: AppliedBatch] = [:]
+    /// The marks each photo shows after its last confirmed write, seeded by the first admission
+    /// that asks for its "before" marks in this open (PRD P0-05's Undo row).
+    private var shownMarks: [PhotoIdentity: PhotoMarks] = [:]
+    /// The changes admitted and not finished, per photo, in admission order (PRD P0-05).
+    private var inFlightByPhoto: [PhotoIdentity: [MarkChangeID]] = [:]
 
     /// Creates the queue over an existing Clove store and an injectable file seam.
     ///
@@ -176,6 +181,7 @@ public actor MarkWriteQueue {
                 }
                 let pendingStatus = existing.withState(.pending)
                 changes[retryID] = pendingStatus
+                trackAdmission(retryID, for: status.identity)
                 notify(pendingStatus)
             }
             if var existing = pending[status.identity] {
@@ -380,6 +386,7 @@ public actor MarkWriteQueue {
         order.append(id)
         sets[id] = set
         latestByPhoto[identity] = id
+        trackAdmission(id, for: identity)
         notify(status)
 
         var fields = change
@@ -579,6 +586,7 @@ public actor MarkWriteQueue {
         guard status.state.isInProgress || status.state.failure != nil else { return }
         let updated = status.withState(state)
         changes[id] = updated
+        settleShownMarks(for: updated)
         notify(updated)
         resumeWaiters(for: id)
         finishDrainingIfIdle()
@@ -613,5 +621,142 @@ public actor MarkWriteQueue {
     /// Detaches a stream's continuation when its reader stops.
     private func removeObserver(_ id: UUID) {
         observers[id] = nil
+    }
+}
+
+// MARK: - Undo support
+
+extension MarkWriteQueue {
+    /// Admits one change and reports the marks its photo showed just before it
+    /// (PRD P0-05's Undo row).
+    ///
+    /// The marks are read inside the queue: after the photo's last confirmed write, with every
+    /// change still in flight folded in admission order, and before this change joins them. A
+    /// failed or superseded change has already left the fold, because the queue removes it when
+    /// its write finishes (PRD How marks reach disk, rule 8).
+    ///
+    /// - Parameters:
+    ///   - change: The rating, label and/or Reject request (PRD P0-07, P0-09).
+    ///   - set: The scanned photo set (C1's set and C2's sidecar state).
+    ///   - confirmed: The marks C4 last confirmed for the photo, which seed the queue's own copy
+    ///     the first time this open admits a change for it. Later admissions use the queue's copy,
+    ///     which advances as writes confirm instead of waiting for a folder's update stream.
+    public func admit(
+        _ change: MarkChange, to set: ScannedPhotoSet, confirmed: PhotoMarks
+    ) async -> MarkChangeAdmission {
+        let photo = set.photoSet.id
+        if shownMarks[photo] == nil { shownMarks[photo] = confirmed }
+        let marksBefore = MarkUndoSeenMarks.marks(
+            confirmed: shownMarks[photo] ?? confirmed, requests: inFlightChanges(for: photo))
+        let id = admit(change, for: set)
+        return MarkChangeAdmission(
+            id: id, photo: photo, change: change, marksBefore: marksBefore)
+    }
+
+    /// Admits one change for many photo sets and reports each photo's marks just before it
+    /// (PRD P0-09; PRD P0-05's Undo row).
+    ///
+    /// Every set is admitted before any result is awaited, so the writes run concurrently like
+    /// ``apply(_:to:)`` does. The batch stays available for ``retryFailed(in:)`` under
+    /// ``MarkBatchAdmission/batchID``.
+    public func admit(
+        _ change: MarkChange, to sets: [ScannedPhotoSet], confirmed: [PhotoIdentity: PhotoMarks]
+    ) async -> MarkBatchAdmission {
+        let batchID = MarkBatchID()
+        guard !change.isEmpty else {
+            let refusals = sets.map { set in
+                MarkChangeStatus(
+                    id: MarkChangeID(), identity: set.photoSet.id, requested: change,
+                    state: .failed(
+                        MarkWriteFailure(
+                            reason: .unknown,
+                            message: "The change names no marks, so nothing was written.")))
+            }
+            return MarkBatchAdmission(
+                batchID: batchID, change: change, admissions: [], refused: refusals)
+        }
+        var admissions: [MarkChangeAdmission] = []
+        admissions.reserveCapacity(sets.count)
+        for set in sets {
+            let photo = set.photoSet.id
+            let seed = confirmed[photo] ?? PhotoMarks()
+            if shownMarks[photo] == nil { shownMarks[photo] = seed }
+            let marksBefore = MarkUndoSeenMarks.marks(
+                confirmed: shownMarks[photo] ?? seed, requests: inFlightChanges(for: photo))
+            let id = admit(change, for: set)
+            admissions.append(
+                MarkChangeAdmission(
+                    id: id, photo: photo, change: change, marksBefore: marksBefore))
+        }
+        batches[batchID] = AppliedBatch(change: change, ids: admissions.map(\.id))
+        return MarkBatchAdmission(
+            batchID: batchID, change: change, admissions: admissions, refused: [])
+    }
+
+    /// Awaits one admission's write and returns its final state, as ``apply(_:to:)`` does.
+    @discardableResult
+    public func waitFor(_ admission: MarkChangeAdmission) async -> MarkChangeStatus {
+        await waitFor(admission.id)
+        return changes[admission.id]
+            ?? MarkChangeStatus(
+                id: admission.id, identity: admission.photo, requested: admission.change,
+                state: .writing)
+    }
+
+    /// Awaits a batch admission's writes and reports each photo's result (PRD P0-09).
+    @discardableResult
+    public func waitFor(_ batch: MarkBatchAdmission) async -> MarkBatchResult {
+        var outcomes = batch.refused
+        outcomes.reserveCapacity(batch.admissions.count + batch.refused.count)
+        for admission in batch.admissions {
+            await waitFor(admission.id)
+            if let status = changes[admission.id] { outcomes.append(status) }
+        }
+        return MarkBatchResult(id: batch.batchID, change: batch.change, outcomes: outcomes)
+    }
+
+    /// The marks one photo shows now: its last confirmed marks plus every change still in flight,
+    /// folded in admission order (PRD P0-05's Undo row).
+    ///
+    /// U9's finishing action re-reads marks this way, so it never rejects a photo whose rating or
+    /// label is still writing (PRD P0-12). `confirmed` seeds the queue's copy the first time.
+    public func marksShown(for photo: PhotoIdentity, confirmed: PhotoMarks) -> PhotoMarks {
+        if shownMarks[photo] == nil { shownMarks[photo] = confirmed }
+        return MarkUndoSeenMarks.marks(
+            confirmed: shownMarks[photo] ?? confirmed, requests: inFlightChanges(for: photo))
+    }
+
+    /// Forgets a folder's shown marks when it opens (PRD P0-05).
+    ///
+    /// The queue outlives a folder, so a reopen seeds its copy from the scan again instead of
+    /// keeping marks a file no longer has.
+    public func forgetShownMarks(in folder: FolderIdentity) {
+        shownMarks = shownMarks.filter { $0.key.folderID != folder }
+        inFlightByPhoto = inFlightByPhoto.filter { $0.key.folderID != folder }
+    }
+
+    /// The changes admitted for one photo that have not finished, in admission order
+    /// (PRD P0-05).
+    private func inFlightChanges(for photo: PhotoIdentity) -> [MarkChange] {
+        (inFlightByPhoto[photo] ?? []).compactMap { changes[$0]?.requested }
+    }
+
+    /// Adds one admitted change to its photo's in-flight list (PRD P0-05).
+    private func trackAdmission(_ id: MarkChangeID, for photo: PhotoIdentity) {
+        var ids = inFlightByPhoto[photo] ?? []
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+        inFlightByPhoto[photo] = ids
+    }
+
+    /// Drops one finished change from the fold and folds a confirmed one into the shown marks
+    /// (PRD P0-05).
+    private func settleShownMarks(for status: MarkChangeStatus) {
+        if var ids = inFlightByPhoto[status.identity] {
+            ids.removeAll { $0 == status.id }
+            inFlightByPhoto[status.identity] = ids.isEmpty ? nil : ids
+        }
+        guard status.state.isConfirmed, let shown = shownMarks[status.identity] else { return }
+        shownMarks[status.identity] = shown.including(status.requested)
     }
 }

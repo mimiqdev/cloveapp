@@ -181,6 +181,13 @@ final class TestLibrary: FolderLibrary {
     private var undoStack: [SampleUndoStep] = []
     private var undoRedoStack: [SampleUndoStep] = []
 
+    /// The marks the sample shows after its last confirmed write, seeded on the first admission
+    /// (PRD P0-05).
+    private var shownMarks: [PhotoIdentity: PhotoMarks] = [:]
+
+    /// The sample's requests still writing, per photo, in admission order (PRD P0-05).
+    private var inFlight: [PhotoIdentity: [MarkChange]] = [:]
+
     /// The stem suffix whose rejected photos fail their first move, or nil when none does
     /// (PRD P0-10).
     private let failingMoveStemSuffix: String?
@@ -584,19 +591,19 @@ final class TestLibrary: FolderLibrary {
     func recordUndoStep(_ request: UndoRecordRequest) async -> Bool {
         let step: SampleUndoStep
         switch request {
-        case .mark(let change, let photo, let marksBefore):
+        case .mark(let admission):
             step = SampleUndoStep(
                 photos: [
-                    SampleUndoPhoto(photo: photo, marksBefore: marksBefore, change: change)
+                    SampleUndoPhoto(
+                        photo: admission.photo, marksBefore: admission.marksBefore,
+                        change: admission.change)
                 ],
-                photoToReturnTo: photo, group: nil)
-        case .batch(let items, let marksBefore):
+                photoToReturnTo: admission.photo, group: nil)
+        case .batch(let admission):
             var photos: [SampleUndoPhoto] = []
-            for item in items {
+            for entry in admission.admissions {
                 let photo = SampleUndoPhoto(
-                    photo: item.photo,
-                    marksBefore: marksBefore[item.photo] ?? PhotoMarks(),
-                    change: item.change)
+                    photo: entry.photo, marksBefore: entry.marksBefore, change: entry.change)
                 guard !photos.contains(where: { $0.photo == photo.photo }) else { continue }
                 photos.append(photo)
             }
@@ -623,6 +630,67 @@ final class TestLibrary: FolderLibrary {
         // PRD P0-05: a new action discards the redo future.
         undoRedoStack.removeAll()
         return true
+    }
+
+    /// Admits one change and reports the sample's marks just before it (PRD P0-05).
+    ///
+    /// The sample writes nothing, so it mirrors C4 with its own in-flight list: the marks it
+    /// shows are its stored marks with every request still writing folded in admission order.
+    func admitMarkChange(_ change: MarkChange, to photo: PhotoIdentity) async
+        -> MarkChangeAdmission?
+    {
+        guard !change.isEmpty else { return nil }
+        if shownMarks[photo] == nil { shownMarks[photo] = marks(for: photo) }
+        let before = MarkUndoSeenMarks.marks(
+            confirmed: shownMarks[photo] ?? PhotoMarks(), requests: inFlight[photo] ?? [])
+        inFlight[photo, default: []].append(change)
+        return MarkChangeAdmission(
+            id: MarkChangeID(), photo: photo, change: change, marksBefore: before)
+    }
+
+    /// Writes one admitted change and keeps the sample's shown marks in step (PRD P0-08).
+    func write(_ admission: MarkChangeAdmission) async -> MarkChangeStatus {
+        let status = perform(admission.change, for: admission.photo)
+        if var requests = inFlight[admission.photo],
+            let index = requests.firstIndex(of: admission.change)
+        {
+            requests.remove(at: index)
+            inFlight[admission.photo] = requests.isEmpty ? nil : requests
+        }
+        if status.state.isConfirmed, let shown = shownMarks[admission.photo] {
+            shownMarks[admission.photo] = shown.including(admission.change)
+        }
+        return status
+    }
+
+    /// Admits one bar action's per-photo changes (PRD P0-09).
+    func admitBatch(_ items: [BatchMarkItem]) async -> BatchWriteAdmission? {
+        guard !items.isEmpty else { return nil }
+        var admissions: [MarkChangeAdmission] = []
+        for item in items {
+            if let admission = await admitMarkChange(item.change, to: item.photo) {
+                admissions.append(admission)
+            }
+        }
+        let change = items.first?.change ?? MarkChange()
+        var order: [PhotoIdentity: Int] = [:]
+        for (index, item) in items.enumerated() { order[item.photo] = index }
+        return BatchWriteAdmission(
+            change: change, batches: [], admissions: admissions, unavailable: [],
+            libraryBatch: MarkBatchID(), order: order)
+    }
+
+    /// Writes one admitted bar action and reports each photo's result (PRD P0-09).
+    func write(_ admission: BatchWriteAdmission) async -> MarkBatchResult {
+        var outcomes: [MarkChangeStatus] = []
+        for entry in admission.admissions {
+            outcomes.append(await write(entry))
+        }
+        outcomes.sort {
+            (admission.order[$0.identity] ?? .max) < (admission.order[$1.identity] ?? .max)
+        }
+        return MarkBatchResult(
+            id: admission.libraryBatch, change: admission.change, outcomes: outcomes)
     }
 
     /// Undoes the sample's next action and restores each photo's recorded fields (PRD P0-05).

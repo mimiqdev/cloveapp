@@ -45,16 +45,6 @@ import CloveCore
         #expect(seen.rating == Self.four)
     }
 
-    @Test func aFailedRequestInTheMiddleDropsOut() {
-        // ★3, then a green label whose write failed, then ★4: the caller removes the failed label
-        // when its write returns, so the fold reads ★4 with no label — what the screen shows. Undo
-        // of ★4 puts ★3 back and leaves the label alone.
-        let seen = MarkUndoSeenMarks.marks(
-            confirmed: PhotoMarks(), requests: [.rating(Self.three), .rating(Self.four)])
-        #expect(seen.rating == Self.four)
-        #expect(seen.label == .clear)
-    }
-
     @Test func aRejectRequestClearsItself() {
         let seen = MarkUndoSeenMarks.marks(
             confirmed: PhotoMarks(rating: Self.three, isRejected: true),

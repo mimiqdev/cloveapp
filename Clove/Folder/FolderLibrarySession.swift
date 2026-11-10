@@ -256,30 +256,165 @@ final class FolderLibrarySession: FolderLibrary {
         guard let history = undoHistory else { return false }
         let recorded: MarkUndoEntryID?
         switch request {
-        case .mark(let change, let photo, let marksBefore):
-            let admission = MarkChangeStatus(
-                id: MarkChangeID(), identity: photo, requested: change, state: .pending)
-            recorded = await history.record(admission, marksBefore: marksBefore)
-        case .batch(let items, let marksBefore):
-            // C4 admits every photo before it awaits any result, so the action's step is recorded
-            // from the request itself, in the state the queue admits each change in.
-            let outcomes = items.map { item in
+        case .mark(let entry):
+            // C4 reported the marks this change replaces at admission, so the record takes them
+            // from there instead of guessing while other writers run (PRD P0-05).
+            let status = MarkChangeStatus(
+                id: entry.id, identity: entry.photo, requested: entry.change, state: .pending)
+            recorded = await history.record(status, marksBefore: entry.marksBefore)
+        case .batch(let entry):
+            let outcomes = entry.admissions.map { admission in
                 MarkChangeStatus(
-                    id: MarkChangeID(), identity: item.photo, requested: item.change,
+                    id: admission.id, identity: admission.photo, requested: admission.change,
                     state: .pending)
             }
+            var marksBefore: [PhotoIdentity: PhotoMarks] = [:]
+            for admission in entry.admissions {
+                marksBefore[admission.photo] = admission.marksBefore
+            }
             let batch = MarkBatchResult(
-                id: MarkBatchID(), change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+                id: entry.libraryBatch, change: entry.change, outcomes: outcomes)
             recorded = await history.recordBatch(batch, marksBefore: marksBefore)
         case .groupFinishing(let undo):
             recorded = await history.recordGroupFinishing(undo)
         }
-        // A folder can close or be replaced while the history call waits, and a new session's
-        // mirror must not be overwritten by the one that is gone (PRD P0-05, P0-14).
-        if undoHistory === history {
-            await refreshUndoAvailability(from: history)
-        }
+        // A folder can close or be replaced while the history call waits: the step landed in the
+        // history that is gone, so it does not count and the new session's mirror is untouched
+        // (PRD P0-05, P0-14).
+        guard undoHistory === history else { return false }
+        await refreshUndoAvailability(from: history)
         return recorded != nil
+    }
+
+    /// Admits one change and reports the marks C4 says it replaces (PRD P0-05).
+    func admitMarkChange(_ change: MarkChange, to photo: PhotoIdentity) async
+        -> MarkChangeAdmission?
+    {
+        guard !change.isEmpty, openSession != nil, let set = store.scannedSet(for: photo) else {
+            return nil
+        }
+        guard case .success(let stores) = await resolvedStores() else { return nil }
+        let confirmed = store.photo(for: photo)?.marks ?? PhotoMarks()
+        return await stores.writes.admit(change, to: set, confirmed: confirmed)
+    }
+
+    /// Awaits one admitted change's write inside C11's session (PRD P0-08).
+    ///
+    /// The write is admitted through the folder's session, so ending the folder waits for it
+    /// before releasing the scope; a folder that closed refuses the change instead of writing
+    /// under a scope it no longer holds.
+    func write(_ admission: MarkChangeAdmission) async -> MarkChangeStatus {
+        func refuse(_ reason: MarkWriteFailureReason, _ message: String) -> MarkChangeStatus {
+            let status = Self.refused(
+                admission.change, for: admission.photo, reason: reason, message: message)
+            publish(.change(status))
+            return status
+        }
+        guard let session = openSession else {
+            return refuse(.locationUnavailable, "The open folder no longer holds this photo.")
+        }
+        switch await resolvedStores() {
+        case .failure(let error):
+            return refuse(.unknown, "Clove's stored marks are unavailable: \(error)")
+        case .success(let stores):
+            do {
+                return try await session.withAdmittedWork {
+                    await stores.writes.waitFor(admission)
+                }
+            } catch {
+                return refuse(
+                    .locationUnavailable, "The folder closed before the change could be written.")
+            }
+        }
+    }
+
+    /// Admits one bar action's per-photo changes (PRD P0-09).
+    ///
+    /// Items can name different changes because C13 resolves the action per photo, so the queue
+    /// admits one batch per distinct change and the action's own handle keeps them for a retry.
+    func admitBatch(_ items: [BatchMarkItem]) async -> BatchWriteAdmission? {
+        guard openSession != nil, !items.isEmpty else { return nil }
+        let scanned = store
+        var order: [PhotoIdentity: Int] = [:]
+        var byChange: [MarkChange: [ScannedPhotoSet]] = [:]
+        var unavailable: [BatchMarkItem] = []
+        for (index, item) in items.enumerated() {
+            order[item.photo] = index
+            guard let set = scanned.scannedSet(for: item.photo) else {
+                unavailable.append(item)
+                let status = Self.refused(
+                    item.change, for: item.photo, reason: .locationUnavailable,
+                    message: "The open folder no longer holds this photo.")
+                publish(.change(status))
+                continue
+            }
+            byChange[item.change, default: []].append(set)
+        }
+        guard case .success(let stores) = await resolvedStores() else { return nil }
+        var queueBatches: [MarkBatchAdmission] = []
+        var admissions: [MarkChangeAdmission] = []
+        for (change, sets) in byChange {
+            var confirmed: [PhotoIdentity: PhotoMarks] = [:]
+            for set in sets {
+                confirmed[set.id] = scanned.photo(for: set.id)?.marks ?? PhotoMarks()
+            }
+            let admission = await stores.writes.admit(change, to: sets, confirmed: confirmed)
+            queueBatches.append(admission)
+            admissions.append(contentsOf: admission.admissions)
+        }
+        admissions.sort { (order[$0.photo] ?? .max) < (order[$1.photo] ?? .max) }
+        let change = items.first?.change ?? MarkChange()
+        let libraryBatch = MarkBatchID()
+        // The action is kept even when nothing reached the queue, so a retry reports the photos
+        // the folder no longer holds instead of dropping them (PRD P0-09).
+        batches[libraryBatch] = AppliedBatch(
+            change: change, queueBatches: queueBatches.map(\.batchID), unavailable: unavailable)
+        return BatchWriteAdmission(
+            change: change, batches: queueBatches, admissions: admissions,
+            unavailable: unavailable, libraryBatch: libraryBatch, order: order)
+    }
+
+    /// Awaits one admitted bar action's writes inside C11's session (PRD P0-09).
+    func write(_ admission: BatchWriteAdmission) async -> MarkBatchResult {
+        var outcomes: [MarkChangeStatus] = []
+        if let session = openSession, case .success(let stores) = await resolvedStores() {
+            for group in admission.batches {
+                let result: MarkBatchResult? = try? await session.withAdmittedWork {
+                    await stores.writes.waitFor(group)
+                }
+                if let result {
+                    outcomes.append(contentsOf: result.outcomes)
+                } else {
+                    for entry in group.admissions {
+                        let status = Self.refused(
+                            entry.change, for: entry.photo, reason: .locationUnavailable,
+                            message: "The folder closed before the batch could be written.")
+                        publish(.change(status))
+                        outcomes.append(status)
+                    }
+                }
+            }
+        } else {
+            for entry in admission.admissions {
+                let status = Self.refused(
+                    entry.change, for: entry.photo, reason: .locationUnavailable,
+                    message: "The open folder no longer holds this photo.")
+                publish(.change(status))
+                outcomes.append(status)
+            }
+        }
+        for item in admission.unavailable {
+            let status = Self.refused(
+                item.change, for: item.photo, reason: .locationUnavailable,
+                message: "The open folder no longer holds this photo.")
+            publish(.change(status))
+            outcomes.append(status)
+        }
+        outcomes.sort {
+            (admission.order[$0.identity] ?? .max) < (admission.order[$1.identity] ?? .max)
+        }
+        return MarkBatchResult(
+            id: admission.libraryBatch, change: admission.change, outcomes: outcomes)
     }
 
     /// Undoes the history's next action through C4's write queue (PRD P0-05).
@@ -769,10 +904,7 @@ final class FolderLibrarySession: FolderLibrary {
         for photo: PhotoIdentity, in writes: MarkWriteQueue
     ) async -> PhotoMarks {
         let confirmed = store.photo(for: photo)?.marks ?? PhotoMarks()
-        guard let latest = await writes.latestChange(for: photo), latest.state.isUnfinished else {
-            return confirmed
-        }
-        return confirmed.including(latest.requested)
+        return await writes.marksShown(for: photo, confirmed: confirmed)
     }
 
     /// A finishing action the folder could not run: every planned change reports the refusal, so
@@ -901,6 +1033,9 @@ final class FolderLibrarySession: FolderLibrary {
         undoHistory = MarkUndoHistory(
             queue: stores.writes, completion: groupCompletionTracker)
         undoState = .none
+        // The queue outlives the folder, so this open seeds its shown marks from the scan again
+        // (PRD P0-05).
+        await stores.writes.forgetShownMarks(in: session.folder.id)
         movedRejectIdentities = []
         rejectMover = RejectMover(markQueue: stores.writes)
         publishedGroups = []

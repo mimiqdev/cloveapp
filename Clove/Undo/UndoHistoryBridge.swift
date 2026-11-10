@@ -174,8 +174,10 @@ final class UndoHistoryBridge {
         _ = isUndo ? await host?.undoThroughHistory() : await host?.redoThroughHistory()
         isStepping = false
         // The manager held no registration for this step, so its stacks no longer describe the
-        // history; the mirror is rebuilt from the history.
-        rebuild()
+        // history; the mirror is rebuilt from the history once no queued press is left to run
+        // against it.
+        if queuedPresses.isEmpty { rebuild() }
+        await runQueuedStep()
     }
 
     /// Finishes one step that a system registration started (PRD P0-05).
@@ -189,7 +191,7 @@ final class UndoHistoryBridge {
         let result =
             isUndo ? await host?.undoThroughHistory() : await host?.redoThroughHistory()
         isStepping = false
-        if result == nil { rebuild() }
+        if result == nil, queuedPresses.isEmpty { rebuild() }
         await runQueuedStep()
     }
 
@@ -212,7 +214,7 @@ final class UndoHistoryBridge {
         case .redo: result = await host.redoThroughHistory()
         }
         isStepping = false
-        if result == nil { rebuild() }
+        if result == nil, queuedPresses.isEmpty { rebuild() }
         await runQueuedStep()
     }
 

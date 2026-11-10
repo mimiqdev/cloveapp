@@ -190,6 +190,28 @@ protocol FolderLibrary: AnyObject {
     /// and is empty until something is recorded and again once the folder closes.
     var undoAvailability: UndoAvailability { get }
 
+    /// Admits one change and reports the marks C4 says it replaces (PRD P0-05).
+    ///
+    /// The value comes from C4's own admission, atomically with it, so a caller that records an
+    /// undo step gets the marks the user last saw even while several writes run for the photo.
+    /// Await ``write(_:)`` for C4's final status; the step exists while the write runs. Nil means
+    /// the folder no longer holds the photo or cannot write.
+    func admitMarkChange(_ change: MarkChange, to photo: PhotoIdentity) async
+        -> MarkChangeAdmission?
+
+    /// Awaits one admitted change's write and reports C4's final status (PRD P0-08).
+    func write(_ admission: MarkChangeAdmission) async -> MarkChangeStatus
+
+    /// Admits one bar action's per-photo changes and reports each photo's marks before it
+    /// (PRD P0-09).
+    ///
+    /// One call is one bar action; nil means the folder can no longer write. Await
+    /// ``write(_:)`` for the per-photo results.
+    func admitBatch(_ items: [BatchMarkItem]) async -> BatchWriteAdmission?
+
+    /// Awaits one admitted bar action's writes and reports each photo's result (PRD P0-09).
+    func write(_ admission: BatchWriteAdmission) async -> MarkBatchResult
+
     /// Records one confirmed change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
     ///
     /// PRD P0-05's Undo row restores the previous mark, so the request carries what the change
@@ -378,6 +400,38 @@ extension FolderLibrary {
 
     /// A library with no history has nothing to undo or redo and records no step (PRD P0-05).
     var undoAvailability: UndoAvailability { .none }
+
+    /// A library with no writes admits nothing, and a write for it is refused instead of claimed
+    /// as saved (PRD P0-08).
+    func admitMarkChange(_ change: MarkChange, to photo: PhotoIdentity) async
+        -> MarkChangeAdmission?
+    {
+        nil
+    }
+
+    func write(_ admission: MarkChangeAdmission) async -> MarkChangeStatus {
+        MarkChangeStatus(
+            id: admission.id, identity: admission.photo, requested: admission.change,
+            state: .failed(
+                MarkWriteFailure(
+                    reason: .locationUnavailable,
+                    message: "The folder holding this photo is not open.")))
+    }
+
+    func admitBatch(_ items: [BatchMarkItem]) async -> BatchWriteAdmission? { nil }
+
+    func write(_ admission: BatchWriteAdmission) async -> MarkBatchResult {
+        MarkBatchResult(
+            id: admission.libraryBatch, change: admission.change,
+            outcomes: admission.unavailable.map { item in
+                MarkChangeStatus(
+                    id: MarkChangeID(), identity: item.photo, requested: item.change,
+                    state: .failed(
+                        MarkWriteFailure(
+                            reason: .locationUnavailable,
+                            message: "The folder holding these photos is not open.")))
+            })
+    }
 
     func recordUndoStep(_ request: UndoRecordRequest) async -> Bool { false }
 
