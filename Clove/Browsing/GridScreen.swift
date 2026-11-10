@@ -8,6 +8,11 @@ import SwiftUI
 /// (PRD P0-03, P0-11, P0-14). The filter and order menus change the state through
 /// ``BrowsingModel`` only, so a fold, a resize or a relaunch restores them.
 ///
+/// A long press starts multi-select on a cell, a tap toggles a cell while the selection is
+/// non-empty, and the batch bar applies a rating, a label or Reject to the selected photos
+/// (PRD P0-09). The selection itself lives in ``BrowsingState/selection``, so folding, resizing or
+/// relaunching keeps it with the rest of the scene (PRD P0-14).
+///
 /// Design placeholder: system menus, symbols and colours stand in for the visual design's
 /// controls and overlays.
 struct GridScreen: View {
@@ -49,9 +54,17 @@ struct GridScreen: View {
                     currentPhoto: browsing.state.currentPhoto,
                     groups: browsing.groups,
                     shownPhotos: Set(photos.map(\.id)),
+                    selection: browsing.state.selection,
                     thumbnails: thumbnails,
                     openPhoto: { browsing.openPhoto($0) },
-                    openGroup: openGroup)
+                    openGroup: openGroup,
+                    beginSelection: { browsing.beginSelection(of: $0) },
+                    toggleSelection: { browsing.toggleSelection(of: $0) })
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if browsing.isSelecting {
+                GridBatchBar(browsing: browsing, cells: cells)
             }
         }
         .accessibilityElement(children: .contain)

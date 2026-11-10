@@ -9,11 +9,16 @@ import UIKit
 /// blue, and the group's count is drawn once, on its first shown cell; tapping that count opens
 /// the group view (PRD P0-11). A collapsed group's cover draws the count instead of a photo's
 /// marks, because the marks belong to the cover photo, not to the group (PRD Grid, collapsed).
+/// In multi-select a selected cell dims and shows a system checkmark (PRD P0-09).
 ///
 /// Design placeholder: system symbols, colours and capsules stand in for the visual design's
-/// overlay art.
+/// overlay art and its selected-cell treatment.
 final class GridPhotoCell: UICollectionViewCell {
     private let thumbnailView = UIImageView()
+    /// Dims a selected cell so the checkmark reads as a selection, not a mark (PRD P0-09).
+    private let selectionScrim = UIView()
+    /// The checkmark a selected cell shows (PRD P0-09).
+    private let selectionBadge = UIImageView()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let unavailableView = UIStackView()
     private let rejectBadge = OverlayBadge(symbol: "xmark.octagon.fill", tint: .systemRed)
@@ -32,6 +37,11 @@ final class GridPhotoCell: UICollectionViewCell {
     /// Whether the last unreadable state came from I1's scheduling pressure, not a bad file.
     private var retriesUnavailable = false
     private var isCover = false
+    /// Whether multi-select has this cell's photos selected (PRD P0-09).
+    private var showsSelection = false
+    /// Whether the grid is in multi-select, so the count tag lets the cell toggle instead of
+    /// opening the group (PRD P0-09).
+    private var isSelecting = false
     private var onOpenGroup: ((GroupID) -> Void)?
 
     /// The transparent view that carries the cell's accessibility label. It stops below the
@@ -60,8 +70,13 @@ final class GridPhotoCell: UICollectionViewCell {
     ///
     /// A marks change, a filter change or a group change reconfigures the same cell without
     /// asking for its pixels again, so browsing never re-decodes a thumbnail it already shows.
+    /// `isSelected` is multi-select's answer for this cell, and `isSelecting` says whether the
+    /// grid is in multi-select, so the count tag can step aside for the cell's own tap
+    /// (PRD P0-09).
     func configure(
         with item: GridCellItem,
+        isSelected: Bool,
+        isSelecting: Bool,
         thumbnails: any GridThumbnailSource,
         onOpenGroup: @escaping (GroupID) -> Void
     ) {
@@ -69,6 +84,8 @@ final class GridPhotoCell: UICollectionViewCell {
             currentItem?.id != item.id || currentItem?.photo.id != item.photo.id
         currentItem = item
         currentCompanions = thumbnails.companions(for: item.photo.id)
+        showsSelection = isSelected
+        self.isSelecting = isSelecting
         self.onOpenGroup = onOpenGroup
         updateOverlays()
         updateAccessibility()
@@ -114,9 +131,13 @@ final class GridPhotoCell: UICollectionViewCell {
         currentCompanions = GridCompanions()
         isUnavailable = false
         retriesUnavailable = false
+        showsSelection = false
+        isSelecting = false
         thumbnailView.image = nil
         spinner.stopAnimating()
         unavailableView.isHidden = true
+        selectionScrim.isHidden = true
+        selectionBadge.isHidden = true
         rejectBadge.isHidden = true
         companionBadge.isHidden = true
         ratingBadge.isHidden = true
@@ -139,6 +160,22 @@ final class GridPhotoCell: UICollectionViewCell {
         thumbnailView.contentMode = .scaleAspectFill
         thumbnailView.clipsToBounds = true
         thumbnailView.backgroundColor = .secondarySystemBackground
+
+        // Design placeholder: a dimming scrim and a system checkmark stand in for the visual
+        // design's selected-cell treatment (PRD P0-09).
+        selectionScrim.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        selectionScrim.isHidden = true
+        selectionScrim.isUserInteractionEnabled = false
+        selectionBadge.image = UIImage(
+            systemName: "checkmark.circle.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold))
+        selectionBadge.tintColor = .white
+        selectionBadge.contentMode = .scaleAspectFit
+        selectionBadge.layer.shadowColor = UIColor.black.cgColor
+        selectionBadge.layer.shadowOpacity = 0.5
+        selectionBadge.layer.shadowRadius = 2
+        selectionBadge.layer.shadowOffset = .zero
+        selectionBadge.isHidden = true
         photoElement.isAccessibilityElement = true
         photoElement.accessibilityTraits = .image
         photoElement.isUserInteractionEnabled = false
@@ -173,8 +210,8 @@ final class GridPhotoCell: UICollectionViewCell {
         setCount(0)
 
         for view in [
-            thumbnailView, photoElement, spinner, unavailableView, rejectBadge, companionBadge,
-            ratingBadge, colourDot, countButton, coverBadge,
+            thumbnailView, selectionScrim, photoElement, spinner, unavailableView, rejectBadge,
+            companionBadge, ratingBadge, colourDot, countButton, coverBadge, selectionBadge,
         ] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
@@ -184,6 +221,12 @@ final class GridPhotoCell: UICollectionViewCell {
             thumbnailView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             thumbnailView.topAnchor.constraint(equalTo: contentView.topAnchor),
             thumbnailView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            selectionScrim.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            selectionScrim.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            selectionScrim.topAnchor.constraint(equalTo: contentView.topAnchor),
+            selectionScrim.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            selectionBadge.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            selectionBadge.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             spinner.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             unavailableView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
@@ -235,6 +278,11 @@ final class GridPhotoCell: UICollectionViewCell {
         let showsCount = !isCover && item.group?.showsCount == true
         countButton.isHidden = !showsCount
         if showsCount { setCount(count) }
+        // In multi-select a tap on the count tag toggles the cover's group with the cell
+        // (PRD P0-09), so the tag stops opening the group view.
+        countButton.isUserInteractionEnabled = !isSelecting
+        selectionScrim.isHidden = !showsSelection
+        selectionBadge.isHidden = !showsSelection
         contentView.layer.borderWidth = item.group != nil && !isCover ? 2 : 0
         contentView.layer.borderColor = UIColor.systemBlue.cgColor
     }
@@ -308,12 +356,17 @@ final class GridPhotoCell: UICollectionViewCell {
         }
         photoElement.accessibilityIdentifier = "clove.grid.photo.\(item.photo.id.stem)"
         photoElement.accessibilityLabel = Self.accessibilityLabel(
-            for: item.photo, companions: currentCompanions, unavailable: isUnavailable)
-        if let group = item.group, group.showsCount {
+            for: item.photo, companions: currentCompanions, unavailable: isUnavailable,
+            selected: showsSelection)
+        if let group = item.group, group.showsCount, !isSelecting {
             countButton.accessibilityIdentifier = "clove.grid.group.\(group.id.rawValue)"
             countButton.accessibilityLabel = "Open the similar group of \(group.count) photos"
             contentView.accessibilityElements = [photoElement, countButton]
         } else {
+            // In multi-select the count tag does not open the group, so it is not announced as
+            // a control; the cell's own tap toggles the group instead (PRD P0-09).
+            countButton.accessibilityIdentifier = nil
+            countButton.accessibilityLabel = nil
             contentView.accessibilityElements = [photoElement]
         }
     }
@@ -348,9 +401,10 @@ final class GridPhotoCell: UICollectionViewCell {
         }
     }
 
-    /// What the cell reads: its file name and every mark it draws (PRD Grid, Scan scope).
+    /// What the cell reads: its file name, every mark it draws and its selection
+    /// (PRD Grid, Scan scope, P0-09).
     private static func accessibilityLabel(
-        for photo: GridPhoto, companions: GridCompanions, unavailable: Bool
+        for photo: GridPhoto, companions: GridCompanions, unavailable: Bool, selected: Bool
     ) -> String {
         var parts = [photo.fileName]
         if photo.marks.rating != .unrated {
@@ -366,6 +420,7 @@ final class GridPhotoCell: UICollectionViewCell {
         if companions.hasJPEG { parts.append("JPEG companion") }
         if companions.hasHEIF { parts.append("HIF companion") }
         if unavailable { parts.append("No preview") }
+        if selected { parts.append("Selected") }
         return parts.joined(separator: ", ")
     }
 }
