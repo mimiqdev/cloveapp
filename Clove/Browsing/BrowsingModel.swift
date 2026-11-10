@@ -348,12 +348,6 @@ final class BrowsingModel {
             for: latestChange(for: photo)?.state, folderLost: folderLocationLoss != nil)
     }
 
-    /// The situation to explain for one photo's latest change, or nil (PRD P0-08).
-    func saveSituation(for photo: PhotoIdentity) -> SaveSituation? {
-        SaveStatus.situation(
-            for: latestChange(for: photo)?.state, folderLoss: folderLocationLoss)
-    }
-
     /// The situation the open folder's own loss explains, or nil while it is reachable
     /// (PRD Failure and recovery, rows 3 and 6).
     var folderSituation: SaveSituation? {

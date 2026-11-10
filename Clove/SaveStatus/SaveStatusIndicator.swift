@@ -31,12 +31,19 @@ struct SaveStatusIndicator: View {
     @State private var isPickingFolder = false
 
     var body: some View {
-        if let situation = browsing.folderSituation {
-            SaveFailureBanner(
-                situation: situation, identifierPrefix: "\(identifierPrefix).failure",
-                perform: perform)
-        } else {
-            summaryControl
+        Group {
+            if let situation = browsing.folderSituation {
+                SaveFailureBanner(
+                    situation: situation, identifierPrefix: "\(identifierPrefix).failure",
+                    perform: perform)
+            } else {
+                summaryControl
+            }
+        }
+        // The sheet hangs off the indicator itself, not off the button that opens it, so it is
+        // not torn down when a retry makes the last unsaved row go away (PRD P0-08).
+        .sheet(isPresented: $showingUnsaved) {
+            UnsavedChangesView(browsing: browsing)
         }
     }
 
@@ -53,9 +60,6 @@ struct SaveStatusIndicator: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier(identifierPrefix)
                 .accessibilityHint("Shows the photos whose marks haven't been saved")
-                .sheet(isPresented: $showingUnsaved) {
-                    UnsavedChangesView(browsing: browsing)
-                }
             } else {
                 summaryLabel(summary)
                     .accessibilityIdentifier(identifierPrefix)
@@ -85,6 +89,8 @@ struct SaveStatusIndicator: View {
             "arrow.triangle.2.circlepath"
         case .saved:
             "checkmark.circle"
+        case .storedInClove:
+            "internaldrive"
         case .unsaved:
             "exclamationmark.triangle"
         }
@@ -154,6 +160,8 @@ struct SaveFailureBanner: View {
 /// The list is short on purpose: it names the photos whose marks are not confirmed instead of
 /// repeating the whole folder. Retry resends one photo's latest failed change, and Retry all
 /// makes the same call for each, so a row never claims a save C4 has not confirmed.
+///
+/// Design placeholder: a system list, sheet and buttons stand in for the design's list.
 struct UnsavedChangesView: View {
     /// The scene's browsing state and the retry calls this list makes.
     let browsing: BrowsingModel

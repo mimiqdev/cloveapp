@@ -17,25 +17,34 @@ public enum FolderSaveSummary: Hashable, Sendable {
     case saved
     /// This many photos have a change that did not confirm.
     case unsaved(Int)
+    /// Everything is confirmed, but only in Clove storage, so nothing was saved to a file.
+    ///
+    /// G1 decision 5 keeps the word Saved for XMP writes and a confirmed move, so a folder whose
+    /// changes are all stored Rejects says they are stored rather than calling them saved.
+    case storedInClove
 
     /// Summarises every photo's latest state in the open folder.
     ///
     /// A change still in progress wins, because PRD P0-08 shows **Writing…** until it settles; a
     /// finished failure counts as unsaved, and a superseded change counts as neither, because a
     /// newer change the user asked for replaced it (PRD How marks reach disk, rule 8). A Clove
-    /// Reject counts as confirmed and never as saved, so it never turns the count down.
+    /// Reject counts as confirmed but not as saved, so it never turns the count down and a folder
+    /// of only Rejects never reads **All saved**.
     public init(states: [MarkChangeState]) {
         var isWriting = false
         var failed = 0
-        var confirmed = 0
+        var saved = 0
+        var stored = 0
         for state in states {
             switch state {
             case .pending, .writing:
                 isWriting = true
             case .failed:
                 failed += 1
-            case .savedInSidecar, .savedInCloveOnly, .storedInClove:
-                confirmed += 1
+            case .savedInSidecar, .savedInCloveOnly:
+                saved += 1
+            case .storedInClove:
+                stored += 1
             case .superseded:
                 break
             }
@@ -44,8 +53,10 @@ public enum FolderSaveSummary: Hashable, Sendable {
             self = .writing
         } else if failed > 0 {
             self = .unsaved(failed)
-        } else if confirmed > 0 {
+        } else if saved > 0 {
             self = .saved
+        } else if stored > 0 {
+            self = .storedInClove
         } else {
             self = .noChanges
         }
@@ -60,6 +71,8 @@ public enum FolderSaveSummary: Hashable, Sendable {
             "Writing…"
         case .saved:
             "All saved"
+        case .storedInClove:
+            "Stored in Clove"
         case .unsaved(let count):
             count == 1 ? "1 photo not saved" : "\(count) photos not saved"
         }

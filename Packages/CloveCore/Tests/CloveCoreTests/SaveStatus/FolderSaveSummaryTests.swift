@@ -17,7 +17,10 @@ struct FolderSaveSummaryTests {
         #expect(FolderSaveSummary(states: []).unsavedCount == 0)
         #expect(
             FolderSaveSummary(states: [.savedInSidecar, .savedInCloveOnly]).text == "All saved")
-        #expect(FolderSaveSummary(states: [.storedInClove]).text == "All saved")
+        // A Clove-stored Reject is confirmed but never saved, so a folder of only Rejects says
+        // what they are instead of claiming Saved (G1 decision 5, PRD P0-08).
+        #expect(FolderSaveSummary(states: [.storedInClove]).text == "Stored in Clove")
+        #expect(FolderSaveSummary(states: [.storedInClove, .savedInSidecar]).text == "All saved")
         // A waiting or running write wins over a finished one, so the folder never reads saved
         // while a change is still on its way to storage.
         #expect(FolderSaveSummary(states: [.savedInSidecar, .pending]).text == "Writing…")
