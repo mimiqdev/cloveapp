@@ -3,11 +3,11 @@ import Testing
 
 @testable import CloveCore
 
-/// The Move rejects sheet's wording, built from C6's plan and result (PRD Move rejects, P0-10).
+/// The Move rejects sheet's wording and staged keeps, built from C6's plan and result.
 ///
-/// PRD "Proposed copy" and Failure and recovery fix the meaning of these sentences: the
-/// confirmation names the counts, the travelling file kinds and the destination folder, and the
-/// result keeps moved, failed and skipped sets separate.
+/// The design handoff's "Move Rejects" copy replaces the PRD's proposed sentence: a title with
+/// the count, the destination and "Nothing is deleted", a partial line and button once rejects
+/// are kept, a toast, and a details sheet for failures (PRD P0-10).
 @Suite("Reject move copy", .timeLimit(.minutes(1)))
 struct RejectMoveCopyTests {
     /// A plan with the requested companion kinds, sidecars and refused sets.
@@ -61,13 +61,23 @@ struct RejectMoveCopyTests {
                     RejectMoveSetPlan(
                         identity: identity, relativeFolderPath: "DCIM/100CAM",
                         destinationFolder: destination, files: members)))
+            if let set = try? PhotoSet(
+                folderID: identity.folderID, relativeFolderPath: identity.relativeFolderPath,
+                rawURL: URL(fileURLWithPath: "/clove-copy/root/IMG_\(index).ARW"))
+            {
+                sets.append(
+                    ScannedPhotoSet(
+                        photoSet: set, sidecar: .absent,
+                        imageFiles: set.imageFiles.map { file in
+                            ScannedImageFile(file: file, size: nil, modificationDate: nil)
+                        }))
+            }
         }
         for index in 0..<refused {
             let identity = PhotoIdentity(
                 folderID: FolderIdentity(rawValue: "folder-copy"),
                 relativeFolderPath: "DCIM/100CAM", stem: "REFUSED_\(index)")
-            entries.append(
-                .refused(identity: identity, refusal: .outsideOpenedFolder))
+            entries.append(.refused(identity: identity, refusal: .outsideOpenedFolder))
         }
         return RejectMovePlan(
             rootURL: root, configuration: configuration, sets: sets, entries: entries,
@@ -84,27 +94,44 @@ struct RejectMoveCopyTests {
                 folderID: folderID, relativeFolderPath: "DCIM/100CAM",
                 stem: "\(kind)_\(index)")
         }
+        func files(_ identity: PhotoIdentity) -> [RejectMoveFilePlan] {
+            [
+                RejectMoveFilePlan(
+                    role: .primary,
+                    source: URL(fileURLWithPath: "/clove-copy/root/\(identity.stem).CR3"),
+                    destination: URL(
+                        fileURLWithPath: "/clove-copy/root/_Rejected/\(identity.stem).CR3")),
+                RejectMoveFilePlan(
+                    role: .jpegCompanion,
+                    source: URL(fileURLWithPath: "/clove-copy/root/\(identity.stem).JPG"),
+                    destination: URL(
+                        fileURLWithPath: "/clove-copy/root/_Rejected/\(identity.stem).JPG")),
+            ]
+        }
         var outcomes: [RejectMoveOutcome] = []
         for index in 0..<moved {
+            let id = identity("moved", index)
             outcomes.append(
                 .moved(
                     RejectMoveMovedSet(
-                        identity: identity("moved", index), files: [],
+                        identity: id, files: files(id),
                         removedStoredReject: true, staleRejectRecord: nil)))
         }
         for index in 0..<failed {
+            let id = identity("failed", index)
             outcomes.append(
                 .failed(
                     RejectMoveFailedSet(
-                        identity: identity("failed", index),
-                        failure: RejectMoveFailure(reason: .unknown, message: "failed"),
-                        files: [])))
+                        identity: id,
+                        failure: RejectMoveFailure(reason: .readOnlyStorage, message: "failed"),
+                        files: files(id))))
         }
         for index in 0..<split {
+            let id = identity("split", index)
             outcomes.append(
                 .split(
                     RejectMoveSplitSet(
-                        identity: identity("split", index),
+                        identity: id,
                         failure: RejectMoveFailure(reason: .notConfirmed, message: "split"),
                         rollbackFailures: [], files: [])))
         }
@@ -118,86 +145,104 @@ struct RejectMoveCopyTests {
         return RejectMoveResult(id: RejectMoveBatchID(), outcomes: outcomes)
     }
 
-    /// PRD's proposed Move confirmation names every travelling kind and the configured folder.
-    @Test func confirmationNamesThePlanKindsAndFolder() {
+    /// The handoff's sheet copy names the count, the configured folder and the no-delete promise.
+    @Test func confirmationUsesHandoffStrings() {
         let confirmation = RejectMoveConfirmation(
-            plan: makePlan(
-                photos: 2, jpegCompanions: 1, heifCompanions: 1, sidecars: 2,
-                folderName: "Outtakes"))
+            plan: makePlan(photos: 2, jpegCompanions: 2, sidecars: 2, folderName: "Outtakes"))
 
-        #expect(confirmation.photoCount == 2)
-        #expect(confirmation.companionCount == 2)
-        #expect(confirmation.sidecarCount == 2)
-        #expect(confirmation.refusedCount == 0)
+        #expect(confirmation.title == "Move 2 rejected photos")
+        #expect(confirmation.body == "To Outtakes in this folder. Nothing is deleted.")
+        #expect(confirmation.partialLine == nil)
+        #expect(confirmation.moveButtonTitle == "Move")
         #expect(confirmation.refusedMessage == nil)
-        #expect(
-            confirmation.message
-                == "Move 2 rejected photos, with their JPEG companion, HIF companion and XMP,"
-                + " to the \"Outtakes\" folder? Originals won't be deleted.")
+
+        let one = RejectMoveConfirmation(plan: makePlan(photos: 1))
+        #expect(one.title == "Move 1 rejected photo")
+        #expect(one.body == "To _Rejected in this folder. Nothing is deleted.")
     }
 
-    /// The sentence names only the kinds the plan contains; no lost companions or invented XMP.
-    @Test func confirmationOmitsKindsThePlanDoesNotContain() {
-        let xmpOnly = RejectMoveConfirmation(
-            plan: makePlan(photos: 1, sidecars: 1, folderName: "_Rejected"))
-        #expect(
-            xmpOnly.message
-                == "Move 1 rejected photo, with their XMP, to the \"_Rejected\" folder?"
-                + " Originals won't be deleted.")
+    /// Keeping one reject updates the count and the button, without changing the title (P0-10).
+    @Test func confirmationCountsStagedKeeps() throws {
+        let plan = makePlan(photos: 3, sidecars: 3)
+        let selection = RejectMoveKeepSelection(plan: plan)
+        let kept = try #require(plan.readyEntries.first?.identity)
+        var withKeep = selection
+        withKeep.toggle(kept)
 
-        let jpegOnly = RejectMoveConfirmation(
-            plan: makePlan(photos: 3, jpegCompanions: 3, folderName: "_Rejected"))
-        #expect(
-            jpegOnly.message
-                == "Move 3 rejected photos, with their JPEG companions, to the \"_Rejected\""
-                + " folder? Originals won't be deleted.")
-
-        let noFiles = RejectMoveConfirmation(
-            plan: makePlan(photos: 1, folderName: "_Rejected"))
-        #expect(
-            noFiles.message
-                == "Move 1 rejected photo to the \"_Rejected\" folder? Originals won't be deleted.")
+        let confirmation = RejectMoveConfirmation(selection: withKeep)
+        #expect(confirmation.title == "Move 3 rejected photos")
+        #expect(confirmation.partialLine == "2 of 3 will move")
+        #expect(confirmation.moveButtonTitle == "Move 2")
+        #expect(confirmation.movingCount == 2)
     }
 
     /// A refused set gets its own line so the photo count never hides it (PRD P0-10).
     @Test func confirmationReportsRefusedSetsSeparately() {
         let plural = RejectMoveConfirmation(
-            plan: makePlan(photos: 2, sidecars: 2, refused: 3, folderName: "_Rejected"))
+            plan: makePlan(photos: 2, refused: 3, folderName: "_Rejected"))
         #expect(plural.refusedCount == 3)
         #expect(plural.refusedMessage == "3 photos can't be moved right now.")
-        #expect(plural.message.contains("Move 2 rejected photos"))
 
-        let singular = RejectMoveConfirmation(
-            plan: makePlan(photos: 1, refused: 1, folderName: "_Rejected"))
+        let singular = RejectMoveConfirmation(plan: makePlan(photos: 1, refused: 1))
         #expect(singular.refusedMessage == "1 photo can't be moved right now.")
     }
 
-    /// All moved shows a short confirmation, and skipped sets are counted apart from failures.
-    @Test func resultConfirmsAllMovedAndNamesSkippedSets() {
-        let allMoved = RejectMoveResultSummary(result: makeResult(moved: 2))
-        #expect(allMoved.message == "Moved 2 photos.")
-        #expect(allMoved.skippedMessage == nil)
-        #expect(!allMoved.canRetry)
+    /// A keep toggles both ways and keeps the kept set out of the staged moving plan (P0-10).
+    @Test func keepSelectionStagesWhichSetsMove() throws {
+        let plan = makePlan(photos: 3, sidecars: 3)
+        var selection = RejectMoveKeepSelection(plan: plan)
+        let first = try #require(plan.readyEntries.first?.identity)
+        let second = try #require(plan.readyEntries.dropFirst().first?.identity)
 
-        let oneMoved = RejectMoveResultSummary(result: makeResult(moved: 1))
-        #expect(oneMoved.message == "Moved 1 photo.")
+        selection.toggle(first)
+        #expect(selection.keptIdentities == [first])
+        #expect(selection.movingCount == 2)
+        #expect(selection.orderedKeptIdentities == [first])
+        #expect(!selection.movingPlan.readyEntries.contains { $0.identity == first })
+        #expect(selection.movingPlan.readyEntries.contains { $0.identity == second })
 
-        let skipped = RejectMoveResultSummary(result: makeResult(moved: 2, skipped: 1))
-        #expect(skipped.message == "Moved 2 photos.")
-        #expect(skipped.skippedMessage == "1 photo was skipped.")
-        #expect(!skipped.canRetry)
+        selection.toggle(first)
+        #expect(selection.keptIdentities.isEmpty)
+        #expect(selection.movingCount == 3)
+        #expect(selection.movingPlan.readyEntries.count == 3)
     }
 
-    /// PRD's partial move copy counts failed and split sets, and only failed ones can retry.
-    @Test func resultKeepsPartialFailuresRetryable() {
-        let partial = RejectMoveResultSummary(result: makeResult(moved: 2, failed: 1, skipped: 1))
-        #expect(partial.message == "Moved 2 photos. 1 photos couldn't be moved.")
-        #expect(partial.skippedMessage == "1 photo was skipped.")
-        #expect(partial.canRetry)
+    /// The all-moved toast is "Moved N to <folder>", with no failure line or Details (handoff).
+    @Test func toastConfirmsAllMoved() {
+        let toast = RejectMoveToast(
+            result: makeResult(moved: 2), rejectsFolderName: .defaultFolderName)
+        #expect(toast.message == "Moved 2 to _Rejected")
+        #expect(toast.failureMessage == nil)
+        #expect(toast.skippedMessage == nil)
+        #expect(!toast.showsDetails)
+    }
 
-        let splitOnly = RejectMoveResultSummary(result: makeResult(moved: 1, split: 1))
-        #expect(splitOnly.message == "Moved 1 photos. 1 photos couldn't be moved.")
-        #expect(!splitOnly.canRetry)
+    /// A partial toast adds the failed count and Details; skipped sets get their own line (P0-10).
+    @Test func toastKeepsPartialFailuresAndSkippedSetsVisible() {
+        let partial = RejectMoveToast(
+            result: makeResult(moved: 1, failed: 1, skipped: 1),
+            rejectsFolderName: RejectsFolderName(rawValue: "Outtakes") ?? .defaultFolderName)
+        #expect(partial.message == "Moved 1 to Outtakes")
+        #expect(partial.failureMessage == "1 couldn't be moved")
+        #expect(partial.skippedMessage == "1 photo was skipped.")
+        #expect(partial.showsDetails)
+    }
+
+    /// The details sheet uses the handoff's title, subtitle, file names, reasons and retry rule.
+    @Test func detailsSheetNamesFailedSetsAndReasons() {
+        let details = RejectMoveDetails(result: makeResult(moved: 1, failed: 1, split: 1))
+
+        #expect(details.title == "2 photos couldn't be moved")
+        #expect(details.subtitle == "They stay rejected in Clove. Nothing was deleted.")
+        #expect(details.rows.count == 2)
+        #expect(details.rows[0].fileName == "failed_0.CR3 + JPG")
+        #expect(details.rows[0].reason == "The location is read-only.")
+        #expect(details.rows[1].fileName == "split_0")
+        #expect(details.canRetry)
+
+        let one = RejectMoveDetails(result: makeResult(failed: 1))
+        #expect(one.title == "1 photo couldn't be moved")
+        #expect(!RejectMoveDetails(result: makeResult(moved: 2)).canRetry)
     }
 
     /// The read-only sentence PRD Failure and recovery proposes lives in one place.
