@@ -72,6 +72,7 @@ final class BrowsingModel {
         self.state = state
         self.groups = library.groups
         self.recents = library.recents
+        self.thumbnails = library.thumbnails
         self.recentFailures = [:]
         self.storedPhotos = library.photos
         refresh()
@@ -94,10 +95,12 @@ final class BrowsingModel {
 
     /// The grid's thumbnail source for the open folder (PRD P0-03).
     ///
-    /// It comes from the library, so the grid draws a real folder's previews through C11's
-    /// session and picks up a new source when another folder opens, without reaching into the
+    /// The model keeps it rather than reading the library on every render, because the library is
+    /// not observable: opening another folder replaces the source here, so no later change can
+    /// leave the grid drawing from the previous folder's pipeline. It comes from the library, so
+    /// the grid draws a real folder's previews through C11's session without reaching into the
     /// library itself.
-    var thumbnails: any GridThumbnailSource { library.thumbnails }
+    private(set) var thumbnails: any GridThumbnailSource
 
     /// Whether entry can return to a folder without the picker (PRD P0-01).
     ///
@@ -296,8 +299,9 @@ final class BrowsingModel {
             if saved.showsPhotos {
                 showOpenFolder()
                 pendingRestore = PendingBrowsingRestore(saved: saved, shown: state)
-                resolvePendingRestore()
+                resolvePendingRestore(scanFinished: false)
             } else {
+                thumbnails = library.thumbnails
                 state = saved.restored(from: .available(library.contents)).state
             }
         case nil:
@@ -310,9 +314,14 @@ final class BrowsingModel {
     }
 
     /// Applies or drops a pending saved state as the folder's contents arrive (PRD P0-14).
-    private func resolvePendingRestore() {
+    ///
+    /// The finished scan is passed in so a photo that is gone by then takes U1's fallback instead
+    /// of holding the restore forever; a partial scan counts as finished.
+    private func resolvePendingRestore(scanFinished: Bool) {
         guard let pending = pendingRestore else { return }
-        switch pending.decision(current: state, contents: library.contents) {
+        switch pending.decision(
+            current: state, contents: library.contents, scanFinished: scanFinished)
+        {
         case .apply(let restored):
             pendingRestore = nil
             state = restored.state
@@ -329,10 +338,10 @@ final class BrowsingModel {
         switch update {
         case .photos, .reads:
             refresh()
-            resolvePendingRestore()
+            resolvePendingRestore(scanFinished: false)
         case .scanFinished:
             refresh()
-            resolvePendingRestore()
+            resolvePendingRestore(scanFinished: true)
             await reloadRecents()
         case .change(let status):
             // A streamed transition keeps "Writing…" and "Saved" current without re-reading
@@ -350,6 +359,9 @@ final class BrowsingModel {
         state.selection = []
         state.groupPosition = nil
         state.route = .grid
+        // The library replaced its pipeline with the folder's, so the grid takes the new source
+        // even when the route does not change.
+        thumbnails = library.thumbnails
     }
 
     /// Takes the library's current photos, groups and save states.

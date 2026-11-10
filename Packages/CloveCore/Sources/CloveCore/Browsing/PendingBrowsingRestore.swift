@@ -22,11 +22,13 @@ public enum PendingBrowsingRestoreDecision: Hashable, Sendable {
 /// moment: U1's ``BrowsingState/restored(from:)`` drops a photo the folder does not hold yet, so
 /// validating early would drop the saved photo, selection and group place on every launch.
 ///
-/// The pending state therefore applies once the folder holds every photo it names, at the latest
-/// when the scan finishes, and only while the scene still shows exactly what the reopen produced.
-/// Any navigation inside the restored folder, another folder opened, or a folder that stopped
-/// answering drops it, so a restore can never overwrite what the user did after the launch. The
-/// decision is pure: it reads no file and changes nothing.
+/// The pending state therefore applies once the folder holds every photo it names, and always
+/// once the scan has finished, because a photo that is gone by then has to fall back the way U1
+/// defined instead of holding the restore forever; a partial scan counts as finished. It applies
+/// only while the scene still shows exactly what the reopen produced: any navigation inside the
+/// restored folder, another folder opened, or a folder that stopped answering drops it, so a
+/// restore can never overwrite what the user did after the launch. The decision is pure: it reads
+/// no file and changes nothing.
 public struct PendingBrowsingRestore: Hashable, Sendable {
     /// The state read back from the scene's storage.
     public let saved: BrowsingState
@@ -41,17 +43,21 @@ public struct PendingBrowsingRestore: Hashable, Sendable {
         self.shown = shown
     }
 
-    /// Decides from the state the screens show now and the folder's current contents.
+    /// Decides from the state the screens show now, the folder's current contents and whether its
+    /// scan has finished.
     ///
     /// A state that differs from ``shown`` means the user navigated, another folder replaced the
     /// saved one, or the session ended; the pending state is dropped rather than applied late.
-    /// The saved photo, selection and group-view photo all have to be present before the saved
-    /// state can be validated without losing them.
+    /// Before the scan finishes, the saved photo, selection and group-view photo all have to be
+    /// present, because validating earlier would drop them. Once it has finished — a partial scan
+    /// included — the saved state is validated either way, so a photo that moved or disappeared
+    /// takes U1's fallback (the detail route returns to the grid, the selection drops the missing
+    /// photo, the group view drops or moves) instead of waiting for a photo that will never come.
     public func decision(
-        current: BrowsingState, contents: FolderContents
+        current: BrowsingState, contents: FolderContents, scanFinished: Bool
     ) -> PendingBrowsingRestoreDecision {
         guard current == shown, contents.folder == saved.folder else { return .drop }
-        guard namedPhotos.isSubset(of: Set(contents.photos)) else { return .wait }
+        guard scanFinished || namedPhotos.isSubset(of: Set(contents.photos)) else { return .wait }
         return .apply(saved.restored(from: .available(contents)))
     }
 

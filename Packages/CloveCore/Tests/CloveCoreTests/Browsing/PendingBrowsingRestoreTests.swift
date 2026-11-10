@@ -22,7 +22,8 @@ struct PendingBrowsingRestoreTests {
         // the only photo the scan delivered so far.
         let partial = FolderContents(
             folder: BrowsingFixtures.folder, photos: [BrowsingFixtures.delta])
-        #expect(pending.decision(current: shown, contents: partial) == .wait)
+        #expect(
+            pending.decision(current: shown, contents: partial, scanFinished: false) == .wait)
     }
 
     @Test func appliesOnceEveryNamedPhotoIsPresent() throws {
@@ -33,7 +34,10 @@ struct PendingBrowsingRestoreTests {
                 BrowsingFixtures.delta,
             ],
             groups: BrowsingFixtures.groups)
-        guard case .apply(let restored) = pending.decision(current: shown, contents: full) else {
+        guard
+            case .apply(let restored) = pending.decision(
+                current: shown, contents: full, scanFinished: false)
+        else {
             Issue.record("the pending restore did not apply")
             return
         }
@@ -47,25 +51,76 @@ struct PendingBrowsingRestoreTests {
         #expect(restored.folderFailure == nil)
     }
 
+    @Test func appliesAtScanEndWhenTheSavedPhotoIsGone() throws {
+        // beta, the saved current photo and group photo, was moved to the rejects folder before
+        // this launch. The finished scan must still restore what survived instead of waiting.
+        let remaining = FolderContents(
+            folder: BrowsingFixtures.folder,
+            photos: [BrowsingFixtures.alpha, BrowsingFixtures.delta])
+        guard
+            case .apply(let restored) = pending.decision(
+                current: shown, contents: remaining, scanFinished: true)
+        else {
+            Issue.record("the finished scan did not apply the saved state")
+            return
+        }
+        // U1's fallback: the group and detail routes return to the grid, the missing photo and
+        // group place drop, and the filter and order survive.
+        #expect(restored.state.route == .grid)
+        #expect(restored.state.currentPhoto == nil)
+        #expect(restored.state.groupPosition == nil)
+        #expect(restored.state.selection == [BrowsingFixtures.alpha])
+        #expect(restored.state.filter == .ratedAtLeast(BrowsingFixtures.threeStars))
+        #expect(restored.state.order == .fileName)
+    }
+
+    @Test func dropsAMissingSelectionItemAtScanEnd() throws {
+        var saved = BrowsingFixtures.saved
+        saved.route = .grid
+        saved.groupPosition = nil
+        let restore = PendingBrowsingRestore(saved: saved, shown: shown)
+        // gamma, one of the two selected photos, is gone; alpha is still there.
+        let partial = FolderContents(
+            folder: BrowsingFixtures.folder,
+            photos: [BrowsingFixtures.alpha, BrowsingFixtures.beta, BrowsingFixtures.delta])
+        guard
+            case .apply(let restored) = restore.decision(
+                current: shown, contents: partial, scanFinished: true)
+        else {
+            Issue.record("the finished scan did not apply the saved state")
+            return
+        }
+        #expect(restored.state.selection == [BrowsingFixtures.alpha])
+        #expect(restored.state.currentPhoto == BrowsingFixtures.beta)
+        #expect(restored.state.filter == .ratedAtLeast(BrowsingFixtures.threeStars))
+        #expect(restored.state.order == .fileName)
+    }
+
     @Test func dropsAfterAnEarlyNavigation() {
         var navigated = shown
         navigated.currentPhoto = BrowsingFixtures.delta
         navigated.route = .detail
         let partial = FolderContents(folder: BrowsingFixtures.folder, photos: [])
-        #expect(pending.decision(current: navigated, contents: partial) == .drop)
+        #expect(
+            pending.decision(current: navigated, contents: partial, scanFinished: false) == .drop)
+        #expect(
+            pending.decision(current: navigated, contents: partial, scanFinished: true) == .drop)
     }
 
     @Test func dropsWhenAnotherFolderAnswers() {
         let other = FolderContents(
             folder: FolderIdentity(rawValue: "another-folder"), photos: [BrowsingFixtures.beta])
-        #expect(pending.decision(current: shown, contents: other) == .drop)
+        #expect(pending.decision(current: shown, contents: other, scanFinished: true) == .drop)
     }
 
     @Test func aSavedStateWithoutPhotosAppliesAtOnce() {
         let saved = BrowsingState(folder: BrowsingFixtures.folder, route: .grid)
         let restore = PendingBrowsingRestore(saved: saved, shown: shown)
         let empty = FolderContents(folder: BrowsingFixtures.folder, photos: [])
-        guard case .apply(let restored) = restore.decision(current: shown, contents: empty) else {
+        guard
+            case .apply(let restored) = restore.decision(
+                current: shown, contents: empty, scanFinished: false)
+        else {
             Issue.record("a saved grid with no photo did not apply")
             return
         }
