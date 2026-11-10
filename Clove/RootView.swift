@@ -42,6 +42,13 @@ struct RootView: View {
             .onChange(of: browsing.state) { _, state in
                 storedState = state.encoded()
             }
+            .onChange(of: settings.settings.similarGroupsEnabled) { _, enabled in
+                // The store owns the choice; the open folder applies it now, and the library
+                // reads the store again when the next folder opens (PRD P0-11, PRD Similar
+                // groups). It lives here rather than on the grid because a compact layout shows
+                // Settings instead of the grid while the toggle changes.
+                Task { await browsing.setSimilarGroupsEnabled(enabled) }
+            }
             .environment(settings)
     }
 }

@@ -18,6 +18,24 @@ public struct FolderPhotos: Sendable {
     private var scannedSets: [PhotoIdentity: ScannedPhotoSet] = [:]
     /// The order photos first arrived in, so reads never depend on dictionary order.
     private var arrival: [PhotoIdentity] = []
+    /// The camera body I4 read for each photo, kept for grouping (PRD P0-11, G1's Grouping row).
+    private var cameraBodies: [PhotoIdentity: CameraBody] = [:]
+
+    /// The photos this folder holds as grouping receives them (PRD P0-11, G1's Grouping row).
+    ///
+    /// Every photo enters in scan order; grouping itself decides which ones may join a group from
+    /// the time's provenance and the camera body (``GroupingPhoto/isEligibleForGrouping``). The
+    /// body is I4's camera model plus the serial when the file carried one, so a photo without a
+    /// model never joins a group (G1's Grouping row, PRD Similar groups step 1).
+    public var groupingPhotos: [GroupingPhoto] {
+        photos.map { photo in
+            GroupingPhoto(
+                id: photo.id,
+                fileName: photo.fileName,
+                time: photo.time,
+                body: cameraBodies[photo.id])
+        }
+    }
 
     /// Starts with no photos; the scan's batches fill it (PRD P0-01).
     public init() {}
@@ -81,6 +99,15 @@ public struct FolderPhotos: Sendable {
         gridPhotos[id]?.marks = marks
     }
 
+    /// Records the camera body I4 read for one photo, which grouping separates photos by
+    /// (PRD P0-11, G1's Grouping row).
+    ///
+    /// The body is nil when the read found no usable model, so the photo stays ungrouped instead
+    /// of being guessed into a bucket. An unknown identity is ignored.
+    public mutating func setCameraBody(_ body: CameraBody?, for id: PhotoIdentity) {
+        cameraBodies[id] = body
+    }
+
     /// Applies the fields a confirmed change named to the photo's marks (PRD P0-08).
     ///
     /// A field the change left nil keeps its value, the same rule C4 applies per field, so a
@@ -100,6 +127,7 @@ public struct FolderPhotos: Sendable {
         for id in removing {
             gridPhotos[id] = nil
             scannedSets[id] = nil
+            cameraBodies[id] = nil
         }
         arrival.removeAll { removing.contains($0) }
     }

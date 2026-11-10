@@ -58,7 +58,12 @@ final class TestLibrary: FolderLibrary {
     }
 
     let folder: FolderIdentity
-    let groups: [BrowsingGroup]
+
+    /// The groups the sample publishes; turning similar groups off publishes none (PRD P0-11).
+    private(set) var groups: [BrowsingGroup]
+
+    /// The groups the sample publishes again when similar groups are turned back on.
+    private let allGroups: [BrowsingGroup]
 
     /// The one update stream the browsing model consumes, so the sample browses through the same
     /// path as the real library (PRD P0-08, P0-13).
@@ -92,6 +97,7 @@ final class TestLibrary: FolderLibrary {
         folder = TestLibrary.emptyFolderKey
         stored = []
         groups = []
+        allGroups = []
         changes = [:]
         failingStemSuffix = nil
         thumbnails = SampleGridThumbnails()
@@ -110,6 +116,7 @@ final class TestLibrary: FolderLibrary {
         folder = TestLibrary.sampleFolderKey
         stored = photos
         self.groups = groups
+        allGroups = groups
         var byPhoto: [PhotoIdentity: MarkChangeStatus] = [:]
         for change in changes { byPhoto[change.identity] = change }
         self.changes = byPhoto
@@ -219,6 +226,18 @@ final class TestLibrary: FolderLibrary {
 
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes[photo] }
+
+    /// Turns the sample's groups on or off through the same call the settings screen makes
+    /// (PRD P0-11).
+    ///
+    /// The sample publishes the change through its stream, so the UI test exercises the whole
+    /// path — store, model, library and grid — without a folder, a fixture or a permission.
+    func setSimilarGroupsEnabled(_ enabled: Bool) async {
+        let published = enabled ? allGroups : []
+        guard published != groups else { return }
+        groups = published
+        updateContinuation.yield(.groups(published))
+    }
 
     /// The sample: 36 photos across two capture folders, a few marks, two bursts, two sets with
     /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).

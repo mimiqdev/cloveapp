@@ -72,6 +72,10 @@ struct GridScreen: View {
     }
 
     /// The filter and the order, read from and written to the browsing state (PRD P0-03).
+    ///
+    /// The grouping menu holds PRD P0-11's Run again and hides with the similar-groups setting,
+    /// because turning grouping off hides every grouping entry point (PRD Similar groups rules).
+    /// Design placeholder: the visual design replaces the menu, its label and its symbol.
     private var controls: some View {
         HStack(spacing: 16) {
             Menu {
@@ -105,6 +109,16 @@ struct GridScreen: View {
                 Label(orderName, systemImage: "arrow.up.arrow.down")
             }
             .accessibilityIdentifier("clove.grid.order")
+
+            if store.settings.similarGroupsEnabled {
+                Menu {
+                    Button("Run again") { Task { await browsing.runGroupingAgain() } }
+                        .accessibilityIdentifier("clove.grid.grouping.runAgain")
+                } label: {
+                    Label("Similar groups", systemImage: "square.grid.2x2")
+                }
+                .accessibilityIdentifier("clove.grid.grouping")
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)

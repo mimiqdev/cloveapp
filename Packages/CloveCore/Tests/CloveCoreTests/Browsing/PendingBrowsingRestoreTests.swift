@@ -23,7 +23,9 @@ struct PendingBrowsingRestoreTests {
         let partial = FolderContents(
             folder: BrowsingFixtures.folder, photos: [BrowsingFixtures.delta])
         #expect(
-            pending.decision(current: shown, contents: partial, scanFinished: false) == .wait)
+            pending.decision(
+                current: shown, contents: partial, scanFinished: false, groupsPublished: true)
+                == .wait)
     }
 
     @Test func appliesOnceEveryNamedPhotoIsPresent() throws {
@@ -36,7 +38,7 @@ struct PendingBrowsingRestoreTests {
             groups: BrowsingFixtures.groups)
         guard
             case .apply(let restored) = pending.decision(
-                current: shown, contents: full, scanFinished: false)
+                current: shown, contents: full, scanFinished: false, groupsPublished: true)
         else {
             Issue.record("the pending restore did not apply")
             return
@@ -59,7 +61,7 @@ struct PendingBrowsingRestoreTests {
             photos: [BrowsingFixtures.alpha, BrowsingFixtures.delta])
         guard
             case .apply(let restored) = pending.decision(
-                current: shown, contents: remaining, scanFinished: true)
+                current: shown, contents: remaining, scanFinished: true, groupsPublished: true)
         else {
             Issue.record("the finished scan did not apply the saved state")
             return
@@ -85,7 +87,7 @@ struct PendingBrowsingRestoreTests {
             photos: [BrowsingFixtures.alpha, BrowsingFixtures.beta, BrowsingFixtures.delta])
         guard
             case .apply(let restored) = restore.decision(
-                current: shown, contents: partial, scanFinished: true)
+                current: shown, contents: partial, scanFinished: true, groupsPublished: true)
         else {
             Issue.record("the finished scan did not apply the saved state")
             return
@@ -102,15 +104,22 @@ struct PendingBrowsingRestoreTests {
         navigated.route = .detail
         let partial = FolderContents(folder: BrowsingFixtures.folder, photos: [])
         #expect(
-            pending.decision(current: navigated, contents: partial, scanFinished: false) == .drop)
+            pending.decision(
+                current: navigated, contents: partial, scanFinished: false,
+                groupsPublished: true) == .drop)
         #expect(
-            pending.decision(current: navigated, contents: partial, scanFinished: true) == .drop)
+            pending.decision(
+                current: navigated, contents: partial, scanFinished: true,
+                groupsPublished: true) == .drop)
     }
 
     @Test func dropsWhenAnotherFolderAnswers() {
         let other = FolderContents(
             folder: FolderIdentity(rawValue: "another-folder"), photos: [BrowsingFixtures.beta])
-        #expect(pending.decision(current: shown, contents: other, scanFinished: true) == .drop)
+        #expect(
+            pending.decision(
+                current: shown, contents: other, scanFinished: true, groupsPublished: true) == .drop
+        )
     }
 
     @Test func aSavedStateWithoutPhotosAppliesAtOnce() {
@@ -119,12 +128,71 @@ struct PendingBrowsingRestoreTests {
         let empty = FolderContents(folder: BrowsingFixtures.folder, photos: [])
         guard
             case .apply(let restored) = restore.decision(
-                current: shown, contents: empty, scanFinished: false)
+                current: shown, contents: empty, scanFinished: false, groupsPublished: true)
         else {
             Issue.record("a saved grid with no photo did not apply")
             return
         }
         #expect(restored.state.route == .grid)
         #expect(restored.state.folder == BrowsingFixtures.folder)
+    }
+
+    @Test func waitsForGroupingBeforeDroppingASavedGroupView() {
+        // The scan has finished and the folder holds the saved group photo, but grouping has not
+        // published yet: the saved group key cannot be checked, so the place waits for the
+        // folder's first groups instead of dropping on every launch (PRD P0-11, P0-14).
+        var saved = BrowsingFixtures.saved
+        saved.selection = []
+        let restore = PendingBrowsingRestore(saved: saved, shown: shown)
+        let contents = FolderContents(
+            folder: BrowsingFixtures.folder,
+            photos: [BrowsingFixtures.alpha, BrowsingFixtures.beta, BrowsingFixtures.gamma])
+        #expect(
+            restore.decision(
+                current: shown, contents: contents, scanFinished: true, groupsPublished: false)
+                == .wait)
+    }
+
+    @Test func keepsASavedGroupViewOnceGroupingPublishes() throws {
+        // The same launch after grouping's time stage published: the saved group still holds the
+        // saved photo, so the group route, its key and the photo apply (PRD P0-11, P0-14).
+        var saved = BrowsingFixtures.saved
+        saved.selection = []
+        let restore = PendingBrowsingRestore(saved: saved, shown: shown)
+        let contents = FolderContents(
+            folder: BrowsingFixtures.folder,
+            photos: [BrowsingFixtures.alpha, BrowsingFixtures.beta, BrowsingFixtures.gamma],
+            groups: BrowsingFixtures.groups)
+        guard
+            case .apply(let restored) = restore.decision(
+                current: shown, contents: contents, scanFinished: true, groupsPublished: true)
+        else {
+            Issue.record("the first published groups did not restore the saved group view")
+            return
+        }
+        #expect(restored.state.route == .group)
+        #expect(restored.state.groupPosition == saved.groupPosition)
+        #expect(restored.state.currentPhoto == saved.currentPhoto)
+    }
+
+    @Test func dropsASavedGroupViewWhenGroupingPublishedNoGroup() throws {
+        // Grouping published and the photo is no longer in a group, so U1's fallback applies:
+        // the group route returns to the grid and the place drops (PRD P0-14).
+        var saved = BrowsingFixtures.saved
+        saved.selection = []
+        let restore = PendingBrowsingRestore(saved: saved, shown: shown)
+        let contents = FolderContents(
+            folder: BrowsingFixtures.folder,
+            photos: [BrowsingFixtures.alpha, BrowsingFixtures.beta, BrowsingFixtures.gamma])
+        guard
+            case .apply(let restored) = restore.decision(
+                current: shown, contents: contents, scanFinished: true, groupsPublished: true)
+        else {
+            Issue.record("the finished grouping did not apply the saved state")
+            return
+        }
+        #expect(restored.state.route == .grid)
+        #expect(restored.state.groupPosition == nil)
+        #expect(restored.state.currentPhoto == saved.currentPhoto)
     }
 }

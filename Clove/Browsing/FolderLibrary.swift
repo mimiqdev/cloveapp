@@ -25,8 +25,11 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// A change's save state moved (PRD P0-08).
     case change(MarkChangeStatus)
 
-    /// Grouping published the folder's groups (PRD P0-11). The grouping follow-up publishes
-    /// through this case, and grouping never runs in U2's library.
+    /// Grouping published the folder's groups (PRD P0-11).
+    ///
+    /// The folder's first publication always arrives, even with no groups and with similar groups
+    /// turned off, so a saved group view knows the wait is over (PRD P0-14); later publications
+    /// carry a refinement or a Run again and only arrive when they changed something.
     case groups([BrowsingGroup])
 }
 
@@ -50,7 +53,24 @@ protocol FolderLibrary: AnyObject {
     var photos: [GridPhoto] { get }
 
     /// The groups grouping published for the folder, empty when grouping is off (PRD P0-11).
+    ///
+    /// They arrive on ``updates`` as ``FolderLibraryUpdate/groups(_:)``; the first publication
+    /// always lands, even when it is empty, so a saved group view knows the wait is over
+    /// (PRD P0-14).
     var groups: [BrowsingGroup] { get }
+
+    /// Runs similar groups again for the open folder without the group cache (PRD P0-11).
+    ///
+    /// PRD P0-11 keeps Run again beside the published groups: the current photos are grouped
+    /// again and the result arrives on ``updates``. A library that cannot group does nothing.
+    func runGroupingAgain() async
+
+    /// Applies C12's similar-groups setting to the open folder (PRD P0-11).
+    ///
+    /// Off means no groups and no feature work; on publishes the cached or time-only result and
+    /// refines again. The settings screen calls this one method; persistence stays with the
+    /// settings store. A library that cannot group ignores it.
+    func setSimilarGroupsEnabled(_ enabled: Bool) async
 
     /// The grid's window on the folder's files: preview pixels and companion badges by identity
     /// (PRD P0-03, G1 preview row).
@@ -206,6 +226,10 @@ extension FolderLibrary {
     }
 
     func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult? { nil }
+
+    func runGroupingAgain() async {}
+
+    func setSimilarGroupsEnabled(_ enabled: Bool) async {}
 
     /// The reason a library with no folder access gives, which asks for the folder again
     /// (PRD P0-02).

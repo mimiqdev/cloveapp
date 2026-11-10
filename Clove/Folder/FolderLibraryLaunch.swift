@@ -15,8 +15,9 @@ import Foundation
 enum FolderLibraryLaunch {
     /// The library for this launch, chosen by the launch environment (PRD P0-01, P0-13).
     ///
-    /// The real library reads the rejects folder name from the settings store when a folder
-    /// opens, so a name changed in Settings applies to the next open (PRD Move rejects).
+    /// The real library reads the rejects folder name and the similar-groups choice from the
+    /// settings store when a folder opens, so a change made in Settings applies to the next open
+    /// (PRD Move rejects, PRD P0-11).
     static func make(
         settings: SettingsStore,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -28,6 +29,7 @@ enum FolderLibraryLaunch {
             stores: Task.detached(priority: .userInitiated) {
                 try FolderLibrarySession.Stores.applicationSupport()
             },
-            rejectsFolderName: { settings.settings.rejectsFolderName })
+            rejectsFolderName: { settings.settings.rejectsFolderName },
+            similarGroupsEnabled: { settings.settings.similarGroupsEnabled })
     }
 }
