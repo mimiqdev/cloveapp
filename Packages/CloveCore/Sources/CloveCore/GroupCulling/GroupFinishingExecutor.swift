@@ -3,8 +3,9 @@
 ///
 /// The executor is the only part of in-group culling that writes. It first records the group's
 /// completion, because the action ran even if a write later fails (PRD In-group culling, group
-/// completion), then reads the latest marks for every planned photo and asks C4 to write only
-/// what is still allowed:
+/// completion), then reads the latest marks for every planned photo, asks
+/// ``GroupFinishingPlan/changesAllowed(currentMarks:)`` what is still allowed and writes only
+/// that:
 ///
 /// - The current photo's keep change for Keep this is derived again from the marks read now, so
 ///   a photo rated after the plan was built keeps that rating (PRD In-group culling).
@@ -40,9 +41,11 @@ public struct GroupFinishingExecutor: Sendable {
     ///
     /// `photoSet` supplies C1/C2's scanned set for a member, which C4 needs for the write
     /// destinations; `latestMarks` is read at execution time, so a mark written after the plan
-    /// was built is respected. A member whose set is not supplied is dropped from the write and
-    /// listed in ``GroupFinishingResult/droppedPhotos``. An unavailable plan, such as Keep this
-    /// with the viewed photo outside the group, writes nothing and records no completion
+    /// was built is respected. The re-check itself is
+    /// ``GroupFinishingPlan/changesAllowed(currentMarks:)``'s, the one rule every caller that
+    /// applies a finishing plan uses. A member whose set is not supplied is dropped from the write
+    /// and listed in ``GroupFinishingResult/droppedPhotos``. An unavailable plan, such as Keep
+    /// this with the viewed photo outside the group, writes nothing and records no completion
     /// (PRD P0-12; PRD P0-11).
     public func execute(
         _ plan: GroupFinishingPlan,
@@ -56,46 +59,42 @@ public struct GroupFinishingExecutor: Sendable {
         // (PRD In-group culling, group completion; PRD P0-12).
         await completion.recordFinishingAction(on: plan.groupID)
 
+        // Keep this reads the current photo even when the plan had nothing to change for it, so
+        // the marks are read for the current photo and for every planned one.
+        var marks: [PhotoIdentity: PhotoMarks] = [:]
+        if plan.action == .keepThis {
+            marks[plan.currentPhoto] = await latestMarks(plan.currentPhoto)
+        }
+        for change in plan.changes where marks[change.photo] == nil {
+            marks[change.photo] = await latestMarks(change.photo)
+        }
+        let allowed = plan.changesAllowed { marks[$0] ?? PhotoMarks() }
+
         var outcomes: [GroupFinishingOutcome] = []
         var droppedPhotos: [PhotoIdentity] = []
-        var keptChangeID: MarkChangeID?
+        for change in plan.changes where !allowed.contains(where: { $0.photo == change.photo }) {
+            droppedPhotos.append(change.photo)
+        }
 
-        if plan.action == .keepThis {
-            let latest = await latestMarks(plan.currentPhoto)
-            let change = GroupFinishingPlan.keepChange(
-                for: latest, keepRating: plan.keepRating)
-            if !change.isEmpty {
-                if let set = await photoSet(plan.currentPhoto) {
-                    let status = await queue.apply(change, to: set)
-                    keptChangeID = status.id
-                    let applied = GroupFinishingChange(
-                        photo: plan.currentPhoto, kind: .keep, marksBefore: latest,
-                        change: change)
-                    outcomes.append(GroupFinishingOutcome(change: applied, status: status))
-                } else {
-                    droppedPhotos.append(plan.currentPhoto)
-                }
-            } else if plan.keptPhoto != nil {
-                // The photo gained a rating after the plan was built, so Keep this has nothing
-                // left to change (PRD In-group culling, finishing actions).
-                droppedPhotos.append(plan.currentPhoto)
+        var keptChangeID: MarkChangeID?
+        if let keep = allowed.first(where: { $0.kind == .keep }) {
+            if let set = await photoSet(keep.photo) {
+                let status = await queue.apply(keep.change, to: set)
+                keptChangeID = status.id
+                outcomes.append(GroupFinishingOutcome(change: keep, status: status))
+            } else {
+                droppedPhotos.append(keep.photo)
             }
         }
 
         var rejectChanges: [GroupFinishingChange] = []
         var rejectSets: [ScannedPhotoSet] = []
-        for planned in plan.rejects {
-            let latest = await latestMarks(planned.photo)
-            // A photo that gained a rating, label or Reject since the plan is never rejected
-            // (PRD P0-12; PRD In-group culling, finishing actions).
-            guard latest.isUnmarked, let set = await photoSet(planned.photo) else {
-                droppedPhotos.append(planned.photo)
+        for reject in allowed where reject.kind == .reject {
+            guard let set = await photoSet(reject.photo) else {
+                droppedPhotos.append(reject.photo)
                 continue
             }
-            rejectChanges.append(
-                GroupFinishingChange(
-                    photo: planned.photo, kind: .reject, marksBefore: latest,
-                    change: planned.change))
+            rejectChanges.append(reject)
             rejectSets.append(set)
         }
         var rejectedBatchID: MarkBatchID?

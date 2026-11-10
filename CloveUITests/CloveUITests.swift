@@ -32,6 +32,7 @@ final class CloveUITests: XCTestCase {
         advanceByEdgeTap(in: app)
         returnToGrid(in: app)
         openGroup(in: app)
+        cullTheGroup(in: app)
         openSettings(in: app)
         showGroupsAsCollapsedCovers(in: app)
         showGroupsAsExpandedCells(in: app)
@@ -344,6 +345,121 @@ final class CloveUITests: XCTestCase {
             element(in: app, "clove.group").waitForExistence(timeout: 10),
             "The group view did not appear"
         )
+    }
+
+    /// The group view marks, finishes and completes the test library's two bursts (PRD In-group
+    /// culling, P0-12; PRD Auto-advance).
+    ///
+    /// The library's first burst starts with two decided photos and one undecided, and the second
+    /// with three undecided, so the path covers C10's count, the group's next-undecided advance,
+    /// the finishing actions and the completion setting's default.
+    @MainActor
+    private func cullTheGroup(in app: XCUIApplication) {
+        checkGroupHeader(in: app)
+        rateWithinTheGroup(in: app)
+        finishTheFirstGroup(in: app)
+        rateInTheNextGroup(in: app)
+        finishTheLastGroup(in: app)
+        checkTheFinishingRejects(in: app)
+    }
+
+    /// The group view opens on its first photo and shows C10's count (PRD In-group culling,
+    /// layout).
+    @MainActor
+    private func checkGroupHeader(in app: XCUIApplication) {
+        waitForFileName("MMQ02678.ARW", in: app)
+        XCTAssertEqual(
+            groupHeader(in: app).label, "Undecided 1 / 3 total",
+            "The group view lost C10's undecided count")
+    }
+
+    /// A rating in the group view advances to the group's next undecided photo, which skips the
+    /// rated and rejected ones in between (PRD In-group culling; PRD Auto-advance).
+    @MainActor
+    private func rateWithinTheGroup(in app: XCUIApplication) {
+        let threeStars = element(in: app, "clove.detail.rate.3")
+        XCTAssertTrue(
+            threeStars.waitForExistence(timeout: 10), "The group view had no rating bar")
+        threeStars.tap()
+
+        // The group's only undecided photo is its third member; the two decided ones are skipped.
+        waitForFileName("MMQ02681.ARW", in: app)
+    }
+
+    /// Keep this, reject the rest finishes the group, and the default setting opens the next
+    /// group (PRD In-group culling, finishing actions and group completion; PRD P0-12).
+    @MainActor
+    private func finishTheFirstGroup(in app: XCUIApplication) {
+        let keepThis = element(in: app, "clove.group.keepThis")
+        XCTAssertTrue(
+            keepThis.waitForExistence(timeout: 10), "The group view had no finishing actions")
+        XCTAssertTrue(keepThis.isHittable, "Keep this, reject the rest was not tappable")
+        keepThis.tap()
+
+        // Nothing is left undecided in this group, so the next incomplete group opens on its
+        // first member instead of staying on the completed one.
+        waitForFileName("MMQ02696.ARW", in: app)
+        let undecided = expectation(
+            for: NSPredicate(format: "label == %@", "Undecided 3 / 3 total"),
+            evaluatedWith: groupHeader(in: app))
+        wait(for: [undecided], timeout: 10)
+    }
+
+    /// The next group rates a photo and advances to the following undecided one (PRD In-group
+    /// culling; PRD Auto-advance).
+    @MainActor
+    private func rateInTheNextGroup(in app: XCUIApplication) {
+        let fourStars = element(in: app, "clove.detail.rate.4")
+        XCTAssertTrue(
+            fourStars.waitForExistence(timeout: 10), "The group view had no rating bar")
+        fourStars.tap()
+        waitForFileName("MMQ02697.ARW", in: app)
+    }
+
+    /// Finishing the folder's last group has no incomplete group after it, so the grid returns
+    /// (PRD In-group culling, group completion).
+    @MainActor
+    private func finishTheLastGroup(in app: XCUIApplication) {
+        let keepThis = element(in: app, "clove.group.keepThis")
+        XCTAssertTrue(keepThis.waitForExistence(timeout: 10), "The group view had no finish action")
+        keepThis.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.grid").waitForExistence(timeout: 10),
+            "The completed last group did not return to the grid")
+    }
+
+    /// Keep this, reject the rest rejects the group's unmarked photo and leaves a rated and a
+    /// kept photo alone (PRD In-group culling, finishing actions; PRD P0-12).
+    ///
+    /// The Rejected filter narrows the grid to what was rejected, so the photos that must not be
+    /// rejected have to be absent from it: it shows every rejected photo of the folder.
+    @MainActor
+    private func checkTheFinishingRejects(in app: XCUIApplication) {
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.rejected")
+
+        let rejected = element(in: app, "clove.grid.photo.mmq02698")
+        XCTAssertTrue(
+            rejected.waitForExistence(timeout: 10),
+            "Keep this, reject the rest left the unmarked photo unrejected")
+        XCTAssertTrue(
+            rejected.label.contains("Rejected"), "The unmarked photo lost its Reject")
+        XCTAssertFalse(
+            element(in: app, "clove.grid.photo.mmq02696").exists,
+            "The finishing action rejected a rated photo")
+        XCTAssertFalse(
+            element(in: app, "clove.grid.photo.mmq02697").exists,
+            "The finishing action rejected the photo it kept")
+        XCTAssertFalse(
+            element(in: app, "clove.grid.photo.mmq02678").exists,
+            "The finishing action rejected a rated and labelled photo")
+
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.all")
+    }
+
+    /// C10's undecided count in the group view's header (PRD In-group culling, layout).
+    @MainActor
+    private func groupHeader(in app: XCUIApplication) -> XCUIElement {
+        element(in: app, "clove.group.undecided")
     }
 
     /// Settings open from the group view.

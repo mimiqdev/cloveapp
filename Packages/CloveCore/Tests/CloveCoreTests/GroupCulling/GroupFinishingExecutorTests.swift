@@ -255,6 +255,42 @@ struct GroupFinishingExecutorTests {
         #expect(!FileManager.default.fileExists(atPath: folder.file("C.xmp").path))
     }
 
+    /// A rating that is still being written already counts as marked, so the executor never
+    /// rejects that photo (PRD P0-12; PRD How marks reach disk, rule 8).
+    ///
+    /// Auto-advance can show the next photo of the group within the write's time, so the group view
+    /// plans the next action while the rating is only requested. C4 keeps the request until a newer
+    /// change replaces it, so the requested rating is what the re-check reads.
+    @Test func aPhotoWithAPendingRatingIsNotRejected() async throws {
+        let folder = try WriteTestFolder()
+        defer { folder.remove() }
+        let double = WriteFileSystemDouble()
+        let queue = MarkWriteQueue(storeDirectory: folder.file("store"), fileSystem: double)
+        let executor = GroupFinishingExecutor(queue: queue)
+        let sets = try makeSets(folder)
+        let members = sets.map(\.id)
+        let group = groupCullingGroup("pending-rating", members: members)
+        let source = makeSource([:])
+        let plan = GroupFinishingPlan(
+            group: group,
+            action: .keepThis,
+            currentPhoto: members[0],
+            marks: [:],
+            enabledRatings: groupCullingTwoAndFour)
+        // B's rating is admitted and not saved yet; its requested marks are what the app holds.
+        let pending = MarkChange(rating: groupCullingRating(3))
+        await source.set(PhotoMarks().including(pending), for: members[1])
+
+        let result = await executor.execute(
+            plan,
+            photoSet: { identity in sets.first { $0.id == identity } },
+            latestMarks: { await source.marks(for: $0) })
+
+        #expect(result.droppedPhotos == [members[1]])
+        #expect(result.outcomes.map(\.photo) == [members[0], members[2]])
+        #expect(!FileManager.default.fileExists(atPath: folder.file("B.xmp").path))
+    }
+
     @Test func keepThisKeepsARatingWrittenAfterThePlan() async throws {
         let folder = try WriteTestFolder()
         defer { folder.remove() }
