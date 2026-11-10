@@ -225,10 +225,8 @@ struct DesignGalleryScreen: View {
     private var progress: some View {
         section("Progress line") {
             VStack(spacing: 12) {
-                ProgressLine(progress: 0.4, identifier: "clove.progress")
-                ProgressLine(
-                    progress: 0.7, tone: .grouping,
-                    identifier: "clove.design.gallery.progress.grouping")
+                ProgressLine(progress: 0.4)
+                ProgressLine(progress: 0.7, tone: .grouping)
             }
         }
     }
@@ -262,4 +260,8 @@ struct DesignGalleryScreen: View {
 
     /// The gallery draws state, it does not apply marks.
     private func noRate(_ rating: Rating) {}
+}
+
+#Preview("Design gallery") {
+    DesignGalleryScreen()
 }

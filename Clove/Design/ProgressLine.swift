@@ -13,9 +13,6 @@ struct ProgressLine: View {
     /// What the line is reporting, which picks its colour.
     var tone: Tone = .reading
 
-    /// The identifier the screen's UI test uses.
-    var identifier = "clove.progress"
-
     /// The two states components.md fills the line in.
     enum Tone {
         /// Reading the folder, in `accent`.
@@ -45,8 +42,6 @@ struct ProgressLine: View {
                 }
             }
             .frame(height: 2)
-            .accessibilityElement()
-            .accessibilityIdentifier(identifier)
             .accessibilityHidden(true)
         }
     }
@@ -54,8 +49,8 @@ struct ProgressLine: View {
 
 #Preview("Progress line") {
     VStack(spacing: 16) {
-        ProgressLine(progress: 0.4, identifier: "preview.progress")
-        ProgressLine(progress: 0.7, tone: .grouping, identifier: "preview.progress.grouping")
+        ProgressLine(progress: 0.4)
+        ProgressLine(progress: 0.7, tone: .grouping)
     }
     .padding(16)
     .background(Rectangle().fill(Color.clove.bg.canvas))
