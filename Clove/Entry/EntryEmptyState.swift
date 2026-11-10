@@ -11,7 +11,7 @@ struct EntryEmptyState: View {
         VStack(spacing: 0) {
             ZStack {
                 frame.rotationEffect(.degrees(-9)).offset(x: -46, y: 22)
-                frame.rotationEffect(.degrees(-6)).offset(x: 48, y: 6)
+                frame.rotationEffect(.degrees(6)).offset(x: 48, y: 6)
                 frame
             }
             .frame(height: 190)

@@ -113,10 +113,8 @@ struct BrowseShell: View {
 }
 
 extension View {
-    /// The placeholder navigation chrome every browsing screen shares (PRD P0-13).
-    ///
-    /// Design placeholder: the visual design replaces the title, the back button and the settings
-    /// item.
+    /// Shared navigation for browsing, with Entry's own header and Settings' Done action
+    /// (PRD P0-13; handoff Entry and Settings).
     func browsingChrome(title: String, browsing: BrowsingModel) -> some View {
         self
             .navigationTitle(title)

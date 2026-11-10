@@ -165,6 +165,8 @@ final class FolderLibrarySession: FolderLibrary {
     private var lastViewedPhoto: PhotoIdentity?
     private var entryPreviewTask: Task<Void, Never>?
     private var progressPersistence: Task<Void, Never>?
+    private var progressDebounceTask: Task<Void, Never>?
+    private var entryProgress: FolderProgress?
     private var changedPhotos: Set<PhotoIdentity> = []
 
     /// The last queued open transition, so two opens can never install out of order.
@@ -684,10 +686,12 @@ final class FolderLibrarySession: FolderLibrary {
         prepareEntryPreviews()
     }
 
-    /// Persists confirmed progress, including partial scans, without reading the folder.
+    /// Persists progress without reading the folder; incomplete scans keep the prior counts.
     func recordEntryProgress(lastViewed: PhotoIdentity?) async {
         if let lastViewed, lastViewed.folderID == folder { lastViewedPhoto = lastViewed }
         guard folder != Self.noFolder, openSession != nil else { return }
+        progressDebounceTask?.cancel()
+        progressDebounceTask = nil
         persistEntryProgress()
         await progressPersistence?.value
         await reloadRecents()
@@ -697,10 +701,12 @@ final class FolderLibrarySession: FolderLibrary {
     private func persistEntryProgress() {
         let photos = store.photos
         let identity = folder
-        let progress = FolderProgress(
-            confirmedMarks: photos.map(\.marks), isComplete: completedScanStatus == .complete,
-            lastViewedPhoto: lastViewedPhoto ?? photos.first?.id,
+        let complete = completedScanStatus == .complete
+        let progress = FolderProgress.snapshot(
+            confirmedMarks: complete ? photos.map(\.marks) : [], scanIsComplete: complete,
+            previous: entryProgress, lastViewedPhoto: lastViewedPhoto ?? photos.first?.id,
             previewPhotos: Array(photos.prefix(3).map(\.id)))
+        entryProgress = progress
         let previous = progressPersistence
         progressPersistence = Task { [stores] in
             await previous?.value
@@ -709,13 +715,28 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
-    /// Prepares at most four previews during browsing, under the existing pipeline's scope.
+    /// Coalesces a batch into one recount and Recents write after marking settles (PRD P0-08).
+    private func scheduleEntryProgress() {
+        progressDebounceTask?.cancel()
+        let generation = scanGeneration
+        progressDebounceTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+            guard let self, generation == self.scanGeneration else { return }
+            self.progressDebounceTask = nil
+            await self.recordEntryProgress(lastViewed: self.lastViewedPhoto)
+        }
+    }
+
+    /// Prepares at most four previews after navigation settles, under the pipeline's scope.
     private func prepareEntryPreviews() {
         entryPreviewTask?.cancel()
-        let source = thumbnails
-        let previews = Array(store.photos.prefix(3).map(\.id))
-        let identities = Array(Set(previews + [lastViewedPhoto].compactMap { $0 }))
-        entryPreviewTask = Task {
+        let generation = scanGeneration
+        entryPreviewTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+            guard let self, generation == self.scanGeneration else { return }
+            let source = self.thumbnails
+            let previews = Array(self.store.photos.prefix(3).map(\.id))
+            let identities = Array(Set(previews + [self.lastViewedPhoto].compactMap { $0 }))
             for photo in identities {
                 guard !Task.isCancelled else { return }
                 if case .image(let image) = await source.thumbnail(for: photo, priority: .prefetch),
@@ -817,7 +838,10 @@ final class FolderLibrarySession: FolderLibrary {
     private func install(_ opened: OpenedFolder) async {
         await endOpenFolder()
         completedScanStatus = nil
-        lastViewedPhoto = opened.recent.progress?.lastViewedPhoto
+        entryProgress =
+            recents.first(where: { $0.id == opened.recent.id })?.progress
+            ?? opened.recent.progress
+        lastViewedPhoto = entryProgress?.lastViewedPhoto
         changedPhotos = []
         guard case .success(let stores) = await resolvedStores() else {
             // Without the app-private stores the folder can be neither scanned nor written, so
@@ -878,6 +902,8 @@ final class FolderLibrarySession: FolderLibrary {
     private func endOpenFolder() async {
         entryPreviewTask?.cancel()
         entryPreviewTask = nil
+        progressDebounceTask?.cancel()
+        progressDebounceTask = nil
         scanGeneration += 1
         if let monitor = locationMonitor {
             locationMonitor = nil
@@ -1354,7 +1380,7 @@ final class FolderLibrarySession: FolderLibrary {
             store.apply(status.requested, to: status.identity)
             if let photo = store.photo(for: status.identity) {
                 publish(.reads(times: [:], marks: [status.identity: photo.marks]))
-                persistEntryProgress()
+                scheduleEntryProgress()
             }
         }
         publish(.change(status))

@@ -35,7 +35,9 @@ struct EntryScreen: View {
 
     @ViewBuilder private var entryContent: some View {
         Group {
-            if let hero = browsing.recents.first {
+            if !browsing.hasLoadedRecents && browsing.recents.isEmpty {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let hero = browsing.recents.first {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         heroCard(hero)
@@ -85,7 +87,10 @@ struct EntryScreen: View {
     }
 
     private func needsReconnect(_ recent: RecentFolder) -> Bool {
-        recent.needsReconnect == true || browsing.recentFailure(for: recent.id) != nil
+        if let failure = browsing.recentFailure(for: recent.id) {
+            return FolderFailureExplanation.needsReconnect(failure)
+        }
+        return recent.needsReconnect == true
     }
 
     private func heroCard(_ recent: RecentFolder) -> some View {
@@ -117,7 +122,9 @@ struct EntryScreen: View {
                         Spacer(minLength: 0)
                         if needsReconnect(recent) {
                             Text("Reconnect").font(.subheadline.weight(.semibold))
-                        } else if let progress = recent.progress {
+                        } else if let progress = recent.progress,
+                            progress.isComplete || progress.total > 0
+                        {
                             Text(
                                 progress.isComplete
                                     ? "\(progress.left.formatted()) left"
@@ -125,6 +132,12 @@ struct EntryScreen: View {
                             )
                             .font(.subheadline.weight(.semibold))
                         }
+                    }
+                    if let failure = browsing.recentFailure(for: recent.id), !needsReconnect(recent)
+                    {
+                        Text(FolderFailureExplanation.text(for: failure))
+                            .font(.caption)
+                            .accessibilityIdentifier("clove.entry.recentFailure")
                     }
                     if let progress = recent.progress {
                         progressLine(progress).padding(.top, 10)
@@ -188,13 +201,20 @@ struct EntryScreen: View {
                 }
                 .frame(width: 104, height: 52)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .opacity(reconnect ? 0.5 : 1)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(RecentFolderSummary.name(for: recent)).font(.subheadline.weight(.semibold))
                     Text(
                         reconnect
-                            ? "Drive not connected" : RecentFolderSummary.location(for: recent)
+                            ? "Not connected" : RecentFolderSummary.location(for: recent)
                     )
                     .font(.caption).foregroundStyle(Color.clove.text.secondary)
+                    if let failure = browsing.recentFailure(for: recent.id), !reconnect {
+                        Text(FolderFailureExplanation.text(for: failure))
+                            .font(.caption).foregroundStyle(Color.clove.text.secondary)
+                            .lineLimit(nil)
+                            .accessibilityIdentifier("clove.entry.recentFailure")
+                    }
                 }
                 .lineLimit(2)
                 .opacity(reconnect ? 0.5 : 1)

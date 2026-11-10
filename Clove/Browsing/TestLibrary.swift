@@ -99,7 +99,7 @@ final class TestLibrary: FolderLibrary {
                 Int(environment[drainDelayVariable] ?? "") ?? 0))
     }
 
-    /// The sample folder's durable key, spelled so a saved scene never looks like a real folder.
+    /// A fixed synthetic Recents UUID so sample scenes and photo identities share one folder.
     static let sampleFolderKey = FolderIdentity(rawValue: sampleRecentID(1).uuidString)
 
     private static func sampleRecentID(_ suffix: UInt8) -> UUID {

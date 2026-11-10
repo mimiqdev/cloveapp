@@ -68,6 +68,9 @@ final class BrowsingModel {
     /// The remembered folders entry lists, most recently opened first (PRD P0-02).
     private(set) var recents: [RecentFolder]
 
+    /// Entry waits for the small app-private Recents read before showing first launch (P0-02).
+    private(set) var hasLoadedRecents = false
+
     /// Why the Recents list could not be read, or nil when it could (PRD P0-02).
     private(set) var recentsFailure: FolderAccessFailure?
 
@@ -96,7 +99,7 @@ final class BrowsingModel {
     /// (PRD Failure and recovery, last row).
     private(set) var leavePrompt: LeaveFolderPrompt?
 
-    /// Whether **Wait for writes** is draining C4 before the question is answered again.
+    /// Whether an explicit queue drain is running; the handoff's Wait action stays via Cancel.
     private(set) var isWaitingForWrites = false
 
     /// Whether this scene left its folder and is ignoring that folder's updates until a real open
@@ -162,13 +165,6 @@ final class BrowsingModel {
     /// I2 pipeline and C11 session, so detail must read the source that belongs to the folder
     /// that is open now, never a pipeline whose folder ended.
     private(set) var detailImages: any DetailImageSource
-
-    /// Whether entry can return to a folder without the picker (PRD P0-01).
-    ///
-    /// A folder that is open stays open while entry is on screen, and the test library starts
-    /// with its photos in place, so entry offers to continue in both cases. An empty folder still
-    /// counts, because coming back from its grid must not claim no folder is open.
-    var canContinueBrowsing: Bool { state.folder != nil || hasFolderContents }
 
     /// The photo the detail route shows, with its current marks (PRD Detail and marking).
     var currentPhoto: GridPhoto? {
@@ -263,15 +259,26 @@ final class BrowsingModel {
     /// the question comes first; reopening the folder that is already open is not leaving it.
     func reopen(_ recent: RecentFolder) async {
         pendingRestore = nil
+        if state.folder == recent.identity {
+            openRequests += 1
+            recentFailures[recent.id] = nil
+            folderFailure = nil
+            state.route = .grid
+            return
+        }
         guard askBeforeLeaving(.recent(recent)) else { return }
         await reopenNow(recent)
     }
 
     /// Reopens the hero at its saved photo through the scene's existing restore validation.
     func resume(_ recent: RecentFolder) async {
+        let resumePhoto =
+            state.folder == recent.identity
+            ? state.currentPhoto ?? recent.progress?.lastViewedPhoto
+            : recent.progress?.lastViewedPhoto
         await reopen(recent)
         guard recentFailures[recent.id] == nil, state.folder == recent.identity,
-            let photo = recent.progress?.lastViewedPhoto
+            let photo = resumePhoto
         else { return }
         var saved = state
         saved.currentPhoto = photo
@@ -304,6 +311,7 @@ final class BrowsingModel {
         await library.reloadRecents()
         recents = library.recents
         recentsFailure = library.recentsFailure
+        hasLoadedRecents = true
     }
 
     /// Shows one photo's detail (PRD Detail and marking).
@@ -907,9 +915,10 @@ final class BrowsingModel {
         }
     }
 
-    /// Waits for C4 to finish, then answers the leaving question again (PRD P0-08).
+    /// Explicitly drains C4, then answers the leaving question again (PRD P0-08).
     ///
-    /// **Wait for writes** keeps the question on screen with a visible waiting state, and PRD
+    /// The handoff's Wait action uses cancelLeave() instead, so it stays even after writes finish.
+    /// This helper keeps the question available during an explicitly requested drain, and PRD
     /// Failure and recovery lets the user still choose **Leave anyway**. Once every change is
     /// confirmed the user's answer proceeds to the destination they named; a change that failed
     /// stays unfinished and keeps the question, so nobody leaves believing it was saved.
@@ -1061,6 +1070,8 @@ final class BrowsingModel {
         pendingRestore = nil
         let saved = BrowsingState.decoded(from: data)
         let launchState = state
+        await reloadRecents()
+        guard state == launchState else { return }
         let availability: FolderAvailability?
         if let folderAvailability {
             availability = folderAvailability

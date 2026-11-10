@@ -2,9 +2,10 @@ import CloveCore
 import SwiftUI
 
 /// The system alert for unfinished marks (handoff Errors; PRD P0-08).
-/// Wait uses the existing drain/recheck path; Leave anyway uses the existing close path.
+/// Wait dismisses the question and stays in the folder while existing writes continue.
 struct LeaveFolderPromptView: ViewModifier {
     let browsing: BrowsingModel
+
     @State private var isPresented = false
 
     func body(content: Content) -> some View {
@@ -14,32 +15,14 @@ struct LeaveFolderPromptView: ViewModifier {
                     Task { await browsing.leaveAnyway() }
                 }
                 .accessibilityIdentifier("clove.leavePrompt.leaveAnyway")
-                Button("Wait", role: .cancel) {
-                    Task {
-                        await browsing.waitForWrites()
-                        isPresented = browsing.leavePrompt != nil
-                    }
-                }
-                .disabled(browsing.isWaitingForWrites)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("clove.leavePrompt.wait")
+                Button("Wait", role: .cancel) { browsing.cancelLeave() }
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("clove.leavePrompt.wait")
             } message: {
-                Text(
-                    browsing.isWaitingForWrites
-                        ? "Waiting for writes… You can still leave anyway."
-                        : countText
-                )
+                Text(countText)
             }
             .onChange(of: browsing.leavePrompt?.id, initial: true) { _, prompt in
                 isPresented = prompt != nil
-            }
-            .task(id: browsing.isWaitingForWrites) {
-                guard browsing.isWaitingForWrites else { return }
-                // Let the first system alert finish dismissing before presenting the waiting
-                // alert. Leave anyway stays available while the existing drain is running.
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled, browsing.leavePrompt != nil else { return }
-                isPresented = true
             }
     }
 

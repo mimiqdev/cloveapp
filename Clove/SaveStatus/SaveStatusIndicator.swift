@@ -146,6 +146,7 @@ struct SaveFailureBanner: View {
         } else if situation == .lostPermission || situation == .locationUnavailable {
             ErrorBanner(
                 message: "Access to this folder is no longer available.",
+                detail: "Open it again to keep marking.",
                 actionTitle: "Open", identifier: identifierPrefix
             ) { perform(.openFolder) }
         } else {

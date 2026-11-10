@@ -67,7 +67,7 @@ final class CloveUITests: XCTestCase {
         app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
         app.launchEnvironment["CLOVE_TEST_LIBRARY_FAIL_STEMS"] = "MMQ02678,MMQ02680"
         // A drain long enough to see the waiting state it shows (PRD Failure and recovery).
-        app.launchEnvironment["CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"] = "5000"
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"] = "1200"
         app.launch()
 
         XCTAssertTrue(
@@ -219,14 +219,20 @@ final class CloveUITests: XCTestCase {
         let title = app.alerts.staticTexts["Some marks haven't finished saving."]
         XCTAssertTrue(title.waitForExistence(timeout: 10), "Leaving did not ask first")
         XCTAssertEqual(title.label, "Some marks haven't finished saving.")
-        // Wait drains the existing queue and rechecks. A failed change remains unfinished.
+        // Wait cancels departure. A failed change remains available for Retry in this folder.
         app.alerts.buttons["Wait"].firstMatch.tap()
+        XCTAssertTrue(waitForDisappearance(title, timeout: 5), "Wait did not dismiss the alert")
         XCTAssertTrue(
-            app.alerts.staticTexts["Waiting for writes… You can still leave anyway."]
-                .waitForExistence(timeout: 3),
-            "The alert did not expose its waiting state before the five-second drain finished")
+            element(in: app, "clove.grid").waitForExistence(timeout: 5), "Wait left the folder")
+        XCTAssertFalse(element(in: app, "clove.entry").exists, "Wait returned to Entry")
+        XCTAssertEqual(element(in: app, "clove.grid.saveState").label, "1 photo not saved")
+        element(in: app, "clove.grid.saveState").tap()
         XCTAssertTrue(
-            app.alerts.buttons["Leave anyway"].firstMatch.exists, "Wait lost the leaving action")
+            element(in: app, "clove.saveState.retryAll").waitForExistence(timeout: 5),
+            "Wait prevented access to Retry")
+        element(in: app, "clove.saveState.unsaved.close").tap()
+        back(in: app)
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "A later departure did not ask again")
         app.alerts.buttons["Leave anyway"].firstMatch.tap()
 
         XCTAssertTrue(
@@ -476,19 +482,21 @@ final class CloveUITests: XCTestCase {
     /// Entry opens the test library and the grid appears.
     @MainActor
     private func checkEntryAndSettings(in app: XCUIApplication) {
-        XCTAssertTrue(element(in: app, "clove.entry.openFolder").exists)
+        XCTAssertTrue(element(in: app, "clove.entry.openFolder").waitForExistence(timeout: 5))
         XCTAssertTrue(
             app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "96, Done")).firstMatch
-                .exists)
+                .waitForExistence(timeout: 5))
         XCTAssertTrue(
             app.buttons.matching(
-                NSPredicate(format: "label CONTAINS %@", "Drive not connected, Reconnect")
-            ).firstMatch.exists)
+                NSPredicate(format: "label CONTAINS %@", "Not connected, Reconnect")
+            ).firstMatch.waitForExistence(timeout: 5))
         attachScreenshot(named: "entry-resume")
         element(in: app, "clove.nav.settings").tap()
-        XCTAssertTrue(element(in: app, "clove.settings.section.appearance").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.section.culling").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.section.move").exists)
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.appearance").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.culling").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app, "clove.settings.section.move").waitForExistence(timeout: 5))
         attachScreenshot(named: "settings-sections")
         back(in: app)
     }
@@ -1046,7 +1054,6 @@ final class CloveUITests: XCTestCase {
     /// Chooses one grid group display value on the settings screen (PRD Grid).
     @MainActor
     private func setGridGroupDisplay(in app: XCUIApplication, to name: String) {
-        scrollToSettingsControl("clove.settings.ratingScale", in: app).tap()
         let picker = scrollToSettingsControl("clove.settings.gridGroupDisplay", in: app)
         XCTAssertTrue(picker.exists, "Settings had no grid display control")
         let option = picker.buttons[name]
@@ -1054,7 +1061,6 @@ final class CloveUITests: XCTestCase {
             option.waitForExistence(timeout: 10),
             "The grid display control offered no \(name) option")
         option.tap()
-        app.navigationBars.buttons.firstMatch.tap()
     }
 
     /// Scrolls the settings list until one control is on screen (PRD Gesture-related settings).
