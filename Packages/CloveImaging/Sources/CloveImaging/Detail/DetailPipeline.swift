@@ -305,6 +305,7 @@ public actor DetailPipeline {
         _ job: Job, cache: DetailCache, reader: any DetailReading
     ) async -> DetailResult {
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
+        let fullResolutionSize = fullResolutionSize(for: job.request, cache: cache)
         var best: DetailImage?
         var failures: [DetailFailure] = []
         for step in DetailPreviewPlan.steps(for: job.request) {
@@ -320,7 +321,8 @@ public actor DetailPipeline {
                 switch await reader.read(step, displayPixels: job.request.displayPixels) {
                 case .image(let pixels):
                     let candidate = DetailImage(
-                        image: pixels, source: source, quality: step.quality)
+                        image: pixels, source: source, quality: step.quality,
+                        fullResolutionSize: fullResolutionSize)
                     cache.storePreview(candidate, for: key)
                     image = candidate
                 case .cannotOpen:
@@ -369,7 +371,9 @@ public actor DetailPipeline {
                 return verified(.available(preview.limited(by: .rawRenderFailed)))
             }
             guard isCurrent(raw) else { return .unavailable(.sourceChanged) }
-            let rendered = DetailImage(image: pixels, source: raw, quality: .nativeRAW)
+            let rendered = DetailImage(
+                image: pixels, source: raw, quality: .nativeRAW,
+                fullResolutionSize: fullResolutionSize)
             cache.storeNative(rendered, for: key)
             return verified(.available(rendered))
         }
@@ -384,7 +388,9 @@ public actor DetailPipeline {
             if let cached = cache.preview(for: key) { return verified(.available(cached)) }
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             if case .image(let pixels) = await reader.fullRaster(jpeg) {
-                let decoded = DetailImage(image: pixels, source: jpeg, quality: .raster)
+                let decoded = DetailImage(
+                    image: pixels, source: jpeg, quality: .raster,
+                    fullResolutionSize: fullResolutionSize)
                 cache.storePreview(decoded, for: key)
                 return verified(.available(decoded))
             }
@@ -400,6 +406,23 @@ public actor DetailPipeline {
     private nonisolated static func verified(_ result: DetailResult) -> DetailResult {
         guard case .available(let image) = result else { return result }
         return isCurrent(image.source) ? result : .unavailable(.sourceChanged)
+    }
+
+    /// The photo's oriented full-resolution pixel size, read from the file header once per photo
+    /// (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// G1 decision 1: with a RAW, the RAW is the photo; without one, the JPEG is. A HIF is never
+    /// fully decoded, so it has no larger size to report and the pixels' own size stands in. A
+    /// file whose revision changed since the request was built answers nil, so no stale size
+    /// reaches the view; the pixel steps report that change themselves.
+    private nonisolated static func fullResolutionSize(
+        for request: DetailRequest, cache: DetailCache
+    ) -> CGSize? {
+        guard let reference = request.raw ?? request.jpeg else { return nil }
+        if let cached = cache.fullResolutionSize(for: reference) { return cached }
+        guard isCurrent(reference), let size = DetailNativeSize.read(reference) else { return nil }
+        cache.store(fullResolutionSize: size, for: reference)
+        return size
     }
 
     private nonisolated static func isCurrent(_ source: DetailSource) -> Bool {

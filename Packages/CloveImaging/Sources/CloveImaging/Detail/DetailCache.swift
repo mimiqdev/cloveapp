@@ -56,6 +56,7 @@ public final class DetailCache: Sendable {
         var previews: [DetailCacheKey: Entry] = [:]
         var previewCost = 0
         var native: (key: DetailCacheKey, image: DetailImage)?
+        var fullResolutionSizes: [DetailSource: CGSize] = [:]
         var tick: UInt64 = 0
     }
 
@@ -72,7 +73,9 @@ public final class DetailCache: Sendable {
     ///
     /// Call this from the app's memory-warning handler: nothing here observes UIKit, so the
     /// app decides when memory is short (G1 "Scheduling and cache"). Images the view is
-    /// already displaying stay alive through their own references.
+    /// already displaying stay alive through their own references. Full-resolution sizes are a
+    /// few bytes of header metadata rather than decoded pixels, so they stay: every photo then
+    /// keeps its native 100% across a memory warning (PRD P0-04).
     public func releaseAll() {
         state.withLock { state in
             state.previews.removeAll()
@@ -122,6 +125,20 @@ public final class DetailCache: Sendable {
     /// Holds at most one native render: a newer one replaces the older (G1 "Scheduling").
     func storeNative(_ image: DetailImage, for key: DetailCacheKey) {
         state.withLock { $0.native = (key, image) }
+    }
+
+    /// The photo's full-resolution size if its header was already read (PRD P0-04).
+    ///
+    /// The source carries the file's revision, so a rewritten file reads its header again
+    /// instead of inheriting an old size (G1 "Scheduling and cache").
+    func fullResolutionSize(for source: DetailSource) -> CGSize? {
+        state.withLock { $0.fullResolutionSizes[source] }
+    }
+
+    /// Remembers a header size so one photo pays for reading it once (PRD P0-04; G1 "Preview,
+    /// detail (I2)").
+    func store(fullResolutionSize: CGSize, for source: DetailSource) {
+        state.withLock { $0.fullResolutionSizes[source] = fullResolutionSize }
     }
 
     /// Bytes currently held by preview and display-size entries, for budget tests.

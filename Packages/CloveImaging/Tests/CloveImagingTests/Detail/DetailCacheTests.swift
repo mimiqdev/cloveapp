@@ -118,6 +118,29 @@ struct DetailCacheTests {
         #expect(cache.holdsNativeImage == false)
     }
 
+    @Test func aFullResolutionSizeIsKeptPerSourceRevision() throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let file = try directory.image(name: "bytes.JPG")
+        let cache = directory.cache()
+        let source = try detailSource(file)
+        #expect(cache.fullResolutionSize(for: source) == nil)
+
+        cache.store(fullResolutionSize: CGSize(width: 8640, height: 5760), for: source)
+
+        // PRD P0-04: the header size is paid for once per photo and answers the native 100%.
+        #expect(cache.fullResolutionSize(for: source) == CGSize(width: 8640, height: 5760))
+        // A rewritten file is a different revision, so it never inherits the old size.
+        let newer = DetailSource(
+            url: source.url,
+            revision: ThumbnailRevision(size: 2, modificationTime: source.revision.modificationTime)
+        )
+        #expect(cache.fullResolutionSize(for: newer) == nil)
+        // The size is metadata rather than decoded pixels, so a memory warning keeps it.
+        cache.releaseAll()
+        #expect(cache.fullResolutionSize(for: source) == CGSize(width: 8640, height: 5760))
+    }
+
     @Test func identityCoversLocationRevisionAndRoute() throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }

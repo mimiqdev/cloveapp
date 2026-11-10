@@ -66,15 +66,25 @@ public struct DetailImage: Sendable {
     public let quality: DetailQuality
     /// Set when these are the best pixels obtainable for the request (PRD P0-04).
     public let limitation: DetailLimitation?
+    /// The photo's oriented full-resolution pixel size (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// This is the size 100% means, read from the photo's header rather than from these pixels,
+    /// so an embedded preview and the RAW render that replaces it answer the same 100% scale and
+    /// the view does not zoom a second time when the render lands. It defaults to this bitmap's
+    /// own size when the header cannot be read, which keeps the earlier behaviour for such a
+    /// file and for a source with no larger pixels to show.
+    public let fullResolutionSize: CGSize
 
     public init(
         image: CGImage, source: DetailSource, quality: DetailQuality,
-        limitation: DetailLimitation? = nil
+        limitation: DetailLimitation? = nil, fullResolutionSize: CGSize? = nil
     ) {
         self.image = image
         self.source = source
         self.quality = quality
         self.limitation = limitation
+        self.fullResolutionSize =
+            fullResolutionSize ?? CGSize(width: image.width, height: image.height)
     }
 
     public var width: Int { image.width }
@@ -89,7 +99,7 @@ public struct DetailImage: Sendable {
     func limited(by limitation: DetailLimitation) -> DetailImage {
         DetailImage(
             image: image, source: source, quality: quality,
-            limitation: self.limitation ?? limitation)
+            limitation: self.limitation ?? limitation, fullResolutionSize: fullResolutionSize)
     }
 }
 
