@@ -47,5 +47,5 @@ struct RootView: View {
 }
 
 #Preview {
-    RootView(settings: SettingsStore.launch(), library: TestLibrary.sample)
+    RootView(settings: .sample, library: TestLibrary.sample)
 }

@@ -55,8 +55,12 @@ final class SettingsStore {
         guard environment[TestLibrary.launchVariable] == "1" else {
             return SettingsStore()
         }
-        return SettingsStore(
-            persistence: SettingsPersistence(storage: TestLaunchSettingsStorage()))
+        return sample
+    }
+
+    /// A store that keeps its settings in memory, for the sample library and the previews.
+    static var sample: SettingsStore {
+        SettingsStore(persistence: SettingsPersistence(storage: SampleSettingsStorage()))
     }
 
     /// Applies one change to a copy of the current settings and stores it.
