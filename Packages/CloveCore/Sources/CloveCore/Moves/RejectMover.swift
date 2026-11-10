@@ -22,20 +22,36 @@ import Foundation
 ///   place for a retry of failed items only, and cancellation stops the run between sets, never
 ///   inside one (PRD P0-10, Failure and recovery).
 ///
-/// The actor holds only in-flight and post-run state: the batches kept for ``retryFailed(in:)``
-/// and the progress streams. All file work goes through the injected ``RejectMoveFileSystem``,
-/// which has no delete or copy operation at all.
+/// The actor holds only in-flight and post-run state: the batches kept for ``retryFailed(in:)``,
+/// the runs ``undo(_:)`` can restore, and the progress streams. All file work goes through the
+/// injected ``RejectMoveFileSystem``, which has no delete or copy operation at all.
 public actor RejectMover {
     /// The injectable file operations every move goes through (PRD P0-10).
-    private let fileSystem: any RejectMoveFileSystem
+    ///
+    /// Not `private` because the undo lane in `RejectMoveUndo.swift` adds its calls in an
+    /// extension in another file; both directions use the same seam, so one injected failure
+    /// covers the whole loop.
+    let fileSystem: any RejectMoveFileSystem
     /// The confirmation-plan builder and the whole-request preconditions (PRD P0-10).
     private let planner: RejectMovePlanner
     /// C4's write queue: drain, the per-set mark-change check and the stored-Reject removal.
-    private let markQueue: MarkWriteQueue
+    ///
+    /// Not `private` for the same reason as ``fileSystem``: undo stores Reject again through
+    /// the queue, which stays the only writer of Clove's stored Reject (G1 decision 5).
+    let markQueue: MarkWriteQueue
     /// One entry per run that still has failed items to retry (PRD P0-10).
     private var batches: [RejectMoveBatchID: AppliedBatch] = [:]
     /// Progress streams handed to a UI or a test (PRD P0-10).
     private var observers: [UUID: AsyncStream<RejectMoveProgress>.Continuation] = [:]
+    /// The completed runs ``undo(_:)`` can restore, by every batch ID they handed out.
+    ///
+    /// PRD P0-10's Undo rule makes a completed move one step, and a retry of that run belongs to
+    /// the same step, so a retry's moved sets join the first attempt's record and both handles
+    /// resolve to it. An undone run stays addressable so a second undo is refused rather than
+    /// moving files twice. `RejectMoveUndo.swift` owns the calls that read this.
+    var undoableRuns: [RejectMoveBatchID: RejectMoveUndoRun] = [:]
+    /// Undo attempts that still have failed photos to retry (PRD P0-10).
+    var undoRetries: [RejectMoveUndoBatchID: RejectMoveUndoRetry] = [:]
 
     /// Creates the mover over C4's queue and the production file system unless a test injects
     /// another.
@@ -117,6 +133,7 @@ public actor RejectMover {
         let plan = try planner.plan(for: request)
         let result = try await move(plan)
         batches[batch] = nil
+        adoptUndoRetry(result, of: batch)
         return result
     }
 
@@ -405,6 +422,7 @@ public actor RejectMover {
 
     /// Keeps the failed sets of a run for a retry of failed items only (PRD P0-10).
     private func remember(_ result: RejectMoveResult, plan: RejectMovePlan) {
+        rememberUndo(result, plan: plan)
         let failedIdentities = Set(result.failed.map(\.identity))
         guard !failedIdentities.isEmpty else {
             batches[result.id] = nil
