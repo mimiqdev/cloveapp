@@ -178,6 +178,12 @@ struct MoveRejectsDetailsSheet: View {
                     // it visible instead of dismissing the result the person just asked for.
                     dismiss()
                 }
+            } catch let refusal as RejectMoveRefusal {
+                if case .undone = refusal {
+                    retryError = "This move was undone."
+                } else {
+                    retryError = "The failed photos couldn't be retried."
+                }
             } catch {
                 retryError = "The failed photos couldn't be retried."
             }
