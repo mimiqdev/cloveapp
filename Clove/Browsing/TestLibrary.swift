@@ -28,6 +28,16 @@ final class TestLibrary: FolderLibrary {
     /// here (PRD P0-14).
     static let emptyFolderKey = FolderIdentity(rawValue: "clove.empty-library")
 
+    /// The sample photo whose file produces no preview, so the grid has an unreadable state to
+    /// show and never a blank image presented as loaded (PRD Scan scope).
+    static let unreadablePhoto = samplePhoto(2700)
+
+    /// The generated tiles the sample grid draws: no file is read and every photo is a tile
+    /// (PRD P0-03). The unreadable photo reports that state instead.
+    static var sampleThumbnails: any GridThumbnailSource {
+        SampleGridThumbnails(companions: sampleCompanions, unavailable: [unreadablePhoto])
+    }
+
     let folder: FolderIdentity
     let groups: [BrowsingGroup]
 
@@ -114,7 +124,8 @@ final class TestLibrary: FolderLibrary {
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes[photo] }
 
-    /// The sample: 36 photos across two capture folders, a few marks and two bursts (PRD P0-03).
+    /// The sample: 36 photos across two capture folders, a few marks, two bursts, two sets with
+    /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).
     static var sample: TestLibrary {
         let captureBase = Date(timeIntervalSince1970: 1_760_000_000)
         let photos = (0..<36).map { index -> GridPhoto in
@@ -178,12 +189,21 @@ final class TestLibrary: FolderLibrary {
     private static let sampleMarks: [PhotoMarks] = {
         var marks = Array(repeating: PhotoMarks(), count: 36)
         marks[0] = PhotoMarks(rating: stars(5), label: ColourLabel(colour: .red))
-        marks[1] = PhotoMarks(rating: stars(3))
+        marks[1] = PhotoMarks(rating: stars(3), isRejected: true)
         marks[4] = PhotoMarks(label: ColourLabel(colour: .green))
         marks[7] = PhotoMarks(isRejected: true)
         marks[21] = PhotoMarks(rating: stars(2), label: ColourLabel(colour: .purple))
         return marks
     }()
+
+    /// The reference companions two sample RAW sets carry, so the grid's badge shows both its
+    /// shapes: JPEG alone and JPEG with HIF (PRD Grid).
+    private static var sampleCompanions: [PhotoIdentity: GridCompanions] {
+        [
+            samplePhoto(2680): GridCompanions(hasJPEG: true),
+            samplePhoto(2695): GridCompanions(hasJPEG: true, hasHEIF: true),
+        ]
+    }
 
     /// A rating for the sample, which only uses values the camera's 0–5 range holds (PRD P0-05).
     private static func stars(_ count: Int) -> Rating {

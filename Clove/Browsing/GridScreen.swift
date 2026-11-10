@@ -3,62 +3,73 @@ import SwiftUI
 
 /// The grid: the open folder's photos in the state's order and filter (PRD Grid, P0-03).
 ///
-/// Design placeholder: the three-column collection view, its cell overlays, similar-group outlines
-/// and long-press multi-select arrive with the grid. This list keeps the flow browsable and shows
-/// the pieces the browsing state has to keep.
+/// A `UICollectionView` draws the cells, their overlays, the similar-group outlines and counts,
+/// and the collapsed covers, while the browsing state keeps the filter and the order per scene
+/// (PRD P0-03, P0-11, P0-14). The filter and order menus change the state through
+/// ``BrowsingModel`` only, so a fold, a resize or a relaunch restores them.
+///
+/// Design placeholder: system menus, symbols and colours stand in for the visual design's
+/// controls and overlays.
 struct GridScreen: View {
     /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
 
-    /// Whether a tap selects a photo instead of opening it (PRD P0-09).
-    @State private var isSelecting = false
+    /// The thumbnails the cells draw (PRD P0-03).
+    ///
+    /// The test library's generated tiles are what this build has. U2 passes
+    /// ``PipelineGridThumbnails`` over the open folder's scanned sets through the initializer,
+    /// so no screen reaches into the folder library itself.
+    @State private var thumbnails: any GridThumbnailSource
+
+    /// Uses the supplied thumbnail source, or the test library's tiles for this build.
+    init(browsing: BrowsingModel, thumbnails: (any GridThumbnailSource)? = nil) {
+        self.browsing = browsing
+        _thumbnails = State(initialValue: thumbnails ?? TestLibrary.sampleThumbnails)
+    }
 
     var body: some View {
-        List {
-            Section {
-                controls
-            }
-            if !browsing.groups.isEmpty {
-                Section("Similar groups") {
-                    ForEach(browsing.groups) { group in
-                        Button {
-                            browsing.openGroup(group)
-                        } label: {
-                            Label(
-                                "\(group.members.count) photos",
-                                systemImage: "square.stack.3d.up")
-                        }
-                        .accessibilityIdentifier("clove.grid.group.\(group.id.rawValue)")
-                    }
-                }
-            }
-            Section {
-                ForEach(browsing.photos) { photo in
-                    row(for: photo)
-                }
-            } header: {
-                Text("Photos")
-            } footer: {
-                Text("\(browsing.photos.count) shown")
+        let photos = browsing.photos
+        let cells = GridDisplay(
+            photos: photos, groups: browsing.groups,
+            groupsEnabled: Self.settings.similarGroupsEnabled,
+            display: Self.settings.gridGroupDisplay
+        ).cells
+        VStack(spacing: 0) {
+            controls
+            Divider()
+            if cells.isEmpty {
+                emptyState
+            } else {
+                GridCollectionView(
+                    items: cells,
+                    currentPhoto: browsing.state.currentPhoto,
+                    groups: browsing.groups,
+                    shownPhotos: Set(photos.map(\.id)),
+                    thumbnails: thumbnails,
+                    openPhoto: { browsing.openPhoto($0) },
+                    openGroup: openGroup)
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.grid")
     }
 
-    /// The filter, the order and the selection mode, all read from the browsing state
-    /// (PRD P0-03, P0-09).
+    /// The filter and the order, read from and written to the browsing state (PRD P0-03).
     private var controls: some View {
-        HStack {
+        HStack(spacing: 16) {
             Menu {
                 Button("All") { browsing.setFilter(.all) }
+                    .accessibilityIdentifier("clove.grid.filter.all")
                 Button("Unmarked") { browsing.setFilter(.unmarked) }
+                    .accessibilityIdentifier("clove.grid.filter.unmarked")
                 Button("Rejected") { browsing.setFilter(.rejected) }
+                    .accessibilityIdentifier("clove.grid.filter.rejected")
                 ForEach(1...5, id: \.self) { stars in
                     if let rating = Rating(rawValue: stars) {
                         Button("\(stars) stars or more") {
                             browsing.setFilter(.ratedAtLeast(rating))
                         }
+                        .accessibilityIdentifier("clove.grid.filter.stars\(stars)")
                     }
                 }
             } label: {
@@ -70,43 +81,35 @@ struct GridScreen: View {
 
             Menu {
                 Button("Capture time") { browsing.setOrder(.captureTime) }
+                    .accessibilityIdentifier("clove.grid.order.captureTime")
                 Button("File name") { browsing.setOrder(.fileName) }
+                    .accessibilityIdentifier("clove.grid.order.fileName")
             } label: {
                 Label(orderName, systemImage: "arrow.up.arrow.down")
             }
             .accessibilityIdentifier("clove.grid.order")
-
-            Spacer()
-
-            Button(isSelecting ? "Done" : "Select") { isSelecting.toggle() }
-                .accessibilityIdentifier("clove.grid.selectMode")
         }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
-    /// One photo's row: its file name and marks, opening detail or toggling selection.
-    private func row(for photo: GridPhoto) -> some View {
-        Button {
-            if isSelecting {
-                browsing.toggleSelection(photo.id)
-            } else {
-                browsing.openPhoto(photo.id)
-            }
-        } label: {
-            HStack {
-                if isSelecting {
-                    Image(
-                        systemName: browsing.state.selection.contains(photo.id)
-                            ? "checkmark.circle.fill" : "circle")
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(photo.fileName)
-                    Text(MarkSummary.text(for: photo.marks))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+    /// What the grid shows when it has no cell to draw (PRD P0-01, P0-03).
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No photos", systemImage: "photo.on.rectangle")
+        } description: {
+            Text(
+                browsing.hasFolderContents
+                    ? "No photos match this filter." : "Open a folder to see its photos.")
         }
-        .accessibilityIdentifier("clove.grid.photo.\(photo.id.stem)")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("clove.grid.empty")
+    }
+
+    /// Opens one similar group's view from its count tag or its cover (PRD Grid, P0-11).
+    private func openGroup(_ id: GroupID) {
+        guard let group = browsing.groups.first(where: { $0.id == id }) else { return }
+        browsing.openGroup(group)
     }
 
     /// The current filter's name, so the grid shows the filter it is applying (PRD P0-03).
@@ -127,4 +130,11 @@ struct GridScreen: View {
     private var orderName: String {
         browsing.state.order == .captureTime ? "Capture time" : "File name"
     }
+
+    /// C12's launch settings the grid reads: whether similar groups are offered and how they
+    /// appear (PRD Grid, Similar groups).
+    ///
+    /// The settings screen (U11) supplies live changes; this build reads the persisted values
+    /// once, which are the launch defaults while nothing writes them.
+    private static let settings = SettingsPersistence(storage: UserDefaultsSettingsStorage()).load()
 }

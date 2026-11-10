@@ -1,6 +1,7 @@
 import XCTest
 
-/// The Clove UI smoke test: the main path against the in-memory test library (PRD P0-13).
+/// The Clove UI smoke test: the grid's overlays, its filter, and U1's path from entry to
+/// settings, all against the in-memory test library (PRD Grid, P0-03, P0-13).
 final class CloveUITests: XCTestCase {
     @MainActor
     func testBrowsingFlowFromEntryToSettings() {
@@ -15,6 +16,8 @@ final class CloveUITests: XCTestCase {
         )
 
         openTestLibrary(in: app)
+        checkGridOverlays(in: app)
+        showOnlyRejectedThenAll(in: app)
         openFirstPhoto(in: app)
         markThePhoto(in: app)
         returnToGrid(in: app)
@@ -32,6 +35,64 @@ final class CloveUITests: XCTestCase {
             element(in: app, "clove.grid").waitForExistence(timeout: 10),
             "The grid did not appear after opening the folder"
         )
+    }
+
+    /// Cells read their marks: the rating and colour dot, the Reject flag and the companion badge
+    /// (PRD Grid, P0-03).
+    @MainActor
+    private func checkGridOverlays(in app: XCUIApplication) {
+        let rated = element(in: app, "clove.grid.photo.mmq02678")
+        XCTAssertTrue(rated.waitForExistence(timeout: 10), "The grid did not show its first cell")
+        XCTAssertTrue(rated.label.contains("MMQ02678.ARW"), "The cell lost its file name")
+        XCTAssertTrue(
+            rated.label.contains("5 stars"), "The cell lost its rating: \(rated.label)")
+        XCTAssertTrue(rated.label.contains("Red"), "The cell lost its colour dot: \(rated.label)")
+
+        let rejected = element(in: app, "clove.grid.photo.mmq02679")
+        XCTAssertTrue(rejected.exists, "The grid did not show the second cell")
+        XCTAssertTrue(
+            rejected.label.contains("Rejected"), "The cell lost its Reject flag: \(rejected.label)")
+
+        let companion = element(in: app, "clove.grid.photo.mmq02680")
+        XCTAssertTrue(companion.exists, "The grid did not show the third cell")
+        XCTAssertTrue(
+            companion.label.contains("JPEG companion"),
+            "The cell lost its companion badge: \(companion.label)")
+    }
+
+    /// The Rejected filter shows only rejected photos, and All brings every photo back
+    /// (PRD P0-03).
+    @MainActor
+    private func showOnlyRejectedThenAll(in app: XCUIApplication) {
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.rejected")
+        XCTAssertTrue(
+            element(in: app, "clove.grid.photo.mmq02679").waitForExistence(timeout: 10),
+            "The Rejected filter did not show a rejected photo"
+        )
+        XCTAssertFalse(
+            element(in: app, "clove.grid.photo.mmq02678").exists,
+            "The Rejected filter showed an unrejected photo"
+        )
+
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.all")
+        XCTAssertTrue(
+            element(in: app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 10),
+            "The All filter did not bring the photos back"
+        )
+    }
+
+    /// Taps a menu control, then its item (PRD P0-03).
+    @MainActor
+    private func selectMenuItem(
+        in app: XCUIApplication, _ control: String, item: String
+    ) {
+        let menu = element(in: app, control)
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "The grid did not show \(control)")
+        menu.tap()
+        let choice = app.buttons[item]
+        XCTAssertTrue(
+            choice.waitForExistence(timeout: 10), "The menu did not offer \(item)")
+        choice.tap()
     }
 
     /// The grid opens the first photo's detail, which shows its file name and saved marks.
@@ -95,11 +156,12 @@ final class CloveUITests: XCTestCase {
         )
     }
 
-    /// The grid opens a group's view.
+    /// The grid opens a group's view from its count tag (PRD Grid, P0-11).
     @MainActor
     private func openGroup(in app: XCUIApplication) {
         let group = element(in: app, "clove.grid.group.burst-2678")
         XCTAssertTrue(group.waitForExistence(timeout: 10), "The grid did not offer a similar group")
+        XCTAssertTrue(group.isHittable, "The group's count tag was not tappable")
         group.tap()
         XCTAssertTrue(
             element(in: app, "clove.group").waitForExistence(timeout: 10),
