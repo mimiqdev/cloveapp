@@ -35,14 +35,14 @@ public enum DetailZoom {
     /// The zoom scale that shows one full-resolution image pixel per screen pixel (PRD P0-04
     /// double-tap to 100%; G1 "Preview, detail (I2)").
     ///
-    /// The photo's full-resolution size is known from the file header before a RAW render
-    /// arrives, so the 100% target is the same for the embedded preview and for the render that
-    /// replaces it (G1 "Preview, detail (I2)"). The preview is drawn enlarged, soft, at that
-    /// scale; the render then supplies the pixels without a second zoom (PRD P0-04).
+    /// The photo's full-resolution size is read before a RAW render arrives, so the 100% target is
+    /// the same for the embedded preview and for the render that replaces it (G1 "Preview, detail
+    /// (I2)"). The preview is drawn enlarged, soft, at that scale; the render then supplies the
+    /// pixels without a second zoom (PRD P0-04).
     ///
     /// The scale is one native image pixel per screen pixel for the image as the render will fit
-    /// it, so it follows `nativePixels`. `shownPixels` supplies that size only when the header
-    /// could not be read, which is the behaviour before the native size was known; a preview
+    /// it, so it follows `nativePixels`. `shownPixels` supplies that size only when the read could
+    /// not give one, which is the behaviour before the native size was known; a preview
     /// with another aspect than the photo — a camera that crops its embedded preview — still
     /// lands at the render's native 100%, and only the unit image point at the viewport has to be
     /// kept when the pixels change (PRD P0-04; G1 "Preview, detail (I2)").
@@ -64,11 +64,66 @@ public enum DetailZoom {
         return max(1, horizontal, vertical)
     }
 
+    /// The scroll-view scale a double tap to 100% adopts, or nil while the view must wait for a
+    /// render (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// A photo whose 100% is its RAW's sensor pixels has no target until that size is known: the
+    /// preview on screen is smaller than the sensor, so its own pixels are never 100% (G1 "Preview,
+    /// detail (I2)"). The view keeps its zoom, starts the native render, and asks again with the
+    /// render's size.
+    ///
+    /// A photo without a RAW always has a size of its own, so nil is only the RAW's unknown size.
+    /// That is why the caller passes nil rather than the preview's pixels: ``fullResolutionScale``
+    /// already answers those for the photos where they are the truth.
+    ///
+    /// The one exception is a photo whose render can no longer bring the size — the RAW render
+    /// failed, so the preview is all it will ever give. A double tap must not do nothing then: it
+    /// inspects the preview at ``inspectionScale`` around the tapped point instead (#111).
+    ///
+    /// - Parameters:
+    ///   - nativePixels: The photo's 100% size, or nil while it is unknown.
+    ///   - shownPixels: The bitmap on screen, used only for a photo whose own pixels are 100%.
+    ///   - previewIsAll: Whether the shown preview is the last pixels this photo will give.
+    public static func fullResolutionTarget(
+        nativePixels: CGSize?, shownPixels: CGSize, viewSize: CGSize, screenScale: CGFloat,
+        previewIsAll: Bool = false
+    ) -> CGFloat? {
+        if let nativePixels, nativePixels.width > 0, nativePixels.height > 0 {
+            return fullResolutionScale(
+                nativePixels: nativePixels, shownPixels: shownPixels, viewSize: viewSize,
+                screenScale: screenScale)
+        }
+        return previewIsAll ? inspectionScale : nil
+    }
+
+    /// The zoom a requested 100% must move to when pixels of another size arrive, or nil when it
+    /// already shows the photo's 100% (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// The 100% target is computed from the size known when the double tap happens, which may be
+    /// a header that describes the preview or nothing at all. The render that replaces the preview
+    /// is the photo's own pixels, so its size is 100% from then on: when it differs from the size
+    /// the zoom was computed with, the view retargets once, at the same unit image point. Equal
+    /// sizes answer nil, so a correct size and a same-sized render never move the zoom a second
+    /// time.
+    ///
+    /// - Parameters:
+    ///   - requestedSize: The size the current 100% zoom was computed with, or nil while it is
+    ///     unknown.
+    ///   - pixels: The arriving image's oriented full-resolution size.
+    public static func retargetedFullResolutionScale(
+        from requestedSize: CGSize?, to pixels: CGSize, viewSize: CGSize, screenScale: CGFloat
+    ) -> CGFloat? {
+        guard requestedSize != pixels else { return nil }
+        return fullResolutionTarget(
+            nativePixels: pixels, shownPixels: pixels, viewSize: viewSize, screenScale: screenScale)
+    }
+
     /// The zoom scale that shows one image pixel per screen pixel for a bitmap whose own size
     /// is its full resolution (PRD P0-04 double-tap to 100%).
     ///
-    /// A shown bitmap with no separate header size, such as a HIF that is never fully decoded or
-    /// a file whose header could not be read, answers as it did before the native size was known.
+    /// A shown bitmap with no separate full-resolution size, such as a HIF that is never fully
+    /// decoded or a file whose size could not be read, answers as it did before the native size was
+    /// known.
     public static func fullResolutionScale(
         imagePixels: CGSize, viewSize: CGSize, screenScale: CGFloat
     ) -> CGFloat {

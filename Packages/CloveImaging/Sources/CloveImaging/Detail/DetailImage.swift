@@ -64,25 +64,32 @@ public struct DetailImage: Sendable {
     public let source: DetailSource
     /// Whether these are camera preview, raster, or native sensor pixels.
     public let quality: DetailQuality
+    /// Whether the photo has a RAW, so 100% is its sensor pixels and never this bitmap's own
+    /// (G1 decision 1; G1 "Preview, detail (I2)").
+    ///
+    /// A photo with a RAW is shown through an embedded preview that the detail route caps below the
+    /// sensor's size, so the preview's own pixels are never what a double-tap to 100% means. A JPEG
+    /// or HIF photo has no such larger source, so its pixels are its own 100%.
+    public let hasRAW: Bool
     /// Set when these are the best pixels obtainable for the request (PRD P0-04).
     public let limitation: DetailLimitation?
-    /// The photo's oriented full-resolution pixel size, read from its file header
-    /// (PRD P0-04; G1 "Preview, detail (I2)"), or nil when the header could not be read.
+    /// The photo's oriented full-resolution pixel size (PRD P0-04; G1 "Preview, detail (I2)"),
+    /// or nil when it is not known.
     ///
     /// This is the size 100% means, so an embedded preview and the RAW render that replaces it
     /// answer the same scale and the view does not zoom a second time when the render lands. A
-    /// render always carries its own size, because those pixels are native by definition. Nil is
-    /// the fallback the header could not fill: consumers use ``fullResolutionPixels``, which is
-    /// then this bitmap's own size.
+    /// render always carries its own size, because those pixels are native by definition. Nil
+    /// means the size could not be read; ``fullResolutionPixels`` says what that leaves.
     public let fullResolutionSize: CGSize?
 
     public init(
-        image: CGImage, source: DetailSource, quality: DetailQuality,
+        image: CGImage, source: DetailSource, quality: DetailQuality, hasRAW: Bool,
         limitation: DetailLimitation? = nil, fullResolutionSize: CGSize? = nil
     ) {
         self.image = image
         self.source = source
         self.quality = quality
+        self.hasRAW = hasRAW
         self.limitation = limitation
         self.fullResolutionSize = fullResolutionSize
     }
@@ -90,14 +97,19 @@ public struct DetailImage: Sendable {
     public var width: Int { image.width }
     public var height: Int { image.height }
 
-    /// The size 100% means for this photo, which is ``fullResolutionSize`` when it is known and
-    /// this bitmap's own size otherwise (PRD P0-04; G1 "Preview, detail (I2)").
+    /// The size 100% means for this photo, or nil while it is unknown (PRD P0-04; G1 "Preview,
+    /// detail (I2)").
     ///
-    /// The fallback is the behaviour before the native size was known: a file whose header
-    /// cannot be read keeps its shown bitmap's 100%, and a source with no larger pixels to show,
-    /// such as a HIF that is never fully decoded, answers at its preview's size.
-    public var fullResolutionPixels: CGSize {
-        fullResolutionSize ?? CGSize(width: width, height: height)
+    /// A photo without a RAW falls back to its shown bitmap's 100% when its size is unknown, which
+    /// is the behaviour before the native size was known: a HIF is never fully decoded, so its
+    /// preview is all there is, and a JPEG whose header cannot be read is its own full resolution.
+    ///
+    /// A photo with a RAW has no such fallback. Its 100% is the sensor's pixels, which are not the
+    /// preview's: a RAW is never smaller than its embedded preview, and the detail preview is capped
+    /// below the sensor's size. An unknown size therefore answers nil, and the view waits for the
+    /// render's own size instead of zooming to the preview's pixels (#111).
+    public var fullResolutionPixels: CGSize? {
+        fullResolutionSize ?? (hasRAW ? nil : CGSize(width: width, height: height))
     }
 
     /// Decoded size of this bitmap, the cost figure the detail cache budgets (S2 measured
@@ -113,11 +125,11 @@ public struct DetailImage: Sendable {
     /// This answers whether asking for more pixels can help. A native RAW render is the photo's
     /// own pixels. A raster is final when it reaches the photo's size, allowing one pixel for
     /// rounding in the fit geometry, or when it reaches the raster decode limit, beyond which no
-    /// display request can produce a larger bitmap. Below that limit, a raster whose header size
+    /// display request can produce a larger bitmap. Below that limit, a raster whose native size
     /// is unknown is not final: it is a display raster, and the route behind it — a RAW render,
     /// for one — may still deliver more. A preview is never final when it could render; a preview
-    /// whose header is unknown still asks, because the render supplies the size the header could
-    /// not.
+    /// whose native size is unknown still asks, because the render supplies the size the read
+    /// could not.
     public var isBestAvailable: Bool {
         switch quality {
         case .nativeRAW:
@@ -134,19 +146,21 @@ public struct DetailImage: Sendable {
 
     func limited(by limitation: DetailLimitation) -> DetailImage {
         DetailImage(
-            image: image, source: source, quality: quality,
+            image: image, source: source, quality: quality, hasRAW: hasRAW,
             limitation: self.limitation ?? limitation, fullResolutionSize: fullResolutionSize)
     }
 
-    /// The same pixels with the request's full-resolution size attached (PRD P0-04).
+    /// The same pixels with the request's 100% answer attached (PRD P0-04; G1 "Preview, detail
+    /// (I2)").
     ///
     /// A cached bitmap can outlive the request that stored it: a HIF companion has its own cache
-    /// identity while the photo's size comes from the RAW. The current request's size therefore
-    /// replaces the stored one, including nil for a request with no larger size to report.
-    func withFullResolutionSize(_ size: CGSize?) -> DetailImage {
+    /// identity while the photo's size and its RAW come from the set. The current request's answer
+    /// therefore replaces the stored one, including nil and no RAW for a request with no larger
+    /// size to report.
+    func withFullResolution(_ size: CGSize?, hasRAW: Bool) -> DetailImage {
         DetailImage(
-            image: image, source: source, quality: quality, limitation: limitation,
-            fullResolutionSize: size)
+            image: image, source: source, quality: quality, hasRAW: hasRAW,
+            limitation: limitation, fullResolutionSize: size)
     }
 }
 

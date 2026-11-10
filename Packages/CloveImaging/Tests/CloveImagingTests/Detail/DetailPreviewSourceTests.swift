@@ -84,7 +84,7 @@ struct DetailPreviewPlanTests {
         func image(_ pixels: Int, quality: DetailQuality = .preview) throws -> DetailImage {
             DetailImage(
                 image: try makeDetailImage(width: pixels, height: 8), source: source,
-                quality: quality)
+                quality: quality, hasRAW: true)
         }
         #expect(DetailPreviewPlan.minimumUsablePreviewPixels == 1024)
         #expect(!DetailPreviewPlan.isUsable(try image(1023), from: .embedded(source)))

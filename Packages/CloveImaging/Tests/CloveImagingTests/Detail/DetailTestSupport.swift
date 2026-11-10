@@ -241,6 +241,14 @@ func letEntriesFinish(_ gate: DetailReadGate, previews: Int = 0, natives: Int = 
     try #require(donePreviews >= previews && doneNatives >= natives)
 }
 
+/// A native size read that reports one fixed answer, so a test can supply the preview-sized or
+/// missing size a camera without usable index-0 properties gives (#111).
+struct StubDetailNativeSizeReader: DetailNativeSizeReading {
+    let size: CGSize?
+
+    func nativeSize(of reference: DetailSource, isRAW: Bool) -> CGSize? { size }
+}
+
 /// An embedded-preview size a test substitutes for a named file.
 ///
 /// The fixtures expose no usable camera HIF preview and no tiny RAW preview, so these two

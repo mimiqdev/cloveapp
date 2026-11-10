@@ -153,14 +153,14 @@ final class SampleDetailImages: DetailImageSource {
             preconditionFailure("the sample detail renderer must produce a Core Graphics image")
         }
         return DetailImage(
-            image: pixels, source: Self.source(for: photo), quality: quality,
+            image: pixels, source: Self.source(for: photo), quality: quality, hasRAW: true,
             fullResolutionSize: Self.fullResolutionSize)
     }
 
     /// The same pixels with a shortfall attached, because I2's `limited` is internal.
     private func limited(_ image: DetailImage, by limitation: DetailLimitation) -> DetailImage {
         DetailImage(
-            image: image.image, source: image.source, quality: image.quality,
+            image: image.image, source: image.source, quality: image.quality, hasRAW: image.hasRAW,
             limitation: image.limitation ?? limitation,
             fullResolutionSize: image.fullResolutionSize)
     }
