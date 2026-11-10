@@ -1,8 +1,8 @@
 import XCTest
 
-/// The Clove UI smoke test: the grid's overlays, its filter, the grid group display setting, and
-/// U1's path from entry to settings and back, all against the in-memory test library (PRD Grid,
-/// P0-03, P0-13).
+/// The Clove UI smoke test: the grid's overlays, its filter, the grid group display setting, the
+/// detail's zoom and marking gestures, and U1's path from entry to settings and back, all against
+/// the in-memory test library (PRD Grid, P0-03, P0-06, P0-13).
 final class CloveUITests: XCTestCase {
     @MainActor
     func testBrowsingFlowFromEntryToSettings() {
@@ -23,6 +23,8 @@ final class CloveUITests: XCTestCase {
         openFirstPhoto(in: app)
         checkDoubleTapZoom(in: app)
         markThePhoto(in: app)
+        rateBySwiping(in: app)
+        rejectBySwiping(in: app)
         advanceByEdgeTap(in: app)
         returnToGrid(in: app)
         openGroup(in: app)
@@ -177,10 +179,33 @@ final class CloveUITests: XCTestCase {
         preview.doubleTap()
         let fit = expectation(for: NSPredicate(format: "label == %@", "Fit"), evaluatedWith: zoom)
         wait(for: [fit], timeout: 10)
+
+        // A pinch still zooms, and while zoomed a one-finger drag pans instead of marking
+        // (PRD Detail gestures: vertical marking swipes are disabled while zoomed).
+        let saveState = element(in: app, "clove.detail.saveState")
+        let marks = element(in: app, "clove.detail.marks")
+        let marksAtFit = marks.label
+        preview.pinch(withScale: 2, velocity: 1)
+        let pinched = expectation(
+            for: NSPredicate(format: "label != %@", "Fit"), evaluatedWith: zoom)
+        wait(for: [pinched], timeout: 10)
+
+        drag(preview, byPointsX: 0, y: -150)
+
+        preview.doubleTap()
+        let backToFit = expectation(
+            for: NSPredicate(format: "label == %@", "Fit"), evaluatedWith: zoom)
+        wait(for: [backToFit], timeout: 10)
+
+        // A zoomed drag that marked would change the marks, and a write would show its own save
+        // state or move the detail on, so what both read here stays as it was at fit.
+        XCTAssertEqual(
+            marks.label, marksAtFit, "The zoomed drag rated the photo instead of panning")
+        XCTAssertEqual(saveState.label, "No change yet", "The zoomed drag wrote a mark")
     }
 
-    /// A rating applied in detail writes through the seam and the detail shows the confirmed save
-    /// state (PRD P0-05, P0-08).
+    /// A rating applied in detail writes through the seam, and the detail moves to the next photo
+    /// after the pause (PRD P0-05, P0-08, PRD Auto-advance).
     @MainActor
     private func markThePhoto(in app: XCUIApplication) {
         let saveState = element(in: app, "clove.detail.saveState")
@@ -192,14 +217,73 @@ final class CloveUITests: XCTestCase {
             fourStars.waitForExistence(timeout: 10), "The detail view had no rating buttons")
         fourStars.tap()
 
+        // Only a written mark starts the default next-photo advance, and it follows the pause
+        // (PRD Auto-advance), so the move is the proof the bar's mark was admitted; the grid
+        // reads the rating back below, and the swipe's save state is read in `rateBySwiping`.
+        waitForFileName("MMQ02679.ARW", in: app)
+    }
+
+    /// A swipe up two rating steps writes that rating, and the detail advances to the next photo
+    /// after the pause; going back shows the written rating (PRD P0-06, PRD Auto-advance).
+    ///
+    /// The drag is a fixed 150 pt, so the step is the PRD's distance and not the screen height:
+    /// 40 pt of dead zone plus two 60 pt steps puts step 2 between 100 and 160 pt.
+    @MainActor
+    private func rateBySwiping(in app: XCUIApplication) {
+        let preview = element(in: app, "clove.detail.preview")
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The detail view had no preview")
+        waitForFileName("MMQ02679.ARW", in: app)
+
+        drag(preview, byPointsX: 0, y: -150)
+
+        // The mark is written on release and the default auto-advance follows after 0.3 s.
+        waitForFileName("MMQ02680.ARW", in: app)
+
+        // Back to the rated photo: the release position decided the rating, two steps up, and the
+        // write it admitted is confirmed on screen (PRD P0-08).
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
+        waitForFileName("MMQ02679.ARW", in: app)
+        let marks = element(in: app, "clove.detail.marks")
+        let twoStars = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: marks)
+        wait(for: [twoStars], timeout: 10)
+
+        let saveState = element(in: app, "clove.detail.saveState")
         let saved = expectation(
             for: NSPredicate(format: "label == %@", "Saved"), evaluatedWith: saveState)
         wait(for: [saved], timeout: 10)
+    }
 
-        let marks = element(in: app, "clove.detail.marks")
-        XCTAssertTrue(
-            marks.label.contains("4 stars"),
-            "The detail view did not show the new rating: \(marks.label)")
+    /// A swipe down past the threshold rejects the photo and advances like a rating does
+    /// (PRD Detail gestures, PRD Auto-advance).
+    @MainActor
+    private func rejectBySwiping(in app: XCUIApplication) {
+        let preview = element(in: app, "clove.detail.preview")
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The detail view had no preview")
+        waitForFileName("MMQ02679.ARW", in: app)
+
+        drag(preview, byPointsX: 0, y: 130)
+
+        // Reject is a written mark, so the default auto-advance moves on after the pause; the
+        // grid check below reads the confirmed Reject back from the photo.
+        waitForFileName("MMQ02680.ARW", in: app)
+    }
+
+    /// Drags a fixed number of points from the middle of an element, slowly enough for the
+    /// preview's pan to track every step (PRD Rating by swipe distance).
+    @MainActor
+    private func drag(_ element: XCUIElement, byPointsX dx: CGFloat, y dy: CGFloat) {
+        let middle = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: dx, dy: dy)))
+    }
+
+    /// Waits for the detail view to show one photo (PRD Detail and marking).
+    @MainActor
+    private func waitForFileName(_ name: String, in app: XCUIApplication) {
+        let fileName = element(in: app, "clove.detail.fileName")
+        let shown = expectation(
+            for: NSPredicate(format: "label == %@", name), evaluatedWith: fileName)
+        wait(for: [shown], timeout: 10)
     }
 
     /// The right edge is a single-tap navigation zone, and it shows the next photo at once
@@ -208,17 +292,15 @@ final class CloveUITests: XCTestCase {
     private func advanceByEdgeTap(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
         XCTAssertTrue(preview.waitForExistence(timeout: 10), "The detail view had no preview")
+        waitForFileName("MMQ02680.ARW", in: app)
         // The outer 18% on each side navigates; 94% is inside the right zone on any width.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
-
-        let fileName = element(in: app, "clove.detail.fileName")
-        let next = expectation(
-            for: NSPredicate(format: "label == %@", "MMQ02679.ARW"), evaluatedWith: fileName)
-        wait(for: [next], timeout: 10)
+        waitForFileName("MMQ02681.ARW", in: app)
     }
 
-    /// Back returns from detail to the grid, and the grid shows the saved rating the update path
-    /// carried back through the library (PRD P0-03, P0-08).
+    /// Back returns from detail to the grid, and the grid shows the marks the update path carried
+    /// back through the library: the bar's rating, the swipe's rating and its Reject
+    /// (PRD P0-03, P0-06, P0-08).
     @MainActor
     private func returnToGrid(in app: XCUIApplication) {
         let back = element(in: app, "clove.nav.back")
@@ -228,7 +310,18 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10), "Back did not return to the grid")
         XCTAssertTrue(
             row.label.contains("4 stars"),
-            "The grid did not show the saved rating: \(row.label)"
+            "The grid did not show the rating the bar wrote: \(row.label)"
+        )
+
+        let swiped = element(in: app, "clove.grid.photo.mmq02679")
+        XCTAssertTrue(swiped.exists, "The grid did not show the swiped photo")
+        XCTAssertTrue(
+            swiped.label.contains("2 stars"),
+            "The grid did not show the rating the swipe wrote: \(swiped.label)"
+        )
+        XCTAssertTrue(
+            swiped.label.contains("Rejected"),
+            "The grid did not show the Reject the swipe wrote: \(swiped.label)"
         )
     }
 

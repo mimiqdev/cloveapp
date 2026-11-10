@@ -17,18 +17,42 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// The swipe-down Reject threshold (PRD Detail gestures); a starting value, tunable.
     public var rejectSwipeRules: RejectSwipeRules
 
-    /// Creates the rules from the current settings and the two gesture constants.
+    /// The drag that begins a marking swipe (PRD Detail gestures); a starting value, tunable.
+    public var markingSwipeRules: MarkingSwipeRules
+
+    /// Creates the rules from the current settings and the gesture constants.
     public init(
         settings: AppSettings = AppSettings(),
         swipeRatingRules: SwipeRatingRules = .standard,
-        rejectSwipeRules: RejectSwipeRules = .standard
+        rejectSwipeRules: RejectSwipeRules = .standard,
+        markingSwipeRules: MarkingSwipeRules = .standard
     ) {
         self.settings = settings
         self.swipeRatingRules = swipeRatingRules
         self.rejectSwipeRules = rejectSwipeRules
+        self.markingSwipeRules = markingSwipeRules
     }
 
     // MARK: - Swipe-up rating
+
+    /// The marking swipe a drag on the detail preview begins as, or nil when it begins none
+    /// (PRD Detail gestures).
+    ///
+    /// This is the preview's one question as a drag starts: marking gestures off (PRD
+    /// Gesture-related settings), a zoomed view and a more horizontal than vertical drag all
+    /// answer nil, and the recognizer then leaves the drag alone. The step ladder is separate,
+    /// because it is read on every sample of a swipe that did begin.
+    public func beginSwipe(
+        horizontalTravel: Double,
+        verticalTravel: Double,
+        isZoomed: Bool
+    ) -> MarkingSwipe? {
+        markingSwipeRules.swipe(
+            horizontalTravel: horizontalTravel,
+            verticalTravel: verticalTravel,
+            isZoomed: isZoomed,
+            gesturesEnabled: settings.gesturesEnabled)
+    }
 
     /// Starts a swipe-up gesture that measures with this rule set.
     ///
