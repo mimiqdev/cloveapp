@@ -41,17 +41,13 @@ final class RejectMoveUndoRun {
     /// Adds a retry's moved sets to this run, so one step still covers the whole run.
     ///
     /// PRD P0-10 retries only the failed items, and those move under a handle of their own; the
-    /// first attempt's record adopts them so a single undo restores everything. A run that was
-    /// already undone keeps only the retry's sets, because the earlier sets are already back and
-    /// a second undo must not try to move their rejects-folder copies again.
+    /// first attempt's record adopts them so a single undo restores everything. PRD P0-10's Undo
+    /// rule undoes a run once, so a retry that moves more sets after the run was undone does not
+    /// reopen the step: the sets stay under the rejects folder, which is the move's durable
+    /// result (G1 decision 5), and restoring them by hand stays outside the undo history.
     func adopt(_ retry: RejectMoveUndoRun) {
-        guard retry !== self, !retry.moved.isEmpty else { return }
-        if isUndone {
-            moved = retry.moved
-            isUndone = false
-        } else {
-            moved.append(contentsOf: retry.moved)
-        }
+        guard retry !== self, !retry.moved.isEmpty, !isUndone else { return }
+        moved.append(contentsOf: retry.moved)
     }
 }
 
@@ -201,9 +197,11 @@ struct RejectMoveUndoRunner: Sendable {
         blockedPath: URL?
     ) -> RejectMoveUndoOutcome {
         var rollbackFailures: [RejectMoveFailure] = []
+        var rolledBack: Set<RejectMoveFilePlan> = []
         for file in movedBack.reversed() {
             do {
                 try fileSystem.moveExclusively(from: file.source, to: file.destination)
+                rolledBack.insert(file)
             } catch {
                 rollbackFailures.append(RejectMoveFailure(classifying: error))
             }
@@ -245,7 +243,8 @@ struct RejectMoveUndoRunner: Sendable {
                 RejectMoveUndoSplitPhoto(
                     identity: job.identity, failure: failure,
                     rollbackFailures: rollbackFailures,
-                    files: locations(of: job.files, movedBack: Set(movedBack))))
+                    files: locations(
+                        of: job.files, movedBack: Set(movedBack), rolledBack: rolledBack)))
         }
         // PRD P0-10's Undo rule reports a set whose original path is taken as a conflict, so the
         // copy the UI shows names the situation the pre-check also reports.
@@ -260,38 +259,53 @@ struct RejectMoveUndoRunner: Sendable {
 
     /// Reports every file's actual location after a failed rollback (PRD P0-10).
     ///
-    /// A file the undo moved back is looked for at its original path first and a file that never
-    /// moved at its rejects-folder path first, so a stale copy can never be mistaken for the
-    /// file. A check that throws is reported as ``RejectMoveFileLocation/Location/unknown``
-    /// rather than as a lost file.
+    /// The last rename that succeeded is what placed a file, so the reporter starts from it: a
+    /// file the rollback returned is under the rejects folder even when something else now uses
+    /// its original path, and a file the rollback could not return is at its original path. Disk
+    /// is read only to notice a file that is no longer where the rename put it. Nothing is
+    /// guessed: a check that cannot run is ``RejectMoveFileLocation/Location/unknown``, a path
+    /// that answers "nothing here" is never reported as holding the file, and a file found at
+    /// neither path is ``RejectMoveFileLocation/Location/missing``.
     private func locations(
-        of files: [RejectMoveFilePlan], movedBack: Set<RejectMoveFilePlan>
+        of files: [RejectMoveFilePlan], movedBack: Set<RejectMoveFilePlan>,
+        rolledBack: Set<RejectMoveFilePlan>
     ) -> [RejectMoveFileLocation] {
         files.map { file in
-            let atSource = try? fileSystem.exists(at: file.source)
-            let atDestination = try? fileSystem.exists(at: file.destination)
+            let placedAtSource = movedBack.contains(file) && !rolledBack.contains(file)
+            let known: RejectMoveFileLocation.Location = placedAtSource ? .source : .destination
             return RejectMoveFileLocation(
                 role: file.role, source: file.source, destination: file.destination,
-                location: location(
-                    source: atSource, destination: atDestination,
-                    prefersSource: movedBack.contains(file)))
+                location: location(known: known, of: file))
         }
     }
 
-    /// Chooses one file's location from the two checks (PRD P0-10).
+    /// Confirms the path the last rename placed the file at, or reports what the checks say.
+    ///
+    /// The checks only move the answer away from the known path when that path definitively
+    /// answers "nothing here" and the other path holds a file; an unreadable known path leaves
+    /// the location unknown, because the other path may hold an unrelated file (PRD P0-10).
     private func location(
-        source: Bool?, destination: Bool?, prefersSource: Bool
+        known: RejectMoveFileLocation.Location, of file: RejectMoveFilePlan
     ) -> RejectMoveFileLocation.Location {
-        let first = prefersSource ? source : destination
-        let second = prefersSource ? destination : source
-        let firstLocation: RejectMoveFileLocation.Location = prefersSource ? .source : .destination
-        let secondLocation: RejectMoveFileLocation.Location =
-            prefersSource ? .destination : .source
-        switch (first, second) {
-        case (true, _): return firstLocation
-        case (false, true), (nil, true): return secondLocation
-        case (false, false): return .missing
-        case (false, nil), (nil, false), (nil, nil): return .unknown
+        let other: RejectMoveFileLocation.Location = known == .source ? .destination : .source
+        guard let atKnown = try? fileSystem.exists(at: url(of: known, in: file)) else {
+            return .unknown
+        }
+        if atKnown { return known }
+        guard let atOther = try? fileSystem.exists(at: url(of: other, in: file)) else {
+            return .unknown
+        }
+        return atOther ? other : .missing
+    }
+
+    /// The URL one location names for a file (PRD P0-10).
+    private func url(of location: RejectMoveFileLocation.Location, in file: RejectMoveFilePlan)
+        -> URL
+    {
+        switch location {
+        case .source: file.source
+        case .destination: file.destination
+        case .missing, .unknown: file.source
         }
     }
 
@@ -353,6 +367,10 @@ extension RejectMover {
     /// back, because they never moved. Folders the move created stay in place: undo deletes
     /// nothing (PRD P0-10).
     ///
+    /// A run is undone once: a second call is refused, and so is a handle for a retry of that
+    /// run. A retry that moves more sets after the undo does not reopen the step, because those
+    /// sets keep the move's durable result (G1 decision 5).
+    ///
     /// - Parameter entry: The step, as the move or its retry produced it.
     /// - Returns: One outcome per restored photo, with the counts and the failed photos a retry
     ///   can send again.
@@ -390,6 +408,23 @@ extension RejectMover {
         return await performUndo(retry.jobs, rootURL: retry.rootURL)
     }
 
+    /// Every undo progress step, as a stream a UI can wrap into its own observation.
+    ///
+    /// PRD P0-10 asks for progress during a move, and an undo renames the same files and stores
+    /// a Reject for each photo. The stream yields each photo as it starts and finishes, then the
+    /// attempt's result, and finishes when the caller stops iterating; the mover keeps no
+    /// reference to a finished stream. A retry of failed photos publishes its own sequence.
+    public func undoProgressUpdates() -> AsyncStream<RejectMoveUndoProgress> {
+        let (stream, continuation) = AsyncStream<RejectMoveUndoProgress>.makeStream(
+            bufferingPolicy: .bufferingNewest(64))
+        let observerID = UUID()
+        undoObservers[observerID] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeUndoObserver(observerID) }
+        }
+        return stream
+    }
+
     /// Refuses an undo that cannot touch any file (PRD P0-10, "Failure and recovery").
     ///
     /// PRD "Failure and recovery" gives a read-only location its own message, so undo refuses
@@ -420,15 +455,28 @@ extension RejectMover {
         outcomes.reserveCapacity(jobs.count)
         var failedJobs: [RejectMoveUndoJob] = []
         for job in jobs {
+            publishUndo(.photoStarted(job.identity))
             let outcome = await runner.restore(job)
             outcomes.append(outcome)
+            publishUndo(.photoFinished(outcome))
             if case .failed = outcome { failedJobs.append(job) }
         }
         let result = RejectMoveUndoResult(id: RejectMoveUndoBatchID(), outcomes: outcomes)
         if !failedJobs.isEmpty {
             undoRetries[result.id] = RejectMoveUndoRetry(rootURL: rootURL, jobs: failedJobs)
         }
+        publishUndo(.finished(result))
         return result
+    }
+
+    /// Publishes one undo progress step to every stream a caller is reading (PRD P0-10).
+    private func publishUndo(_ progress: RejectMoveUndoProgress) {
+        for observer in undoObservers.values { observer.yield(progress) }
+    }
+
+    /// Detaches a stream's continuation when its reader stops (PRD P0-10).
+    private func removeUndoObserver(_ id: UUID) {
+        undoObservers[id] = nil
     }
 
     /// The run's moved sets plus the photos the confirmation kept, each photographed once.

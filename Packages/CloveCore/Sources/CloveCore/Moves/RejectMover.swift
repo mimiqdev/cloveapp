@@ -52,6 +52,8 @@ public actor RejectMover {
     var undoableRuns: [RejectMoveBatchID: RejectMoveUndoRun] = [:]
     /// Undo attempts that still have failed photos to retry (PRD P0-10).
     var undoRetries: [RejectMoveUndoBatchID: RejectMoveUndoRetry] = [:]
+    /// Undo progress streams handed to a UI or a test (PRD P0-10's Undo rule).
+    var undoObservers: [UUID: AsyncStream<RejectMoveUndoProgress>.Continuation] = [:]
 
     /// Creates the mover over C4's queue and the production file system unless a test injects
     /// another.

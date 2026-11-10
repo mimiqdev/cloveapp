@@ -298,3 +298,18 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
         return "Restored \(restoredCount) photos. \(unrestoredCount) photos couldn't be restored."
     }
 }
+
+/// One observable step of an undo attempt (PRD P0-10's Undo rule).
+///
+/// PRD P0-10 asks for progress during a move, and an undo renames the same files and stores a
+/// Reject for every photo, so a run of hundreds takes as long as the move did. The stream yields
+/// each photo as it starts and finishes, then the attempt's result, so the toast can show
+/// movement without polling; a retry of failed photos publishes its own sequence.
+public enum RejectMoveUndoProgress: Hashable, Sendable {
+    /// A photo's files are about to be renamed back (PRD P0-10's Undo rule).
+    case photoStarted(PhotoIdentity)
+    /// A photo reached its final outcome (PRD P0-10's Undo rule).
+    case photoFinished(RejectMoveUndoOutcome)
+    /// The attempt ended; every requested photo has an outcome (PRD P0-10's Undo rule).
+    case finished(RejectMoveUndoResult)
+}

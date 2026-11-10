@@ -59,6 +59,9 @@ struct RejectMoveUndoTests {
         }
         // A move renames and an undo renames back, so the folder holds exactly what it did.
         #expect(fixture.folder.files() == before)
+        // PRD P0-10's Undo rule deletes nothing, including the folders the move created.
+        #expect(fixture.folder.isDirectory("_Rejected/DCIM/100AAAAA"))
+        #expect(fixture.folder.isDirectory("_Rejected/DCIM/100BBBBB"))
         for set in sets {
             #expect(try await storesReject(set, in: fixture))
             let restored = try #require(result.restored.first { $0.identity == set.id })
@@ -76,13 +79,16 @@ struct RejectMoveUndoTests {
         let moved = try makeMoveSet(
             root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
             formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
+        // A standalone JPEG keeps its rating and label in Clove, so the test can read them back
+        // without a sidecar (G1 decision 6).
         let kept = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0002",
-            formats: [.raw, .heif], sidecarName: "IMG_0002.xmp")
+            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0002", formats: [.jpeg])
         for set in [moved, kept] {
             try writeMoveSet(set, in: fixture.folder)
             await fixture.queue.apply(.reject(true), to: set)
         }
+        await fixture.queue.apply(
+            MarkChange(rating: Rating(rawValue: 3), label: ColourLabel(colour: .red)), to: kept)
         // PRD Move rejects: a keep is applied on Move, which clears only the kept photo's Reject.
         await fixture.queue.apply(.reject(false), to: kept)
         let keptBytes = try originalContents(of: [kept], in: fixture.folder)
@@ -97,6 +103,9 @@ struct RejectMoveUndoTests {
         #expect(result.restoredIdentities == [moved.id, kept.id])
         #expect(try await storesReject(moved, in: fixture))
         #expect(try await storesReject(kept, in: fixture))
+        let keptMarks = try await fixture.queue.storedMarks(for: kept.id)
+        #expect(keptMarks?.rating == Rating(rawValue: 3))
+        #expect(keptMarks?.label == ColourLabel(colour: .red))
         let restored = try #require(result.kept.first)
         #expect(restored.identity == kept.id)
         #expect(restored.files.isEmpty)
@@ -206,6 +215,49 @@ struct RejectMoveUndoTests {
         let result = try await fixture.mover.undo(entry)
         #expect(result.restoredCount == 1)
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
+    }
+
+    /// An undo pushes each photo's start and end, then its result, as one sequence.
+    @Test func publishesUndoProgressPerPhotoAndTheFinishedResult() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let sets = try (0..<2).map { index in
+            try makeMoveSet(
+                root: fixture.folder.url, relativePath: "DCIM/\(index)", stem: "IMG_000\(index)",
+                formats: [.raw])
+        }
+        for set in sets {
+            try writeMoveSet(set, in: fixture.folder)
+            await fixture.queue.apply(.reject(true), to: set)
+        }
+        let moveResult = try await fixture.move(try await fixture.plan(sets))
+        let entry = undoStep(for: moveResult, returningTo: sets[0].id)
+        let stream = await fixture.mover.undoProgressUpdates()
+        let undoTask = Task { try await fixture.mover.undo(entry) }
+
+        var events: [RejectMoveUndoProgress] = []
+        for await event in stream {
+            events.append(event)
+            if case .finished = event { break }
+        }
+        let result = try await undoTask.value
+
+        #expect(events.count == 5)
+        let started = events.compactMap { event -> PhotoIdentity? in
+            guard case .photoStarted(let identity) = event else { return nil }
+            return identity
+        }
+        let finished = events.compactMap { event -> RejectMoveUndoOutcome? in
+            guard case .photoFinished(let outcome) = event else { return nil }
+            return outcome
+        }
+        #expect(started == sets.map(\.id))
+        #expect(finished.map(\.identity) == sets.map(\.id))
+        guard case .finished(let published)? = events.last else {
+            Issue.record("The undo should end with its result")
+            return
+        }
+        #expect(published == result)
     }
 }
 
