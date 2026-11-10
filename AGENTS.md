@@ -62,7 +62,9 @@ XcodeGen. Every task is listed here.
 - The packages use Swift Testing (`import Testing`, `#expect`). App targets use
   SwiftUI; the UI test target uses XCTest.
 - No third-party dependencies without a decision record in `docs/decisions/`.
-- Build UI with system components until the visual design arrives. Placeholders
+- Behavior, flows, and copy follow `design/handoff/`, which takes precedence
+  over the PRD's screen descriptions. Build UI with system components until
+  the visual design pass (Q6) applies the handoff's visuals; placeholders
   exist only to keep the skeleton verifiable.
 - Keep the generated project out of git. Never edit `Clove.xcodeproj` by hand;
   change `project.yml` and regenerate.
