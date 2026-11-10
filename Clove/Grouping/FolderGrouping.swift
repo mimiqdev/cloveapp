@@ -51,6 +51,8 @@ final class FolderGrouping {
     private var published: [BrowsingGroup] = []
     /// The background feature and refinement pass, cancelled by a new run or by closing.
     private var analysisTask: Task<Void, Never>?
+    /// The last queued run, so two Run again taps or a setting change cannot overlap (P0-11).
+    private var transition: Task<Void, Never>?
     /// The grouper's published results, so a refinement reaches the grid (PRD P0-11).
     private var updatesTask: Task<Void, Never>?
 
@@ -139,26 +141,49 @@ final class FolderGrouping {
         isClosed = true
         let analysis = analysisTask
         analysisTask = nil
+        let pending = transition
+        transition = nil
         updatesTask?.cancel()
         updatesTask = nil
         analysis?.cancel()
         await features.close()
         await analysis?.value
+        // A run that was waiting for its turn returns without publishing; the caller can then
+        // release the folder's scope.
+        await pending?.value
     }
 
     // MARK: - Running
 
     /// Runs step 2 and starts the background pass for the current inputs.
     ///
-    /// A pass this run replaces is cancelled and awaited before the new one starts, so a Run again
-    /// or a changed setting can never leave two passes queueing file work, and no pass that
-    /// resumes late can publish into the new result.
+    /// Runs are serialized: a Run again or a setting change that arrives while another run is in
+    /// flight waits for it, so no two runs can publish into one another or leave two feature
+    /// passes queueing file work. A dropped folder's queued run returns without publishing.
     private func run(reusingCache: Bool) async {
-        let earlier = analysisTask
+        let earlier = transition
+        let queued = Task { [weak self] in
+            await earlier?.value
+            guard let self, !self.isClosed else { return }
+            await self.performRun(reusingCache: reusingCache)
+        }
+        transition = queued
+        await queued.value
+    }
+
+    /// Runs step 2 once it is this run's turn, then starts the background pass.
+    ///
+    /// A pass this run replaces is cancelled and awaited before the grouper runs again, and the
+    /// closed state is re-checked after every suspension, so a resuming run never publishes,
+    /// observes or reads for a folder that ended meanwhile.
+    private func performRun(reusingCache: Bool) async {
+        let earlierAnalysis = analysisTask
         analysisTask = nil
-        earlier?.cancel()
+        earlierAnalysis?.cancel()
+        await earlierAnalysis?.value
+        // Jobs the replaced pass queued before it stopped are dropped here, so the new pass
+        // starts from an empty queue (G1 scheduling row).
         await features.cancel(folder: folder.rawValue)
-        await earlier?.value
         guard !isClosed else { return }
         await grouping.run(
             photos: inputs, revision: revision, similarGroupsEnabled: enabled,
@@ -167,6 +192,7 @@ final class FolderGrouping {
         // The grouper's own result, read here rather than waited for, so the caller's next step
         // runs after the first publication instead of racing it (PRD P0-14).
         let groups = await grouping.current.browsingGroups
+        guard !isClosed else { return }
         adopt(groups)
         startUpdates()
         startAnalysis()
