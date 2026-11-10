@@ -29,6 +29,12 @@ final class BrowsingModel {
     /// The library's photos with their marks, before this state's order and filter (PRD P0-03).
     private var storedPhotos: [GridPhoto]
 
+    /// The latest change to each photo, with its save state (PRD P0-08).
+    ///
+    /// The model keeps the statuses rather than asking the library on every render, so an
+    /// applied change repaints the screen through observation.
+    private var latestChanges: [PhotoIdentity: MarkChangeStatus]
+
     /// Whether this scene has already read its saved state, so a later appearance never
     /// overwrites what the user has done since.
     private var hasRestored = false
@@ -39,6 +45,8 @@ final class BrowsingModel {
         self.state = state
         self.groups = library.groups
         self.storedPhotos = library.photos
+        self.latestChanges = [:]
+        refresh()
     }
 
     /// The photos the grid shows: this state's order and filter, applied to the folder's photos
@@ -138,10 +146,21 @@ final class BrowsingModel {
         }
     }
 
-    /// Applies marks to one photo through the library and shows them at once (PRD P0-05).
-    func apply(_ marks: PhotoMarks, to photo: PhotoIdentity) {
-        library.apply(marks, to: photo)
-        storedPhotos = library.photos
+    /// The latest change to one photo with its save state, or nil when nothing was requested
+    /// (PRD P0-08). U7 reads the same status for its retry.
+    func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? {
+        latestChanges[photo]
+    }
+
+    /// Applies one change to one photo through the library and shows its marks and save state
+    /// (PRD P0-08).
+    ///
+    /// The await is C4's write queue: the model refreshes the library's photos and statuses once
+    /// the write returns, so a screen never shows a mark the storage has not accepted.
+    func apply(_ change: MarkChange, to photo: PhotoIdentity) async {
+        guard !change.isEmpty else { return }
+        _ = await library.apply(change, to: photo)
+        refresh()
     }
 
     /// Restores this scene's saved state through CloveCore's validation (PRD P0-14).
@@ -157,7 +176,20 @@ final class BrowsingModel {
         let restored = BrowsingState.decoded(from: data).restored(from: folder)
         state = restored.state
         folderFailure = restored.folderFailure
-        groups = library.groups
+        refresh()
+    }
+
+    /// Takes the library's current photos, groups and save states.
+    ///
+    /// U2 and U3 refresh through this path as scan batches and grouping results stream in, so the
+    /// screens keep reading the model while the library changes underneath it.
+    private func refresh() {
         storedPhotos = library.photos
+        groups = library.groups
+        var changes: [PhotoIdentity: MarkChangeStatus] = [:]
+        for photo in storedPhotos {
+            if let change = library.latestChange(for: photo.id) { changes[photo.id] = change }
+        }
+        latestChanges = changes
     }
 }

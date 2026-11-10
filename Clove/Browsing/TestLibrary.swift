@@ -1,11 +1,11 @@
 import CloveCore
 import Foundation
 
-/// The in-memory library the UI test and previews browse (PRD P0-13).
+/// The in-memory library the UI test and previews browse (PRD P0-08, P0-13).
 ///
-/// It stands in for folder access, the scan, the order and writes until U2 and U3 replace the
-/// ``FolderLibrary`` seam. It holds one fake folder with a few dozen photos, some marks and two
-/// groups, keeps every change in memory, and writes nothing anywhere.
+/// It stands in for folder access, the scan, the order and the atomic C4 write until U2 and U3
+/// replace the ``FolderLibrary`` seam. It holds one fake folder with a few dozen photos, some
+/// marks, two groups and the save state of each change it receives, and writes nothing anywhere.
 ///
 /// The sample is selected with the launch environment value ``launchVariable``; without it the
 /// app browses an empty library and entry says no folder is open.
@@ -32,6 +32,7 @@ final class TestLibrary: FolderLibrary {
     let groups: [BrowsingGroup]
 
     private var stored: [GridPhoto]
+    private var changes: [PhotoIdentity: MarkChangeStatus]
 
     /// The folder's photos with their marks, in the sample's capture order (PRD P0-03).
     var photos: [GridPhoto] { stored }
@@ -41,31 +42,56 @@ final class TestLibrary: FolderLibrary {
         folder = TestLibrary.emptyFolderKey
         stored = []
         groups = []
+        changes = [:]
     }
 
     /// A fixed library, for the sample below and the previews.
-    init(photos: [GridPhoto], groups: [BrowsingGroup]) {
+    init(
+        photos: [GridPhoto],
+        groups: [BrowsingGroup],
+        changes: [MarkChangeStatus] = []
+    ) {
         folder = TestLibrary.sampleFolderKey
         stored = photos
         self.groups = groups
+        var byPhoto: [PhotoIdentity: MarkChangeStatus] = [:]
+        for change in changes { byPhoto[change.identity] = change }
+        self.changes = byPhoto
     }
 
-    /// Applies marks to one photo, keeping them for the rest of the run (PRD P0-05).
-    func apply(_ marks: PhotoMarks, to photo: PhotoIdentity) {
-        guard let index = stored.firstIndex(where: { $0.id == photo }) else { return }
-        stored[index].marks = marks
+    /// Applies only the fields the change names and reports the state C4 would (PRD P0-08).
+    ///
+    /// The sample has no sidecar to write, so a rating or label reports
+    /// ``MarkChangeState/savedInSidecar``, and a Reject-only change reports
+    /// ``MarkChangeState/storedInClove``, which is confirmed but never shown as Saved (G1
+    /// decision 5). Nothing is written anywhere.
+    func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus {
+        if let index = stored.firstIndex(where: { $0.id == photo }) {
+            var marks = stored[index].marks
+            if let rating = change.rating { marks.rating = rating }
+            if let label = change.label { marks.label = label }
+            if let reject = change.reject { marks.isRejected = reject }
+            stored[index].marks = marks
+        }
+        let state: MarkChangeState =
+            change.rating == nil && change.label == nil ? .storedInClove : .savedInSidecar
+        let status = MarkChangeStatus(
+            id: MarkChangeID(), identity: photo, requested: change, state: state)
+        changes[photo] = status
+        return status
     }
+
+    /// The latest change to one photo with its save state (PRD P0-08).
+    func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes[photo] }
 
     /// The sample: 36 photos across two capture folders, a few marks and two bursts (PRD P0-03).
     static var sample: TestLibrary {
         let captureBase = Date(timeIntervalSince1970: 1_760_000_000)
         let photos = (0..<36).map { index -> GridPhoto in
-            let stem = String(format: "MMQ%05d", 2678 + index)
-            let path = index < 18 ? "DCIM/100CAM" : "DCIM/101CAM"
-            let id = PhotoIdentity(
-                folderID: sampleFolderKey, relativeFolderPath: path, stem: stem)
+            let number = 2678 + index
+            let stem = String(format: "MMQ%05d", number)
             return GridPhoto(
-                id: id,
+                id: samplePhoto(number),
                 fileName: "\(stem).ARW",
                 time: .known(
                     PhotoTime(
@@ -73,7 +99,7 @@ final class TestLibrary: FolderLibrary {
                         hasUTCOffset: true)),
                 marks: sampleMarks[index])
         }
-        return TestLibrary(photos: photos, groups: sampleGroups)
+        return TestLibrary(photos: photos, groups: sampleGroups, changes: sampleChanges)
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).
@@ -88,14 +114,34 @@ final class TestLibrary: FolderLibrary {
         ]
     }
 
+    /// The save states the sample starts with (PRD P0-08).
+    ///
+    /// One photo starts failed, with the requested change kept, so the save state has a failure to
+    /// show and U7 has a change to retry.
+    private static var sampleChanges: [MarkChangeStatus] {
+        [
+            MarkChangeStatus(
+                id: MarkChangeID(),
+                identity: samplePhoto(2679),
+                requested: .rating(stars(3)),
+                state: .failed(
+                    MarkWriteFailure(
+                        reason: .notConfirmed,
+                        message: "The sample sidecar did not read back.")))
+        ]
+    }
+
     /// Identities of the sample photos for the given stems, in ascending order.
     private static func samplePhotos(_ numbers: ClosedRange<Int>) -> [PhotoIdentity] {
-        numbers.map { number in
-            PhotoIdentity(
-                folderID: sampleFolderKey,
-                relativeFolderPath: number < 2696 ? "DCIM/100CAM" : "DCIM/101CAM",
-                stem: String(format: "MMQ%05d", number))
-        }
+        numbers.map(samplePhoto)
+    }
+
+    /// The sample photo with one number, in its capture folder.
+    private static func samplePhoto(_ number: Int) -> PhotoIdentity {
+        PhotoIdentity(
+            folderID: sampleFolderKey,
+            relativeFolderPath: number < 2696 ? "DCIM/100CAM" : "DCIM/101CAM",
+            stem: String(format: "MMQ%05d", number))
     }
 
     /// A few saved marks, so the flow has something to show (PRD P0-05).

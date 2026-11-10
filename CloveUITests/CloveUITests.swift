@@ -16,6 +16,7 @@ final class CloveUITests: XCTestCase {
 
         openTestLibrary(in: app)
         openFirstPhoto(in: app)
+        markThePhoto(in: app)
         returnToGrid(in: app)
         openGroup(in: app)
         openSettings(in: app)
@@ -54,6 +55,29 @@ final class CloveUITests: XCTestCase {
             marks.label.contains("5 stars"),
             "The detail view did not show the saved rating: \(marks.label)"
         )
+    }
+
+    /// A rating applied in detail writes through the seam and the detail shows the confirmed save
+    /// state (PRD P0-05, P0-08).
+    @MainActor
+    private func markThePhoto(in app: XCUIApplication) {
+        let saveState = element(in: app, "clove.detail.saveState")
+        XCTAssertTrue(saveState.waitForExistence(timeout: 10), "The detail view had no save state")
+        XCTAssertEqual(saveState.label, "Not saved yet")
+
+        let fourStars = element(in: app, "clove.detail.rate.4")
+        XCTAssertTrue(
+            fourStars.waitForExistence(timeout: 10), "The detail view had no rating buttons")
+        fourStars.tap()
+
+        let saved = expectation(
+            for: NSPredicate(format: "label == %@", "Saved"), evaluatedWith: saveState)
+        wait(for: [saved], timeout: 10)
+
+        let marks = element(in: app, "clove.detail.marks")
+        XCTAssertTrue(
+            marks.label.contains("4 stars"),
+            "The detail view did not show the new rating: \(marks.label)")
     }
 
     /// Back returns from detail to the grid.
