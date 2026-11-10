@@ -130,24 +130,29 @@ public actor RejectMover {
     /// places and a retry could not restore them blindly. A set that was skipped is not part of
     /// the retry either: resolving its mark change is what makes it movable.
     ///
-    /// One Move rejects action is one undo step, however many retries it takes: the returned
-    /// result carries `batch`, the step covers every set this retry moved, and the app records no
-    /// second undo entry (PRD P0-10's Undo rule). The next retry of the same action uses the same
-    /// handle again, with only the sets that still failed.
+    /// `excluding` drops failed photos whose Reject was cleared after the run, so a retry never
+    /// moves a photo the person un-rejected. One Move rejects action is one undo step, however
+    /// many retries it takes: the returned result carries `batch`, the step covers every set this
+    /// retry moved, and the app records no second undo entry (PRD P0-10's Undo rule). The next
+    /// retry of the same action uses the same handle again, with only the sets that still failed.
     ///
-    /// - Parameter batch: The run whose failed sets should be retried.
-    /// - Returns: The retry's outcomes under the same handle, or `nil` when the run has no failed
-    ///   sets left.
+    /// - Parameters:
+    ///   - batch: The run whose failed sets should be retried.
+    ///   - excluded: Failed photos C6 must leave alone.
+    /// - Returns: The retry's outcomes under the same handle, or `nil` when the run has no
+    ///   failed sets left.
     /// - Throws: The plan's whole-request refusal, or ``RejectMoveRefusal/undone(_:)`` when the
     ///   run was undone. Undo closes the step, so no set of that run may move into the rejects
     ///   folder again; the call moves nothing.
-    public func retryFailed(in batch: RejectMoveBatchID) async throws(RejectMoveRefusal)
-        -> RejectMoveResult?
-    {
+    public func retryFailed(
+        in batch: RejectMoveBatchID, excluding excluded: Set<PhotoIdentity> = []
+    ) async throws(RejectMoveRefusal) -> RejectMoveResult? {
         guard undoableRuns[batch]?.isUndone != true else { throw .undone(batch) }
         guard let applied = batches[batch], !applied.sets.isEmpty else { return nil }
+        let sets = applied.sets.filter { !excluded.contains($0.photoSet.id) }
+        guard !sets.isEmpty else { return nil }
         let request = RejectMoveRequest(
-            rootURL: applied.rootURL, sets: applied.sets,
+            rootURL: applied.rootURL, sets: sets,
             configuration: applied.configuration)
         let plan = try planner.plan(for: request)
         // An undo that starts while this retry runs waits for it, so the step it closes already
@@ -495,6 +500,7 @@ extension RejectMoveSkipReason {
         case .failedMarkChange: "A mark change for this photo failed and needs its retry first."
         case .insideRejectsFolder: "The photo set is already inside the rejects folder."
         case .cancelled: "The move was cancelled before this photo set started."
+        case .noLongerRejected: "The photo is no longer rejected, so the retry left it alone."
         }
     }
 }
