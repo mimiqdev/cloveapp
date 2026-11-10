@@ -9,10 +9,14 @@ import SwiftUI
 /// the next launch reads the stored value.
 ///
 /// Design placeholder: system lists, pickers, toggles and fields stand in for the visual design,
-/// and the PRD's wording stands in for approved copy.
+/// and the PRD's wording stands in for approved copy. The Appearance section is the design
+/// handoff's (`design/handoff/screens.md`, Settings).
 struct SettingsScreen: View {
     /// The app-wide settings every scene shares (PRD Gesture-related settings).
     @Environment(SettingsStore.self) private var store
+
+    /// The appearance in effect, which picks the theme tile that carries the ring (tokens.md).
+    @Environment(\.colorScheme) private var colourScheme
 
     /// The rejects folder name as typed, which may not be valid yet.
     ///
@@ -25,6 +29,7 @@ struct SettingsScreen: View {
 
     var body: some View {
         List {
+            appearanceSection
             gesturesSection
             autoAdvanceSection
             doubleTapSection
@@ -44,6 +49,37 @@ struct SettingsScreen: View {
             // its place and its explanation.
             rejectsFolderNameDraft = name.rawValue
         }
+    }
+
+    /// Whether the system picks the theme, and the eight theme tiles (`design/handoff/screens.md`,
+    /// Settings Appearance; tokens.md).
+    ///
+    /// The ring follows the theme in effect, so it sits on Light or Dark while Match system is on.
+    /// Choosing a tile stops matching the system, because a theme picked by hand is meant to
+    /// apply.
+    private var appearanceSection: some View {
+        Section {
+            Toggle("Match system light/dark", isOn: binding(\.appearance.matchesSystemAppearance))
+                .accessibilityIdentifier("clove.settings.appearance.matchSystem")
+            ThemePicker(selection: themeInEffect) { theme in
+                store.update {
+                    $0.appearance = AppearanceChoice(
+                        matchesSystemAppearance: false, theme: theme)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+        } header: {
+            Text("Appearance")
+        } footer: {
+            Text("Photos are never tinted. Only the app around them changes.")
+        }
+    }
+
+    /// The theme the app draws, from the Appearance setting and the system appearance
+    /// (tokens.md).
+    private var themeInEffect: CloveTheme {
+        store.settings.appearance.theme(
+            inSystemAppearance: colourScheme == .dark ? .dark : .light)
     }
 
     /// Gestures on or off, and the rating levels input may apply (PRD Gesture-related settings,
