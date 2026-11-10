@@ -104,7 +104,7 @@ struct GridScreen: View {
             // The handoff hides Move Rejects while opening and when there is nothing to move,
             // rather than leaving a disabled action on screen (design handoff, P0-10).
             if store.settings.moveRejectsEnabled, browsing.rejectedPhotoCount > 0,
-                !browsing.isFolderOpening
+                !browsing.isFolderOpening, !browsing.isMovingRejects
             {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Move rejects", systemImage: "tray.and.arrow.up") {
@@ -125,7 +125,7 @@ struct GridScreen: View {
                 .padding(.bottom, 12)
             }
         }
-        .task(id: browsing.lastRejectMove?.id) {
+        .task(id: browsing.rejectMoveToastAttempt) {
             guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
             // Toast timings are still proposed in the handoff; the details remain reachable
             // from the same result until this presentation ends.

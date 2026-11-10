@@ -383,7 +383,8 @@ final class TestLibrary: FolderLibrary {
     ) async throws -> RejectMoveResult? {
         guard let entries = rejectMoveBatches[batch], !readOnly else { return nil }
         rejectMoveBatches[batch] = nil
-        return simulateMove(entries.filter { !identities.contains($0.identity) })
+        return simulateMove(
+            entries.filter { !identities.contains($0.identity) }, batchID: batch)
     }
 
     /// The sample's progress steps for one run (PRD P0-10).
@@ -479,7 +480,9 @@ final class TestLibrary: FolderLibrary {
     }
 
     /// Simulates one run, publishing progress and the photos that left the sample (P0-10).
-    private func simulateMove(_ entries: [RejectMovePlanEntry]) -> RejectMoveResult {
+    private func simulateMove(
+        _ entries: [RejectMovePlanEntry], batchID: RejectMoveBatchID? = nil
+    ) -> RejectMoveResult {
         var outcomes: [RejectMoveOutcome] = []
         var moved: Set<PhotoIdentity> = []
         for entry in entries {
@@ -495,7 +498,7 @@ final class TestLibrary: FolderLibrary {
             updateGroupsAfterMove(moved)
             updateContinuation.yield(.photos([]))
         }
-        let result = RejectMoveResult(id: RejectMoveBatchID(), outcomes: outcomes)
+        let result = RejectMoveResult(id: batchID ?? RejectMoveBatchID(), outcomes: outcomes)
         let failed = Set(result.failed.map(\.identity))
         let retryable = entries.filter { failed.contains($0.identity) }
         if !retryable.isEmpty { rejectMoveBatches[result.id] = retryable }

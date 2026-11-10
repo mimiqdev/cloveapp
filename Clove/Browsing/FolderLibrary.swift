@@ -387,11 +387,6 @@ extension FolderLibrary {
         in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
     ) async throws -> RejectMoveResult? { nil }
 
-    /// Retries a run without excluding any failed set (PRD P0-10).
-    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? {
-        try await retryFailedRejects(in: batch, excluding: [])
-    }
-
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
         AsyncStream { $0.finish() }
     }

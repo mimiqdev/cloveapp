@@ -104,10 +104,7 @@ final class MoveRejectsFlow: Identifiable {
         guard case .confirming(let confirmed) = stage, confirmed == plan,
             let selection = keepSelection, let context = confirmationContext,
             context.isCurrent(browsing)
-        else {
-            stage = .failed("The folder changed before the move started.")
-            return false
-        }
+        else { return false }
         let kept = selection.orderedKeptIdentities
         let moving = selection.movingPlan
         stage = .moving(finished: 0, total: moving.photoCount)

@@ -623,6 +623,10 @@ final class BrowsingModel {
     /// Dismissing the toast keeps ``lastRejectMove``; only the presentation goes away.
     private(set) var isRejectMoveToastVisible = false
 
+    /// How many times a move toast was shown, so a retry restarts its timer even when C14 keeps
+    /// the same batch ID (PRD P0-10).
+    private(set) var rejectMoveToastAttempt = 0
+
     /// Whether a Move rejects run is in progress (PRD P0-10).
     ///
     /// C6 drains the mark queue before it moves and skips a set with an unfinished mark change,
@@ -657,14 +661,6 @@ final class BrowsingModel {
         return try await library.runRejectMove(plan)
     }
 
-    /// Retries only the sets an earlier Move rejects run could not move (PRD P0-10).
-    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? {
-        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
-        isMovingRejects = true
-        defer { isMovingRejects = false }
-        return try await library.retryFailedRejects(in: batch)
-    }
-
     /// Records one completed move, so the toast can show it and C14 can undo it (PRD P0-10).
     func recordRejectMove(
         _ result: RejectMoveResult, keptIdentities: [PhotoIdentity],
@@ -674,6 +670,7 @@ final class BrowsingModel {
             result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
             folder: folder, openGeneration: openGeneration)
         isRejectMoveToastVisible = true
+        rejectMoveToastAttempt += 1
     }
 
     /// Hides the move toast while keeping the completed move for a later undo (PRD P0-10).
@@ -739,6 +736,7 @@ final class BrowsingModel {
             rejectsFolderName: completed.rejectsFolderName,
             folder: completed.folder, openGeneration: completed.openGeneration)
         isRejectMoveToastVisible = true
+        rejectMoveToastAttempt += 1
         return combined
     }
 

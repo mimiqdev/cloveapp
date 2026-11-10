@@ -84,6 +84,9 @@ struct MoveRejectsDetailsSheet: View {
     /// A retry that could not run, shown in the sheet instead of being swallowed (P0-10).
     @State private var retryError: String?
 
+    /// Whether Try again is running, so it cannot run twice or be swiped away (P0-10).
+    @State private var isRetrying = false
+
     /// Creates the sheet from the completed move's result.
     init(browsing: BrowsingModel, completed: CompletedRejectMove) {
         self.browsing = browsing
@@ -123,13 +126,19 @@ struct MoveRejectsDetailsSheet: View {
                             browsing.dismissRejectMoveToast()
                             dismiss()
                         }
+                        .disabled(isRetrying)
                         .accessibilityIdentifier("clove.moves.details.done")
                         Spacer()
                         if details.canRetry {
                             Button("Try again") { retry() }
                                 .buttonStyle(.borderedProminent)
+                                .disabled(isRetrying)
                                 .accessibilityIdentifier("clove.moves.details.retry")
                         }
+                    }
+                    if isRetrying {
+                        ProgressView()
+                            .accessibilityIdentifier("clove.moves.details.retrying")
                     }
                 }
                 .padding()
@@ -139,6 +148,7 @@ struct MoveRejectsDetailsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("clove.moves.details.sheet")
         }
+        .interactiveDismissDisabled(isRetrying)
         .accessibilityElement(children: .contain)
     }
 
@@ -160,7 +170,10 @@ struct MoveRejectsDetailsSheet: View {
 
     /// Retries only the failed sets, then closes the sheet once nothing failed is left (P0-10).
     private func retry() {
+        guard !isRetrying else { return }
+        isRetrying = true
         Task {
+            defer { isRetrying = false }
             retryError = nil
             do {
                 guard let retried = try await browsing.retryRejectMove(current) else {
