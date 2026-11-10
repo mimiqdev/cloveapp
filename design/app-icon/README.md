@@ -4,7 +4,7 @@ One instant print, split on the diagonal: the kept half bright, the rejected hal
 
 ## Files
 - `preview.png`: default, dark and tinted at 220 / 120 / 60 / 40 / 29 pt.
-- `xcode/`: 1024 px PNGs for the Xcode asset catalog (no alpha): `AppIcon.png` (default), `AppIcon-Dark.png`, `AppIcon-Tinted.png` (grayscale).
+- `Clove/Assets.xcassets/AppIcon.appiconset/`: the 1024 px PNGs in the app's asset catalog (no alpha): `AppIcon.png` (default), `AppIcon-Dark.png`, `AppIcon-Tinted.png` (grayscale).
 - `svg/`: full-bleed masters for each appearance (the system applies the rounded mask).
 - `layers/`: transparent SVG + PNG layers for Icon Composer, back to front: print, photo window, kept half, rejected half. Set the rejected half to 30% opacity and put the background fill in Icon Composer.
 
