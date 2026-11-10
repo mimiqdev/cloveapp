@@ -100,6 +100,52 @@ struct GridDisplayTests {
     }
 }
 
+/// PRD Grid and P0-11: the grid holds the current photo's cell in place, including a collapsed
+/// cover that stands for the photo and a cover keyed by a refined group.
+@Suite("Grid cell lookup")
+struct GridCellLookupTests {
+    /// Expanded display resolves a photo to its own cell.
+    @Test func aPhotoResolvesToItsOwnCell() {
+        let cells = GridDisplay(photos: photos(0...2), groups: []).cells
+        #expect(
+            GridCellItem.cell(for: photos(0...2)[1].id, in: cells, groups: [])
+                == .photo(photos(0...2)[1].id))
+    }
+
+    /// Collapsed display resolves a member to its group's cover, not to a photo cell it does
+    /// not show.
+    @Test func aCollapsedMemberResolvesToItsCover() {
+        let burst = group("burst-one", photos(0...2))
+        let cells = GridDisplay(photos: photos(0...2), groups: [burst], display: .collapsed).cells
+        #expect(
+            GridCellItem.cell(for: photos(0...2)[2].id, in: cells, groups: [burst])
+                == .group(burst.id))
+    }
+
+    /// Refinement can move the photo into a group with a new key; each update resolves against
+    /// its own cells and groups, so the mapping survives the key change.
+    @Test func aRefinedGroupResolvesToItsNewCover() {
+        let before = group("burst-one", photos(0...1))
+        let after = group("burst-two", photos(1...2))
+        let oldCells = GridDisplay(photos: photos(0...2), groups: [before], display: .collapsed)
+            .cells
+        let newCells = GridDisplay(photos: photos(0...2), groups: [after], display: .collapsed)
+            .cells
+        let photo = photos(0...2)[1].id
+        #expect(GridCellItem.cell(for: photo, in: oldCells, groups: [before]) == .group(before.id))
+        #expect(GridCellItem.cell(for: photo, in: newCells, groups: [after]) == .group(after.id))
+    }
+
+    /// A photo the grid does not draw has no cell.
+    @Test func aHiddenPhotoHasNoCell() {
+        let burst = group("burst-one", photos(2...3))
+        let cells = GridDisplay(photos: photos(0...1), groups: [burst], display: .collapsed).cells
+        #expect(GridCellItem.cell(for: photos(2...3)[0].id, in: cells, groups: [burst]) == nil)
+        // A photo outside the shown list and outside every group has no cell either.
+        #expect(GridCellItem.cell(for: photos(5...5)[0].id, in: cells, groups: [burst]) == nil)
+    }
+}
+
 /// The photos for one display test, in capture order, built on the ordering tests' helpers.
 private func photos(_ range: ClosedRange<Int>) -> [GridPhoto] {
     range.map { index in

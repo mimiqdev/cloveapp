@@ -233,8 +233,9 @@ final class GridPhotoCell: UICollectionViewCell {
     /// Starts one request and shows whichever state it reports (PRD Scan scope).
     ///
     /// A deferred outcome is I1's scheduling pressure or a superseded request, not a broken
-    /// file, so the cell retries twice and then leaves the loading state for the next display
-    /// to ask again (G1 scheduling row). Only image and unavailable are terminal.
+    /// file, so the cell keeps its loading state and asks again with a growing delay for about
+    /// eight seconds while it stays visible (G1 scheduling row). Only then does it show the
+    /// unreadable state, which the next display or reconfiguration can retry.
     private func loadThumbnail(
         for photo: PhotoIdentity, thumbnails: any GridThumbnailSource
     ) {
@@ -243,7 +244,11 @@ final class GridPhotoCell: UICollectionViewCell {
         spinner.startAnimating()
         unavailableView.isHidden = true
         thumbnailTask = Task { [weak self] in
-            for attempt in 0..<3 {
+            for delay in [0, 150, 300, 600, 1_200, 2_400, 4_000] {
+                if delay > 0 {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                    if Task.isCancelled { return }
+                }
                 let outcome = await thumbnails.thumbnail(for: photo, priority: .visible)
                 guard !Task.isCancelled, let self, self.currentItem?.photo.id == photo else {
                     return
@@ -253,12 +258,9 @@ final class GridPhotoCell: UICollectionViewCell {
                     self.thumbnailTask = nil
                     return
                 }
-                if attempt < 2 {
-                    try? await Task.sleep(for: .milliseconds(150))
-                    if Task.isCancelled { return }
-                }
             }
             guard !Task.isCancelled, let self, self.currentItem?.photo.id == photo else { return }
+            self.show(.unavailable)
             self.thumbnailTask = nil
         }
     }
