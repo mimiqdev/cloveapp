@@ -17,6 +17,10 @@ import SwiftUI
 /// navigates, with single taps only, so a tap there never waits for a double tap. The middle
 /// keeps the double-tap action (PRD Detail and marking).
 ///
+/// Settings come from the app-wide ``SettingsStore`` in the environment, so a change on the
+/// settings screen applies the next time this screen draws; the screen reads no storage itself
+/// (PRD Gesture-related settings).
+///
 /// Design placeholder: the HUD, filmstrip and preview use system components until the visual
 /// design lands. The save-state words are U1's summary, which U7 replaces; the Undo button is
 /// disabled until U8 supplies the one model call it should invoke.
@@ -24,14 +28,14 @@ struct DetailScreen: View {
     /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
 
-    /// C12's settings this screen reads: the double-tap behaviour, keep-zoom, the enabled
-    /// ratings and the labels the HUD offers.
-    let settings: AppSettings
-
     /// The pixels to show, normally the open folder's source from the browsing model.
     private let images: any DetailImageSource
 
     @Environment(\.displayScale) private var displayScale
+
+    /// The app-wide settings, read live so a change on the settings screen applies the next time
+    /// this screen draws (PRD Gesture-related settings).
+    @Environment(SettingsStore.self) private var store
 
     /// The pixels on screen, or nil while the first preview loads (PRD P0-04).
     @State private var shown: DetailImage?
@@ -66,22 +70,17 @@ struct DetailScreen: View {
     /// The debounced render request a pinch may need (G1 "Scheduling and cache").
     @State private var upgradeTask: Task<Void, Never>?
 
-    /// C12's persisted settings, the launch defaults until U11 passes the live value.
-    private static let launchSettings = SettingsPersistence(
-        storage: UserDefaultsSettingsStorage()
-    ).load()
+    /// C12's current settings: the double-tap behaviour, keep-zoom, the enabled ratings and the
+    /// labels the HUD offers.
+    private var settings: AppSettings { store.settings }
 
     /// Creates the screen for one browsing model.
     ///
-    /// `settings` is a value, defaulting to the persisted load, so U11 can pass live settings
-    /// without this screen reading storage itself. `images` exists for previews and tests; the
-    /// app uses the browsing model's source for the open folder.
-    init(
-        browsing: BrowsingModel, settings: AppSettings? = nil,
-        images: (any DetailImageSource)? = nil
-    ) {
+    /// `images` exists for previews and tests; the app uses the browsing model's source for the
+    /// open folder. Settings come from the app-wide ``SettingsStore`` in the environment, so this
+    /// screen reads no storage of its own and one source of settings serves every screen.
+    init(browsing: BrowsingModel, images: (any DetailImageSource)? = nil) {
         self.browsing = browsing
-        self.settings = settings ?? Self.launchSettings
         self.images = images ?? browsing.detailImages
     }
 
