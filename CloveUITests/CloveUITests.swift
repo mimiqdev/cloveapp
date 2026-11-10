@@ -44,8 +44,8 @@ final class CloveUITests: XCTestCase {
         retryTheFailedPhotos(in: app)
         leaveMultiSelect(in: app)
         rejectPhotosForMove(in: app)
+        checkMoveRejectsSetting(in: app)
         moveRejectsWithRetry(in: app)
-        hideMoveRejectsWhenOff(in: app)
     }
 
     /// Entry opens the test library and the grid appears.
@@ -700,16 +700,27 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(kept.exists, "The retry moved the kept photo")
     }
 
-    /// Turning Move rejects off hides its grid action; Reject itself still works for filtering
-    /// (PRD Move rejects, PRD P0-10).
+    /// The Move rejects action shows while rejects exist and the setting is on, and turns off
+    /// with the setting (design handoff, PRD P0-10).
     @MainActor
-    private func hideMoveRejectsWhenOff(in app: XCUIApplication) {
+    private func checkMoveRejectsSetting(in app: XCUIApplication) {
+        XCTAssertTrue(
+            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 10),
+            "The grid did not offer Move rejects with rejected photos in the folder")
+
         openSettingsFromGrid(in: app)
         setMoveRejects(in: app, on: false)
         backToGrid(in: app)
         XCTAssertFalse(
             element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 3),
             "Turning Move rejects off left its grid action")
+
+        openSettingsFromGrid(in: app)
+        setMoveRejects(in: app, on: true)
+        backToGrid(in: app)
+        XCTAssertTrue(
+            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 10),
+            "Turning Move rejects back on did not restore its grid action")
     }
 
     /// Taps the Move rejects switch, scrolling the settings list until it is on screen.

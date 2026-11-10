@@ -492,16 +492,37 @@ final class BrowsingModel {
     /// every photo the run moved. A batch the library can no longer retry answers nil.
     func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
+        let kept = Set(completed.keptIdentities)
+        let clearFailures = completed.result.failed.filter { kept.contains($0.identity) }
+        let moveFailures = completed.result.failed.filter { !kept.contains($0.identity) }
+        guard !clearFailures.isEmpty || !moveFailures.isEmpty else { return nil }
         isMovingRejects = true
         defer { isMovingRejects = false }
-        guard let retried = try await library.retryFailedRejects(in: completed.result.id) else {
-            return nil
+
+        // C6 first: a lost batch leaves the clear failures untouched for a later attempt.
+        var retried: RejectMoveResult?
+        if !moveFailures.isEmpty {
+            guard let result = try await library.retryFailedRejects(in: completed.result.id) else {
+                return nil
+            }
+            retried = result
         }
-        let kept = completed.result.outcomes.filter { outcome in
+        // A kept photo's Reject clear is a C4 write, not a C6 move, so it is retried through the
+        // same mark path. An unresolved one stays in the failure list for the next attempt.
+        var unresolved: [RejectMoveFailedSet] = []
+        for set in clearFailures {
+            let status = await library.apply(.reject(false), to: set.identity)
+            if !status.state.isConfirmed { unresolved.append(set) }
+        }
+
+        let alreadyDone = completed.result.outcomes.filter { outcome in
             if case .failed = outcome { return false }
             return true
         }
-        let combined = RejectMoveResult(id: retried.id, outcomes: kept + retried.outcomes)
+        let combined = RejectMoveResult(
+            id: retried?.id ?? completed.result.id,
+            outcomes: alreadyDone + (retried?.outcomes ?? [])
+                + unresolved.map(RejectMoveOutcome.failed))
         lastRejectMove = CompletedRejectMove(
             result: combined, keptIdentities: completed.keptIdentities,
             rejectsFolderName: completed.rejectsFolderName)
@@ -640,6 +661,12 @@ final class BrowsingModel {
     /// Applies one library update on the main actor (PRD P0-03, P0-08).
     private func apply(_ update: FolderLibraryUpdate) async {
         switch update {
+        case .scanStarted:
+            // A reopen of the same folder starts a new scan, so the old finished marker cannot
+            // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
+            finishedScanFor = nil
+            groupsPublishedFor = nil
+            refresh()
         case .photos, .reads:
             refresh()
             resolvePendingRestore(scanFinished: false)

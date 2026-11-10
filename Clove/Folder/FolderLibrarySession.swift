@@ -526,6 +526,7 @@ final class FolderLibrarySession: FolderLibrary {
         rejectMover = RejectMover(markQueue: stores.writes)
         publishedGroups = []
         hasPublishedGroups = false
+        publish(.scanStarted)
         publish(.photos([]))
         // PRD How marks reach disk, rule 1: Reject and standalone marks are read when the folder
         // opens. A damaged store is reported by U7's save state; the scan still shows the photos.

@@ -25,6 +25,10 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// A change's save state moved (PRD P0-08).
     case change(MarkChangeStatus)
 
+    /// A new open started scanning, so the previous scan's finished state no longer applies
+    /// (PRD P0-01, design handoff: Move Rejects hides while opening).
+    case scanStarted
+
     /// Grouping published the folder's groups (PRD P0-11).
     ///
     /// The folder's first publication always arrives, even with no groups and with similar groups

@@ -72,11 +72,15 @@ struct MoveRejectsDetailsSheet: View {
     /// The current result, replaced when Try again returns a new one (PRD P0-10).
     @State private var result: RejectMoveResult
 
+    /// The latest completed record, so a second Try again uses the new retry handle (P0-10).
+    @State private var current: CompletedRejectMove
+
     /// Creates the sheet from the completed move's result.
     init(browsing: BrowsingModel, completed: CompletedRejectMove) {
         self.browsing = browsing
         self.completed = completed
         _result = State(initialValue: completed.result)
+        _current = State(initialValue: completed)
     }
 
     var body: some View {
@@ -138,8 +142,11 @@ struct MoveRejectsDetailsSheet: View {
     /// Retries only the failed sets, then closes the sheet once nothing failed is left (P0-10).
     private func retry() {
         Task {
-            guard let retried = try? await browsing.retryRejectMove(completed) else { return }
+            guard let retried = try? await browsing.retryRejectMove(current) else { return }
             result = retried
+            current = CompletedRejectMove(
+                result: retried, keptIdentities: current.keptIdentities,
+                rejectsFolderName: current.rejectsFolderName)
             let details = RejectMoveDetails(result: retried)
             if details.rows.isEmpty {
                 // The updated toast now reports the retry's total; closing the sheet leaves it

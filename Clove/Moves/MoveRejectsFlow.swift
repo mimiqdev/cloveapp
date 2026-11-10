@@ -93,6 +93,7 @@ final class MoveRejectsFlow: Identifiable {
         stage = .moving(finished: 0, total: moving.photoCount)
 
         var clearFailures: [RejectMoveFailedSet] = []
+        var cleared: [PhotoIdentity] = []
         for identity in kept {
             let status = await browsing.apply(.reject(false), to: identity)
             guard let status, status.state.isConfirmed else {
@@ -111,6 +112,7 @@ final class MoveRejectsFlow: Identifiable {
                         files: plan.readyEntries.first { $0.identity == identity }?.files ?? []))
                 continue
             }
+            cleared.append(identity)
         }
 
         let progress = await browsing.rejectMoveProgress()
@@ -127,12 +129,23 @@ final class MoveRejectsFlow: Identifiable {
             return true
         } catch let refusal as RejectMoveRefusal {
             cancelProgress()
+            // Nothing moved, so the keep clears are restored; a whole-request refusal must not
+            // leave the kept photos changed without a completed record C14 can undo.
+            await restore(cleared)
             stage = Self.stage(for: refusal)
             return false
         } catch {
             cancelProgress()
+            await restore(cleared)
             stage = .failed("The rejected photos couldn't be moved.")
             return false
+        }
+    }
+
+    /// Restores Reject on kept photos whose clear ran before a whole-request failure (P0-10).
+    private func restore(_ identities: [PhotoIdentity]) async {
+        for identity in identities {
+            _ = await browsing.apply(.reject(true), to: identity)
         }
     }
 

@@ -169,6 +169,7 @@ final class TestLibrary: FolderLibrary {
             of: RejectMoveProgress.self)
         // The sample is fully scanned when it opens, so the grid can show the actions the
         // handoff hides during opening (design handoff, PRD P0-01).
+        updateContinuation.yield(.scanStarted)
         updateContinuation.yield(
             .scanFinished(
                 FolderScanSummary(photoCount: stored.count, status: .complete)))

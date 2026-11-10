@@ -90,7 +90,6 @@ struct MoveRejectsSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(selection.movingCount == 0)
                 .accessibilityIdentifier("clove.moves.confirm")
             }
         }
@@ -128,13 +127,19 @@ struct MoveRejectsSheet: View {
     @ViewBuilder
     private func moving(finished: Int, total: Int) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            ProgressView(value: Double(finished), total: Double(max(total, 1)))
-            Text(
-                total == 1
-                    ? "Moving 1 photo"
-                    : "Moving \(min(finished + 1, total)) of \(total) photos"
-            )
-            .accessibilityIdentifier("clove.moves.progress")
+            if total == 0 {
+                ProgressView()
+                Text("Clearing kept rejects")
+                    .accessibilityIdentifier("clove.moves.progress")
+            } else {
+                ProgressView(value: Double(finished), total: Double(total))
+                Text(
+                    total == 1
+                        ? "Moving 1 photo"
+                        : "Moving \(min(finished + 1, total)) of \(total) photos"
+                )
+                .accessibilityIdentifier("clove.moves.progress")
+            }
         }
     }
 
