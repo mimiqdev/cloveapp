@@ -100,7 +100,11 @@ final class TestLibrary: FolderLibrary {
     }
 
     /// The sample folder's durable key, spelled so a saved scene never looks like a real folder.
-    static let sampleFolderKey = FolderIdentity(rawValue: "10000000-0000-0000-0000-000000000001")
+    static let sampleFolderKey = FolderIdentity(rawValue: sampleRecentID(1).uuidString)
+
+    private static func sampleRecentID(_ suffix: UInt8) -> UUID {
+        UUID(uuid: (0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, suffix))
+    }
 
     /// The empty library's key: nothing is open, so a scene saved by the sample never applies
     /// here (PRD P0-14).
@@ -134,7 +138,7 @@ final class TestLibrary: FolderLibrary {
         let date = Date().addingTimeInterval(-86_400)
         return [
             RecentFolder(
-                id: UUID(uuidString: Self.sampleFolderKey.rawValue)!, bookmark: Data(),
+                id: Self.sampleRecentID(1), bookmark: Data(),
                 pathSummary: "/Shoots/Coastal light", volumeName: "Field Drive",
                 mediaType: .externalDrive,
                 photoCount: stored.count, scanStatus: .complete, lastOpened: date,
@@ -143,14 +147,14 @@ final class TestLibrary: FolderLibrary {
                     lastViewedPhoto: stored.first?.id,
                     previewPhotos: Array(stored.prefix(3).map(\.id)))),
             RecentFolder(
-                id: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!, bookmark: Data(),
+                id: Self.sampleRecentID(2), bookmark: Data(),
                 pathSummary: "/Documents/Studio", mediaType: .internalVolume, photoCount: 96,
                 scanStatus: .complete, lastOpened: date.addingTimeInterval(-86_400),
                 progress: FolderProgress(
                     marked: 80, rejected: 16, total: 96,
                     previewPhotos: Array(stored.suffix(3).map(\.id)))),
             RecentFolder(
-                id: UUID(uuidString: "10000000-0000-0000-0000-000000000003")!, bookmark: Data(),
+                id: Self.sampleRecentID(3), bookmark: Data(),
                 pathSummary: "/Shoots/Backup card", volumeName: "Travel Card",
                 mediaType: .externalDrive,
                 lastOpened: date.addingTimeInterval(-172_800), needsReconnect: true),
