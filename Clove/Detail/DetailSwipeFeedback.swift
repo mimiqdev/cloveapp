@@ -43,17 +43,36 @@ struct DetailSwipeFeedbackBadge: View {
     let feedback: DetailSwipeFeedback
 
     var body: some View {
-        if feedback.isShowing {
-            indicator
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.regularMaterial, in: Capsule())
-                .position(feedback.location)
-                .allowsHitTesting(false)
-                .accessibilityElement(children: .ignore)
-                .accessibilityIdentifier("clove.detail.swipeFeedback")
-                .accessibilityLabel(indicatorName)
+        GeometryReader { proxy in
+            if feedback.isShowing {
+                indicator
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial, in: Capsule())
+                    .position(badgeCentre(in: proxy.size))
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityIdentifier("clove.detail.swipeFeedback")
+                    .accessibilityLabel(indicatorName)
+            }
         }
+    }
+
+    /// The badge sits just above the finger, and inside the preview, so the hand never covers the
+    /// step it is on (PRD Rating by swipe distance; PRD Detail and marking keeps marks out from
+    /// under the hand).
+    ///
+    /// Design placeholder: the lift and the half extents are the indicator's own size, which the
+    /// visual design replaces.
+    private func badgeCentre(in size: CGSize) -> CGPoint {
+        let lift: CGFloat = 56
+        let halfWidth: CGFloat = 70
+        let halfHeight: CGFloat = 20
+        return CGPoint(
+            x: min(max(feedback.location.x, halfWidth), max(size.width - halfWidth, halfWidth)),
+            y: min(
+                max(feedback.location.y - lift, halfHeight),
+                max(size.height - halfHeight, halfHeight)))
     }
 
     /// The rating the finger is on, or the Reject symbol past the threshold (PRD P0-15 colours).

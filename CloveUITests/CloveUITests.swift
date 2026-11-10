@@ -168,17 +168,28 @@ final class CloveUITests: XCTestCase {
         let fit = expectation(for: NSPredicate(format: "label == %@", "Fit"), evaluatedWith: zoom)
         wait(for: [fit], timeout: 10)
 
-        // A pinch still zooms: the marking pan must not take the second finger, and while zoomed
-        // a one-finger drag pans instead of marking (PRD Detail gestures).
+        // A pinch still zooms, and while zoomed a one-finger drag pans instead of marking
+        // (PRD Detail gestures: vertical marking swipes are disabled while zoomed).
+        let saveState = element(in: app, "clove.detail.saveState")
+        let marks = element(in: app, "clove.detail.marks")
+        let marksAtFit = marks.label
         preview.pinch(withScale: 2, velocity: 1)
         let pinched = expectation(
             for: NSPredicate(format: "label != %@", "Fit"), evaluatedWith: zoom)
         wait(for: [pinched], timeout: 10)
 
+        drag(preview, byPointsX: 0, y: -150)
+
         preview.doubleTap()
         let backToFit = expectation(
             for: NSPredicate(format: "label == %@", "Fit"), evaluatedWith: zoom)
         wait(for: [backToFit], timeout: 10)
+
+        // A zoomed drag that marked would change the marks, and a write would change the save
+        // state or move the detail on, so both stay as they were at fit.
+        XCTAssertEqual(
+            marks.label, marksAtFit, "The zoomed drag rated the photo instead of panning")
+        XCTAssertEqual(saveState.label, "No change yet", "The zoomed drag wrote a mark")
     }
 
     /// A rating applied in detail writes through the seam, and the detail moves to the next photo

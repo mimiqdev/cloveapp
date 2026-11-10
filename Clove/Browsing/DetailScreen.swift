@@ -152,13 +152,13 @@ struct DetailScreen: View {
             image: shown?.image,
             command: command,
             doubleTapZoomEnabled: settings.doubleTap == .zoom,
-            gesturesEnabled: settings.gesturesEnabled,
             rules: rules,
             feedback: swipeFeedback,
             onZoomChange: { zoomChanged($0, on: photo) },
             onEdgeTap: { navigate($0) },
             onDoubleTap: { doubleTap(at: $0, on: photo) },
-            onMarkingSwipe: { applyMarkingSwipe($0, on: photo) }
+            onMarkingSwipe: { applyMarkingSwipe($0, on: photo) },
+            onMarkingSwipeBegin: { autoAdvance.cancel() }
         )
         .overlay { DetailSwipeFeedbackBadge(feedback: swipeFeedback) }
         .onGeometryChange(for: CGSize.self) { proxy in
@@ -457,11 +457,11 @@ struct DetailScreen: View {
     ///
     /// C13 decides where to go from the grid's current order and filter, so a filtered grid only
     /// offers the photos it shows, and the plan carries the marked photo so undo can return there
-    /// (PRD Undo row). The model keeps that record. A group view answers with its own next
-    /// undecided photo through the same rules; that hook is U9's.
+    /// (PRD Undo row). Every plan is recorded, including the one that stays, so undo always reads
+    /// the photo of the mark it undid. A group view answers with its own next undecided photo
+    /// through the same rules; that hook is U9's.
     private func startAutoAdvance(after kind: MarkKind, from photo: GridPhoto) {
         let plan = rules.autoAdvancePlan(after: kind, from: photo.id, photos: browsing.photos)
-        guard plan.advances else { return }
         browsing.recordAutoAdvance(plan)
         autoAdvance.schedule(plan) { target in
             switch target {
