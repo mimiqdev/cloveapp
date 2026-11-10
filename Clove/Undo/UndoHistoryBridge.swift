@@ -56,6 +56,17 @@ final class UndoHistoryBridge {
     /// Whether a step is running, so a second press cannot apply another action.
     private(set) var isStepping = false
 
+    /// A press that arrived while a step was running, run once that step finishes.
+    ///
+    /// The system manager has already taken the press's entry by then, so dropping it would leave
+    /// ⌘Z and the three-finger gesture with nothing left to do while the history still has a step.
+    private enum StepDirection {
+        case undo
+        case redo
+    }
+
+    private var queuedStep: StepDirection?
+
     /// Attaches the scene's undo manager and mirrors the history into it (PRD P0-05).
     ///
     /// Attaching the same manager twice, or from another screen, is what the split layout does on
@@ -63,9 +74,9 @@ final class UndoHistoryBridge {
     func attach(_ manager: UndoManager?) {
         guard let manager, self.manager == nil else { return }
         self.manager = manager
-        // Each recorded action is one system undo group, and the folder session keeps C5's history
-        // to this many actions, so the system stack is bounded the same way.
-        manager.groupsByEvent = false
+        // The window's undo manager is shared with UIKit text editing, so its event grouping stays
+        // as the system set it; this bridge wraps only its own registrations in a group. The folder
+        // session keeps C5's history to this many actions, so the system stack is bounded the same.
         manager.levelsOfUndo = MarkUndoHistory.defaultDepthLimit
         rebuild()
     }
@@ -115,21 +126,32 @@ final class UndoHistoryBridge {
 
     /// Runs one system undo: registers its redo pair while the manager applies it, then restores
     /// the marks through the history (PRD P0-05).
+    ///
+    /// A press that arrives while another step runs takes its place in a queue instead of being
+    /// dropped, because the manager has already removed the entry this press stood for.
     private func handleSystemUndo() {
-        guard let manager, let host, beginStep() else { return }
+        guard let manager, let host else { return }
         let name = host.undoAvailability.undoName ?? "Mark"
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemRedo() }
         manager.setActionName(name)
+        guard beginStep() else {
+            queuedStep = .undo
+            return
+        }
         Task { await finishStep(isUndo: true) }
     }
 
     /// Runs one system redo: registers the undo pair while the manager applies the redo, then
     /// re-applies the marks through the history (PRD P0-05).
     private func handleSystemRedo() {
-        guard let manager, let host, beginStep() else { return }
+        guard let manager, let host else { return }
         let name = host.undoAvailability.redoName ?? "Mark"
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemUndo() }
         manager.setActionName(name)
+        guard beginStep() else {
+            queuedStep = .redo
+            return
+        }
         Task { await finishStep(isUndo: false) }
     }
 
@@ -149,23 +171,48 @@ final class UndoHistoryBridge {
     /// The action's redo pair was registered while the manager applied it, so the stacks stay as
     /// they are: a failed step keeps its history entry, and C5's next undo is the entry the
     /// manager still holds. Only a step the history could not take at all leaves the mirror
-    /// without a matching entry, and that is rebuilt from the history.
+    /// without a matching entry, and that is rebuilt from the history. A press that arrived during
+    /// the step runs next, with the pair its own application already registered.
     private func finishStep(isUndo: Bool) async {
         let result =
             isUndo ? await host?.undoThroughHistory() : await host?.redoThroughHistory()
         isStepping = false
         if result == nil { rebuild() }
+        await runQueuedStep()
+    }
+
+    /// Runs the one press that arrived during a step, if any (PRD P0-05).
+    private func runQueuedStep() async {
+        guard let queued = queuedStep else { return }
+        queuedStep = nil
+        guard beginStep() else { return }
+        let result: UndoStepResult?
+        switch queued {
+        case .undo: result = await host?.undoThroughHistory()
+        case .redo: result = await host?.redoThroughHistory()
+        }
+        isStepping = false
+        if result == nil { rebuild() }
+        await runQueuedStep()
     }
 
     // MARK: - Mirror
 
     /// Registers the history's next action as one system undo, named for its menu (PRD P0-05).
+    ///
+    /// Event grouping is paused for this one registration, so two actions recorded in one run-loop
+    /// turn still become two undo groups and one ⌘Z never restores both. The setting is restored
+    /// at once, because the window's manager is also UIKit's text-editing undo manager and must
+    /// keep grouping events for it.
     private func registerUndoOperation(named name: String?) {
         guard let manager else { return }
+        let groupsByEvent = manager.groupsByEvent
+        manager.groupsByEvent = false
         manager.beginUndoGrouping()
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemUndo() }
         if let name { manager.setActionName(name) }
         manager.endUndoGrouping()
+        manager.groupsByEvent = groupsByEvent
     }
 
     /// Mirrors the history into a fresh system stack, one undo group per undoable action.

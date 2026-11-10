@@ -267,7 +267,11 @@ extension GridCollectionView {
             guard
                 let index = GridAnchorRule.newIndex(
                     of: held.item, previous: previousIDs, in: newItems.map(\.id))
-            else { return }
+            else {
+                // The anchor's cells all went away, so only the undo reveal has a place to go.
+                revealIfNeeded(reveal)
+                return
+            }
             restore(index: index, offset: held.offset)
             revealIfNeeded(reveal)
         }
