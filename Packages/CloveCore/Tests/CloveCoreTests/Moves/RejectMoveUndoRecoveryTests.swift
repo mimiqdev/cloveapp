@@ -373,8 +373,8 @@ struct RejectMoveUndoRecoveryTests {
         #expect(fixture.folder.exists(relativePath(of: splitJpeg.destination, in: fixture.folder)))
     }
 
-    /// A retry of the move after an undo does not reopen the spent step.
-    @Test func doesNotReopenTheStepWhenARetryMovesMoreAfterUndo() async throws {
+    /// A retry that moves more after an undo keeps the spent step spent and gets its own.
+    @Test func givesARetryThatFinishesAfterTheUndoItsOwnStep() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
         let first = try makeMoveSet(
@@ -400,18 +400,87 @@ struct RejectMoveUndoRecoveryTests {
         let retry = try #require(retried)
         #expect(retry.movedCount == 1)
 
-        // PRD P0-10's Undo rule undoes a run once, so the retry's handle is spent with it.
+        // PRD P0-10's Undo rule undoes a run once, so the original handle stays spent...
         await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(entry.batch)) {
             try await fixture.mover.undo(entry)
         }
+        // ...and the sets the retry moved after the undo are their own one-time step.
         let retryEntry = RejectMoveUndoEntry(batch: retry.id, photoToReturnTo: second.id)
+        let secondUndo = try await fixture.mover.undo(retryEntry)
+        #expect(secondUndo.restoredIdentities == [second.id])
+        #expect(secondUndo.isComplete)
+        #expect(fixture.folder.exists("DCIM/100BBBBB/IMG_0002.ARW"))
+        #expect(fixture.folder.exists("DCIM/100AAAAA/IMG_0001.ARW"))
+        #expect(try await undoTestStoresReject(second, in: fixture))
         await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(retryEntry.batch)) {
             try await fixture.mover.undo(retryEntry)
         }
-        // The retried set keeps the move's durable result (G1 decision 5).
-        #expect(fixture.folder.exists("_Rejected/DCIM/100BBBBB/IMG_0002.ARW"))
-        #expect(!fixture.folder.exists("DCIM/100BBBBB/IMG_0002.ARW"))
-        #expect(fixture.folder.exists("DCIM/100AAAAA/IMG_0001.ARW"))
+    }
+
+    /// A file no longer where the last rename put it is unknown, never the file at its old path.
+    @Test func reportsAFileThatLeftItsPlaceAsUnknown() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let set = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
+            formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
+        try writeMoveSet(set, in: fixture.folder)
+        await fixture.queue.apply(.reject(true), to: set)
+        let moveResult = try await fixture.move(try await fixture.plan([set]))
+        let files = try #require(moveResult.moved.first?.files)
+        let raw = try #require(files.first)
+        let jpeg = try #require(files.first { $0.role == .jpegCompanion })
+        let sidecar = try #require(files.first { $0.role == .sidecar })
+        let jpegPath = relativePath(of: jpeg.source, in: fixture.folder)
+        // The sidecar cannot come back and the RAW's rollback fails, which splits the set; the
+        // JPEG's rollback succeeds, and then the JPEG leaves the rejects folder while something
+        // else takes its old path.
+        fixture.fileSystem.fail(.move, at: sidecar.source, with: POSIXError(.EIO))
+        fixture.fileSystem.fail(.move, at: raw.destination, with: POSIXError(.EIO))
+        fixture.fileSystem.beforeOperation = { record in
+            guard record.step == .move, record.url == raw.destination else { return }
+            try? Data("intruder".utf8).write(to: jpeg.source)
+            try? FileManager.default.removeItem(at: jpeg.destination)
+        }
+
+        let result = try await fixture.mover.undo(
+            undoEntry(for: moveResult, returningTo: set.id))
+
+        let split = try #require(result.split.first)
+        #expect(split.files.map(\.location) == [.source, .unknown, .destination])
+        #expect(fixture.folder.contents(of: jpegPath) == Data("intruder".utf8))
+    }
+
+    /// A second undo is refused while the first one is still running.
+    @Test func refusesASecondUndoWhileTheFirstIsRunning() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let set = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
+            formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
+        try writeMoveSet(set, in: fixture.folder)
+        await fixture.queue.apply(.reject(true), to: set)
+        let moveResult = try await fixture.move(try await fixture.plan([set]))
+        let entry = undoEntry(for: moveResult, returningTo: set.id)
+        let gate = DispatchSemaphore(value: 0)
+        fixture.markFileSystem.blockWrites { _ in gate }
+        let stream = await fixture.mover.undoProgressUpdates()
+        let undoTask = Task { try await fixture.mover.undo(entry) }
+        var iterator = stream.makeAsyncIterator()
+        let announced = await iterator.next()
+        guard case .photoStarted? = announced else {
+            Issue.record("The undo should announce the photo before it waits for the store")
+            gate.signal()
+            return
+        }
+
+        await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(entry.batch)) {
+            try await fixture.mover.undo(entry)
+        }
+        gate.signal()
+        let result = try await undoTask.value
+        #expect(result.restoredCount == 1)
+        #expect(try await undoTestStoresReject(set, in: fixture))
     }
 }
 

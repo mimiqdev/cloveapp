@@ -281,9 +281,9 @@ struct RejectMoveUndoRunner: Sendable {
 
     /// Confirms the path the last rename placed the file at, or reports what the checks say.
     ///
-    /// The checks only move the answer away from the known path when that path definitively
-    /// answers "nothing here" and the other path holds a file; an unreadable known path leaves
-    /// the location unknown, because the other path may hold an unrelated file (PRD P0-10).
+    /// A path that answers "nothing here" cannot be the file's location, but the other path is
+    /// not the answer either: nothing proves the file that occupies it is this one, so the
+    /// location stays unknown. Only two definite absences make the file missing (PRD P0-10).
     private func location(
         known: RejectMoveFileLocation.Location, of file: RejectMoveFilePlan
     ) -> RejectMoveFileLocation.Location {
@@ -295,7 +295,7 @@ struct RejectMoveUndoRunner: Sendable {
         guard let atOther = try? fileSystem.exists(at: url(of: other, in: file)) else {
             return .unknown
         }
-        return atOther ? other : .missing
+        return atOther ? .unknown : .missing
     }
 
     /// The URL one location names for a file (PRD P0-10).
@@ -412,8 +412,10 @@ extension RejectMover {
     ///
     /// PRD P0-10 asks for progress during a move, and an undo renames the same files and stores
     /// a Reject for each photo. The stream yields each photo as it starts and finishes, then the
-    /// attempt's result, and finishes when the caller stops iterating; the mover keeps no
-    /// reference to a finished stream. A retry of failed photos publishes its own sequence.
+    /// attempt's result. It buffers at most 64 steps and drops its subscription once the stream
+    /// ends, so a caller that deallocates the stream leaves nothing behind; a caller that keeps
+    /// an abandoned stream retains that one buffered subscription. A retry of failed photos
+    /// publishes its own sequence.
     public func undoProgressUpdates() -> AsyncStream<RejectMoveUndoProgress> {
         let (stream, continuation) = AsyncStream<RejectMoveUndoProgress>.makeStream(
             bufferingPolicy: .bufferingNewest(64))
@@ -470,8 +472,16 @@ extension RejectMover {
     }
 
     /// Publishes one undo progress step to every stream a caller is reading (PRD P0-10).
+    ///
+    /// A subscription whose stream has already ended is dropped here, so a finished reader never
+    /// keeps a buffered step alive.
     private func publishUndo(_ progress: RejectMoveUndoProgress) {
-        for observer in undoObservers.values { observer.yield(progress) }
+        for (id, observer) in undoObservers {
+            switch observer.yield(progress) {
+            case .terminated: undoObservers[id] = nil
+            @unknown default: break
+            }
+        }
     }
 
     /// Detaches a stream's continuation when its reader stops (PRD P0-10).
@@ -520,12 +530,14 @@ extension RejectMover {
     ///
     /// PRD "Failure and recovery" retries the unmoved items of one run, so the retry is not a
     /// second undo step: its sets join the first attempt's record, and both handles resolve to
-    /// that one step.
+    /// that one step. A run that was already undone keeps its step spent, so a retry that
+    /// finishes afterwards keeps its own handle instead: its sets moved after the undo, and the
+    /// only alternative would leave them with no way back.
     func adoptUndoRetry(_ result: RejectMoveResult, of batch: RejectMoveBatchID) {
         guard let root = undoableRuns[batch], let retried = undoableRuns[result.id] else {
             return
         }
-        guard root !== retried else { return }
+        guard root !== retried, !root.isUndone else { return }
         root.adopt(retried)
         undoableRuns[result.id] = root
     }
