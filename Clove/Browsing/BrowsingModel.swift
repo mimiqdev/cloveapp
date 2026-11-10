@@ -57,6 +57,10 @@ final class BrowsingModel {
     /// Whether the open folder's scan reported itself finished (PRD P0-01).
     private var hasFinishedScan: Bool { finishedScanFor == library.folder }
 
+    /// Whether the open folder is still opening, so the grid hides actions the handoff hides
+    /// until the scan finishes (design handoff, PRD P0-01).
+    var isFolderOpening: Bool { !hasFinishedScan }
+
     /// The remembered folders entry lists, most recently opened first (PRD P0-02).
     private(set) var recents: [RecentFolder]
 
@@ -365,7 +369,7 @@ final class BrowsingModel {
     /// (PRD P0-08). A second action is refused while one runs, so both plans cannot read the same
     /// pre-batch marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings) async {
-        guard !isApplyingBatch else { return }
+        guard !isApplyingBatch, !isMovingRejects else { return }
         let targets = batchTargets
         let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
         guard !plan.items.isEmpty else { return }
@@ -391,7 +395,8 @@ final class BrowsingModel {
     /// that can no longer retry, such as one whose folder closed, answers nil; the report then
     /// stays as it was, so the bar still names the photos that did not save (PRD P0-08).
     func retryFailedBatch() async {
-        guard !isApplyingBatch, let report = batchReport, report.canRetry else { return }
+        guard !isApplyingBatch, !isMovingRejects, let report = batchReport, report.canRetry
+        else { return }
         let folder = state.folder
         let clearances = selectionClearances
         let dismissals = reportDismissals
@@ -402,6 +407,106 @@ final class BrowsingModel {
             dismissals == reportDismissals
         else { return }
         batchReport = report.merging(result)
+    }
+
+    // MARK: - Move rejects
+
+    /// How many photos the open folder holds with Reject set (PRD P0-10).
+    ///
+    /// The grid offers Move rejects only while this is non-zero, the scan has finished and
+    /// C12's setting is on; the plan still decides which sets can actually move.
+    var rejectedPhotoCount: Int { storedPhotos.filter(\.marks.isRejected).count }
+
+    /// The latest completed Move rejects run, which C14's undo will use (PRD P0-10).
+    ///
+    /// It holds the run's result and the identities the person kept in the confirmation, plus the
+    /// folder name that run used. It stays after the toast goes, so a later undo has the whole
+    /// move; nothing in this task moves files back.
+    private(set) var lastRejectMove: CompletedRejectMove?
+
+    /// Whether the grid shows the latest move's toast (design handoff, PRD P0-10).
+    ///
+    /// Dismissing the toast keeps ``lastRejectMove``; only the presentation goes away.
+    private(set) var isRejectMoveToastVisible = false
+
+    /// Whether a Move rejects run is in progress (PRD P0-10).
+    ///
+    /// C6 drains the mark queue before it moves and skips a set with an unfinished mark change,
+    /// so marking stays blocked for the whole run: the detail controls and the batch bar cannot
+    /// start a write that would target a path the move is about to change.
+    private(set) var isMovingRejects = false
+
+    /// The progress steps of the next or running Move rejects (PRD P0-10).
+    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
+        await library.rejectMoveProgress()
+    }
+
+    /// Plans Move rejects for the open folder's rejected photos (PRD P0-10).
+    ///
+    /// The plan is the confirmation sheet's input; nothing moves until ``runRejectMove(_:)``.
+    /// The configuration is read from settings by the caller at move time, so a renamed folder
+    /// applies without reopening the folder (PRD Move rejects, C12).
+    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
+        try await library.planRejectMove(configuration: configuration)
+    }
+
+    /// Runs a confirmed Move rejects plan (PRD P0-10).
+    ///
+    /// The library drops every confirmed set from its photos and publishes the change through
+    /// ``FolderLibrary/updates``, so the grid loses the moved photos and ``refresh()`` reconciles
+    /// the selection, current photo and group place with what remains. The flag is set before the
+    /// wait and cleared on every exit path, so a failed run never leaves marking blocked.
+    func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
+        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+        return try await library.runRejectMove(plan)
+    }
+
+    /// Retries only the sets an earlier Move rejects run could not move (PRD P0-10).
+    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? {
+        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+        return try await library.retryFailedRejects(in: batch)
+    }
+
+    /// Records one completed move, so the toast can show it and C14 can undo it (PRD P0-10).
+    func recordRejectMove(
+        _ result: RejectMoveResult, keptIdentities: [PhotoIdentity],
+        rejectsFolderName: RejectsFolderName
+    ) {
+        lastRejectMove = CompletedRejectMove(
+            result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName)
+        isRejectMoveToastVisible = true
+    }
+
+    /// Hides the move toast while keeping the completed move for a later undo (PRD P0-10).
+    func dismissRejectMoveToast() {
+        isRejectMoveToastVisible = false
+    }
+
+    /// Retries a completed move's failed sets and keeps the moved ones in the record (P0-10).
+    ///
+    /// The retry's outcomes replace only the failures, so the toast and C14's record still count
+    /// every photo the run moved. A batch the library can no longer retry answers nil.
+    func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
+        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+        guard let retried = try await library.retryFailedRejects(in: completed.result.id) else {
+            return nil
+        }
+        let kept = completed.result.outcomes.filter { outcome in
+            if case .failed = outcome { return false }
+            return true
+        }
+        let combined = RejectMoveResult(id: retried.id, outcomes: kept + retried.outcomes)
+        lastRejectMove = CompletedRejectMove(
+            result: combined, keptIdentities: completed.keptIdentities,
+            rejectsFolderName: completed.rejectsFolderName)
+        isRejectMoveToastVisible = true
+        return combined
     }
 
     /// Dismisses the batch's report without retrying (PRD Failure and recovery: Cancel).
@@ -426,9 +531,10 @@ final class BrowsingModel {
     /// ordered stream, never from this call's return: a returned status can arrive after a newer
     /// change was admitted, which would let an older finished state paint over the newer one
     /// (``PhotoChangeStates``). A failed write therefore never shows a mark it did not confirm.
-    func apply(_ change: MarkChange, to photo: PhotoIdentity) async {
-        guard !change.isEmpty else { return }
-        _ = await library.apply(change, to: photo)
+    @discardableResult
+    func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus? {
+        guard !isMovingRejects, !change.isEmpty else { return nil }
+        return await library.apply(change, to: photo)
     }
 
     /// The auto-advance the last mark made in the detail view resolved to, with the photo it
@@ -605,6 +711,30 @@ final class BrowsingModel {
         for photo in storedPhotos {
             if let change = library.latestChange(for: photo.id) { changes.insert(change) }
         }
+        reconcileRemovedPhotos()
+    }
+
+    /// Drops scene state that names a photo the folder no longer holds (PRD P0-10, P0-14).
+    ///
+    /// A confirmed move removes photos, so the selection, the current photo and the group place
+    /// must not point at one. The scan only adds photos, so this changes nothing during a normal
+    /// scan; a detail or group route whose photo is gone returns to the grid, the same fallback a
+    /// restore uses. Grouping's own update then keeps a surviving group's place.
+    private func reconcileRemovedPhotos() {
+        let present = Set(storedPhotos.map(\.id))
+        if !state.selection.isSubset(of: present) {
+            state.selection.formIntersection(present)
+            batchReport = nil
+            selectionClearances += 1
+        }
+        if let current = state.currentPhoto, !present.contains(current) {
+            state.currentPhoto = nil
+            if state.route == .detail { state.route = .grid }
+        }
+        if let position = state.groupPosition, !present.contains(position.photo) {
+            state.groupPosition = nil
+            if state.route == .group { state.route = .grid }
+        }
     }
 }
 
@@ -621,4 +751,21 @@ struct BatchMarkApplication: Sendable {
 
     /// Each targeted photo's marks before the batch, keyed by C1's identity (PRD P0-05).
     let marksBefore: [PhotoIdentity: PhotoMarks]
+}
+
+/// The latest completed Move rejects run, kept for the toast and C14's undo (PRD P0-10).
+///
+/// The result names every set the run moved, failed or skipped, and the kept identities are the
+/// photos the person kept in the confirmation. C14's undo will move the files back and restore
+/// Reject on both lists as one step; this task only keeps the value.
+struct CompletedRejectMove: Sendable, Identifiable {
+    /// The run's outcomes and its retry handle (PRD P0-10).
+    let result: RejectMoveResult
+    /// The ready sets the person kept, in the plan's order (PRD P0-10).
+    let keptIdentities: [PhotoIdentity]
+    /// The rejects folder name that run used, for the toast (PRD Move rejects).
+    let rejectsFolderName: RejectsFolderName
+
+    /// The run's id, so the grid can key the toast on it (PRD P0-10).
+    var id: RejectMoveBatchID { result.id }
 }

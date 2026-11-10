@@ -13,6 +13,10 @@ import SwiftUI
 /// (PRD P0-09). The selection itself lives in ``BrowsingState/selection``, so folding, resizing or
 /// relaunching keeps it with the rest of the scene (PRD P0-14).
 ///
+/// The toolbar also offers Move rejects while the setting is on and the folder holds a rejected
+/// photo (PRD P0-10). The action opens ``MoveRejectsSheet``, which plans, confirms, runs and
+/// reports the move; it never runs without the confirmation.
+///
 /// Design placeholder: system menus, symbols and colours stand in for the visual design's
 /// controls and overlays.
 struct GridScreen: View {
@@ -22,6 +26,25 @@ struct GridScreen: View {
     /// The app-wide settings, read live so a change on the settings screen shows here at once
     /// (PRD Grid, Similar groups).
     @Environment(SettingsStore.self) private var store
+
+    /// The Move rejects sheet or its details sheet, or nil while both are closed (PRD P0-10).
+    ///
+    /// One item drives one sheet, so the confirmation and the failure details never try to
+    /// present at the same time.
+    @State private var moveSheet: MoveSheetRoute?
+
+    /// One Move rejects presentation: the confirmation flow or its failure details (P0-10).
+    private enum MoveSheetRoute: Identifiable {
+        case flow(MoveRejectsFlow)
+        case details(CompletedRejectMove)
+
+        var id: String {
+            switch self {
+            case .flow(let flow): "flow-\(flow.id)"
+            case .details(let completed): "details-\(completed.id)"
+            }
+        }
+    }
 
     /// The thumbnails the cells draw (PRD P0-03).
     ///
@@ -65,6 +88,52 @@ struct GridScreen: View {
         .safeAreaInset(edge: .bottom) {
             if browsing.isSelecting {
                 GridBatchBar(browsing: browsing, cells: cells)
+                    // PRD P0-10 blocks marking while a move runs; C6's rule is also enforced in
+                    // the model, and this keeps the bar from looking ready.
+                    .disabled(browsing.isMovingRejects)
+            }
+        }
+        .toolbar {
+            // The handoff hides Move Rejects while opening and when there is nothing to move,
+            // rather than leaving a disabled action on screen (design handoff, P0-10).
+            if store.settings.moveRejectsEnabled, browsing.rejectedPhotoCount > 0,
+                !browsing.isFolderOpening
+            {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Move rejects", systemImage: "tray.and.arrow.up") {
+                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                    }
+                    .accessibilityIdentifier("clove.grid.moveRejects")
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let completed = browsing.lastRejectMove,
+                browsing.isRejectMoveToastVisible
+            {
+                MoveRejectsToast(completed: completed) {
+                    moveSheet = .details(completed)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+            }
+        }
+        .task(id: browsing.lastRejectMove?.id) {
+            guard browsing.isRejectMoveToastVisible else { return }
+            // Toast timings are still proposed in the handoff; the details remain reachable
+            // from the same result until this presentation ends.
+            try? await Task.sleep(for: .seconds(10))
+            // A newer move cancels this task; swallowing the sleep's cancellation must not
+            // dismiss the toast the newer result just showed.
+            guard !Task.isCancelled else { return }
+            browsing.dismissRejectMoveToast()
+        }
+        .sheet(item: $moveSheet) { route in
+            switch route {
+            case .flow(let flow):
+                MoveRejectsSheet(flow: flow)
+            case .details(let completed):
+                MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
             }
         }
         .accessibilityElement(children: .contain)

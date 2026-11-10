@@ -1,0 +1,180 @@
+import CloveCore
+import Foundation
+import Observation
+
+/// The Move rejects sheet's state: plan, staged keeps, move and progress (PRD P0-10).
+///
+/// The flow reads every value through ``BrowsingModel``, so the sheet never reaches into the
+/// library, the scan or a file path. The configuration is passed in at plan time, because PRD
+/// Move rejects lets the folder name change in Settings and the move must use the name in force
+/// when the user confirms. A keep is staged only: dismissing the sheet discards it, and the kept
+/// photos' Reject is cleared only when Move runs.
+@MainActor
+@Observable
+final class MoveRejectsFlow: Identifiable {
+    /// What the sheet shows at one moment (PRD P0-10).
+    enum Stage: Equatable {
+        /// The plan is being built; nothing has moved.
+        case planning
+        /// The plan is ready and waits for the user's confirmation.
+        case confirming(RejectMovePlan)
+        /// The run is clearing kept rejects or moving sets, with its finished count and total.
+        case moving(finished: Int, total: Int)
+        /// The request failed as a whole, with no per-photo result to show.
+        case failed(String)
+        /// PRD Failure and recovery's read-only location copy.
+        case readOnly
+        /// The setting was turned off before the request reached the library.
+        case disabled
+    }
+
+    /// The sheet's identity, so a new toolbar tap starts a new flow.
+    let id = UUID()
+
+    /// The browsing state and the library calls this flow performs.
+    private let browsing: BrowsingModel
+
+    /// What the sheet shows now.
+    private(set) var stage: Stage = .planning
+
+    /// The staged keeps for the plan, or nil before one is built (PRD P0-10).
+    private(set) var keepSelection: RejectMoveKeepSelection?
+
+    /// The thumbnails the keep grid draws for the open folder (PRD P0-10, P0-03).
+    var thumbnails: any GridThumbnailSource { browsing.thumbnails }
+
+    /// The task reading C6's progress stream (PRD P0-10).
+    private var progressTask: Task<Void, Never>?
+
+    /// Creates one sheet's flow over the scene's browsing model.
+    init(browsing: BrowsingModel) {
+        self.browsing = browsing
+    }
+
+    /// Plans the move once the sheet appears (PRD P0-10).
+    ///
+    /// A plan is built only from the `.planning` stage, so a returning view does not rebuild a
+    /// confirmation the user is looking at.
+    func planIfNeeded(configuration: RejectMoveConfiguration) async {
+        guard stage == .planning else { return }
+        await plan(configuration: configuration)
+    }
+
+    /// Builds the confirmation plan for the open folder's rejected photos (PRD P0-10).
+    func plan(configuration: RejectMoveConfiguration) async {
+        stage = .planning
+        do {
+            let plan = try await browsing.planRejectMove(configuration: configuration)
+            keepSelection = RejectMoveKeepSelection(plan: plan)
+            stage = .confirming(plan)
+        } catch let refusal as RejectMoveRefusal {
+            stage = Self.stage(for: refusal)
+        } catch {
+            stage = .failed("The rejected photos couldn't be listed.")
+        }
+    }
+
+    /// Keeps one ready set, or un-keeps it when it is already kept (design handoff, P0-10).
+    func toggleKeep(_ identity: PhotoIdentity) {
+        keepSelection?.toggle(identity)
+    }
+
+    /// Clears the kept photos' Reject, then moves the rest (design handoff, PRD P0-10).
+    ///
+    /// The keeps are staged until this call: every kept photo first goes through C4's existing
+    /// mark path as a Reject-off change, leaving rating and label untouched, and every kept photo
+    /// is left out of the plan even when that clear fails. The plan's remaining sets then move
+    /// through C6. A completed run is recorded on the model for the toast and C14's undo; the
+    /// return value tells the sheet whether it can dismiss.
+    func move(_ plan: RejectMovePlan) async -> Bool {
+        guard let selection = keepSelection else { return false }
+        let kept = selection.orderedKeptIdentities
+        let moving = selection.movingPlan
+        stage = .moving(finished: 0, total: moving.photoCount)
+
+        var clearFailures: [RejectMoveFailedSet] = []
+        for identity in kept {
+            let status = await browsing.apply(.reject(false), to: identity)
+            guard let status, status.state.isConfirmed else {
+                let failure: RejectMoveFailure
+                if case .failed(let writeFailure) = status?.state {
+                    failure = RejectMoveFailure(classifying: writeFailure)
+                } else {
+                    failure = RejectMoveFailure(
+                        reason: .notConfirmed,
+                        message: "The kept photo's Reject wasn't cleared.")
+                }
+                clearFailures.append(
+                    RejectMoveFailedSet(
+                        identity: identity,
+                        failure: failure,
+                        files: plan.readyEntries.first { $0.identity == identity }?.files ?? []))
+                continue
+            }
+        }
+
+        let progress = await browsing.rejectMoveProgress()
+        startProgress(progress)
+        do {
+            let result = try await browsing.runRejectMove(moving)
+            await finishProgress()
+            let outcomes =
+                result.outcomes + clearFailures.map(RejectMoveOutcome.failed)
+            let completed = RejectMoveResult(id: result.id, outcomes: outcomes)
+            browsing.recordRejectMove(
+                completed, keptIdentities: kept,
+                rejectsFolderName: plan.configuration.rejectsFolderName)
+            return true
+        } catch let refusal as RejectMoveRefusal {
+            cancelProgress()
+            stage = Self.stage(for: refusal)
+            return false
+        } catch {
+            cancelProgress()
+            stage = .failed("The rejected photos couldn't be moved.")
+            return false
+        }
+    }
+
+    /// Subscribes to C6's progress before a run starts (PRD P0-10).
+    ///
+    /// The stream is created before the run, so every step is buffered even when the consumer
+    /// task has not started iterating yet; a short move therefore still reports its finish.
+    private func startProgress(_ stream: AsyncStream<RejectMoveProgress>) {
+        progressTask?.cancel()
+        progressTask = Task { [weak self] in
+            for await update in stream {
+                guard let self, !Task.isCancelled else { return }
+                switch update {
+                case .setStarted:
+                    break
+                case .setFinished:
+                    guard case .moving(let finished, let total) = self.stage else { continue }
+                    self.stage = .moving(finished: min(finished + 1, total), total: total)
+                case .finished:
+                    return
+                }
+            }
+        }
+    }
+
+    /// Waits for the progress stream to see the run's final step (PRD P0-10).
+    private func finishProgress() async {
+        await progressTask?.value
+        progressTask = nil
+    }
+
+    /// Stops reading progress after a run failed before it finished (PRD P0-10).
+    private func cancelProgress() {
+        progressTask?.cancel()
+        progressTask = nil
+    }
+
+    /// Maps a whole-request refusal to the sheet's copy (PRD P0-10, Failure and recovery).
+    private static func stage(for refusal: RejectMoveRefusal) -> Stage {
+        switch refusal {
+        case .disabled: .disabled
+        case .readOnlyLocation: .readOnly
+        }
+    }
+}

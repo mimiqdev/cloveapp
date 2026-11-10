@@ -167,6 +167,11 @@ final class TestLibrary: FolderLibrary {
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         (rejectMoveUpdates, rejectMoveContinuation) = AsyncStream.makeStream(
             of: RejectMoveProgress.self)
+        // The sample is fully scanned when it opens, so the grid can show the actions the
+        // handoff hides during opening (design handoff, PRD P0-01).
+        updateContinuation.yield(
+            .scanFinished(
+                FolderScanSummary(photoCount: stored.count, status: .complete)))
     }
 
     /// Applies only the fields the change names and reports the state C4 would (PRD P0-08).
