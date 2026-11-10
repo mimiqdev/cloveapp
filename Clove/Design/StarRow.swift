@@ -32,7 +32,8 @@ struct StarRow: View {
     }
 
     /// One star button; a disabled level is dimmed and does nothing, and the value the photo
-    /// already has clears on a second tap (PRD Enabled rating levels, PRD Marking rules).
+    /// already has clears on a second tap, even when that level is disabled, because clearing is
+    /// always allowed (PRD Enabled rating levels, PRD Marking rules).
     private func star(_ level: Rating) -> some View {
         let isFilled = level <= rating
         let isEnabled = enabledRatings.contains(level)
@@ -47,7 +48,7 @@ struct StarRow: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled)
+        .disabled(!isEnabled && level != rating)
         .accessibilityLabel("\(level.rawValue) stars")
         .accessibilityAddTraits(level == rating ? .isSelected : [])
         .accessibilityIdentifier("\(identifier).\(level.rawValue)")

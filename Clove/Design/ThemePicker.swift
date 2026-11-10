@@ -4,9 +4,9 @@ import SwiftUI
 /// The eight theme tiles in a 4 × 2 grid (`design/handoff/screens.md`, Settings Appearance).
 ///
 /// The ring follows the theme in effect, so with Match system on it sits on Light or Dark as the
-/// system changes, exactly as the frame shows. Choosing a tile reports the theme; the settings
-/// section decides that choosing one also stops matching the system, because a theme picked by hand
-/// is meant to apply.
+/// system changes, exactly as the frame shows. Choosing a tile only reports the theme; the settings
+/// section applies `design/handoff/interactions.md`'s rule: Light or Dark keeps Match system on,
+/// and any other theme turns it off.
 struct ThemePicker: View {
     /// The theme in effect, which carries the ring (components.md, Theme tile).
     let selection: CloveTheme

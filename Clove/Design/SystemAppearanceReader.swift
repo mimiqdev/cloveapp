@@ -18,7 +18,10 @@ struct SystemAppearanceReader: UIViewRepresentable {
 
     func updateUIView(_ view: ReporterView, context: Context) {
         view.onChange = onChange
-        view.report()
+        // The report writes the owner's state, which SwiftUI forbids during a view update, so it
+        // runs on the next main-actor turn. It catches a change the trait callback missed: with a
+        // forced theme in effect the screen can switch style without the view's traits changing.
+        Task { @MainActor [weak view] in view?.report() }
     }
 
     /// An invisible view that watches the scene rather than its own traits.
