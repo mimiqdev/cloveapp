@@ -86,9 +86,6 @@ final class UndoHistoryBridge {
     /// The registration discards the manager's redo stack outside an undo application, which is
     /// what C5 does for a newly recorded action too (PRD P0-05's last-in, first-out undo).
     func historyDidRecord() {
-        // A record lands from a user action on the main actor, never inside the manager's own
-        // application, so the new registration becomes an undo and discards the redo stack, which
-        // is what C5 does for a newly recorded action too (PRD P0-05's last-in, first-out undo).
         guard let host, host.undoAvailability.canUndo else { return }
         registerUndoOperation(named: host.undoAvailability.undoName)
     }
