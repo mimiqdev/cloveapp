@@ -55,8 +55,10 @@ struct DesignGalleryScreen: View {
             .background(Rectangle().fill(Color.clove.bg.canvas).ignoresSafeArea())
             .navigationTitle("Design gallery")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(theme.appearance.colorScheme, for: .navigationBar)
         }
         .environment(\.cloveTheme, theme)
+        .environment(\.colorScheme, theme.appearance.colorScheme)
         .preferredColorScheme(theme.appearance.colorScheme)
         .accessibilityIdentifier("clove.design.gallery")
     }

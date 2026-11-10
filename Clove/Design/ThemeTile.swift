@@ -21,6 +21,10 @@ struct ThemeTile: View {
                 .frame(width: 74, height: 54)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(theme.tokens.separator.color, lineWidth: 1)
+                }
+                .overlay {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(Color.clove.accent, lineWidth: 2)
@@ -52,12 +56,17 @@ struct ThemeTile: View {
     /// Three photo tiles on the theme's stage, which stands in for a grid (components.md).
     private var gridStrip: some View {
         HStack(spacing: 1) {
-            ForEach(0..<3, id: \.self) { index in
-                Rectangle()
-                    .fill(index == 1 ? theme.tokens.stage.color : theme.tokens.card.color)
+            ForEach(0..<3, id: \.self) { _ in
+                ZStack {
+                    Rectangle().fill(theme.tokens.card.color)
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(theme.tokens.secondaryText.color)
+                }
             }
         }
-        .frame(height: 26)
+        .frame(height: 28)
+        .background(theme.tokens.stage.color)
         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
     }
 

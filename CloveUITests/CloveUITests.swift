@@ -42,6 +42,126 @@ final class CloveUITests: XCTestCase {
         leaveMultiSelect(in: app)
     }
 
+    /// The design gallery shows the shared controls, and its theme switcher redraws them
+    /// (V1; design/handoff/README.md build order).
+    ///
+    /// The gallery is reachable only through the launch environment, so this also proves it never
+    /// appears on the app's own paths. The four screenshots go into the test results for the pull
+    /// request.
+    @MainActor
+    func testDesignGalleryShowsEveryControl() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
+        app.launchEnvironment["CLOVE_DESIGN_GALLERY"] = "1"
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.design.gallery").waitForExistence(timeout: 30),
+            "The design gallery did not appear")
+        XCTAssertTrue(
+            element(in: app, "clove.mark.capsule").exists, "The gallery had no mark capsule")
+        XCTAssertTrue(element(in: app, "clove.toast").exists, "The gallery had no toast")
+        XCTAssertTrue(
+            element(in: app, "clove.mark.starBar").exists, "The gallery had no vertical star bar")
+
+        attachScreenshot(named: "gallery-light")
+        for theme in ["dark", "darkroom", "nord"] {
+            let tile = app.buttons["clove.design.gallery.theme.\(theme)"]
+            XCTAssertTrue(
+                tile.waitForExistence(timeout: 10), "The gallery had no \(theme) theme button")
+            tile.tap()
+            XCTAssertTrue(waitForSelection(of: tile, timeout: 5), "The gallery stayed on its theme")
+            XCTAssertTrue(
+                element(in: app, "clove.mark.capsule").exists,
+                "The gallery lost the capsule in \(theme)")
+            attachScreenshot(named: "gallery-\(theme)")
+        }
+
+        // One more frame of the lower half, where the toast, the banner and the tiles are.
+        app.swipeUp()
+        attachScreenshot(named: "gallery-lower")
+    }
+
+    /// The Appearance setting keeps a chosen theme across a relaunch (V1, tokens.md).
+    ///
+    /// This launch uses the app's own settings storage rather than the sample library, because
+    /// the check is that the next launch reads what this one stored. The test starts from Match
+    /// system on and leaves it on, so the other tests see the usual appearance.
+    @MainActor
+    func testAppearanceChoicePersistsAcrossLaunches() {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The Clove root view did not appear")
+        openSettings(in: app)
+        setAppearanceMatchSystem(in: app, on: true)
+        attachScreenshot(named: "settings-appearance-light")
+        setAppearanceMatchSystem(in: app, on: false)
+
+        let nord = app.buttons["clove.settings.appearance.theme.nord"]
+        XCTAssertTrue(nord.waitForExistence(timeout: 10), "The theme picker had no Nord tile")
+        nord.tap()
+        XCTAssertTrue(
+            waitForSelection(of: nord, timeout: 5), "Nord did not become the chosen theme")
+        attachScreenshot(named: "settings-appearance-nord")
+
+        app.terminate()
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The relaunched Clove did not appear")
+        openSettings(in: app)
+        let storedMatchSystem = app.switches["clove.settings.appearance.matchSystem"]
+        XCTAssertTrue(
+            waitForValue("0", of: storedMatchSystem, timeout: 10),
+            "The relaunch lost Match system")
+        XCTAssertTrue(
+            waitForSelection(
+                of: app.buttons["clove.settings.appearance.theme.nord"], timeout: 10),
+            "The relaunch lost the chosen theme")
+
+        // Leave the system choice on for the other tests in this run.
+        setAppearanceMatchSystem(in: app, on: true)
+    }
+
+    /// Turns Match system light/dark on or off, and checks that the switch followed.
+    ///
+    /// A SwiftUI row toggle flips only on its switch, which sits at the trailing edge; a tap in
+    /// the middle of the row lands on the label.
+    @MainActor
+    private func setAppearanceMatchSystem(in app: XCUIApplication, on: Bool) {
+        let toggle = app.switches["clove.settings.appearance.matchSystem"]
+        XCTAssertTrue(
+            toggle.waitForExistence(timeout: 10), "Settings had no Match system switch")
+        for _ in 0..<2 {
+            if switchValue(toggle) == (on ? "1" : "0") { return }
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertEqual(
+            switchValue(toggle), on ? "1" : "0",
+            "Match system did not turn \(on ? "on" : "off")")
+    }
+
+    /// Waits until an element reports that it is selected, with a bounded timeout.
+    @MainActor
+    private func waitForSelection(of element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isSelected == true"), object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    /// Keeps a screenshot in the test results, named after what it shows.
+    @MainActor
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     /// Entry opens the test library and the grid appears.
     @MainActor
     private func openTestLibrary(in app: XCUIApplication) {
