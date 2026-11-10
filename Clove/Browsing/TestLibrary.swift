@@ -61,18 +61,37 @@ final class TestLibrary: FolderLibrary {
 
     /// Applies only the fields the change names and reports the state C4 would (PRD P0-08).
     ///
-    /// The sample has no sidecar to write, so a rating or label reports
-    /// ``MarkChangeState/savedInSidecar``, and a Reject-only change reports
+    /// Every sample photo is a RAW set, whose rating and label belong to its sidecar, so a change
+    /// that names either reports ``MarkChangeState/savedInSidecar``. A Reject-only change reports
     /// ``MarkChangeState/storedInClove``, which is confirmed but never shown as Saved (G1
-    /// decision 5). Nothing is written anywhere.
+    /// decision 5). ``MarkChangeState/savedInCloveOnly`` would belong to a standalone JPEG/HIF
+    /// (G1 decision 6); the sample has none. A newer change replaces the photo's status the way the
+    /// queue supersedes an older request, and a photo with nothing requested has no status at all.
+    /// Nothing is written anywhere.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus {
-        if let index = stored.firstIndex(where: { $0.id == photo }) {
-            var marks = stored[index].marks
-            if let rating = change.rating { marks.rating = rating }
-            if let label = change.label { marks.label = label }
-            if let reject = change.reject { marks.isRejected = reject }
-            stored[index].marks = marks
+        guard !change.isEmpty else {
+            // C4's queue refuses a request that names no marks and records nothing.
+            return MarkChangeStatus(
+                id: MarkChangeID(), identity: photo, requested: change,
+                state: .failed(
+                    MarkWriteFailure(
+                        reason: .unknown,
+                        message: "The change names no marks, so nothing was written.")))
         }
+        guard let index = stored.firstIndex(where: { $0.id == photo }) else {
+            return MarkChangeStatus(
+                id: MarkChangeID(), identity: photo, requested: change,
+                state: .failed(
+                    MarkWriteFailure(
+                        reason: .locationUnavailable,
+                        message: "The sample library does not hold this photo.")))
+        }
+        var marks = stored[index].marks
+        if let rating = change.rating { marks.rating = rating }
+        if let label = change.label { marks.label = label }
+        if let reject = change.reject { marks.isRejected = reject }
+        stored[index].marks = marks
+
         let state: MarkChangeState =
             change.rating == nil && change.label == nil ? .storedInClove : .savedInSidecar
         let status = MarkChangeStatus(
@@ -123,7 +142,7 @@ final class TestLibrary: FolderLibrary {
             MarkChangeStatus(
                 id: MarkChangeID(),
                 identity: samplePhoto(2679),
-                requested: .rating(stars(3)),
+                requested: .rating(stars(4)),
                 state: .failed(
                     MarkWriteFailure(
                         reason: .notConfirmed,

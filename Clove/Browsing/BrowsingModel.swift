@@ -155,12 +155,15 @@ final class BrowsingModel {
     /// Applies one change to one photo through the library and shows its marks and save state
     /// (PRD P0-08).
     ///
-    /// The await is C4's write queue: the model refreshes the library's photos and statuses once
-    /// the write returns, so a screen never shows a mark the storage has not accepted.
+    /// The await is C4's write queue. The refresh takes the library's photos, and the status the
+    /// write returned is stored as it came back: a library that publishes its transitions through
+    /// a stream can be a moment behind, and the screen must show what this write reported, not
+    /// what the next poll happens to see.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async {
         guard !change.isEmpty else { return }
-        _ = await library.apply(change, to: photo)
+        let status = await library.apply(change, to: photo)
         refresh()
+        latestChanges[photo] = status
     }
 
     /// Restores this scene's saved state through CloveCore's validation (PRD P0-14).

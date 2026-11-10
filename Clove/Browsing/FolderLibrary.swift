@@ -4,7 +4,8 @@ import CloveCore
 ///
 /// Folder access (C11), the scan (C2), the order (C8), writes (C4) and grouping (C9) arrive with
 /// U2 and U3. The seam already speaks C4's `MarkChange` and `MarkChangeStatus`, so those tasks
-/// replace the implementation without changing a screen or this protocol's shape.
+/// replace the implementation without changing a screen or the shape of these calls; a library
+/// answers with the statuses its own writes produced.
 ///
 /// This build reads the library when it opens a folder, restores a scene and applies a change.
 /// U2 and U3 push their updates in: the model consumes one `AsyncStream` of scan batches and
@@ -30,8 +31,10 @@ protocol FolderLibrary: AnyObject {
 
     /// The latest change to one photo with its save state (PRD P0-08).
     ///
-    /// Mirrors C4's `MarkWriteQueue.latestChange(for:)`: U7 reads the same status for its retry.
-    /// Nil means nothing has been requested for the photo, not that everything is saved.
+    /// It answers from the library's current records, synchronously, so a screen can render it.
+    /// C4's `MarkWriteQueue.latestChange(for:)` is actor-isolated, so U2 keeps this answer in
+    /// step with the statuses the queue streams; U7 reads the same status for its retry. Nil
+    /// means nothing has been requested for the photo, not that everything is saved.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus?
 }
 

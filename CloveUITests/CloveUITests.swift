@@ -63,7 +63,7 @@ final class CloveUITests: XCTestCase {
     private func markThePhoto(in app: XCUIApplication) {
         let saveState = element(in: app, "clove.detail.saveState")
         XCTAssertTrue(saveState.waitForExistence(timeout: 10), "The detail view had no save state")
-        XCTAssertEqual(saveState.label, "Not saved yet")
+        XCTAssertEqual(saveState.label, "No change yet")
 
         let fourStars = element(in: app, "clove.detail.rate.4")
         XCTAssertTrue(
