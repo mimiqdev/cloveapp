@@ -235,6 +235,97 @@ final class BrowsingModel {
         }
     }
 
+    /// The last batch the bar applied, with each targeted photo's marks before it
+    /// (PRD P0-09; C5's `MarkUndoHistory.recordBatch`).
+    ///
+    /// U8 records one undo entry per bar action from this value. A retry does not replace it, so
+    /// retrying a failed item never records a second entry for the same action.
+    private(set) var lastBatch: BatchMarkApplication?
+
+    /// What the multi-select bar reports for the batch it applied, or nil when there is nothing
+    /// to report or the bar dismissed it (PRD P0-09, PRD Failure and recovery).
+    private(set) var batchReport: BatchMarkReport?
+
+    /// The photos one batch marks: the selection narrowed to the photos the grid shows, in grid
+    /// order (PRD P0-09). A photo the filter hides stays selected and is not marked.
+    var batchTargets: [GridPhoto] {
+        BatchSelection.targets(selection: state.selection, shown: photos)
+    }
+
+    /// Whether the grid is in multi-select (PRD P0-09).
+    ///
+    /// The mode is not stored separately: a non-empty selection is multi-select, and
+    /// ``BrowsingState/selection`` is already saved per scene, so a fold, a resize and a relaunch
+    /// keep the mode along with the photos it names (PRD P0-14).
+    var isSelecting: Bool { !state.selection.isEmpty }
+
+    /// The selection read against the folder's published groups (PRD P0-09, P0-11).
+    private var batchSelection: BatchSelection {
+        BatchSelection(groups: groups, selection: state.selection)
+    }
+
+    /// Enters multi-select on one cell's photos (PRD P0-09).
+    ///
+    /// A photo's cell adds that photo; a collapsed group's cover adds every photo in its group,
+    /// because the cover stands for the group (PRD Grid, collapsed).
+    func beginSelection(of cell: GridCellItem) {
+        state.selection = batchSelection.selecting(cell)
+    }
+
+    /// Adds one cell's photos to the multi-selection or removes them (PRD P0-09).
+    ///
+    /// In multi-select a tap toggles instead of opening detail, and a partly selected cover
+    /// completes its group rather than clearing the part already chosen.
+    func toggleSelection(of cell: GridCellItem) {
+        state.selection = batchSelection.toggling(cell)
+    }
+
+    /// Selects every photo the shown cells stand for (PRD P0-09's Select all visible).
+    func selectAllVisible(_ cells: [GridCellItem]) {
+        state.selection = batchSelection.selectingAll(cells)
+    }
+
+    /// Leaves multi-select, clears the selection and drops the batch's report (PRD P0-09).
+    ///
+    /// A failed photo keeps its failure in ``latestChange(for:)`` and shows no mark it did not
+    /// save; U7's global save state reports the unfinished writes from there.
+    func clearSelection() {
+        state.selection = []
+        batchReport = nil
+    }
+
+    /// Applies one bar action to the selected photos the grid shows (PRD P0-09).
+    ///
+    /// One call is one batch: the library admits every photo before awaiting any result, so a bar
+    /// action over 50 photos writes them concurrently and reports one result with one retry
+    /// handle. Each photo's save state still arrives through the library's stream, like any other
+    /// change, so a failed photo never shows a mark it did not save (PRD P0-08).
+    func applyBatch(_ action: BatchMarkAction, settings: AppSettings) async {
+        let targets = batchTargets
+        let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
+        guard !plan.items.isEmpty else { return }
+        var marksBefore: [PhotoIdentity: PhotoMarks] = [:]
+        for photo in targets { marksBefore[photo.id] = photo.marks }
+        let result = await library.apply(plan.items)
+        lastBatch = BatchMarkApplication(result: result, marksBefore: marksBefore)
+        batchReport = BatchMarkReport(result)
+    }
+
+    /// Retries only the photos the last batch could not save (PRD P0-09).
+    ///
+    /// The saved photos are left alone, and the retry's result merges with the action's, so the
+    /// bar keeps counting the whole action instead of only the photos the retry resent.
+    func retryFailedBatch() async {
+        guard let report = batchReport, report.canRetry else { return }
+        guard let result = await library.retryFailed(in: report.batch) else { return }
+        batchReport = report.merging(result)
+    }
+
+    /// Dismisses the batch's report without retrying (PRD Failure and recovery: Cancel).
+    func dismissBatchReport() {
+        batchReport = nil
+    }
+
     /// The latest change to one photo with its save state, or nil when nothing was requested
     /// (PRD P0-08). U7 reads the same status for its retry.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? {
@@ -359,6 +450,10 @@ final class BrowsingModel {
         state.selection = []
         state.groupPosition = nil
         state.route = .grid
+        // Another folder replaces every selected photo's identity, so the batch's report and
+        // U8's undo snapshot go with the selection.
+        lastBatch = nil
+        batchReport = nil
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change.
         thumbnails = library.thumbnails
@@ -375,4 +470,19 @@ final class BrowsingModel {
             if let change = library.latestChange(for: photo.id) { changes.insert(change) }
         }
     }
+}
+
+/// One batch the multi-select bar applied, with what U8's undo entry needs (PRD P0-09, C5).
+///
+/// The batch is already written when this value exists, so it holds what the action cannot be
+/// re-derived from: C4's per-photo results, including the failed photos a retry resends, and the
+/// marks each targeted photo had just before the batch. U8 passes both to
+/// `MarkUndoHistory.recordBatch(_:marksBefore:)` from the one ``BrowsingModel/applyBatch(_:settings:)``
+/// call, which is what keeps one bar action to one undo entry.
+struct BatchMarkApplication: Sendable {
+    /// C4's per-photo results, with the photos the batch could not save (PRD P0-09).
+    let result: MarkBatchResult
+
+    /// Each targeted photo's marks before the batch, keyed by C1's identity (PRD P0-05).
+    let marksBefore: [PhotoIdentity: PhotoMarks]
 }
