@@ -204,10 +204,17 @@ final class FolderLibrarySession: FolderLibrary {
     /// (PRD P0-02).
     var openGeneration: Int { scanGeneration }
 
-    /// Whether C4 still holds an unfinished change, asked of the queue itself (PRD P0-08).
+    /// Whether C4 still holds an unfinished change for the open folder (PRD P0-08).
+    ///
+    /// The queue keeps a failed change for the session, including one from a folder the user
+    /// left, so the answer is narrowed to the folder that is open now; otherwise an earlier
+    /// folder's failure would keep this folder's leaving question up forever.
     func hasUnfinishedWrites() async -> Bool {
         guard case .success(let stores) = await resolvedStores() else { return false }
-        return !(await stores.writes.unfinishedChanges().isEmpty)
+        let current = folder
+        return await stores.writes.unfinishedChanges().contains {
+            $0.identity.folderID == current
+        }
     }
 
     /// The scanned set behind one photo, for writes and U3's thumbnail lookup (PRD P0-08).

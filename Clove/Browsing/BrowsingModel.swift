@@ -446,13 +446,15 @@ final class BrowsingModel {
         // Cancel, Leave anyway or a new question may have replaced the one that started this wait,
         // and a stale waiter must never answer the newer question or clear its progress.
         guard leavePrompt?.id == prompt.id else { return }
-        isWaitingForWrites = false
         // The queue's own answer is authoritative: a streamed status can still be on its way to
         // this screen when the drain returns, and the question must not stay over confirmed work.
-        guard await library.hasUnfinishedWrites() else {
-            await leave(to: prompt.destination)
-            return
-        }
+        let unfinished = await library.hasUnfinishedWrites()
+        // Answering takes another await, so the question can have been cancelled or replaced
+        // meanwhile; a stale waiter never acts on the newer one.
+        guard leavePrompt?.id == prompt.id else { return }
+        isWaitingForWrites = false
+        guard !unfinished else { return }
+        await leave(to: prompt.destination)
     }
 
     /// Leaves the open folder now, without reporting its unconfirmed changes as saved
@@ -599,8 +601,12 @@ final class BrowsingModel {
         case .available?:
             folderFailure = nil
             // C11 reopened and validated the folder, so a loss buffered before this scene caught
-            // up belongs to whatever was open then, not to what it shows now (PRD P0-02).
+            // up belongs to whatever was open then, not to what it shows now (PRD P0-02). The
+            // open it just installed is the one this scene shows, even when the saved route is
+            // entry or settings and the grid does not appear yet.
             folderLocationLoss = nil
+            shownOpenGeneration = library.openGeneration
+            hasLeftFolder = false
             await reloadRecents()
             if saved.showsPhotos {
                 showOpenFolder()
