@@ -113,16 +113,17 @@ public struct DetailImage: Sendable {
     /// This answers whether asking for more pixels can help. A native RAW render is the photo's
     /// own pixels. A raster is final when it reaches the photo's size, allowing one pixel for
     /// rounding in the fit geometry, or when it reaches the raster decode limit, beyond which no
-    /// display request can produce a larger bitmap. A raster whose header size is unknown is not
-    /// final: it is a display raster, and the route behind it — a RAW render, for one — may still
-    /// deliver more. A preview is never final when it could render; a preview whose header is
-    /// unknown still asks, because the render supplies the size the header could not.
+    /// display request can produce a larger bitmap. Below that limit, a raster whose header size
+    /// is unknown is not final: it is a display raster, and the route behind it — a RAW render,
+    /// for one — may still deliver more. A preview is never final when it could render; a preview
+    /// whose header is unknown still asks, because the render supplies the size the header could
+    /// not.
     public var isBestAvailable: Bool {
         switch quality {
         case .nativeRAW:
             return true
         case .raster:
-            if longEdge >= DetailRenderer.maximumRasterPixels { return true }
+            if longEdge >= DetailPixelLimit.maximumEdge { return true }
             guard let fullResolutionSize else { return false }
             let nativeLongEdge = max(fullResolutionSize.width, fullResolutionSize.height)
             return CGFloat(longEdge) + 1 >= nativeLongEdge
