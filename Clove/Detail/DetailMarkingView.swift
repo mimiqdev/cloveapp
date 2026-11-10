@@ -294,18 +294,20 @@ struct DetailMarkingView: View {
     /// pixels are on screen, so an edge tap to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
         upgradeTask?.cancel()
-        keptZoom = nil
-        keptScale = nil
-        keptNativeScale = nil
-        if zoomPolicy.keepsScale, shown != nil, let snapshot = probe.container?.zoomSnapshot {
-            // A preview that has not arrived yet leaves the container with no pixels, so its
-            // snapshot is nil: the zoom read before an earlier tap in a run of quick taps stays
-            // pending for the photo that finally loads (PRD In-group culling, synchronized zoom).
-            keptScale = snapshot.scale
-            if let shown, shown.fullResolutionSize != nil {
-                keptNativeScale = nativeFullResolutionScale(for: shown)
-            }
-            if zoomPolicy.keepsPosition { keptZoom = snapshot }
+        if !zoomPolicy.keepsScale {
+            keptZoom = nil
+            keptScale = nil
+            keptNativeScale = nil
+        } else if let shown {
+            // A preview that has not arrived yet leaves `shown` nil, so this branch is skipped:
+            // the zoom read before an earlier tap in a run of quick taps stays pending for the
+            // photo that finally loads (PRD In-group culling, synchronized zoom).
+            let snapshot = probe.container?.zoomSnapshot
+            keptScale = snapshot?.scale
+            keptNativeScale =
+                snapshot != nil && shown.fullResolutionSize != nil
+                ? nativeFullResolutionScale(for: shown) : nil
+            keptZoom = zoomPolicy.keepsPosition ? snapshot : nil
         }
         if !zoomPolicy.keepsScale {
             zoomMode = .fit
