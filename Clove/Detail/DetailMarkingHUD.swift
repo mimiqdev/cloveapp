@@ -17,8 +17,8 @@ struct DetailMarkingHUD: View {
     /// The photo whose marks the HUD shows (PRD P0-04).
     let photo: GridPhoto
 
-    /// C12's settings: which ratings and labels may be applied, and the double-tap choice is not
-    /// read here but the value is passed whole so U11 has one place to wire.
+    /// C12's settings: which ratings and labels may be applied. The screen owns the double-tap
+    /// and keep-zoom choices, and passes the whole value so U11 has one place to wire.
     let settings: AppSettings
 
     /// U1's save-state summary, which U7 replaces with its own copy (PRD P0-08).
