@@ -118,6 +118,42 @@ struct DetailCacheTests {
         #expect(cache.holdsNativeImage == false)
     }
 
+    @Test func aHeaderSizeIsKeptPerSourceRevision() throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let file = try directory.image(name: "bytes.JPG")
+        let cache = directory.cache()
+        let source = try detailSource(file)
+        #expect(cache.headerSize(for: source) == nil)
+
+        cache.store(headerSize: .known(CGSize(width: 8640, height: 5760)), for: source)
+
+        // PRD P0-04: the header size is paid for once per photo and answers the native 100%.
+        #expect(cache.headerSize(for: source) == .known(CGSize(width: 8640, height: 5760)))
+        // A rewritten file is a different revision, so it never inherits the old size.
+        let newer = DetailSource(
+            url: source.url,
+            revision: ThumbnailRevision(size: 2, modificationTime: source.revision.modificationTime)
+        )
+        #expect(cache.headerSize(for: newer) == nil)
+        // A memory warning drops every cached value, so the map stays bounded.
+        cache.releaseAll()
+        #expect(cache.headerSize(for: source) == nil)
+    }
+
+    @Test func anUnreadableHeaderIsCachedAsUnknown() throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let file = try directory.image(name: "bytes.JPG")
+        let cache = directory.cache()
+        let source = try detailSource(file)
+
+        cache.store(headerSize: .unreadable, for: source)
+
+        // A file that cannot supply a header is not opened again on every request.
+        #expect(cache.headerSize(for: source) == .unreadable)
+    }
+
     @Test func identityCoversLocationRevisionAndRoute() throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }

@@ -1,5 +1,17 @@
 import Foundation
 
+/// The largest pixel edge a detail request and decode may use (PRD P0-04; G1 "Preview, detail
+/// (I2)").
+///
+/// One value keeps the request clamp, the cache key's range and the decode cap from drifting
+/// apart. A request above it would ask for a bitmap no decode can produce, and the view would
+/// keep asking for pixels that cannot arrive (G1 "Scheduling and cache").
+public enum DetailPixelLimit {
+    /// The largest long edge, in device pixels, a detail request may carry or a decode may
+    /// produce.
+    public static let maximumEdge = 32_768
+}
+
 /// One image file of a photo set: where it lives and which revision of its bytes the
 /// caller expects.
 ///
@@ -62,7 +74,7 @@ public struct DetailRequest: Hashable, Sendable {
         displayPixels: Int, wantsNativeResolution: Bool = false, locationIdentity: String
     ) {
         precondition(raw != nil || jpeg != nil || heif != nil, "A detail request needs a file")
-        precondition((1...32_768).contains(displayPixels))
+        precondition((1...DetailPixelLimit.maximumEdge).contains(displayPixels))
         self.raw = raw
         self.jpeg = jpeg
         self.heif = heif

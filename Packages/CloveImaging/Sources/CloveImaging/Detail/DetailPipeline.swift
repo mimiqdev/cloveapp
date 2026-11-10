@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Synchronization
 
@@ -305,6 +306,7 @@ public actor DetailPipeline {
         _ job: Job, cache: DetailCache, reader: any DetailReading
     ) async -> DetailResult {
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
+        let fullResolutionSize = fullResolutionSize(for: job.request, cache: cache)
         var best: DetailImage?
         var failures: [DetailFailure] = []
         for step in DetailPreviewPlan.steps(for: job.request) {
@@ -320,7 +322,8 @@ public actor DetailPipeline {
                 switch await reader.read(step, displayPixels: job.request.displayPixels) {
                 case .image(let pixels):
                     let candidate = DetailImage(
-                        image: pixels, source: source, quality: step.quality)
+                        image: pixels, source: source, quality: step.quality,
+                        fullResolutionSize: fullResolutionSize)
                     cache.storePreview(candidate, for: key)
                     image = candidate
                 case .cannotOpen:
@@ -329,6 +332,10 @@ public actor DetailPipeline {
                     failures.append(.noUsablePreview)
                 }
             }
+            // A cached bitmap can outlive the request that stored it: a HIF companion has its own
+            // cache identity while the photo's size comes from the RAW. This request's size wins,
+            // so a companion preview never answers with another reference's 100% (PRD P0-04).
+            image = image?.withFullResolutionSize(fullResolutionSize)
             guard let image else { continue }
             // G1 "Preview, detail (I2)": stop at the first source with a usable preview. A
             // later source is only tried when this one could not be opened, has no preview
@@ -369,7 +376,10 @@ public actor DetailPipeline {
                 return verified(.available(preview.limited(by: .rawRenderFailed)))
             }
             guard isCurrent(raw) else { return .unavailable(.sourceChanged) }
-            let rendered = DetailImage(image: pixels, source: raw, quality: .nativeRAW)
+            let rendered = DetailImage(
+                image: pixels, source: raw, quality: .nativeRAW,
+                fullResolutionSize: renderedSize(
+                    pixels, header: fullResolutionSize, source: raw))
             cache.storeNative(rendered, for: key)
             return verified(.available(rendered))
         }
@@ -384,7 +394,19 @@ public actor DetailPipeline {
             if let cached = cache.preview(for: key) { return verified(.available(cached)) }
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             if case .image(let pixels) = await reader.fullRaster(jpeg) {
-                let decoded = DetailImage(image: pixels, source: jpeg, quality: .raster)
+                var decoded = DetailImage(
+                    image: pixels, source: jpeg, quality: .raster,
+                    fullResolutionSize: renderedSize(
+                        pixels, header: fullResolutionSize, source: jpeg))
+                // A decode capped below the photo's size is all this route can give, so the
+                // shortfall is reported instead of asked for again (PRD P0-04; G1 "Preview,
+                // detail (I2)").
+                if let fullResolutionSize,
+                    max(fullResolutionSize.width, fullResolutionSize.height)
+                        > CGFloat(max(pixels.width, pixels.height))
+                {
+                    decoded = decoded.limited(by: .noHigherResolution)
+                }
                 cache.storePreview(decoded, for: key)
                 return verified(.available(decoded))
             }
@@ -402,7 +424,55 @@ public actor DetailPipeline {
         return isCurrent(image.source) ? result : .unavailable(.sourceChanged)
     }
 
+    /// The photo's oriented full-resolution pixel size, read from the file header once per photo
+    /// (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// G1 decision 1: with a RAW, the RAW is the photo; without one, the JPEG is. A HIF is never
+    /// fully decoded, so it has no larger size to report and the pixels' own size stands in. The
+    /// answer is cached per source revision, including an unreadable header, so a preview and its
+    /// render read the file once. A file whose revision changed since the request was built
+    /// answers nil, so no stale size reaches the view; the pixel steps report that change
+    /// themselves.
+    private nonisolated static func fullResolutionSize(
+        for request: DetailRequest, cache: DetailCache
+    ) -> CGSize? {
+        guard let reference = request.raw ?? request.jpeg, isCurrent(reference) else { return nil }
+        if let cached = cache.headerSize(for: reference) {
+            switch cached {
+            case .known(let size): return size
+            case .unreadable: return nil
+            }
+        }
+        let size = DetailNativeSize.read(reference)
+        cache.store(
+            headerSize: size.map(DetailCache.HeaderSize.known) ?? .unreadable, for: reference)
+        return size
+    }
+
+    /// The size a render reports as 100% (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// The rendered pixels are what 100% means; a header can be rounded or cropped by the decoder,
+    /// and the device check wants to see where. A difference is printed once per render instead of
+    /// silently correcting the pixels, and the render's own size is what the view uses from then
+    /// on.
+    private nonisolated static func renderedSize(
+        _ pixels: CGImage, header: CGSize?, source: DetailSource
+    ) -> CGSize {
+        let size = pixelSize(pixels)
+        if let header, header != size {
+            print(
+                "DETAIL native-size-mismatch header=\(Int(header.width))x\(Int(header.height))"
+                    + " render=\(pixels.width)x\(pixels.height)"
+                    + " file=\(source.url.lastPathComponent)")
+        }
+        return size
+    }
+
     private nonisolated static func isCurrent(_ source: DetailSource) -> Bool {
         (try? ThumbnailRevision.read(from: source.url)) == source.revision
+    }
+
+    private nonisolated static func pixelSize(_ pixels: CGImage) -> CGSize {
+        CGSize(width: pixels.width, height: pixels.height)
     }
 }
