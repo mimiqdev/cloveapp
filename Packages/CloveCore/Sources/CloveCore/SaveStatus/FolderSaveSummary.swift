@@ -13,15 +13,16 @@ public enum FolderSaveSummary: Hashable, Sendable {
     case noChanges
     /// At least one change is waiting for or running its write (PRD P0-08: **Writing…**).
     case writing
-    /// Every requested change is confirmed in its storage (PRD P0-08: read-back matched).
-    case saved
+    /// Every requested change is confirmed in its storage (PRD P0-08: read-back matched), with
+    /// how many of them are Rejects that only Clove storage holds (G1 decision 5).
+    case saved(storedInClove: Int)
     /// This many photos have a change that did not confirm.
     case unsaved(Int)
-    /// Everything is confirmed, but only in Clove storage, so nothing was saved to a file.
+    /// Every change is confirmed, but only in Clove storage, so nothing was saved to a file.
     ///
     /// G1 decision 5 keeps the word Saved for XMP writes and a confirmed move, so a folder whose
     /// changes are all stored Rejects says they are stored rather than calling them saved.
-    case storedInClove
+    case storedInClove(Int)
 
     /// Summarises every photo's latest state in the open folder.
     ///
@@ -54,25 +55,31 @@ public enum FolderSaveSummary: Hashable, Sendable {
         } else if failed > 0 {
             self = .unsaved(failed)
         } else if saved > 0 {
-            self = .saved
+            self = .saved(storedInClove: stored)
         } else if stored > 0 {
-            self = .storedInClove
+            self = .storedInClove(stored)
         } else {
             self = .noChanges
         }
     }
 
     /// What the indicator reads.
+    ///
+    /// A stored Reject is never folded into **All saved**: when one exists, the line says how
+    /// many are only stored in Clove, so the folder never claims a save the Reject has not had
+    /// (G1 decision 5, PRD How marks reach disk, rule 7).
     public var text: String {
         switch self {
         case .noChanges:
             "No changes yet"
         case .writing:
             "Writing…"
-        case .saved:
+        case .saved(let stored) where stored == 0:
             "All saved"
-        case .storedInClove:
-            "Stored in Clove"
+        case .saved(let stored):
+            stored == 1 ? "All saved, 1 stored in Clove" : "All saved, \(stored) stored in Clove"
+        case .storedInClove(let count):
+            count == 1 ? "1 stored in Clove" : "\(count) stored in Clove"
         case .unsaved(let count):
             count == 1 ? "1 photo not saved" : "\(count) photos not saved"
         }

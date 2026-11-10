@@ -278,7 +278,23 @@ final class FolderLibrarySession: FolderLibrary {
     /// unconfirmed changes as saved: they keep their failed or unfinished state in C4, and the
     /// next open reads the actual XMP and Clove-stored marks. The library drops the folder's
     /// photos, groups and save states and answers with ``noFolder`` until another open.
+    ///
+    /// The close takes the same turn as an open, so a close queued before an open never tears
+    /// down the folder that open installed. The departure itself does not wait for this: the
+    /// screen shows entry first, and ending the folder here waits for C4's work only to keep
+    /// G1's scope release safe.
     func closeFolder() async {
+        let earlier = openTransition
+        let transition = Task { [weak self] in
+            await earlier?.value
+            await self?.uninstallFolder()
+        }
+        openTransition = transition
+        await transition.value
+    }
+
+    /// Ends the open folder and forgets its contents, once every earlier open finished.
+    private func uninstallFolder() async {
         await endOpenFolder()
         folder = Self.noFolder
         store = FolderPhotos()
@@ -408,9 +424,10 @@ final class FolderLibrarySession: FolderLibrary {
         // The loss is reported for the folder this open installed, never for a later one.
         let monitor = makeLocationMonitor(for: session, mediaType: opened.recent.mediaType)
         locationMonitor = monitor
+        let installedFolder = session.folder.id
         await monitor.start { [weak self] loss in
             Task { @MainActor [weak self] in
-                self?.locationLost(loss, generation: generation)
+                self?.locationLost(loss, folder: installedFolder, generation: generation)
             }
         }
         grouping = makeGrouping(
@@ -855,11 +872,12 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Publishes a loss the watch reported for the folder this open installed (PRD P0-02).
     ///
-    /// A loss that arrives after another open replaced the folder is dropped, so a view never
-    /// explains one folder's loss over another folder's photos.
-    private func locationLost(_ loss: FolderLocationLoss, generation: Int) {
+    /// A loss that arrives after another open replaced the folder is dropped here, and the update
+    /// carries the folder's identity so a reader that had already suspended cannot apply it to a
+    /// newer folder either.
+    private func locationLost(_ loss: FolderLocationLoss, folder: FolderIdentity, generation: Int) {
         guard generation == scanGeneration else { return }
-        publish(.locationLost(loss))
+        publish(.locationLost(folder: folder, loss: loss))
     }
 
     // MARK: - Writes

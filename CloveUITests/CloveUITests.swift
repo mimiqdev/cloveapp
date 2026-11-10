@@ -67,6 +67,35 @@ final class CloveUITests: XCTestCase {
         leaveWithAnUnfinishedWrite(in: app)
     }
 
+    /// The folder's lost location explains itself with the PRD's disconnected-drive copy and its
+    /// recovery action, instead of keeping a save state on screen (PRD Failure and recovery,
+    /// row 6; PRD P0-02).
+    @MainActor
+    func testLocationLossExplainsItself() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_LOCATION_LOSS"] = "drive"
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The Clove root view did not appear"
+        )
+        openTestLibrary(in: app)
+
+        let message = element(in: app, "clove.grid.saveState.failure.message")
+        XCTAssertTrue(message.waitForExistence(timeout: 10), "The grid did not explain the loss")
+        XCTAssertEqual(
+            message.label, "The drive disconnected. Reconnect it, then reopen this folder.",
+            "The disconnected-drive copy changed")
+        XCTAssertTrue(
+            element(in: app, "clove.grid.saveState.failure.reopenFolder").exists,
+            "The loss offered no Reconnect/reopen action")
+        XCTAssertFalse(
+            element(in: app, "clove.grid.saveState").exists,
+            "A lost folder still showed its save-state line instead of the loss")
+    }
+
     /// Rates a photo whose first write is forced to fail, and checks the PRD's copy, the photo's
     /// own state and the folder's count (PRD Failure and recovery, row 1; PRD P0-08).
     @MainActor
@@ -168,8 +197,15 @@ final class CloveUITests: XCTestCase {
         let title = element(in: app, "clove.leavePrompt.title")
         XCTAssertTrue(title.waitForExistence(timeout: 10), "Leaving did not ask first")
         XCTAssertEqual(title.label, "Some marks haven't finished saving.")
+        // Wait for writes drains C4 and, because the failed change is still unfinished, the
+        // question stays so the user can still choose Leave anyway (PRD Failure and recovery).
+        let wait = element(in: app, "clove.leavePrompt.wait")
+        XCTAssertTrue(wait.exists, "The question did not offer Wait for writes")
+        wait.tap()
         let leave = element(in: app, "clove.leavePrompt.leaveAnyway")
-        XCTAssertTrue(leave.exists, "The question did not offer Leave anyway")
+        XCTAssertTrue(
+            leave.waitForExistence(timeout: 10),
+            "Waiting for writes took away the Leave anyway answer")
         leave.tap()
 
         XCTAssertTrue(

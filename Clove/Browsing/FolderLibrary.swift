@@ -29,8 +29,10 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     ///
     /// C11's watch reports one loss and stops. The folder stays open so the user can reopen it,
     /// and PRD Failure and recovery requires the disconnected-drive or missing-location copy
-    /// instead of **Writing…** or **Saved** for the folder's unfinished changes.
-    case locationLost(FolderLocationLoss)
+    /// instead of **Writing…** or **Saved** for the folder's unfinished changes. The update names
+    /// the folder it belongs to, because a buffered loss can reach a reader after another folder
+    /// opened, and no view may explain one folder's loss over another folder's photos.
+    case locationLost(folder: FolderIdentity, loss: FolderLocationLoss)
 
     /// Grouping published the folder's groups (PRD P0-11).
     ///

@@ -45,6 +45,18 @@ struct SaveStatusIndicator: View {
         .sheet(isPresented: $showingUnsaved) {
             UnsavedChangesView(browsing: browsing)
         }
+        // PRD Failure and recovery's Select-it-through-Open action opens the system picker here
+        // too, so a lost location is recoverable from the grid and from detail (PRD P0-01).
+        .sheet(isPresented: $isPickingFolder) {
+            FolderPicker(
+                onPick: { url in
+                    isPickingFolder = false
+                    Task { await browsing.openPickedFolder(url) }
+                },
+                onCancel: { isPickingFolder = false }
+            )
+            .ignoresSafeArea()
+        }
     }
 
     /// The folder's one save-state line, which opens the unsaved list when there is one.
@@ -87,8 +99,8 @@ struct SaveStatusIndicator: View {
             "circle.dashed"
         case .writing:
             "arrow.triangle.2.circlepath"
-        case .saved:
-            "checkmark.circle"
+        case .saved(let stored):
+            stored == 0 ? "checkmark.circle" : "internaldrive"
         case .storedInClove:
             "internaldrive"
         case .unsaved:
@@ -172,7 +184,7 @@ struct UnsavedChangesView: View {
         NavigationStack {
             List {
                 if browsing.unsavedChanges.isEmpty {
-                    Text("The folder's marks are all saved now.")
+                    Text("Nothing is waiting to be saved now.")
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("clove.saveState.unsaved.empty")
                 } else {
@@ -201,14 +213,20 @@ struct UnsavedChangesView: View {
     }
 
     /// One photo's row: its name, its save state and its own Retry (PRD P0-08).
+    ///
+    /// A folder whose location was reported gone makes an unfinished row read **Not saved**, so
+    /// the list never keeps **Writing…** on screen after the loss either.
     private func row(_ change: UnsavedChange) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(change.fileName)
                     .lineLimit(1)
-                Text(SaveStatus.text(for: change.state))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    SaveStatus.text(
+                        for: change.state, folderLost: browsing.folderLocationLoss != nil)
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             Button("Retry") {

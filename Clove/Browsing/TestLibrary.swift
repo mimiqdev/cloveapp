@@ -152,7 +152,9 @@ final class TestLibrary: FolderLibrary {
         if let locationLoss {
             // The stream buffers this until the model starts reading it (PRD P0-02).
             updateContinuation.yield(
-                .locationLost(FolderLocationLoss(reason: locationLoss, date: Date())))
+                .locationLost(
+                    folder: folder,
+                    loss: FolderLocationLoss(reason: locationLoss, date: Date())))
         }
     }
 
@@ -226,13 +228,21 @@ final class TestLibrary: FolderLibrary {
         guard let status = changes[photo], status.state.failure != nil else {
             return changes[photo]
         }
+        // C4's retry re-admits the same change, so the sample publishes the same identity moving
+        // back to pending before the write lands; the merge rule accepts that one backward move.
+        let pending = MarkChangeStatus(
+            id: status.id, identity: photo, requested: status.requested, state: .pending)
+        changes[photo] = pending
+        updateContinuation.yield(.change(pending))
         return await apply(status.requested, to: photo)
     }
 
     /// Reports the sample folder's location gone, as C11's watch does (PRD P0-02).
     func reportLocationLoss(_ reason: FolderLocationLoss.Reason) {
         updateContinuation.yield(
-            .locationLost(FolderLocationLoss(reason: reason, date: Date())))
+            .locationLost(
+                folder: folder,
+                loss: FolderLocationLoss(reason: reason, date: Date())))
     }
 
     /// Closes the sample folder, so leaving with unfinished writes really drops its photos
