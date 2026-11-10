@@ -234,10 +234,12 @@ final class FolderLibrarySession: FolderLibrary {
     /// Records one confirmed change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
     ///
     /// PRD P0-05's Undo row restores the previous mark, so each request carries what its change
-    /// replaced. One photo's mark is recorded from the request itself, in the state C4 admits a
-    /// change in before writing it; the mark can therefore be undone while its write is still
-    /// running. A bar action and a finishing action are recorded once each, from C4's and C10's own
-    /// per-photo results; a change that names no field records nothing.
+    /// replaced. A mark and a bar action are recorded from their requests, in the state C4 admits
+    /// a change in, so the history holds the action from the moment it starts and the Undo control
+    /// is live while its write runs. The browsing model waits for its own writes before it runs a
+    /// step, so a step never reads the marks between this record and C4 admitting the write. A
+    /// finishing action is recorded once, from C10's own record of what it changed; a change that
+    /// names no field records nothing, and a retry never records a second step.
     func recordUndoStep(_ request: UndoRecordRequest) async -> Bool {
         guard let history = undoHistory else { return false }
         let recorded: MarkUndoEntryID?
@@ -246,8 +248,17 @@ final class FolderLibrarySession: FolderLibrary {
             let admission = MarkChangeStatus(
                 id: MarkChangeID(), identity: photo, requested: change, state: .pending)
             recorded = await history.record(admission, marksBefore: marksBefore)
-        case .batch(let result, let marksBefore):
-            recorded = await history.recordBatch(result, marksBefore: marksBefore)
+        case .batch(let items, let marksBefore):
+            // C4 admits every photo before it awaits any result, so the action's step is recorded
+            // from the request itself, in the state the queue admits each change in.
+            let outcomes = items.map { item in
+                MarkChangeStatus(
+                    id: MarkChangeID(), identity: item.photo, requested: item.change,
+                    state: .pending)
+            }
+            let batch = MarkBatchResult(
+                id: MarkBatchID(), change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+            recorded = await history.recordBatch(batch, marksBefore: marksBefore)
         case .groupFinishing(let undo):
             recorded = await history.recordGroupFinishing(undo)
         }

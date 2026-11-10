@@ -335,13 +335,13 @@ final class TestLibrary: FolderLibrary {
                     SampleUndoPhoto(photo: photo, marksBefore: marksBefore, change: change)
                 ],
                 photoToReturnTo: photo, group: nil)
-        case .batch(let result, let marksBefore):
+        case .batch(let items, let marksBefore):
             var photos: [SampleUndoPhoto] = []
-            for outcome in result.outcomes where !outcome.state.isSuperseded {
+            for item in items {
                 let photo = SampleUndoPhoto(
-                    photo: outcome.identity,
-                    marksBefore: marksBefore[outcome.identity] ?? PhotoMarks(),
-                    change: outcome.requested)
+                    photo: item.photo,
+                    marksBefore: marksBefore[item.photo] ?? PhotoMarks(),
+                    change: item.change)
                 guard !photos.contains(where: { $0.photo == photo.photo }) else { continue }
                 photos.append(photo)
             }

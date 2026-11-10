@@ -135,9 +135,26 @@ final class BrowsingModel: UndoHistoryHost {
     /// (PRD Auto-advance).
     private(set) var undoReturnCount = 0
 
-    /// A finishing action whose undo cleared its completion record, kept so a redo restores the
-    /// group view's own idea of completion along with C10's record (PRD P0-12).
-    private var undoneGroupFinishing: GroupFinishingResult?
+    /// The last finishing action's result for each group, so a redo can bring the group view's own
+    /// completion state back with C10's record (PRD P0-12).
+    private var finishingResults: [GroupID: GroupFinishingResult] = [:]
+
+    /// The groups whose finishing record an undo cleared, so the group view stops treating them as
+    /// finished until a redo restores them (PRD P0-12).
+    private var clearedFinishingGroups: Set<GroupID> = []
+
+    /// How many actions this folder's history recorded, so a failure row knows whether its step is
+    /// still the newest action (PRD P0-08).
+    private var recordedActions = 0
+
+    /// How many writes this scene started and has not seen finish (PRD P0-05).
+    ///
+    /// A step waits for them before it reads the marks, so it never runs between recording an
+    /// action and C4 admitting that action's writes.
+    private var writesInFlight = 0
+
+    /// Callers waiting for ``writesInFlight`` to reach zero.
+    private var writeIdleWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// The photo the grid must bring into view after an undo, with a token per request
     /// (PRD P0-05's Undo row).
@@ -358,8 +375,14 @@ final class BrowsingModel: UndoHistoryHost {
     ///
     /// The result carries ``GroupFinishingResult/undo``, so one property holds both what the
     /// group view shows and what U8 records as one undo entry. A later action or a retry replaces
-    /// it.
-    private(set) var lastGroupFinishing: GroupFinishingResult?
+    /// the group's result, and an undo hides it until a redo restores it, so the group view reads
+    /// the record that belongs to the group it is showing.
+    var lastGroupFinishing: GroupFinishingResult? {
+        guard let group = state.groupPosition?.group, let result = finishingResults[group],
+            !clearedFinishingGroups.contains(group)
+        else { return nil }
+        return result
+    }
 
     /// Whether a finishing action is running, so the group view holds its completion until the
     /// action's per-photo result arrives (PRD P0-12; PRD P0-09).
@@ -406,13 +429,13 @@ final class BrowsingModel: UndoHistoryHost {
         let folder = state.folder
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
-        let result = await library.runGroupFinishing(plan)
+        let result = await runWrite { await library.runGroupFinishing(plan) }
         isRunningGroupFinishing = false
         // The action happened, but its result must not land in another folder's group view or
         // make U8 undo a mark in a folder it does not belong to (PRD P0-14).
         guard state.folder == folder else { return }
-        lastGroupFinishing = result
-        undoneGroupFinishing = nil
+        finishingResults[plan.groupID] = result
+        clearedFinishingGroups.remove(plan.groupID)
         groupFinishingRuns += 1
         // One finishing action is one undo step, from C10's own record of what it changed
         // (PRD P0-12). A retry resends its failed changes and records nothing more.
@@ -428,11 +451,12 @@ final class BrowsingModel: UndoHistoryHost {
         let folder = state.folder
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
-        let retried = await library.retryGroupFinishing(result)
+        let retried = await runWrite { await library.retryGroupFinishing(result) }
         isRunningGroupFinishing = false
         // A retry that returns after the folder changed belongs to the folder that is gone.
         guard state.folder == folder else { return }
-        lastGroupFinishing = retried
+        finishingResults[retried.plan.groupID] = retried
+        clearedFinishingGroups.remove(retried.plan.groupID)
         groupFinishingRuns += 1
     }
 
@@ -610,13 +634,16 @@ final class BrowsingModel: UndoHistoryHost {
         let clearances = selectionClearances
         isApplyingBatch = true
         defer { isApplyingBatch = false }
-        let result = await library.apply(plan.items)
+        // One bar action is one undo step, whatever the number of photos it writes. It is recorded
+        // when the action starts, so a slow write cannot put it after an action taken later
+        // (PRD P0-09, P0-05).
+        await recordUndoStep(.batch(items: plan.items, marksBefore: marksBefore))
+        guard state.folder == folder else { return }
+        let result = await runWrite { await library.apply(plan.items) }
         // The batch happened, but its report must not land in another folder's bar or reopen
         // after Done cleared the mode it belonged to.
         guard state.folder == folder else { return }
         lastBatch = BatchMarkApplication(result: result, marksBefore: marksBefore)
-        // One bar action is one undo step, whatever the number of photos it wrote (PRD P0-09).
-        await recordUndoStep(.batch(result: result, marksBefore: marksBefore))
         guard clearances == selectionClearances else { return }
         batchReport = BatchMarkReport(result)
     }
@@ -634,7 +661,7 @@ final class BrowsingModel: UndoHistoryHost {
         let dismissals = reportDismissals
         isApplyingBatch = true
         defer { isApplyingBatch = false }
-        guard let result = await library.retryFailed(in: report.batch),
+        guard let result = await runWrite({ await library.retryFailed(in: report.batch) }),
             state.folder == folder, clearances == selectionClearances,
             dismissals == reportDismissals
         else { return }
@@ -691,7 +718,31 @@ final class BrowsingModel: UndoHistoryHost {
         // order cannot reorder the history the user is stepping back through.
         await recordUndoStep(.mark(change: change, photo: photo, marksBefore: marksBefore))
         guard state.folder == folder else { return }
-        _ = await library.apply(change, to: photo)
+        _ = await runWrite { await library.apply(change, to: photo) }
+    }
+
+    /// Runs one library write and keeps the scene's in-flight count (PRD P0-05).
+    ///
+    /// A step waits for these writes before it reads any marks, so it cannot undo an action that
+    /// the history already holds while C4 has not admitted that action's write yet.
+    private func runWrite<T>(_ write: () async -> T) async -> T {
+        writesInFlight += 1
+        defer {
+            writesInFlight -= 1
+            if writesInFlight == 0 {
+                let waiters = writeIdleWaiters
+                writeIdleWaiters = []
+                for waiter in waiters { waiter.resume() }
+            }
+        }
+        return await write()
+    }
+
+    /// Waits until this scene's own writes have finished (PRD P0-05).
+    private func waitForPendingWrites() async {
+        while writesInFlight > 0 {
+            await withCheckedContinuation { writeIdleWaiters.append($0) }
+        }
     }
 
     // MARK: - Undo
@@ -752,21 +803,24 @@ final class BrowsingModel: UndoHistoryHost {
         }
     }
 
-    /// Records one confirmed change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
+    /// Records one change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
     ///
-    /// The model records every kind of step in the one place its call returned, so a single mark,
-    /// one bar action and one finishing action each land as one entry. A retry resends an already
-    /// recorded change, so it records nothing and never gives one action two entries.
+    /// Every kind of step goes through this one call, so one action is one entry. A mark and a bar
+    /// action are recorded when they start, before their writes finish, so the history keeps the
+    /// order the user acted in and Undo is live while the write runs; a step waits for the scene's
+    /// own writes before it reads any marks (``applyUndoStep(isRedo:_:)``). A finishing action is
+    /// recorded from C10's own record of what it changed. A retry resends an already recorded
+    /// change, so it records nothing and never gives one action two entries.
     private func recordUndoStep(_ request: UndoRecordRequest) async {
-        // A new action discards the redo future (PRD P0-05), so it also clears the failure it
-        // could have retried and the finishing action it could have restored.
+        // A new action discards the redo future (PRD P0-05), so a failure the user could have
+        // retried no longer belongs to the action that is next.
         undoFailure = nil
-        undoneGroupFinishing = nil
         guard await library.recordUndoStep(request) else {
             undoAvailability = library.undoAvailability
             return
         }
         undoAvailability = library.undoAvailability
+        recordedActions += 1
         // The history gained a step, so the system undo stack mirrors it once, here.
         undoBridge.historyDidRecord()
     }
@@ -778,16 +832,23 @@ final class BrowsingModel: UndoHistoryHost {
         // The screen that asked decides where the view returns to, and the folder the step belongs
         // to must still be the open one when it answers (PRD P0-14).
         let folder = state.folder
+        // A step reads the marks C4 has now, so it waits for the writes this scene started: an
+        // undo can otherwise run between recording a mark and that mark reaching the queue.
+        await waitForPendingWrites()
         let screen = undoReturnScreen
+        let recorded = recordedActions
         guard let result = await step() else {
             undoAvailability = library.undoAvailability
             return nil
         }
         guard state.folder == folder else { return nil }
         undoAvailability = library.undoAvailability
-        undoFailure = result.failureSummary.map {
-            UndoFailure(summary: $0, isRedo: isRedo)
-        }
+        // A newer action recorded during the step takes the failed entry's place at the top of the
+        // history, so its retry would run that newer action instead; U7 still shows the writes.
+        undoFailure =
+            recordedActions == recorded
+            ? result.failureSummary.map { UndoFailure(summary: $0, isRedo: isRedo) }
+            : nil
         applyCompletionChange(result.completion)
         returnToPhoto(after: result, from: screen)
         return result
@@ -802,14 +863,10 @@ final class BrowsingModel: UndoHistoryHost {
     private func applyCompletionChange(_ change: UndoCompletionChange?) {
         guard let change else { return }
         if change.isCleared {
-            guard lastGroupFinishing?.plan.groupID == change.groupID else { return }
-            undoneGroupFinishing = lastGroupFinishing
-            lastGroupFinishing = nil
+            clearedFinishingGroups.insert(change.groupID)
             dismissedGroupFailure = nil
         } else {
-            guard undoneGroupFinishing?.plan.groupID == change.groupID else { return }
-            lastGroupFinishing = undoneGroupFinishing
-            undoneGroupFinishing = nil
+            clearedFinishingGroups.remove(change.groupID)
         }
     }
 
@@ -914,7 +971,7 @@ final class BrowsingModel: UndoHistoryHost {
     /// reach disk, rule 8, keeps a superseded change from being retried (the library reads the
     /// photo's latest change).
     func retryLatestChange(for photo: PhotoIdentity) async {
-        _ = await library.retryLatestChange(for: photo)
+        _ = await runWrite { await library.retryLatestChange(for: photo) }
     }
 
     /// Retries every photo the indicator lists, one call per photo (PRD P0-08).
@@ -1063,7 +1120,8 @@ final class BrowsingModel: UndoHistoryHost {
         // action from a folder the user left and the system stack forgets it too.
         undoAvailability = .none
         undoFailure = nil
-        undoneGroupFinishing = nil
+        finishingResults = [:]
+        clearedFinishingGroups = []
         undoBridge.historyDidReset()
         thumbnails = library.thumbnails
         detailImages = library.detailImages
@@ -1244,7 +1302,8 @@ final class BrowsingModel: UndoHistoryHost {
         isWaitingForWrites = false
         // The finishing action, its failure and its event count belong to the folder that is
         // gone, so a new folder's group view never shows or advances on the old one (PRD P0-12).
-        lastGroupFinishing = nil
+        finishingResults = [:]
+        clearedFinishingGroups = []
         dismissedGroupFailure = nil
         groupFinishingRuns = 0
 
@@ -1257,7 +1316,6 @@ final class BrowsingModel: UndoHistoryHost {
         // it already has (PRD P0-05).
         undoAvailability = library.undoAvailability
         undoFailure = nil
-        undoneGroupFinishing = nil
         undoBridge.historyDidReset()
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid
