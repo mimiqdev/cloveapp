@@ -9,7 +9,8 @@ This package is everything an implementation session needs to build the Clove MV
 | File | What it is | Read it when |
 |---|---|---|
 | `screens.md` | Every screen and state per device, with Figma links and behavior notes. **The main spec.** | Building any screen. |
-| `frames.json` | The same frame list in machine-readable form (section, name, node id, URL, device). | Scripting Figma MCP calls or splitting work across agents. |
+| `screens/` | A 1x PNG of each of the 41 frames, Light and Dark side by side. | Seeing what a state looks like without Figma. |
+| `frames.json` | The same frame list in machine-readable form (section, name, node id, URL, device, screenshot path). | Scripting Figma MCP calls or splitting work across agents. |
 | `tokens/clove-themes.json` | All 21 tokens × 8 themes as hex, with the Swift names and usage notes. | Generating the color assets or the `Color.clove` theme struct. |
 | `tokens/tokens.md` | The same tokens as a readable table, plus the theming rules. | Checking a color by eye. |
 | `components.md` | The reusable component inventory with sizes and token usage. | Building shared views before screens. |
@@ -21,7 +22,7 @@ If two sources disagree, the order of trust is: the **Figma frame** for layout a
 
 ## How to use the Figma frames
 
-The proxy blocks PNG export from this environment, so no image assets are bundled. Use the Figma MCP server with the links instead:
+`screens/` has a 1x PNG of every frame (Light and Dark side by side), linked from each state in `screens.md`, so the spec works without Figma access. For exact spacing, token bindings or a higher resolution, use the Figma MCP server with the links:
 - `get_screenshot` (fileKey `xJcgQ7FziNyPM7UToZvkmq`, nodeId from `frames.json`) to see a state.
 - `get_design_context` for layout, spacing and token bindings. Treat its output as a reference to adapt, not code to paste.
 - `get_variable_defs` on a frame to see the bound `Clove Theme` variables.
