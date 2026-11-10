@@ -16,6 +16,15 @@ struct DetailNativeSizeFixtureTests {
         "cr3", "nef", "arw", "raf", "orf", "rw2", "dng",
     ]
 
+    /// The ProRAW DNG's render is compared in `portraitHeaderIsOrientedLikeTheNativeRender`.
+    ///
+    /// This file's decode takes seconds when another test decodes it at the same time, and the
+    /// fixture timings decode it as well, so repeating it here stalls the whole test run. The
+    /// assertion is the same one every other fixture makes below.
+    private static let renderComparedWithThePortraitTest: Set<String> = [
+        "apple-iphone-12-pro.DNG"
+    ]
+
     @Test func everyRAWFixtureAnswersTheSizeItsRenderProduces() async throws {
         let names = try FileManager.default.contentsOfDirectory(atPath: DetailFixtures.formats.path)
             .sorted()
@@ -28,23 +37,27 @@ struct DetailNativeSizeFixtureTests {
             // The decoder's own size, read without rendering: this is what the first preview
             // carries, so the double-tap target is the size the render then produces (#111).
             let decoded = try #require(DetailNativeSize.raw(source), "No decoder size for \(name)")
-            let rendered = try #require(
-                await DetailRenderer().nativeRAW(source), "No render for \(name)")
             let pipeline = DetailPipeline(cache: DetailCache())
             let preview = try availableDetail(
                 try await pipeline.preview(for: try rawRequest(url, displayPixels: 1200)))
             await pipeline.close()
 
-            let renderPixels = CGSize(width: rendered.width, height: rendered.height)
-            #expect(decoded == renderPixels, "\(name) decoded a size its render does not produce")
+            let previewPixels = CGSize(width: preview.width, height: preview.height)
             #expect(preview.hasRAW, "\(name) lost its RAW")
-            #expect(preview.fullResolutionSize == renderPixels, "\(name) preview size")
+            #expect(preview.fullResolutionSize == decoded, "\(name) preview size")
             // A RAW's preview never answers its own pixels as 100% (PRD P0-04; G1 "Preview,
             // detail (I2)").
-            let previewPixels = CGSize(width: preview.width, height: preview.height)
             #expect(
                 preview.fullResolutionPixels != previewPixels,
                 "\(name) answered the preview's 100%")
+
+            if !Self.renderComparedWithThePortraitTest.contains(name) {
+                let rendered = try #require(
+                    await DetailRenderer().nativeRAW(source), "No render for \(name)")
+                #expect(
+                    decoded == CGSize(width: rendered.width, height: rendered.height),
+                    "\(name) decoded a size its render does not produce")
+            }
         }
     }
 
@@ -64,9 +77,12 @@ struct DetailNativeSizeFixtureTests {
 
         let header = try #require(DetailNativeSize.header(source))
         let rendered = try #require(await DetailRenderer().nativeRAW(source))
+        let decoded = try #require(DetailNativeSize.raw(source))
 
         #expect(header == CGSize(width: 3024, height: 4032))
         #expect(header == CGSize(width: rendered.width, height: rendered.height))
+        // The decoder read the first preview carries is the size this render produces.
+        #expect(decoded == CGSize(width: rendered.width, height: rendered.height))
     }
 
     @Test func jpegHeaderMatchesTheFullRaster() async throws {
