@@ -37,6 +37,26 @@ final class BrowsingModel {
     /// The groups the open folder publishes, in grid order (PRD P0-11).
     private(set) var groups: [BrowsingGroup]
 
+    /// The folder whose grouping has published a result (PRD P0-11).
+    ///
+    /// A saved group view names a group key, and grouping publishes keys only after the scan, so
+    /// the pending restore waits for that first publication instead of dropping the place on
+    /// every launch (PRD P0-14). The folder key keeps the answer with the folder that produced
+    /// it, so a reopen that the scan answered before this scene caught up is not lost.
+    private var groupsPublishedFor: FolderIdentity?
+
+    /// The folder whose scan reported itself finished (PRD P0-01).
+    ///
+    /// The pending restore reads it when groups arrive, because the two can land in either order
+    /// and the decision has to see the same scan state both times.
+    private var finishedScanFor: FolderIdentity?
+
+    /// Whether the open folder's grouping has published, even with no groups (PRD P0-11).
+    private var groupsPublished: Bool { groupsPublishedFor == library.folder }
+
+    /// Whether the open folder's scan reported itself finished (PRD P0-01).
+    private var hasFinishedScan: Bool { finishedScanFor == library.folder }
+
     /// The remembered folders entry lists, most recently opened first (PRD P0-02).
     private(set) var recents: [RecentFolder]
 
@@ -189,6 +209,23 @@ final class BrowsingModel {
         state.route = .group
     }
 
+    /// Runs similar groups again for the open folder, without the group cache (PRD P0-11).
+    ///
+    /// Run again is the grid's own action (PRD Similar groups rules), so the model passes it to
+    /// the library and takes the result from the update stream like any other grouping result.
+    func runGroupingAgain() async {
+        await library.runGroupingAgain()
+    }
+
+    /// Applies C12's similar-groups setting to the open folder (PRD P0-11).
+    ///
+    /// The settings screen calls this when the user changes the choice: the open folder drops or
+    /// restores its groups at once, and every later open in this launch reads the same value.
+    /// Saving the choice stays with the settings store.
+    func setSimilarGroupsEnabled(_ enabled: Bool) async {
+        await library.setSimilarGroupsEnabled(enabled)
+    }
+
     /// Moves the open group view to another member (PRD P0-12).
     func showGroupPhoto(_ photo: PhotoIdentity) {
         guard let position = state.groupPosition else { return }
@@ -299,7 +336,9 @@ final class BrowsingModel {
             if saved.showsPhotos {
                 showOpenFolder()
                 pendingRestore = PendingBrowsingRestore(saved: saved, shown: state)
-                resolvePendingRestore(scanFinished: false)
+                // The scan and grouping can answer before this scene catches up, so the decision
+                // reads their current state rather than assuming neither has happened.
+                resolvePendingRestore(scanFinished: hasFinishedScan)
             } else {
                 thumbnails = library.thumbnails
                 state = saved.restored(from: .available(library.contents)).state
@@ -320,7 +359,8 @@ final class BrowsingModel {
     private func resolvePendingRestore(scanFinished: Bool) {
         guard let pending = pendingRestore else { return }
         switch pending.decision(
-            current: state, contents: library.contents, scanFinished: scanFinished)
+            current: state, contents: library.contents, scanFinished: scanFinished,
+            groupsPublished: groupsPublished)
         {
         case .apply(let restored):
             pendingRestore = nil
@@ -340,6 +380,7 @@ final class BrowsingModel {
             refresh()
             resolvePendingRestore(scanFinished: false)
         case .scanFinished:
+            finishedScanFor = library.folder
             refresh()
             resolvePendingRestore(scanFinished: true)
             await reloadRecents()
@@ -349,6 +390,9 @@ final class BrowsingModel {
             changes.insert(status)
         case .groups(let groups):
             self.groups = groups
+            groupsPublishedFor = library.folder
+            // A saved group view waited for this publication (PRD P0-11, P0-14).
+            resolvePendingRestore(scanFinished: hasFinishedScan)
         }
     }
 
@@ -359,6 +403,9 @@ final class BrowsingModel {
         state.selection = []
         state.groupPosition = nil
         state.route = .grid
+        // The folder's groups are whatever grouping published for it, even when the scan
+        // answered before this scene caught up (PRD P0-11).
+        groups = library.groups
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change.
         thumbnails = library.thumbnails

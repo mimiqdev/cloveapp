@@ -21,17 +21,32 @@ final class FolderLibrarySession: FolderLibrary {
         let access: FolderAccess
         let writes: MarkWriteQueue
 
-        /// Prepares the stores below Application Support (PRD P0-02, P0-08).
+        /// C9's per-folder group cache in Clove's own storage (PRD Similar groups rules).
+        let groups: SimilarGroupsCache
+
+        /// Prepares the stores below Application Support (PRD P0-02, P0-08, P0-11).
         ///
         /// Resolving those paths touches the file system, so ``FolderLibraryLaunch`` runs this off
         /// the main actor instead of during the scene's first body evaluation.
         static func applicationSupport() throws -> Stores {
             let store = try RecentFolderStore.applicationSupport()
             let marksDirectory = try CloveMarkStore.applicationSupportDirectory()
+            let groupsDirectory = try SimilarGroupsCache.applicationSupportDirectory()
             return Stores(
                 access: FolderAccess(store: store),
-                writes: MarkWriteQueue(storeDirectory: marksDirectory))
+                writes: MarkWriteQueue(storeDirectory: marksDirectory),
+                groups: SimilarGroupsCache(directory: groupsDirectory))
         }
+    }
+
+    /// The open folder's I1 preview cache and I3 feature cache (G1 preview and scheduling rows).
+    ///
+    /// Grouping's features share the grid's preview cache, so a photo the grid already decoded is
+    /// never read twice, and both caches live in the app's Caches directory because both can be
+    /// rebuilt from the files.
+    struct Caches: Sendable {
+        let thumbnails: ThumbnailCache
+        let features: ImageFeatureCache
     }
 
     /// The key a library answers with while no folder is open (PRD P0-02, P0-14).
@@ -43,7 +58,9 @@ final class FolderLibrarySession: FolderLibrary {
     /// The stores, prepared off the main actor so the first scene never waits on disk.
     private let stores: Task<Stores, any Error>
     private let metadata: MetadataReader
-    private let settings: AppSettings
+    /// The launch settings, plus the similar-groups choice the folder keeps while it is open
+    /// (PRD P0-11). Persistence stays with the settings store.
+    private var settings: AppSettings
     private let codec = XMPCodec()
 
     /// The one stream this library publishes, consumed by ``BrowsingModel``.
@@ -79,6 +96,16 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// The grid's source for the open folder, bound to that folder's session and pipeline.
     private var thumbnailSource: (any GridThumbnailSource)?
+
+    /// The open folder's grouping, which publishes its groups (PRD P0-11).
+    private var grouping: FolderGrouping?
+
+    /// The groups grouping last published for the open folder (PRD P0-11).
+    private var publishedGroups: [BrowsingGroup] = []
+
+    /// Whether grouping published at all for the open folder, even with no groups, so a saved
+    /// group view knows the wait is over (PRD P0-14).
+    private var hasPublishedGroups = false
 
     /// The task keeping this library's save states in step with C4 (PRD P0-08).
     private var writeStatusTask: Task<Void, Never>?
@@ -119,9 +146,10 @@ final class FolderLibrarySession: FolderLibrary {
     /// The folder's photos with their marks, in scan order (PRD P0-03).
     var photos: [GridPhoto] { store.photos }
 
-    /// Grouping's groups for the folder. The grouping follow-up publishes them through
-    /// ``FolderLibraryUpdate/groups(_:)``; U2 runs no grouping (PRD P0-11).
-    var groups: [BrowsingGroup] { [] }
+    /// Grouping's groups for the folder, in grid order and by grouping's stable keys
+    /// (PRD P0-11). They arrive through ``FolderLibraryUpdate/groups(_:)``; before grouping's
+    /// first publication this is empty.
+    var groups: [BrowsingGroup] { publishedGroups }
 
     /// The grid's source for the open folder's previews and companion badges (PRD P0-03).
     ///
@@ -273,13 +301,18 @@ final class FolderLibrarySession: FolderLibrary {
         openSession = session
         store = FolderPhotos()
         changes = PhotoChangeStates()
+        publishedGroups = []
+        hasPublishedGroups = false
         publish(.photos([]))
         // PRD How marks reach disk, rule 1: Reject and standalone marks are read when the folder
         // opens. A damaged store is reported by U7's save state; the scan still shows the photos.
         let storedMarks = (try? await stores.writes.storedMarks(for: session.folder.id)) ?? [:]
         let configuration = ScanConfiguration(
             rejectsFolderName: settings.rejectsFolderName.rawValue)
-        thumbnailSource = await makeThumbnailSource(for: session)
+        let caches = await Self.makeCaches()
+        thumbnailSource = makeThumbnailSource(for: session, caches: caches)
+        grouping = makeGrouping(
+            for: session, stores: stores, caches: caches, generation: generation)
         let scan = FolderScan(
             folderURL: session.rootURL, folderID: session.folder.id,
             configuration: configuration)
@@ -302,6 +335,14 @@ final class FolderLibrarySession: FolderLibrary {
         scanTask?.cancel()
         scanTask = nil
         thumbnailSource = nil
+        publishedGroups = []
+        hasPublishedGroups = false
+        if let grouping {
+            self.grouping = nil
+            // Grouping's 400 px preview reads run under the folder's scope too, so the folder
+            // waits for them exactly as it waits for a grid decode (G1 folder access).
+            await grouping.close()
+        }
         if let pipeline = thumbnailPipeline {
             thumbnailPipeline = nil
             // I1's close cancels queued work and waits for a decode in flight, so the scope is
@@ -365,7 +406,7 @@ final class FolderLibrarySession: FolderLibrary {
         } catch is CancellationError {
             // A newer open or a closed folder cancelled this scan; it publishes nothing.
         } catch {
-            failedScan(generation: generation)
+            await failedScan(generation: generation)
         }
     }
 
@@ -385,7 +426,7 @@ final class FolderLibrarySession: FolderLibrary {
         return added.compactMap { store.scannedSet(for: $0.id) }
     }
 
-    /// Applies one batch's metadata and mark reads (PRD P0-03, P0-07).
+    /// Applies one batch's metadata and mark reads (PRD P0-03, P0-07, P0-11).
     private func applyReads(
         _ reads: [MetadataFileResult],
         marks: [PhotoIdentity: PhotoMarks],
@@ -402,6 +443,14 @@ final class FolderLibrarySession: FolderLibrary {
             let time = Self.timeState(for: read.outcome, in: timeZone)
             times[set.id] = time
             store.setTime(time, for: set.id)
+            // G1's Grouping row separates photos by camera model plus the serial when the file
+            // carries one, so the read's values are kept beside the time for grouping.
+            if case .success(let metadata) = read.outcome {
+                store.setCameraBody(
+                    CameraBody(
+                        model: metadata.model.value, serial: metadata.bodySerial.value),
+                    for: set.id)
+            }
         }
         for (id, marks) in marks {
             store.setMarks(marks, for: id)
@@ -425,12 +474,14 @@ final class FolderLibrarySession: FolderLibrary {
             status: summary.status == .complete ? .complete : .partial)
         try? await stores.access.recordScan(recorded, for: session)
         await reloadRecents()
+        await startGrouping()
         publish(.scanFinished(recorded))
     }
 
     /// Reports a scan that could not run as partial, without recording a count (PRD P0-01).
-    private func failedScan(generation: Int) {
+    private func failedScan(generation: Int) async {
         guard generation == scanGeneration else { return }
+        await startGrouping()
         publish(
             .scanFinished(
                 FolderScanSummary(photoCount: store.count, status: .partial)))
@@ -493,14 +544,14 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Builds the open folder's grid source over a pipeline bound to its session (PRD P0-03).
     ///
-    /// The pipeline's cache lives in the app's Caches directory, and its requests are admitted
-    /// through the folder's C11 session, so ending the folder drains a decode before releasing
-    /// the scope (G1 preview and folder-access rows). A cache that cannot be created leaves the
-    /// grid without previews rather than failing the open.
-    private func makeThumbnailSource(for session: FolderAccessSession)
-        async -> (any GridThumbnailSource)?
+    /// The pipeline's requests are admitted through the folder's C11 session, so ending the
+    /// folder drains a decode before releasing the scope (G1 preview and folder-access rows). A
+    /// cache that cannot be created leaves the grid without previews rather than failing the open.
+    private func makeThumbnailSource(for session: FolderAccessSession, caches: Caches?)
+        -> (any GridThumbnailSource)?
     {
-        guard let pipeline = await Self.makeThumbnailPipeline() else { return nil }
+        guard let caches else { return nil }
+        let pipeline = ThumbnailPipeline(cache: caches.thumbnails)
         thumbnailPipeline = pipeline
         let folder = session.folder.id
         return PipelineGridThumbnails(
@@ -510,6 +561,57 @@ final class FolderLibrarySession: FolderLibrary {
                 guard let self else { return .unavailable }
                 return await self.admittedThumbnail(work, session: session, folder: folder)
             })
+    }
+
+    /// Builds the open folder's grouping over C9 and I3 (PRD P0-11, G1's Grouping row).
+    ///
+    /// One grouper and one feature pipeline live as long as the folder; ``endOpenFolder()``
+    /// closes them before the scope is released. The group cache is app-private, so a reopened
+    /// folder shows its finished groups at once, and the feature pipeline shares the grid's
+    /// preview cache so grouping never decodes a preview the grid already has (G1 preview row).
+    /// A folder whose caches could not be created groups nothing rather than failing the open.
+    private func makeGrouping(
+        for session: FolderAccessSession, stores: Stores, caches: Caches?, generation: Int
+    ) -> FolderGrouping? {
+        guard let caches else { return nil }
+        let folder = session.folder.id
+        return FolderGrouping(
+            folder: folder,
+            session: session,
+            cache: stores.groups,
+            featureCache: caches.features,
+            previewCache: caches.thumbnails,
+            sets: { [weak self] photo in self?.store.scannedSet(for: photo)?.photoSet },
+            publish: { [weak self] groups in
+                // A replaced folder publishes nothing: the open that owns this grouping is gone.
+                guard let self, generation == self.scanGeneration else { return }
+                self.publishGroups(groups)
+            })
+    }
+
+    /// Runs grouping's time stage for the open folder and publishes its result (PRD P0-11).
+    ///
+    /// The first publication always lands, even with no groups, before the scan reports itself
+    /// finished: a saved group view waits for it instead of dropping its place on every launch
+    /// (PRD P0-14). A folder that could not build grouping publishes an empty result here too.
+    private func startGrouping() async {
+        let photos = store.groupingPhotos
+        if let grouping {
+            await grouping.begin(photos: photos, enabled: settings.similarGroupsEnabled)
+        }
+        if !hasPublishedGroups { publishGroups([]) }
+    }
+
+    /// Publishes grouping's groups for the open folder (PRD P0-11).
+    ///
+    /// The first publication of a folder always lands, because a saved group view waits for it
+    /// (PRD P0-14); a later publication only lands when it changed something, so refinement and
+    /// Run again do not repaint an unchanged grid.
+    private func publishGroups(_ groups: [BrowsingGroup]) {
+        guard groups != publishedGroups || !hasPublishedGroups else { return }
+        publishedGroups = groups
+        hasPublishedGroups = true
+        publish(.groups(groups))
     }
 
     /// Runs one grid request inside the session that holds the folder's scope.
@@ -529,20 +631,23 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
-    /// Builds the grid pipeline over the app's Caches directory, off the main actor.
+    /// Builds the folder's caches over the app's Caches directory, off the main actor.
     ///
-    /// Creating the cache makes its directory and reads what it already holds, so this runs in a
-    /// detached task; the folder waits for it while opening, and nothing touches the disk during
+    /// Creating either cache makes its directory and reads what it already holds, so this runs in
+    /// a detached task; the folder waits for it while opening, and nothing touches the disk during
     /// the scene's first body evaluation.
-    private nonisolated static func makeThumbnailPipeline() async -> ThumbnailPipeline? {
+    private nonisolated static func makeCaches() async -> Caches? {
         await Task.detached(priority: .userInitiated) {
             do {
                 let caches = try FileManager.default.url(
                     for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                let cache = try ThumbnailCache(
+                let thumbnails = try ThumbnailCache(
                     directory: caches.appendingPathComponent(
                         "Clove/GridThumbnails", isDirectory: true))
-                return ThumbnailPipeline(cache: cache)
+                let features = try ImageFeatureCache(
+                    directory: caches.appendingPathComponent(
+                        "Clove/ImageFeatures", isDirectory: true))
+                return Caches(thumbnails: thumbnails, features: features)
             } catch {
                 return nil
             }
@@ -564,6 +669,30 @@ final class FolderLibrarySession: FolderLibrary {
             }
         }
         publish(.change(status))
+    }
+
+    // MARK: - Grouping
+
+    /// Runs similar groups again for the open folder without the group cache (PRD P0-11).
+    ///
+    /// P0-11 keeps Run again available beside the published groups. The current photos are the
+    /// inputs, the cache's finished result is not reused, and the refinement follows in the
+    /// background as it does on open; the group keys stay put through C9's ancestry, so the grid
+    /// does not move the photo the user is looking at.
+    func runGroupingAgain() async {
+        guard let grouping, hasPublishedGroups else { return }
+        await grouping.runAgain(photos: store.groupingPhotos)
+    }
+
+    /// Applies C12's similar-groups setting to the open folder (PRD P0-11).
+    ///
+    /// Off publishes no groups and stops feature work; on publishes the cached or time-only
+    /// result at once and refines again. The settings screen reaches this through the same seam
+    /// as the other screens' calls, and later opens in this launch read the value the library
+    /// keeps here. Persisting the choice stays with the settings store.
+    func setSimilarGroupsEnabled(_ enabled: Bool) async {
+        settings.similarGroupsEnabled = enabled
+        await grouping?.setEnabled(enabled, photos: store.groupingPhotos)
     }
 
     // MARK: - Publishing
