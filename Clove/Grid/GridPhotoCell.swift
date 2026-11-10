@@ -249,6 +249,9 @@ final class GridPhotoCell: UICollectionViewCell {
         for photo: PhotoIdentity, thumbnails: any GridThumbnailSource
     ) {
         thumbnailTask?.cancel()
+        // A new request starts from loading, so an interrupted retry stays retryable; the
+        // previous unreadable state is only kept by a request that actually reports one.
+        isUnavailable = false
         retriesUnavailable = false
         thumbnailView.image = nil
         spinner.startAnimating()
