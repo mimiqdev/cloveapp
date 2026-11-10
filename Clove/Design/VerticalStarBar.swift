@@ -41,6 +41,16 @@ struct VerticalStarBar: View {
     /// The value the drag is showing, or nil when no drag has run since the last commit.
     @State private var preview: Rating?
 
+    /// Whether the running gesture has moved past the tap slop at any point.
+    ///
+    /// The final translation is not enough: a drag that leaves a star and comes back to it would
+    /// otherwise look like a tap and clear the rating.
+    @State private var movedPastTapSlop = false
+
+    /// Whether a drag is running. SwiftUI resets gesture state when a gesture ends or is cancelled,
+    /// so a cancelled drag cannot leave its preview behind.
+    @GestureState private var isDragging = false
+
     /// The value the stars fill to: the drag's live value while one runs, else the photo's rating.
     private var shownRating: Rating { preview ?? rating }
 
@@ -68,11 +78,23 @@ struct VerticalStarBar: View {
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($isDragging) { _, state, _ in
+                        state = true
+                    }
                     .onChanged { value in
+                        trackMove(value.translation)
                         previewDrag(at: value.location.y, in: proxy.size.height)
                     }
-                    .onEnded(commitDrag)
+                    .onEnded { _ in
+                        commitDrag()
+                    }
             )
+            .onChange(of: isDragging) { _, dragging in
+                guard !dragging else { return }
+                // A cancelled gesture ends without `onEnded`, so clear what it previewed.
+                preview = nil
+                movedPastTapSlop = false
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rating")
             .accessibilityValue(accessibilityValue)
@@ -114,19 +136,26 @@ struct VerticalStarBar: View {
         onPreview(next)
     }
 
+    /// Remembers that the gesture moved at all, so a drag back to its start is not a tap.
+    private func trackMove(_ translation: CGSize) {
+        guard
+            abs(translation.height) >= Self.tapSlop
+                || abs(translation.width) >= Self.tapSlop
+        else { return }
+        movedPastTapSlop = true
+    }
+
     /// Commits the value the gesture ended on; nothing is applied before this call
     /// (interactions.md).
     ///
-    /// A gesture that did not move is a tap: on the photo's current value it clears the rating, and
-    /// anywhere else it picks that star (PRD Marking rules). A drag commits what it shows, even
-    /// when that is the value already set.
-    private func commitDrag(_ value: DragGesture.Value) {
+    /// A gesture that never moved past the tap slop is a tap: on the photo's current value it
+    /// clears the rating, and anywhere else it picks that star (PRD Marking rules). A drag commits
+    /// what it shows, even when that is the value already set.
+    private func commitDrag() {
         let live = preview ?? rating
-        let moved =
-            abs(value.translation.height) >= Self.tapSlop
-            || abs(value.translation.width) >= Self.tapSlop
-        let committed = moved || live != rating ? live : Rating.unrated
+        let committed = movedPastTapSlop || live != rating ? live : Rating.unrated
         preview = nil
+        movedPastTapSlop = false
         onCommit(committed)
     }
 
