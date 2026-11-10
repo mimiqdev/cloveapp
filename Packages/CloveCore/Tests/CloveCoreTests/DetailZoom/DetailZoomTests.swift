@@ -121,16 +121,19 @@ struct DetailZoomTests {
         let phone = DetailZoom.maximumScale(
             imagePixels: CGSize(width: 3000, height: 2000),
             viewSize: CGSize(width: 393, height: 852), screenScale: 3)
-        #expect(phone >= DetailZoom.fullResolutionScale(
-            imagePixels: CGSize(width: 3000, height: 2000),
-            viewSize: CGSize(width: 393, height: 852), screenScale: 3))
+        #expect(
+            phone
+                >= DetailZoom.fullResolutionScale(
+                    imagePixels: CGSize(width: 3000, height: 2000),
+                    viewSize: CGSize(width: 393, height: 852), screenScale: 3))
 
         let raw = DetailZoom.maximumScale(
             imagePixels: CGSize(width: 8640, height: 5760),
             viewSize: CGSize(width: 393, height: 852), screenScale: 3)
         #expect(raw >= DetailZoom.inspectionScale)
-        #expect(raw > DetailZoom.fullResolutionScale(
-            imagePixels: CGSize(width: 8640, height: 5760),
-            viewSize: CGSize(width: 393, height: 852), screenScale: 3) - 0.0001)
+        #expect(
+            raw > DetailZoom.fullResolutionScale(
+                imagePixels: CGSize(width: 8640, height: 5760),
+                viewSize: CGSize(width: 393, height: 852), screenScale: 3) - 0.0001)
     }
 }
