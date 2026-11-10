@@ -123,6 +123,11 @@ final class TestLibrary: FolderLibrary {
     private var changes: [PhotoIdentity: MarkChangeStatus]
 
     /// The stem suffix U4's launch value names, whose photos fail their first write (PRD P0-09).
+    /// The sample's finishing-action records, so a group it finishes counts as complete like the
+    /// real session's (PRD In-group culling, group completion; PRD P0-12).
+    private let groupCompletion = GroupCompletionTracker()
+
+    /// The stem suffix whose photos fail their first write, or nil when none does (PRD P0-09).
     private let failingStemSuffix: String?
 
     /// The stem suffixes whose photos fail their first write (PRD P0-08).
@@ -347,6 +352,60 @@ final class TestLibrary: FolderLibrary {
         updateContinuation.yield(.photos([]))
     }
 
+    // MARK: - In-group culling
+
+    /// Runs one finishing action's plan through the sample's own mark call (PRD P0-12).
+    ///
+    /// The sample has no write queue, so it applies the plan's still-allowed changes itself and
+    /// reports the same result shape the real library returns
+    /// (``GroupFinishingResult/applied(_:changes:statuses:undo:)``). The changes are re-checked
+    /// against the marks the sample holds now through C10's own rule, so a photo rated or labelled
+    /// after the screen built its plan is never rejected and its rating is never overwritten
+    /// (PRD P0-12; ``GroupFinishingPlan/changesAllowed(currentMarks:)``). An unavailable plan
+    /// writes nothing and records no completion, exactly like the executor (PRD In-group culling,
+    /// finishing actions).
+    func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {
+        let changes = plan.changesAllowed { self.marks(for: $0) }
+        guard plan.availability.isAvailable else {
+            return GroupFinishingResult.applied(plan, changes: changes, statuses: [:])
+        }
+        await groupCompletion.recordFinishingAction(on: plan.groupID)
+        var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
+        for change in changes {
+            statuses[change.photo] = await apply(change.change, to: change.photo)
+        }
+        return GroupFinishingResult.applied(plan, changes: changes, statuses: statuses)
+    }
+
+    /// Sends the finishing action's failed changes again, and only those (PRD P0-09).
+    func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult {
+        var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
+        for outcome in result.outcomes { statuses[outcome.photo] = outcome.status }
+        for outcome in result.outcomes where outcome.status.state.isUnfinished {
+            // A retry applies the same requested marks; the sample's marks still allow them or the
+            // change would have been dropped when the action ran (PRD P0-12).
+            statuses[outcome.photo] = await apply(outcome.change.change, to: outcome.photo)
+        }
+        return GroupFinishingResult.applied(
+            result.plan, changes: result.undo.entries, statuses: statuses, undo: result.undo)
+    }
+
+    /// The marks the sample holds for one photo right now, for a finishing action's re-check
+    /// (PRD P0-12).
+    private func marks(for photo: PhotoIdentity) -> PhotoMarks {
+        stored.first { $0.id == photo }?.marks ?? PhotoMarks()
+    }
+
+    /// Whether the sample's group is complete, and where the group view goes next (PRD P0-12).
+    func groupCompletion(
+        for groupID: GroupID, behaviour: GroupCompletionBehaviour
+    ) async -> GroupViewCompletion {
+        var marks: [PhotoIdentity: PhotoMarks] = [:]
+        for photo in stored { marks[photo.id] = photo.marks }
+        return await groupCompletion.viewCompletion(
+            after: groupID, in: groups, behaviour: behaviour, marks: marks)
+    }
+
     /// Turns the sample's groups on or off through the same call the settings screen makes
     /// (PRD P0-11).
     ///
@@ -428,11 +487,15 @@ final class TestLibrary: FolderLibrary {
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).
+    ///
+    /// The first burst skips 2680: the UI test's group flow and its batch flow run in one launch
+    /// and the batch flow forces one stem-0 photo to fail its first write, so the two flows must
+    /// not write the same photo (PRD P0-09).
     private static var sampleGroups: [BrowsingGroup] {
         [
             BrowsingGroup(
                 id: GroupID(rawValue: "burst-2678"),
-                members: samplePhotos(2678...2680)),
+                members: [samplePhoto(2678), samplePhoto(2679), samplePhoto(2681)]),
             BrowsingGroup(
                 id: GroupID(rawValue: "burst-2696"),
                 members: samplePhotos(2696...2698)),

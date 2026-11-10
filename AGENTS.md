@@ -19,6 +19,7 @@ Packages/CloveLabKit/     Lab report tooling plus one module per verification to
 Config/Shared.xcconfig    Shared build settings; includes Local.xcconfig if present
 Config/Local.xcconfig     Local development team, gitignored, never committed
 Config/TestFlight.local.json  Local signing config for the release script, gitignored
+design/handoff/           MVP design handoff: screens, theme tokens, components, interactions, copy (start with README.md)
 scripts/                  Project generation, simulator smoke test, fixture and release tooling
 project.yml               XcodeGen definition; Clove.xcodeproj is generated, not committed
 mise.toml / mise.lock     Pinned tools and project tasks
@@ -61,7 +62,9 @@ XcodeGen. Every task is listed here.
 - The packages use Swift Testing (`import Testing`, `#expect`). App targets use
   SwiftUI; the UI test target uses XCTest.
 - No third-party dependencies without a decision record in `docs/decisions/`.
-- Build UI with system components until the visual design arrives. Placeholders
+- Behavior, flows, and copy follow `design/handoff/`, which takes precedence
+  over the PRD's screen descriptions. Build UI with system components until
+  the visual design pass (Q6) applies the handoff's visuals; placeholders
   exist only to keep the skeleton verifiable.
 - Keep the generated project out of git. Never edit `Clove.xcodeproj` by hand;
   change `project.yml` and regenerate.
