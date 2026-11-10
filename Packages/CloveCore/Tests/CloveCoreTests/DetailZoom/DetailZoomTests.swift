@@ -217,6 +217,48 @@ struct DetailZoomTests {
         #expect(abs(fromPreview - 6000.0 / 1179.0) < 0.0001)
     }
 
+    /// A kept zoom is native-relative: 100% stays 100% of the next photo's native size, and a
+    /// pinched percentage of native stays that percentage (PRD P0-04; PRD In-group culling,
+    /// synchronized zoom).
+    @Test func aKeptZoomConvertsByTheNativeScaleRatio() {
+        let landscape = CGSize(width: 8640, height: 5760)
+        let portrait = CGSize(width: 5760, height: 8640)
+        let crop = CGSize(width: 2768, height: 1848)
+        let view = CGSize(width: 393, height: 852)
+        func nativeScale(_ pixels: CGSize) -> CGFloat {
+            DetailZoom.fullResolutionScale(
+                nativePixels: pixels, shownPixels: pixels, viewSize: view, screenScale: 3)
+        }
+        let landscapeScale = nativeScale(landscape)
+        let portraitScale = nativeScale(portrait)
+        let cropScale = nativeScale(crop)
+
+        // 100% of one frame is 100% of the next, portrait or crop.
+        #expect(
+            abs(
+                DetailZoom.convertedScale(
+                    landscapeScale, fromNativeScale: landscapeScale, toNativeScale: portraitScale)
+                    - portraitScale) < 0.0001)
+        #expect(
+            abs(
+                DetailZoom.convertedScale(
+                    landscapeScale, fromNativeScale: landscapeScale, toNativeScale: cropScale)
+                    - cropScale) < 0.0001)
+        // 150% of native stays 150% of native.
+        #expect(
+            abs(
+                DetailZoom.convertedScale(
+                    landscapeScale * 1.5, fromNativeScale: landscapeScale,
+                    toNativeScale: portraitScale) - portraitScale * 1.5) < 0.0001)
+        // The same native size is unchanged.
+        #expect(
+            DetailZoom.convertedScale(
+                2.5, fromNativeScale: landscapeScale, toNativeScale: landscapeScale) == 2.5)
+        // A native size that is unknown leaves the screen scale alone.
+        #expect(
+            DetailZoom.convertedScale(2.5, fromNativeScale: 0, toNativeScale: portraitScale) == 2.5)
+    }
+
     /// 100% names this photo's own native scale, not another photo's or a fraction of it
     /// (PRD P0-04).
     @Test func fullResolutionNameRequiresThisPhotosNativeScale() {

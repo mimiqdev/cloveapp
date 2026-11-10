@@ -52,11 +52,20 @@ public final class DetailCache: Sendable {
         let access: UInt64
     }
 
+    /// A photo's header size, or the answer that its header could not be read (PRD P0-04).
+    ///
+    /// The unknown answer is cached too, so a file that cannot supply a header is not opened
+    /// again on every preview and render request.
+    enum HeaderSize: Hashable, Sendable {
+        case known(CGSize)
+        case unreadable
+    }
+
     private struct State {
         var previews: [DetailCacheKey: Entry] = [:]
         var previewCost = 0
         var native: (key: DetailCacheKey, image: DetailImage)?
-        var fullResolutionSizes: [DetailSource: CGSize] = [:]
+        var headerSizes: [DetailSource: HeaderSize] = [:]
         var tick: UInt64 = 0
     }
 
@@ -69,18 +78,19 @@ public final class DetailCache: Sendable {
         self.state = Mutex(State())
     }
 
-    /// Drops every cached image, previews and the native render alike.
+    /// Drops every cached image, previews and the native render alike, and the header sizes.
     ///
     /// Call this from the app's memory-warning handler: nothing here observes UIKit, so the
     /// app decides when memory is short (G1 "Scheduling and cache"). Images the view is
-    /// already displaying stay alive through their own references. Full-resolution sizes are a
-    /// few bytes of header metadata rather than decoded pixels, so they stay: every photo then
-    /// keeps its native 100% across a memory warning (PRD P0-04).
+    /// already displaying stay alive through their own references. Header sizes are tiny, but
+    /// dropping them keeps this one "release everything" call and bounds the map to the photos
+    /// in use (PRD P0-04).
     public func releaseAll() {
         state.withLock { state in
             state.previews.removeAll()
             state.previewCost = 0
             state.native = nil
+            state.headerSizes.removeAll()
         }
     }
 
@@ -127,18 +137,19 @@ public final class DetailCache: Sendable {
         state.withLock { $0.native = (key, image) }
     }
 
-    /// The photo's full-resolution size if its header was already read (PRD P0-04).
+    /// The photo's header size if it was already read, including the answer that it could not be
+    /// read (PRD P0-04).
     ///
     /// The source carries the file's revision, so a rewritten file reads its header again
     /// instead of inheriting an old size (G1 "Scheduling and cache").
-    func fullResolutionSize(for source: DetailSource) -> CGSize? {
-        state.withLock { $0.fullResolutionSizes[source] }
+    func headerSize(for source: DetailSource) -> HeaderSize? {
+        state.withLock { $0.headerSizes[source] }
     }
 
-    /// Remembers a header size so one photo pays for reading it once (PRD P0-04; G1 "Preview,
-    /// detail (I2)").
-    func store(fullResolutionSize: CGSize, for source: DetailSource) {
-        state.withLock { $0.fullResolutionSizes[source] = fullResolutionSize }
+    /// Remembers a header size, or that there is none, so one photo pays for the read once
+    /// (PRD P0-04; G1 "Preview, detail (I2)").
+    func store(headerSize: HeaderSize, for source: DetailSource) {
+        state.withLock { $0.headerSizes[source] = headerSize }
     }
 
     /// Bytes currently held by preview and display-size entries, for budget tests.

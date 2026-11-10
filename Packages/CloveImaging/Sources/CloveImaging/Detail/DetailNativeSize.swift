@@ -21,22 +21,15 @@ enum DetailNativeSize {
         autoreleasepool {
             guard
                 let imageSource = CGImageSourceCreateWithURL(
-                    source.url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+                    source.url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+                let properties =
+                    CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any]
             else { return nil }
-            return read(imageSource)
+            let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
+            let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+            let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
+            return oriented(width: width, height: height, orientation: orientation)
         }
-    }
-
-    /// The same read for an ImageIO source a caller already opened.
-    static func read(_ imageSource: CGImageSource) -> CGSize? {
-        guard
-            let properties =
-                CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any]
-        else { return nil }
-        let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
-        let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
-        let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
-        return oriented(width: width, height: height, orientation: orientation)
     }
 
     /// The size after EXIF orientation, which is the size the pixels are displayed at.

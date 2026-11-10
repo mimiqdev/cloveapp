@@ -44,8 +44,8 @@ public enum DetailZoom {
     /// it, so it follows `nativePixels`. `shownPixels` supplies that size only when the header
     /// could not be read, which is the behaviour before the native size was known; a preview
     /// with another aspect than the photo — a camera that crops its embedded preview — still
-    /// lands at the render's native 100%, and only the visible point has to be kept when the
-    /// pixels change (PRD P0-04; G1 "Preview, detail (I2)").
+    /// lands at the render's native 100%, and only the unit image point at the viewport has to be
+    /// kept when the pixels change (PRD P0-04; G1 "Preview, detail (I2)").
     ///
     /// The two axes answer the same scale for an aspect-preserved size; the larger is used so
     /// rounding can never leave the view below native resolution. The result is never below the
@@ -92,6 +92,29 @@ public enum DetailZoom {
             fullResolutionScale(
                 nativePixels: nativePixels, shownPixels: shownPixels, viewSize: viewSize,
                 screenScale: screenScale))
+    }
+
+    /// The scale a kept zoom becomes on a photo whose native 100% needs another scale
+    /// (PRD P0-04; PRD In-group culling, synchronized zoom).
+    ///
+    /// A group, and a detail view that keeps the zoom level while navigating, compare photos of
+    /// the same scene that can differ in native size: a portrait frame of the same sensor, or an
+    /// APS-C crop. The zoom level that survives that move is the native-relative one, so 100% of
+    /// the previous photo stays 100% of the next one and a pinched 150% of native stays 150% of
+    /// native. The ratio of the two native scales is the whole rule; a degenerate scale keeps the
+    /// screen scale, which is what a caller uses when a native size is unknown.
+    ///
+    /// - Parameters:
+    ///   - scale: The previous photo's scroll-view zoom scale.
+    ///   - previousNativeScale: The previous photo's 100% scale, from
+    ///     ``fullResolutionScale(nativePixels:shownPixels:viewSize:screenScale:)``.
+    ///   - nativeScale: The next photo's 100% scale, from the same call.
+    public static func convertedScale(
+        _ scale: CGFloat, fromNativeScale previousNativeScale: CGFloat,
+        toNativeScale nativeScale: CGFloat
+    ) -> CGFloat {
+        guard previousNativeScale > 0, nativeScale > 0 else { return scale }
+        return scale * nativeScale / previousNativeScale
     }
 
     /// Whether a zoom scale shows this photo's native 100% (PRD P0-04).

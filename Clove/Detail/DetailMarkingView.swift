@@ -146,9 +146,17 @@ struct DetailMarkingView: View {
     /// The command's identity, so repeated SwiftUI updates never re-apply a zoom.
     @State private var nextCommandID = 0
 
-    /// The zoom the previous photo showed, waiting for the new pixels (PRD In-group culling,
-    /// synchronized zoom).
+    /// The position the previous photo showed, waiting for the new pixels (PRD In-group culling,
+    /// synchronized zoom). A regular detail view keeps the level without this.
     @State private var keptZoom: DetailZoomSnapshot?
+
+    /// The scale the previous photo showed, so the next photo opens at the same native-relative
+    /// zoom (PRD P0-04; PRD In-group culling, synchronized zoom).
+    @State private var keptScale: CGFloat?
+
+    /// The previous photo's native 100% scale, when its size was known: the ratio between the
+    /// two photos' native scales is what a pinched zoom converts by (PRD P0-04).
+    @State private var keptNativeScale: CGFloat?
 
     /// The handle that reads the shown zoom from the preview (PRD In-group culling).
     @State private var probe = DetailZoomProbe()
@@ -286,14 +294,18 @@ struct DetailMarkingView: View {
     /// pixels are on screen, so an edge tap to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
         upgradeTask?.cancel()
-        if zoomPolicy.keepsPosition {
+        keptZoom = nil
+        keptScale = nil
+        keptNativeScale = nil
+        if zoomPolicy.keepsScale, shown != nil, let snapshot = probe.container?.zoomSnapshot {
             // A preview that has not arrived yet leaves the container with no pixels, so its
-            // snapshot is nil: the position read before an earlier tap in a run of quick taps
-            // stays pending for the photo that finally loads (PRD In-group culling, synchronized
-            // zoom).
-            if shown != nil { keptZoom = probe.container?.zoomSnapshot }
-        } else {
-            keptZoom = nil
+            // snapshot is nil: the zoom read before an earlier tap in a run of quick taps stays
+            // pending for the photo that finally loads (PRD In-group culling, synchronized zoom).
+            keptScale = snapshot.scale
+            if let shown, shown.fullResolutionSize != nil {
+                keptNativeScale = nativeFullResolutionScale(for: shown)
+            }
+            if zoomPolicy.keepsPosition { keptZoom = snapshot }
         }
         if !zoomPolicy.keepsScale {
             zoomMode = .fit
@@ -341,12 +353,13 @@ struct DetailMarkingView: View {
     /// size: the render sharpens the picture instead of zooming a second time (PRD P0-04; G1
     /// "Preview, detail (I2)").
     ///
-    /// The next photo of a group is the exception the policy names: the scale and the position
-    /// the previous photo showed are applied to the new pixels, so the same spot stays under the
-    /// viewport at the same zoom level (PRD In-group culling, synchronized zoom; PRD P0-12). A
-    /// header that could not be read leaves the preview's 100% at its own pixels; the render's own
-    /// size then supplies that target once, which is the behaviour before the native size was
-    /// known.
+    /// The next photo is where the zoom is converted to the new photo's native size, so 100% stays
+    /// 100% and a pinched fraction of native stays that fraction (PRD In-group culling,
+    /// synchronized zoom; PRD P0-12). A group also keeps the position, and asks for the pixels
+    /// its retained zoom needs, as before; a regular detail view keeps the level only and starts
+    /// no render of its own. A header that could not be read leaves the preview's 100% at its own
+    /// pixels; the render's own size then supplies that target once, which is the behaviour
+    /// before the native size was known.
     private func show(_ image: DetailImage) {
         let previous = shown
         shown = image
@@ -355,31 +368,54 @@ struct DetailMarkingView: View {
         if image.limitation != nil {
             previewOnly = true
         }
-        if let keptZoom {
+        if let keptScale {
+            let previousNativeScale = keptNativeScale
+            let anchor = keptZoom?.anchor ?? .centre
+            self.keptScale = nil
+            self.keptNativeScale = nil
             self.keptZoom = nil
-            setZoom(.scale(keptZoom.scale, anchor: keptZoom.anchor.unitPoint))
+            let opening = openingScale(
+                keptScale, previousNativeScale: previousNativeScale, for: image)
+            setZoom(.scale(opening, anchor: anchor.unitPoint))
+            // A group's retained zoom may need more pixels than the preview holds (G1 "Preview,
+            // detail (I2)"); a regular detail view keeps its level without starting a render, as
+            // before.
+            if zoomPolicy.keepsPosition { upgradeIfNeeded() }
         } else if case .fullResolution = zoomMode, didRequestFullResolution, let previous,
             previous.fullResolutionSize == nil, image.fullResolutionSize != nil,
             viewSize.width > 0
         {
             // A render is native by definition, so its size is the 100% the preview could not
-            // report; the visible point the user chose stays under the viewport as it retargets.
+            // report; the unit image point the user chose stays under the viewport as it retargets.
             let anchor = probe.container?.zoomSnapshot?.anchor ?? .centre
-            let target = DetailZoom.fullResolutionScale(
-                nativePixels: image.fullResolutionPixels, shownPixels: pixelSize(image),
-                viewSize: viewSize, screenScale: displayScale)
+            let target = nativeFullResolutionScale(for: image)
             setZoom(.scale(target, anchor: anchor.unitPoint))
         }
-        // A retained zoom, in a group or in regular detail, needs the pixels that photo shows; a
-        // fit view never renders, and pixels the route cannot improve — the photo's own, or the
-        // raster decode limit — are never asked for twice (G1 "Preview, detail (I2)"). The same
-        // bitmap arriving again cannot help either; a request the source cannot answer comes back
-        // with a limitation, which turns `previewOnly` on and ends the asking.
-        if scale > DetailFitScale.tolerance, !image.isBestAvailable,
-            previous?.image !== image.image
-        {
-            upgradeIfNeeded()
-        }
+    }
+
+    /// The scale the next photo opens with (PRD P0-04; PRD In-group culling, synchronized zoom).
+    ///
+    /// 100% stays 100% of the new photo's own native size, and a pinched scale converts by the
+    /// ratio of the two photos' native 100% scales, so the same fraction of the sensor stays on
+    /// screen. When either native size is unknown, the earlier scale stays, which is the
+    /// behaviour before native sizes were read.
+    private func openingScale(
+        _ keptScale: CGFloat, previousNativeScale: CGFloat?, for image: DetailImage
+    ) -> CGFloat {
+        guard viewSize.width > 0, image.fullResolutionSize != nil else { return keptScale }
+        let nativeScale = nativeFullResolutionScale(for: image)
+        if case .fullResolution = zoomMode { return nativeScale }
+        guard let previousNativeScale else { return keptScale }
+        return DetailZoom.convertedScale(
+            keptScale, fromNativeScale: previousNativeScale, toNativeScale: nativeScale)
+    }
+
+    /// The scroll-view scale at which this photo shows one native image pixel per screen pixel
+    /// (PRD P0-04; G1 "Preview, detail (I2)").
+    private func nativeFullResolutionScale(for image: DetailImage) -> CGFloat {
+        DetailZoom.fullResolutionScale(
+            nativePixels: image.fullResolutionPixels, shownPixels: image.fullResolutionPixels,
+            viewSize: viewSize, screenScale: displayScale)
     }
 
     /// The neighbours' previews, so the next edge tap starts from a cache hit.

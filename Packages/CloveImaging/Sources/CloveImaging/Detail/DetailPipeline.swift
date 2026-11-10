@@ -378,7 +378,8 @@ public actor DetailPipeline {
             guard isCurrent(raw) else { return .unavailable(.sourceChanged) }
             let rendered = DetailImage(
                 image: pixels, source: raw, quality: .nativeRAW,
-                fullResolutionSize: fullResolutionSize ?? pixelSize(pixels))
+                fullResolutionSize: renderedSize(
+                    pixels, header: fullResolutionSize, source: raw))
             cache.storeNative(rendered, for: key)
             return verified(.available(rendered))
         }
@@ -395,7 +396,8 @@ public actor DetailPipeline {
             if case .image(let pixels) = await reader.fullRaster(jpeg) {
                 var decoded = DetailImage(
                     image: pixels, source: jpeg, quality: .raster,
-                    fullResolutionSize: fullResolutionSize ?? pixelSize(pixels))
+                    fullResolutionSize: renderedSize(
+                        pixels, header: fullResolutionSize, source: jpeg))
                 // A decode capped below the photo's size is all this route can give, so the
                 // shortfall is reported instead of asked for again (PRD P0-04; G1 "Preview,
                 // detail (I2)").
@@ -426,16 +428,43 @@ public actor DetailPipeline {
     /// (PRD P0-04; G1 "Preview, detail (I2)").
     ///
     /// G1 decision 1: with a RAW, the RAW is the photo; without one, the JPEG is. A HIF is never
-    /// fully decoded, so it has no larger size to report and the pixels' own size stands in. A
-    /// file whose revision changed since the request was built answers nil, so no stale size
-    /// reaches the view; the pixel steps report that change themselves.
+    /// fully decoded, so it has no larger size to report and the pixels' own size stands in. The
+    /// answer is cached per source revision, including an unreadable header, so a preview and its
+    /// render read the file once. A file whose revision changed since the request was built
+    /// answers nil, so no stale size reaches the view; the pixel steps report that change
+    /// themselves.
     private nonisolated static func fullResolutionSize(
         for request: DetailRequest, cache: DetailCache
     ) -> CGSize? {
-        guard let reference = request.raw ?? request.jpeg else { return nil }
-        if let cached = cache.fullResolutionSize(for: reference) { return cached }
-        guard isCurrent(reference), let size = DetailNativeSize.read(reference) else { return nil }
-        cache.store(fullResolutionSize: size, for: reference)
+        guard let reference = request.raw ?? request.jpeg, isCurrent(reference) else { return nil }
+        if let cached = cache.headerSize(for: reference) {
+            switch cached {
+            case .known(let size): return size
+            case .unreadable: return nil
+            }
+        }
+        let size = DetailNativeSize.read(reference)
+        cache.store(
+            headerSize: size.map(DetailCache.HeaderSize.known) ?? .unreadable, for: reference)
+        return size
+    }
+
+    /// The size a render reports as 100% (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// The rendered pixels are what 100% means; a header can be rounded or cropped by the decoder,
+    /// and the device check wants to see where. A difference is printed once per render instead of
+    /// silently correcting the pixels, and the render's own size is what the view uses from then
+    /// on.
+    private nonisolated static func renderedSize(
+        _ pixels: CGImage, header: CGSize?, source: DetailSource
+    ) -> CGSize {
+        let size = pixelSize(pixels)
+        if let header, header != size {
+            print(
+                "DETAIL native-size-mismatch header=\(Int(header.width))x\(Int(header.height))"
+                    + " render=\(pixels.width)x\(pixels.height)"
+                    + " file=\(source.url.lastPathComponent)")
+        }
         return size
     }
 

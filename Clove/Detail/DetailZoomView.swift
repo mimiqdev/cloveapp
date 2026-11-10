@@ -300,8 +300,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     ///
     /// A preview and its render share the photo's aspect, so the image's drawn rect does not
     /// move. A camera that crops its embedded preview can give it another aspect; that rect then
-    /// changes, so the image point at the viewport's centre is kept explicitly, and the visible
-    /// point stays under the same place on screen (PRD P0-04; G1 "Preview, detail (I2)").
+    /// changes, so the image point at the viewport's centre is kept as a unit coordinate. With a
+    /// crop that unit point names a slightly different pixel, so the visible spot can shift by
+    /// the crop margin, but it does not jump to a corner (PRD P0-04; G1 "Preview, detail (I2)").
     func setImage(_ pixels: CGImage?, fullResolutionPixels: CGSize? = nil) {
         let fullResolution = fullResolutionPixels ?? .zero
         guard pixels !== imageView.image?.cgImage || fullResolution != self.fullResolutionPixels
