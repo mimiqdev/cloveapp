@@ -371,11 +371,11 @@ struct DetailMarkingView: View {
             setZoom(.scale(target, anchor: anchor.unitPoint))
         }
         // A retained zoom, in a group or in regular detail, needs the pixels that photo shows; a
-        // fit view never renders, and pixels that already are the photo's full resolution cannot
-        // be improved, so the same answer is never asked for twice (G1 "Preview, detail (I2)").
-        // The same bitmap arriving again cannot help either; a request the source cannot answer
-        // comes back with a limitation, which turns `previewOnly` on and ends the asking.
-        if scale > DetailFitScale.tolerance, !image.isFullResolution,
+        // fit view never renders, and pixels the route cannot improve — the photo's own, or the
+        // raster decode limit — are never asked for twice (G1 "Preview, detail (I2)"). The same
+        // bitmap arriving again cannot help either; a request the source cannot answer comes back
+        // with a limitation, which turns `previewOnly` on and ends the asking.
+        if scale > DetailFitScale.tolerance, !image.isBestAvailable,
             previous?.image !== image.image
         {
             upgradeIfNeeded()

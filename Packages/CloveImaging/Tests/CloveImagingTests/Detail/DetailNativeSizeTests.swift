@@ -94,7 +94,9 @@ struct DetailNativeSizeFixtureTests {
         #expect(image.quality == .raster)
         #expect(image.longEdge == DetailRenderer.maximumRasterPixels)
         #expect(image.limitation == .noHigherResolution)
-        #expect(!image.isFullResolution)
+        // The cap is final: no display request can produce a larger bitmap, so the view stops
+        // asking even though the file's own size is larger.
+        #expect(image.isBestAvailable)
     }
 
     @Test func aCachedCompanionPreviewTakesTheRequestsOwnSize() async throws {
@@ -173,7 +175,7 @@ struct DetailNativeSizeTests {
         #expect(DetailNativeSize.read(try detailSource(file)) == nil)
     }
 
-    @Test func aFullResolutionImageNeverAsksForMorePixels() throws {
+    @Test func anImageAtItsBestNeverAsksForMorePixels() throws {
         let source = DetailSource(
             url: URL(fileURLWithPath: "/missing/photo.ARW"),
             revision: ThumbnailRevision(size: 0, modificationTime: .distantPast))
@@ -188,17 +190,24 @@ struct DetailNativeSizeTests {
 
         // A native RAW render is the photo's full resolution, and a full raster answers a JPEG's
         // 100%, so asking either for more would repeat the same pixels (G1 "Preview, detail").
-        #expect(try image(8640, 5760, .nativeRAW, native).isFullResolution)
-        #expect(try image(2900, 1933, .raster, CGSize(width: 2900, height: 1933)).isFullResolution)
+        #expect(try image(8640, 5760, .nativeRAW, native).isBestAvailable)
+        #expect(try image(2900, 1933, .raster, CGSize(width: 2900, height: 1933)).isBestAvailable)
         // One pixel short counts as full: rounding in the fit geometry can lose that pixel.
-        #expect(try image(2899, 1933, .raster, CGSize(width: 2900, height: 1933)).isFullResolution)
+        #expect(try image(2899, 1933, .raster, CGSize(width: 2900, height: 1933)).isBestAvailable)
+        // The raster decode limit is final even when the file is larger: no display request can
+        // produce more pixels than the cap.
+        #expect(
+            try image(
+                DetailRenderer.maximumRasterPixels, 8, .raster,
+                CGSize(width: 40_000, height: 8)
+            ).isBestAvailable)
         // A display raster below the photo's size and any preview can still improve.
-        #expect(try !image(1200, 800, .raster, native).isFullResolution)
-        #expect(try !image(1616, 1080, .preview, native).isFullResolution)
+        #expect(try !image(1200, 800, .raster, native).isBestAvailable)
+        #expect(try !image(1616, 1080, .preview, native).isBestAvailable)
         // A raster or preview whose header is unknown may still find the render's size, so it
         // asks rather than treating its own size as the photo's.
-        #expect(try !image(1616, 1080, .raster, nil).isFullResolution)
-        #expect(try !image(1616, 1080, .preview, nil).isFullResolution)
+        #expect(try !image(1616, 1080, .raster, nil).isBestAvailable)
+        #expect(try !image(1616, 1080, .preview, nil).isBestAvailable)
     }
 
     @Test func aPreviewWithoutAHeaderSizeFallsBackToItsOwnPixels() throws {
