@@ -443,9 +443,9 @@ public actor DetailPipeline {
     /// themselves.
     ///
     /// A RAW's answer must be larger than the preview on screen: a RAW is never smaller than its
-    /// embedded preview, so a size that is not describes the preview rather than the sensor. That
-    /// answer is treated as unknown and printed once per photo, so a device log shows the cause
-    /// (#111).
+    /// embedded preview, so a size that is no larger describes the preview rather than the sensor.
+    /// That answer is treated as unknown and printed once per photo, so a device log shows the
+    /// cause (#111).
     private nonisolated static func fullResolutionSize(
         for request: DetailRequest, previewLongEdge: Int, cache: DetailCache,
         sizes: any DetailNativeSizeReading
