@@ -101,6 +101,12 @@ struct DetailScreen: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail")
+        .onDisappear {
+            // A render the user left behind must not keep reading the folder or write into a
+            // screen that is gone; the neighbour prefetch is dropped too (G1 scheduling row).
+            upgradeTask?.cancel()
+            Task { await images.cancelPrefetch() }
+        }
     }
 
     /// The HUD, the preview and the filmstrip, in the order PRD Detail and marking fixes.
@@ -276,7 +282,7 @@ struct DetailScreen: View {
     private func zoomChanged(_ value: CGFloat, on photo: GridPhoto) {
         scale = value
         if abs(value - commandedScale) > 0.01 {
-            zoomMode = .manual(scale: value)
+            zoomMode = .manual
         }
         guard !previewOnly, let shown else { return }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
@@ -469,5 +475,5 @@ private enum DetailZoomMode: Equatable {
     /// 100%, centred on the image point the user tapped.
     case fullResolution(anchor: UnitPoint)
     /// A scale the user pinched.
-    case manual(scale: CGFloat)
+    case manual
 }
