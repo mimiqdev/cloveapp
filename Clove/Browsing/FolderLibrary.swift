@@ -29,6 +29,16 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// (PRD P0-01, design handoff: Move Rejects hides while opening).
     case scanStarted
 
+    /// The open folder's location was reported gone while it was open (PRD P0-02, P0-08).
+    ///
+    /// C11's watch reports one loss and stops. The folder stays open so the user can reopen it,
+    /// and PRD Failure and recovery requires the disconnected-drive or missing-location copy
+    /// instead of **Writing…** or **Saved** for the folder's unfinished changes. The update names
+    /// the folder it belongs to and the open it came from, because a buffered loss can reach a
+    /// reader after another folder opened — or after the same folder opened again — and no view
+    /// may explain one open's loss over another open's photos.
+    case locationLost(folder: FolderIdentity, loss: FolderLocationLoss, generation: Int)
+
     /// Grouping published the folder's groups (PRD P0-11).
     ///
     /// The folder's first publication always arrives, even with no groups and with similar groups
@@ -171,6 +181,48 @@ protocol FolderLibrary: AnyObject {
     /// retry. Nil means nothing has been requested for the photo, not that everything is saved.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus?
 
+    /// Resends one photo's latest failed change through C4 and reports its final state
+    /// (PRD P0-08).
+    ///
+    /// PRD Failure and recovery offers Retry for a single-photo write failure, and PRD How marks
+    /// reach disk, rule 8, keeps the requested marks until a retry confirms them. A change that
+    /// did not fail, or that a newer change superseded, is never retried. Nil means the photo has
+    /// no change this library can retry, such as one from a folder that closed.
+    func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus?
+
+    /// Waits until every admitted write has finished, for the leaving question (PRD P0-08).
+    ///
+    /// PRD Failure and recovery's "Wait for writes" holds the folder while C4 drains; a failed
+    /// change is finished for this purpose and stays for an explicit retry.
+    func drainWrites() async
+
+    /// Checks the open folder's location now, as a return to the foreground asks (PRD P0-02).
+    ///
+    /// G1 folder access watches with presenters plus a 500 ms foreground poll; a scene that comes
+    /// back must not wait one interval before it learns the drive is gone.
+    func checkFolderLocationNow() async
+
+    /// Closes the open folder and releases its scope (PRD P0-08, PRD P0-02).
+    ///
+    /// Leaving with unfinished writes closes the folder, and the unconfirmed changes are never
+    /// reported as saved afterwards (PRD Failure and recovery, paragraph after the table).
+    func closeFolder() async
+
+    /// A value that changes with every folder this library installs or ends (PRD P0-02).
+    ///
+    /// Two opens of the same folder share the folder's identity, so an update a reader had already
+    /// suspended can only be told apart by the open it came from. The library changes this
+    /// whenever a folder is installed or closed; a reader compares it with the value it saw when
+    /// it showed the folder.
+    var openGeneration: Int { get }
+
+    /// Whether a change is still admitted and unfinished, read from the write queue itself
+    /// (PRD P0-08).
+    ///
+    /// The leaving question asks this after draining: the queue's own answer cannot lag behind a
+    /// stream the screen has not caught up with yet. A failed change is finished for draining and
+    /// stays for an explicit retry.
+    func hasUnfinishedWrites() async -> Bool
     /// Runs one finishing action's plan in the open folder session (PRD In-group culling,
     /// finishing actions; PRD P0-12).
     ///
@@ -272,6 +324,24 @@ extension FolderLibrary {
 
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? { nil }
 
+    /// A library that installed nothing answers a generation a reader compares with zero, and one
+    /// with no writes has nothing unfinished (PRD P0-02, P0-08).
+    var openGeneration: Int { 0 }
+
+    func hasUnfinishedWrites() async -> Bool { false }
+
+    /// A library with no writes has nothing to retry or drain and no watch to poll
+    /// (PRD P0-08, P0-02).
+    func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus? {
+        latestChange(for: photo)
+    }
+
+    func drainWrites() async {}
+
+    func checkFolderLocationNow() async {}
+
+    /// A library with no folder to close keeps the folder key it has.
+    func closeFolder() async {}
     /// A library with no folder to write records no finishing action and completes no group
     /// (PRD In-group culling).
     func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {

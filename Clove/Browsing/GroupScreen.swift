@@ -133,9 +133,10 @@ struct GroupScreen: View {
     /// (PRD P0-04; PRD In-group culling).
     private func markingView(photo: GridPhoto) -> some View {
         DetailMarkingView(
+            browsing: browsing,
             photo: photo,
             settings: settings,
-            saveState: SaveStateSummary.text(for: browsing.latestChange(for: photo.id)?.state),
+            saveState: browsing.saveText(for: photo.id),
             images: browsing.detailImages,
             zoomPolicy: .group(settings),
             order: browsing.groupPhotos,

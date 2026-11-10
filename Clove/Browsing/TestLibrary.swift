@@ -8,7 +8,10 @@ import Foundation
 /// marks, two groups and the save state of each change it receives, and writes nothing anywhere.
 ///
 /// The sample is selected with the launch environment value ``launchVariable``; without it the
-/// app browses an empty library and entry says no folder is open.
+/// app browses an empty library and entry says no folder is open. Launch values can also force a
+/// write failure on chosen photos with a chosen reason, slow the write drain, and report the
+/// folder's location gone, so the UI test drives the PRD's failure and recovery copy without a
+/// file, a fixture or a permission.
 @MainActor
 final class TestLibrary: FolderLibrary {
     /// The launch environment value that selects the sample library: set it to `1`.
@@ -46,15 +49,54 @@ final class TestLibrary: FolderLibrary {
     /// saved." copy, and sees a retry of only the failed photo succeed.
     static let forcedFailureVariable = "CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX"
 
+    /// The launch environment value that makes the first write to named photos fail (PRD P0-08).
+    ///
+    /// Its value is a comma-separated list of stem suffixes. A photo whose stem ends with one of
+    /// them reports one failed change and keeps the marks it had, and the next write saves it, so
+    /// a UI test drives PRD Failure and recovery's single-photo row without a file or a
+    /// permission.
+    static let forcedFailureStemsVariable = "CLOVE_TEST_LIBRARY_FAIL_STEMS"
+
+    /// The launch environment value that chooses the forced failure's reason (PRD P0-08).
+    ///
+    /// Values are `permission`, `location`, `readOnly`, `space` and `write`. A write that cannot
+    /// be confirmed is the default, so the PRD's single-photo row appears without a hardware
+    /// fault.
+    static let forcedFailureReasonVariable = "CLOVE_TEST_LIBRARY_FAIL_REASON"
+
+    /// The launch environment value that slows the sample's write drain, in milliseconds
+    /// (PRD P0-08).
+    ///
+    /// A UI test can then see the leaving question's waiting state instead of a drain that
+    /// finishes within one frame.
+    static let drainDelayVariable = "CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"
+
+    /// The launch environment value that makes the sample report its folder's location gone
+    /// (PRD P0-02).
+    ///
+    /// Values are `drive` for an external volume that disconnected and `location` for a folder
+    /// that cannot be found. The sample publishes C11's loss on its update stream, so the grid
+    /// shows the PRD's copy and recovery action without a drive or a permission.
+    static let locationLossVariable = "CLOVE_TEST_LIBRARY_LOCATION_LOSS"
+
     /// The library this launch browses: the sample when the launch value asks for it (PRD P0-13).
     static func forLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> any FolderLibrary {
         guard environment[launchVariable] == "1" else { return TestLibrary() }
+        let stems = (environment[forcedFailureStemsVariable] ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
         return sample(
             failingStemSuffix: environment[forcedFailureVariable],
             failingMoveStemSuffix: environment[forcedMoveFailureVariable],
-            readOnly: environment[readOnlyVariable] == "1")
+            readOnly: environment[readOnlyVariable] == "1",
+            failingStems: stems,
+            failureReason: forcedFailureReason(named: environment[forcedFailureReasonVariable]),
+            locationLoss: locationLoss(named: environment[locationLossVariable]),
+            drainDelay: Duration.milliseconds(
+                Int(environment[drainDelayVariable] ?? "") ?? 0))
     }
 
     /// The sample folder's durable key, spelled so a saved scene never looks like a real folder.
@@ -106,6 +148,7 @@ final class TestLibrary: FolderLibrary {
     private var stored: [GridPhoto]
     private var changes: [PhotoIdentity: MarkChangeStatus]
 
+    /// The stem suffix U4's launch value names, whose photos fail their first write (PRD P0-09).
     /// The sample's finishing-action records, so a group it finishes counts as complete like the
     /// real session's (PRD In-group culling, group completion; PRD P0-12).
     private let groupCompletion = GroupCompletionTracker()
@@ -113,7 +156,13 @@ final class TestLibrary: FolderLibrary {
     /// The stem suffix whose photos fail their first write, or nil when none does (PRD P0-09).
     private let failingStemSuffix: String?
 
-    /// The photos whose forced failure already happened, so a retry saves them (PRD P0-09).
+    /// The stem suffixes whose photos fail their first write (PRD P0-08).
+    private let failingStems: [String]
+
+    /// The reason a forced failure reports, so a test can show any PRD row (PRD P0-08).
+    private let failureReason: MarkWriteFailureReason
+
+    /// The photos whose forced failure already happened, so a retry saves them (PRD P0-08, P0-09).
     private var alreadyFailed: Set<PhotoIdentity> = []
 
     /// The photos whose forced move failure already happened, so a retry moves them (P0-10).
@@ -138,6 +187,13 @@ final class TestLibrary: FolderLibrary {
     /// Each run gets its own stream, so a retry never reads the earlier run's finished step.
     private var rejectMoveContinuation: AsyncStream<RejectMoveProgress>.Continuation?
 
+    /// How long the sample's write drain takes, so a UI test can see the waiting state
+    /// (PRD P0-08).
+    private let drainDelay: Duration
+
+    /// The open this sample library installed last, which ``closeFolder()`` changes (PRD P0-02).
+    private(set) var openGeneration = 0
+
     /// The folder's photos with their marks, in the sample's capture order (PRD P0-03).
     var photos: [GridPhoto] { stored }
 
@@ -151,6 +207,9 @@ final class TestLibrary: FolderLibrary {
         failingStemSuffix = nil
         failingMoveStemSuffix = nil
         readOnly = false
+        failingStems = []
+        failureReason = .notConfirmed
+        drainDelay = .zero
         thumbnails = SampleGridThumbnails()
         detailImages = EmptyDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
@@ -164,7 +223,11 @@ final class TestLibrary: FolderLibrary {
         failingStemSuffix: String? = nil,
         failingMoveStemSuffix: String? = nil,
         readOnly: Bool = false,
-        detailImages: (any DetailImageSource)? = nil
+        detailImages: (any DetailImageSource)? = nil,
+        failingStems: [String] = [],
+        failureReason: MarkWriteFailureReason = .notConfirmed,
+        locationLoss: FolderLocationLoss.Reason? = nil,
+        drainDelay: Duration = .zero
     ) {
         folder = TestLibrary.sampleFolderKey
         stored = photos
@@ -176,9 +239,21 @@ final class TestLibrary: FolderLibrary {
         self.failingStemSuffix = failingStemSuffix
         self.failingMoveStemSuffix = failingMoveStemSuffix
         self.readOnly = readOnly
+        self.failingStems = failingStems.map { $0.lowercased() }
+        self.failureReason = failureReason
+        self.drainDelay = drainDelay
         thumbnails = TestLibrary.sampleThumbnails
         self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
+        // The stream buffers these until the model starts reading it, so the sample opens with
+        // the save states, the loss and the scan state it was built with (PRD P0-08, P0-02).
+        for change in changes { updateContinuation.yield(.change(change)) }
+        if let locationLoss {
+            updateContinuation.yield(
+                .locationLost(
+                    folder: folder, loss: FolderLocationLoss(reason: locationLoss, date: Date()),
+                    generation: openGeneration))
+        }
         // The sample is fully scanned when it opens, so the grid can show the actions the
         // handoff hides during opening (design handoff, PRD P0-01).
         updateContinuation.yield(.scanStarted)
@@ -227,15 +302,10 @@ final class TestLibrary: FolderLibrary {
 
     /// Applies one change to one photo and reports the state C4 would (PRD P0-08).
     ///
-    /// Every sample photo is a RAW set, whose rating and label belong to its sidecar, so a change
-    /// that names either reports ``MarkChangeState/savedInSidecar``. A Reject-only change reports
-    /// ``MarkChangeState/storedInClove``, which is confirmed but never shown as Saved (G1
-    /// decision 5). ``MarkChangeState/savedInCloveOnly`` would belong to a standalone JPEG/HIF
-    /// (G1 decision 6); the sample has none. A newer change replaces the photo's status the way the
-    /// queue supersedes an older request, and a photo with nothing requested has no status at all.
-    /// A forced failure leaves the photo's marks untouched and fails only that photo's first
-    /// write, so a retry shows what retrying does (PRD P0-08, P0-09). Nothing is written
-    /// anywhere.
+    /// A newer change replaces the photo's status the way the queue supersedes an older request,
+    /// and a photo with nothing requested has no status at all. A forced failure leaves the
+    /// photo's marks untouched, keeps the requested change for a retry, and happens only once per
+    /// photo, so a retry shows what retrying does (PRD P0-08, P0-09). Nothing is written anywhere.
     private func perform(_ change: MarkChange, for photo: PhotoIdentity) -> MarkChangeStatus {
         guard !change.isEmpty else {
             // C4's queue refuses a request that names no marks and records nothing.
@@ -254,15 +324,15 @@ final class TestLibrary: FolderLibrary {
                         reason: .locationUnavailable,
                         message: "The sample library does not hold this photo.")))
         }
-        if let failingStemSuffix, photo.stem.hasSuffix(failingStemSuffix),
-            alreadyFailed.insert(photo).inserted
-        {
+        if shouldFailFirstWrite(to: photo) {
+            // PRD How marks reach disk, rule 8: the requested marks stay for a retry and are not
+            // painted onto the photo, so nothing unconfirmed appears as saved.
             let status = MarkChangeStatus(
                 id: MarkChangeID(), identity: photo, requested: change,
                 state: .failed(
                     MarkWriteFailure(
-                        reason: .notConfirmed,
-                        message: "The sample library was told to fail this photo.")))
+                        reason: forcedFailureReason(for: photo),
+                        message: "The sample library's forced failure.")))
             changes[photo] = status
             updateContinuation.yield(.change(status))
             return status
@@ -484,6 +554,56 @@ final class TestLibrary: FolderLibrary {
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes[photo] }
 
+    /// Resends the photo's latest failed change, which the sample then saves (PRD P0-08).
+    ///
+    /// A forced failure happens once per photo, so Retry confirms the change the way C4's queue
+    /// does after the condition that broke the write is gone; a change that did not fail is left
+    /// alone, and a superseded one is never resurrected (PRD How marks reach disk, rule 8).
+    func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus? {
+        guard let status = changes[photo], status.state.failure != nil else {
+            return changes[photo]
+        }
+        // C4's retry re-admits the same change, so the sample publishes the same identity moving
+        // back to pending before the write lands; the merge rule accepts that one backward move.
+        let pending = MarkChangeStatus(
+            id: status.id, identity: photo, requested: status.requested, state: .pending)
+        changes[photo] = pending
+        updateContinuation.yield(.change(pending))
+        return perform(status.requested, for: photo)
+    }
+
+    /// Reports the sample folder's location gone, as C11's watch does (PRD P0-02).
+    func reportLocationLoss(_ reason: FolderLocationLoss.Reason) {
+        updateContinuation.yield(
+            .locationLost(
+                folder: folder, loss: FolderLocationLoss(reason: reason, date: Date()),
+                generation: openGeneration))
+    }
+
+    /// Waits for the sample's writes; a launch can make this take long enough to see
+    /// (PRD Failure and recovery).
+    func drainWrites() async {
+        guard drainDelay > .zero else { return }
+        try? await Task.sleep(for: drainDelay)
+    }
+
+    /// Whether a change admitted in this open is still unfinished, so Wait for writes keeps the
+    /// question (PRD P0-08).
+    func hasUnfinishedWrites() async -> Bool {
+        changes.values.contains { $0.state.isUnfinished }
+    }
+
+    /// Closes the sample folder, so leaving with unfinished writes really drops its photos
+    /// (PRD P0-08).
+    func closeFolder() async {
+        stored = []
+        groups = []
+        changes = [:]
+        batches = [:]
+        openGeneration += 1
+        updateContinuation.yield(.photos([]))
+    }
+
     // MARK: - In-group culling
 
     /// Runs one finishing action's plan through the sample's own mark call (PRD P0-12).
@@ -550,24 +670,57 @@ final class TestLibrary: FolderLibrary {
         updateContinuation.yield(.groups(published))
     }
 
-    /// The sample: 36 photos across two capture folders, a few marks, two bursts, two sets with
-    /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).
-    static var sample: TestLibrary { makeSample(failingStemSuffix: nil) }
-
-    /// The sample with the launch's forced write and move failures (PRD P0-09, P0-10).
-    static func sample(
-        failingStemSuffix suffix: String?,
-        failingMoveStemSuffix moveSuffix: String? = nil,
-        readOnly: Bool = false
-    ) -> TestLibrary {
-        makeSample(
-            failingStemSuffix: suffix, failingMoveStemSuffix: moveSuffix, readOnly: readOnly)
+    /// Whether this photo's first write should fail, and records that it did (PRD P0-08, P0-09).
+    private func shouldFailFirstWrite(to photo: PhotoIdentity) -> Bool {
+        guard !alreadyFailed.contains(photo) else { return false }
+        let suffix = failingStemSuffix.map { photo.stem.hasSuffix($0) } ?? false
+        let listed = failingStems.contains { photo.stem.hasSuffix($0) }
+        guard suffix || listed else { return false }
+        alreadyFailed.insert(photo)
+        return true
     }
 
-    /// Builds the sample, keeping the forced failures and read-only location when asked.
-    private static func makeSample(
-        failingStemSuffix: String?, failingMoveStemSuffix: String? = nil,
-        readOnly: Bool = false
+    /// The forced failure's reason, which the named list can choose (PRD P0-08).
+    private func forcedFailureReason(for photo: PhotoIdentity) -> MarkWriteFailureReason {
+        failingStems.contains { photo.stem.hasSuffix($0) } ? failureReason : .notConfirmed
+    }
+
+    /// The forced failure's reason, by its launch value (PRD P0-08).
+    private static func forcedFailureReason(named name: String?) -> MarkWriteFailureReason {
+        switch name {
+        case "permission": .permissionLost
+        case "location": .locationUnavailable
+        case "readOnly": .readOnlyStorage
+        case "space": .insufficientSpace
+        default: .notConfirmed
+        }
+    }
+
+    /// The location loss the sample reports at launch, by its launch value (PRD P0-02).
+    private static func locationLoss(named name: String?) -> FolderLocationLoss.Reason? {
+        switch name {
+        case "drive": .externalVolumeDisconnected
+        case "location": .locationUnavailable
+        default: nil
+        }
+    }
+
+    /// The sample: 36 photos across two capture folders, a few marks, two bursts, two sets with
+    /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).
+    static var sample: TestLibrary { sample() }
+
+    /// The sample, with the launch's forced write and move failures, lost location and drain.
+    ///
+    /// The forced values keep the UI tests from needing files; the move failures and read-only
+    /// switch cover PRD P0-10, while the write failures, loss and drain cover PRD P0-08 and P0-02.
+    static func sample(
+        failingStemSuffix: String? = nil,
+        failingMoveStemSuffix: String? = nil,
+        readOnly: Bool = false,
+        failingStems: [String] = [],
+        failureReason: MarkWriteFailureReason = .notConfirmed,
+        locationLoss: FolderLocationLoss.Reason? = nil,
+        drainDelay: Duration = .zero
     ) -> TestLibrary {
         let captureBase = Date(timeIntervalSince1970: 1_760_000_000)
         let photos = (0..<36).map { index -> GridPhoto in
@@ -586,7 +739,9 @@ final class TestLibrary: FolderLibrary {
             photos: photos, groups: sampleGroups, changes: sampleChanges,
             failingStemSuffix: failingStemSuffix,
             failingMoveStemSuffix: failingMoveStemSuffix, readOnly: readOnly,
-            detailImages: sampleDetailImages)
+            detailImages: sampleDetailImages, failingStems: failingStems,
+            failureReason: failureReason, locationLoss: locationLoss,
+            drainDelay: drainDelay)
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).
@@ -607,18 +762,17 @@ final class TestLibrary: FolderLibrary {
 
     /// The save states the sample starts with (PRD P0-08).
     ///
-    /// One photo starts failed, with the requested change kept, so the save state has a failure to
-    /// show and U7 has a change to retry.
+    /// One photo starts saved, so the indicator's normal reading is **All saved** and a launch
+    /// that forces a failure can watch it come back to that. The requested marks are kept on the
+    /// status so a failure made in the sample has something to retry (PRD How marks reach disk,
+    /// rule 8).
     private static var sampleChanges: [MarkChangeStatus] {
         [
             MarkChangeStatus(
                 id: MarkChangeID(),
                 identity: samplePhoto(2679),
-                requested: .rating(stars(4)),
-                state: .failed(
-                    MarkWriteFailure(
-                        reason: .notConfirmed,
-                        message: "The sample sidecar did not read back.")))
+                requested: .rating(stars(3)),
+                state: .savedInSidecar)
         ]
     }
 

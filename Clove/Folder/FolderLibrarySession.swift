@@ -151,6 +151,12 @@ final class FolderLibrarySession: FolderLibrary {
     /// these identities are dropped from later scan batches instead of reappearing in the grid.
     private var movedRejectIdentities: Set<PhotoIdentity> = []
 
+    /// The watch that reports the open folder's location going away (PRD P0-02, G1 folder access).
+    ///
+    /// G1 uses presenters plus a 500 ms foreground poll; the watch reports one loss and stops, and
+    /// ``endOpenFolder()`` removes it so nothing arrives after the folder closes.
+    private var locationMonitor: FolderLocationMonitor?
+
     /// Which open a scan belongs to, so a replaced scan publishes nothing.
     private var scanGeneration = 0
 
@@ -218,6 +224,23 @@ final class FolderLibrarySession: FolderLibrary {
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes.latest(for: photo) }
 
+    /// The open this library installed last, which changes on every install and close
+    /// (PRD P0-02).
+    var openGeneration: Int { scanGeneration }
+
+    /// Whether C4 still holds an unfinished change for the open folder (PRD P0-08).
+    ///
+    /// The queue keeps a failed change for the session, including one from a folder the user
+    /// left, so the answer is narrowed to the folder that is open now; otherwise an earlier
+    /// folder's failure would keep this folder's leaving question up forever.
+    func hasUnfinishedWrites() async -> Bool {
+        guard case .success(let stores) = await resolvedStores() else { return false }
+        let current = folder
+        return await stores.writes.unfinishedChanges().contains {
+            $0.identity.folderID == current
+        }
+    }
+
     /// The scanned set behind one photo, for writes and U3's thumbnail lookup (PRD P0-08).
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? { store.scannedSet(for: photo) }
 
@@ -250,6 +273,80 @@ final class FolderLibrarySession: FolderLibrary {
                     .locationUnavailable, "The folder closed before the change could be written.")
             }
         }
+    }
+
+    /// Resends one photo's latest failed change through C4, inside the session holding its scope.
+    ///
+    /// PRD Failure and recovery offers Retry for a single-photo write failure, and PRD How marks
+    /// reach disk, rule 8, never retries a change a newer one superseded. The library therefore
+    /// retries only the photo's latest change and only while it still holds a failure; anything
+    /// else answers with what it already has, so a retry can neither resurrect stale marks nor
+    /// report an unconfirmed change as saved. The write is admitted through C11's session for the
+    /// same reason ``apply(_:to:)`` is (G1 folder access, PRD P0-08).
+    func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus? {
+        guard case .success(let stores) = await resolvedStores() else {
+            return changes.latest(for: photo)
+        }
+        // C4's own record is the authority: a session copy can lag a transition, and a change
+        // this open already forgot must not be retried (PRD Failure and recovery).
+        guard let status = await stores.writes.latestChange(for: photo) else { return nil }
+        guard status.state.failure != nil, let session = openSession else { return status }
+        do {
+            return try await session.withAdmittedWork {
+                await stores.writes.retry(status.id)
+            }
+        } catch {
+            return status
+        }
+    }
+
+    /// Waits until C4 has finished every admitted write (PRD Failure and recovery).
+    ///
+    /// The leaving question's "Wait for writes" uses this; a failed change is finished for this
+    /// purpose and is retried explicitly instead of holding the folder open.
+    func drainWrites() async {
+        guard case .success(let stores) = await resolvedStores() else { return }
+        await stores.writes.drain()
+    }
+
+    /// Checks the open folder's location now, for a scene that came back to the foreground
+    /// (PRD P0-02, G1 folder access). Nothing is watched while no folder is open.
+    func checkFolderLocationNow() async {
+        await locationMonitor?.checkNow()
+    }
+
+    /// Closes the open folder and releases its scope (PRD P0-08, PRD P0-02).
+    ///
+    /// PRD Failure and recovery's "Leave anyway" closes the folder without reporting the
+    /// unconfirmed changes as saved: they keep their failed or unfinished state in C4, and the
+    /// next open reads the actual XMP and Clove-stored marks. The library drops the folder's
+    /// photos, groups and save states and answers with ``noFolder`` until another open.
+    ///
+    /// The close takes the same turn as an open, so a close queued before an open never tears
+    /// down the folder that open installed. The departure itself does not wait for this: the
+    /// screen shows entry first, and ending the folder here waits for C4's work only to keep
+    /// G1's scope release safe.
+    func closeFolder() async {
+        let earlier = openTransition
+        let transition = Task { [weak self] in
+            await earlier?.value
+            await self?.uninstallFolder()
+        }
+        openTransition = transition
+        await transition.value
+    }
+
+    /// Ends the open folder and forgets its contents, once every earlier open finished.
+    private func uninstallFolder() async {
+        await endOpenFolder()
+        folder = Self.noFolder
+        store = FolderPhotos()
+        changes = PhotoChangeStates()
+        publishedGroups = []
+        hasPublishedGroups = false
+        thumbnailSource = nil
+        detailSource = nil
+        publish(.photos([]))
     }
 
     /// Applies one bar action to the open folder's photos in one batch and reports each photo's
@@ -692,6 +789,15 @@ final class FolderLibrarySession: FolderLibrary {
         let caches = await Self.makeCaches()
         thumbnailSource = makeThumbnailSource(for: session, caches: caches)
         detailSource = makeDetailSource(for: session)
+        // The loss is reported for the folder this open installed, never for a later one.
+        let monitor = makeLocationMonitor(for: session, mediaType: opened.recent.mediaType)
+        locationMonitor = monitor
+        let installedFolder = session.folder.id
+        await monitor.start { [weak self] loss in
+            Task { @MainActor [weak self] in
+                self?.locationLost(loss, folder: installedFolder, generation: generation)
+            }
+        }
         grouping = makeGrouping(
             for: session, stores: stores, caches: caches, generation: generation)
         let scan = FolderScan(
@@ -711,6 +817,10 @@ final class FolderLibrarySession: FolderLibrary {
     /// drained before the session ends. Ending waits for the scan's admitted work as well.
     private func endOpenFolder() async {
         scanGeneration += 1
+        if let monitor = locationMonitor {
+            locationMonitor = nil
+            await monitor.stop()
+        }
         openScan?.cancel()
         openScan = nil
         scanTask?.cancel()
@@ -741,6 +851,12 @@ final class FolderLibrarySession: FolderLibrary {
         }
         if case .success(let stores) = await resolvedStores() {
             await stores.writes.drain()
+            // PRD Failure and recovery: a folder that closes takes its unconfirmed changes with
+            // it, so the next open reads the actual XMP and no later leaving question counts
+            // marks the user abandoned.
+            if folder != Self.noFolder {
+                await stores.writes.forgetUnfinishedChanges(in: folder)
+            }
         }
         guard let session = openSession else { return }
         openSession = nil
@@ -1118,6 +1234,30 @@ final class FolderLibrarySession: FolderLibrary {
                 return nil
             }
         }.value
+    }
+
+    // MARK: - Location
+
+    /// Starts the watch that reports the open folder's location going away (G1 folder access).
+    ///
+    /// G1 uses presenters plus a 500 ms poll while the app is in the foreground; the monitor holds
+    /// the folder's URL, its media type and the volume root it reads at start, so a folder on an
+    /// external drive can tell a disconnect from a missing folder. The library keeps the monitor
+    /// so a return to the foreground can check at once and ``endOpenFolder()`` can stop it.
+    private func makeLocationMonitor(for session: FolderAccessSession, mediaType: FolderMediaType)
+        -> FolderLocationMonitor
+    {
+        FolderLocationMonitor(rootURL: session.rootURL, mediaType: mediaType)
+    }
+
+    /// Publishes a loss the watch reported for the folder this open installed (PRD P0-02).
+    ///
+    /// A loss that arrives after another open replaced the folder is dropped here, and the update
+    /// carries the folder's identity and the open so a reader that had already suspended cannot
+    /// apply it to a newer folder or to a later open of the same folder either.
+    private func locationLost(_ loss: FolderLocationLoss, folder: FolderIdentity, generation: Int) {
+        guard generation == scanGeneration else { return }
+        publish(.locationLost(folder: folder, loss: loss, generation: generation))
     }
 
     // MARK: - Writes

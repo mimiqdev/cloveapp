@@ -1,9 +1,10 @@
 import XCTest
 
 /// The Clove UI smoke test: the grid's overlays, its filter, the grid group display setting, the
-/// detail's zoom and marking gestures, multi-select's batch and its partial failure, Move rejects
-/// with its partial failure and retry, and U1's path from entry to settings and back, all against
-/// the in-memory test library (PRD Grid, P0-03, P0-06, P0-09, P0-10, P0-13).
+/// detail's zoom and marking gestures, multi-select's batch and its partial failure, the save
+/// state's failure and recovery, Move rejects with its partial failure and retry, and U1's path
+/// from entry to settings and back, all against the in-memory test library (PRD Grid, P0-03,
+/// P0-06, P0-08, P0-09, P0-10, P0-13).
 final class CloveUITests: XCTestCase {
     @MainActor
     func testBrowsingFlowFromEntryToSettings() {
@@ -50,6 +51,266 @@ final class CloveUITests: XCTestCase {
         rejectPhotosForMove(in: app)
         checkMoveRejectsSetting(in: app)
         moveRejectsWithRetry(in: app)
+    }
+
+    /// The save state and its recovery: a forced failure shows the PRD's single-photo copy with
+    /// Retry, Retry confirms it, the indicator counts the unsaved photos and comes back to none,
+    /// the unsaved list names them, and leaving with an unfinished write asks first (PRD P0-08,
+    /// PRD Failure and recovery).
+    ///
+    /// The forced failures are the test library's: a photo whose stem is listed fails its first
+    /// write and saves on the next one, so no file, fixture or permission is involved.
+    @MainActor
+    func testSaveStateFailureAndRecovery() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_FAIL_STEMS"] = "MMQ02678,MMQ02680"
+        // A drain long enough to see the waiting state it shows (PRD Failure and recovery).
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"] = "1200"
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The Clove root view did not appear"
+        )
+        openTestLibrary(in: app)
+        // Nothing is waiting, so the folder claims no unsaved photo (PRD P0-08).
+        XCTAssertTrue(
+            waitForLabel("All saved", of: element(in: app, "clove.grid.saveState"), timeout: 10),
+            "The grid did not start from a fully saved folder"
+        )
+
+        failOnePhoto(in: app)
+        retryTheFailedPhoto(in: app)
+        failAnotherPhoto(in: app)
+        checkTheUnsavedList(in: app)
+        leaveWithAnUnfinishedWrite(in: app)
+    }
+
+    /// The folder's lost location explains itself with the PRD's disconnected-drive copy and its
+    /// recovery action, instead of keeping a save state on screen (PRD Failure and recovery,
+    /// row 6; PRD P0-02).
+    @MainActor
+    func testLocationLossExplainsItself() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_LOCATION_LOSS"] = "drive"
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The Clove root view did not appear"
+        )
+        openTestLibrary(in: app)
+
+        let message = element(in: app, "clove.grid.saveState.failure.message")
+        XCTAssertTrue(message.waitForExistence(timeout: 10), "The grid did not explain the loss")
+        XCTAssertEqual(
+            message.label, "The drive disconnected. Reconnect it, then reopen this folder.",
+            "The disconnected-drive copy changed")
+        XCTAssertTrue(
+            element(in: app, "clove.grid.saveState.failure.reopenFolder").exists,
+            "The loss offered no Reconnect/reopen action")
+        XCTAssertFalse(
+            element(in: app, "clove.grid.saveState").exists,
+            "A lost folder still showed its save-state line instead of the loss")
+    }
+
+    /// Rates a photo whose first write is forced to fail, and checks the PRD's copy, the photo's
+    /// own state and the folder's count (PRD Failure and recovery, row 1; PRD P0-08).
+    @MainActor
+    private func failOnePhoto(in app: XCUIApplication) {
+        openPhoto("mmq02678", in: app)
+        rateFourStars(in: app)
+
+        // The written mark starts the default auto-advance, so the failure belongs to the photo
+        // that was rated; the left edge goes back to it (PRD P0-04, PRD Auto-advance).
+        waitForFileName("MMQ02679.ARW", in: app)
+        element(in: app, "clove.detail.preview")
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
+        waitForFileName("MMQ02678.ARW", in: app)
+
+        let message = element(in: app, "clove.detail.saveFailure.message")
+        XCTAssertTrue(message.waitForExistence(timeout: 10), "The failure showed no PRD copy")
+        XCTAssertTrue(
+            message.label.contains("This photo's marks weren't saved"),
+            "The single-photo copy changed: \(message.label)"
+        )
+        XCTAssertTrue(element(in: app, "clove.detail.saveFailure.retry").exists)
+        XCTAssertTrue(element(in: app, "clove.detail.saveFailure.cancel").exists)
+        XCTAssertEqual(
+            element(in: app, "clove.detail.saveState").label, "Not saved",
+            "A failed change appeared as saved")
+        XCTAssertTrue(
+            waitForLabel(
+                "1 photo not saved", of: element(in: app, "clove.detail.saveStatus"),
+                timeout: 10),
+            "The folder did not count the failed photo"
+        )
+    }
+
+    /// Retry resends the failed change and the HUD and the indicator show what the write confirmed
+    /// (PRD P0-08, PRD How marks reach disk, rule 8).
+    @MainActor
+    private func retryTheFailedPhoto(in app: XCUIApplication) {
+        let retry = element(in: app, "clove.detail.saveFailure.retry")
+        XCTAssertTrue(retry.waitForExistence(timeout: 10), "The failure offered no Retry")
+        retry.tap()
+
+        XCTAssertTrue(
+            waitForLabel("Saved", of: element(in: app, "clove.detail.saveState"), timeout: 10),
+            "The retried change did not confirm"
+        )
+        XCTAssertTrue(
+            waitForLabel("All saved", of: element(in: app, "clove.detail.saveStatus"), timeout: 10),
+            "The unsaved count did not come back to none"
+        )
+    }
+
+    /// Rates a second photo whose first write is forced to fail, so the folder has one unfinished
+    /// change to leave with (PRD P0-08).
+    @MainActor
+    private func failAnotherPhoto(in app: XCUIApplication) {
+        back(in: app)
+        XCTAssertTrue(
+            waitForLabel("All saved", of: element(in: app, "clove.grid.saveState"), timeout: 10),
+            "The grid did not show the folder fully saved"
+        )
+        openPhoto("mmq02680", in: app)
+        rateFourStars(in: app)
+        // The advance is the proof the mark was admitted; the failure belongs to 2680 and the
+        // folder's count is read with the unsaved list below (PRD P0-08).
+        waitForFileName("MMQ02681.ARW", in: app)
+    }
+
+    /// The unsaved count opens a list that names the photo whose marks are not saved
+    /// (PRD P0-08).
+    @MainActor
+    private func checkTheUnsavedList(in app: XCUIApplication) {
+        let indicator = element(in: app, "clove.detail.saveStatus")
+        XCTAssertTrue(
+            waitForLabel("1 photo not saved", of: indicator, timeout: 10),
+            "The detail view did not count the unsaved photo"
+        )
+        indicator.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.saveState.unsaved.mmq02680").waitForExistence(timeout: 10),
+            "The unsaved list did not name the photo"
+        )
+        XCTAssertTrue(element(in: app, "clove.saveState.retryAll").exists)
+        let close = element(in: app, "clove.saveState.unsaved.close")
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "The unsaved list had no Close")
+        close.tap()
+    }
+
+    /// Back from the grid asks before leaving with an unfinished write, and Leave anyway closes
+    /// the folder and shows entry (PRD Failure and recovery, last row).
+    @MainActor
+    private func leaveWithAnUnfinishedWrite(in app: XCUIApplication) {
+        back(in: app)
+        XCTAssertTrue(
+            element(in: app, "clove.grid").waitForExistence(timeout: 10),
+            "Back from detail did not return to the grid"
+        )
+        back(in: app)
+
+        let title = element(in: app, "clove.leavePrompt.title")
+        XCTAssertTrue(title.waitForExistence(timeout: 10), "Leaving did not ask first")
+        XCTAssertEqual(title.label, "Some marks haven't finished saving.")
+        // Wait for writes drains C4 and, because the failed change is still unfinished, the
+        // question stays so the user can still choose Leave anyway (PRD Failure and recovery).
+        let wait = element(in: app, "clove.leavePrompt.wait")
+        XCTAssertTrue(wait.exists, "The question did not offer Wait for writes")
+        wait.tap()
+        // The waiting state is visible while C4 drains, and Leave anyway stays available
+        // (PRD Failure and recovery: the user can still choose it).
+        XCTAssertTrue(
+            waitForElement(element(in: app, "clove.leavePrompt.waiting"), timeout: 5),
+            "Wait for writes showed no waiting state")
+        let leave = element(in: app, "clove.leavePrompt.leaveAnyway")
+        XCTAssertTrue(leave.exists, "Waiting for writes took away the Leave anyway answer")
+        XCTAssertTrue(
+            waitForDisappearance(element(in: app, "clove.leavePrompt.waiting"), timeout: 10),
+            "The waiting state never finished")
+        // The failed change is still unfinished, so the question stays for an explicit answer.
+        XCTAssertTrue(
+            element(in: app, "clove.leavePrompt.title").exists,
+            "The question left while a change was still unfinished")
+        leave.tap()
+
+        XCTAssertTrue(
+            element(in: app, "clove.entry").waitForExistence(timeout: 10),
+            "Leave anyway did not show entry"
+        )
+        XCTAssertTrue(
+            element(in: app, "clove.entry.noFolder").waitForExistence(timeout: 10),
+            "Leave anyway left the folder open"
+        )
+    }
+
+    /// Opens one sample photo's detail from the grid (PRD P0-03).
+    @MainActor
+    private func openPhoto(_ identifier: String, in app: XCUIApplication) {
+        let cell = element(in: app, "clove.grid.photo.\(identifier)")
+        XCTAssertTrue(cell.waitForExistence(timeout: 10), "The grid did not show \(identifier)")
+        cell.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.detail.preview").waitForExistence(timeout: 10),
+            "The detail view did not appear"
+        )
+    }
+
+    /// Applies four stars in the HUD, which writes the change (PRD P0-05).
+    @MainActor
+    private func rateFourStars(in app: XCUIApplication) {
+        let fourStars = element(in: app, "clove.detail.rate.4")
+        XCTAssertTrue(fourStars.waitForExistence(timeout: 10), "The HUD had no rating button")
+        fourStars.tap()
+    }
+
+    /// Taps the navigation back button once (PRD P0-13).
+    @MainActor
+    private func back(in app: XCUIApplication) {
+        let back = element(in: app, "clove.nav.back")
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "The screen had no back button")
+        back.tap()
+    }
+
+    /// Waits for an element to appear, with a tight poll, so a short visible state is not missed
+    /// between XCTest's slower checks (PRD Failure and recovery).
+    @MainActor
+    private func waitForElement(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.exists { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return element.exists
+    }
+
+    /// Waits for an element to go away, with a bounded poll (PRD Failure and recovery).
+    @MainActor
+    private func waitForDisappearance(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !element.exists { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return !element.exists
+    }
+
+    /// Waits for an element's label with a tight poll, so a save state that arrives from the
+    /// library's stream is read as soon as SwiftUI shows it.
+    @MainActor
+    private func waitForLabel(
+        _ label: String, of element: XCUIElement, timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.exists, element.label == label { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return element.exists && element.label == label
     }
 
     /// Entry opens the test library and the grid appears.

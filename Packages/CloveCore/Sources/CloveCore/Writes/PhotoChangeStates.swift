@@ -9,9 +9,12 @@ import Foundation
 /// newer change was admitted, which would let an older finished state replace the newer one. The
 /// reader that owns the stream keeps this value and a photo's marks from the same ordered source.
 ///
-/// A change already recorded never moves backwards: once it is finished, an earlier-lived pending
-/// or writing state for the same change is ignored. A newer change to the same photo replaces the
-/// older one, which is what U7 reads for its retry (PRD How marks reach disk, rule 8).
+/// A change already recorded never moves backwards from a save that confirmed it: an earlier-
+/// lived pending or writing state for the same change is ignored. The one exception is C4's retry,
+/// which re-admits the same change and publishes pending, writing and its new final state under
+/// the change's own identity (PRD P0-08's Retry), so a failed change does move back to writing. A
+/// newer change to the same photo replaces the older one, which is what U7 reads for its retry
+/// (PRD How marks reach disk, rule 8).
 public struct PhotoChangeStates: Sendable {
     /// The latest change per photo, by photo identity.
     private var latest: [PhotoIdentity: MarkChangeStatus] = [:]
@@ -32,16 +35,25 @@ public struct PhotoChangeStates: Sendable {
     ///
     /// The first state of a change replaces its photo's state, because it is the newest change
     /// admitted. A state of a change already recorded only replaces that change's own state, only
-    /// while it is still the photo's latest, and never after it reached a finished one. The
-    /// return value is what the caller uses to decide whether the change's fields still belong on
-    /// the photo: a refused status is an older change a newer one replaced (PRD disk rule 8).
+    /// while it is still the photo's latest, and never after it reached a confirmed one — except
+    /// when a retry resends the change it failed. The return value is what the caller uses to
+    /// decide whether the change's fields still belong on the photo: a refused status is an older
+    /// change a newer one replaced (PRD disk rule 8).
     @discardableResult
     public mutating func insert(_ status: MarkChangeStatus) -> Bool {
         guard !seen.contains(status.id) else {
             guard let current = latest[status.identity], current.id == status.id else {
                 return false
             }
-            guard !(current.state.isFinished && !status.state.isFinished) else { return false }
+            guard !(current.state.isFinished && !status.state.isFinished) else {
+                // PRD P0-08's Retry re-admits the change it could not confirm: the queue
+                // publishes pending and writing again under the same identity, so a failure is
+                // the one finished state that may go back to writing. A saved or stored change
+                // never does.
+                guard current.state.failure != nil, status.state.isInProgress else { return false }
+                latest[status.identity] = status
+                return true
+            }
             latest[status.identity] = status
             return true
         }

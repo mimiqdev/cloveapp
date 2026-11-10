@@ -93,6 +93,7 @@ final class MoveRejectsFlow: Identifiable {
             let selection = keepSelection
         else { return false }
         let folder = browsing.state.folder
+        let generation = browsing.openGeneration
         let kept = selection.orderedKeptIdentities
         let moving = selection.movingPlan
         stage = .moving(finished: 0, total: moving.photoCount)
@@ -115,7 +116,8 @@ final class MoveRejectsFlow: Identifiable {
             let completed = RejectMoveResult(id: result.id, outcomes: outcomes)
             // A folder replaced while the move ran must not record its result against the new
             // one; the model already cleared the old record when that open happened.
-            guard browsing.state.folder == folder else { return true }
+            guard browsing.state.folder == folder, browsing.openGeneration == generation
+            else { return true }
             browsing.recordRejectMove(
                 completed, keptIdentities: kept,
                 rejectsFolderName: plan.configuration.rejectsFolderName)

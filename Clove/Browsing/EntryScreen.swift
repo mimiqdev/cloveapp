@@ -56,15 +56,8 @@ struct EntryScreen: View {
                 Text("Recents")
             }
         }
-        .sheet(isPresented: $isPickingFolder) {
-            FolderPicker(
-                onPick: { url in
-                    isPickingFolder = false
-                    Task { await browsing.openPickedFolder(url) }
-                },
-                onCancel: { isPickingFolder = false }
-            )
-            .ignoresSafeArea()
+        .folderPicker(isPresented: $isPickingFolder) { url in
+            await browsing.openPickedFolder(url)
         }
         .task { await browsing.reloadRecents() }
         .accessibilityElement(children: .contain)
