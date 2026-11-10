@@ -48,6 +48,38 @@ enum DetailMarkingSwipeEnd: Equatable {
     case reject(travel: Double)
 }
 
+extension DetailZoomAnchor {
+    /// The same position as SwiftUI's unit point, for the preview's zoom command (PRD P0-04).
+    var unitPoint: UnitPoint { UnitPoint(x: x, y: y) }
+}
+
+/// The zoom one preview shows, so the next photo can keep it (PRD In-group culling,
+/// synchronized zoom).
+///
+/// The scale is the zoom level and the anchor is the image point at the centre of what the view
+/// shows, in unit image coordinates, so the same spot stays under the viewport when another photo
+/// takes the place of this one (PRD In-group culling, comparison and elimination).
+struct DetailZoomSnapshot: Hashable {
+    /// The scroll view's zoom scale, one or more.
+    let scale: CGFloat
+
+    /// The image point at the centre of the visible rect (PRD P0-04, PRD P0-12).
+    let anchor: DetailZoomAnchor
+}
+
+/// A handle on the preview's UIKit view, so the screen can read the zoom it shows.
+///
+/// The synchronized zoom rule needs the position the view is on *before* the next photo's pixels
+/// replace the current ones: the view is the only place that zoom is known, and a screen cannot
+/// read it from SwiftUI state without reporting every scroll event (PRD In-group culling,
+/// synchronized zoom). The reference is weak, so a preview that leaves the screen leaves nothing
+/// behind.
+@MainActor
+final class DetailZoomProbe {
+    /// The preview's container view, alive while the preview is on screen.
+    weak var container: DetailZoomContainerView?
+}
+
 /// The detail preview: a scroll view with pinch zoom, pan, one centre double-tap and single
 /// taps on the two edges (PRD P0-04, PRD Gestures and keyboard), plus the vertical marking
 /// swipes that rate and reject (PRD P0-06, PRD Detail gestures).
@@ -105,8 +137,13 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports that a marking swipe began, before any travel is measured (PRD Auto-advance).
     let onMarkingSwipeBegin: () -> Void
 
+    /// A handle the screen reads the shown zoom from, or nil when it needs none
+    /// (PRD In-group culling, synchronized zoom).
+    var probe: DetailZoomProbe?
+
     func makeUIView(context: Context) -> DetailZoomContainerView {
         let view = DetailZoomContainerView()
+        probe?.container = view
         view.onZoomChange = onZoomChange
         view.onEdgeTap = onEdgeTap
         view.onDoubleTap = onDoubleTap
@@ -220,6 +257,20 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         updateGestureAvailability()
     }
 
+    /// The zoom the view shows, or nil at fit (PRD In-group culling, synchronized zoom).
+    ///
+    /// The group view reads this before it shows another photo of the group, so the next photo
+    /// opens on the same spot at the same zoom (PRD In-group culling, comparison and elimination).
+    /// A view at fit has no position to keep and answers nil.
+    var zoomSnapshot: DetailZoomSnapshot? {
+        guard
+            let anchor = DetailZoom.centreAnchor(
+                scale: scrollView.zoomScale, contentOffset: scrollView.contentOffset,
+                imagePixels: shownPixels, viewSize: bounds.size)
+        else { return nil }
+        return DetailZoomSnapshot(scale: scrollView.zoomScale, anchor: anchor)
+    }
+
     /// SwiftUI never decodes this view from a storyboard; the initializer exists because UIView
     /// requires it of every subclass and refuses to build.
     required init?(coder: NSCoder) {
@@ -267,7 +318,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             scrollView.setZoomScale(1, animated: false)
             scrollView.setContentOffset(.zero, animated: false)
         case .scale(let scale, let anchor):
-            zoom(to: scale, around: anchor)
+            zoom(to: scale, around: DetailZoomAnchor(x: anchor.x, y: anchor.y))
         }
         // A programmatic zoom is the same handoff as a pinch, whether or not the delegate fires.
         updateGestureAvailability()
@@ -289,7 +340,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         scrollView.contentSize = bounds.size
         updateMaximumZoom()
         if previous != .zero, previousScale > 1 {
-            zoom(to: previousScale, around: .center)
+            zoom(to: previousScale, around: .centre)
         }
         isApplyingCommand = false
         updateGestureAvailability()
@@ -441,17 +492,18 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     // MARK: - Geometry
 
     /// Zooms to a scale and centres the image point, clamped to the image (PRD P0-04).
-    private func zoom(to scale: CGFloat, around anchor: UnitPoint) {
+    ///
+    /// The geometry is ``DetailZoom``'s, so a double-tap, a synchronized zoom and a resize all
+    /// place the viewport the same way (PRD P0-04; PRD In-group culling, synchronized zoom).
+    private func zoom(to scale: CGFloat, around anchor: DetailZoomAnchor) {
         guard bounds.width > 0, bounds.height > 0, shownPixels.width > 0, shownPixels.height > 0
         else { return }
         let target = min(max(scale, 1), max(scrollView.maximumZoomScale, scale))
         scrollView.maximumZoomScale = max(scrollView.maximumZoomScale, target)
         let contentSize = CGSize(
             width: bounds.width * target, height: bounds.height * target)
-        let imageRect = imageRectAtFit()
-        let point = CGPoint(
-            x: (imageRect.minX + anchor.x * imageRect.width) * target,
-            y: (imageRect.minY + anchor.y * imageRect.height) * target)
+        let point = DetailZoom.contentPoint(
+            for: anchor, scale: target, imagePixels: shownPixels, viewSize: bounds.size)
         let visible = DetailZoom.visibleRect(
             centredOn: point, contentSize: contentSize, viewSize: bounds.size)
         scrollView.setZoomScale(target, animated: false)
