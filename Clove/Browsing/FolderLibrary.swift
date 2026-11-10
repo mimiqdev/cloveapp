@@ -60,6 +60,14 @@ protocol FolderLibrary: AnyObject {
     /// test library answers with its generated tiles. A library that supplies none draws no tiles.
     var thumbnails: any GridThumbnailSource { get }
 
+    /// The detail view's window on the folder's pixels (PRD P0-04, G1 "Preview, detail (I2)").
+    ///
+    /// One pipeline serves the open folder and is closed when the folder ends, so a quality
+    /// change and the neighbours' prefetch share its cache without outliving C11's scope. The
+    /// real library admits every read through that scope and answers unavailable for a photo
+    /// from an earlier folder; the test library answers with its generated images.
+    var detailImages: any DetailImageSource { get }
+
     /// The one stream of updates this library publishes while it is open (PRD P0-03, P0-08).
     ///
     /// It carries the scan's batches, the metadata reads that finish each photo's time, the mark
@@ -141,6 +149,8 @@ extension FolderLibrary {
     }
 
     var thumbnails: any GridThumbnailSource { SampleGridThumbnails() }
+
+    var detailImages: any DetailImageSource { EmptyDetailImages() }
 
     var recents: [RecentFolder] { [] }
 
