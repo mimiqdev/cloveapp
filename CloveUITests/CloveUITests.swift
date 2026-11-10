@@ -2,8 +2,9 @@ import XCTest
 
 /// The Clove UI smoke test: the grid's overlays, its filter, the grid group display setting, the
 /// detail's zoom and marking gestures, multi-select's batch and its partial failure, the save
-/// state's failure and recovery, and U1's path from entry to settings and back, all against the
-/// in-memory test library (PRD Grid, P0-03, P0-06, P0-08, P0-09, P0-13).
+/// state's failure and recovery, undo across a mark, a batch and a group finishing action, and
+/// U1's path from entry to settings and back, all against the in-memory test library (PRD Grid,
+/// P0-03, P0-05, P0-06, P0-08, P0-09, P0-12, P0-13).
 final class CloveUITests: XCTestCase {
     @MainActor
     func testBrowsingFlowFromEntryToSettings() {
@@ -104,6 +105,25 @@ final class CloveUITests: XCTestCase {
         XCTAssertFalse(
             element(in: app, "clove.grid.saveState").exists,
             "A lost folder still showed its save-state line instead of the loss")
+    }
+
+    /// Undo covers the three recorded kinds: a mark in detail that auto-advanced, a grid batch and
+    /// a group finishing action, each as one step, with the view returning to the photo it
+    /// restored (PRD P0-05's Undo row; PRD P0-09, P0-12).
+    @MainActor
+    func testUndoRestoresMarksBatchesAndGroupFinishing() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The Clove root view did not appear"
+        )
+        openTestLibrary(in: app)
+        undoAMarkAfterAutoAdvance(in: app)
+        undoABatchWithTheKeyboard(in: app)
+        undoAGroupFinishingAction(in: app)
     }
 
     /// Rates a photo whose first write is forced to fail, and checks the PRD's copy, the photo's
@@ -889,6 +909,169 @@ final class CloveUITests: XCTestCase {
     @MainActor
     private func element(in app: XCUIApplication, _ identifier: String) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
+    }
+
+    /// A written mark starts the default auto-advance; the HUD's Undo returns to the marked photo
+    /// and clears the rating (PRD P0-05's Undo row).
+    @MainActor
+    private func undoAMarkAfterAutoAdvance(in app: XCUIApplication) {
+        // The sample's fourth photo starts with a green label only, so the rating is the whole
+        // mark the undo has to take back.
+        openPhoto("mmq02682", in: app)
+        waitForFileName("MMQ02682.ARW", in: app)
+        let marks = element(in: app, "clove.detail.marks")
+        XCTAssertEqual(marks.label, "Green", "The sample photo did not start with its label only")
+
+        let undo = element(in: app, "clove.detail.undo")
+        XCTAssertTrue(undo.waitForExistence(timeout: 10), "The HUD had no Undo button")
+        XCTAssertFalse(undo.isEnabled, "Undo was enabled with nothing recorded")
+
+        element(in: app, "clove.detail.rate.4").tap()
+        // The written mark starts the default advance, so the undo below has to bring the view
+        // back to the photo whose mark it restores.
+        waitForFileName("MMQ02683.ARW", in: app)
+
+        XCTAssertTrue(undo.isEnabled, "Undo was disabled after a written mark")
+        undo.tap()
+
+        waitForFileName("MMQ02682.ARW", in: app)
+        XCTAssertTrue(
+            waitForLabel("Green", of: marks, timeout: 10),
+            "Undo did not clear the rating: \(marks.label)")
+        XCTAssertFalse(undo.isEnabled, "Undo stayed enabled with nothing left to undo")
+
+        back(in: app)
+        XCTAssertTrue(
+            element(in: app, "clove.grid").waitForExistence(timeout: 10),
+            "Back from detail did not return to the grid")
+        let cell = element(in: app, "clove.grid.photo.mmq02682")
+        XCTAssertTrue(cell.waitForExistence(timeout: 10), "The grid did not show the photo")
+        XCTAssertFalse(
+            cell.label.contains("stars"),
+            "The grid still showed the rating the undo cleared: \(cell.label)")
+        XCTAssertTrue(
+            cell.label.contains("Green"), "The undo cleared the label it did not write")
+    }
+
+    /// One bar action is one undo step: ⌘Z restores both photos (PRD P0-09, P0-05).
+    @MainActor
+    private func undoABatchWithTheKeyboard(in app: XCUIApplication) {
+        let first = element(in: app, "clove.grid.photo.mmq02681")
+        XCTAssertTrue(
+            first.waitForExistence(timeout: 10), "The grid did not show the batch's first cell")
+        first.press(forDuration: 1)
+        let count = element(in: app, "clove.grid.batch.count")
+        XCTAssertTrue(
+            count.waitForExistence(timeout: 10), "A long press did not start multi-select")
+        element(in: app, "clove.grid.photo.mmq02682").tap()
+        let two = expectation(
+            for: NSPredicate(format: "label == %@", "2 photos selected"), evaluatedWith: count)
+        wait(for: [two], timeout: 10)
+
+        let undo = element(in: app, "clove.grid.undo")
+        XCTAssertTrue(
+            undo.waitForExistence(timeout: 10), "The grid toolbar had no Undo button")
+        XCTAssertFalse(undo.isEnabled, "Undo was enabled before the batch was applied")
+
+        element(in: app, "clove.grid.batch.rate.2").tap()
+        let second = element(in: app, "clove.grid.photo.mmq02682")
+        let firstRated = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: first)
+        let secondRated = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: second)
+        wait(for: [firstRated, secondRated], timeout: 10)
+        XCTAssertTrue(undo.isEnabled, "Undo was disabled after a batch")
+
+        // ⌘Z reaches the scene's undo manager, which drives the same history as the toolbar's
+        // button (PRD P0-05's Undo row).
+        app.typeKey("z", modifierFlags: .command)
+
+        let firstRestored = expectation(
+            for: NSPredicate(format: "NOT (label CONTAINS %@)", "stars"), evaluatedWith: first)
+        let secondRestored = expectation(
+            for: NSPredicate(format: "NOT (label CONTAINS %@)", "stars"), evaluatedWith: second)
+        wait(for: [firstRestored, secondRestored], timeout: 10)
+        XCTAssertTrue(
+            second.label.contains("Green"),
+            "The batch undo cleared a label the batch did not write: \(second.label)")
+        XCTAssertFalse(undo.isEnabled, "Undo stayed enabled after the batch was undone")
+
+        // ⇧⌘Z redoes the step and ⌘Z takes it back, so both directions share one history
+        // (PRD P0-05's Undo row).
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        let redone = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: second)
+        wait(for: [redone], timeout: 10)
+        XCTAssertTrue(undo.isEnabled, "Undo was disabled while a redone step was undoable")
+        app.typeKey("z", modifierFlags: .command)
+        let undoneAgain = expectation(
+            for: NSPredicate(format: "NOT (label CONTAINS %@)", "stars"), evaluatedWith: second)
+        wait(for: [undoneAgain], timeout: 10)
+
+        element(in: app, "clove.grid.batch.done").tap()
+        XCTAssertTrue(
+            element(in: app, "clove.grid.photo.mmq02681").waitForExistence(timeout: 10),
+            "Done did not leave multi-select")
+    }
+
+    /// One finishing action is one undo step: undoing it from the grid clears the rejects it wrote
+    /// and makes the group incomplete again (PRD P0-12; PRD P0-05).
+    ///
+    /// The first burst starts with a rated and a rejected photo and one undecided member, so
+    /// Keep this, reject the rest rejects that member alone and completes the group.
+    @MainActor
+    private func undoAGroupFinishingAction(in app: XCUIApplication) {
+        let group = element(in: app, "clove.grid.group.burst-2678")
+        XCTAssertTrue(
+            group.waitForExistence(timeout: 10), "The grid did not offer the similar group")
+        group.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.group").waitForExistence(timeout: 10),
+            "The group view did not appear")
+        waitForFileName("MMQ02678.ARW", in: app)
+
+        let keepThis = element(in: app, "clove.group.keepThis")
+        XCTAssertTrue(
+            keepThis.waitForExistence(timeout: 10), "The group view had no finishing action")
+        keepThis.tap()
+
+        // The completion setting opens the folder's next incomplete group, so the grid is one
+        // step back (PRD In-group culling, group completion).
+        waitForFileName("MMQ02696.ARW", in: app)
+        back(in: app)
+        XCTAssertTrue(
+            element(in: app, "clove.grid").waitForExistence(timeout: 10),
+            "Back from the completed group did not return to the grid")
+        let rejected = element(in: app, "clove.grid.photo.mmq02681")
+        XCTAssertTrue(
+            rejected.waitForExistence(timeout: 10), "The grid did not show the rejected photo")
+        XCTAssertTrue(
+            rejected.label.contains("Rejected"),
+            "The finishing action did not reject the unmarked photo: \(rejected.label)")
+
+        let undo = element(in: app, "clove.grid.undo")
+        XCTAssertTrue(undo.isEnabled, "Undo was disabled after a finishing action")
+        undo.tap()
+
+        // One step restores the photo the action changed (PRD P0-05, P0-12).
+        let rejectsCleared = expectation(
+            for: NSPredicate(format: "NOT (label CONTAINS %@)", "Rejected"),
+            evaluatedWith: rejected)
+        wait(for: [rejectsCleared], timeout: 10)
+        XCTAssertFalse(
+            undo.isEnabled, "Undo stayed enabled after the finishing action was undone")
+
+        // The group is incomplete again: its undecided member is back (PRD P0-12: a finishing
+        // action can be undone).
+        group.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.group").waitForExistence(timeout: 10),
+            "The grid did not reopen the group after the undo")
+        waitForFileName("MMQ02678.ARW", in: app)
+        XCTAssertEqual(
+            groupHeader(in: app).label, "Undecided 1 / 3 total",
+            "Undo left the group complete instead of making it incomplete again")
+        back(in: app)
     }
 
     /// A long press starts multi-select on that photo, and two taps add two more (PRD P0-09).
