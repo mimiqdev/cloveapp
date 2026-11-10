@@ -54,6 +54,7 @@ struct MarkUndoBatchTests {
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(1)))
 
         let result = try #require(await undoStep(fixture))
+        #expect(result.droppedFromHistory)
         let outcome = try #require(result.outcomes.first)
         #expect(outcome.isNotUndone)
         #expect(outcome.status == nil)
@@ -64,9 +65,11 @@ struct MarkUndoBatchTests {
         #expect(result.failedCount == 0)
         #expect(result.notUndoneCount == 1)
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(1)))
-        // Nothing reached the target, so the entry stays undoable (DEV-PLAN C5 decision).
-        #expect(await fixture.history.canUndo)
+        // Nothing reached the target and no write is left to retry, so the entry is dropped
+        // instead of blocking the next undo (PRD P0-05).
+        #expect(await fixture.history.canUndo == false)
         #expect(await fixture.history.canRedo == false)
+        #expect(await fixture.history.undoCount == 0)
     }
 
     /// A photo already holding the restored marks needs no write (PRD P0-05).
@@ -127,6 +130,76 @@ struct MarkUndoBatchTests {
         #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(.unrated))
     }
 
+    /// A dropped undo entry does not block the older action behind it (PRD P0-05).
+    @Test func theOlderEntryIsUndoneAfterANothingRestoredEntryIsDropped() async throws {
+        let fixture = try UndoTestFixture()
+        defer { fixture.remove() }
+        let set = try #require(fixture.photoSets.first)
+        await fixture.record(.rating(undoRating(2)), on: set.id)
+        await fixture.record(.label(undoGreen), on: set.id)
+        // Another app replaces the label, so undoing that change restores nothing.
+        _ = await fixture.queue.apply(.label(ColourLabel(colour: .blue)), to: set)
+
+        let dropped = try #require(await undoStep(fixture))
+        #expect(dropped.droppedFromHistory)
+        #expect(dropped.outcomes[0].isNotUndone)
+        #expect(await fixture.history.undoCount == 1)
+
+        // The next undo reaches the rating instead of the dropped label entry.
+        let older = try #require(await undoStep(fixture))
+        #expect(older.outcomes[0].isWritten)
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.unrated))
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).label == ColourLabel(colour: .blue))
+        #expect(await fixture.history.canUndo == false)
+    }
+
+    /// A dropped unavailable-photo entry does not block the older action either (PRD P0-05).
+    @Test func theOlderEntryIsUndoneAfterAnUnavailableEntryIsDropped() async throws {
+        let fixture = try UndoTestFixture(stems: ["A", "B"])
+        defer { fixture.remove() }
+        let first = fixture.photoSets[0]
+        let second = fixture.photoSets[1]
+        await fixture.record(.rating(undoRating(2)), on: first.id)
+        await fixture.record(.rating(undoRating(5)), on: second.id)
+        // A rescan no longer finds the second photo, so its restore cannot be written.
+        await fixture.sets.remove(second.id)
+
+        let dropped = try #require(await undoStep(fixture))
+        #expect(dropped.droppedFromHistory)
+        #expect(dropped.outcomes[0].leftAlone.first?.reason == .photoUnavailable)
+        #expect(await fixture.history.undoCount == 1)
+
+        let older = try #require(await undoStep(fixture))
+        #expect(older.outcomes[0].isWritten)
+        #expect(try undoSidecarMarks(at: fixture.sidecar(0)).rating == .rated(.unrated))
+        #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(undoRating(5)))
+    }
+
+    /// A dropped redo entry does not block the older undone action (PRD P0-05).
+    @Test func theOlderRedoEntryRunsAfterANothingRestoredEntryIsDropped() async throws {
+        let fixture = try UndoTestFixture(stems: ["A", "B"])
+        defer { fixture.remove() }
+        let first = fixture.photoSets[0]
+        let second = fixture.photoSets[1]
+        await fixture.record(.rating(undoRating(2)), on: first.id)
+        await fixture.record(.rating(undoRating(5)), on: second.id)
+        _ = try #require(await undoStep(fixture))
+        _ = try #require(await undoStep(fixture))
+        #expect(await fixture.history.redoCount == 2)
+
+        // Another write replaces the first photo's restored value, so its redo restores nothing.
+        _ = await fixture.queue.apply(.rating(undoRating(1)), to: first)
+        let dropped = try #require(await undoRedoStep(fixture))
+        #expect(dropped.droppedFromHistory)
+        #expect(dropped.outcomes[0].isNotUndone)
+        #expect(await fixture.history.redoCount == 1)
+
+        // The older redo (the second photo) still runs.
+        let older = try #require(await undoRedoStep(fixture))
+        #expect(older.outcomes[0].isWritten)
+        #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(undoRating(5)))
+    }
+
     /// A photo the session no longer has is reported, not written to a guessed path.
     @Test func aPhotoTheSessionNoLongerHasIsReportedAsUnavailable() async throws {
         let fixture = try UndoTestFixture()
@@ -136,6 +209,7 @@ struct MarkUndoBatchTests {
         await fixture.sets.remove(set.id)
 
         let result = try #require(await undoStep(fixture))
+        #expect(result.droppedFromHistory)
         let outcome = try #require(result.outcomes.first)
         #expect(outcome.isNotUndone)
         #expect(undoLeftAloneFields(outcome) == [.rating])
@@ -143,7 +217,8 @@ struct MarkUndoBatchTests {
         #expect(result.notUndoneCount == 1)
         #expect(result.failedCount == 0)
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
-        #expect(await fixture.history.canUndo)
+        #expect(await fixture.history.canUndo == false)
+        #expect(await fixture.history.undoCount == 0)
     }
 
     /// Redo re-applies the change only where undo's value still holds (PRD P0-05).
@@ -158,10 +233,12 @@ struct MarkUndoBatchTests {
         _ = await fixture.queue.apply(.rating(undoRating(1)), to: set)
 
         let redoResult = try #require(await undoRedoStep(fixture))
+        #expect(redoResult.droppedFromHistory)
         let outcome = try #require(redoResult.outcomes.first)
         #expect(outcome.isNotUndone)
         #expect(undoLeftAloneFields(outcome) == [.rating])
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(1)))
-        #expect(await fixture.history.canRedo)
+        #expect(await fixture.history.canRedo == false)
+        #expect(await fixture.history.redoCount == 0)
     }
 }

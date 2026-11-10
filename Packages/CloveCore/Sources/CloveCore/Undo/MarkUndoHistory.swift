@@ -372,7 +372,6 @@ public actor MarkUndoHistory {
             }
         }
 
-        let completionUpdate = await updateCompletion(for: entry, step: step)
         let outcomes = plans.enumerated().map { index, plan in
             MarkUndoPhotoOutcome(
                 photo: plan.photo,
@@ -380,26 +379,31 @@ public actor MarkUndoHistory {
                 leftAlone: plan.leftAlone,
                 alreadyAtTarget: plan.alreadyAtTarget)
         }
-        let result = MarkUndoResult(
-            actionName: entry.actionName,
-            photoToReturnTo: entry.photoToReturnTo,
-            outcomes: outcomes,
-            completion: completionUpdate)
-
-        updateStacks(
+        // PRD P0-12: the finishing-action record changes only when the step actually restored
+        // something, so an action whose marks were all replaced keeps its completion.
+        let reachedTarget = outcomes.contains { $0.reachedTarget }
+        let completionUpdate = reachedTarget ? await updateCompletion(for: entry, step: step) : nil
+        let dropped = updateStacks(
             entry: entry,
             step: step,
             removedAt: removedAt,
             outcomes: outcomes,
+            reachedTarget: reachedTarget,
             recordedNew: recordings - recordedBefore,
             closed: closes != closesBefore)
-        return result
+        return MarkUndoResult(
+            actionName: entry.actionName,
+            photoToReturnTo: entry.photoToReturnTo,
+            outcomes: outcomes,
+            completion: completionUpdate,
+            droppedFromHistory: dropped)
     }
 
     /// Clears (undo) or restores (redo) a finishing action's group record (PRD P0-12).
     ///
-    /// The record changes whatever the writes do, because the action is being undone or re-run
-    /// as a whole and a failure stays visible through C4 (PRD P0-12; PRD Failure and recovery).
+    /// The caller only calls this when at least one photo reached the target, because a step
+    /// that restored nothing did not undo the action; a failed write stays visible through C4
+    /// instead (PRD P0-12; PRD Failure and recovery).
     private func updateCompletion(
         for entry: MarkUndoEntry,
         step: Step
@@ -413,43 +417,49 @@ public actor MarkUndoHistory {
             groupID: group.groupID, state: step == .undo ? .cleared : .restored)
     }
 
-    /// Puts the entry back, moves it across the two stacks, or drops it, following the outcome.
+    /// Puts the entry back, moves it across the two stacks, or drops it; returns whether it was
+    /// dropped because the step restored nothing.
     ///
-    /// A step that did not reach the target leaves the entry where it was, so the user can try
-    /// again or retry C4's change (PRD P0-05). `recordedNew` counts the actions recorded while
-    /// the step waited: a new recorded action clears the redo future (PRD P0-05), so a step that
-    /// finishes after one must not resurrect it.
+    /// A step with an unfinished or failed write keeps its entry, so the user can try again or
+    /// retry C4's change (PRD P0-08). A step that reached no field target and has no write left
+    /// to retry is dropped from both stacks: every field kept a newer mark or its photo was
+    /// unavailable, and keeping the entry would make the next undo hit the same entry forever
+    /// instead of reaching an older action (PRD P0-05's last-in, first-out undo). `recordedNew`
+    /// counts the actions recorded while the step waited: a new recorded action clears the redo
+    /// future (PRD P0-05), so a step that finishes after one must not resurrect it.
     private func updateStacks(
         entry: MarkUndoEntry,
         step: Step,
         removedAt: Int,
         outcomes: [MarkUndoPhotoOutcome],
+        reachedTarget: Bool,
         recordedNew: Int,
         closed: Bool
-    ) {
+    ) -> Bool {
         // The folder is closed, so nothing can be undone or redone in this session any more.
-        guard !closed else { return }
-        let needsRetry = outcomes.contains { outcome in
-            guard let state = outcome.status?.state else { return false }
-            return state.isUnfinished || state.isSuperseded
-        }
-        let reachedTarget = outcomes.contains { $0.isWritten || !$0.alreadyAtTarget.isEmpty }
+        guard !closed else { return false }
+        let needsRetry = outcomes.contains { $0.status?.state.isUnfinished == true }
         switch step {
         case .undo:
-            if needsRetry || !reachedTarget {
+            if needsRetry {
                 undoStack = inserting(entry, into: undoStack, at: removedAt)
-            } else if recordedNew == 0 {
-                redoStack = appending(entry, to: redoStack)
+                return false
             }
+            guard reachedTarget else { return true }
+            if recordedNew == 0 { redoStack = appending(entry, to: redoStack) }
+            return false
         case .redo:
-            if needsRetry || !reachedTarget {
-                guard recordedNew == 0 else { return }
-                redoStack = inserting(entry, into: redoStack, at: removedAt)
-            } else {
-                // The redone action belongs below anything recorded after it was taken.
-                undoStack = inserting(
-                    entry, into: undoStack, at: max(0, undoStack.count - recordedNew))
+            if needsRetry {
+                if recordedNew == 0 {
+                    redoStack = inserting(entry, into: redoStack, at: removedAt)
+                }
+                return false
             }
+            guard reachedTarget else { return true }
+            // The redone action belongs below anything recorded after it was taken.
+            undoStack = inserting(
+                entry, into: undoStack, at: max(0, undoStack.count - recordedNew))
+            return false
         }
     }
 

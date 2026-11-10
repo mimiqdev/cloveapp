@@ -43,6 +43,14 @@ public struct MarkUndoPhotoOutcome: Hashable, Sendable {
     /// Whether nothing was written because every field kept a newer value (PRD P0-05).
     public var isNotUndone: Bool { status == nil && !leftAlone.isEmpty }
 
+    /// Whether the photo now holds a value this step restored (PRD P0-05).
+    ///
+    /// A confirmed write reached its target, and a field already at the target needed none. A
+    /// failed or superseded write did not, which is why it is not counted here (PRD P0-08).
+    public var reachedTarget: Bool {
+        status?.state.isConfirmed == true || !alreadyAtTarget.isEmpty
+    }
+
     /// The fields this photo kept as they were, in report order (PRD P0-05).
     public var leftAloneFields: [MarkUndoField] { leftAlone.map(\.field) }
 }
@@ -93,19 +101,32 @@ public struct MarkUndoResult: Hashable, Sendable {
     /// One outcome per photo in the entry, in the entry's order.
     public let outcomes: [MarkUndoPhotoOutcome]
     /// The group whose completion changed, for a finishing-action step (PRD P0-12).
+    ///
+    /// This is `nil` when nothing reached its target, including when a finishing action's marks
+    /// were all replaced by newer marks; the group keeps its completion record then.
     public let completion: MarkUndoCompletionUpdate?
+    /// Whether the step removed its entry from the history because it restored nothing.
+    ///
+    /// Every field kept a newer mark or its photo was unavailable, and no write is left to
+    /// retry. The entry is on neither stack: keeping it would make the next undo hit the same
+    /// entry again instead of reaching an older action (PRD P0-05's last-in, first-out undo).
+    /// U8 can use this to tell the user and take the action off the menu; a step that failed
+    /// keeps its entry instead.
+    public let droppedFromHistory: Bool
 
     /// Describes the result of one step; the history builds these.
     init(
         actionName: String,
         photoToReturnTo: PhotoIdentity,
         outcomes: [MarkUndoPhotoOutcome],
-        completion: MarkUndoCompletionUpdate?
+        completion: MarkUndoCompletionUpdate?,
+        droppedFromHistory: Bool
     ) {
         self.actionName = actionName
         self.photoToReturnTo = photoToReturnTo
         self.outcomes = outcomes
         self.completion = completion
+        self.droppedFromHistory = droppedFromHistory
     }
 
     /// Photos whose restore C4 confirmed in the storage the marks use (PRD P0-08).

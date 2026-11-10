@@ -106,6 +106,77 @@ struct MarkUndoGroupFinishingTests {
         #expect(try await fixture.queue.storedMarks(for: photos[2])?.isRejected == true)
     }
 
+    /// Undoing a finishing action that restores nothing leaves the group completion alone.
+    @Test func anUndoThatRestoresNothingLeavesTheCompletionAlone() async throws {
+        let fixture = try UndoTestFixture()
+        defer { fixture.remove() }
+        let set = try #require(fixture.photoSets.first)
+        let completion = fixture.completion
+        let group = groupCullingGroup("single", members: [set.id])
+
+        let (result, entry) = await run(
+            .keepThis, group: group, currentPhoto: set.id, marks: [:],
+            fixture: fixture, completion: completion)
+        #expect(result.savedCount == 1)
+        #expect(entry != nil)
+        #expect(await completion.hasFinishingAction(on: group.id))
+        // Another app replaces the rating the action wrote, so the undo restores nothing.
+        _ = await fixture.queue.apply(.rating(undoRating(3)), to: set)
+
+        let undoResult = try #require(await undoStep(fixture))
+        #expect(undoResult.droppedFromHistory)
+        #expect(undoResult.completion == nil)
+        #expect(await completion.hasFinishingAction(on: group.id))
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
+    }
+
+    /// Undoing a finishing action whose photos are gone leaves the completion alone too.
+    @Test func aFinishingActionUndoWithUnavailablePhotosLeavesTheCompletionAlone() async throws {
+        let fixture = try UndoTestFixture(stems: ["A", "B"])
+        defer { fixture.remove() }
+        let photos = fixture.photoSets.map(\.id)
+        let completion = fixture.completion
+        let group = groupCullingGroup("unavailable", members: photos)
+
+        let (result, _) = await run(
+            .keepThis, group: group, currentPhoto: photos[0], marks: [:],
+            fixture: fixture, completion: completion)
+        #expect(result.savedCount == 2)
+        // A rescan drops both photos, so neither the kept rating nor the reject can be restored.
+        await fixture.sets.remove(photos[0])
+        await fixture.sets.remove(photos[1])
+
+        let undoResult = try #require(await undoStep(fixture))
+        #expect(undoResult.droppedFromHistory)
+        #expect(undoResult.completion == nil)
+        #expect(undoResult.outcomes.allSatisfy { $0.isNotUndone })
+        #expect(await completion.hasFinishingAction(on: group.id))
+    }
+
+    /// A redo that restores nothing leaves the cleared completion cleared.
+    @Test func aRedoThatRestoresNothingLeavesTheCompletionCleared() async throws {
+        let fixture = try UndoTestFixture()
+        defer { fixture.remove() }
+        let set = try #require(fixture.photoSets.first)
+        let completion = fixture.completion
+        let group = groupCullingGroup("single-redo", members: [set.id])
+
+        let (result, _) = await run(
+            .keepThis, group: group, currentPhoto: set.id, marks: [:],
+            fixture: fixture, completion: completion)
+        #expect(result.savedCount == 1)
+        let undoResult = try #require(await undoStep(fixture))
+        #expect(undoResult.completion?.state == .cleared)
+        #expect(await completion.hasFinishingAction(on: group.id) == false)
+        // Another app replaces the restored rating, so the redo cannot re-apply the change.
+        _ = await fixture.queue.apply(.rating(undoRating(4)), to: set)
+
+        let redoResult = try #require(await undoRedoStep(fixture))
+        #expect(redoResult.droppedFromHistory)
+        #expect(redoResult.completion == nil)
+        #expect(await completion.hasFinishingAction(on: group.id) == false)
+    }
+
     /// An action that changes no marks records no entry, because there is no mark to restore.
     @Test func aFinishingActionThatChangesNothingRecordsNoEntry() async throws {
         let fixture = try UndoTestFixture(stems: ["A", "B", "C"])
