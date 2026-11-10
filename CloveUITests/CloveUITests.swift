@@ -220,13 +220,14 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 10), "Leaving did not ask first")
         XCTAssertEqual(title.label, "Some marks haven't finished saving.")
         // Wait drains the existing queue and rechecks. A failed change remains unfinished.
-        app.alerts.buttons["Wait"].tap()
+        app.alerts.buttons["Wait"].firstMatch.tap()
         XCTAssertTrue(
             app.alerts.staticTexts["Waiting for writes… You can still leave anyway."]
                 .waitForExistence(timeout: 3),
             "The alert did not expose its waiting state before the five-second drain finished")
-        XCTAssertTrue(app.alerts.buttons["Leave anyway"].exists, "Wait lost the leaving action")
-        app.alerts.buttons["Leave anyway"].tap()
+        XCTAssertTrue(
+            app.alerts.buttons["Leave anyway"].firstMatch.exists, "Wait lost the leaving action")
+        app.alerts.buttons["Leave anyway"].firstMatch.tap()
 
         XCTAssertTrue(
             element(in: app, "clove.entry").waitForExistence(timeout: 10),
