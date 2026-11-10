@@ -154,8 +154,8 @@ struct VerticalStarBar: View {
     ///
     /// A gesture that never moved past the tap slop is a tap: an enabled star is picked, the
     /// photo's current value clears even when its level is disabled, and any other disabled star
-    /// does nothing (PRD Marking rules, PRD Enabled rating levels). A drag commits the last value it previewed, so a drag back to its
-    /// start keeps the rating instead of clearing it.
+    /// does nothing (PRD Marking rules, PRD Enabled rating levels). A drag commits the last value
+    /// it previewed, so a drag back to its start keeps the rating instead of clearing it.
     private func commit(_ value: DragGesture.Value, in height: CGFloat) {
         defer {
             preview = nil
