@@ -47,6 +47,15 @@ public struct BrowsingState: Hashable, Sendable, Codable {
     /// The destination the browser shows (PRD P0-13).
     public var route: BrowserRoute
 
+    /// Whether the route shows the folder's photos, which needs the folder those photos belong
+    /// to (PRD P0-13).
+    ///
+    /// A restored scene uses this to tell a grid, detail or group route, which has to wait for
+    /// the folder to deliver its photos, from entry or settings, which need none.
+    public var showsPhotos: Bool {
+        route == .grid || route == .detail || route == .group
+    }
+
     /// Collects every part PRD P0-14 preserves, with the launch defaults.
     public init(
         folder: FolderIdentity? = nil,

@@ -40,7 +40,7 @@ struct BrowseShell: View {
                     screen(for: browsing.state.route)
                 } else {
                     HStack(spacing: 0) {
-                        GridScreen(browsing: browsing)
+                        GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
                             .frame(minWidth: 320, idealWidth: 420, maxWidth: 560)
                         Divider()
                         detailColumn
@@ -73,7 +73,7 @@ struct BrowseShell: View {
         case .entry:
             EntryScreen(browsing: browsing)
         case .grid:
-            GridScreen(browsing: browsing)
+            GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
         case .detail:
             DetailScreen(browsing: browsing)
         case .group:

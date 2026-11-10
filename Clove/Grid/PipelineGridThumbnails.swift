@@ -19,13 +19,29 @@ final class PipelineGridThumbnails: GridThumbnailSource {
     /// The grid preview size from the G1 preview row's embedded preview at about 400 px.
     static let targetPixels = 400
 
+    /// One request's file reads and decode, so a folder can admit them through C11's session
+    /// (G1 folder access).
+    typealias AdmittedWork = @Sendable () async -> GridThumbnailOutcome
+
     private let pipeline: ThumbnailPipeline
     private let set: @MainActor (PhotoIdentity) -> PhotoSet?
+    private let admitted: @Sendable (AdmittedWork) async -> GridThumbnailOutcome
 
     /// Uses one folder's pipeline and the folder's lookup from identity to scanned set.
-    init(pipeline: ThumbnailPipeline, set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?) {
+    ///
+    /// The folder library passes a closure that admits the request through its C11 session, so
+    /// ending the folder waits for a decode instead of releasing the scope under it. A caller
+    /// with no session passes the work straight through.
+    init(
+        pipeline: ThumbnailPipeline,
+        set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
+        admitted: @escaping @Sendable (AdmittedWork) async -> GridThumbnailOutcome = {
+            await $0()
+        }
+    ) {
         self.pipeline = pipeline
         self.set = set
+        self.admitted = admitted
     }
 
     /// The companions the set holds beside its primary file (PRD Grid).
@@ -46,30 +62,34 @@ final class PipelineGridThumbnails: GridThumbnailSource {
     func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority)
         async -> GridThumbnailOutcome
     {
-        guard let set = set(photo) else { return .unavailable }
-        let source = set.primary.url
-        guard
-            let revision = await Task.detached(
-                priority: .userInitiated,
-                operation: {
-                    try? ThumbnailRevision.read(from: source)
-                }
-            ).value
-        else {
-            return .unavailable
-        }
-        let request = ThumbnailRequest(
-            source: source, revision: revision, targetPixels: Self.targetPixels,
-            locationIdentity: photo.folderID.rawValue)
-        do {
-            switch try await pipeline.thumbnail(for: request, priority: priority.pipeline) {
-            case .available(let thumbnail):
-                return .image(thumbnail.image)
-            case .unavailable:
+        guard let source = set(photo)?.primary.url else { return .unavailable }
+        let targetPixels = Self.targetPixels
+        // G1 folder access holds the scope until the work that relies on it drains, so the
+        // revision read and the decode both run inside the closure the folder supplies.
+        return await admitted { [pipeline] in
+            guard
+                let revision = await Task.detached(
+                    priority: .userInitiated,
+                    operation: {
+                        try? ThumbnailRevision.read(from: source)
+                    }
+                ).value
+            else {
                 return .unavailable
             }
-        } catch {
-            return .deferred
+            let request = ThumbnailRequest(
+                source: source, revision: revision, targetPixels: targetPixels,
+                locationIdentity: photo.folderID.rawValue)
+            do {
+                switch try await pipeline.thumbnail(for: request, priority: priority.pipeline) {
+                case .available(let thumbnail):
+                    return .image(thumbnail.image)
+                case .unavailable:
+                    return .unavailable
+                }
+            } catch {
+                return .deferred
+            }
         }
     }
 }

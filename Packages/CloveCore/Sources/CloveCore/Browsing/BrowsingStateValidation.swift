@@ -47,7 +47,6 @@ extension BrowsingState {
 
     /// The saved state narrowed to one folder's contents, or entry when it does not apply.
     private func restored(in contents: FolderContents) -> BrowsingState {
-        let showsPhotos = route == .grid || route == .detail || route == .group
         guard !showsPhotos || folder == contents.folder else { return .entry }
 
         var state = self

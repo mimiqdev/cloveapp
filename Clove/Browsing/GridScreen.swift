@@ -16,15 +16,15 @@ struct GridScreen: View {
 
     /// The thumbnails the cells draw (PRD P0-03).
     ///
-    /// The test library's generated tiles are what this build has. U2 passes
-    /// ``PipelineGridThumbnails`` over the open folder's scanned sets through the initializer,
-    /// so no screen reaches into the folder library itself.
-    @State private var thumbnails: any GridThumbnailSource
+    /// The browsing model supplies the open folder's source, so opening another folder brings a
+    /// source bound to that folder and no screen reaches into the folder library itself. A caller
+    /// can pass its own for a preview.
+    let thumbnails: any GridThumbnailSource
 
-    /// Uses the supplied thumbnail source, or the test library's tiles for this build.
+    /// Uses the supplied thumbnail source, or the browsing model's source for the open folder.
     init(browsing: BrowsingModel, thumbnails: (any GridThumbnailSource)? = nil) {
         self.browsing = browsing
-        _thumbnails = State(initialValue: thumbnails ?? TestLibrary.sampleThumbnails)
+        self.thumbnails = thumbnails ?? browsing.thumbnails
     }
 
     var body: some View {
