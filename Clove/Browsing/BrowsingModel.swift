@@ -91,6 +91,17 @@ final class BrowsingModel {
     /// Whether **Wait for writes** is draining C4 before the question is answered again.
     private(set) var isWaitingForWrites = false
 
+    /// Whether this scene left its folder and is ignoring that folder's updates until a real open
+    /// shows another one (PRD P0-08's Leave anyway).
+    ///
+    /// The library keeps the departed folder's photos until its session drains, so without this
+    /// a confirmed write could refresh them back onto entry and bring Continue browsing with it.
+    private var hasLeftFolder = false
+
+    /// The open this scene shows, so a loss from an earlier open of the same folder is dropped
+    /// (PRD P0-02).
+    private var shownOpenGeneration = 0
+
     /// The saved scene waiting for its folder to hold the photos it names (PRD P0-14).
     ///
     /// It applies as soon as the scan delivered them, at the latest when the scan finishes, and
@@ -436,8 +447,12 @@ final class BrowsingModel {
         // and a stale waiter must never answer the newer question or clear its progress.
         guard leavePrompt?.id == prompt.id else { return }
         isWaitingForWrites = false
-        guard !leaveConfirmation.shouldAsk else { return }
-        await leave(to: prompt.destination)
+        // The queue's own answer is authoritative: a streamed status can still be on its way to
+        // this screen when the drain returns, and the question must not stay over confirmed work.
+        guard await library.hasUnfinishedWrites() else {
+            await leave(to: prompt.destination)
+            return
+        }
     }
 
     /// Leaves the open folder now, without reporting its unconfirmed changes as saved
@@ -460,6 +475,8 @@ final class BrowsingModel {
     private func askBeforeLeaving(_ destination: LeaveFolderDestination) -> Bool {
         guard leavesWithUnfinishedWrites(destination) else { return true }
         leavePrompt = LeaveFolderPrompt(destination: destination)
+        // A question that was cancelled mid-wait must not leave the new one's Wait disabled.
+        isWaitingForWrites = false
         return false
     }
 
@@ -481,9 +498,13 @@ final class BrowsingModel {
     /// row).
     private func leave(to destination: LeaveFolderDestination) async {
         leavePrompt = nil
+        isWaitingForWrites = false
+        // The screen leaves the folder before anything that waits for its writes, so no
+        // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
+        // the work ends, but that is not something the user has to watch).
+        showEntryAfterLeaving()
         switch destination {
         case .entry:
-            showEntryAfterLeaving()
             await library.closeFolder()
         case .picked(let url):
             await openPickedFolderNow(url)
@@ -508,6 +529,8 @@ final class BrowsingModel {
         changes = PhotoChangeStates()
         groupsPublishedFor = nil
         finishedScanFor = nil
+        pendingRestore = nil
+        hasLeftFolder = true
         storedPhotos = []
         groups = []
         thumbnails = library.thumbnails
@@ -619,6 +642,9 @@ final class BrowsingModel {
 
     /// Applies one library update on the main actor (PRD P0-03, P0-08).
     private func apply(_ update: FolderLibraryUpdate) async {
+        // A folder this scene left may still be closing; nothing it publishes may bring it back
+        // (PRD P0-08's Leave anyway).
+        guard !hasLeftFolder else { return }
         switch update {
         case .photos, .reads:
             refresh()
@@ -632,12 +658,12 @@ final class BrowsingModel {
             // A streamed transition keeps "Writing…" and "Saved" current without re-reading
             // every photo, and the merge rule keeps a finished change from moving backwards.
             changes.insert(status)
-        case .locationLost(let folder, let loss):
+        case .locationLost(let folder, let loss, let generation):
             // PRD Failure and recovery forbids keeping Writing… or Saved for the folder's
             // unfinished changes after a loss; the indicator supplies the copy (PRD P0-02).
-            // A buffered loss can arrive after another folder opened, so it only applies to the
-            // folder the library holds now.
-            guard folder == library.folder else { return }
+            // A buffered loss can arrive after another folder opened, or after the same folder
+            // opened again, so it only applies to the folder and the open this scene shows.
+            guard folder == library.folder, generation == shownOpenGeneration else { return }
             folderLocationLoss = loss
         case .groups(let groups):
             self.groups = groups
@@ -673,6 +699,8 @@ final class BrowsingModel {
     /// open (entry's Continue browsing) never validated it again, so its warning stays until a
     /// real open or reopen reads it (PRD P0-02). A real open clears the loss itself.
     private func showOpenFolder() {
+        hasLeftFolder = false
+        shownOpenGeneration = library.openGeneration
         state.folder = library.folder
         state.currentPhoto = nil
         state.selection = []
@@ -680,24 +708,24 @@ final class BrowsingModel {
         state.route = .grid
         leavePrompt = nil
         isWaitingForWrites = false
-        // The folder's groups are whatever grouping published for it, even when the scan
-        // answered before this scene caught up (PRD P0-11).
-        groups = library.groups
+        // Whatever the folder published before this screen caught up (a scan batch that landed
+        // while the old folder closed, or grouping's first result) is read here, so the grid
+        // never waits for one more update (PRD P0-11).
+        refresh()
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change. Detail takes the source bound to the same folder.
         thumbnails = library.thumbnails
         detailImages = library.detailImages
     }
 
-    /// Takes the library's current photos, groups and save states.
+    /// Takes the library's current photos and groups.
     ///
-    /// Scan batches, metadata reads, mark reads and confirmed writes all refresh through this
-    /// path, so the screens keep reading the model while the library changes underneath it.
+    /// Scan batches, metadata reads and confirmed writes all refresh through this path, so the
+    /// screens keep reading the model while the library changes underneath it. Save states are
+    /// deliberately not copied from the library here: they arrive only on the ordered update
+    /// stream, so a snapshot can never paint an older transition over a newer one.
     private func refresh() {
         storedPhotos = library.photos
         groups = library.groups
-        for photo in storedPhotos {
-            if let change = library.latestChange(for: photo.id) { changes.insert(change) }
-        }
     }
 }

@@ -29,6 +29,13 @@ final class TestLibrary: FolderLibrary {
     /// fault.
     static let forcedFailureReasonVariable = "CLOVE_TEST_LIBRARY_FAIL_REASON"
 
+    /// The launch environment value that slows the sample's write drain, in milliseconds
+    /// (PRD P0-08).
+    ///
+    /// A UI test can then see the leaving question's waiting state instead of a drain that
+    /// finishes within one frame.
+    static let drainDelayVariable = "CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"
+
     /// The launch environment value that makes the sample report its folder's location gone
     /// (PRD P0-02).
     ///
@@ -49,7 +56,9 @@ final class TestLibrary: FolderLibrary {
         return sample(
             failingStems: stems,
             failureReason: forcedFailureReason(named: environment[forcedFailureReasonVariable]),
-            locationLoss: locationLoss(named: environment[locationLossVariable]))
+            locationLoss: locationLoss(named: environment[locationLossVariable]),
+            drainDelay: Duration.milliseconds(
+                Int(environment[drainDelayVariable] ?? "") ?? 0))
     }
 
     /// The sample folder's durable key, spelled so a saved scene never looks like a real folder.
@@ -110,6 +119,13 @@ final class TestLibrary: FolderLibrary {
     /// The photos whose forced failure already happened, so a retry saves them (PRD P0-08).
     private var alreadyFailed: Set<PhotoIdentity> = []
 
+    /// How long the sample's write drain takes, so a UI test can see the waiting state
+    /// (PRD P0-08).
+    private let drainDelay: Duration
+
+    /// The open this sample library installed last, which ``closeFolder()`` changes (PRD P0-02).
+    private(set) var openGeneration = 0
+
     /// The folder's photos with their marks, in the sample's capture order (PRD P0-03).
     var photos: [GridPhoto] { stored }
 
@@ -122,6 +138,7 @@ final class TestLibrary: FolderLibrary {
         changes = [:]
         failingStems = []
         failureReason = .notConfirmed
+        drainDelay = .zero
         thumbnails = SampleGridThumbnails()
         detailImages = EmptyDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
@@ -135,7 +152,8 @@ final class TestLibrary: FolderLibrary {
         detailImages: (any DetailImageSource)? = nil,
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
-        locationLoss: FolderLocationLoss.Reason? = nil
+        locationLoss: FolderLocationLoss.Reason? = nil,
+        drainDelay: Duration = .zero
     ) {
         folder = TestLibrary.sampleFolderKey
         stored = photos
@@ -146,15 +164,18 @@ final class TestLibrary: FolderLibrary {
         self.changes = byPhoto
         self.failingStems = failingStems.map { $0.lowercased() }
         self.failureReason = failureReason
+        self.drainDelay = drainDelay
         thumbnails = TestLibrary.sampleThumbnails
         self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
+        // The stream buffers these until the model starts reading it, so the sample opens with
+        // the save states and the loss it was built with (PRD P0-08, P0-02).
+        for change in changes { updateContinuation.yield(.change(change)) }
         if let locationLoss {
-            // The stream buffers this until the model starts reading it (PRD P0-02).
             updateContinuation.yield(
                 .locationLost(
-                    folder: folder,
-                    loss: FolderLocationLoss(reason: locationLoss, date: Date())))
+                    folder: folder, loss: FolderLocationLoss(reason: locationLoss, date: Date()),
+                    generation: openGeneration))
         }
     }
 
@@ -241,8 +262,21 @@ final class TestLibrary: FolderLibrary {
     func reportLocationLoss(_ reason: FolderLocationLoss.Reason) {
         updateContinuation.yield(
             .locationLost(
-                folder: folder,
-                loss: FolderLocationLoss(reason: reason, date: Date())))
+                folder: folder, loss: FolderLocationLoss(reason: reason, date: Date()),
+                generation: openGeneration))
+    }
+
+    /// Waits for the sample's writes; a launch can make this take long enough to see
+    /// (PRD Failure and recovery).
+    func drainWrites() async {
+        guard drainDelay > .zero else { return }
+        try? await Task.sleep(for: drainDelay)
+    }
+
+    /// Whether a change is still unfinished, so Wait for writes keeps the question
+    /// (PRD P0-08).
+    func hasUnfinishedWrites() async -> Bool {
+        changes.values.contains { $0.state.isUnfinished }
     }
 
     /// Closes the sample folder, so leaving with unfinished writes really drops its photos
@@ -251,6 +285,7 @@ final class TestLibrary: FolderLibrary {
         stored = []
         groups = []
         changes = [:]
+        openGeneration += 1
         updateContinuation.yield(.photos([]))
     }
 
@@ -274,7 +309,8 @@ final class TestLibrary: FolderLibrary {
     static func sample(
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
-        locationLoss: FolderLocationLoss.Reason? = nil
+        locationLoss: FolderLocationLoss.Reason? = nil,
+        drainDelay: Duration = .zero
     ) -> TestLibrary {
         let captureBase = Date(timeIntervalSince1970: 1_760_000_000)
         let photos = (0..<36).map { index -> GridPhoto in
@@ -292,7 +328,7 @@ final class TestLibrary: FolderLibrary {
         return TestLibrary(
             photos: photos, groups: sampleGroups, changes: sampleChanges,
             detailImages: sampleDetailImages, failingStems: failingStems,
-            failureReason: failureReason, locationLoss: locationLoss)
+            failureReason: failureReason, locationLoss: locationLoss, drainDelay: drainDelay)
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).

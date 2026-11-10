@@ -13,15 +13,15 @@ public enum FolderSaveSummary: Hashable, Sendable {
     case noChanges
     /// At least one change is waiting for or running its write (PRD P0-08: **Writing…**).
     case writing
-    /// Every requested change is confirmed in its storage (PRD P0-08: read-back matched), with
-    /// how many of them are Rejects that only Clove storage holds (G1 decision 5).
-    case saved(storedInClove: Int)
+    /// Every requested change is confirmed in its storage and saved there (PRD P0-08).
+    case saved
     /// This many photos have a change that did not confirm.
     case unsaved(Int)
-    /// Every change is confirmed, but only in Clove storage, so nothing was saved to a file.
+    /// At least one change is confirmed only in Clove storage, so nothing in the folder may be
+    /// summarised as saved.
     ///
-    /// G1 decision 5 keeps the word Saved for XMP writes and a confirmed move, so a folder whose
-    /// changes are all stored Rejects says they are stored rather than calling them saved.
+    /// G1 decision 5 keeps the word Saved for XMP writes and a confirmed move, so a folder with
+    /// a stored Reject says how many are stored rather than calling the folder saved.
     case storedInClove(Int)
 
     /// Summarises every photo's latest state in the open folder.
@@ -54,10 +54,10 @@ public enum FolderSaveSummary: Hashable, Sendable {
             self = .writing
         } else if failed > 0 {
             self = .unsaved(failed)
-        } else if saved > 0 {
-            self = .saved(storedInClove: stored)
         } else if stored > 0 {
             self = .storedInClove(stored)
+        } else if saved > 0 {
+            self = .saved
         } else {
             self = .noChanges
         }
@@ -65,19 +65,17 @@ public enum FolderSaveSummary: Hashable, Sendable {
 
     /// What the indicator reads.
     ///
-    /// A stored Reject is never folded into **All saved**: when one exists, the line says how
-    /// many are only stored in Clove, so the folder never claims a save the Reject has not had
-    /// (G1 decision 5, PRD How marks reach disk, rule 7).
+    /// **All saved** requires that no confirmed change is only stored in Clove: any stored Reject
+    /// makes the line report the stored count, so the folder never claims a save a Reject has not
+    /// had (G1 decision 5, PRD How marks reach disk, rule 7).
     public var text: String {
         switch self {
         case .noChanges:
             "No changes yet"
         case .writing:
             "Writing…"
-        case .saved(let stored) where stored == 0:
+        case .saved:
             "All saved"
-        case .saved(let stored):
-            stored == 1 ? "All saved, 1 stored in Clove" : "All saved, \(stored) stored in Clove"
         case .storedInClove(let count):
             count == 1 ? "1 stored in Clove" : "\(count) stored in Clove"
         case .unsaved(let count):

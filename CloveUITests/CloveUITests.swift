@@ -47,6 +47,8 @@ final class CloveUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
         app.launchEnvironment["CLOVE_TEST_LIBRARY_FAIL_STEMS"] = "MMQ02678,MMQ02680"
+        // A drain long enough to see the waiting state it shows (PRD Failure and recovery).
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"] = "1200"
         app.launch()
 
         XCTAssertTrue(
@@ -202,10 +204,20 @@ final class CloveUITests: XCTestCase {
         let wait = element(in: app, "clove.leavePrompt.wait")
         XCTAssertTrue(wait.exists, "The question did not offer Wait for writes")
         wait.tap()
-        let leave = element(in: app, "clove.leavePrompt.leaveAnyway")
+        // The waiting state is visible while C4 drains, and Leave anyway stays available
+        // (PRD Failure and recovery: the user can still choose it).
         XCTAssertTrue(
-            leave.waitForExistence(timeout: 10),
-            "Waiting for writes took away the Leave anyway answer")
+            waitForElement(element(in: app, "clove.leavePrompt.waiting"), timeout: 5),
+            "Wait for writes showed no waiting state")
+        let leave = element(in: app, "clove.leavePrompt.leaveAnyway")
+        XCTAssertTrue(leave.exists, "Waiting for writes took away the Leave anyway answer")
+        XCTAssertTrue(
+            waitForDisappearance(element(in: app, "clove.leavePrompt.waiting"), timeout: 10),
+            "The waiting state never finished")
+        // The failed change is still unfinished, so the question stays for an explicit answer.
+        XCTAssertTrue(
+            element(in: app, "clove.leavePrompt.title").exists,
+            "The question left while a change was still unfinished")
         leave.tap()
 
         XCTAssertTrue(
@@ -244,6 +256,29 @@ final class CloveUITests: XCTestCase {
         let back = element(in: app, "clove.nav.back")
         XCTAssertTrue(back.waitForExistence(timeout: 10), "The screen had no back button")
         back.tap()
+    }
+
+    /// Waits for an element to appear, with a tight poll, so a short visible state is not missed
+    /// between XCTest's slower checks (PRD Failure and recovery).
+    @MainActor
+    private func waitForElement(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.exists { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return element.exists
+    }
+
+    /// Waits for an element to go away, with a bounded poll (PRD Failure and recovery).
+    @MainActor
+    private func waitForDisappearance(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !element.exists { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return !element.exists
     }
 
     /// Waits for an element's label with a tight poll, so a save state that arrives from the

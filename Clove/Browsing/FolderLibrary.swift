@@ -30,9 +30,10 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// C11's watch reports one loss and stops. The folder stays open so the user can reopen it,
     /// and PRD Failure and recovery requires the disconnected-drive or missing-location copy
     /// instead of **Writing…** or **Saved** for the folder's unfinished changes. The update names
-    /// the folder it belongs to, because a buffered loss can reach a reader after another folder
-    /// opened, and no view may explain one folder's loss over another folder's photos.
-    case locationLost(folder: FolderIdentity, loss: FolderLocationLoss)
+    /// the folder it belongs to and the open it came from, because a buffered loss can reach a
+    /// reader after another folder opened — or after the same folder opened again — and no view
+    /// may explain one open's loss over another open's photos.
+    case locationLost(folder: FolderIdentity, loss: FolderLocationLoss, generation: Int)
 
     /// Grouping published the folder's groups (PRD P0-11).
     ///
@@ -148,6 +149,22 @@ protocol FolderLibrary: AnyObject {
     /// reported as saved afterwards (PRD Failure and recovery, paragraph after the table).
     func closeFolder() async
 
+    /// A value that changes with every folder this library installs or ends (PRD P0-02).
+    ///
+    /// Two opens of the same folder share the folder's identity, so an update a reader had already
+    /// suspended can only be told apart by the open it came from. The library changes this
+    /// whenever a folder is installed or closed; a reader compares it with the value it saw when
+    /// it showed the folder.
+    var openGeneration: Int { get }
+
+    /// Whether a change is still admitted and unfinished, read from the write queue itself
+    /// (PRD P0-08).
+    ///
+    /// The leaving question asks this after draining: the queue's own answer cannot lag behind a
+    /// stream the screen has not caught up with yet. A failed change is finished for draining and
+    /// stays for an explicit retry.
+    func hasUnfinishedWrites() async -> Bool
+
     /// The scanned set behind one photo, for writes, thumbnails and the grouping follow-up
     /// (PRD P0-08, P0-11).
     ///
@@ -224,6 +241,12 @@ extension FolderLibrary {
     }
 
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? { nil }
+
+    /// A library that installed nothing answers a generation a reader compares with zero, and one
+    /// with no writes has nothing unfinished (PRD P0-02, P0-08).
+    var openGeneration: Int { 0 }
+
+    func hasUnfinishedWrites() async -> Bool { false }
 
     /// A library with no writes has nothing to retry or drain and no watch to poll
     /// (PRD P0-08, P0-02).

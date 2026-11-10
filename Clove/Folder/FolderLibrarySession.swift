@@ -200,6 +200,16 @@ final class FolderLibrarySession: FolderLibrary {
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes.latest(for: photo) }
 
+    /// The open this library installed last, which changes on every install and close
+    /// (PRD P0-02).
+    var openGeneration: Int { scanGeneration }
+
+    /// Whether C4 still holds an unfinished change, asked of the queue itself (PRD P0-08).
+    func hasUnfinishedWrites() async -> Bool {
+        guard case .success(let stores) = await resolvedStores() else { return false }
+        return !(await stores.writes.unfinishedChanges().isEmpty)
+    }
+
     /// The scanned set behind one photo, for writes and U3's thumbnail lookup (PRD P0-08).
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? { store.scannedSet(for: photo) }
 
@@ -873,11 +883,11 @@ final class FolderLibrarySession: FolderLibrary {
     /// Publishes a loss the watch reported for the folder this open installed (PRD P0-02).
     ///
     /// A loss that arrives after another open replaced the folder is dropped here, and the update
-    /// carries the folder's identity so a reader that had already suspended cannot apply it to a
-    /// newer folder either.
+    /// carries the folder's identity and the open so a reader that had already suspended cannot
+    /// apply it to a newer folder or to a later open of the same folder either.
     private func locationLost(_ loss: FolderLocationLoss, folder: FolderIdentity, generation: Int) {
         guard generation == scanGeneration else { return }
-        publish(.locationLost(folder: folder, loss: loss))
+        publish(.locationLost(folder: folder, loss: loss, generation: generation))
     }
 
     // MARK: - Writes

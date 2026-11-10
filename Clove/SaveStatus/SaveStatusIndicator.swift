@@ -99,8 +99,8 @@ struct SaveStatusIndicator: View {
             "circle.dashed"
         case .writing:
             "arrow.triangle.2.circlepath"
-        case .saved(let stored):
-            stored == 0 ? "checkmark.circle" : "internaldrive"
+        case .saved:
+            "checkmark.circle"
         case .storedInClove:
             "internaldrive"
         case .unsaved:

@@ -23,8 +23,8 @@ struct FolderSaveSummaryTests {
         #expect(
             FolderSaveSummary(states: [.storedInClove, .storedInClove]).text == "2 stored in Clove")
         #expect(
-            FolderSaveSummary(states: [.savedInSidecar, .storedInClove]).text
-                == "All saved, 1 stored in Clove")
+            FolderSaveSummary(states: [.savedInSidecar, .storedInClove]).text == "1 stored in Clove"
+        )
         // A waiting or running write wins over a finished one, so the folder never reads saved
         // while a change is still on its way to storage.
         #expect(FolderSaveSummary(states: [.savedInSidecar, .pending]).text == "Writing…")
