@@ -61,7 +61,7 @@ Test devices: iPhone 17 Pro Max, iPad Pro, and iPhone Duo. The owner's camera me
 | M1 | Spikes S1–S7 | **G1 decided, M1 closed**: [approved technical approach](decisions/G1-technical-approach.md), with matching PRD edits. The S7 Duo run ([#18](https://github.com/mimiqdev/cloveapp/issues/18)) and remaining checks ([#29](https://github.com/mimiqdev/cloveapp/issues/29)) stay open. |
 | M2 | Core engine, `CloveCore` | Unit tests cover the PRD's persistence rules |
 | M3 | Imaging pipeline, `CloveImaging` | Grid scrolling and preview speed meet the targets set at G1 on device |
-| M4 | iPhone main flow | **G2**: the product owner completes the main path on the iPhone 17 Pro Max from any folder Files can open: local storage, or the CFexpress Type A USB reader when at hand. No SD card or SSD is required. |
+| M4 | iPhone main flow, with the design handoff applied | **G2**: the product owner completes the main path on the iPhone 17 Pro Max from any folder Files can open: local storage, or the CFexpress Type A USB reader when at hand. No SD card or SSD is required. |
 | M5 | iPad, keyboard, Duo | Main path works on Duo and iPad |
 | M6 | Failure states, accessibility, performance, beta | **G3**: external TestFlight testing |
 
@@ -159,15 +159,26 @@ Depends on C-series interfaces (start with mock data). G2 follows when all are d
 | U10 | Move rejects | Confirmation sheet (RAW, JPEG and/or HIF companions, and XMP counts and destination); progress; partial failure; then keeping rejects in the confirmation and an Undo toast, through C14 | C6, U3, C14 | S | P0-10 |
 | U11 | Settings screen | All settings | C12 | S | Multiple |
 
-**G2**: on the iPhone 17 Pro Max, from any folder Files can open (local storage, or the CFexpress Type A USB reader when at hand), the product owner completes: open → grid → mark in detail → cull a group → move rejects → quit and reopen with marks intact. No SD card or SSD is required; removable media is not on the MVP critical path. The product owner also confirms the gesture feel (step distance and dead zone).
+### Design implementation
+
+The owner decided on 2026-11-10 that the design handoff in `design/handoff/` is built into the app before G2, and that G2 can wait for it. This replaces Q6. V1 adds new files only, so it runs alongside the U tasks. Each screen pass starts once the behavior tasks for its screens have merged, so the same files are not edited twice in parallel. Behavior in the handoff that differs from the PRD lands in the screen pass for that screen.
+
+| ID | Task | Output and acceptance | Depends on | Size | Device |
+| --- | --- | --- | --- | --- | --- |
+| V1 | Design foundation | Theme tokens from `design/handoff/tokens/clove-themes.json` (21 tokens × 8 themes), with tests that the code matches the JSON; `Color.clove` resolved from the current theme; the Appearance setting (Match system light/dark, theme) in C12 and the Settings screen; the shared glass style (system Liquid Glass on iOS 26 and later, `surface/glass` as the fallback); the shared controls from `components.md`; a component gallery for previews and UI tests. No screen changes | U11 | M | No |
+| V2 | iPhone grid and detail | Grid (tiles, stacks, dimmed rejects, the Move Rejects button, filter, select mode with the capsule, opening states, toasts) and detail (the mark capsule, swipe-up star bar and swipe-down Reject, filmstrip, top bar with Info and Undo, the Info sheet, the subtitle save state) per the handoff, including #82's companion badge | V1, U7, U8 | L | Yes |
+| V3 | Group review and Move Rejects | Group review per the handoff: one finishing action, Reject N unmarked (C10's availability becomes any photo rated or labeled), the header, always-synced zoom, Undecided only in the "…" menu, Continue →; the Move Rejects sheet, quick grid, toasts and Details sheet, with Undo wired through C14 | V1, U8, U9, U10, C14 | M | Yes |
+| V4 | Entry, Settings and errors | The hero resume card, Recents rows (absorbing #82's path display), first launch, the Open folder capsule, the Settings layout and theme picker, error banners and alerts | V1, U7 | M | Yes |
+
+**G2** runs after V1–V4, on the designed iPhone app. On the iPhone 17 Pro Max, from any folder Files can open (local storage, or the CFexpress Type A USB reader when at hand), the product owner completes: open → grid → mark in detail → cull a group → move rejects → quit and reopen with marks intact. No SD card or SSD is required; removable media is not on the MVP critical path. The product owner also confirms the gesture feel (step distance and dead zone).
 
 ## M5 iPad, keyboard, and Duo
 
 | ID | Task | Output and acceptance | Depends on | Size | Device |
 | --- | --- | --- | --- | --- | --- |
-| P1 | iPad layout | Sidebar (locations, filters, labels, similar groups); five-column grid; right-hand marking rail in detail; group view with large preview and sidebar grid | G2 | M | Yes |
+| P1 | iPad layout | Per `design/handoff/` (iPad sections). Sidebar (locations, filters, labels, similar groups); five-column grid; right-hand marking rail in detail; group view with large preview and sidebar grid | G2 | M | Yes |
 | P2 | External keyboard | `0`–`5`, `6`–`9`, `↑`, `↓`, `←` `→`, `⌘Z`; only enabled ratings accepted; also works on iPhone with a keyboard | U6, U8 | S | Yes |
-| P3 | Duo adaptive layout | Per [G1's fold-state approach](decisions/G1-technical-approach.md#3-recommended-by-the-spikes-accepted), subject to the S7 Duo run: compact cover layout; inner grid and detail follow available geometry; controls avoid the hinge when half-folded, with no hard-coded hinge position. Public hinge API on iOS 27.1+ behind availability checks; minimum remains iOS 18. Navigation and selection state live outside layout | G2, S7 | L | Yes |
+| P3 | Duo adaptive layout | Per `design/handoff/` (Duo sections, including the dock and the split state machine) and [G1's fold-state approach](decisions/G1-technical-approach.md#3-recommended-by-the-spikes-accepted), subject to the S7 Duo run: compact cover layout; inner grid and detail follow available geometry; controls avoid the hinge when half-folded, with no hard-coded hinge position. Public hinge API on iOS 27.1+ behind availability checks; minimum remains iOS 18. Navigation and selection state live outside layout | G2, S7 | L | Yes |
 | P4 | Duo state continuity | Cover ↔ inner, half-fold, and window resizing preserve folder, photo, filters, selection, group-view position, and write status | U1, P3 | M | Yes |
 
 ## M6 Polish and beta
@@ -179,7 +190,7 @@ Depends on C-series interfaces (start with mock data). G2 follows when all are d
 | Q3 | Performance | Grid scrolling, peak memory, scan time, and grouping time on a 2,000-photo folder against [G1's starting targets](decisions/G1-technical-approach.md#starting-performance-targets-iphone-for-m3-and-q3); revisit after remaining device checks, which do not block MVP for removable media | M5 | M | Yes |
 | Q4 | Acceptance automation | Automate what the PRD acceptance table allows (core tests and simulator UI tests); turn the rest into a device checklist | M5 | M | No |
 | Q5 | Release prep | Privacy manifest `PrivacyInfo.xcprivacy` (reading file timestamps is a required-reason API); placeholder icon; version and build number rules; external TestFlight materials | M5 | S | No |
-| Q6 | Visual design swap | Apply colors, type, icons, and spacing from the delivered design without changing behavior | Design delivery (`design/handoff/`, 2026-11-10) | M | Yes |
+| Q6 | Visual design swap | Moved into M4 as V1–V4 on 2026-11-10 | — | — | — |
 
 **G3**: the device checklist passes in full, and the build goes to external TestFlight testing.
 
@@ -198,7 +209,7 @@ Between gates, these lanes can go to different agents at the same time:
 | M0 | T0.2 skeleton ‖ T0.3 fixtures, then T0.1 TestFlight release |
 | M1 | S1 ‖ S2 ‖ S3 ‖ S4 ‖ S5 ‖ S6 ‖ S7 |
 | M2+M3 | Write lane (C3 → C4 → C5, C6; C7 deferred) ‖ scan lane (C2, C8, C11) ‖ grouping lane (C9 → C10, with I3) ‖ imaging lane (I1 → I2, I4) ‖ rules lane (C12 → C13) |
-| M4 | Grid lane (U3 → U4, U10) ‖ detail lane (U5 → U6, U8, U9) ‖ entry and settings (U2, U11) ‖ state lane (U7) |
+| M4 | Grid lane (U3 → U4, U10) ‖ detail lane (U5 → U6, U8, U9) ‖ entry and settings (U2, U11) ‖ state lane (U7) ‖ design lane (V1, then V2, V3 and V4 as their screens' behavior tasks merge) |
 | M5 | iPad (P1, P2) ‖ Duo (P3 → P4) |
 
 ## Risks
