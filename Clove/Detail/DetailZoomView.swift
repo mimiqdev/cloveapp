@@ -110,10 +110,11 @@ struct DetailZoomView: UIViewRepresentable {
 
     /// The photo's oriented full-resolution pixel size, or nil when it is unknown.
     ///
-    /// The scroll view's zoom limit follows it, so a pinch can reach native 100% and
-    /// ``DetailZoom/inspectionScale`` past it while a smaller embedded preview is still on
-    /// screen (PRD P0-04; G1 "Preview, detail (I2)"). Without it the shown bitmap's own size is
-    /// the full resolution, which is the behaviour before the native size was known.
+    /// The scroll view's zoom limit follows it, so a pinch can reach native 100% while a smaller
+    /// embedded preview is still on screen (PRD P0-04; G1 "Preview, detail (I2)"). The limit is
+    /// still at least ``DetailZoom/inspectionScale``, so a photo whose native 100% needs less can
+    /// be inspected past it. Without a size the shown bitmap is the full resolution, which is the
+    /// behaviour before the native size was known.
     let fullResolutionPixels: CGSize?
 
     /// The zoom the screen wants, or nil to leave the view's own pinch alone.
@@ -294,7 +295,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// A quality change from an embedded preview to a native render is the same call, so the
     /// view keeps whatever scale and offset the user had, and the render only sharpens the
     /// picture (G1 "Preview, detail (I2)"). The screen issues a command only when the photo
-    /// changes or a group keeps a zoom, never for the quality change itself.
+    /// changes, a group keeps a zoom, or a 100% taken from a preview whose header could not be
+    /// read finds the render's own size.
     ///
     /// A preview and its render share the photo's aspect, so the image's drawn rect does not
     /// move. A camera that crops its embedded preview can give it another aspect; that rect then

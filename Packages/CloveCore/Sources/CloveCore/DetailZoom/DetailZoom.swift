@@ -98,15 +98,15 @@ public enum DetailZoom {
     ///
     /// A view that keeps the zoom level across photos, or shows a group whose photos have
     /// different native sizes, can sit at a scale that is another photo's 100%. The HUD reads
-    /// 100% only when this photo's own native scale is on screen; the tolerance absorbs rounding
-    /// in a layout, and a view that has not been laid out is not at 100%.
+    /// 100% only when this photo's own native scale is on screen; half a percent absorbs rounding
+    /// in a layout, so a pinch that settles just off 100% still reports its own percentage.
     public static func isFullResolution(
         scale: CGFloat, nativePixels: CGSize, viewSize: CGSize, screenScale: CGFloat
     ) -> Bool {
         let target = fullResolutionScale(
             nativePixels: nativePixels, shownPixels: nativePixels, viewSize: viewSize,
             screenScale: screenScale)
-        return abs(scale - target) <= max(target, 1) * 0.01
+        return abs(scale - target) <= max(target, 1) * 0.005
     }
 
     /// The scroll view's largest zoom when the shown bitmap is its own full resolution

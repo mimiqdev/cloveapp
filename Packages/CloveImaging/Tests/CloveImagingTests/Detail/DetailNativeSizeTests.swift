@@ -156,6 +156,32 @@ struct DetailNativeSizeTests {
         #expect(DetailNativeSize.read(try detailSource(file)) == nil)
     }
 
+    @Test func aFullResolutionImageNeverAsksForMorePixels() throws {
+        let source = DetailSource(
+            url: URL(fileURLWithPath: "/missing/photo.ARW"),
+            revision: ThumbnailRevision(size: 0, modificationTime: .distantPast))
+        let native = CGSize(width: 8640, height: 5760)
+        func image(_ width: Int, _ height: Int, _ quality: DetailQuality, _ size: CGSize?)
+            throws -> DetailImage
+        {
+            DetailImage(
+                image: try makeDetailImage(width: width, height: height), source: source,
+                quality: quality, fullResolutionSize: size)
+        }
+
+        // A native RAW render is the photo's full resolution, and a full raster answers a JPEG's
+        // 100%, so asking either for more would repeat the same pixels (G1 "Preview, detail").
+        #expect(try image(8640, 5760, .nativeRAW, native).isFullResolution)
+        #expect(try image(2900, 1933, .raster, CGSize(width: 2900, height: 1933)).isFullResolution)
+        // One pixel short counts as full: rounding in the fit geometry can lose that pixel.
+        #expect(try image(2899, 1933, .raster, CGSize(width: 2900, height: 1933)).isFullResolution)
+        // A display raster below the photo's size and any preview can still improve.
+        #expect(try !image(1200, 800, .raster, native).isFullResolution)
+        #expect(try !image(1616, 1080, .preview, native).isFullResolution)
+        // A preview whose header is unknown may still find the render's size, so it asks.
+        #expect(try !image(1616, 1080, .preview, nil).isFullResolution)
+    }
+
     @Test func aPreviewWithoutAHeaderSizeFallsBackToItsOwnPixels() throws {
         let image = DetailImage(
             image: try makeDetailImage(width: 320, height: 240),

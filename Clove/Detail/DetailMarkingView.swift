@@ -366,30 +366,12 @@ struct DetailMarkingView: View {
             setZoom(.scale(target, anchor: anchor.unitPoint))
         }
         // A retained zoom, in a group or in regular detail, needs the pixels that photo shows; a
-        // fit view never renders, and native pixels need nothing more (G1 "Preview, detail
-        // (I2)"). A request the source cannot answer comes back with a limitation, which turns
+        // fit view never renders, and pixels that already are the photo's full resolution cannot
+        // be improved, so the same answer is never asked for twice (G1 "Preview, detail (I2)").
+        // A request the source cannot answer comes back with a limitation, which turns
         // `previewOnly` on and ends the asking.
-        if scale > DetailFitScale.tolerance, image.quality != .nativeRAW {
+        if scale > DetailFitScale.tolerance, !image.isFullResolution {
             upgradeIfNeeded()
-        }
-        recheckFullResolutionName(for: image)
-    }
-
-    /// Reads 100% only when this photo's own native scale is on screen (PRD P0-04).
-    ///
-    /// A detail view that keeps the zoom level, and a group whose photos have different native
-    /// sizes, can open a photo at another photo's 100%. The scale stays, because the PRD keeps
-    /// the zoom level across photos, so the name reports the real percentage instead of 100%
-    /// (PRD In-group culling, synchronized zoom).
-    private func recheckFullResolutionName(for image: DetailImage) {
-        guard case .fullResolution = zoomMode, viewSize.width > 0 else { return }
-        guard
-            DetailZoom.isFullResolution(
-                scale: scale, nativePixels: image.fullResolutionPixels, viewSize: viewSize,
-                screenScale: displayScale)
-        else {
-            zoomMode = .manual
-            return
         }
     }
 
@@ -626,10 +608,21 @@ struct DetailMarkingView: View {
         CGSize(width: image.width, height: image.height)
     }
 
-    /// Fit, 100% or the percentage the user pinched.
+    /// Fit, this photo's own native 100%, or the percentage the user pinched (PRD P0-04).
+    ///
+    /// The 100% reading comes from the shown scale and the photo's native size rather than from
+    /// how the zoom got there: a group keeps its zoom level across photos of different native
+    /// sizes, and only the photo whose own 100% is on screen may read 100% (PRD In-group culling,
+    /// synchronized zoom).
     private var zoomName: String {
-        if case .fullResolution = zoomMode { return "100%" }
         if scale <= DetailFitScale.tolerance { return "Fit" }
+        if let shown, viewSize.width > 0,
+            DetailZoom.isFullResolution(
+                scale: scale, nativePixels: shown.fullResolutionPixels, viewSize: viewSize,
+                screenScale: displayScale)
+        {
+            return "100%"
+        }
         return "\(Int((scale * 100).rounded()))%"
     }
 

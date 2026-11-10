@@ -107,6 +107,27 @@ public struct DetailImage: Sendable {
     /// Longest side in pixels, which is what a display-size request is compared against.
     var longEdge: Int { max(width, height) }
 
+    /// Whether these pixels already are the photo's full resolution (PRD P0-04; G1 "Preview,
+    /// detail (I2)").
+    ///
+    /// A native RAW render is full by definition. A raster is full when it reaches the photo's
+    /// size, allowing one pixel for rounding in the fit geometry; a raster below that can still
+    /// ask for a larger one. A preview is never full, because the route behind it may render
+    /// even when its header size could not be read — and when no larger size is known, its own
+    /// size is what 100% means, so the view must not ask a source that has nothing more.
+    public var isFullResolution: Bool {
+        switch quality {
+        case .nativeRAW:
+            return true
+        case .raster:
+            let nativeLongEdge = max(
+                fullResolutionPixels.width, fullResolutionPixels.height)
+            return CGFloat(longEdge) + 1 >= nativeLongEdge
+        case .preview:
+            return false
+        }
+    }
+
     func limited(by limitation: DetailLimitation) -> DetailImage {
         DetailImage(
             image: image, source: source, quality: quality,
