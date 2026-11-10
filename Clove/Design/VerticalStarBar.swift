@@ -4,11 +4,15 @@ import SwiftUI
 /// The vertical star bar: a narrow glass pill of five stars that fill from the bottom, with a ✕
 /// chip below it for the swipe-down reject (`design/handoff/components.md`, Vertical star bar).
 ///
-/// It opens on a swipe up in iPhone detail and on the Duo dock's star button. Tapping or dragging
-/// sets the rating: the bottom star is one and the top is five, and dragging past the current value
-/// keeps filling, which is how the gesture's distance reads. The iPad rail version is 43 × 174 with
-/// a padding of 10 and a gap of 6, and leaves the chip out because the rail has its own Reject
-/// circle.
+/// It opens on a swipe up in iPhone detail and on the Duo dock's star button. Dragging fills the
+/// stars from the bottom to the top and only the release commits, so the mark is written once:
+/// ``onPreview`` reports the live value while the drag runs, for the capsule's stars to mirror it,
+/// and ``onCommit`` reports the value the gesture ends on (`design/handoff/interactions.md`, iPhone
+/// Detail). A tap picks the star it lands on, and tapping the photo's current value clears it, the
+/// same rule as the capsule's stars (PRD Marking rules).
+///
+/// The iPad rail version is 43 × 174 with a padding of 10 and a gap of 6, and leaves the chip out
+/// because the rail has its own Reject circle.
 struct VerticalStarBar: View {
     /// The photo's rating.
     let rating: Rating
@@ -25,11 +29,20 @@ struct VerticalStarBar: View {
     /// The identifier the screen's UI test uses.
     var identifier = "clove.mark.starBar"
 
-    /// Applies a rating, or clears it (PRD Marking rules).
-    let onRate: (Rating) -> Void
+    /// The live value while a drag runs, before release (interactions.md).
+    let onPreview: (Rating) -> Void
+
+    /// The value the gesture ends on; the one mark to apply (interactions.md).
+    let onCommit: (Rating) -> Void
 
     /// Rejects the photo, the same as a swipe down (PRD Marking rules, interactions.md).
     let onReject: () -> Void
+
+    /// The value the drag is showing, or nil when no drag has run since the last commit.
+    @State private var preview: Rating?
+
+    /// The value the stars fill to: the drag's live value while one runs, else the photo's rating.
+    private var shownRating: Rating { preview ?? rating }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -56,9 +69,14 @@ struct VerticalStarBar: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        onRate(rating(at: value.location.y, in: proxy.size.height))
+                        previewDrag(at: value.location.y, in: proxy.size.height)
                     }
+                    .onEnded(commitDrag)
             )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Rating")
+            .accessibilityValue(accessibilityValue)
+            .accessibilityAdjustableAction(adjustRating)
         }
         .frame(width: width, height: height)
         .cloveGlass(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -66,20 +84,11 @@ struct VerticalStarBar: View {
 
     /// One star; the filled ones start at the bottom (components.md).
     private func star(_ level: Rating) -> some View {
-        let isFilled = level <= rating
-        return Button {
-            onRate(level == rating ? .unrated : level)
-        } label: {
-            Image(systemName: isFilled ? "star.fill" : "star")
-                .font(.title3)
-                .foregroundStyle(isFilled ? Color.clove.rating.on : Color.clove.rating.off)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(level.rawValue) stars")
-        .accessibilityAddTraits(level == rating ? .isSelected : [])
-        .accessibilityIdentifier("\(identifier).star.\(level.rawValue)")
+        let isFilled = level <= shownRating
+        return Image(systemName: isFilled ? "star.fill" : "star")
+            .font(.title3)
+            .foregroundStyle(isFilled ? Color.clove.rating.on : Color.clove.rating.off)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// The ✕ chip the swipe down lands on (components.md).
@@ -97,6 +106,52 @@ struct VerticalStarBar: View {
         .accessibilityIdentifier("\(identifier).reject")
     }
 
+    /// Fills the bar and reports the live value while the drag runs (interactions.md).
+    private func previewDrag(at y: CGFloat, in height: CGFloat) {
+        let next = rating(at: y, in: height)
+        guard next != shownRating else { return }
+        preview = next
+        onPreview(next)
+    }
+
+    /// Commits the value the gesture ended on; nothing is applied before this call
+    /// (interactions.md).
+    ///
+    /// A gesture that did not move is a tap: on the photo's current value it clears the rating, and
+    /// anywhere else it picks that star (PRD Marking rules). A drag commits what it shows, even
+    /// when that is the value already set.
+    private func commitDrag(_ value: DragGesture.Value) {
+        let live = preview ?? rating
+        let moved =
+            abs(value.translation.height) >= Self.tapSlop
+            || abs(value.translation.width) >= Self.tapSlop
+        let committed = moved || live != rating ? live : Rating.unrated
+        preview = nil
+        onCommit(committed)
+    }
+
+    /// Steps the rating from VoiceOver, since the bar is one adjustable control.
+    ///
+    /// It offers no value below the lowest level: clearing is the capsule's tap rule, and stepping
+    /// down from one star stays at one (PRD Marking rules).
+    private func adjustRating(_ direction: AccessibilityAdjustmentDirection) {
+        switch direction {
+        case .increment:
+            guard let level = levels.first(where: { $0 > rating }) else { return }
+            onCommit(level)
+        case .decrement:
+            guard let level = levels.last(where: { $0 < rating }) else { return }
+            onCommit(level)
+        @unknown default:
+            return
+        }
+    }
+
+    /// The rating the bar reports to VoiceOver (copy.md `a11y.rating`).
+    private var accessibilityValue: String {
+        rating == .unrated ? "Unrated" : "\(rating.rawValue) stars"
+    }
+
     /// The rating for a drag at `y`: the stars fill from the bottom (components.md).
     private func rating(at y: CGFloat, in height: CGFloat) -> Rating {
         let innerHeight = max(height - 2 * padding, 1)
@@ -105,7 +160,7 @@ struct VerticalStarBar: View {
         return levels[min(max(filled, 1), levels.count) - 1]
     }
 
-    /// The pill's width: 40 on iPhone and 43 on the iPad rail (components.md).
+    /// The pill's width: 40 on iPhone, 43 on the iPad rail (components.md).
     private var width: CGFloat {
         switch size {
         case .phone: 40
@@ -138,16 +193,20 @@ struct VerticalStarBar: View {
 
     /// The pill's inner padding: 10 (components.md).
     private var padding: CGFloat { 10 }
+
+    /// How far a gesture may move and still count as a tap.
+    private static let tapSlop: CGFloat = 4
 }
 
 #Preview("Vertical star bar") {
     HStack(alignment: .top, spacing: 16) {
         VerticalStarBar(
             rating: Rating(rawValue: 2) ?? .unrated, identifier: "preview.starBar",
-            onRate: { _ in }, onReject: {})
+            onPreview: { _ in }, onCommit: { _ in }, onReject: {})
         VerticalStarBar(
             rating: Rating(rawValue: 2) ?? .unrated, size: .pad, showsRejectChip: false,
-            identifier: "preview.starBar.pad", onRate: { _ in }, onReject: {})
+            identifier: "preview.starBar.pad", onPreview: { _ in }, onCommit: { _ in },
+            onReject: {})
     }
     .padding(24)
     .background(Rectangle().fill(Color.clove.bg.canvas))

@@ -161,11 +161,12 @@ struct DesignGalleryScreen: View {
         section("Vertical star bar") {
             HStack(alignment: .top, spacing: 16) {
                 VerticalStarBar(
-                    rating: threeStars, identifier: "clove.mark.starBar", onRate: noRate,
-                    onReject: {})
+                    rating: threeStars, identifier: "clove.mark.starBar",
+                    onPreview: noRate, onCommit: noRate, onReject: {})
                 VerticalStarBar(
                     rating: threeStars, size: .pad, showsRejectChip: false,
-                    identifier: "clove.design.gallery.starBar.pad", onRate: noRate, onReject: {})
+                    identifier: "clove.design.gallery.starBar.pad",
+                    onPreview: noRate, onCommit: noRate, onReject: {})
             }
         }
     }

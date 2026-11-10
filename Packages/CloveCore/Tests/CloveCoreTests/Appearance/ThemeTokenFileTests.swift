@@ -27,10 +27,10 @@ struct ThemeTokenFileTests {
 
             for token in ThemeToken.allCases {
                 let expected = try #require(entry.colours[token.rawValue], "\(entry.id) \(token)")
+                let actual = Self.components(of: theme.tokens[token])
                 #expect(
-                    Self.components(of: theme.tokens[token]) == expected,
-                    "\(entry.id) \(token.rawValue): \(componentsText(Self.components(of: theme.tokens[token]))) is not \(componentsText(expected))"
-                )
+                    actual == expected,
+                    "\(entry.id) \(token.rawValue): \(actual) is not \(expected)")
             }
 
             let opacity = try #require(entry.numbers["opacity/rejected"], "\(entry.id) opacity")
@@ -66,11 +66,10 @@ struct ThemeTokenFileTests {
         }
     }
 
-    /// The RGBA components as 8-bit values, the precision the file stores.
-    private static func components(of colour: ThemeColour) -> [Int] {
-        [colour.red, colour.green, colour.blue, colour.alpha].map {
-            Int((($0 * 255).rounded()))
-        }
+    /// The RGBA components exactly as the code stores them, so a drift smaller than one 8-bit
+    /// step still fails.
+    private static func components(of colour: ThemeColour) -> [Double] {
+        [colour.red, colour.green, colour.blue, colour.alpha]
     }
 }
 
@@ -86,8 +85,8 @@ private struct ThemeTokenFile {
         let appearance: ThemeAppearance
         /// Every raw token string, for the token-set check.
         let tokens: [String: Any]
-        /// The colour tokens, as 8-bit RGBA components.
-        let colours: [String: [Int]]
+        /// The colour tokens, as RGBA components from 0 to 1.
+        let colours: [String: [Double]]
         /// The numeric tokens; the file has one, `opacity/rejected`.
         let numbers: [String: Double]
     }
@@ -116,7 +115,7 @@ private struct ThemeTokenFile {
         let themes = try (root["themes"] as? [[String: Any]] ?? []).map { entry in
             let tokens = try #require(entry["tokens"] as? [String: Any])
             let appearance = try #require(ThemeAppearance(rawValue: try text(entry, "appearance")))
-            var colours: [String: [Int]] = [:]
+            var colours: [String: [Double]] = [:]
             var numbers: [String: Double] = [:]
             for (name, value) in tokens {
                 if let hex = value as? String {
@@ -162,8 +161,11 @@ private struct ThemeTokenFile {
         try #require(entry[key] as? String, "Missing \(key)")
     }
 
-    /// Parses the file's `#RRGGBB` or `#RRGGBBAA` spelling into 8-bit RGBA components.
-    private static func parseHex(_ hex: String) throws -> [Int] {
+    /// Parses the file's `#RRGGBB` or `#RRGGBBAA` spelling into RGBA components from 0 to 1.
+    ///
+    /// Each byte becomes `Double(byte) / 255`, the same arithmetic the palettes use, so the
+    /// comparison is exact rather than rounded.
+    private static func parseHex(_ hex: String) throws -> [Double] {
         let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         #expect(digits.count == 6 || digits.count == 8, "\(hex)")
         let bytes = stride(from: 0, to: digits.count, by: 2).map { offset -> Int in
@@ -171,11 +173,7 @@ private struct ThemeTokenFile {
             let end = digits.index(start, offsetBy: 2)
             return Int(digits[start..<end], radix: 16) ?? -1
         }
-        return digits.count == 6 ? bytes + [255] : bytes
+        let rgba = digits.count == 6 ? bytes + [255] : bytes
+        return rgba.map { Double($0) / 255 }
     }
-}
-
-/// A readable RGBA listing for a failure message.
-private func componentsText(_ components: [Int]) -> String {
-    components.map(String.init).joined(separator: "/")
 }
