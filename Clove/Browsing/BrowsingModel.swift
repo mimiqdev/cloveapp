@@ -711,10 +711,13 @@ final class BrowsingModel {
             retried = result
         }
 
+        guard state.folder == folder, openGeneration == generation else { return nil }
+
         // A kept photo's Reject clear is a C4 write, not a C6 move, so it is retried through the
         // same mark path. An unresolved one stays in the failure list for the next attempt.
         var clearing = RejectMoveKeepClearing()
         for set in selection.clearFailures {
+            guard state.folder == folder, openGeneration == generation else { return nil }
             let status = await library.apply(.reject(false), to: set.identity)
             clearing.record(status, for: set.identity, files: set.files)
         }

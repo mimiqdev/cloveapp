@@ -100,13 +100,16 @@ final class MoveRejectsFlow: Identifiable {
 
         var clearing = RejectMoveKeepClearing()
         for identity in kept {
+            guard isCurrent(folder, generation) else { return true }
             let status = await browsing.apply(.reject(false), to: identity)
             clearing.record(
                 status, for: identity,
                 files: plan.readyEntries.first { $0.identity == identity }?.files ?? [])
         }
+        guard isCurrent(folder, generation) else { return true }
 
         let progress = await browsing.rejectMoveProgress()
+        guard isCurrent(folder, generation) else { return true }
         startProgress(progress)
         do {
             let result = try await browsing.runRejectMove(moving)
@@ -116,8 +119,7 @@ final class MoveRejectsFlow: Identifiable {
             let completed = RejectMoveResult(id: result.id, outcomes: outcomes)
             // A folder replaced while the move ran must not record its result against the new
             // one; the model already cleared the old record when that open happened.
-            guard browsing.state.folder == folder, browsing.openGeneration == generation
-            else { return true }
+            guard isCurrent(folder, generation) else { return true }
             browsing.recordRejectMove(
                 completed, keptIdentities: kept,
                 rejectsFolderName: plan.configuration.rejectsFolderName)
@@ -126,22 +128,36 @@ final class MoveRejectsFlow: Identifiable {
             cancelProgress()
             // Nothing moved, so the keep clears are restored; a whole-request refusal must not
             // leave the kept photos changed without a completed record C14 can undo.
-            await restore(clearing.restorationIdentities)
+            if isCurrent(folder, generation) {
+                await restore(
+                    clearing.restorationIdentities, folder: folder, generation: generation)
+            }
             stage = Self.stage(for: refusal)
             return false
         } catch {
             cancelProgress()
-            await restore(clearing.restorationIdentities)
+            if isCurrent(folder, generation) {
+                await restore(
+                    clearing.restorationIdentities, folder: folder, generation: generation)
+            }
             stage = .failed("The rejected photos couldn't be moved.")
             return false
         }
     }
 
     /// Restores Reject on kept photos whose clear ran before a whole-request failure (P0-10).
-    private func restore(_ identities: [PhotoIdentity]) async {
+    private func restore(
+        _ identities: [PhotoIdentity], folder: FolderIdentity?, generation: Int
+    ) async {
         for identity in identities {
+            guard isCurrent(folder, generation) else { return }
             _ = await browsing.apply(.reject(true), to: identity)
         }
+    }
+
+    /// Whether the folder that started this move is still the open one (PRD P0-02).
+    private func isCurrent(_ folder: FolderIdentity?, _ generation: Int) -> Bool {
+        browsing.state.folder == folder && browsing.openGeneration == generation
     }
 
     /// Subscribes to C6's progress before a run starts (PRD P0-10).
