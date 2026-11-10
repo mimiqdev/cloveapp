@@ -119,7 +119,7 @@ struct GridScreen: View {
             }
         }
         .task(id: browsing.lastRejectMove?.id) {
-            guard browsing.isRejectMoveToastVisible else { return }
+            guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
             // Toast timings are still proposed in the handoff; the details remain reachable
             // from the same result until this presentation ends.
             try? await Task.sleep(for: .seconds(10))

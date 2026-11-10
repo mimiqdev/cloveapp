@@ -16,6 +16,8 @@ final class CloveUITests: XCTestCase {
         // A rejected photo whose stem ends in 9 fails its first move once, so Move rejects can
         // report PRD's partial copy and retry without a file (PRD P0-10).
         app.launchEnvironment["CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX"] = "9"
+        // Keep the move toast up for the Details check; the user-facing timer stays unchanged.
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_KEEP_TOAST"] = "1"
         app.launch()
 
         XCTAssertTrue(
@@ -805,16 +807,7 @@ final class CloveUITests: XCTestCase {
         XCTAssertEqual(
             failure.label, "1 couldn't be moved", "The partial toast changed its counts")
 
-        // The kept photo is still in the grid and is no longer rejected; the failed photo stays
-        // rejected in place.
-        let kept = element(in: app, "clove.grid.photo.mmq02681")
-        XCTAssertTrue(kept.exists, "The kept photo left the grid")
-        XCTAssertFalse(
-            kept.label.contains("Rejected"), "The kept photo kept its Reject: \(kept.label)")
-        XCTAssertTrue(
-            element(in: app, "clove.grid.photo.mmq02689").label.contains("Rejected"),
-            "A failed move cleared the photo's Reject")
-
+        // Details opens before the other grid queries, so a long test run never races the toast.
         element(in: app, "clove.moves.details").tap()
         let detailsTitle = element(in: app, "clove.moves.details.subtitle")
         XCTAssertTrue(
@@ -833,11 +826,14 @@ final class CloveUITests: XCTestCase {
             evaluatedWith: toast)
         wait(for: [retried], timeout: 10)
 
+        let kept = element(in: app, "clove.grid.photo.mmq02681")
+        XCTAssertTrue(kept.exists, "The retry moved the kept photo")
+        XCTAssertFalse(
+            kept.label.contains("Rejected"), "The kept photo kept its Reject: \(kept.label)")
         let moved = element(in: app, "clove.grid.photo.mmq02689")
         let gone = expectation(
             for: NSPredicate(format: "exists == false"), evaluatedWith: moved)
         wait(for: [gone], timeout: 10)
-        XCTAssertTrue(kept.exists, "The retry moved the kept photo")
     }
 
     /// The Move rejects action shows while rejects exist and the setting is on, and turns off

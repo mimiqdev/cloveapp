@@ -36,6 +36,12 @@ struct MoveRejectsToast: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("clove.moves.toast.skipped")
                 }
+                if let notRejected = copy.noLongerRejectedMessage {
+                    Text(notRejected)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("clove.moves.toast.noLongerRejected")
+                }
             }
             Spacer(minLength: 0)
             if let undo {
@@ -75,6 +81,9 @@ struct MoveRejectsDetailsSheet: View {
     /// The latest completed record, so a second Try again uses the new retry handle (P0-10).
     @State private var current: CompletedRejectMove
 
+    /// A retry that could not run, shown in the sheet instead of being swallowed (P0-10).
+    @State private var retryError: String?
+
     /// Creates the sheet from the completed move's result.
     init(browsing: BrowsingModel, completed: CompletedRejectMove) {
         self.browsing = browsing
@@ -95,6 +104,16 @@ struct MoveRejectsDetailsSheet: View {
                         Text(skipped)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("clove.moves.details.skipped")
+                    }
+                    if let notRejected = details.noLongerRejectedMessage {
+                        Text(notRejected)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("clove.moves.details.noLongerRejected")
+                    }
+                    if let retryError {
+                        Text(retryError)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("clove.moves.details.error")
                     }
                     ForEach(details.rows) { row in
                         rowView(row)
@@ -142,16 +161,24 @@ struct MoveRejectsDetailsSheet: View {
     /// Retries only the failed sets, then closes the sheet once nothing failed is left (P0-10).
     private func retry() {
         Task {
-            guard let retried = try? await browsing.retryRejectMove(current) else { return }
-            result = retried
-            current = CompletedRejectMove(
-                result: retried, keptIdentities: current.keptIdentities,
-                rejectsFolderName: current.rejectsFolderName)
-            let details = RejectMoveDetails(result: retried)
-            if details.rows.isEmpty {
-                // The updated toast now reports the retry's total; closing the sheet leaves it
-                // visible instead of dismissing the result the person just asked for.
-                dismiss()
+            retryError = nil
+            do {
+                guard let retried = try await browsing.retryRejectMove(current) else {
+                    retryError = "Those photos can no longer be retried."
+                    return
+                }
+                result = retried
+                current = CompletedRejectMove(
+                    result: retried, keptIdentities: current.keptIdentities,
+                    rejectsFolderName: current.rejectsFolderName)
+                let details = RejectMoveDetails(result: retried)
+                if details.rows.isEmpty {
+                    // The updated toast now reports the retry's total; closing the sheet leaves
+                    // it visible instead of dismissing the result the person just asked for.
+                    dismiss()
+                }
+            } catch {
+                retryError = "The failed photos couldn't be retried."
             }
         }
     }

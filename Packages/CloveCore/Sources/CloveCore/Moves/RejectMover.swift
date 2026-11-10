@@ -107,12 +107,14 @@ public actor RejectMover {
     /// places and a retry could not restore them blindly. A set that was skipped is not part of
     /// the retry either: resolving its mark change is what makes it movable. The returned run
     /// has its own handle, and the earlier one is dropped so a second retry cannot resend it.
-    public func retryFailed(in batch: RejectMoveBatchID) async throws(RejectMoveRefusal)
-        -> RejectMoveResult?
-    {
+    public func retryFailed(
+        in batch: RejectMoveBatchID, excluding excluded: Set<PhotoIdentity> = []
+    ) async throws(RejectMoveRefusal) -> RejectMoveResult? {
         guard let applied = batches[batch], !applied.sets.isEmpty else { return nil }
+        let sets = applied.sets.filter { !excluded.contains($0.photoSet.id) }
+        guard !sets.isEmpty else { return nil }
         let request = RejectMoveRequest(
-            rootURL: applied.rootURL, sets: applied.sets,
+            rootURL: applied.rootURL, sets: sets,
             configuration: applied.configuration)
         let plan = try planner.plan(for: request)
         let result = try await move(plan)
@@ -444,6 +446,7 @@ extension RejectMoveSkipReason {
         case .failedMarkChange: "A mark change for this photo failed and needs its retry first."
         case .insideRejectsFolder: "The photo set is already inside the rejects folder."
         case .cancelled: "The move was cancelled before this photo set started."
+        case .noLongerRejected: "The photo is no longer rejected, so the retry left it alone."
         }
     }
 }

@@ -27,6 +27,17 @@ final class TestLibrary: FolderLibrary {
     /// location the sheet explains, still without touching a file.
     static let readOnlyVariable = "CLOVE_TEST_LIBRARY_READ_ONLY"
 
+    /// The launch environment value that keeps a sample move toast from auto-dismissing.
+    ///
+    /// The UI smoke test reads Details and the grid after a move; this holds the toast for that
+    /// check without lengthening the timer users get.
+    static let keepToastVariable = "CLOVE_TEST_LIBRARY_KEEP_TOAST"
+
+    /// Whether this launch keeps the sample move toast visible (PRD P0-10).
+    static var keepsMoveToast: Bool {
+        ProcessInfo.processInfo.environment[keepToastVariable] == "1"
+    }
+
     /// The launch environment value that makes sample photos fail their first write (PRD P0-09).
     ///
     /// Its value is a stem suffix: a photo whose stem ends with it reports a failed change once
@@ -123,8 +134,9 @@ final class TestLibrary: FolderLibrary {
     private var rejectMoveBatches: [RejectMoveBatchID: [RejectMovePlanEntry]] = [:]
 
     /// The progress stream the move sheet reads while a sample move runs (PRD P0-10).
-    private let rejectMoveUpdates: AsyncStream<RejectMoveProgress>
-    private let rejectMoveContinuation: AsyncStream<RejectMoveProgress>.Continuation
+    ///
+    /// Each run gets its own stream, so a retry never reads the earlier run's finished step.
+    private var rejectMoveContinuation: AsyncStream<RejectMoveProgress>.Continuation?
 
     /// The folder's photos with their marks, in the sample's capture order (PRD P0-03).
     var photos: [GridPhoto] { stored }
@@ -142,8 +154,6 @@ final class TestLibrary: FolderLibrary {
         thumbnails = SampleGridThumbnails()
         detailImages = EmptyDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
-        (rejectMoveUpdates, rejectMoveContinuation) = AsyncStream.makeStream(
-            of: RejectMoveProgress.self)
     }
 
     /// A fixed library, for the sample below and the previews.
@@ -169,8 +179,6 @@ final class TestLibrary: FolderLibrary {
         thumbnails = TestLibrary.sampleThumbnails
         self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
-        (rejectMoveUpdates, rejectMoveContinuation) = AsyncStream.makeStream(
-            of: RejectMoveProgress.self)
         // The sample is fully scanned when it opens, so the grid can show the actions the
         // handoff hides during opening (design handoff, PRD P0-01).
         updateContinuation.yield(.scanStarted)
@@ -300,14 +308,22 @@ final class TestLibrary: FolderLibrary {
     }
 
     /// Retries only the sample sets an earlier move could not move (PRD P0-10).
-    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? {
+    func retryFailedRejects(
+        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
+    ) async throws -> RejectMoveResult? {
         guard let entries = rejectMoveBatches[batch], !readOnly else { return nil }
         rejectMoveBatches[batch] = nil
-        return simulateMove(entries)
+        return simulateMove(entries.filter { !identities.contains($0.identity) })
     }
 
-    /// The sample's progress steps while a move runs (PRD P0-10).
-    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> { rejectMoveUpdates }
+    /// The sample's progress steps for one run (PRD P0-10).
+    ///
+    /// A fresh stream per call keeps a retry from ending on the previous run's finished step.
+    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
+        let (stream, continuation) = AsyncStream.makeStream(of: RejectMoveProgress.self)
+        rejectMoveContinuation = continuation
+        return stream
+    }
 
     /// Refuses a disabled or read-only sample request before anything changes (PRD P0-10).
     private func checkMoveRejects(_ configuration: RejectMoveConfiguration) throws {
@@ -397,11 +413,11 @@ final class TestLibrary: FolderLibrary {
         var outcomes: [RejectMoveOutcome] = []
         var moved: Set<PhotoIdentity> = []
         for entry in entries {
-            rejectMoveContinuation.yield(.setStarted(entry.identity))
+            rejectMoveContinuation?.yield(.setStarted(entry.identity))
             let outcome = simulateMove(entry)
             outcomes.append(outcome)
             if case .moved(let set) = outcome { moved.insert(set.identity) }
-            rejectMoveContinuation.yield(.setFinished(outcome))
+            rejectMoveContinuation?.yield(.setFinished(outcome))
         }
         if !moved.isEmpty {
             stored.removeAll { moved.contains($0.id) }
@@ -413,7 +429,8 @@ final class TestLibrary: FolderLibrary {
         let failed = Set(result.failed.map(\.identity))
         let retryable = entries.filter { failed.contains($0.identity) }
         if !retryable.isEmpty { rejectMoveBatches[result.id] = retryable }
-        rejectMoveContinuation.yield(.finished(result))
+        rejectMoveContinuation?.yield(.finished(result))
+        rejectMoveContinuation = nil
         return result
     }
 

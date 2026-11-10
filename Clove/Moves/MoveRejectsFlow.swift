@@ -87,32 +87,22 @@ final class MoveRejectsFlow: Identifiable {
     /// through C6. A completed run is recorded on the model for the toast and C14's undo; the
     /// return value tells the sheet whether it can dismiss.
     func move(_ plan: RejectMovePlan) async -> Bool {
-        guard let selection = keepSelection else { return false }
+        // The stage becomes moving synchronously before the first await, so a second tap on Move
+        // cannot start a second run or overwrite the completed move (PRD P0-10).
+        guard case .confirming(let confirmed) = stage, confirmed == plan,
+            let selection = keepSelection
+        else { return false }
+        let folder = browsing.state.folder
         let kept = selection.orderedKeptIdentities
         let moving = selection.movingPlan
         stage = .moving(finished: 0, total: moving.photoCount)
 
-        var clearFailures: [RejectMoveFailedSet] = []
-        var cleared: [PhotoIdentity] = []
+        var clearing = RejectMoveKeepClearing()
         for identity in kept {
             let status = await browsing.apply(.reject(false), to: identity)
-            guard let status, status.state.isConfirmed else {
-                let failure: RejectMoveFailure
-                if case .failed(let writeFailure) = status?.state {
-                    failure = RejectMoveFailure(classifying: writeFailure)
-                } else {
-                    failure = RejectMoveFailure(
-                        reason: .notConfirmed,
-                        message: "The kept photo's Reject wasn't cleared.")
-                }
-                clearFailures.append(
-                    RejectMoveFailedSet(
-                        identity: identity,
-                        failure: failure,
-                        files: plan.readyEntries.first { $0.identity == identity }?.files ?? []))
-                continue
-            }
-            cleared.append(identity)
+            clearing.record(
+                status, for: identity,
+                files: plan.readyEntries.first { $0.identity == identity }?.files ?? [])
         }
 
         let progress = await browsing.rejectMoveProgress()
@@ -121,8 +111,11 @@ final class MoveRejectsFlow: Identifiable {
             let result = try await browsing.runRejectMove(moving)
             await finishProgress()
             let outcomes =
-                result.outcomes + clearFailures.map(RejectMoveOutcome.failed)
+                result.outcomes + clearing.clearFailures.map(RejectMoveOutcome.failed)
             let completed = RejectMoveResult(id: result.id, outcomes: outcomes)
+            // A folder replaced while the move ran must not record its result against the new
+            // one; the model already cleared the old record when that open happened.
+            guard browsing.state.folder == folder else { return true }
             browsing.recordRejectMove(
                 completed, keptIdentities: kept,
                 rejectsFolderName: plan.configuration.rejectsFolderName)
@@ -131,12 +124,12 @@ final class MoveRejectsFlow: Identifiable {
             cancelProgress()
             // Nothing moved, so the keep clears are restored; a whole-request refusal must not
             // leave the kept photos changed without a completed record C14 can undo.
-            await restore(cleared)
+            await restore(clearing.restorationIdentities)
             stage = Self.stage(for: refusal)
             return false
         } catch {
             cancelProgress()
-            await restore(cleared)
+            await restore(clearing.restorationIdentities)
             stage = .failed("The rejected photos couldn't be moved.")
             return false
         }

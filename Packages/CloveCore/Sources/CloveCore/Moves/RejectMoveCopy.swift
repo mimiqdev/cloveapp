@@ -146,6 +146,8 @@ public struct RejectMoveToast: Hashable, Sendable {
     public let failureMessage: String?
     /// The skipped sets, or nil when none was (P0-10).
     public let skippedMessage: String?
+    /// The failed sets whose Reject was cleared before the retry, or nil (P0-10).
+    public let noLongerRejectedMessage: String?
     /// Whether the toast offers Details (design handoff, P0-10).
     public let showsDetails: Bool
 
@@ -154,7 +156,8 @@ public struct RejectMoveToast: Hashable, Sendable {
         message = "Moved \(result.movedCount) to \(rejectsFolderName.rawValue)"
         failureMessage =
             result.unmovedCount == 0 ? nil : "\(result.unmovedCount) couldn't be moved"
-        skippedMessage = Self.skipped(result.skippedCount)
+        skippedMessage = Self.skipped(result.otherSkippedCount)
+        noLongerRejectedMessage = Self.noLongerRejected(result.noLongerRejectedCount)
         showsDetails = result.unmovedCount > 0
     }
 
@@ -162,6 +165,13 @@ public struct RejectMoveToast: Hashable, Sendable {
     static func skipped(_ count: Int) -> String? {
         guard count > 0 else { return nil }
         return count == 1 ? "1 photo was skipped." : "\(count) photos were skipped."
+    }
+
+    /// The "no longer rejected" sentence, shared with the details sheet (PRD P0-10).
+    static func noLongerRejected(_ count: Int) -> String? {
+        guard count > 0 else { return nil }
+        return count == 1
+            ? "1 photo is no longer rejected." : "\(count) photos are no longer rejected."
     }
 }
 
@@ -196,6 +206,8 @@ public struct RejectMoveDetails: Hashable, Sendable {
     public let rows: [Row]
     /// The skipped sets, or nil when none was (PRD P0-10).
     public let skippedMessage: String?
+    /// The failed sets whose Reject was cleared before the retry, or nil (P0-10).
+    public let noLongerRejectedMessage: String?
     /// Whether Try again can resend anything (PRD P0-10).
     public let canRetry: Bool
 
@@ -218,7 +230,9 @@ public struct RejectMoveDetails: Hashable, Sendable {
                     reason: set.failure.reason.userMessage)
             })
         self.rows = rows
-        skippedMessage = RejectMoveToast.skipped(result.skippedCount)
+        skippedMessage = RejectMoveToast.skipped(result.otherSkippedCount)
+        noLongerRejectedMessage = RejectMoveToast.noLongerRejected(
+            result.noLongerRejectedCount)
         canRetry = result.failedCount > 0
     }
 
@@ -245,6 +259,115 @@ public struct RejectMoveDetails: Hashable, Sendable {
         if files.contains(where: { $0.role == .heifCompanion }) { parts.append("HIF") }
         return parts.joined(separator: " + ")
     }
+}
+
+/// The failed sets a Move rejects retry should send, and the ones it must leave alone.
+///
+/// C6's retry replans its stored failed sets and checks only their write state, not whether the
+/// photo is still rejected. The model therefore reads the folder's current marks first: a failed
+/// photo the person un-rejected is reported as no longer rejected and never resent. Kept photos
+/// are not move failures at all; their own clear failures are retried through C4.
+public struct RejectMoveRetrySelection: Hashable, Sendable {
+    /// Failed sets still rejected, which C6 may retry (PRD P0-10).
+    public let retryable: [RejectMoveFailedSet]
+    /// Failed sets whose Reject was cleared, reported as no longer rejected (P0-10).
+    public let noLongerRejected: [RejectMoveFailedSet]
+    /// Failed sets that were kept in the confirmation, retried through C4 (P0-10).
+    public let clearFailures: [RejectMoveFailedSet]
+
+    /// Selects from one completed move's failures (PRD P0-10).
+    public init(
+        result: RejectMoveResult, keptIdentities: Set<PhotoIdentity>,
+        rejectedIdentities: Set<PhotoIdentity>
+    ) {
+        let kept = result.failed.filter { keptIdentities.contains($0.identity) }
+        let moveFailures = result.failed.filter { !keptIdentities.contains($0.identity) }
+        clearFailures = kept
+        retryable = moveFailures.filter { rejectedIdentities.contains($0.identity) }
+        noLongerRejected = moveFailures.filter {
+            !rejectedIdentities.contains($0.identity)
+        }
+    }
+
+    /// The identities C6's retry must not receive (PRD P0-10).
+    public var excludedFromRetry: Set<PhotoIdentity> {
+        Set(noLongerRejected.map(\.identity))
+    }
+
+    /// Whether there is anything for C6's retry to send (PRD P0-10).
+    public var hasRetryableMoves: Bool { !retryable.isEmpty }
+}
+
+/// Builds the result a Move rejects retry shows after C6 and the kept clears finish (P0-10).
+///
+/// Earlier moved, split and skipped outcomes stay in the record, C6's retried outcomes replace
+/// its failed ones, kept clears that still fail are put back, and photos the person un-rejected
+/// become skips with ``RejectMoveSkipReason/noLongerRejected`` rather than failures.
+public enum RejectMoveRetryMerge {
+    /// Merges one retry's parts into the completed move (PRD P0-10).
+    public static func result(
+        previous: RejectMoveResult, retried: RejectMoveResult?,
+        unresolvedClearFailures: [RejectMoveFailedSet],
+        noLongerRejected: [PhotoIdentity]
+    ) -> RejectMoveResult {
+        let alreadyDone = previous.outcomes.filter { outcome in
+            if case .failed = outcome { return false }
+            return true
+        }
+        let noLongerRejectedOutcomes = noLongerRejected.map { identity in
+            RejectMoveOutcome.skipped(
+                RejectMoveSkippedSet(
+                    identity: identity, reason: .noLongerRejected,
+                    message: "The photo is no longer rejected."))
+        }
+        return RejectMoveResult(
+            id: retried?.id ?? previous.id,
+            outcomes: alreadyDone + (retried?.outcomes ?? [])
+                + unresolvedClearFailures.map(RejectMoveOutcome.failed)
+                + noLongerRejectedOutcomes)
+    }
+}
+
+/// The result of clearing Reject on the kept photos before a move (design handoff, P0-10).
+///
+/// A keep is committed by a Reject-off write through C4. A failed write leaves that photo out of
+/// the move and reports it with the failures; a later whole-request refusal restores Reject on
+/// every photo whose clear was confirmed.
+public struct RejectMoveKeepClearing: Hashable, Sendable {
+    /// The kept photos whose Reject was confirmed cleared, in order (P0-10).
+    public private(set) var clearedIdentities: [PhotoIdentity]
+    /// The kept photos whose clear did not confirm (P0-10).
+    public private(set) var clearFailures: [RejectMoveFailedSet]
+
+    /// Starts with nothing cleared (P0-10).
+    public init() {
+        clearedIdentities = []
+        clearFailures = []
+    }
+
+    /// Records one kept photo's clear result (P0-10).
+    public mutating func record(
+        _ status: MarkChangeStatus?, for identity: PhotoIdentity,
+        files: [RejectMoveFilePlan]
+    ) {
+        guard let status, status.state.isConfirmed else {
+            let failure: RejectMoveFailure
+            if case .failed(let writeFailure) = status?.state {
+                failure = RejectMoveFailure(classifying: writeFailure)
+            } else {
+                failure = RejectMoveFailure(
+                    reason: .notConfirmed,
+                    message: "The kept photo's Reject wasn't cleared.")
+            }
+            clearFailures.append(
+                RejectMoveFailedSet(identity: identity, failure: failure, files: files))
+            return
+        }
+        clearedIdentities.append(identity)
+    }
+
+    /// The kept photos a whole-request refusal must restore Reject on (P0-10).
+    public var restorationIdentities: [PhotoIdentity] { clearedIdentities }
 }
 
 /// The one place the Move rejects screens keep wording C6 does not own (PRD Failure and recovery).

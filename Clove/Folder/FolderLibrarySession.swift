@@ -386,9 +386,11 @@ final class FolderLibrarySession: FolderLibrary {
         guard let mover = rejectMover, let session = openSession else {
             throw FolderSessionError.ended
         }
+        let generation = scanGeneration
         let result = try await session.withAdmittedWork {
             try await mover.move(plan)
         }
+        guard generation == scanGeneration, openSession === session else { return result }
         let moved = result.movedIdentities
         guard !moved.isEmpty else { return result }
         movedRejectIdentities.formUnion(moved)
@@ -403,12 +405,16 @@ final class FolderLibrarySession: FolderLibrary {
     /// The retry is admitted like the first run and drops whatever it moves, so a retry's moved
     /// sets leave the grid as the first run's did. A folder that closed, or a run this session
     /// never started, cannot be retried and answers nil.
-    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? {
+    func retryFailedRejects(
+        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
+    ) async throws -> RejectMoveResult? {
         guard let mover = rejectMover, let session = openSession else { return nil }
+        let generation = scanGeneration
         let retried = try await session.withAdmittedWork {
-            try await mover.retryFailed(in: batch)
+            try await mover.retryFailed(in: batch, excluding: identities)
         }
         guard let result = retried else { return nil }
+        guard generation == scanGeneration, openSession === session else { return result }
         let moved = result.movedIdentities
         guard !moved.isEmpty else { return result }
         movedRejectIdentities.formUnion(moved)

@@ -121,6 +121,12 @@ public enum RejectMoveSkipReason: String, CaseIterable, Hashable, Sendable {
     /// The caller cancelled the move before this set started; cancellation only takes effect
     /// between sets, never inside one (PRD P0-10).
     case cancelled
+    /// A retry skipped the set because its photo is no longer rejected (PRD P0-10).
+    ///
+    /// C6's retry replans its stored failures and only checks write state, so the caller removes
+    /// sets whose Reject was cleared after the earlier run. Reporting the removal as a skip keeps
+    /// it out of "couldn't be moved" and never moves a photo the person un-rejected.
+    case noLongerRejected
 }
 
 extension Array where Element == MarkWriteErrorEntry {

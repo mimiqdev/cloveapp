@@ -626,37 +626,43 @@ final class BrowsingModel {
     /// every photo the run moved. A batch the library can no longer retry answers nil.
     func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
-        let kept = Set(completed.keptIdentities)
-        let clearFailures = completed.result.failed.filter { kept.contains($0.identity) }
-        let moveFailures = completed.result.failed.filter { !kept.contains($0.identity) }
-        guard !clearFailures.isEmpty || !moveFailures.isEmpty else { return nil }
+        let folder = state.folder
+        let selection = RejectMoveRetrySelection(
+            result: completed.result,
+            keptIdentities: Set(completed.keptIdentities),
+            rejectedIdentities: Set(
+                storedPhotos.filter(\.marks.isRejected).map(\.id)))
+        guard
+            selection.hasRetryableMoves || !selection.clearFailures.isEmpty
+                || !selection.noLongerRejected.isEmpty
+        else { return nil }
         isMovingRejects = true
         defer { isMovingRejects = false }
 
-        // C6 first: a lost batch leaves the clear failures untouched for a later attempt.
+        // C6 first, without the failures whose Reject was cleared. If its batch is gone, nothing
+        // else changes and the details sheet can report the failure.
         var retried: RejectMoveResult?
-        if !moveFailures.isEmpty {
-            guard let result = try await library.retryFailedRejects(in: completed.result.id) else {
-                return nil
-            }
+        if selection.hasRetryableMoves {
+            guard
+                let result = try await library.retryFailedRejects(
+                    in: completed.result.id, excluding: selection.excludedFromRetry)
+            else { return nil }
             retried = result
         }
+
         // A kept photo's Reject clear is a C4 write, not a C6 move, so it is retried through the
         // same mark path. An unresolved one stays in the failure list for the next attempt.
-        var unresolved: [RejectMoveFailedSet] = []
-        for set in clearFailures {
+        var clearing = RejectMoveKeepClearing()
+        for set in selection.clearFailures {
             let status = await library.apply(.reject(false), to: set.identity)
-            if !status.state.isConfirmed { unresolved.append(set) }
+            clearing.record(status, for: set.identity, files: set.files)
         }
+        guard state.folder == folder else { return nil }
 
-        let alreadyDone = completed.result.outcomes.filter { outcome in
-            if case .failed = outcome { return false }
-            return true
-        }
-        let combined = RejectMoveResult(
-            id: retried?.id ?? completed.result.id,
-            outcomes: alreadyDone + (retried?.outcomes ?? [])
-                + unresolved.map(RejectMoveOutcome.failed))
+        let combined = RejectMoveRetryMerge.result(
+            previous: completed.result, retried: retried,
+            unresolvedClearFailures: clearing.clearFailures,
+            noLongerRejected: selection.noLongerRejected.map(\.identity))
         lastRejectMove = CompletedRejectMove(
             result: combined, keptIdentities: completed.keptIdentities,
             rejectsFolderName: completed.rejectsFolderName)
@@ -863,6 +869,9 @@ final class BrowsingModel {
         state.selection = []
         state.groupPosition = nil
         state.route = .grid
+        // The previous folder's completed move cannot be undone through this folder's session.
+        lastRejectMove = nil
+        isRejectMoveToastVisible = false
         // The finishing action, its failure and its event count belong to the folder that is
         // gone, so a new folder's group view never shows or advances on the old one (PRD P0-12).
         lastGroupFinishing = nil

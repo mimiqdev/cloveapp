@@ -90,6 +90,7 @@ struct MoveRejectsSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(selection.movingCount == 0)
                 .accessibilityIdentifier("clove.moves.confirm")
             }
         }

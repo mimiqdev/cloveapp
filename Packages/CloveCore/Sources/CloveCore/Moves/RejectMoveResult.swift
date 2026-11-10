@@ -247,6 +247,15 @@ public struct RejectMoveResult: Hashable, Sendable {
     /// Sets not attempted; PRD "Failure and recovery" retries failed items only.
     public var skippedCount: Int { skipped.count }
 
+    /// Skipped sets whose Reject was cleared after an earlier run, so a retry left them alone
+    /// (PRD P0-10).
+    public var noLongerRejectedCount: Int {
+        skipped.filter { $0.reason == .noLongerRejected }.count
+    }
+
+    /// Skipped sets for reasons other than a cleared Reject (PRD P0-10).
+    public var otherSkippedCount: Int { skippedCount - noLongerRejectedCount }
+
     /// PRD P0-10's "M photos couldn't be moved": failed and split sets, never skipped ones.
     public var unmovedCount: Int { failedCount + splitCount }
 

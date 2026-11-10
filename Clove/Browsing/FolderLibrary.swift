@@ -149,9 +149,13 @@ protocol FolderLibrary: AnyObject {
 
     /// Retries only the sets an earlier Move rejects run could not move (PRD P0-10).
     ///
-    /// Moved sets stay moved and split or skipped sets are not resent. Nil means the library can
-    /// no longer retry that run, for example because the folder it belonged to closed.
-    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult?
+    /// Moved sets stay moved and split or skipped sets are not resent. `excluding` names failed
+    /// photos whose Reject was cleared after the run, so C6's retry never moves a photo the
+    /// person un-rejected. Nil means the library can no longer retry that run, for example
+    /// because the folder it belonged to closed.
+    func retryFailedRejects(
+        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
+    ) async throws -> RejectMoveResult?
 
     /// The progress steps of the next or running Move rejects (PRD P0-10).
     ///
@@ -309,7 +313,14 @@ extension FolderLibrary {
         throw RejectMoveRefusal.disabled
     }
 
-    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? { nil }
+    func retryFailedRejects(
+        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
+    ) async throws -> RejectMoveResult? { nil }
+
+    /// Retries a run without excluding any failed set (PRD P0-10).
+    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? {
+        try await retryFailedRejects(in: batch, excluding: [])
+    }
 
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
         AsyncStream { $0.finish() }

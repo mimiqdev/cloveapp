@@ -251,4 +251,86 @@ struct RejectMoveCopyTests {
             RejectMoveCopy.viewOnlyLocation
                 == "You can view this location, but can't save marks here.")
     }
+    /// A failed photo whose Reject was cleared is excluded from the retry and reported apart.
+    @Test func retrySelectionDropsPhotosNoLongerRejected() {
+        let result = makeResult(failed: 2)
+        let first = result.failed[0].identity
+        let second = result.failed[1].identity
+        let selection = RejectMoveRetrySelection(
+            result: result, keptIdentities: [], rejectedIdentities: [first])
+
+        #expect(selection.retryable.map(\.identity) == [first])
+        #expect(selection.noLongerRejected.map(\.identity) == [second])
+        #expect(selection.excludedFromRetry == [second])
+        #expect(selection.clearFailures.isEmpty)
+    }
+
+    /// The merge keeps earlier moves, carries the retry's handle and reports cleared rejects as
+    /// skips, while a kept clear that still fails stays a failure (PRD P0-10).
+    @Test func retryMergeKeepsEarlierMovesAndUnresolvedFailures() {
+        let previous = makeResult(moved: 1, failed: 2)
+        let retried = makeResult(moved: 1)
+        let keptIdentity = previous.failed[1].identity
+        let keptFailure = RejectMoveFailedSet(
+            identity: keptIdentity,
+            failure: RejectMoveFailure(reason: .notConfirmed, message: "clear failed"),
+            files: [])
+
+        let combined = RejectMoveRetryMerge.result(
+            previous: previous, retried: retried,
+            unresolvedClearFailures: [keptFailure],
+            noLongerRejected: [previous.failed[0].identity])
+
+        #expect(combined.id == retried.id)
+        #expect(combined.movedCount == 2)
+        #expect(combined.failedCount == 1)
+        #expect(combined.noLongerRejectedCount == 1)
+        #expect(combined.otherSkippedCount == 0)
+        #expect(combined.skipped.first?.reason == .noLongerRejected)
+    }
+
+    /// A kept clear records confirmation or failure, and only confirmed clears are restored.
+    @Test func keepClearingTracksRestoreAndFailures() {
+        let plan = makePlan(photos: 2, sidecars: 2)
+        var selection = RejectMoveKeepSelection(plan: plan)
+        let first = plan.readyEntries[0].identity
+        let second = plan.readyEntries[1].identity
+        selection.toggle(first)
+        selection.toggle(second)
+
+        var clearing = RejectMoveKeepClearing()
+        clearing.record(
+            MarkChangeStatus(
+                id: MarkChangeID(), identity: first, requested: .reject(false),
+                state: .storedInClove),
+            for: first, files: plan.readyEntries[0].files)
+        clearing.record(
+            MarkChangeStatus(
+                id: MarkChangeID(), identity: second, requested: .reject(false),
+                state: .failed(MarkWriteFailure(reason: .unknown, message: "failed"))),
+            for: second, files: plan.readyEntries[1].files)
+
+        #expect(clearing.clearedIdentities == [first])
+        #expect(clearing.restorationIdentities == [first])
+        #expect(clearing.clearFailures.map(\.identity) == [second])
+        // A failed clear never changes which staged sets the move excludes.
+        #expect(!selection.movingPlan.readyEntries.contains { $0.identity == first })
+        #expect(!selection.movingPlan.readyEntries.contains { $0.identity == second })
+    }
+
+    /// The toast and details show a cleared reject as no longer rejected, not as a failure.
+    @Test func copyReportsNoLongerRejectedSeparately() {
+        let result = RejectMoveRetryMerge.result(
+            previous: makeResult(failed: 1), retried: nil,
+            unresolvedClearFailures: [],
+            noLongerRejected: [makeResult(failed: 1).failed[0].identity])
+        let toast = RejectMoveToast(result: result, rejectsFolderName: .defaultFolderName)
+        #expect(toast.skippedMessage == nil)
+        #expect(toast.noLongerRejectedMessage == "1 photo is no longer rejected.")
+        #expect(!toast.showsDetails)
+        let details = RejectMoveDetails(result: result)
+        #expect(details.noLongerRejectedMessage == "1 photo is no longer rejected.")
+        #expect(details.rows.isEmpty)
+    }
+
 }
