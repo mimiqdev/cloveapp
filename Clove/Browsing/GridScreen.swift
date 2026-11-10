@@ -6,7 +6,8 @@ import SwiftUI
 /// A `UICollectionView` draws the cells, their overlays, the similar-group outlines and counts,
 /// and the collapsed covers, while the browsing state keeps the filter and the order per scene
 /// (PRD P0-03, P0-11, P0-14). The filter and order menus change the state through
-/// ``BrowsingModel`` only, so a fold, a resize or a relaunch restores them.
+/// ``BrowsingModel`` only, so a fold, a resize or a relaunch restores them. The save-state row
+/// under the controls is the folder's one indicator (PRD P0-08).
 ///
 /// Design placeholder: system menus, symbols and colours stand in for the visual design's
 /// controls and overlays.
@@ -40,6 +41,12 @@ struct GridScreen: View {
         ).cells
         VStack(spacing: 0) {
             controls
+            // The folder's one save state, beside the grid's other folder-level readings
+            // (PRD P0-08). It opens the photos whose marks are not saved yet.
+            SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.grid.saveState")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
             Divider()
             if cells.isEmpty {
                 emptyState

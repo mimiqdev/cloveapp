@@ -27,8 +27,8 @@ import SwiftUI
 /// PRD Auto-advance). P2's keyboard can call that same path.
 ///
 /// Design placeholder: the HUD, filmstrip, preview and the swipe's badge use system components
-/// until the visual design lands. The save-state words are U1's summary, which U7 replaces; the
-/// Undo button is disabled until U8 supplies the one model call it should invoke.
+/// until the visual design lands. The Undo button is disabled until U8 supplies the one model
+/// call it should invoke.
 struct DetailScreen: View {
     /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
@@ -85,6 +85,14 @@ struct DetailScreen: View {
     /// labels the HUD offers.
     private var settings: AppSettings { store.settings }
 
+    /// Whether the system folder picker is presented for a read-only failure's Open action
+    /// (PRD P0-01).
+    @State private var isPickingFolder = false
+
+    /// The failed changes whose explanation the user dismissed, so Cancel hides the row without
+    /// pretending the change was saved (PRD Failure and recovery, row 1).
+    @State private var dismissedFailures: Set<MarkChangeID> = []
+
     /// Creates the screen for one browsing model.
     ///
     /// `images` exists for previews and tests; the app uses the browsing model's source for the
@@ -109,6 +117,16 @@ struct DetailScreen: View {
                 .accessibilityIdentifier("clove.detail.noPhoto")
             }
         }
+        .sheet(isPresented: $isPickingFolder) {
+            FolderPicker(
+                onPick: { url in
+                    isPickingFolder = false
+                    Task { await browsing.openPickedFolder(url) }
+                },
+                onCancel: { isPickingFolder = false }
+            )
+            .ignoresSafeArea()
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail")
         .onDisappear {
@@ -128,13 +146,26 @@ struct DetailScreen: View {
             DetailMarkingHUD(
                 photo: photo,
                 settings: settings,
-                saveState: SaveStateSummary.text(
-                    for: browsing.latestChange(for: photo.id)?.state),
+                saveState: browsing.saveText(for: photo.id),
                 zoomName: zoomName,
                 rate: { rate($0, on: photo) },
                 label: { choose($0, on: photo) },
                 toggleReject: { toggleReject(on: photo) },
                 undo: undo)
+            // The open folder's own save state, then the current photo's failure with the PRD's
+            // Retry and Cancel (PRD P0-08). The folder's row carries a location loss; the photo's
+            // row carries one write that did not confirm.
+            SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.detail.saveStatus")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            if let situation = failureSituation(for: photo) {
+                SaveFailureBanner(
+                    situation: situation, identifierPrefix: "clove.detail.saveFailure",
+                    perform: { perform($0, on: photo) }
+                )
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            }
             Divider()
             previewArea(for: photo)
             Divider()
@@ -478,6 +509,38 @@ struct DetailScreen: View {
 
     /// C13's rules for this screen's settings.
     private var rules: MarkingInputRules { MarkingInputRules(settings: settings) }
+
+    // MARK: - Save state
+
+    /// The situation to explain under the HUD for the current photo, or nil (PRD P0-08).
+    ///
+    /// A folder whose location was reported gone explains itself once, in the folder's row, so
+    /// one photo's own failure row stays out of its way. The row is only for a change that did not
+    /// confirm, and Cancel keeps it dismissed for that change rather than for the photo forever:
+    /// a newer failure has a new identity and asks again (PRD How marks reach disk, rule 8).
+    private func failureSituation(for photo: GridPhoto) -> SaveSituation? {
+        guard browsing.folderLocationLoss == nil else { return nil }
+        guard let status = browsing.latestChange(for: photo.id), status.state.failure != nil,
+            !dismissedFailures.contains(status.id)
+        else { return nil }
+        return SaveStatus.situation(for: status.state, folderLoss: nil)
+    }
+
+    /// Performs one action of the PRD's failure row (PRD Failure and recovery).
+    private func perform(_ action: SaveAction, on photo: GridPhoto) {
+        switch action {
+        case .retry, .freeSpaceAndRetry:
+            Task { await browsing.retryLatestChange(for: photo.id) }
+        case .cancel:
+            if let status = browsing.latestChange(for: photo.id) {
+                dismissedFailures.insert(status.id)
+            }
+        case .reopenFolder:
+            Task { await browsing.reopenOpenFolder() }
+        case .openFolder:
+            isPickingFolder = true
+        }
+    }
 
     // MARK: - Geometry
 

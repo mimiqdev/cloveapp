@@ -7,7 +7,8 @@ import SwiftUI
 /// Compact width shows one screen at a time behind a back button; regular width shows the grid
 /// beside the detail or the group view. Both read the same ``BrowsingModel``, so a fold, an
 /// unfold or a resize changes only which layout draws the state (G1 fold-state row). The choice
-/// reads the width class the view is handed, never a device name or model.
+/// reads the width class the view is handed, never a device name or model. The leaving question
+/// belongs to the shell because entry, the grid, the group view and settings can all be left.
 struct BrowseShell: View {
     /// The scene's browsing state and the operations the screens perform on it.
     let browsing: BrowsingModel
@@ -15,11 +16,26 @@ struct BrowseShell: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
-        if usesSplitLayout {
-            splitLayout
-        } else {
-            compactLayout
+        Group {
+            if usesSplitLayout {
+                splitLayout
+            } else {
+                compactLayout
+            }
         }
+        // PRD Failure and recovery asks before leaving a folder with unconfirmed writes, wherever
+        // the leaving started: the back button, a pick or a Recents tap.
+        .sheet(item: leavePrompt) { _ in
+            LeaveFolderPromptView(browsing: browsing)
+        }
+    }
+
+    /// The leaving question the model is holding, with dismissal answering Cancel
+    /// (PRD Failure and recovery, last row).
+    private var leavePrompt: Binding<LeaveFolderPrompt?> {
+        Binding(
+            get: { browsing.leavePrompt },
+            set: { if $0 == nil { browsing.cancelLeave() } })
     }
 
     /// Compact width: one screen at a time (PRD single-screen iPhone).

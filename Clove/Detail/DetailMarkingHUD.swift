@@ -11,8 +11,9 @@ import SwiftUI
 /// ``BrowsingModel/apply(_:to:)``, so tapping the applied rating clears it and the same label
 /// clears itself (C13's rules).
 ///
-/// Design placeholder: system buttons and a menu stand in for the design's glass HUD. U7 replaces
-/// the save-state words and U8 enables Undo.
+/// Design placeholder: system buttons and a menu stand in for the design's glass HUD. The
+/// save-state line reads C4's confirmed state through ``BrowsingModel/saveText(for:)``, and the
+/// failure row with Retry belongs to the screen above this one (PRD P0-08). U8 enables Undo.
 struct DetailMarkingHUD: View {
     /// The photo whose marks the HUD shows (PRD P0-04).
     let photo: GridPhoto
@@ -21,7 +22,7 @@ struct DetailMarkingHUD: View {
     /// and keep-zoom choices.
     let settings: AppSettings
 
-    /// U1's save-state summary, which U7 replaces with its own copy (PRD P0-08).
+    /// The photo's save state, from C4's confirmed state (PRD P0-08).
     let saveState: String
 
     /// The current zoom, for focus inspection: Fit, 100% or a percentage.
