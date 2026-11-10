@@ -66,7 +66,7 @@ struct DetailSwipeFeedbackBadge: View {
     /// visual design replaces.
     private func badgeCentre(in size: CGSize) -> CGPoint {
         let lift: CGFloat = 56
-        let halfWidth: CGFloat = 70
+        let halfWidth: CGFloat = 76
         let halfHeight: CGFloat = 20
         return CGPoint(
             x: min(max(feedback.location.x, halfWidth), max(size.width - halfWidth, halfWidth)),

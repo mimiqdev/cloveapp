@@ -323,7 +323,7 @@ struct DetailScreen: View {
     /// The double-tap action: 100% around the tapped point, or back to fit (PRD P0-04).
     private func doubleTap(at anchor: UnitPoint, on photo: GridPhoto) {
         guard settings.doubleTap == .zoom else { return }
-        guard scale <= 1.01 else {
+        guard scale <= DetailFitScale.tolerance else {
             zoomMode = .fit
             setZoom(.fit)
             return
@@ -506,7 +506,7 @@ struct DetailScreen: View {
     /// Fit, 100% or the percentage the user pinched.
     private var zoomName: String {
         if case .fullResolution = zoomMode { return "100%" }
-        if scale <= 1.005 { return "Fit" }
+        if scale <= DetailFitScale.tolerance { return "Fit" }
         return "\(Int((scale * 100).rounded()))%"
     }
 

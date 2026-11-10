@@ -261,13 +261,14 @@ final class BrowsingModel {
         _ = await library.apply(change, to: photo)
     }
 
-    /// The auto-advance the last written mark resolved to, with the photo it marked
-    /// (PRD Auto-advance).
+    /// The auto-advance the last mark made in the detail view resolved to, with the photo it
+    /// marked (PRD Auto-advance).
     ///
     /// U8 reads ``lastAutoAdvance``'s `markedPhoto` after an undo to return to the photo whose
     /// mark was undone (PRD Undo row: undoing after auto-advance returns to the photo whose mark
-    /// was undone). Every mark records its plan, including the one that stays, so the record
-    /// always names the latest mark rather than the latest move.
+    /// was undone). Every detail mark records its plan, including the one that stays, so the
+    /// record always names the latest mark rather than the latest move. A batch mark from the grid
+    /// has no detail view to advance, so it records nothing.
     private(set) var lastAutoAdvance: AutoAdvancePlan?
 
     /// Records the advance one written mark started, so undo can return to the marked photo

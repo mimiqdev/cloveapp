@@ -14,21 +14,22 @@ public enum MarkingSwipe: Hashable, Sendable {
 /// The drag that begins a marking swipe, and the drags that must not (PRD Detail gestures).
 ///
 /// A marking swipe shares the preview with the other gestures PRD Detail gestures lists: the
-/// horizontal swipe that navigates, the edge single taps and the centre double tap, and the
-/// scroll view's own pinch and pan. The taps need no help, because a pan never begins without
+/// horizontal swipe the PRD gives navigation, the edge single taps and the centre double tap, and
+/// the scroll view's own pinch and pan. The taps need no help, because a pan never begins without
 /// movement. A drag begins a marking swipe only when it is vertical enough, so a more horizontal
-/// drag is left unclaimed and a horizontal navigation gesture stays available.
+/// drag is left unclaimed for the navigation the PRD lists (Clove navigates with edge taps and the
+/// filmstrip today).
 ///
 /// PRD Detail gestures turns vertical marking swipes off while zoomed, where a one-finger drag
 /// pans instead, and PRD Gesture-related settings can turn marking gestures off entirely. Both
 /// answer nil here rather than at the call site, so the view asks one question and keeps no
 /// marking rule of its own.
 public struct MarkingSwipeRules: Hashable, Sendable {
-    /// How much larger the vertical travel must be than the horizontal travel, as a ratio.
+    /// The minimum ratio of vertical to horizontal travel for a marking swipe.
     ///
-    /// The launch value of 1 is the 45° split: a drag at least as steep as a diagonal is a
-    /// marking swipe, anything flatter stays navigation. It is a starting value, tunable with
-    /// the other gesture distances.
+    /// The launch value of 1 is the 45° split: a drag whose vertical travel is at least its
+    /// horizontal travel is a marking swipe, and anything flatter is left unclaimed. It is a
+    /// starting value, tunable with the other gesture distances.
     public var verticalToHorizontalRatio: Double
 
     /// The launch starting value: a drag as steep as 45° begins a marking swipe.

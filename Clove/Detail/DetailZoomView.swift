@@ -2,6 +2,16 @@ import CloveCore
 import SwiftUI
 import UIKit
 
+/// The scale above fit at which the preview counts as zoomed (PRD Detail gestures, PRD P0-04).
+///
+/// A pinch that comes back to fit can settle a hair above the minimum scale, and the marking
+/// gesture, the zoom name and the double-tap action all have to agree on where "fit" ends; one
+/// tolerance keeps them from drifting apart.
+enum DetailFitScale {
+    /// How far above the fit scale a view may sit and still count as fit.
+    static let tolerance: CGFloat = 1.005
+}
+
 /// One zoom the screen asks the preview to show (PRD P0-04).
 ///
 /// The screen computes the scale and the image point from ``DetailZoom``'s geometry; the view
@@ -127,12 +137,6 @@ struct DetailZoomView: UIViewRepresentable {
 /// zoom application.
 @MainActor
 final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
-    /// The scale above fit at which the view counts as zoomed, matching the screen's zoom name.
-    ///
-    /// A pinch that comes back to fit can settle a hair above the minimum scale, so an exact
-    /// comparison would leave the marking pan off for the rest of the session.
-    private static let fitTolerance: CGFloat = 1.005
-
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
     private let edgeTap = UITapGestureRecognizer()
@@ -248,7 +252,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// other. Turning the scroll view's pan off at fit would also cost U5's pinch, which needs it
     /// for two-finger panning as it zooms.
     private func updateGestureAvailability() {
-        let isZoomed = scrollView.zoomScale > Self.fitTolerance
+        let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
         markingPan.isEnabled = rules.settings.gesturesEnabled && !isZoomed
     }
 
@@ -316,7 +320,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         swipe = rules.beginSwipe(
             horizontalTravel: Double(translation.x),
             verticalTravel: -Double(translation.y),
-            isZoomed: scrollView.zoomScale > Self.fitTolerance)
+            isZoomed: scrollView.zoomScale > DetailFitScale.tolerance)
         return swipe != nil
     }
 
@@ -357,8 +361,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Starts the session for the direction the drag began as.
     private func beginMarkingSwipe() {
-        // The screen drops a pending auto-advance before it can swap the photo out from under
-        // the finger and send this swipe's travel to a different photo (PRD Auto-advance).
+        // The screen drops a pending auto-advance before it can swap the photo out from under the
+        // finger and send this swipe's travel to a different photo (PRD Auto-advance). A drag that
+        // ends up writing nothing therefore also keeps the current photo, which is what the user
+        // still working on it expects.
         onMarkingSwipeBegin?()
         haptics.prepare()
         feedback?.clear()

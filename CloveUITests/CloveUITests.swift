@@ -185,8 +185,8 @@ final class CloveUITests: XCTestCase {
             for: NSPredicate(format: "label == %@", "Fit"), evaluatedWith: zoom)
         wait(for: [backToFit], timeout: 10)
 
-        // A zoomed drag that marked would change the marks, and a write would change the save
-        // state or move the detail on, so both stay as they were at fit.
+        // A zoomed drag that marked would change the marks, and a write would show its own save
+        // state or move the detail on, so what both read here stays as it was at fit.
         XCTAssertEqual(
             marks.label, marksAtFit, "The zoomed drag rated the photo instead of panning")
         XCTAssertEqual(saveState.label, "No change yet", "The zoomed drag wrote a mark")
