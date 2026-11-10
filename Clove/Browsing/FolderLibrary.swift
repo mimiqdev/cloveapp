@@ -167,6 +167,30 @@ protocol FolderLibrary: AnyObject {
     /// retry. Nil means nothing has been requested for the photo, not that everything is saved.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus?
 
+    /// Runs one finishing action's plan in the open folder session (PRD In-group culling,
+    /// finishing actions; PRD P0-12).
+    ///
+    /// The plan is C10's, and C4's write queue is the only writer, so per-photo results, the
+    /// partial-failure counts and a retry of only the failed items come from one place
+    /// (PRD P0-09). A library whose folder cannot write reports the refused changes instead of
+    /// claiming they were saved (PRD P0-08).
+    func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult
+
+    /// Retries only the changes of one finishing action that still need it (PRD P0-09).
+    ///
+    /// Confirmed changes are left alone, so a retry can never repeat a successful write; the
+    /// plan, the dropped photos and C5's undo record stay as they were (PRD P0-12).
+    func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult
+
+    /// Whether the group is complete, and where the group view goes next, following C12's
+    /// setting (PRD In-group culling, group completion; PRD P0-12).
+    ///
+    /// The library owns the folder's completion records, so the view never derives a second
+    /// rule; a folder that ended answers ``GroupViewCompletion/inProgress``.
+    func groupCompletion(
+        for groupID: GroupID, behaviour: GroupCompletionBehaviour
+    ) async -> GroupViewCompletion
+
     /// The scanned set behind one photo, for writes, thumbnails and the grouping follow-up
     /// (PRD P0-08, P0-11).
     ///
@@ -243,6 +267,22 @@ extension FolderLibrary {
     }
 
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? { nil }
+
+    /// A library with no folder to write records no finishing action and completes no group
+    /// (PRD In-group culling).
+    func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {
+        GroupFinishingResult.applied(plan, statuses: [:])
+    }
+
+    func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult {
+        result
+    }
+
+    func groupCompletion(
+        for groupID: GroupID, behaviour: GroupCompletionBehaviour
+    ) async -> GroupViewCompletion {
+        .inProgress
+    }
 
     /// A library with no batch write reports every photo as failed instead of claiming a save
     /// (PRD P0-09, P0-08).
