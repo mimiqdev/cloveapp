@@ -672,8 +672,12 @@ final class BrowsingModel: UndoHistoryHost {
         guard !change.isEmpty else { return }
         // PRD P0-05's Undo row restores the previous mark, so the marks on screen before the
         // change are the ones undo puts back; a field the user did not see is never restored.
+        let folder = state.folder
         let marksBefore = storedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks()
         let status = await library.apply(change, to: photo)
+        // A change that returns after another folder opened belongs to the folder that is gone,
+        // so it never records a step in the new folder's history (PRD P0-05, P0-14).
+        guard state.folder == folder else { return }
         await recordUndoStep(.mark(status: status, marksBefore: marksBefore))
     }
 
