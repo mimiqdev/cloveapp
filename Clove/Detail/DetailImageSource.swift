@@ -45,7 +45,7 @@ struct DetailPixelRequest: Hashable, Sendable {
     /// Keeps the request inside I2's accepted range, because a view can report a zero size
     /// before its first layout.
     init(displayPixels: Int, need: Need) {
-        self.displayPixels = min(max(displayPixels, 1), 32_768)
+        self.displayPixels = min(max(displayPixels, 1), DetailPixelLimit.maximumEdge)
         self.need = need
     }
 }
