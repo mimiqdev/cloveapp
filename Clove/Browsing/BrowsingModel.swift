@@ -57,6 +57,12 @@ final class BrowsingModel {
     /// overwrites what the user has done since.
     private var hasRestored = false
 
+    /// The saved scene waiting for its folder to hold the photos it names (PRD P0-14).
+    ///
+    /// It applies as soon as the scan delivered them, at the latest when the scan finishes, and
+    /// is dropped if the user navigates or opens another folder first.
+    private var pendingRestore: PendingBrowsingRestore?
+
     /// The task applying the library's updates on the main actor (PRD P0-03, P0-08).
     private var updateTask: Task<Void, Never>?
 
@@ -120,6 +126,7 @@ final class BrowsingModel {
     /// coming back from the grid does not need the picker again. A folder that opens answers
     /// whatever the last failed open left on entry, so the message goes with it (PRD P0-02).
     func openFolder() {
+        pendingRestore = nil
         folderFailure = nil
         showOpenFolder()
     }
@@ -129,6 +136,7 @@ final class BrowsingModel {
     /// The library performs C11's validating read; a failure stays on the model so entry explains
     /// it and asks for the folder again, while a success shows the grid as the scan streams in.
     func openPickedFolder(_ url: URL) async {
+        pendingRestore = nil
         folderFailure = await library.pick(url)
         guard folderFailure == nil else { return }
         showOpenFolder()
@@ -140,6 +148,7 @@ final class BrowsingModel {
     /// A failed reopen keeps C11's reason on that item, so entry can explain it there and ask for
     /// the folder again instead of failing silently.
     func reopen(_ recent: RecentFolder) async {
+        pendingRestore = nil
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
             return
@@ -236,33 +245,76 @@ final class BrowsingModel {
 
     /// Restores this scene's saved state through CloveCore's validation (PRD P0-14).
     ///
-    /// A saved scene that names a folder reopens it through C11 before anything is validated, so
-    /// the folder availability passed in is what the launch actually read (PRD P0-02). An
-    /// unavailable folder starts at entry with the reason on its Recents item, and a launch with
-    /// nothing saved starts at entry. Restoring runs once per scene; later appearances keep
-    /// whatever the user has done.
+    /// A saved scene that shows photos reopens its folder through C11 and shows that folder's
+    /// grid at once, because a large RAW folder's metadata read must not hold the launch on entry.
+    /// The saved photo, filter, order, selection and group place stay pending and are validated by
+    /// ``PendingBrowsingRestore``: they apply as soon as the folder holds every photo they name,
+    /// at the latest when the scan finishes, and only while the scene still shows what the reopen
+    /// produced. The user navigating, opening another folder or reopening a Recents item first
+    /// drops the pending state instead of being overwritten later.
+    ///
+    /// A folder that does not open lands on entry with C11's reason on its Recents item
+    /// (PRD P0-02), and a launch with nothing saved starts at entry. Restoring runs once per
+    /// scene; later appearances keep whatever the user has done.
     func restore(from data: Data?, folderAvailability: FolderAvailability? = nil) async {
         guard !hasRestored else { return }
         hasRestored = true
+        pendingRestore = nil
         let saved = BrowsingState.decoded(from: data)
-        let availability: FolderAvailability
+        let launchState = state
+        let availability: FolderAvailability?
         if let folderAvailability {
             availability = folderAvailability
         } else if let folder = saved.folder {
             availability = await library.openSavedFolder(folder)
         } else {
-            availability = .available(library.contents)
+            availability = nil
         }
-        let restored = saved.restored(from: availability)
-        state = restored.state
-        folderFailure = restored.folderFailure
-        await reloadRecents()
-        if let failure = restored.folderFailure, let folder = saved.folder,
-            let recent = recents.first(where: { $0.identity == folder })
-        {
-            recentFailures[recent.id] = failure
+        // The user opened another folder while this one reopened; their choice wins.
+        guard state == launchState else { return }
+
+        switch availability {
+        case .unavailable(let failure):
+            state = .entry
+            folderFailure = failure
+            await reloadRecents()
+            if let folder = saved.folder,
+                let recent = recents.first(where: { $0.identity == folder })
+            {
+                recentFailures[recent.id] = failure
+            }
+        case .available?:
+            folderFailure = nil
+            await reloadRecents()
+            if saved.showsPhotos {
+                showOpenFolder()
+                pendingRestore = PendingBrowsingRestore(saved: saved, shown: state)
+                resolvePendingRestore()
+            } else {
+                state = saved.restored(from: .available(library.contents)).state
+            }
+        case nil:
+            let restored = saved.restored(from: .available(library.contents))
+            state = restored.state
+            folderFailure = restored.folderFailure
+            await reloadRecents()
         }
         refresh()
+    }
+
+    /// Applies or drops a pending saved state as the folder's contents arrive (PRD P0-14).
+    private func resolvePendingRestore() {
+        guard let pending = pendingRestore else { return }
+        switch pending.decision(current: state, contents: library.contents) {
+        case .apply(let restored):
+            pendingRestore = nil
+            state = restored.state
+            folderFailure = restored.folderFailure
+        case .drop:
+            pendingRestore = nil
+        case .wait:
+            break
+        }
     }
 
     /// Applies one library update on the main actor (PRD P0-03, P0-08).
@@ -270,8 +322,10 @@ final class BrowsingModel {
         switch update {
         case .photos, .reads:
             refresh()
+            resolvePendingRestore()
         case .scanFinished:
             refresh()
+            resolvePendingRestore()
             await reloadRecents()
         case .change(let status):
             // A streamed transition keeps "Writing…" and "Saved" current without re-reading

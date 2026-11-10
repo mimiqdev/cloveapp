@@ -94,6 +94,26 @@ struct PhotoChangeStatesTests {
         #expect(states.latest(for: first)?.state == .pending)
     }
 
+    @Test func aRefusedStatusIsShownAndALaterSuccessReplacesIt() {
+        var states = PhotoChangeStates()
+        // A change the queue never admitted (the folder closed) still has to reach the screen
+        // (PRD P0-08: never fail silently).
+        let refused = status(
+            .failed(
+                MarkWriteFailure(
+                    reason: .locationUnavailable, message: "The folder closed.")))
+        let acceptedRefusal = states.insert(refused)
+        #expect(acceptedRefusal)
+        #expect(states.latest(for: first)?.state.failure?.reason == .locationUnavailable)
+
+        // A change admitted after the refusal is the newer one and replaces it.
+        let success = status(.savedInSidecar)
+        let acceptedSuccess = states.insert(success)
+        #expect(acceptedSuccess)
+        #expect(states.latest(for: first) == success)
+        #expect(states.latest(for: first)?.state.failure == nil)
+    }
+
     @Test func theFirstStateOfANewChangeIsAcceptedOnce() {
         var states = PhotoChangeStates()
         let once = status(.savedInSidecar)

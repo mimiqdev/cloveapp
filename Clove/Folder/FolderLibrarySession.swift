@@ -128,26 +128,28 @@ final class FolderLibrarySession: FolderLibrary {
     /// A photo the folder no longer holds, or a folder that closed while the change waited, is
     /// refused instead of being written somewhere else. The write is admitted through C11's
     /// session so `end()` cannot release the scope while it runs (G1 folder access, PRD P0-08).
+    /// A refusal never reaches the queue, so it is published on ``updates`` itself; otherwise the
+    /// screen would never learn that the latest attempt failed (PRD P0-08 never fails silently).
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus {
+        func refuse(_ reason: MarkWriteFailureReason, _ message: String) -> MarkChangeStatus {
+            let status = Self.refused(change, for: photo, reason: reason, message: message)
+            publish(.change(status))
+            return status
+        }
         guard let set = store.scannedSet(for: photo), let session = openSession else {
-            return Self.refused(
-                change, for: photo, reason: .locationUnavailable,
-                message: "The open folder no longer holds this photo.")
+            return refuse(.locationUnavailable, "The open folder no longer holds this photo.")
         }
         switch await resolvedStores() {
         case .failure(let error):
-            return Self.refused(
-                change, for: photo, reason: .unknown,
-                message: "Clove's stored marks are unavailable: \(error)")
+            return refuse(.unknown, "Clove's stored marks are unavailable: \(error)")
         case .success(let stores):
             do {
                 return try await session.withAdmittedWork {
                     await stores.writes.apply(change, to: set)
                 }
             } catch {
-                return Self.refused(
-                    change, for: photo, reason: .locationUnavailable,
-                    message: "The folder closed before the change could be written.")
+                return refuse(
+                    .locationUnavailable, "The folder closed before the change could be written.")
             }
         }
     }
@@ -206,10 +208,11 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Reopens the folder a saved scene names, for launch restore (PRD P0-02, P0-14).
     ///
-    /// Restore validation asks what the folder holds now, so this waits for the launch scan
-    /// before answering: the first batch alone cannot say whether the saved photo, selection and
-    /// group view survived. The scan still streams into the model while entry is on screen, so
-    /// the grid already has its photos when the restored route appears.
+    /// It answers as soon as C11 reopened and validated the folder, so entry shows the saved
+    /// folder's grid at once instead of waiting for a large RAW folder's metadata. The scan keeps
+    /// streaming, and its `scanFinished` update tells the model when the folder's contents are
+    /// known and the saved scene can be validated. A folder that did not open answers with C11's
+    /// reason, which entry explains on the matching Recents item.
     func openSavedFolder(_ folder: FolderIdentity) async -> FolderAvailability {
         await reloadRecents()
         if let failure = recentsFailure { return .unavailable(failure) }
@@ -219,10 +222,6 @@ final class FolderLibrarySession: FolderLibrary {
             return .unavailable(Self.missingLocation)
         }
         if let failure = await reopen(recent) { return .unavailable(failure) }
-        await scanTask?.value
-        // Another open while the scan ran replaced the saved folder, so its contents no longer
-        // answer for the saved scene.
-        guard self.folder == folder else { return .unavailable(Self.missingLocation) }
         return .available(contents)
     }
 
