@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Synchronization
 
@@ -331,6 +332,10 @@ public actor DetailPipeline {
                     failures.append(.noUsablePreview)
                 }
             }
+            // A cached bitmap can outlive the request that stored it: a HIF companion has its own
+            // cache identity while the photo's size comes from the RAW. This request's size wins,
+            // so a companion preview never answers with another reference's 100% (PRD P0-04).
+            image = image?.withFullResolutionSize(fullResolutionSize)
             guard let image else { continue }
             // G1 "Preview, detail (I2)": stop at the first source with a usable preview. A
             // later source is only tried when this one could not be opened, has no preview
@@ -373,7 +378,7 @@ public actor DetailPipeline {
             guard isCurrent(raw) else { return .unavailable(.sourceChanged) }
             let rendered = DetailImage(
                 image: pixels, source: raw, quality: .nativeRAW,
-                fullResolutionSize: fullResolutionSize)
+                fullResolutionSize: fullResolutionSize ?? pixelSize(pixels))
             cache.storeNative(rendered, for: key)
             return verified(.available(rendered))
         }
@@ -390,7 +395,7 @@ public actor DetailPipeline {
             if case .image(let pixels) = await reader.fullRaster(jpeg) {
                 let decoded = DetailImage(
                     image: pixels, source: jpeg, quality: .raster,
-                    fullResolutionSize: fullResolutionSize)
+                    fullResolutionSize: fullResolutionSize ?? pixelSize(pixels))
                 cache.storePreview(decoded, for: key)
                 return verified(.available(decoded))
             }
@@ -427,5 +432,9 @@ public actor DetailPipeline {
 
     private nonisolated static func isCurrent(_ source: DetailSource) -> Bool {
         (try? ThumbnailRevision.read(from: source.url)) == source.revision
+    }
+
+    private nonisolated static func pixelSize(_ pixels: CGImage) -> CGSize {
+        CGSize(width: pixels.width, height: pixels.height)
     }
 }

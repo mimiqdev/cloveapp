@@ -58,7 +58,7 @@ struct DetailNativeSizeFixtureTests {
         // The embedded preview is smaller than the RAW; the native size arrives with it, so the
         // double-tap target is the render's size and the render adds no second zoom.
         #expect(preview.quality == .preview)
-        #expect(preview.longEdge < Int(preview.fullResolutionSize.width))
+        #expect(preview.longEdge < Int(preview.fullResolutionPixels.width))
         #expect(preview.fullResolutionSize == CGSize(width: 2768, height: 1848))
         #expect(rendered.quality == .nativeRAW)
         #expect(rendered.fullResolutionSize == preview.fullResolutionSize)
@@ -79,20 +79,59 @@ struct DetailNativeSizeFixtureTests {
         #expect(preview.longEdge == 1200)
         #expect(preview.fullResolutionSize == CGSize(width: 5472, height: 3648))
     }
+
+    @Test func aCachedCompanionPreviewTakesTheRequestsOwnSize() async throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let heif = try directory.image(name: "camera.HIF", type: .heic, embedded: true)
+        let gate = DetailReadGate()
+        // The generated HEIF's own preview is tiny, so the plan would skip it; this substitution
+        // gives it the camera-sized preview a RAW + HIF set shows first.
+        let substitutions = [
+            DetailPreviewSubstitution(file: "camera.HIF", width: 1200, height: 800)
+        ]
+        let pipeline = DetailPipeline(
+            cache: DetailCache(),
+            reader: GatedDetailReader(gate: gate, substitutions: substitutions))
+        let raw = try detailSource(DetailFixtures.file("sony-ilce-7s.ARW"))
+        let heifSource = try detailSource(heif)
+        let withRaw = DetailRequest(
+            raw: raw, heif: heifSource, displayPixels: 1200, locationIdentity: "folder")
+
+        let first = try availableDetail(try await pipeline.preview(for: withRaw))
+        // The preview comes from the HIF, while the photo's size comes from the RAW.
+        #expect(first.source.url.lastPathComponent == "camera.HIF")
+        #expect(first.fullResolutionSize == CGSize(width: 2768, height: 1848))
+
+        // The same cached HIF preview asked for a HIF-only photo has no larger size to report,
+        // so it must not keep the RAW's 100% from the earlier request.
+        let heifOnly = DetailRequest(
+            heif: heifSource, displayPixels: 1200, locationIdentity: "folder")
+        let second = try availableDetail(try await pipeline.preview(for: heifOnly))
+        #expect(second.source.url.lastPathComponent == "camera.HIF")
+        #expect(second.fullResolutionSize == nil)
+        #expect(second.fullResolutionPixels == CGSize(width: 1200, height: 800))
+    }
 }
 
 /// Header reads that need no fixture: the orientation rule and the unreadable-file fallback.
 @Suite(.serialized)
 struct DetailNativeSizeTests {
-    @Test func aPortraitJpegHeaderIsOriented() throws {
+    @Test func aPortraitJpegHeaderIsOrientedLikeItsFullRaster() async throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
         let file = try directory.image(
             name: "portrait.JPG", orientation: 6, width: 2400, height: 1600)
+        let source = try detailSource(file)
 
-        let header = try #require(DetailNativeSize.read(try detailSource(file)))
+        let header = try #require(DetailNativeSize.read(source))
+        guard case .image(let pixels) = await DetailRenderer().fullRaster(source) else {
+            Issue.record("The portrait JPEG did not decode")
+            return
+        }
 
         #expect(header == CGSize(width: 1600, height: 2400))
+        #expect(header == CGSize(width: pixels.width, height: pixels.height))
     }
 
     @Test func everyQuarterTurnOrientationSwapsTheAxes() {
@@ -125,6 +164,7 @@ struct DetailNativeSizeTests {
                 revision: ThumbnailRevision(size: 0, modificationTime: .distantPast)),
             quality: .preview)
 
-        #expect(image.fullResolutionSize == CGSize(width: 320, height: 240))
+        #expect(image.fullResolutionSize == nil)
+        #expect(image.fullResolutionPixels == CGSize(width: 320, height: 240))
     }
 }

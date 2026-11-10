@@ -198,4 +198,46 @@ struct DetailZoomTests {
                 nativePixels: native, shownPixels: preview, viewSize: view, screenScale: 3)
                 >= before)
     }
+
+    /// A preview cropped to another aspect than the photo still lands on the render's native
+    /// 100%, because the scale follows the photo's size rather than the preview's shape; only the
+    /// visible point has to be kept when the pixels change (PRD P0-04; G1 "Preview, detail
+    /// (I2)").
+    @Test func aCroppedPreviewStillUsesTheRendersNativeScale() {
+        let native = CGSize(width: 6000, height: 4000)
+        let preview = CGSize(width: 2000, height: 1125)
+        let view = CGSize(width: 393, height: 852)
+
+        let fromPreview = DetailZoom.fullResolutionScale(
+            nativePixels: native, shownPixels: preview, viewSize: view, screenScale: 3)
+        let fromRender = DetailZoom.fullResolutionScale(
+            nativePixels: native, shownPixels: native, viewSize: view, screenScale: 3)
+
+        #expect(abs(fromPreview - fromRender) < 0.0001)
+        #expect(abs(fromPreview - 6000.0 / 1179.0) < 0.0001)
+    }
+
+    /// 100% names this photo's own native scale, not another photo's or a fraction of it
+    /// (PRD P0-04).
+    @Test func fullResolutionNameRequiresThisPhotosNativeScale() {
+        let native = CGSize(width: 8640, height: 5760)
+        let view = CGSize(width: 393, height: 852)
+        let target = DetailZoom.fullResolutionScale(
+            nativePixels: native, shownPixels: native, viewSize: view, screenScale: 3)
+
+        #expect(
+            DetailZoom.isFullResolution(
+                scale: target, nativePixels: native, viewSize: view, screenScale: 3))
+        #expect(
+            !DetailZoom.isFullResolution(
+                scale: target / 2, nativePixels: native, viewSize: view, screenScale: 3))
+        // Another photo's 100% is not this photo's 100%.
+        let smaller = CGSize(width: 4320, height: 2880)
+        #expect(
+            !DetailZoom.isFullResolution(
+                scale: target, nativePixels: smaller, viewSize: view, screenScale: 3))
+        #expect(
+            DetailZoom.isFullResolution(
+                scale: target / 2, nativePixels: smaller, viewSize: view, screenScale: 3))
+    }
 }

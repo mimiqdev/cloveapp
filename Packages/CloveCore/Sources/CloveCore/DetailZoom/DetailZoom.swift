@@ -40,21 +40,24 @@ public enum DetailZoom {
     /// replaces it (G1 "Preview, detail (I2)"). The preview is drawn enlarged, soft, at that
     /// scale; the render then supplies the pixels without a second zoom (PRD P0-04).
     ///
-    /// The fit geometry follows `shownPixels`, because that is the bitmap the scroll view draws,
-    /// while the resolution follows `nativePixels`. The two axes answer the same scale for a
-    /// preview that has the photo's aspect; the larger is used so rounding — or a camera that
-    /// crops its embedded preview — can never leave the view below native resolution. The result
-    /// is never below the fit scale of 1, because the scroll view cannot zoom out past the whole
-    /// image; an image too small to fill its view already shows more than one screen pixel per
-    /// image pixel at fit. A degenerate native size falls back to the shown bitmap, which is the
-    /// behaviour when no header size could be read.
+    /// The scale is one native image pixel per screen pixel for the image as the render will fit
+    /// it, so it follows `nativePixels`. `shownPixels` supplies that size only when the header
+    /// could not be read, which is the behaviour before the native size was known; a preview
+    /// with another aspect than the photo — a camera that crops its embedded preview — still
+    /// lands at the render's native 100%, and only the visible point has to be kept when the
+    /// pixels change (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// The two axes answer the same scale for an aspect-preserved size; the larger is used so
+    /// rounding can never leave the view below native resolution. The result is never below the
+    /// fit scale of 1, because the scroll view cannot zoom out past the whole image; an image too
+    /// small to fill its view already shows more than one screen pixel per image pixel at fit.
     public static func fullResolutionScale(
         nativePixels: CGSize, shownPixels: CGSize, viewSize: CGSize, screenScale: CGFloat
     ) -> CGFloat {
         guard screenScale > 0 else { return 1 }
         let native =
             nativePixels.width > 0 && nativePixels.height > 0 ? nativePixels : shownPixels
-        let fitted = fittedSize(imagePixels: shownPixels, viewSize: viewSize)
+        let fitted = fittedSize(imagePixels: native, viewSize: viewSize)
         guard fitted.width > 0, fitted.height > 0 else { return 1 }
         let horizontal = native.width / (screenScale * fitted.width)
         let vertical = native.height / (screenScale * fitted.height)
@@ -78,8 +81,9 @@ public enum DetailZoom {
     /// ``inspectionScale`` (PRD P0-04 pinch zoom; G1 "Preview, detail (I2)").
     ///
     /// The photo's full-resolution size, not the shown bitmap, sets the limit, so a pinch can
-    /// reach native 100% and ``inspectionScale`` past it while the embedded preview is still on
-    /// screen (G1 "Preview, detail (I2)").
+    /// reach native 100% while the embedded preview is still on screen. Native sizes large
+    /// enough that 100% needs more than ``inspectionScale`` stop there, because focus inspection
+    /// needs native pixels and nothing beyond them (G1 "Preview, detail (I2)").
     public static func maximumScale(
         nativePixels: CGSize, shownPixels: CGSize, viewSize: CGSize, screenScale: CGFloat
     ) -> CGFloat {
@@ -88,6 +92,21 @@ public enum DetailZoom {
             fullResolutionScale(
                 nativePixels: nativePixels, shownPixels: shownPixels, viewSize: viewSize,
                 screenScale: screenScale))
+    }
+
+    /// Whether a zoom scale shows this photo's native 100% (PRD P0-04).
+    ///
+    /// A view that keeps the zoom level across photos, or shows a group whose photos have
+    /// different native sizes, can sit at a scale that is another photo's 100%. The HUD reads
+    /// 100% only when this photo's own native scale is on screen; the tolerance absorbs rounding
+    /// in a layout, and a view that has not been laid out is not at 100%.
+    public static func isFullResolution(
+        scale: CGFloat, nativePixels: CGSize, viewSize: CGSize, screenScale: CGFloat
+    ) -> Bool {
+        let target = fullResolutionScale(
+            nativePixels: nativePixels, shownPixels: nativePixels, viewSize: viewSize,
+            screenScale: screenScale)
+        return abs(scale - target) <= max(target, 1) * 0.01
     }
 
     /// The scroll view's largest zoom when the shown bitmap is its own full resolution
