@@ -15,15 +15,23 @@ struct RootView: View {
     /// This scene's stored browsing state; the key is per scene, so scenes never share it.
     @SceneStorage("clove.browsing.state") private var storedState: Data?
 
+    /// The app-wide settings this scene reads and the environment carries (PRD Gesture-related
+    /// settings). The store belongs to the app, not to the scene.
+    private let settings: SettingsStore
+
     @State private var browsing: BrowsingModel
 
-    /// Creates the scene over the library this launch browses (PRD P0-01, P0-13).
+    /// Creates the scene over the app's settings and the library this launch browses
+    /// (PRD P0-01, P0-13).
     ///
     /// The library is created once per scene, so two windows never share one folder's scan or
-    /// write queue. A preview passes its own library.
-    init(library: (any FolderLibrary)? = nil) {
+    /// write queue. It reads the rejects folder name from the settings store when a folder opens,
+    /// so a renamed folder applies to the next open. A preview passes its own library.
+    init(settings: SettingsStore, library: (any FolderLibrary)? = nil) {
+        self.settings = settings
         _browsing = State(
-            initialValue: BrowsingModel(library: library ?? FolderLibraryLaunch.make()))
+            initialValue: BrowsingModel(
+                library: library ?? FolderLibraryLaunch.make(settings: settings)))
     }
 
     var body: some View {
@@ -34,9 +42,10 @@ struct RootView: View {
             .onChange(of: browsing.state) { _, state in
                 storedState = state.encoded()
             }
+            .environment(settings)
     }
 }
 
 #Preview {
-    RootView(library: TestLibrary.sample)
+    RootView(settings: SettingsStore.launch(), library: TestLibrary.sample)
 }
