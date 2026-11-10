@@ -258,17 +258,14 @@ struct GroupScreen: View {
     /// The last finishing action's failure while it still needs a retry and belongs to this group
     /// (PRD P0-09; PRD Failure and recovery).
     private func finishingFailure(for group: BrowsingGroup) -> GroupFinishingResult? {
-        guard let failure = browsing.groupFinishingFailure, failure.plan.groupID == group.id
-        else { return nil }
-        return failure
+        retryableFailure(for: group.id)
     }
-
     // MARK: - Completion
 
     /// The values that change when the group on screen can complete (PRD P0-12).
     ///
-    /// The marks, the finishing action, the failure the user can still retry and C12's setting are
-    /// all in the value, so any of them is one event the screen reacts to.
+    /// The marks, the finishing action, its per-photo result, the failure the user can still retry
+    /// and C12's setting are all in the value, so any of them is one event the screen reacts to.
     private struct GroupCompletionTrigger: Hashable {
         /// The group on screen, or nil when there is none.
         let group: GroupID?
@@ -276,7 +273,13 @@ struct GroupScreen: View {
         let undecided: Int
         /// The last finishing action, with its completion record (PRD P0-12).
         let finishing: GroupFinishingResult?
-        /// The finishing action's failure while the user can still retry it
+        /// How many finishing actions and retries have run, so two equal results stay two events
+        /// (PRD P0-12).
+        let finishingRuns: Int
+        /// Whether a finishing action is still running, so its failures are not known yet
+        /// (PRD P0-09).
+        let finishingRunning: Bool
+        /// The current group's finishing failure while the user can still retry it
         /// (PRD Failure and recovery).
         let failure: GroupFinishingResult?
         /// C12's "After a group is complete" (PRD Gesture-related settings).
@@ -285,12 +288,27 @@ struct GroupScreen: View {
 
     /// Builds the completion trigger from the state the screen already reads.
     private var completionTrigger: GroupCompletionTrigger {
-        GroupCompletionTrigger(
-            group: browsing.state.groupPosition?.group,
+        let group = browsing.state.groupPosition?.group
+        return GroupCompletionTrigger(
+            group: group,
             undecided: undecidedCount.undecided,
             finishing: browsing.lastGroupFinishing,
-            failure: browsing.groupFinishingFailure,
+            finishingRuns: browsing.groupFinishingRuns,
+            finishingRunning: browsing.isRunningGroupFinishing,
+            failure: retryableFailure(for: group),
             behaviour: settings.groupCompletion)
+    }
+
+    /// The finishing action's failure while it belongs to one group (PRD P0-09; PRD Failure and
+    /// recovery).
+    ///
+    /// Scoping it to the group matters twice: a failure belongs to the action that produced it, so
+    /// another group's failure must neither show its bar here nor hold this group's completion.
+    private func retryableFailure(for group: GroupID?) -> GroupFinishingResult? {
+        guard let group, let failure = browsing.groupFinishingFailure,
+            failure.plan.groupID == group
+        else { return nil }
+        return failure
     }
 
     /// Whether the trigger's group is complete (PRD In-group culling, group completion).
@@ -309,17 +327,20 @@ struct GroupScreen: View {
     /// group completion; PRD P0-12).
     ///
     /// A completion is an event, not a state: a group the user opens from the grid that is already
-    /// finished stays where it is, while a group that completed here and a finishing action the
-    /// user runs both hand the view on. The move waits out C13's pause, because PRD Auto-advance
-    /// shows the mark that completed the group for about 0.3 seconds before the view leaves it. A
-    /// finishing action that left changes to retry keeps the view until the user retries or
-    /// cancels, so the failure bar and its retry stay reachable (PRD P0-09; PRD Failure and
-    /// recovery).
+    /// finished stays where it is, while a group that completed here, a finishing action the user
+    /// runs and a finishing failure the user retries or cancels all hand the view on. The move
+    /// waits out C13's pause, because PRD Auto-advance shows the mark that completed the group for
+    /// about 0.3 seconds before the view leaves it.
+    ///
+    /// A finishing action that left changes to retry keeps the view until the user decides, so the
+    /// failure bar and its retry stay reachable (PRD P0-09; PRD Failure and recovery), and so does
+    /// an action that is still running, because its failures are not known yet.
     private func advanceIfCompleted(
         previous: GroupCompletionTrigger, current: GroupCompletionTrigger
     ) {
         guard let group = current.group else {
             completedGroup = nil
+            completionTask?.cancel()
             return
         }
         if group != previous.group {
@@ -330,11 +351,22 @@ struct GroupScreen: View {
         }
         let becameComplete = group == previous.group && isComplete(current) && !isComplete(previous)
         let finishedNow =
-            current.finishing != nil && current.finishing != previous.finishing
+            group == previous.group && current.finishingRuns != previous.finishingRuns
             && current.finishing?.plan.groupID == group
-        if becameComplete || finishedNow { completedGroup = group }
+        let failureResolved =
+            group == previous.group && previous.failure != nil && current.failure == nil
+        if becameComplete || finishedNow || failureResolved { completedGroup = group }
 
-        guard completedGroup == group, isComplete(current), current.failure == nil else { return }
+        guard completedGroup == group,
+            isComplete(current),
+            !current.finishingRunning,
+            current.failure == nil
+        else {
+            // A completion that was waiting must not outlive this state: a failure that arrives
+            // during the pause keeps the view, so its retry stays reachable (PRD P0-09).
+            completionTask?.cancel()
+            return
+        }
         completedGroup = nil
         autoAdvance.cancel()
         completionTask?.cancel()

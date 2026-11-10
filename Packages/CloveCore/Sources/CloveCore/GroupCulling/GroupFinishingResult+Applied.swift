@@ -4,35 +4,39 @@ extension GroupFinishingPlan {
     /// The plan's changes that the marks read now still allow (PRD P0-12; PRD In-group culling,
     /// finishing actions).
     ///
-    /// This is the rule ``GroupFinishingExecutor`` re-checks before every write. The current
-    /// photo's keep change is derived again from the marks read now, so a rating added after the
-    /// plan was built is kept instead of overwritten; a planned reject survives only while the
-    /// photo is unmarked, so a photo rated or labelled since the plan is never rejected
-    /// (PRD In-group culling: "Neither action ever rejects a photo that already has a rating or
-    /// color label"). A library that applies a plan without C4's write queue uses this instead of
-    /// planning a second copy of the rule.
+    /// This is the rule ``GroupFinishingExecutor`` re-checks before every write. Keep this derives
+    /// the current photo's change again from the marks read now, so a rating added after the plan
+    /// was built is kept instead of overwritten, and also a rating the plan did not have to change
+    /// but a later delete did; a planned reject survives only while the photo is still unmarked,
+    /// so a photo rated or labelled since the plan is never rejected (PRD In-group culling: "Neither
+    /// action ever rejects a photo that already has a rating or color label"). A library that
+    /// applies a plan without C4's write queue uses this instead of planning a second copy of the
+    /// rule.
     public func changesAllowed(
         currentMarks: (PhotoIdentity) -> PhotoMarks
     ) -> [GroupFinishingChange] {
+        guard availability.isAvailable else { return [] }
         var allowed: [GroupFinishingChange] = []
-        for change in changes {
-            let marks = currentMarks(change.photo)
-            switch change.kind {
-            case .keep:
-                let keeping = GroupFinishingPlan.keepChange(
-                    for: marks, keepRating: keepRating)
-                guard !keeping.isEmpty else { continue }
+        if action == .keepThis {
+            // The current photo is derived from the marks read now, not from the planned list: a
+            // photo the plan had nothing to change can be unrated or rejected by the time the
+            // action runs, and then it still has to be kept (PRD In-group culling).
+            let marks = currentMarks(currentPhoto)
+            let keeping = GroupFinishingPlan.keepChange(for: marks, keepRating: keepRating)
+            if !keeping.isEmpty {
                 allowed.append(
                     GroupFinishingChange(
-                        photo: change.photo, kind: .keep, marksBefore: marks, change: keeping))
-            case .reject:
-                // A photo that gained a rating, label or Reject since the plan is never rejected.
-                guard marks.isUnmarked else { continue }
-                allowed.append(
-                    GroupFinishingChange(
-                        photo: change.photo, kind: .reject, marksBefore: marks,
-                        change: change.change))
+                        photo: currentPhoto, kind: .keep, marksBefore: marks, change: keeping))
             }
+        }
+        for change in changes where change.kind == .reject {
+            let marks = currentMarks(change.photo)
+            // A photo that gained a rating, label or Reject since the plan is never rejected.
+            guard marks.isUnmarked else { continue }
+            allowed.append(
+                GroupFinishingChange(
+                    photo: change.photo, kind: .reject, marksBefore: marks,
+                    change: change.change))
         }
         return allowed
     }

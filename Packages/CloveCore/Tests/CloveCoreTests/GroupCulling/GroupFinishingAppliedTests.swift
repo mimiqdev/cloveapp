@@ -145,4 +145,25 @@ struct GroupFinishingAppliedTests {
         let allowed = plan.changesAllowed { markedMeanwhile[$0] ?? PhotoMarks() }
         #expect(allowed.isEmpty)
     }
+
+    /// A current photo the plan had nothing to change is still kept when it is rejected before the
+    /// action runs (PRD In-group culling, finishing actions; PRD P0-12).
+    @Test func aCurrentPhotoRejectedAfterPlanningIsStillKept() {
+        let allRated = groupCullingMarks([
+            (kept, PhotoMarks(rating: groupCullingRating(4))),
+            (rejected, PhotoMarks(rating: groupCullingRating(3))),
+            (rated, PhotoMarks(rating: groupCullingRating(2))),
+        ])
+        let plan = GroupFinishingPlan(
+            group: group, action: .keepThis, currentPhoto: kept, marks: allRated,
+            enabledRatings: groupCullingTwoAndFour)
+        #expect(plan.keptPhoto == nil)
+
+        let rejectedSince = groupCullingMarks([(kept, PhotoMarks(isRejected: true))])
+        let allowed = plan.changesAllowed { rejectedSince[$0] ?? allRated[$0] ?? PhotoMarks() }
+
+        #expect(allowed.map(\.kind) == [.keep])
+        #expect(allowed.first?.change.reject == false)
+        #expect(allowed.first?.change.rating == groupCullingRating(2))
+    }
 }

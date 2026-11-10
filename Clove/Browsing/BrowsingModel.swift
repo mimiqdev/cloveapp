@@ -266,6 +266,21 @@ final class BrowsingModel {
     /// it.
     private(set) var lastGroupFinishing: GroupFinishingResult?
 
+    /// Whether a finishing action is running, so the group view holds its completion until the
+    /// action's per-photo result arrives (PRD P0-12; PRD P0-09).
+    ///
+    /// A finishing action's marks stream in one photo at a time, so the group can look complete
+    /// before the action returns and its failures are known; advancing meanwhile would hide the
+    /// retry (PRD Failure and recovery).
+    private(set) var isRunningGroupFinishing = false
+
+    /// Counts the finishing actions and retries this scene has run (PRD P0-12).
+    ///
+    /// Two finishing actions can produce equal results — Keep rated on a group that is already
+    /// fully decided changes nothing — so the group view needs an identity for the event itself,
+    /// not only for the value it produced.
+    private(set) var groupFinishingRuns = 0
+
     /// The finishing action the user already dismissed, so its bar does not return on the next
     /// redraw (PRD Failure and recovery: Cancel hides it without retrying).
     private var dismissedGroupFailure: GroupFinishingResult?
@@ -291,14 +306,22 @@ final class BrowsingModel {
     /// (PRD P0-09).
     func runGroupFinishing(_ plan: GroupFinishingPlan) async {
         dismissedGroupFailure = nil
-        lastGroupFinishing = await library.runGroupFinishing(plan)
+        isRunningGroupFinishing = true
+        let result = await library.runGroupFinishing(plan)
+        lastGroupFinishing = result
+        groupFinishingRuns += 1
+        isRunningGroupFinishing = false
     }
 
     /// Retries only the changes that still need it, through C4 (PRD P0-09).
     func retryGroupFinishing() async {
         guard let result = lastGroupFinishing else { return }
         dismissedGroupFailure = nil
-        lastGroupFinishing = await library.retryGroupFinishing(result)
+        isRunningGroupFinishing = true
+        let retried = await library.retryGroupFinishing(result)
+        lastGroupFinishing = retried
+        groupFinishingRuns += 1
+        isRunningGroupFinishing = false
     }
 
     /// Hides the finishing action's failure without retrying it (PRD Failure and recovery).
