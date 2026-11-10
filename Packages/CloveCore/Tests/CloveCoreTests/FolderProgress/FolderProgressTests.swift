@@ -28,6 +28,40 @@ import Testing
         #expect(bounded.rejected == 3)
     }
 
+    @Test func incompleteRescanKeepsFinishedCountsAndUpdatesResumeOnly() {
+        let folder = FolderIdentity(rawValue: "progress-folder")
+        let oldPhoto = PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "IMG_001")
+        let viewed = PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "IMG_002")
+        let previous = FolderProgress(
+            marked: 90, rejected: 10, total: 100, lastViewedPhoto: oldPhoto,
+            previewPhotos: [oldPhoto])
+        let partial = FolderProgress.snapshot(
+            confirmedMarks: Array(repeating: PhotoMarks(), count: 20), scanIsComplete: false,
+            previous: previous, lastViewedPhoto: viewed, previewPhotos: [viewed])
+        #expect(partial.marked == 90)
+        #expect(partial.rejected == 10)
+        #expect(partial.total == 100)
+        #expect(partial.left == 0)
+        #expect(partial.finished)
+        #expect(partial.lastViewedPhoto == viewed)
+        #expect(partial.previewPhotos == [oldPhoto])
+    }
+
+    @Test func unreadMarksNeverCreateLeftCountsBeforeFirstCompleteScan() {
+        let unknown = FolderProgress.snapshot(
+            confirmedMarks: Array(repeating: PhotoMarks(), count: 50), scanIsComplete: false,
+            previous: nil, lastViewedPhoto: nil, previewPhotos: [])
+        #expect(unknown.total == 0)
+        #expect(unknown.left == 0)
+        #expect(!unknown.finished)
+        let complete = FolderProgress.snapshot(
+            confirmedMarks: [PhotoMarks(), PhotoMarks(isRejected: true)], scanIsComplete: true,
+            previous: unknown, lastViewedPhoto: nil, previewPhotos: [])
+        #expect(complete.total == 2)
+        #expect(complete.rejected == 1)
+        #expect(complete.left == 1)
+    }
+
     @Test func confirmedProgressSurvivesCloseAndReopen() async throws {
         let root = try makeTemporaryFolder()
         defer { try? FileManager.default.removeItem(at: root) }

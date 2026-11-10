@@ -15,6 +15,27 @@ import Testing
                 == "On My iPad › Shoots › 2026")
     }
 
+    @Test func userFolderNamesSurviveAfterTheProviderAnchor() {
+        let root =
+            "/private/var/mobile/Containers/Shared/AppGroup/10000000-0000-0000-0000-000000000001/File Provider Storage"
+        let path = root + "/Clients/Shared"
+        #expect(FolderDisplayLocation.name(path: path) == "Shared")
+        #expect(
+            FolderDisplayLocation.text(path: path, volumeName: nil, mediaType: .internalVolume)
+                == "On My iPhone › Clients › Shared")
+        for name in ["Data", "Shared", "Library", "Application", "mobile"] {
+            let local = root + "/Clients/" + name
+            #expect(FolderDisplayLocation.name(path: local) == name)
+            #expect(
+                FolderDisplayLocation.text(path: local, volumeName: nil, mediaType: .internalVolume)
+                    == "On My iPhone › Clients › " + name)
+            #expect(
+                FolderDisplayLocation.text(
+                    path: "/Shoots/" + name, volumeName: nil, mediaType: .unknown)
+                    == "Shoots › " + name)
+        }
+    }
+
     @Test func cloudDriveHidesImplementationNames() {
         #expect(
             FolderDisplayLocation.text(

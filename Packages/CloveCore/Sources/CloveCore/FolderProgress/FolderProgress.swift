@@ -43,6 +43,24 @@ public struct FolderProgress: Codable, Hashable, Sendable {
             lastViewedPhoto: lastViewedPhoto, previewPhotos: previewPhotos)
     }
 
+    /// Keeps the last complete counts during a rescan; unread XMP is never counted as unmarked
+    /// (handoff Entry; PRD P0-02, P0-08). With no prior summary, counts stay unknown until complete.
+    public static func snapshot(
+        confirmedMarks: [PhotoMarks], scanIsComplete: Bool, previous: FolderProgress?,
+        lastViewedPhoto: PhotoIdentity?, previewPhotos: [PhotoIdentity]
+    ) -> FolderProgress {
+        if scanIsComplete {
+            return FolderProgress(
+                confirmedMarks: confirmedMarks, isComplete: true,
+                lastViewedPhoto: lastViewedPhoto, previewPhotos: previewPhotos)
+        }
+        return FolderProgress(
+            marked: previous?.marked ?? 0, rejected: previous?.rejected ?? 0,
+            total: previous?.total ?? 0, isComplete: previous?.isComplete ?? false,
+            lastViewedPhoto: lastViewedPhoto ?? previous?.lastViewedPhoto,
+            previewPhotos: previous?.previewPhotos ?? previewPhotos)
+    }
+
     /// Reads bounded counts and optional resume information (handoff Entry; PRD P0-02).
     public init(from decoder: any Decoder) throws {
         let form = try Form(from: decoder)
