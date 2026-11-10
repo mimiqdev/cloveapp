@@ -90,6 +90,12 @@ protocol FolderLibrary: AnyObject {
     /// store, so reading it never performs I/O on the main actor.
     var recents: [RecentFolder] { get }
 
+    /// Why the Recents list could not be read, or nil when it could (PRD P0-02).
+    ///
+    /// PRD P0-02 asks for the problem to be explained instead of showing an empty list as if
+    /// nothing had ever opened, so entry reports this next to the Recents list.
+    var recentsFailure: FolderAccessFailure? { get }
+
     /// Re-reads C11's Recents list, keeping what the store holds (PRD P0-02).
     func reloadRecents() async
 
@@ -127,6 +133,8 @@ extension FolderLibrary {
     }
 
     var recents: [RecentFolder] { [] }
+
+    var recentsFailure: FolderAccessFailure? { nil }
 
     func reloadRecents() async {}
 

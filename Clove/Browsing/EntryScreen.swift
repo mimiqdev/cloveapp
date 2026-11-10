@@ -77,6 +77,10 @@ struct EntryScreen: View {
         if let failure = browsing.folderFailure {
             Text(FolderFailureExplanation.text(for: failure))
                 .accessibilityIdentifier("clove.entry.folderFailure")
+        } else if browsing.recentsFailure != nil {
+            // PRD P0-02: a stored list that cannot be read is explained, not shown as empty.
+            Text("Clove could not read its list of recent folders.")
+                .accessibilityIdentifier("clove.entry.recentsFailure")
         } else {
             Text("Choose a folder to browse its photos. Nothing is copied into Clove.")
                 .accessibilityIdentifier("clove.entry.hint")

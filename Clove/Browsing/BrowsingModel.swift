@@ -40,6 +40,9 @@ final class BrowsingModel {
     /// The remembered folders entry lists, most recently opened first (PRD P0-02).
     private(set) var recents: [RecentFolder]
 
+    /// Why the Recents list could not be read, or nil when it could (PRD P0-02).
+    private(set) var recentsFailure: FolderAccessFailure?
+
     /// The library's photos with their marks, before this state's order and filter (PRD P0-03).
     private var storedPhotos: [GridPhoto]
 
@@ -151,6 +154,7 @@ final class BrowsingModel {
     func reloadRecents() async {
         await library.reloadRecents()
         recents = library.recents
+        recentsFailure = library.recentsFailure
     }
 
     /// Shows one photo's detail (PRD Detail and marking).
@@ -221,15 +225,13 @@ final class BrowsingModel {
     /// Applies one change to one photo through the library and shows its marks and save state
     /// (PRD P0-08).
     ///
-    /// The await is C4's write queue. The refresh takes the library's photos, and the status the
-    /// write returned is stored as it came back: the library's stream can be a moment behind, and
-    /// the screen must show what this write reported, not what the next update happens to see.
-    /// ``PhotoChangeStates`` keeps the two paths from moving a change backwards.
+    /// The await is C4's write queue. The change's states arrive only through the library's
+    /// ordered stream, never from this call's return: a returned status can arrive after a newer
+    /// change was admitted, which would let an older finished state paint over the newer one
+    /// (``PhotoChangeStates``). A failed write therefore never shows a mark it did not confirm.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async {
         guard !change.isEmpty else { return }
-        let status = await library.apply(change, to: photo)
-        changes.insert(status)
-        refresh()
+        _ = await library.apply(change, to: photo)
     }
 
     /// Restores this scene's saved state through CloveCore's validation (PRD P0-14).
