@@ -17,6 +17,7 @@ import CloveCore
             "similarGroupsEnabled",
             "gridGroupDisplay",
             "groupCompletion",
+            "appearance",
         ])
     #expect(propertyLabels(of: AutoAdvance()) == ["destination", "triggers"])
     #expect(propertyLabels(of: AutoAdvanceTriggers()) == ["rating", "reject", "colourLabel"])
