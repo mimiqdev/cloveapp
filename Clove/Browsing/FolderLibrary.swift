@@ -125,6 +125,36 @@ protocol FolderLibrary: AnyObject {
     /// batch, for example because the folder it belonged to closed.
     func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult?
 
+    /// Plans Move rejects for the open folder's rejected photos (PRD P0-10).
+    ///
+    /// The plan is the confirmation sheet's input: how many photos, JPEG/HIF companions and XMP
+    /// files travel, the destination and the sets that cannot move. The library reads the
+    /// rejected photos from its current marks, and `configuration` carries the folder name and
+    /// switch the caller read from settings at move time (PRD Move rejects, C12). Nothing moves:
+    /// building a plan only checks existence. A library that cannot move a folder refuses with
+    /// ``RejectMoveRefusal``, which the sheet explains.
+    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan
+
+    /// Runs a confirmed Move rejects plan under the open folder's session (PRD P0-10).
+    ///
+    /// The call waits for C4's admitted writes, moves every ready set as one unit and reports one
+    /// outcome per requested set. Moved sets leave the library's photos and their Reject records
+    /// with them; failed and skipped sets stay where they are, so a retry addresses only the
+    /// failures. Progress arrives on ``rejectMoveProgress()`` while the call runs.
+    func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult
+
+    /// Retries only the sets an earlier Move rejects run could not move (PRD P0-10).
+    ///
+    /// Moved sets stay moved and split or skipped sets are not resent. Nil means the library can
+    /// no longer retry that run, for example because the folder it belonged to closed.
+    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult?
+
+    /// The progress steps of the next or running Move rejects (PRD P0-10).
+    ///
+    /// The stream yields each set as it starts and finishes, then the run's result. A library that
+    /// cannot move answers with a stream that finishes at once.
+    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress>
+
     /// The latest change to one photo with its save state (PRD P0-08).
     ///
     /// It answers from the library's current records, synchronously, so a screen can render it.
@@ -226,6 +256,20 @@ extension FolderLibrary {
     }
 
     func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult? { nil }
+
+    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
+        throw RejectMoveRefusal.disabled
+    }
+
+    func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
+        throw RejectMoveRefusal.disabled
+    }
+
+    func retryFailedRejects(in batch: RejectMoveBatchID) async throws -> RejectMoveResult? { nil }
+
+    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
+        AsyncStream { $0.finish() }
+    }
 
     func runGroupingAgain() async {}
 

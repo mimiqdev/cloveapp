@@ -80,6 +80,17 @@ public struct RejectMoveMovedSet: Hashable, Sendable {
     public let removedStoredReject: Bool
     /// A stored Reject that could not be removed, kept for a later cleanup (PRD P0-08).
     public let staleRejectRecord: RejectMoveFailure?
+
+    /// Describes one confirmed set (PRD P0-10).
+    public init(
+        identity: PhotoIdentity, files: [RejectMoveFilePlan], removedStoredReject: Bool,
+        staleRejectRecord: RejectMoveFailure?
+    ) {
+        self.identity = identity
+        self.files = files
+        self.removedStoredReject = removedStoredReject
+        self.staleRejectRecord = staleRejectRecord
+    }
 }
 
 /// One photo set that stayed entirely in place, with its failure (PRD P0-10).
@@ -93,6 +104,13 @@ public struct RejectMoveFailedSet: Hashable, Sendable {
     public let failure: RejectMoveFailure
     /// The files as they are, all at their sources (PRD P0-10).
     public let files: [RejectMoveFilePlan]
+
+    /// Describes one set that stayed in place (PRD P0-10).
+    public init(identity: PhotoIdentity, failure: RejectMoveFailure, files: [RejectMoveFilePlan]) {
+        self.identity = identity
+        self.failure = failure
+        self.files = files
+    }
 }
 
 /// One photo set that is partly in both places because the move back also failed (PRD P0-10).
@@ -108,6 +126,17 @@ public struct RejectMoveSplitSet: Hashable, Sendable {
     public let rollbackFailures: [RejectMoveFailure]
     /// Every file's actual location (PRD P0-10).
     public let files: [RejectMoveFileLocation]
+
+    /// Describes one set left in both places (PRD P0-10).
+    public init(
+        identity: PhotoIdentity, failure: RejectMoveFailure,
+        rollbackFailures: [RejectMoveFailure], files: [RejectMoveFileLocation]
+    ) {
+        self.identity = identity
+        self.failure = failure
+        self.rollbackFailures = rollbackFailures
+        self.files = files
+    }
 }
 
 /// One photo set that was deliberately not attempted, with the condition to resolve first.
@@ -122,6 +151,13 @@ public struct RejectMoveSkippedSet: Hashable, Sendable {
     public let reason: RejectMoveSkipReason
     /// A short developer-facing explanation; product copy belongs to the UI.
     public let message: String
+
+    /// Describes one set that was not attempted (PRD P0-10).
+    public init(identity: PhotoIdentity, reason: RejectMoveSkipReason, message: String) {
+        self.identity = identity
+        self.reason = reason
+        self.message = message
+    }
 }
 
 /// One requested set's result (PRD P0-10).
