@@ -101,10 +101,13 @@ final class MoveRejectsFlow: Identifiable {
     func move(_ plan: RejectMovePlan) async -> Bool {
         // The stage becomes moving synchronously before the first await, so a second tap on Move
         // cannot start a second run or overwrite the completed move (PRD P0-10).
-        guard case .confirming(let confirmed) = stage, confirmed == plan,
-            let selection = keepSelection, let context = confirmationContext,
-            context.isCurrent(browsing)
-        else { return false }
+        guard case .confirming(let confirmed) = stage else { return false }
+        guard confirmed == plan, let selection = keepSelection,
+            let context = confirmationContext, context.isCurrent(browsing)
+        else {
+            stage = .failed("The folder changed before the move started.")
+            return false
+        }
         let kept = selection.orderedKeptIdentities
         let moving = selection.movingPlan
         stage = .moving(finished: 0, total: moving.photoCount)
