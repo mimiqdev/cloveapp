@@ -80,15 +80,18 @@ final class CloveUITests: XCTestCase {
             "The detail view did not show the new rating: \(marks.label)")
     }
 
-    /// Back returns from detail to the grid.
+    /// Back returns from detail to the grid, and the grid shows the saved rating the update path
+    /// carried back through the library (PRD P0-03, P0-08).
     @MainActor
     private func returnToGrid(in app: XCUIApplication) {
         let back = element(in: app, "clove.nav.back")
         XCTAssertTrue(back.waitForExistence(timeout: 10), "The detail view had no back button")
         back.tap()
+        let row = element(in: app, "clove.grid.photo.mmq02678")
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "Back did not return to the grid")
         XCTAssertTrue(
-            element(in: app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 10),
-            "Back did not return to the grid"
+            row.label.contains("4 stars"),
+            "The grid did not show the saved rating: \(row.label)"
         )
     }
 

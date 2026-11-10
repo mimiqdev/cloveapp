@@ -9,22 +9,36 @@ import Observation
 /// unfold or a resize changes the layout (PRD P0-14, G1 fold-state row). The model also keeps the
 /// state in the shape CloveCore can validate and store, so a launch restores what it can and falls
 /// back to entry for the rest.
+///
+/// The model is the only reader of the library's ``FolderLibrary/updates`` stream: entry's
+/// Recents, the grid's photos and the save state all come from here, so no screen polls a
+/// library or a write queue.
 @MainActor
 @Observable
 final class BrowsingModel {
-    /// The seam the screens read through; U2 and U3 replace it with folder access, the scan, the
-    /// order, writes and grouping.
+    /// The seam the screens read through: folder access, the scan, the order and writes.
     private let library: any FolderLibrary
 
     /// The scene's browsing state (PRD P0-14).
     private(set) var state: BrowsingState
 
-    /// Why entry must ask for the saved folder again, or nil (PRD P0-02). Entry shows the message
-    /// until U2 writes its copy.
+    /// Why entry must ask for the saved folder again, or nil (PRD P0-02).
+    ///
+    /// This is the last open that is not tied to a Recents item, such as a pick or a launch
+    /// restore; a failed reopen keeps its reason on the item instead (``recentFailure(for:)``).
     private(set) var folderFailure: FolderAccessFailure?
+
+    /// Why one Recents item did not reopen, keyed by that record (PRD P0-02).
+    ///
+    /// PRD P0-02 requires an explicit answer on the item that failed rather than a silent
+    /// failure, so the reason stays with the record until that record opens again.
+    private var recentFailures: [RecentFolder.ID: FolderAccessFailure]
 
     /// The groups the open folder publishes, in grid order (PRD P0-11).
     private(set) var groups: [BrowsingGroup]
+
+    /// The remembered folders entry lists, most recently opened first (PRD P0-02).
+    private(set) var recents: [RecentFolder]
 
     /// The library's photos with their marks, before this state's order and filter (PRD P0-03).
     private var storedPhotos: [GridPhoto]
@@ -32,21 +46,32 @@ final class BrowsingModel {
     /// The latest change to each photo, with its save state (PRD P0-08).
     ///
     /// The model keeps the statuses rather than asking the library on every render, so an
-    /// applied change repaints the screen through observation.
-    private var latestChanges: [PhotoIdentity: MarkChangeStatus]
+    /// applied change repaints the screen through observation and a streamed transition shows
+    /// "Writing…" without a refresh of its own.
+    private var changes = PhotoChangeStates()
 
     /// Whether this scene has already read its saved state, so a later appearance never
     /// overwrites what the user has done since.
     private var hasRestored = false
+
+    /// The task applying the library's updates on the main actor (PRD P0-03, P0-08).
+    private var updateTask: Task<Void, Never>?
 
     /// Creates the model over one library, starting at entry unless a state is passed in.
     init(library: any FolderLibrary, state: BrowsingState = .entry) {
         self.library = library
         self.state = state
         self.groups = library.groups
+        self.recents = library.recents
+        self.recentFailures = [:]
         self.storedPhotos = library.photos
-        self.latestChanges = [:]
         refresh()
+        updateTask = Task { [weak self, updates = library.updates] in
+            for await update in updates {
+                guard let self else { return }
+                await self.apply(update)
+            }
+        }
     }
 
     /// The photos the grid shows: this state's order and filter, applied to the folder's photos
@@ -57,6 +82,13 @@ final class BrowsingModel {
 
     /// Whether the open folder holds photos to browse (PRD P0-01).
     var hasFolderContents: Bool { !storedPhotos.isEmpty }
+
+    /// Whether entry can return to a folder without the picker (PRD P0-01).
+    ///
+    /// A folder that is open stays open while entry is on screen, and the test library starts
+    /// with its photos in place, so entry offers to continue in both cases. An empty folder still
+    /// counts, because coming back from its grid must not claim no folder is open.
+    var canContinueBrowsing: Bool { state.folder != nil || hasFolderContents }
 
     /// The photo the detail route shows, with its current marks (PRD Detail and marking).
     var currentPhoto: GridPhoto? {
@@ -74,17 +106,51 @@ final class BrowsingModel {
         return group.members.compactMap { byIdentity[$0] }
     }
 
-    /// Opens the library's folder and shows its grid (PRD Entry, P0-01).
+    /// Why one Recents item did not open, or nil when it did (PRD P0-02).
+    func recentFailure(for recent: RecentFolder.ID) -> FolderAccessFailure? {
+        recentFailures[recent]
+    }
+
+    /// Opens the folder the library already holds and shows its grid (PRD Entry, P0-01).
     ///
-    /// A folder that opens answers whatever the last failed open left on entry, so the message
-    /// goes with it (PRD P0-02).
+    /// Entry offers this once a folder is open, which is what the test library starts with, so
+    /// coming back from the grid does not need the picker again. A folder that opens answers
+    /// whatever the last failed open left on entry, so the message goes with it (PRD P0-02).
     func openFolder() {
         folderFailure = nil
-        state.folder = library.folder
-        state.currentPhoto = nil
-        state.selection = []
-        state.groupPosition = nil
-        state.route = .grid
+        showOpenFolder()
+    }
+
+    /// Opens the folder the user chose in the system picker (PRD P0-01, P0-02).
+    ///
+    /// The library performs C11's validating read; a failure stays on the model so entry explains
+    /// it and asks for the folder again, while a success shows the grid as the scan streams in.
+    func openPickedFolder(_ url: URL) async {
+        folderFailure = await library.pick(url)
+        guard folderFailure == nil else { return }
+        showOpenFolder()
+        await reloadRecents()
+    }
+
+    /// Reopens one remembered folder (PRD P0-02).
+    ///
+    /// A failed reopen keeps C11's reason on that item, so entry can explain it there and ask for
+    /// the folder again instead of failing silently.
+    func reopen(_ recent: RecentFolder) async {
+        if let failure = await library.reopen(recent) {
+            recentFailures[recent.id] = failure
+            return
+        }
+        recentFailures[recent.id] = nil
+        folderFailure = nil
+        showOpenFolder()
+        await reloadRecents()
+    }
+
+    /// Re-reads the Recents list from C11's store (PRD P0-02).
+    func reloadRecents() async {
+        await library.reloadRecents()
+        recents = library.recents
     }
 
     /// Shows one photo's detail (PRD Detail and marking).
@@ -149,50 +215,89 @@ final class BrowsingModel {
     /// The latest change to one photo with its save state, or nil when nothing was requested
     /// (PRD P0-08). U7 reads the same status for its retry.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? {
-        latestChanges[photo]
+        changes.latest(for: photo)
     }
 
     /// Applies one change to one photo through the library and shows its marks and save state
     /// (PRD P0-08).
     ///
     /// The await is C4's write queue. The refresh takes the library's photos, and the status the
-    /// write returned is stored as it came back: a library that publishes its transitions through
-    /// a stream can be a moment behind, and the screen must show what this write reported, not
-    /// what the next poll happens to see.
+    /// write returned is stored as it came back: the library's stream can be a moment behind, and
+    /// the screen must show what this write reported, not what the next update happens to see.
+    /// ``PhotoChangeStates`` keeps the two paths from moving a change backwards.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async {
         guard !change.isEmpty else { return }
         let status = await library.apply(change, to: photo)
+        changes.insert(status)
         refresh()
-        latestChanges[photo] = status
     }
 
     /// Restores this scene's saved state through CloveCore's validation (PRD P0-14).
     ///
-    /// The folder's availability comes from the caller because folder access owns it: this build
-    /// always passes the library's contents, and U2 passes what C11 reported, so an unavailable
-    /// folder starts at entry with the reason entry explains (PRD P0-02). Restoring runs once per
-    /// scene; later appearances keep whatever the user has done.
-    func restore(from data: Data?, folderAvailability: FolderAvailability? = nil) {
+    /// A saved scene that names a folder reopens it through C11 before anything is validated, so
+    /// the folder availability passed in is what the launch actually read (PRD P0-02). An
+    /// unavailable folder starts at entry with the reason on its Recents item, and a launch with
+    /// nothing saved starts at entry. Restoring runs once per scene; later appearances keep
+    /// whatever the user has done.
+    func restore(from data: Data?, folderAvailability: FolderAvailability? = nil) async {
         guard !hasRestored else { return }
         hasRestored = true
-        let folder = folderAvailability ?? .available(library.contents)
-        let restored = BrowsingState.decoded(from: data).restored(from: folder)
+        let saved = BrowsingState.decoded(from: data)
+        let availability: FolderAvailability
+        if let folderAvailability {
+            availability = folderAvailability
+        } else if let folder = saved.folder {
+            availability = await library.openSavedFolder(folder)
+        } else {
+            availability = .available(library.contents)
+        }
+        let restored = saved.restored(from: availability)
         state = restored.state
         folderFailure = restored.folderFailure
+        await reloadRecents()
+        if let failure = restored.folderFailure, let folder = saved.folder,
+            let recent = recents.first(where: { $0.identity == folder })
+        {
+            recentFailures[recent.id] = failure
+        }
         refresh()
+    }
+
+    /// Applies one library update on the main actor (PRD P0-03, P0-08).
+    private func apply(_ update: FolderLibraryUpdate) async {
+        switch update {
+        case .photos, .reads:
+            refresh()
+        case .scanFinished:
+            refresh()
+            await reloadRecents()
+        case .change(let status):
+            // A streamed transition keeps "Writing…" and "Saved" current without re-reading
+            // every photo, and the merge rule keeps a finished change from moving backwards.
+            changes.insert(status)
+        case .groups(let groups):
+            self.groups = groups
+        }
+    }
+
+    /// Shows the grid on the folder the library just opened (PRD Entry, P0-01).
+    private func showOpenFolder() {
+        state.folder = library.folder
+        state.currentPhoto = nil
+        state.selection = []
+        state.groupPosition = nil
+        state.route = .grid
     }
 
     /// Takes the library's current photos, groups and save states.
     ///
-    /// U2 and U3 refresh through this path as scan batches and grouping results stream in, so the
-    /// screens keep reading the model while the library changes underneath it.
+    /// Scan batches, metadata reads, mark reads and confirmed writes all refresh through this
+    /// path, so the screens keep reading the model while the library changes underneath it.
     private func refresh() {
         storedPhotos = library.photos
         groups = library.groups
-        var changes: [PhotoIdentity: MarkChangeStatus] = [:]
         for photo in storedPhotos {
-            if let change = library.latestChange(for: photo.id) { changes[photo.id] = change }
+            if let change = library.latestChange(for: photo.id) { changes.insert(change) }
         }
-        latestChanges = changes
     }
 }
