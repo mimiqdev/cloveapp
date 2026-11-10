@@ -355,6 +355,10 @@ public actor DetailPipeline {
                 ? DetailFailure.cannotOpen : DetailFailure.noUsablePreview
             return .unavailable(failure)
         }
+        // A request that was cancelled before the preview arrived must not pay for the size read:
+        // the pure-preview swipe path runs this off the main actor, and the read is the slowest
+        // thing in it (PRD P0-04; G1 "Scheduling and cache").
+        if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
         // Read once per photo, against the preview that is about to be shown: a RAW is never
         // smaller than its embedded preview, which is how a size that describes the preview is
         // told apart from the sensor's (PRD P0-04; G1 "Preview, detail (I2)").
@@ -389,6 +393,12 @@ public actor DetailPipeline {
                 fullResolutionSize: renderedSize(
                     pixels, known: fullResolutionSize, source: raw))
             cache.storeNative(rendered, for: key)
+            // The render is the photo's own pixels, so its size is the native size a later read
+            // would have looked for. Remembering it means coming back to this photo needs no new
+            // decoder read (PRD P0-04; G1 "Preview, detail (I2)").
+            if fullResolutionSize == nil {
+                cache.store(nativeSize: .known(pixelSize(pixels)), for: raw)
+            }
             return verified(.available(rendered))
         }
 

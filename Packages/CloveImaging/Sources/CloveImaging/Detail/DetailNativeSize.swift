@@ -25,13 +25,15 @@ enum DetailNativeSize {
     /// This reads the filter's output extent and nothing else: no context, no bitmap, no
     /// demosaicing, so no image pixel is decoded. `CIRAWFilter` applies the RAW's own orientation
     /// to its output, which is why the extent is already the size the pixels are displayed at.
+    /// The extent is taken as `integral`, the rectangle `createCGImage` renders, so this size and
+    /// ``DetailRenderer/nativeRAW(_:)`` cannot disagree about a fractional edge.
     static func raw(_ source: DetailSource) -> CGSize? {
         autoreleasepool {
             guard let filter = CIRAWFilter(imageURL: source.url),
                 let extent = filter.outputImage?.extent
             else { return nil }
             return oriented(
-                width: Int(extent.width.rounded()), height: Int(extent.height.rounded()),
+                width: Int(extent.integral.width), height: Int(extent.integral.height),
                 orientation: 1)
         }
     }

@@ -184,6 +184,50 @@ struct DetailNativeSizeFixtureTests {
         #expect(rendered.fullResolutionSize != preview.fullResolutionSize)
     }
 
+    @Test func aRenderRemembersTheSizeTheReadCouldNotGive() async throws {
+        let url = DetailFixtures.file("sony-ilce-7s.ARW")
+        let pipeline = DetailPipeline(
+            cache: DetailCache(), reader: DetailRenderer(),
+            sizes: StubDetailNativeSizeReader(size: nil))
+
+        let preview = try availableDetail(
+            try await pipeline.preview(for: try rawRequest(url, displayPixels: 1200)))
+        #expect(preview.fullResolutionPixels == nil)
+
+        let rendered = try availableDetail(
+            try await pipeline.image(for: try rawRequest(url, displayPixels: 1200, native: true)))
+        #expect(rendered.fullResolutionSize == CGSize(width: 2768, height: 1848))
+
+        // The render is the photo's own pixels, so coming back to the photo knows its 100% without
+        // another decoder read (PRD P0-04; G1 "Preview, detail (I2)").
+        let again = try availableDetail(
+            try await pipeline.preview(for: try rawRequest(url, displayPixels: 1200)))
+        #expect(again.fullResolutionSize == CGSize(width: 2768, height: 1848))
+    }
+
+    @Test func aRAWWithoutASizeWhoseRenderFailsStillLeavesNo100Percent() async throws {
+        let url = DetailFixtures.file("sony-ilce-7s.ARW")
+        let gate = DetailReadGate()
+        await gate.configure(behaviour: .fail, holdNative: false, holdPreview: false)
+        let pipeline = DetailPipeline(
+            cache: DetailCache(), reader: GatedDetailReader(gate: gate),
+            sizes: StubDetailNativeSizeReader(size: nil))
+
+        let preview = try availableDetail(
+            try await pipeline.preview(for: try rawRequest(url, displayPixels: 1200)))
+        #expect(preview.hasRAW)
+        #expect(preview.fullResolutionPixels == nil)
+
+        let failed = try availableDetail(
+            try await pipeline.image(for: try rawRequest(url, displayPixels: 1200, native: true)))
+        // The preview stays with the failure reported, and it still has no 100%: the view's rule
+        // then inspects the preview instead of doing nothing (PRD P0-04; #111).
+        #expect(failed.limitation == .rawRenderFailed)
+        #expect(failed.fullResolutionSize == nil)
+        #expect(failed.fullResolutionPixels == nil)
+        #expect(await gate.nativePaths.count == 1)
+    }
+
     @Test func aJpegPrimaryPreviewCarriesTheFullJpegSize() async throws {
         let pipeline = DetailPipeline(cache: DetailCache())
         let request = try rasterRequest(
