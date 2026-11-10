@@ -178,6 +178,9 @@ final class UndoHistoryBridge {
         // against it.
         if queuedPresses.isEmpty { rebuild() }
         await runQueuedStep()
+        // A press that ran after the direct step consumed a registration the manager still holds,
+        // so the mirror is brought back in step now that the queue is empty.
+        if !isStepping, queuedPresses.isEmpty { rebuild() }
     }
 
     /// Finishes one step that a system registration started (PRD P0-05).

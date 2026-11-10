@@ -57,6 +57,9 @@ public actor MarkWriteQueue {
     private var shownMarks: [PhotoIdentity: PhotoMarks] = [:]
     /// The changes admitted and not finished, per photo, in admission order (PRD P0-05).
     private var inFlightByPhoto: [PhotoIdentity: [MarkChangeID]] = [:]
+    /// Confirmed changes for a photo nothing has seeded yet, so the first admission still sees
+    /// what the queue confirmed while the folder's stream lagged (PRD P0-05).
+    private var confirmedBeforeSeed: [PhotoIdentity: MarkChange] = [:]
 
     /// Creates the queue over an existing Clove store and an injectable file seam.
     ///
@@ -645,7 +648,10 @@ extension MarkWriteQueue {
         _ change: MarkChange, to set: ScannedPhotoSet, confirmed: PhotoMarks
     ) async -> MarkChangeAdmission {
         let photo = set.photoSet.id
-        if shownMarks[photo] == nil { shownMarks[photo] = confirmed }
+        if shownMarks[photo] == nil {
+            shownMarks[photo] = confirmed.including(confirmedBeforeSeed[photo] ?? MarkChange())
+            confirmedBeforeSeed[photo] = nil
+        }
         let marksBefore = MarkUndoSeenMarks.marks(
             confirmed: shownMarks[photo] ?? confirmed, requests: inFlightChanges(for: photo))
         let id = admit(change, for: set)
@@ -680,7 +686,10 @@ extension MarkWriteQueue {
         for set in sets {
             let photo = set.photoSet.id
             let seed = confirmed[photo] ?? PhotoMarks()
-            if shownMarks[photo] == nil { shownMarks[photo] = seed }
+            if shownMarks[photo] == nil {
+                shownMarks[photo] = seed.including(confirmedBeforeSeed[photo] ?? MarkChange())
+                confirmedBeforeSeed[photo] = nil
+            }
             let marksBefore = MarkUndoSeenMarks.marks(
                 confirmed: shownMarks[photo] ?? seed, requests: inFlightChanges(for: photo))
             let id = admit(change, for: set)
@@ -721,7 +730,10 @@ extension MarkWriteQueue {
     /// U9's finishing action re-reads marks this way, so it never rejects a photo whose rating or
     /// label is still writing (PRD P0-12). `confirmed` seeds the queue's copy the first time.
     public func marksShown(for photo: PhotoIdentity, confirmed: PhotoMarks) -> PhotoMarks {
-        if shownMarks[photo] == nil { shownMarks[photo] = confirmed }
+        if shownMarks[photo] == nil {
+            shownMarks[photo] = confirmed.including(confirmedBeforeSeed[photo] ?? MarkChange())
+            confirmedBeforeSeed[photo] = nil
+        }
         return MarkUndoSeenMarks.marks(
             confirmed: shownMarks[photo] ?? confirmed, requests: inFlightChanges(for: photo))
     }
@@ -733,6 +745,7 @@ extension MarkWriteQueue {
     public func forgetShownMarks(in folder: FolderIdentity) {
         shownMarks = shownMarks.filter { $0.key.folderID != folder }
         inFlightByPhoto = inFlightByPhoto.filter { $0.key.folderID != folder }
+        confirmedBeforeSeed = confirmedBeforeSeed.filter { $0.key.folderID != folder }
     }
 
     /// The changes admitted for one photo that have not finished, in admission order
@@ -756,7 +769,14 @@ extension MarkWriteQueue {
             ids.removeAll { $0 == status.id }
             inFlightByPhoto[status.identity] = ids.isEmpty ? nil : ids
         }
-        guard status.state.isConfirmed, let shown = shownMarks[status.identity] else { return }
+        guard status.state.isConfirmed else { return }
+        guard let shown = shownMarks[status.identity] else {
+            // Nothing has asked for this photo's "before" marks yet, so the change is kept until
+            // the first admission seeds them.
+            let earlier = confirmedBeforeSeed[status.identity] ?? MarkChange()
+            confirmedBeforeSeed[status.identity] = earlier.merged(with: status.requested)
+            return
+        }
         shownMarks[status.identity] = shown.including(status.requested)
     }
 }

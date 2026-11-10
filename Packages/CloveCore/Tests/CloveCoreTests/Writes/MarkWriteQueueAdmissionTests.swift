@@ -31,7 +31,7 @@ private func holdReplace(
 ///
 /// These run against the real queue and a file seam that can hold or fail one write, so the
 /// "before" marks are checked with several writers for one photo in flight at once.
-@Suite struct MarkWriteQueueAdmissionTests {
+@Suite(.timeLimit(.minutes(1))) struct MarkWriteQueueAdmissionTests {
     @Test func aRatingALabelAndAnotherRatingInFlightFoldInOrder() async throws {
         let folder = try WriteTestFolder()
         defer { folder.remove() }
@@ -133,6 +133,23 @@ private func holdReplace(
         // delivers; the queue's own confirmed marks are what ★4 replaces.
         let second = await queue.admit(.rating(admissionFour), to: set, confirmed: PhotoMarks())
         #expect(second.marksBefore.rating == admissionThree)
+    }
+
+    @Test func aConfirmedWriteNobodyAskedForIsKeptUntilTheSeed() async throws {
+        let folder = try WriteTestFolder()
+        defer { folder.remove() }
+        let double = WriteFileSystemDouble()
+        let set = try makeScannedSet(
+            folder: makeFolderIdentity(), root: folder.url, stem: "MMQ05184")
+        let queue = makeAdmissionQueue(folder, double)
+
+        // A finishing action's "keep" writes through the plain apply before any admission has
+        // seeded the photo, and the folder's stream may lag or drop the transition.
+        _ = await queue.apply(.rating(admissionThree), to: set)
+
+        // ★4 is admitted with the caller's stale marks: C4's own confirmed write is the seed.
+        let mark = await queue.admit(.rating(admissionFour), to: set, confirmed: PhotoMarks())
+        #expect(mark.marksBefore.rating == admissionThree)
     }
 
     @Test func aFailedChangeIsNotWhatUndoRestoresBefore() async throws {

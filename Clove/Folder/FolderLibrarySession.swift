@@ -124,6 +124,14 @@ final class FolderLibrarySession: FolderLibrary {
     /// The session holding the open folder's scope, ended when another folder opens.
     private var openSession: FolderAccessSession?
 
+    /// Whether the open folder is closing, set before its drain (PRD P0-01, P0-08).
+    ///
+    /// C4 starts a change's write at admission, so an admission after the drain but before the
+    /// scope is released would write under a scope the folder no longer holds. The flag closes
+    /// that window: an admission that starts after the close begins is refused, and every write
+    /// admitted before it is drained.
+    private var isClosingFolder = false
+
     /// The running scan, cancelled when another folder opens.
     private var scanTask: Task<Void, Never>?
 
@@ -290,10 +298,23 @@ final class FolderLibrarySession: FolderLibrary {
     func admitMarkChange(_ change: MarkChange, to photo: PhotoIdentity) async
         -> MarkChangeAdmission?
     {
-        guard !change.isEmpty, openSession != nil, let set = store.scannedSet(for: photo) else {
+        func refuse(_ reason: MarkWriteFailureReason, _ message: String) -> MarkChangeAdmission? {
+            let status = Self.refused(change, for: photo, reason: reason, message: message)
+            publish(.change(status))
             return nil
         }
-        guard case .success(let stores) = await resolvedStores() else { return nil }
+        guard !change.isEmpty else { return nil }
+        guard !isClosingFolder, let set = store.scannedSet(for: photo), openSession != nil else {
+            return refuse(.locationUnavailable, "The open folder no longer holds this photo.")
+        }
+        guard case .success(let stores) = await resolvedStores() else {
+            return refuse(.unknown, "Clove's stored marks are unavailable.")
+        }
+        // The folder can close while the stores resolve.
+        guard !isClosingFolder, openSession != nil else {
+            return refuse(
+                .locationUnavailable, "The folder closed before the change could be admitted.")
+        }
         let confirmed = store.photo(for: photo)?.marks ?? PhotoMarks()
         return await stores.writes.admit(change, to: set, confirmed: confirmed)
     }
@@ -333,7 +354,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// Items can name different changes because C13 resolves the action per photo, so the queue
     /// admits one batch per distinct change and the action's own handle keeps them for a retry.
     func admitBatch(_ items: [BatchMarkItem]) async -> BatchWriteAdmission? {
-        guard openSession != nil, !items.isEmpty else { return nil }
+        guard !items.isEmpty, !isClosingFolder, openSession != nil else { return nil }
         let scanned = store
         var order: [PhotoIdentity: Int] = [:]
         var byChange: [MarkChange: [ScannedPhotoSet]] = [:]
@@ -351,6 +372,7 @@ final class FolderLibrarySession: FolderLibrary {
             byChange[item.change, default: []].append(set)
         }
         guard case .success(let stores) = await resolvedStores() else { return nil }
+        guard !isClosingFolder, openSession != nil else { return nil }
         var queueBatches: [MarkBatchAdmission] = []
         var admissions: [MarkChangeAdmission] = []
         for (change, sets) in byChange {
@@ -1019,6 +1041,7 @@ final class FolderLibrarySession: FolderLibrary {
             return
         }
         let session = opened.session
+        isClosingFolder = false
         scanGeneration += 1
         let generation = scanGeneration
         folder = session.folder.id
@@ -1077,6 +1100,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// G1 folder access keeps the scope until the work that relies on it drains, so the queue is
     /// drained before the session ends. Ending waits for the scan's admitted work as well.
     private func endOpenFolder() async {
+        isClosingFolder = true
         scanGeneration += 1
         if let monitor = locationMonitor {
             locationMonitor = nil
