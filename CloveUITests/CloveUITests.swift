@@ -911,12 +911,11 @@ final class CloveUITests: XCTestCase {
         app.descendants(matching: .any)[identifier]
     }
 
-    /// A written mark starts the default auto-advance; the HUD's Undo returns to the marked photo
-    /// and clears the rating (PRD P0-05's Undo row).
+    /// Written marks in detail start the default auto-advance; Undo returns to the marked photo
+    /// and clears the mark it restored, with older entries still undoable (PRD P0-05's Undo row).
     @MainActor
     private func undoAMarkAfterAutoAdvance(in app: XCUIApplication) {
-        // The sample's fourth photo starts with a green label only, so the rating is the whole
-        // mark the undo has to take back.
+        // The sample's fourth photo starts with a green label only, so a rating is the whole mark.
         openPhoto("mmq02682", in: app)
         waitForFileName("MMQ02682.ARW", in: app)
         let marks = element(in: app, "clove.detail.marks")
@@ -926,18 +925,39 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(undo.waitForExistence(timeout: 10), "The HUD had no Undo button")
         XCTAssertFalse(undo.isEnabled, "Undo was enabled with nothing recorded")
 
+        // The first mark starts the default advance (PRD Auto-advance); the second one leaves an
+        // older entry under the next undo.
         element(in: app, "clove.detail.rate.4").tap()
-        // The written mark starts the default advance, so the undo below has to bring the view
-        // back to the photo whose mark it restores.
         waitForFileName("MMQ02683.ARW", in: app)
+        element(in: app, "clove.detail.rate.4").tap()
+        waitForFileName("MMQ02684.ARW", in: app)
 
-        XCTAssertTrue(undo.isEnabled, "Undo was disabled after a written mark")
+        // ⌘Z undoes the second mark and returns to its photo, and the first mark stays undoable.
+        app.typeKey("z", modifierFlags: .command)
+        waitForFileName("MMQ02683.ARW", in: app)
+        XCTAssertTrue(
+            waitForLabel("Unmarked", of: marks, timeout: 10),
+            "Undo did not clear the rating: \(marks.label)")
+        XCTAssertTrue(
+            undo.isEnabled, "Undo was disabled while an older mark was still undoable")
+
+        // ⇧⌘Z redoes it with that older entry still under it, and ⌘Z takes it back, so both
+        // directions share one history (PRD P0-05's Undo row).
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        XCTAssertTrue(
+            waitForLabel("4 stars", of: marks, timeout: 10),
+            "Redo did not put the rating back: \(marks.label)")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(
+            waitForLabel("Unmarked", of: marks, timeout: 10),
+            "The second undo did not clear the rating: \(marks.label)")
+
+        // The last undo takes the first mark back and returns to the photo that carried it.
         undo.tap()
-
         waitForFileName("MMQ02682.ARW", in: app)
         XCTAssertTrue(
             waitForLabel("Green", of: marks, timeout: 10),
-            "Undo did not clear the rating: \(marks.label)")
+            "Undo did not clear the first rating: \(marks.label)")
         XCTAssertFalse(undo.isEnabled, "Undo stayed enabled with nothing left to undo")
 
         back(in: app)
@@ -1058,8 +1078,17 @@ final class CloveUITests: XCTestCase {
             for: NSPredicate(format: "NOT (label CONTAINS %@)", "Rejected"),
             evaluatedWith: rejected)
         wait(for: [rejectsCleared], timeout: 10)
-        XCTAssertFalse(
-            undo.isEnabled, "Undo stayed enabled after the finishing action was undone")
+        // ⇧⌘Z redoes the step and ⌘Z takes it back, so the two directions share one stack
+        // (PRD P0-05's Undo row).
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        let rejectsBack = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "Rejected"), evaluatedWith: rejected)
+        wait(for: [rejectsBack], timeout: 10)
+        app.typeKey("z", modifierFlags: .command)
+        let clearedAgain = expectation(
+            for: NSPredicate(format: "NOT (label CONTAINS %@)", "Rejected"),
+            evaluatedWith: rejected)
+        wait(for: [clearedAgain], timeout: 10)
 
         // The group is incomplete again: its undecided member is back (PRD P0-12: a finishing
         // action can be undone).

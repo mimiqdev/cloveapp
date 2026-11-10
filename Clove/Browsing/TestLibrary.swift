@@ -317,7 +317,8 @@ final class TestLibrary: FolderLibrary {
     var undoAvailability: UndoAvailability {
         UndoAvailability(
             canUndo: !undoStack.isEmpty, canRedo: !undoRedoStack.isEmpty,
-            undoName: undoStack.last?.actionName, redoName: undoRedoStack.last?.actionName)
+            undoDepth: undoStack.count, undoName: undoStack.last?.actionName,
+            redoName: undoRedoStack.last?.actionName)
     }
 
     /// Records one confirmed change on the sample's undo history (PRD P0-05, P0-09, P0-12).
@@ -328,15 +329,12 @@ final class TestLibrary: FolderLibrary {
     func recordUndoStep(_ request: UndoRecordRequest) async -> Bool {
         let step: SampleUndoStep
         switch request {
-        case .mark(let status, let marksBefore):
-            guard !status.state.isSuperseded else { return false }
+        case .mark(let change, let photo, let marksBefore):
             step = SampleUndoStep(
                 photos: [
-                    SampleUndoPhoto(
-                        photo: status.identity, marksBefore: marksBefore,
-                        change: status.requested)
+                    SampleUndoPhoto(photo: photo, marksBefore: marksBefore, change: change)
                 ],
-                photoToReturnTo: status.identity, group: nil)
+                photoToReturnTo: photo, group: nil)
         case .batch(let result, let marksBefore):
             var photos: [SampleUndoPhoto] = []
             for outcome in result.outcomes where !outcome.state.isSuperseded {

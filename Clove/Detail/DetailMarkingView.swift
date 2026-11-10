@@ -171,8 +171,9 @@ struct DetailMarkingView: View {
                 label: { choose($0) },
                 toggleReject: { toggleReject() },
                 canUndo: browsing.canUndo,
-                undoFailure: browsing.lastUndoFailureSummary,
-                undo: { browsing.undo() })
+                undoFailure: browsing.undoFailure?.summary,
+                undo: { browsing.undo() },
+                retryUndo: { browsing.retryFailedUndoStep() })
             // The open folder's own save state, then this photo's failure with the PRD's Retry
             // and Cancel (PRD P0-08). The folder's row carries a location loss; the photo's row
             // carries one write that did not confirm.
@@ -196,6 +197,9 @@ struct DetailMarkingView: View {
         // The scene's undo manager reaches this model here, so ⌘Z and the three-finger gestures
         // undo the same history the HUD's button does (PRD P0-05).
         .undoHistory(browsing: browsing)
+        // An undo that returned the view to a photo drops the auto-advance the undone mark
+        // started, so the restored photo stays on screen (PRD Auto-advance, PRD P0-05).
+        .onChange(of: browsing.undoReturnCount) { _, _ in actions.markingSwipeBegan() }
         .task(id: photo.id) { await loadPreview(for: photo) }
         .onDisappear {
             // A render the user left behind must not keep reading the folder or write into a

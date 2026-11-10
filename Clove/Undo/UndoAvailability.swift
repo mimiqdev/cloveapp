@@ -12,11 +12,16 @@ struct UndoAvailability: Hashable, Sendable {
     var canUndo: Bool
     /// Whether there is an undone action to redo (PRD P0-05).
     var canRedo: Bool
+    /// How many actions the history can still undo.
+    ///
+    /// The system undo manager mirrors the history one group per action, so it needs the count as
+    /// well as the next action's name.
+    var undoDepth: Int
     /// C5's short name for the next undo's action, which the system menu shows (PRD P0-05).
     var undoName: String?
     /// C5's short name for the next redo's action (PRD P0-05).
     var redoName: String?
 
     /// A folder with no recorded action, which is what opening one starts from (PRD P0-05).
-    static let none = UndoAvailability(canUndo: false, canRedo: false)
+    static let none = UndoAvailability(canUndo: false, canRedo: false, undoDepth: 0)
 }

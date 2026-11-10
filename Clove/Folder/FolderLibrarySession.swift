@@ -234,15 +234,18 @@ final class FolderLibrarySession: FolderLibrary {
     /// Records one confirmed change on the open folder's undo history (PRD P0-05, P0-09, P0-12).
     ///
     /// PRD P0-05's Undo row restores the previous mark, so each request carries what its change
-    /// replaced. Every kind of step is recorded after C4 admitted it: one photo's mark, one bar
-    /// action as one step, and one finishing action as one step. A change the queue superseded, or
-    /// one that changed no field, records nothing.
+    /// replaced. One photo's mark is recorded from the request itself, in the state C4 admits a
+    /// change in before writing it; the mark can therefore be undone while its write is still
+    /// running. A bar action and a finishing action are recorded once each, from C4's and C10's own
+    /// per-photo results; a change that names no field records nothing.
     func recordUndoStep(_ request: UndoRecordRequest) async -> Bool {
         guard let history = undoHistory else { return false }
         let recorded: MarkUndoEntryID?
         switch request {
-        case .mark(let status, let marksBefore):
-            recorded = await history.record(status, marksBefore: marksBefore)
+        case .mark(let change, let photo, let marksBefore):
+            let admission = MarkChangeStatus(
+                id: MarkChangeID(), identity: photo, requested: change, state: .pending)
+            recorded = await history.record(admission, marksBefore: marksBefore)
         case .batch(let result, let marksBefore):
             recorded = await history.recordBatch(result, marksBefore: marksBefore)
         case .groupFinishing(let undo):
@@ -303,10 +306,12 @@ final class FolderLibrarySession: FolderLibrary {
     private func refreshUndoAvailability(from history: MarkUndoHistory) async {
         let canUndo = await history.canUndo
         let canRedo = await history.canRedo
+        let undoDepth = await history.undoCount
         let undoName = await history.nextUndoActionName
         let redoName = await history.nextRedoActionName
         undoState = UndoAvailability(
-            canUndo: canUndo, canRedo: canRedo, undoName: undoName, redoName: redoName)
+            canUndo: canUndo, canRedo: canRedo, undoDepth: undoDepth, undoName: undoName,
+            redoName: redoName)
     }
 
     /// The open this library installed last, which changes on every install and close

@@ -58,3 +58,14 @@ struct UndoStepResult: Hashable, Sendable {
         self.droppedFromHistory = droppedFromHistory
     }
 }
+
+/// The counts of an undo or redo step whose writes did not all confirm (PRD P0-08, P0-09).
+///
+/// A failed step keeps its history entry, so the same Undo button is its retry; the direction is
+/// kept here because a failed redo must be redone again, not undone (C5's rule).
+struct UndoFailure: Hashable, Sendable {
+    /// C5's partial-failure line, which the Undo row shows (PRD P0-09).
+    let summary: String
+    /// Whether the failed step was a redo, so Try again repeats it in the same direction.
+    let isRedo: Bool
+}

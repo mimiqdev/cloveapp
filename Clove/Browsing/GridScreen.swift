@@ -53,6 +53,16 @@ struct GridScreen: View {
         ).cells
         VStack(spacing: 0) {
             controls
+            // A step whose restore did not confirm keeps its history entry, so the counts and
+            // their Try again stay beside the Undo control they belong to (PRD P0-08, P0-09).
+            if let failure = browsing.undoFailure {
+                UndoFailureRow(
+                    summary: failure.summary, retry: { browsing.retryFailedUndoStep() },
+                    identifierPrefix: "clove.grid.undoFailure"
+                )
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+            }
             // The folder's one save state, beside the grid's other folder-level readings
             // (PRD P0-08). It opens the photos whose marks are not saved yet.
             SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.grid.saveState")
@@ -96,14 +106,14 @@ struct GridScreen: View {
                     // the badge says why it is needed (PRD P0-08).
                     Label(
                         "Undo",
-                        systemImage: browsing.lastUndoFailureSummary == nil
+                        systemImage: browsing.undoFailure == nil
                             ? "arrow.uturn.backward"
                             : "arrow.uturn.backward.circle.badge.exclamationmark")
                 }
                 .disabled(!browsing.canUndo)
                 .accessibilityIdentifier("clove.grid.undo")
-                .accessibilityValue(browsing.lastUndoFailureSummary ?? "")
-                .help(browsing.lastUndoFailureSummary ?? "Undo the last mark")
+                .accessibilityValue(browsing.undoFailure?.summary ?? "")
+                .help(browsing.undoFailure?.summary ?? "Undo the last mark")
             }
         }
         .accessibilityElement(children: .contain)

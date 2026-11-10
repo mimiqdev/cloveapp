@@ -21,19 +21,24 @@ protocol UndoHistoryHost: AnyObject {
 /// keyboard and the iOS three-finger gestures. All three reach the scene's one `UndoManager`, so
 /// this bridge is the single place that registers with it:
 ///
-/// - **One registration per recorded action.** The browsing model records an action once, after
-///   C4 admitted it, and calls ``historyDidChange()``. Whichever screen attaches the manager, the
-///   registration happens here and only here, so a toolbar press and the system gesture can never
-///   apply one action twice.
+/// - **One registration per recorded action.** The browsing model records an action once and asks
+///   the bridge to mirror it; the bridge registers exactly one system operation for it, in its own
+///   undo group. Whichever screen attaches the manager, registration happens here and only here,
+///   so a toolbar press and the system gesture can never apply one action twice.
 /// - **The toolbar goes through the same manager.** ``requestUndo()`` asks the manager to undo
 ///   while it holds a registration, exactly as ⌘Z and the gesture do, so one press is one step.
-/// - **The manager's redo pair is registered while it applies the undo.** That is the only moment
-///   its redo stack can gain an operation, so ⇧⌘Z and the three-finger redo gesture work.
-/// - **A step that moves nothing rebuilds the stack.** A failed write keeps its history entry
-///   (PRD P0-08) and a dropped entry leaves nothing to redo, so the system stack is rebuilt from
-///   the history instead of keeping a pair that would undo a different action.
+/// - **The manager's redo pair is registered while it applies the undo**, which is the only moment
+///   its redo stack can gain an operation, so ⇧⌘Z and the redo gesture work. Registering a new
+///   action outside such an application is exactly what discards the redo future, which is also
+///   C5's rule for a newly recorded action (PRD P0-05's last-in, first-out undo).
+/// - **A step that leaves the stacks out of step rebuilds them.** A failed write keeps its history
+///   entry (PRD P0-08) and a step that restored nothing drops it, so the mirror is rebuilt from the
+///   history then instead of keeping a pair that would run a different action.
 /// - **One step at a time.** A request while a step runs is ignored; the running step rebuilds the
 ///   stack when it finishes, so the extra press can never apply a second action.
+///
+/// The bridge groups registrations itself (`groupsByEvent` off), because two registrations in one
+/// run-loop turn would otherwise join one system undo and a single ⌘Z would restore two actions.
 @MainActor
 final class UndoHistoryBridge {
     /// The browsing model this bridge undoes through, held weakly for the scene's lifetime.
@@ -58,13 +63,29 @@ final class UndoHistoryBridge {
     func attach(_ manager: UndoManager?) {
         guard let manager, self.manager == nil else { return }
         self.manager = manager
-        // A folder session keeps C5's history to this many actions, so the system stack does too.
+        // Each recorded action is one system undo group, and the folder session keeps C5's history
+        // to this many actions, so the system stack is bounded the same way.
+        manager.groupsByEvent = false
         manager.levelsOfUndo = MarkUndoHistory.defaultDepthLimit
         rebuild()
     }
 
-    /// Mirrors the history after a recorded action (PRD P0-05).
-    func historyDidChange() {
+    /// Mirrors one newly recorded action onto the system undo stack (PRD P0-05).
+    ///
+    /// The registration discards the manager's redo stack outside an undo application, which is
+    /// what C5 does for a newly recorded action too (PRD P0-05's last-in, first-out undo).
+    func historyDidRecord() {
+        guard !isStepping else {
+            changedDuringStep = true
+            return
+        }
+        guard let host, host.undoAvailability.canUndo else { return }
+        registerUndoOperation(named: host.undoAvailability.undoName)
+    }
+
+    /// Forgets every system step after the open folder's history was replaced or cleared
+    /// (PRD P0-05).
+    func historyDidReset() {
         guard !isStepping else {
             changedDuringStep = true
             return
@@ -129,6 +150,8 @@ final class UndoHistoryBridge {
         guard beginStep() else { return }
         _ = isUndo ? await host?.undoThroughHistory() : await host?.redoThroughHistory()
         isStepping = false
+        // The manager held no registration for this step, so its stacks no longer describe the
+        // history; the mirror is rebuilt from the history.
         rebuild()
     }
 
@@ -139,37 +162,42 @@ final class UndoHistoryBridge {
         isStepping = false
         let changed = changedDuringStep
         changedDuringStep = false
-        // The pair registered above belongs to this step only while the step moved the history.
+        // The pair registered above belongs to this step only while the step moved the history:
+        // a failed restore keeps its entry (PRD P0-08) and a dropped entry leaves nothing behind.
         let moved = result.map { $0.failureSummary == nil && !$0.droppedFromHistory } ?? false
-        if changed || !moved {
-            rebuild()
-            return
-        }
-        if isUndo { registerNextUndo() }
+        if changed || !moved { rebuild() }
     }
 
-    /// Registers the history's next undo as one system operation, named for its menu
-    /// (PRD P0-05).
-    ///
-    /// The group is begun explicitly, so two registrations in one run-loop turn stay two
-    /// operations and one ⌘Z never restores two actions.
-    private func registerNextUndo() {
-        guard let manager, let host, host.undoAvailability.canUndo else { return }
+    // MARK: - Mirror
+
+    /// Registers the history's next action as one system undo, named for its menu (PRD P0-05).
+    private func registerUndoOperation(named name: String?) {
+        guard let manager else { return }
         manager.beginUndoGrouping()
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemUndo() }
-        manager.setActionName(host.undoAvailability.undoName ?? "Mark")
+        if let name { manager.setActionName(name) }
         manager.endUndoGrouping()
     }
 
-    /// Mirrors the history into a fresh system stack: one undo registration for its next action.
+    /// Mirrors the history into a fresh system stack, one undo group per undoable action.
     ///
     /// The system's redo stack gains operations only while it applies an undo, so a rebuild cannot
-    /// restore redo. The history keeps the undone actions, and the next undo registers their pair
-    /// again (PRD P0-05's last-in, first-out undo).
+    /// restore redo; the history keeps the undone actions, and undoing again registers their pair
+    /// (PRD P0-05's last-in, first-out undo). Only the next action's name is known, so the groups
+    /// below it carry that name until they are applied.
     private func rebuild() {
-        guard let manager else { return }
+        guard let manager, let host else { return }
         manager.removeAllActions()
-        registerNextUndo()
+        guard host.undoAvailability.canUndo else { return }
+        let name = host.undoAvailability.undoName
+        for _ in 0..<undoDepth(of: host) {
+            registerUndoOperation(named: name)
+        }
+    }
+
+    /// How many system undo groups the history can still undo (PRD P0-05).
+    private func undoDepth(of host: UndoHistoryHost) -> Int {
+        host.undoAvailability.undoDepth
     }
 
     /// Marks a step as running, or reports that one already is.

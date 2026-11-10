@@ -48,10 +48,20 @@ struct DetailMarkingHUD: View {
     /// Undoes the open folder's next action through the system undo path (PRD P0-05).
     let undo: () -> Void
 
+    /// Retries the undo or redo step that did not confirm (PRD P0-08).
+    let retryUndo: () -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             summary
             controls
+            // A step whose restore did not confirm keeps its history entry, so the counts and
+            // their Try again sit beside the Undo button they belong to (PRD P0-08, P0-09).
+            if let undoFailure {
+                UndoFailureRow(
+                    summary: undoFailure, retry: retryUndo,
+                    identifierPrefix: "clove.detail.undoFailure")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
