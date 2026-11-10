@@ -2,18 +2,21 @@ import Foundation
 
 /// The latest save state of each photo's change, merged as C4 publishes transitions (PRD P0-08).
 ///
-/// A change's state arrives from two places: C4's ``MarkWriteQueue/stateUpdates()`` stream, which
-/// yields each transition in order, and an awaited ``MarkWriteQueue/apply(_:to:)-swift.method``
-/// return, which is already final. The two paths can reach a reader in either order, so this
-/// value never moves a change backwards: a change already seen only accepts its own forward
-/// transitions while it is still its photo's latest change. A newer change to the same photo
-/// replaces the older one, which is what U7 reads for its retry (PRD How marks reach disk,
-/// rule 8).
+/// A change's state arrives only from C4's ``MarkWriteQueue/stateUpdates()`` stream, which yields
+/// each transition in admission order, so a status of a change already recorded is a transition
+/// of that change and a status of an unseen change is a newer one. Nothing may feed this type from
+/// an awaited ``MarkWriteQueue/apply(_:to:)-swift.method`` return: that value can arrive after a
+/// newer change was admitted, which would let an older finished state replace the newer one. The
+/// reader that owns the stream keeps this value and a photo's marks from the same ordered source.
+///
+/// A change already recorded never moves backwards: once it is finished, an earlier-lived pending
+/// or writing state for the same change is ignored. A newer change to the same photo replaces the
+/// older one, which is what U7 reads for its retry (PRD How marks reach disk, rule 8).
 public struct PhotoChangeStates: Sendable {
     /// The latest change per photo, by photo identity.
     private var latest: [PhotoIdentity: MarkChangeStatus] = [:]
-    /// Every change identity already admitted, so a repeated state is treated as a transition
-    /// of that change rather than as a newer change.
+    /// Every change identity already seen, so a repeated state is treated as a transition of that
+    /// change rather than as a newer change.
     private var seen: Set<MarkChangeID> = []
 
     /// Starts with no change recorded; a photo with nothing requested has no state at all.
@@ -25,27 +28,28 @@ public struct PhotoChangeStates: Sendable {
     /// How many photos have a recorded change.
     public var count: Int { latest.count }
 
-    /// Records one state, keeping the rules above (PRD P0-08).
+    /// Records one state and reports whether it became the photo's latest.
     ///
-    /// The first state of a change replaces its photo's state, because it is the newest change.
-    /// A state of a change already recorded only replaces that change's own state, only while it
-    /// is still the photo's latest, and never after it reached a finished one.
-    public mutating func insert(_ status: MarkChangeStatus) {
+    /// The first state of a change replaces its photo's state, because it is the newest change
+    /// admitted. A state of a change already recorded only replaces that change's own state, only
+    /// while it is still the photo's latest, and never after it reached a finished one. The
+    /// return value is what the caller uses to decide whether the change's fields still belong on
+    /// the photo: a refused status is an older change a newer one replaced (PRD disk rule 8).
+    @discardableResult
+    public mutating func insert(_ status: MarkChangeStatus) -> Bool {
         guard !seen.contains(status.id) else {
-            guard let current = latest[status.identity], current.id == status.id else { return }
-            guard !(current.state.isFinished && !status.state.isFinished) else { return }
+            guard let current = latest[status.identity], current.id == status.id else {
+                return false
+            }
+            guard !(current.state.isFinished && !status.state.isFinished) else { return false }
             latest[status.identity] = status
-            return
+            return true
         }
         seen.insert(status.id)
         latest[status.identity] = status
+        return true
     }
 
     /// The latest change to one photo, or nil when nothing has been requested for it.
     public func latest(for photo: PhotoIdentity) -> MarkChangeStatus? { latest[photo] }
-
-    /// Records every state a library reports, for a reader that pulls them in one go.
-    public mutating func insert(contentsOf statuses: [MarkChangeStatus]) {
-        for status in statuses { insert(status) }
-    }
 }

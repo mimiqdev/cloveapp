@@ -59,4 +59,14 @@ public struct FolderScan: AsyncSequence, Sendable {
     public func summary() async throws -> ScanSummary {
         try await producer.value
     }
+
+    /// Stops the walk without waiting for the batch sequence to be dropped.
+    ///
+    /// Leaving the sequence early already stops it, but a caller that keeps the value and ends its
+    /// folder needs the enumeration to stop before the security scope is released (PRD P0-02,
+    /// G1 folder access). The walk checks cancellation between entries, and ``summary()`` then
+    /// reports `CancellationError` once the producer has finished.
+    public func cancel() {
+        producer.cancel()
+    }
 }

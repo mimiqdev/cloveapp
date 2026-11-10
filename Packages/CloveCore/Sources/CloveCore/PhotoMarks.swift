@@ -81,26 +81,48 @@ public struct PhotoMarks: Hashable, Sendable {
         self.isRejected = isRejected
     }
 
-    /// Combines the marks a photo's two storages hold into what the grid shows (PRD P0-05, P0-07).
+    /// The marks Clove stores for a photo, before its sidecar read finishes (PRD P0-05, P0-08).
     ///
-    /// Reject only ever comes from Clove's storage (G1 decision 5). A RAW set's rating and label
-    /// come from its sidecar, and a standalone JPEG or HIF keeps them in Clove (G1 decision 6), so
-    /// the sidecar's in-range values win and Clove's stored values fill in where the packet holds
-    /// none. An `xmp:Rating` outside PRD P0-05's 0–5 range is an external value with no place in
-    /// these marks, so it reads as unrated rather than as Reject (G1 decision 5, PRD P0-07) and
-    /// never hides a rating Clove stored for the same photo.
-    public init(stored: CloveStoredMarks? = nil, xmp: XMPMarks? = nil) {
-        // A packet that names no rating, or names 0, leaves Clove's stored rating in place: the
-        // two are indistinguishable in PRD P0-05's 0–5 scale, and a standalone set's stored
-        // rating is the only copy it has (G1 decision 6).
-        let packetRating = xmp?.rating.rating
-        let rating =
-            (packetRating == .unrated ? nil : packetRating) ?? stored?.rating ?? .unrated
-        let sidecarLabel = xmp?.label ?? .clear
-        let storedLabel = stored?.label ?? .clear
+    /// A photo enters the grid with these so a Reject or a standalone JPEG's marks are visible at
+    /// once; the sidecar read that follows replaces them with
+    /// ``init(stored:xmp:persistence:)``'s routing.
+    public init(stored: CloveStoredMarks?) {
         self.init(
-            rating: rating,
-            label: sidecarLabel.isClear ? storedLabel : sidecarLabel,
+            rating: stored?.rating ?? .unrated, label: stored?.label ?? .clear,
             isRejected: stored?.isRejected ?? false)
+    }
+
+    /// The marks a photo shows, from the storages its persistence routes them to
+    /// (PRD P0-05, P0-07; G1 decisions 2, 5–6).
+    ///
+    /// G1 decides a destination per field, so reading follows the same route:
+    /// - a RAW set's rating and label come from its sidecar only, and an explicit `0` or a clear
+    ///   label is the user's choice rather than a reason to fall back to a value Clove happens to
+    ///   store for the same identity (G1 decision 2);
+    /// - a standalone JPEG or HIF keeps its rating and label in Clove storage only, because it is
+    ///   never given a sidecar (G1 decision 6);
+    /// - Reject always comes from Clove storage (G1 decision 5).
+    ///
+    /// `xmp` is the packet C3 read for the photo, or nil when it has none. An `xmp:Rating` outside
+    /// PRD P0-05's 0–5 range is an external value with no place in these marks, so it reads as
+    /// unrated rather than as Reject (PRD P0-07).
+    public init(
+        stored: CloveStoredMarks? = nil, xmp: XMPMarks? = nil, persistence: MarkPersistence
+    ) {
+        let rating: Rating
+        switch persistence.rating {
+        case .xmpSidecar:
+            rating = xmp?.rating.rating ?? .unrated
+        case .cloveStorage:
+            rating = stored?.rating ?? .unrated
+        }
+        let label: ColourLabel
+        switch persistence.label {
+        case .xmpSidecar:
+            label = xmp?.label ?? .clear
+        case .cloveStorage:
+            label = stored?.label ?? .clear
+        }
+        self.init(rating: rating, label: label, isRejected: stored?.isRejected ?? false)
     }
 }
