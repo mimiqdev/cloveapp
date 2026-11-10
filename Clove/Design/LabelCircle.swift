@@ -23,7 +23,7 @@ struct LabelCircle: View {
                     .fill(Color.clove.label.colour(for: label))
                     .overlay {
                         Circle().strokeBorder(
-                            Color.clove.separator, lineWidth: label == nil ? 1.5 : 0)
+                            Color.clove.text.secondary, lineWidth: label == nil ? 1.5 : 0)
                     }
             }
             .frame(width: 36, height: 36)

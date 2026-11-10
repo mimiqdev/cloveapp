@@ -11,14 +11,16 @@ import SwiftUI
 /// Detail). A tap picks the star it lands on, and tapping the photo's current value clears it, the
 /// same rule as the capsule's stars (PRD Marking rules).
 ///
-/// The iPad rail version is 43 × 174 with a padding of 10 and a gap of 6, and leaves the chip out
-/// because the rail has its own Reject circle.
+/// All five levels always show, because the enabled-ratings setting affects input only (PRD
+/// Enabled rating levels): a disabled star is dimmed, a drag settles on the nearest enabled level
+/// below it, and a tap on it does nothing. The iPad rail version is 43 × 174 with a padding of 10
+/// and a gap of 6, and leaves the chip out because the rail has its own Reject circle.
 struct VerticalStarBar: View {
     /// The photo's rating.
     let rating: Rating
 
-    /// The levels the bar offers, ascending; the settings' enabled levels by default.
-    var levels: [Rating] = EnabledRatings.all.levels
+    /// The levels input may apply; all five by default, and every level still shows.
+    var enabledRatings: EnabledRatings = .all
 
     /// The size components.md measures on the device.
     var size: ControlSize = .phone
@@ -69,7 +71,7 @@ struct VerticalStarBar: View {
     private var pill: some View {
         GeometryReader { proxy in
             VStack(spacing: gap) {
-                ForEach(levels.reversed(), id: \.rawValue) { level in
+                ForEach(EnabledRatings.all.levels.reversed(), id: \.rawValue) { level in
                     star(level)
                 }
             }
@@ -83,10 +85,11 @@ struct VerticalStarBar: View {
                     }
                     .onChanged { value in
                         trackMove(value.translation)
+                        guard movedPastTapSlop else { return }
                         previewDrag(at: value.location.y, in: proxy.size.height)
                     }
-                    .onEnded { _ in
-                        commitDrag()
+                    .onEnded { value in
+                        commit(value, in: proxy.size.height)
                     }
             )
             .onChange(of: isDragging) { _, dragging in
@@ -104,21 +107,24 @@ struct VerticalStarBar: View {
         .cloveGlass(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
-    /// One star; the filled ones start at the bottom (components.md).
+    /// One star; the filled ones start at the bottom, and a disabled level is dimmed
+    /// (components.md, PRD Enabled rating levels).
     private func star(_ level: Rating) -> some View {
         let isFilled = level <= shownRating
+        let isEnabled = enabledRatings.contains(level)
         return Image(systemName: isFilled ? "star.fill" : "star")
             .font(.title3)
             .foregroundStyle(isFilled ? Color.clove.rating.on : Color.clove.rating.off)
+            .opacity(isEnabled ? 1 : 0.35)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The ✕ chip the swipe down lands on (components.md).
+    /// The ✕ chip the swipe down lands on (components.md): a light, thin ✕ on its own glass chip.
     private var rejectChip: some View {
         Button(action: onReject) {
             Image(systemName: "xmark")
-                .font(.headline)
-                .foregroundStyle(Color.clove.text.primary)
+                .font(.subheadline)
+                .foregroundStyle(Color.clove.text.secondary)
                 .frame(width: 40, height: 40)
                 .contentShape(Circle())
                 .cloveGlass(in: Circle())
@@ -128,10 +134,9 @@ struct VerticalStarBar: View {
         .accessibilityIdentifier("\(identifier).reject")
     }
 
-    /// Fills the bar and reports the live value while the drag runs (interactions.md).
+    /// Fills the bar and reports the live value while a drag runs (interactions.md).
     private func previewDrag(at y: CGFloat, in height: CGFloat) {
-        let next = rating(at: y, in: height)
-        guard next != shownRating else { return }
+        guard let next = enabledRating(at: y, in: height), next != shownRating else { return }
         preview = next
         onPreview(next)
     }
@@ -145,18 +150,25 @@ struct VerticalStarBar: View {
         movedPastTapSlop = true
     }
 
-    /// Commits the value the gesture ended on; nothing is applied before this call
-    /// (interactions.md).
+    /// Applies what the gesture chose; nothing is applied before this call (interactions.md).
     ///
-    /// A gesture that never moved past the tap slop is a tap: on the photo's current value it
-    /// clears the rating, and anywhere else it picks that star (PRD Marking rules). A drag commits
-    /// what it shows, even when that is the value already set.
-    private func commitDrag() {
-        let live = preview ?? rating
-        let committed = movedPastTapSlop || live != rating ? live : Rating.unrated
-        preview = nil
-        movedPastTapSlop = false
-        onCommit(committed)
+    /// A gesture that never moved past the tap slop is a tap: an enabled star is picked, the
+    /// photo's current value clears, and a disabled star does nothing (PRD Marking rules, PRD
+    /// Enabled rating levels). A drag commits the last value it previewed, so a drag back to its
+    /// start keeps the rating instead of clearing it.
+    private func commit(_ value: DragGesture.Value, in height: CGFloat) {
+        defer {
+            preview = nil
+            movedPastTapSlop = false
+        }
+        guard movedPastTapSlop else {
+            let drawn = drawnLevel(at: value.location.y, in: height)
+            guard enabledRatings.contains(drawn) else { return }
+            onCommit(drawn == rating ? .unrated : drawn)
+            return
+        }
+        guard let live = preview else { return }
+        onCommit(live)
     }
 
     /// Steps the rating from VoiceOver, since the bar is one adjustable control.
@@ -166,10 +178,10 @@ struct VerticalStarBar: View {
     private func adjustRating(_ direction: AccessibilityAdjustmentDirection) {
         switch direction {
         case .increment:
-            guard let level = levels.first(where: { $0 > rating }) else { return }
+            guard let level = enabledRatings.levels.first(where: { $0 > rating }) else { return }
             onCommit(level)
         case .decrement:
-            guard let level = levels.last(where: { $0 < rating }) else { return }
+            guard let level = enabledRatings.levels.last(where: { $0 < rating }) else { return }
             onCommit(level)
         @unknown default:
             return
@@ -181,12 +193,20 @@ struct VerticalStarBar: View {
         rating == .unrated ? "Unrated" : "\(rating.rawValue) stars"
     }
 
-    /// The rating for a drag at `y`: the stars fill from the bottom (components.md).
-    private func rating(at y: CGFloat, in height: CGFloat) -> Rating {
+    /// The star a drag at `y` points at: the stars fill from the bottom (components.md).
+    private func drawnLevel(at y: CGFloat, in height: CGFloat) -> Rating {
+        let levels = EnabledRatings.all.levels
         let innerHeight = max(height - 2 * padding, 1)
         let filled = Int(
             ((innerHeight - (y - padding)) / innerHeight * CGFloat(levels.count)).rounded(.up))
         return levels[min(max(filled, 1), levels.count) - 1]
+    }
+
+    /// The enabled level a drag at `y` applies: the nearest one at or below the star it points at,
+    /// or nil under the lowest enabled level (PRD Enabled rating levels).
+    private func enabledRating(at y: CGFloat, in height: CGFloat) -> Rating? {
+        let drawn = drawnLevel(at: y, in: height)
+        return enabledRatings.levels.last { $0 <= drawn }
     }
 
     /// The pill's width: 40 on iPhone, 43 on the iPad rail (components.md).

@@ -21,9 +21,9 @@ enum DesignGalleryLaunch {
 /// Every shared control in every state, with a theme switcher, for previews and screenshots
 /// (`design/handoff/components.md`, `README.md` build order steps 1 and 2).
 ///
-/// The gallery keeps V1 checkable before V2–V4 wire the controls into the screens: it draws each
-/// control with plain sample values and empty closures, and switching a theme shows all of them in
-/// that theme at once.
+/// The gallery keeps the controls checkable before the screens adopt them: it draws each control
+/// with plain sample values and empty closures, and switching a theme shows all of them in that
+/// theme at once.
 struct DesignGalleryScreen: View {
     /// The theme the gallery draws, changed by the switcher at the top.
     @State private var theme = CloveTheme.light
@@ -31,31 +31,46 @@ struct DesignGalleryScreen: View {
     /// Sample ratings and labels for the states below.
     private let threeStars = (Rating(rawValue: 3) ?? .unrated)
 
+    /// A 4★ from another app, which still shows when 4 is turned off for input (PRD Enabled
+    /// rating levels).
+    private let fourStars = (Rating(rawValue: 4) ?? .unrated)
+
+    /// Only 1, 3 and 5 enabled, so the states below show a disabled level that still displays.
+    private let oddRatings =
+        EnabledRatings(
+            EnabledRatings.all.levels.enumerated()
+                .filter { $0.offset.isMultiple(of: 2) }
+                .map(\.element)
+        ) ?? .all
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    themeSwitcher
-                    glassButtons
-                    moveRejects
-                    markCapsule
-                    marks
-                    starBar
-                    labelPicker
-                    toast
-                    banner
-                    pillActions
-                    progress
-                    themeTiles
+        GeometryReader { proxy in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        themeSwitcher
+                        glassButtons
+                        moveRejects
+                        markCapsule
+                        marks
+                        starBar
+                        labelPicker
+                        toast
+                        banner
+                        pillActions
+                        progress
+                        themeTiles
+                    }
+                    .padding(16)
+                    // A fixed width, so no control's ideal width can widen the page; the gallery
+                    // is a test screen, not a layout that adapts to its content.
+                    .frame(width: min(proxy.size.width, 520), alignment: .leading)
                 }
-                .padding(16)
-                .frame(maxWidth: 520)
-                .frame(maxWidth: .infinity)
+                .background(Rectangle().fill(Color.clove.bg.canvas).ignoresSafeArea())
+                .navigationTitle("Design gallery")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(theme.appearance.colorScheme, for: .navigationBar)
             }
-            .background(Rectangle().fill(Color.clove.bg.canvas).ignoresSafeArea())
-            .navigationTitle("Design gallery")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(theme.appearance.colorScheme, for: .navigationBar)
         }
         .environment(\.cloveTheme, theme)
         .environment(\.colorScheme, theme.appearance.colorScheme)
@@ -64,33 +79,43 @@ struct DesignGalleryScreen: View {
     }
 
     /// The theme switcher, so a screenshot can show the same controls in another theme.
+    ///
+    /// All eight sit in fixed rows, so every one is on screen and can be tapped or seen without
+    /// scrolling.
     private var themeSwitcher: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(CloveTheme.allCases) { candidate in
-                    Button {
-                        theme = candidate
-                    } label: {
-                        Text(candidate.name)
-                            .font(.footnote.weight(candidate == theme ? .semibold : .regular))
-                            .foregroundStyle(
-                                candidate == theme ? Color.clove.accent : Color.clove.text.secondary
-                            )
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background {
-                                if candidate == theme {
-                                    Capsule().fill(Color.clove.surface.card)
-                                }
+        VStack(alignment: .leading, spacing: 6) {
+            themeRow([.light, .dark])
+            themeRow([.darkroom, .night])
+            themeRow([.catppuccinLatte, .catppuccinMocha])
+            themeRow([.nord, .gruvbox])
+        }
+    }
+
+    /// One row of theme chips.
+    private func themeRow(_ themes: [CloveTheme]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(themes) { candidate in
+                Button {
+                    theme = candidate
+                } label: {
+                    Text(candidate.name)
+                        .font(.footnote.weight(candidate == theme ? .semibold : .regular))
+                        .foregroundStyle(
+                            candidate == theme ? Color.clove.accent : Color.clove.text.secondary
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background {
+                            if candidate == theme {
+                                Capsule().fill(Color.clove.surface.card)
                             }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(candidate == theme ? .isSelected : [])
-                    .accessibilityIdentifier("clove.design.gallery.theme.\(candidate.id)")
+                        }
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(candidate == theme ? .isSelected : [])
+                .accessibilityIdentifier("clove.design.gallery.theme.\(candidate.id)")
             }
         }
-        .scrollIndicators(.hidden)
     }
 
     /// The glass icon button in its normal and filter-active states (components.md).
@@ -135,6 +160,11 @@ struct DesignGalleryScreen: View {
                     rating: threeStars, label: .red, isRejected: true,
                     identifier: "clove.design.gallery.capsule.rejected",
                     onRate: noRate, onReject: {}, onLabel: {})
+                MarkCapsule(
+                    rating: fourStars, label: .green, isRejected: false,
+                    enabledRatings: oddRatings,
+                    identifier: "clove.design.gallery.capsule.disabledLevels",
+                    onRate: noRate, onReject: {}, onLabel: {})
             }
         }
     }
@@ -149,6 +179,9 @@ struct DesignGalleryScreen: View {
                     isRejected: true, identifier: "clove.design.gallery.reject.on", onToggle: {})
                 StarRow(
                     rating: threeStars, identifier: "clove.design.gallery.stars", onRate: noRate)
+                StarRow(
+                    rating: fourStars, enabledRatings: oddRatings,
+                    identifier: "clove.design.gallery.stars.disabledLevels", onRate: noRate)
                 LabelCircle(label: nil, identifier: "clove.design.gallery.label.none", onTap: {})
                 LabelCircle(
                     label: .green, identifier: "clove.design.gallery.label.green", onTap: {})
@@ -166,6 +199,10 @@ struct DesignGalleryScreen: View {
                 VerticalStarBar(
                     rating: threeStars, size: .pad, showsRejectChip: false,
                     identifier: "clove.design.gallery.starBar.pad",
+                    onPreview: noRate, onCommit: noRate, onReject: {})
+                VerticalStarBar(
+                    rating: fourStars, enabledRatings: oddRatings,
+                    identifier: "clove.design.gallery.starBar.disabledLevels",
                     onPreview: noRate, onCommit: noRate, onReject: {})
             }
         }
@@ -235,14 +272,19 @@ struct DesignGalleryScreen: View {
     /// The theme tile, selected and not (components.md, Theme tile).
     private var themeTiles: some View {
         section("Theme tiles") {
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    ForEach(CloveTheme.allCases) { candidate in
-                        ThemeTile(theme: candidate, isSelected: candidate == theme)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 10) {
+                themeTileRow([.light, .dark, .darkroom, .night])
+                themeTileRow([.catppuccinLatte, .catppuccinMocha, .nord, .gruvbox])
             }
-            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// One row of theme tiles.
+    private func themeTileRow(_ themes: [CloveTheme]) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(themes) { candidate in
+                ThemeTile(theme: candidate, isSelected: candidate == theme)
+            }
         }
     }
 

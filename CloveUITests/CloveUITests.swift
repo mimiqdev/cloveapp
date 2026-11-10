@@ -350,6 +350,10 @@ final class CloveUITests: XCTestCase {
     /// system on and leaves it on, so the other tests see the usual appearance.
     @MainActor
     func testAppearanceChoicePersistsAcrossLaunches() {
+        addTeardownBlock { @MainActor in
+            Self.restoreAppearance()
+        }
+
         let app = XCUIApplication()
         app.launch()
 
@@ -384,8 +388,56 @@ final class CloveUITests: XCTestCase {
                 of: app.buttons["clove.settings.appearance.theme.nord"], timeout: 10),
             "The relaunch lost the chosen theme")
 
-        // Leave the system choice on for the other tests in this run.
+        // Matching the system again in a light simulator brings the Light theme back: the theme
+        // follows the device, not the dark color scheme the app had set for Nord.
         setAppearanceMatchSystem(in: app, on: true)
+        XCTAssertTrue(
+            waitForSelection(of: app.buttons["clove.settings.appearance.theme.light"], timeout: 5),
+            "Matching a light system did not bring the Light theme back")
+    }
+
+    /// Puts the app back on Match system light/dark and the Light theme after the appearance test,
+    /// even when it failed, so the other tests never run in a theme it left behind.
+    ///
+    /// It is best effort: a missing element ends it instead of failing the run again.
+    @MainActor
+    private static func restoreAppearance() {
+        let app = XCUIApplication()
+        app.launch()
+        guard app.descendants(matching: .any)["clove.root"].waitForExistence(timeout: 30) else {
+            return
+        }
+        let settings = app.descendants(matching: .any)["clove.nav.settings"]
+        guard settings.waitForExistence(timeout: 10) else { return }
+        settings.tap()
+        let toggle = app.switches["clove.settings.appearance.matchSystem"]
+        guard toggle.waitForExistence(timeout: 10) else { return }
+
+        // Matching off first, so choosing Light applies instead of being ignored.
+        if toggle.value as? String == "1" {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+            waitForSwitch(toggle, value: "0", timeout: 5)
+        }
+        let light = app.buttons["clove.settings.appearance.theme.light"]
+        if light.waitForExistence(timeout: 5) {
+            light.tap()
+        }
+        if toggle.value as? String == "0" {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+            waitForSwitch(toggle, value: "1", timeout: 5)
+        }
+    }
+
+    /// Waits until a switch reports a value, with a bounded poll.
+    @MainActor
+    private static func waitForSwitch(
+        _ toggle: XCUIElement, value: String, timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if toggle.value as? String == value { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
     }
 
     /// Turns Match system light/dark on or off, and checks that the switch followed.

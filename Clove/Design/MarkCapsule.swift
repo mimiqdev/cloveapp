@@ -7,7 +7,7 @@ import SwiftUI
 /// It is 358 × 56, radius 28, with a gap of 12 and padding of 16; the stars sit centred with
 /// hairlines either side. It floats above the home indicator in detail, group review, select mode
 /// and the half fold. Every mark goes through the closures, so the screen applies C13's rules and
-/// writes the mark; the capsule itself knows nothing about the library (V1 scope).
+/// writes the mark; the capsule itself knows nothing about the library.
 struct MarkCapsule: View {
     /// The photo's rating (PRD P0-04).
     let rating: Rating
@@ -18,8 +18,9 @@ struct MarkCapsule: View {
     /// Whether the photo is rejected (G1 decision 5).
     let isRejected: Bool
 
-    /// The levels the stars offer; the settings' enabled levels by default.
-    var levels: [Rating] = EnabledRatings.all.levels
+    /// The levels input may apply; all five by default, and every level still shows
+    /// (PRD Enabled rating levels).
+    var enabledRatings: EnabledRatings = .all
 
     /// The identifier the screen's UI test uses.
     var identifier = "clove.mark.capsule"
@@ -40,7 +41,8 @@ struct MarkCapsule: View {
             Spacer(minLength: 0)
             hairline
             StarRow(
-                rating: rating, levels: levels, identifier: "\(identifier).stars", onRate: onRate)
+                rating: rating, enabledRatings: enabledRatings,
+                identifier: "\(identifier).stars", onRate: onRate)
             hairline
             Spacer(minLength: 0)
             LabelCircle(label: label, identifier: "\(identifier).label", onTap: onLabel)

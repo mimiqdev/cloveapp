@@ -42,7 +42,7 @@ struct Toast: View {
                     Text(actionTitle)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color.clove.accent)
-                        .frame(width: 72, height: 38)
+                        .frame(minWidth: 72, minHeight: 38)
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)

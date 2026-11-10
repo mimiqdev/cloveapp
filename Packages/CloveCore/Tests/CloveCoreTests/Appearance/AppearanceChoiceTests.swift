@@ -27,6 +27,31 @@ struct AppearanceChoiceTests {
         }
     }
 
+    /// Choosing Light or Dark while matching the system changes nothing, because the system already
+    /// picks between them; choosing any other theme stops matching
+    /// (`design/handoff/interactions.md`, Theme switching).
+    @Test func choosingATileFollowsTheThemeSwitchingRule() {
+        let matching = AppearanceChoice()
+        #expect(matching.choosing(.light) == matching)
+        #expect(matching.choosing(.dark) == matching)
+
+        for theme in CloveTheme.allCases where theme != .light && theme != .dark {
+            let chosen = matching.choosing(theme)
+            #expect(!chosen.matchesSystemAppearance)
+            #expect(chosen.theme == theme)
+        }
+
+        // A theme already chosen stays when Light or Dark is picked while matching is off.
+        for theme in CloveTheme.allCases {
+            let chosen = AppearanceChoice(matchesSystemAppearance: false, theme: theme)
+            for tile in CloveTheme.allCases {
+                let next = chosen.choosing(tile)
+                #expect(!next.matchesSystemAppearance)
+                #expect(next.theme == tile)
+            }
+        }
+    }
+
     /// Light and Catppuccin Latte are light appearances and the other six are dark (tokens.md).
     @Test func themesAreLightOrDarkAppearances() {
         #expect(CloveTheme.allCases.count == 8)

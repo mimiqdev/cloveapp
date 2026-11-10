@@ -1,5 +1,6 @@
 import CloveCore
 import SwiftUI
+import UIKit
 
 /// The scene's root: it owns this scene's browsing model and stores that model's state
 /// (PRD P0-14), and it puts the theme in effect into the environment
@@ -15,22 +16,22 @@ import SwiftUI
 ///
 /// The theme in effect comes from the Appearance setting and the system appearance: matching the
 /// system picks Light or Dark, otherwise the chosen theme applies in both, and its light or dark
-/// appearance fixes the window's color scheme and so the status bar and keyboard (tokens.md).
+/// appearance fixes the window's color scheme and so the status bar and keyboard (tokens.md). The
+/// system appearance is read from the window scene's screen through ``SystemAppearanceReader``,
+/// never from this tree's `\.colorScheme`, which the window override would otherwise report back.
 struct RootView: View {
     /// This scene's stored browsing state; the key is per scene, so scenes never share it.
     @SceneStorage("clove.browsing.state") private var storedState: Data?
 
-    /// The system appearance, which picks the theme while Match system is on (tokens.md). It stays
-    /// the system's value because the window only overrides the color scheme when it must.
-    @Environment(\.colorScheme) private var systemColourScheme
-
-    /// Whether the scene is in front, which is when the open folder's location is checked again
-    /// (PRD P0-02, G1 folder access).
-    @Environment(\.scenePhase) private var scenePhase
+    /// The system's light or dark appearance, kept current by ``SystemAppearanceReader``.
+    @State private var systemAppearance: ThemeAppearance
 
     /// The app-wide settings this scene reads and the environment carries (PRD Gesture-related
     /// settings). The store belongs to the app, not to the scene.
     private let settings: SettingsStore
+
+    /// Whether this launch shows the design gallery instead of the app; read once per scene.
+    private let showsDesignGallery = DesignGalleryLaunch.isEnabled()
 
     @State private var browsing: BrowsingModel
 
@@ -42,6 +43,7 @@ struct RootView: View {
     /// so a renamed folder applies to the next open. A preview passes its own library.
     init(settings: SettingsStore, library: (any FolderLibrary)? = nil) {
         self.settings = settings
+        _systemAppearance = State(initialValue: Self.windowSceneAppearance)
         _browsing = State(
             initialValue: BrowsingModel(
                 library: library ?? FolderLibraryLaunch.make(settings: settings)))
@@ -51,12 +53,20 @@ struct RootView: View {
         content
             .environment(\.cloveTheme, themeInEffect)
             .preferredColorScheme(preferredColourScheme)
+            .background {
+                SystemAppearanceReader { appearance in
+                    guard appearance != systemAppearance else { return }
+                    systemAppearance = appearance
+                }
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+            }
     }
 
-    /// The app's browsing shell, or the design gallery on the launch that asks for it (V1).
+    /// The app's browsing shell, or the design gallery on the launch that asks for it.
     @ViewBuilder
     private var content: some View {
-        if DesignGalleryLaunch.isEnabled() {
+        if showsDesignGallery {
             DesignGalleryScreen()
         } else {
             BrowseShell(browsing: browsing)
@@ -84,6 +94,10 @@ struct RootView: View {
         }
     }
 
+    /// Whether the scene is in front, which is when the open folder's location is checked again
+    /// (PRD P0-02, G1 folder access).
+    @Environment(\.scenePhase) private var scenePhase
+
     /// The theme in effect for the Appearance setting and the system appearance (tokens.md).
     private var themeInEffect: CloveTheme {
         settings.settings.appearance.theme(inSystemAppearance: systemAppearance)
@@ -96,9 +110,12 @@ struct RootView: View {
         return themeInEffect.appearance.colorScheme
     }
 
-    /// The system's light or dark appearance (tokens.md).
-    private var systemAppearance: ThemeAppearance {
-        systemColourScheme == .dark ? .dark : .light
+    /// The device's style at launch, so a dark system does not flash Light first.
+    private static var windowSceneAppearance: ThemeAppearance {
+        let style = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.screen.traitCollection.userInterfaceStyle
+        return style == .dark ? .dark : .light
     }
 }
 

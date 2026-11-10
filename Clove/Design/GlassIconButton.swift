@@ -18,8 +18,9 @@ struct GlassIconButton: View {
     /// The SF Symbol, from components.md's icon list.
     let symbol: String
 
-    /// Whether the active state is on; the filter uses it (components.md).
-    var isActive = false
+    /// Whether the button's active state is on, or nil for a button that has none; only the
+    /// filter fills with `accent` and reports On or Off (components.md).
+    var isActive: Bool?
 
     /// The size components.md measures on the device.
     var size: ControlSize = .phone
@@ -33,12 +34,13 @@ struct GlassIconButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                if isActive {
+                if isActive == true {
                     Circle().fill(Color.clove.accent)
                 }
                 Image(systemName: symbol)
                     .font(symbolFont)
-                    .foregroundStyle(isActive ? Color.white : theme.tokens.primaryText.color)
+                    .foregroundStyle(
+                        isActive == true ? Color.white : theme.tokens.primaryText.color)
             }
             .frame(width: diameter, height: diameter)
             .contentShape(Circle())
@@ -46,8 +48,7 @@ struct GlassIconButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
-        .accessibilityValue(isActive ? "On" : "Off")
-        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .modifier(ActiveStateAccessibility(isActive: isActive))
         .accessibilityIdentifier(identifier)
     }
 
@@ -83,4 +84,21 @@ struct GlassIconButton: View {
     }
     .padding(24)
     .background(Rectangle().fill(Color.clove.bg.canvas))
+}
+
+/// Reports a button's active state only when the button has one, so Info, Undo and More do not
+/// announce On or Off they cannot be.
+private struct ActiveStateAccessibility: ViewModifier {
+    /// The active state, or nil for a button without one.
+    let isActive: Bool?
+
+    func body(content: Content) -> some View {
+        if let isActive {
+            content
+                .accessibilityValue(isActive ? "On" : "Off")
+                .accessibilityAddTraits(isActive ? .isSelected : [])
+        } else {
+            content
+        }
+    }
 }

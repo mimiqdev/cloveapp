@@ -27,4 +27,15 @@ public struct AppearanceChoice: Hashable, Sendable {
         guard matchesSystemAppearance else { return theme }
         return appearance == .light ? .light : .dark
     }
+
+    /// The choice after the user picks a tile in the theme picker.
+    ///
+    /// While the system picks the theme, Light and Dark are the two it already picks between, so
+    /// choosing either changes nothing and matching stays on. Picking another theme stops matching
+    /// the system and applies that theme (`design/handoff/interactions.md`, Theme switching:
+    /// "Picking another theme turns the toggle off.").
+    public func choosing(_ tile: CloveTheme) -> AppearanceChoice {
+        guard !matchesSystemAppearance || (tile != .light && tile != .dark) else { return self }
+        return AppearanceChoice(matchesSystemAppearance: false, theme: tile)
+    }
 }

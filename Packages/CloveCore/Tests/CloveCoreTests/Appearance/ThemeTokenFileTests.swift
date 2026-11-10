@@ -5,9 +5,9 @@ import CloveCore
 
 /// Checks the code's themes and tokens against the design handoff, token by token.
 ///
-/// `design/handoff/tokens/clove-themes.json` is the source (V1 in the development plan), so this
-/// suite reads the committed file instead of repeating its values. A change to the file without a
-/// matching change in ``CloveTheme`` fails here, and so does a typo in either one.
+/// `design/handoff/tokens/clove-themes.json` is the source, so this suite reads the committed file
+/// instead of repeating its values. A change to the file without a matching change in
+/// ``CloveTheme`` fails here, and so does a typo in either one.
 @Suite("Theme token file")
 struct ThemeTokenFileTests {
     /// Every theme and token in the file matches the code, in the file's order.
@@ -15,7 +15,8 @@ struct ThemeTokenFileTests {
         let file = try ThemeTokenFile.load()
         #expect(file.themes.count == CloveTheme.allCases.count)
 
-        for (index, entry) in file.themes.enumerated() {
+        // `prefix` keeps a ninth theme in the file from crashing the loop; the count above fails.
+        for (index, entry) in file.themes.enumerated().prefix(CloveTheme.allCases.count) {
             let theme = CloveTheme.allCases[index]
             #expect(entry.id == theme.rawValue)
             #expect(entry.name == theme.name)
