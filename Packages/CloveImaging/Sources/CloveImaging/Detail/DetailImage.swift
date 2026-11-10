@@ -66,19 +66,40 @@ public struct DetailImage: Sendable {
     public let quality: DetailQuality
     /// Set when these are the best pixels obtainable for the request (PRD P0-04).
     public let limitation: DetailLimitation?
+    /// The photo's oriented full-resolution pixel size, read from its file header
+    /// (PRD P0-04; G1 "Preview, detail (I2)"), or nil when the header could not be read.
+    ///
+    /// This is the size 100% means, so an embedded preview and the RAW render that replaces it
+    /// answer the same scale and the view does not zoom a second time when the render lands. A
+    /// render always carries its own size, because those pixels are native by definition. Nil is
+    /// the fallback the header could not fill: consumers use ``fullResolutionPixels``, which is
+    /// then this bitmap's own size.
+    public let fullResolutionSize: CGSize?
 
     public init(
         image: CGImage, source: DetailSource, quality: DetailQuality,
-        limitation: DetailLimitation? = nil
+        limitation: DetailLimitation? = nil, fullResolutionSize: CGSize? = nil
     ) {
         self.image = image
         self.source = source
         self.quality = quality
         self.limitation = limitation
+        self.fullResolutionSize = fullResolutionSize
     }
 
     public var width: Int { image.width }
     public var height: Int { image.height }
+
+    /// The size 100% means for this photo, which is ``fullResolutionSize`` when it is known and
+    /// this bitmap's own size otherwise (PRD P0-04; G1 "Preview, detail (I2)").
+    ///
+    /// The fallback is the behaviour before the native size was known: a file whose header
+    /// cannot be read keeps its shown bitmap's 100%, and a source with no larger pixels to show,
+    /// such as a HIF that is never fully decoded, answers at its preview's size.
+    public var fullResolutionPixels: CGSize {
+        fullResolutionSize ?? CGSize(width: width, height: height)
+    }
+
     /// Decoded size of this bitmap, the cost figure the detail cache budgets (S2 measured
     /// row bytes rather than assuming four bytes per pixel).
     public var decodedBytes: Int { image.bytesPerRow * image.height }
@@ -86,10 +107,46 @@ public struct DetailImage: Sendable {
     /// Longest side in pixels, which is what a display-size request is compared against.
     var longEdge: Int { max(width, height) }
 
+    /// Whether these pixels are the best this photo's route can deliver (PRD P0-04; G1
+    /// "Preview, detail (I2)").
+    ///
+    /// This answers whether asking for more pixels can help. A native RAW render is the photo's
+    /// own pixels. A raster is final when it reaches the photo's size, allowing one pixel for
+    /// rounding in the fit geometry, or when it reaches the raster decode limit, beyond which no
+    /// display request can produce a larger bitmap. Below that limit, a raster whose header size
+    /// is unknown is not final: it is a display raster, and the route behind it — a RAW render,
+    /// for one — may still deliver more. A preview is never final when it could render; a preview
+    /// whose header is unknown still asks, because the render supplies the size the header could
+    /// not.
+    public var isBestAvailable: Bool {
+        switch quality {
+        case .nativeRAW:
+            return true
+        case .raster:
+            if longEdge >= DetailPixelLimit.maximumEdge { return true }
+            guard let fullResolutionSize else { return false }
+            let nativeLongEdge = max(fullResolutionSize.width, fullResolutionSize.height)
+            return CGFloat(longEdge) + 1 >= nativeLongEdge
+        case .preview:
+            return false
+        }
+    }
+
     func limited(by limitation: DetailLimitation) -> DetailImage {
         DetailImage(
             image: image, source: source, quality: quality,
-            limitation: self.limitation ?? limitation)
+            limitation: self.limitation ?? limitation, fullResolutionSize: fullResolutionSize)
+    }
+
+    /// The same pixels with the request's full-resolution size attached (PRD P0-04).
+    ///
+    /// A cached bitmap can outlive the request that stored it: a HIF companion has its own cache
+    /// identity while the photo's size comes from the RAW. The current request's size therefore
+    /// replaces the stored one, including nil for a request with no larger size to report.
+    func withFullResolutionSize(_ size: CGSize?) -> DetailImage {
+        DetailImage(
+            image: image, source: source, quality: quality, limitation: limitation,
+            fullResolutionSize: size)
     }
 }
 

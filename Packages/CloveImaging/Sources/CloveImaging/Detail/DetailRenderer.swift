@@ -34,7 +34,7 @@ struct DetailRenderer: DetailReading {
     /// fixture 1616×1080, so the requested size is the largest the file offers.
     static let embeddedPreviewPixels = 2000
     /// Upper bound for a raster decode; protects the cache key range and the bitmap size.
-    static let maximumRasterPixels = 32_768
+    static let maximumRasterPixels = DetailPixelLimit.maximumEdge
 
     func read(_ step: DetailPreviewStep, displayPixels: Int) async -> DetailReadOutcome {
         switch step {
