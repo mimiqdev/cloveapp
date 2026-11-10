@@ -73,12 +73,19 @@ final class GridPhotoCell: UICollectionViewCell {
         if showsDifferentPhoto {
             isUnavailable = false
             loadThumbnail(for: item.photo.id, thumbnails: thumbnails)
+        } else if thumbnailTask == nil, thumbnailView.image == nil, !isUnavailable {
+            // A deferred or interrupted request left the cell without pixels; ask again.
+            loadThumbnail(for: item.photo.id, thumbnails: thumbnails)
         }
     }
 
     /// Starts a thumbnail request the cell still needs after scrolling back (PRD P0-03).
+    ///
+    /// It never restarts a request that is still running, so a cell prepared before it appears
+    /// keeps the work it already began (G1 scheduling row).
     func resumeThumbnail(using thumbnails: any GridThumbnailSource) {
-        guard let photo = currentItem?.photo.id, thumbnailView.image == nil, !isUnavailable
+        guard thumbnailTask == nil, let photo = currentItem?.photo.id,
+            thumbnailView.image == nil, !isUnavailable
         else { return }
         loadThumbnail(for: photo, thumbnails: thumbnails)
     }
@@ -224,6 +231,10 @@ final class GridPhotoCell: UICollectionViewCell {
     }
 
     /// Starts one request and shows whichever state it reports (PRD Scan scope).
+    ///
+    /// A deferred outcome is I1's scheduling pressure or a superseded request, not a broken
+    /// file, so the cell retries twice and then leaves the loading state for the next display
+    /// to ask again (G1 scheduling row). Only image and unavailable are terminal.
     private func loadThumbnail(
         for photo: PhotoIdentity, thumbnails: any GridThumbnailSource
     ) {
@@ -232,21 +243,36 @@ final class GridPhotoCell: UICollectionViewCell {
         spinner.startAnimating()
         unavailableView.isHidden = true
         thumbnailTask = Task { [weak self] in
-            let outcome = await thumbnails.thumbnail(for: photo, priority: .visible)
+            for attempt in 0..<3 {
+                let outcome = await thumbnails.thumbnail(for: photo, priority: .visible)
+                guard !Task.isCancelled, let self, self.currentItem?.photo.id == photo else {
+                    return
+                }
+                guard case .deferred = outcome else {
+                    self.show(outcome)
+                    self.thumbnailTask = nil
+                    return
+                }
+                if attempt < 2 {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    if Task.isCancelled { return }
+                }
+            }
             guard !Task.isCancelled, let self, self.currentItem?.photo.id == photo else { return }
-            self.show(outcome)
+            self.thumbnailTask = nil
         }
     }
 
     /// Shows the pixels, or the unreadable state instead of a blank image presented as loaded.
+    ///
+    /// Called with the two terminal outcomes: a deferred request never reaches here.
     private func show(_ outcome: GridThumbnailOutcome) {
         spinner.stopAnimating()
-        switch outcome {
-        case .image(let image):
+        if case .image(let image) = outcome {
             isUnavailable = false
             thumbnailView.image = UIImage(cgImage: image)
             unavailableView.isHidden = true
-        case .unavailable:
+        } else {
             isUnavailable = true
             thumbnailView.image = nil
             unavailableView.isHidden = false

@@ -38,31 +38,38 @@ final class PipelineGridThumbnails: GridThumbnailSource {
     /// Asks I1 for the primary file's embedded preview (G1 preview row).
     ///
     /// Reading the file's size and modification time is what I1's revision check needs, and it
-    /// happens before the pipeline takes the request so a file that is already gone costs no
-    /// queue slot. A request the pipeline queued but could not serve reports unavailable, so
-    /// the cell never sits on a blank image presented as loaded (PRD Scan scope).
+    /// runs off the main actor: both calls ask the file system, and PRD P0-03 puts smooth
+    /// scrolling before decoding, so a slow card must never stall the grid. A file that is
+    /// already gone then reports unavailable, without taking a queue slot (PRD Scan scope).
+    /// I1's queue pressure, a closed pipeline and a superseded request are deferred instead:
+    /// the file may be readable and the cell asks again (G1 scheduling row).
     func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority)
         async -> GridThumbnailOutcome
     {
         guard let set = set(photo) else { return .unavailable }
+        let source = set.primary.url
         guard
-            let request = try? ThumbnailRequest(
-                source: set.primary.url,
-                revision: ThumbnailRevision.read(from: set.primary.url),
-                targetPixels: Self.targetPixels,
-                locationIdentity: photo.folderID.rawValue)
+            let revision = await Task.detached(
+                priority: .userInitiated,
+                operation: {
+                    try? ThumbnailRevision.read(from: source)
+                }
+            ).value
         else {
             return .unavailable
         }
-        guard let result = try? await pipeline.thumbnail(for: request, priority: priority.pipeline)
-        else {
-            return .unavailable
-        }
-        switch result {
-        case .available(let thumbnail):
-            return .image(thumbnail.image)
-        case .unavailable:
-            return .unavailable
+        let request = ThumbnailRequest(
+            source: source, revision: revision, targetPixels: Self.targetPixels,
+            locationIdentity: photo.folderID.rawValue)
+        do {
+            switch try await pipeline.thumbnail(for: request, priority: priority.pipeline) {
+            case .available(let thumbnail):
+                return .image(thumbnail.image)
+            case .unavailable:
+                return .unavailable
+            }
+        } catch {
+            return .deferred
         }
     }
 }

@@ -28,6 +28,7 @@ struct GridScreen: View {
     }
 
     var body: some View {
+        let cells = cells
         VStack(spacing: 0) {
             controls
             Divider()
@@ -36,7 +37,7 @@ struct GridScreen: View {
             } else {
                 GridCollectionView(
                     items: cells,
-                    currentPhoto: browsing.state.currentPhoto,
+                    anchorCell: anchorCell(in: cells),
                     thumbnails: thumbnails,
                     openPhoto: { browsing.openPhoto($0) },
                     openGroup: openGroup)
@@ -105,6 +106,22 @@ struct GridScreen: View {
             groupsEnabled: Self.settings.similarGroupsEnabled,
             display: Self.settings.gridGroupDisplay
         ).cells
+    }
+
+    /// The cell that draws the current photo, for the grid to hold in place (PRD Grid, P0-14).
+    ///
+    /// Expanded display has the photo's own cell. Collapsed display draws one cover per group,
+    /// so a current photo inside a group resolves to that group's cover (PRD P0-11), and a
+    /// refinement cannot move the cover holding the photo. A photo the filter hides has no
+    /// cell, so the grid falls back to its top visible cell.
+    private func anchorCell(in cells: [GridCellItem]) -> GridCellItem.ID? {
+        guard let photo = browsing.state.currentPhoto else { return nil }
+        if cells.contains(where: { $0.id == .photo(photo) }) { return .photo(photo) }
+        guard let group = browsing.groups.first(where: { $0.members.contains(photo) }) else {
+            return nil
+        }
+        let cover = GridCellItem.ID.group(group.id)
+        return cells.contains(where: { $0.id == cover }) ? cover : nil
     }
 
     /// Opens one similar group's view from its count tag or its cover (PRD Grid, P0-11).

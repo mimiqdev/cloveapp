@@ -20,8 +20,11 @@ struct GridCollectionView: UIViewRepresentable {
     /// The cells to show, in grid order (PRD P0-03, P0-11).
     let items: [GridCellItem]
 
-    /// The photo the browser is on, which the update holds in place (PRD Grid, P0-14).
-    let currentPhoto: PhotoIdentity?
+    /// The cell the browser is on, which the update holds in place (PRD Grid, P0-14).
+    ///
+    /// The screen resolves the current photo to the cell that draws it, including a collapsed
+    /// group's cover, so a refinement cannot move a photo the cover stands for (PRD P0-11).
+    let anchorCell: GridCellItem.ID?
 
     /// The thumbnails and companion badges the cells draw (PRD Grid, P0-03).
     let thumbnails: any GridThumbnailSource
@@ -52,7 +55,7 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.openPhoto = openPhoto
         context.coordinator.openGroup = openGroup
         context.coordinator.apply(
-            items: items, currentPhoto: currentPhoto,
+            items: items, anchorCell: anchorCell,
             sizeClass: context.environment.horizontalSizeClass)
     }
 
@@ -92,9 +95,14 @@ extension GridCollectionView {
 
         private var items: [GridCellItem] = []
         private var itemsByID: [GridCellItem.ID: GridCellItem] = [:]
+        private struct PrefetchRequest {
+            let token: UUID
+            let task: Task<Void, Never>
+        }
+
         private var dataSource: UICollectionViewDiffableDataSource<Int, GridCellItem.ID>?
         private weak var collectionView: UICollectionView?
-        private var prefetchTasks: [GridCellItem.ID: Task<Void, Never>] = [:]
+        private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
 
         init(
@@ -126,12 +134,12 @@ extension GridCollectionView {
 
         /// Applies the cells SwiftUI handed over, holding the anchor cell's place (PRD P0-11).
         ///
-        /// The anchor is measured before the snapshot changes: the current photo when the grid
-        /// shows it, else the top visible cell. ``GridAnchorRule`` answers which cell takes that
-        /// place afterwards, including when a filter or a group refinement removed the anchor,
-        /// and the view scrolls that cell back to the same distance from the top.
+        /// The anchor is measured before the snapshot changes: the current photo's cell when
+        /// the grid shows it, else the top visible cell. ``GridAnchorRule`` answers which cell
+        /// takes that place afterwards, including when a filter or a group refinement removed
+        /// the anchor, and the view scrolls that cell back to the same distance from the top.
         func apply(
-            items newItems: [GridCellItem], currentPhoto: PhotoIdentity?,
+            items newItems: [GridCellItem], anchorCell: GridCellItem.ID?,
             sizeClass: UserInterfaceSizeClass?
         ) {
             guard let collectionView, let dataSource else { return }
@@ -143,7 +151,7 @@ extension GridCollectionView {
 
             let previousIDs = items.map(\.id)
             let previousByID = itemsByID
-            let held = hold(currentPhoto: currentPhoto)
+            let held = hold(anchorCell: anchorCell)
             items = newItems
             itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
 
@@ -182,13 +190,15 @@ extension GridCollectionView {
             _ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]
         ) {
             for indexPath in indexPaths {
-                guard let item = item(at: indexPath), prefetchTasks[item.id] == nil else {
+                guard let item = item(at: indexPath), prefetchRequests[item.id] == nil else {
                     continue
                 }
-                prefetchTasks[item.id] = Task { [weak self] in
+                let token = UUID()
+                let task = Task { [weak self] in
                     _ = await self?.thumbnails.thumbnail(for: item.photo.id, priority: .prefetch)
-                    self?.prefetchTasks[item.id] = nil
+                    self?.finishPrefetch(item.id, token: token)
                 }
+                prefetchRequests[item.id] = PrefetchRequest(token: token, task: task)
             }
         }
 
@@ -198,7 +208,7 @@ extension GridCollectionView {
         ) {
             for indexPath in indexPaths {
                 guard let item = item(at: indexPath) else { continue }
-                prefetchTasks.removeValue(forKey: item.id)?.cancel()
+                cancelPrefetch(item.id)
             }
         }
 
@@ -208,7 +218,7 @@ extension GridCollectionView {
             forItemAt indexPath: IndexPath
         ) {
             guard let item = item(at: indexPath), let cell = cell as? GridPhotoCell else { return }
-            prefetchTasks.removeValue(forKey: item.id)?.cancel()
+            cancelPrefetch(item.id)
             cell.resumeThumbnail(using: thumbnails)
         }
 
@@ -220,20 +230,34 @@ extension GridCollectionView {
             (cell as? GridPhotoCell)?.cancelThumbnailRequest()
         }
 
+        /// Drops one prefetch, cancelling the request when it is still running.
+        private func cancelPrefetch(_ id: GridCellItem.ID) {
+            prefetchRequests.removeValue(forKey: id)?.task.cancel()
+        }
+
+        /// Clears a finished prefetch only when it is still the request stored for that cell.
+        ///
+        /// A cancelled request may finish after a replacement was installed, so the token keeps
+        /// the old completion from erasing the new request's handle (G1 scheduling row).
+        private func finishPrefetch(_ id: GridCellItem.ID, token: UUID) {
+            guard prefetchRequests[id]?.token == token else { return }
+            prefetchRequests[id] = nil
+        }
+
         private func item(at indexPath: IndexPath) -> GridCellItem? {
             guard items.indices.contains(indexPath.item) else { return nil }
             return items[indexPath.item]
         }
 
         /// The anchor cell and its distance from the top of the visible area, before an update.
-        private func hold(currentPhoto: PhotoIdentity?) -> (
+        private func hold(anchorCell: GridCellItem.ID?) -> (
             item: GridCellItem.ID, offset: CGFloat?
         )? {
             guard let collectionView, !items.isEmpty else { return nil }
             let ids = items.map(\.id)
             let anchor: GridCellItem.ID
-            if let currentPhoto, let photo = ids.first(where: { $0 == .photo(currentPhoto) }) {
-                anchor = photo
+            if let anchorCell, ids.contains(anchorCell) {
+                anchor = anchorCell
             } else if let first = collectionView.indexPathsForVisibleItems.min(),
                 ids.indices.contains(first.item)
             {

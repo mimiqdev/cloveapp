@@ -10,6 +10,11 @@ enum GridThumbnailOutcome: Sendable {
     /// Nothing usable can be drawn for the photo, so the cell shows its unreadable state and
     /// never a blank image presented as loaded (PRD Scan scope).
     case unavailable
+
+    /// The request could not run now: I1's queue was full, its pipeline closed, or the request
+    /// was superseded (G1 scheduling row). The cell keeps its loading state and asks again,
+    /// because the file itself may be perfectly readable.
+    case deferred
 }
 
 /// How urgent one grid thumbnail request is (PRD P0-03, G1 scheduling row).

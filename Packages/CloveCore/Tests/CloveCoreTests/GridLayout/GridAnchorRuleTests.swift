@@ -71,6 +71,8 @@ struct GridAnchorRuleTests {
         #expect(GridAnchorRule.newIndex(of: nil, previous: ["a"], in: ["a"]) == nil)
         #expect(GridAnchorRule.newIndex(of: "z", previous: ["a"], in: ["a"]) == nil)
         #expect(GridAnchorRule.newIndex(of: "a", previous: ["a"], in: ["z"]) == nil)
+        // An anchor that was not in the old list has no old place to keep.
+        #expect(GridAnchorRule.newIndex(of: "a", previous: [], in: ["a"]) == nil)
     }
 
     /// The same rule works on the cell identities the collection view tracks, not just on strings.

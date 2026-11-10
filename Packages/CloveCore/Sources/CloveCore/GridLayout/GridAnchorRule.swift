@@ -20,13 +20,13 @@ public enum GridAnchorRule {
     /// before backward because the cell after the anchor is the one that was below it on screen.
     ///
     /// A nil anchor, or an anchor that was not in `previous`, returns nil: a view with no anchor
-    /// has no place to hold, and the caller starts from the top.
+    /// has no place to hold, and the caller starts from the top. An anchor that is new to
+    /// `previous` has no old place to keep, so it is not placed even when `cells` contains it.
     public static func newIndex<Cell: Hashable>(
         of anchor: Cell?, previous: [Cell], in cells: [Cell]
     ) -> Int? {
-        guard let anchor else { return nil }
+        guard let anchor, let removed = previous.firstIndex(of: anchor) else { return nil }
         if let index = cells.firstIndex(of: anchor) { return index }
-        guard let removed = previous.firstIndex(of: anchor) else { return nil }
         for offset in 1...(previous.count + 1) {
             let index = removed + offset
             if index < previous.count, let survivor = cells.firstIndex(of: previous[index]) {
