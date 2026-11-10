@@ -20,6 +20,10 @@ import CloveCore
     #expect(settings.similarGroupsEnabled)
     #expect(settings.gridGroupDisplay == .expanded)
     #expect(settings.groupCompletion == .nextGroup)
+    #expect(settings.appearance == AppearanceChoice())
+    #expect(settings.appearance.matchesSystemAppearance)
+    #expect(settings.appearance.theme == .light)
+    #expect(settings.appearance.theme(inSystemAppearance: .dark) == .dark)
 }
 
 @Test func settingChoicesAreTheLaunchChoices() {
@@ -28,6 +32,8 @@ import CloveCore
     #expect(DoubleTapBehaviour.allCases == [.zoom, .off])
     #expect(GridGroupDisplay.allCases == [.expanded, .collapsed])
     #expect(GroupCompletionBehaviour.allCases == [.nextGroup, .stay])
+    #expect(CloveTheme.allCases.first == .light)
+    #expect(ThemeAppearance.allCases == [.light, .dark])
 }
 
 @Test func labelsOfferedFollowExtendedColours() {
@@ -46,6 +52,7 @@ import CloveCore
     requireSendable(AutoAdvanceTriggers.self)
     requireSendable(KeepZoom.self)
     requireSendable(RejectsFolderName.self)
+    requireSendable(AppearanceChoice.self)
     requireSendable(SettingsPersistence.self)
     requireSendable(UserDefaultsSettingsStorage.self)
 }

@@ -66,6 +66,11 @@ import CloveCore
         ),
         ("grid.groupDisplay", invalid, { $0.gridGroupDisplay = defaults.gridGroupDisplay }),
         ("groups.completion", invalid, { $0.groupCompletion = defaults.groupCompletion }),
+        (
+            "appearance.matchSystem", invalid,
+            { $0.appearance.matchesSystemAppearance = defaults.appearance.matchesSystemAppearance }
+        ),
+        ("appearance.theme", invalid, { $0.appearance.theme = defaults.appearance.theme }),
     ]
     // The table covers every persisted key, so a new key cannot skip the fallback rule.
     #expect(cases.map(\.key).sorted() == launchSettingKeys)
@@ -101,6 +106,23 @@ import CloveCore
     let persistence = SettingsPersistence(storage: storage)
     persistence.save(custom)
     #expect(persistence.load().enabledRatings == custom.enabledRatings)
+}
+
+/// Storage written before the Appearance setting existed loads its launch defaults, so an update
+/// needs no migration step and keeps every other stored value.
+@Test func appearanceReadsItsDefaultsFromOlderStorage() {
+    let storage = InMemorySettingsStorage()
+    var older = AppSettings()
+    older.gesturesEnabled = false
+    older.keepZoom = KeepZoom(inGroups: false, inDetail: true)
+    SettingsPersistence(storage: storage).save(older)
+    // What the previous version wrote: every key it knew, and none of the Appearance keys.
+    storage.setString(nil, forKey: "appearance.matchSystem")
+    storage.setString(nil, forKey: "appearance.theme")
+
+    var expected = older
+    expected.appearance = AppearanceChoice()
+    #expect(SettingsPersistence(storage: storage).load() == expected)
 }
 
 @Test func aNewSettingReadsItsDefaultWithoutMigration() {

@@ -96,6 +96,10 @@ public struct AppSettings: Hashable, Sendable {
     /// default.
     public var groupCompletion: GroupCompletionBehaviour
 
+    /// Whether the system appearance picks the theme, and the chosen theme otherwise
+    /// (`design/handoff/tokens/tokens.md`); matching the system, with Light chosen, by default.
+    public var appearance: AppearanceChoice
+
     /// Creates every launch setting, defaulting each one to its PRD launch value.
     public init(
         gesturesEnabled: Bool = true,
@@ -108,7 +112,8 @@ public struct AppSettings: Hashable, Sendable {
         moveRejectsEnabled: Bool = true,
         similarGroupsEnabled: Bool = true,
         gridGroupDisplay: GridGroupDisplay = .expanded,
-        groupCompletion: GroupCompletionBehaviour = .nextGroup
+        groupCompletion: GroupCompletionBehaviour = .nextGroup,
+        appearance: AppearanceChoice = AppearanceChoice()
     ) {
         self.gesturesEnabled = gesturesEnabled
         self.enabledRatings = enabledRatings
@@ -121,6 +126,7 @@ public struct AppSettings: Hashable, Sendable {
         self.similarGroupsEnabled = similarGroupsEnabled
         self.gridGroupDisplay = gridGroupDisplay
         self.groupCompletion = groupCompletion
+        self.appearance = appearance
     }
 
     /// The colour labels the marking HUD, menu, and keyboard offer (PRD Marking rules).

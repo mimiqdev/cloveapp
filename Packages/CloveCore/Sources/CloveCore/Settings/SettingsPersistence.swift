@@ -19,6 +19,8 @@ enum SettingsKey: String, CaseIterable {
     case similarGroups = "groups.similarEnabled"
     case gridGroupDisplay = "grid.groupDisplay"
     case groupCompletion = "groups.completion"
+    case appearanceMatchesSystem = "appearance.matchSystem"
+    case appearanceTheme = "appearance.theme"
 }
 
 /// Reads and writes `AppSettings` through `SettingsStorage`, one key per field.
@@ -64,7 +66,12 @@ public struct SettingsPersistence: Sendable {
             moveRejectsEnabled: boolean(.moveRejects) ?? defaults.moveRejectsEnabled,
             similarGroupsEnabled: boolean(.similarGroups) ?? defaults.similarGroupsEnabled,
             gridGroupDisplay: rawValue(.gridGroupDisplay) ?? defaults.gridGroupDisplay,
-            groupCompletion: rawValue(.groupCompletion) ?? defaults.groupCompletion
+            groupCompletion: rawValue(.groupCompletion) ?? defaults.groupCompletion,
+            appearance: AppearanceChoice(
+                matchesSystemAppearance: boolean(.appearanceMatchesSystem)
+                    ?? defaults.appearance.matchesSystemAppearance,
+                theme: rawValue(.appearanceTheme) ?? defaults.appearance.theme
+            )
         )
     }
 
@@ -85,6 +92,8 @@ public struct SettingsPersistence: Sendable {
         setBoolean(settings.similarGroupsEnabled, .similarGroups)
         setText(settings.gridGroupDisplay.rawValue, .gridGroupDisplay)
         setText(settings.groupCompletion.rawValue, .groupCompletion)
+        setBoolean(settings.appearance.matchesSystemAppearance, .appearanceMatchesSystem)
+        setText(settings.appearance.theme.rawValue, .appearanceTheme)
     }
 
     /// Writes every key, then reads them back and reports whether storage kept the settings.
