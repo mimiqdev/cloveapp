@@ -19,6 +19,7 @@ Packages/CloveLabKit/     Lab report tooling plus one module per verification to
 Config/Shared.xcconfig    Shared build settings; includes Local.xcconfig if present
 Config/Local.xcconfig     Local development team, gitignored, never committed
 Config/TestFlight.local.json  Local signing config for the release script, gitignored
+design/handoff/           MVP design handoff: screens, theme tokens, components, interactions, copy (start with README.md)
 scripts/                  Project generation, simulator smoke test, fixture and release tooling
 project.yml               XcodeGen definition; Clove.xcodeproj is generated, not committed
 mise.toml / mise.lock     Pinned tools and project tasks

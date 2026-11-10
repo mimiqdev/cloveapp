@@ -1,0 +1,335 @@
+{
+  "fileKey": "xJcgQ7FziNyPM7UToZvkmq",
+  "page": "Clove · MVP design (0:1)",
+  "note": "Each frame holds the Light and Dark versions side by side.",
+  "frames": [
+    {
+      "section": "themes",
+      "row": "Themes",
+      "name": "Theme board (8 palettes)",
+      "nodeId": "181:2391",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=181-2391",
+      "device": "all"
+    },
+    {
+      "section": "themes",
+      "row": "Themes",
+      "name": "Live demo (grid + detail in Darkroom, Mocha, Nord, Gruvbox)",
+      "nodeId": "215:1878",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=215-1878",
+      "device": "all"
+    },
+    {
+      "section": "themes",
+      "row": "Themes",
+      "name": "Group wrapper color options (exploration; C chosen)",
+      "nodeId": "208:1154",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=208-1154",
+      "device": "all"
+    },
+    {
+      "section": "entry",
+      "row": "01 Entry",
+      "name": "Resume first (has recent folders)",
+      "nodeId": "187:1308",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=187-1308",
+      "device": "iphone"
+    },
+    {
+      "section": "entry",
+      "row": "01 Entry",
+      "name": "First launch (no folders yet)",
+      "nodeId": "189:1396",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=189-1396",
+      "device": "iphone"
+    },
+    {
+      "section": "grid",
+      "row": "02 Grid",
+      "name": "Default",
+      "nodeId": "159:1596",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=159-1596",
+      "device": "iphone"
+    },
+    {
+      "section": "grid",
+      "row": "02 Grid",
+      "name": "Filter menu (Unmarked active)",
+      "nodeId": "159:2251",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=159-2251",
+      "device": "iphone"
+    },
+    {
+      "section": "grid",
+      "row": "02 Grid",
+      "name": "Select mode (batch capsule)",
+      "nodeId": "176:2767",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2767",
+      "device": "iphone"
+    },
+    {
+      "section": "grid",
+      "row": "02 Grid",
+      "name": "Batch result (partial failure)",
+      "nodeId": "176:3424",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-3424",
+      "device": "iphone"
+    },
+    {
+      "section": "grid",
+      "row": "02 Grid",
+      "name": "Opening 1: reading photos",
+      "nodeId": "211:1741",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=211-1741",
+      "device": "iphone"
+    },
+    {
+      "section": "grid",
+      "row": "02 Grid",
+      "name": "Opening 2: finding similar shots",
+      "nodeId": "211:2332",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=211-2332",
+      "device": "iphone"
+    },
+    {
+      "section": "grid",
+      "row": "02 Grid",
+      "name": "\"…\" menu + no-preview tile",
+      "nodeId": "213:1422",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=213-1422",
+      "device": "iphone"
+    },
+    {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "Default (floating capsule)",
+      "nodeId": "154:1356",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=154-1356",
+      "device": "iphone"
+    },
+    {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "Label popover open",
+      "nodeId": "154:1653",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=154-1653",
+      "device": "iphone"
+    },
+    {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "Swipe-up star bar",
+      "nodeId": "154:1968",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=154-1968",
+      "device": "iphone"
+    },
+    {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "Info sheet",
+      "nodeId": "157:1584",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=157-1584",
+      "device": "iphone"
+    },
+    {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "Rejected",
+      "nodeId": "176:2070",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2070",
+      "device": "iphone"
+    },
+    {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "Save failed",
+      "nodeId": "176:2301",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2301",
+      "device": "iphone"
+    },
+    {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "100% zoom (chrome hidden)",
+      "nodeId": "176:2532",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2532",
+      "device": "iphone"
+    },
+    {
+      "section": "group",
+      "row": "04 Group review",
+      "name": "In progress (iPhone)",
+      "nodeId": "173:1950",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=173-1950",
+      "device": "iphone"
+    },
+    {
+      "section": "group",
+      "row": "04 Group review",
+      "name": "Group done (iPhone)",
+      "nodeId": "173:2193",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=173-2193",
+      "device": "iphone"
+    },
+    {
+      "section": "group",
+      "row": "04 Group review",
+      "name": "iPad",
+      "nodeId": "214:2931",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2931",
+      "device": "ipad"
+    },
+    {
+      "section": "group",
+      "row": "04 Group review",
+      "name": "Duo expanded",
+      "nodeId": "214:3214",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-3214",
+      "device": "duo-expanded"
+    },
+    {
+      "section": "move",
+      "row": "05 Move Rejects",
+      "name": "Confirm sheet",
+      "nodeId": "161:1716",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=161-1716",
+      "device": "iphone"
+    },
+    {
+      "section": "move",
+      "row": "05 Move Rejects",
+      "name": "Expanded quick grid (tap to keep)",
+      "nodeId": "162:1776",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=162-1776",
+      "device": "iphone"
+    },
+    {
+      "section": "move",
+      "row": "05 Move Rejects",
+      "name": "Done: toast with Undo",
+      "nodeId": "211:2923",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=211-2923",
+      "device": "iphone"
+    },
+    {
+      "section": "move",
+      "row": "05 Move Rejects",
+      "name": "Done: partial failure toast",
+      "nodeId": "211:3532",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=211-3532",
+      "device": "iphone"
+    },
+    {
+      "section": "move",
+      "row": "05 Move Rejects",
+      "name": "Couldn't move: Details sheet",
+      "nodeId": "217:1928",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=217-1928",
+      "device": "iphone"
+    },
+    {
+      "section": "ipad",
+      "row": "06–07 iPad",
+      "name": "Grid",
+      "nodeId": "166:1836",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-1836",
+      "device": "ipad"
+    },
+    {
+      "section": "ipad",
+      "row": "06–07 iPad",
+      "name": "Detail",
+      "nodeId": "166:2591",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-2591",
+      "device": "ipad"
+    },
+    {
+      "section": "duo",
+      "row": "08–09 Duo",
+      "name": "Cover (folded, outer screen)",
+      "nodeId": "167:1856",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=167-1856",
+      "device": "duo-cover"
+    },
+    {
+      "section": "duo",
+      "row": "08–09 Duo",
+      "name": "Expanded: grid (default, full width)",
+      "nodeId": "167:2521",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=167-2521",
+      "device": "duo-expanded"
+    },
+    {
+      "section": "duo",
+      "row": "08–09 Duo",
+      "name": "Expanded: photo focus 30/70",
+      "nodeId": "196:1119",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=196-1119",
+      "device": "duo-expanded"
+    },
+    {
+      "section": "duo",
+      "row": "08–09 Duo",
+      "name": "Expanded: photo only",
+      "nodeId": "197:1161",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=197-1161",
+      "device": "duo-expanded"
+    },
+    {
+      "section": "duo",
+      "row": "08–09 Duo",
+      "name": "Expanded: dock star bar (sliding)",
+      "nodeId": "217:2575",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=217-2575",
+      "device": "duo-expanded"
+    },
+    {
+      "section": "duo",
+      "row": "08–09 Duo",
+      "name": "Expanded: dock label picker",
+      "nodeId": "217:3348",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=217-3348",
+      "device": "duo-expanded"
+    },
+    {
+      "section": "halffold",
+      "row": "10 Duo half fold",
+      "name": "Quick refresh (dedicated layout is 1.1)",
+      "nodeId": "193:1172",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=193-1172",
+      "device": "duo-halffold"
+    },
+    {
+      "section": "settings",
+      "row": "11 Settings",
+      "name": "Theme picker",
+      "nodeId": "212:1394",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=212-1394",
+      "device": "iphone"
+    },
+    {
+      "section": "errors",
+      "row": "12 Errors",
+      "name": "Drive disconnected",
+      "nodeId": "214:1484",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-1484",
+      "device": "iphone"
+    },
+    {
+      "section": "errors",
+      "row": "12 Errors",
+      "name": "Lost access",
+      "nodeId": "214:2083",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2083",
+      "device": "iphone"
+    },
+    {
+      "section": "errors",
+      "row": "12 Errors",
+      "name": "Leaving with unsaved marks",
+      "nodeId": "214:2682",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2682",
+      "device": "iphone"
+    }
+  ]
+}
