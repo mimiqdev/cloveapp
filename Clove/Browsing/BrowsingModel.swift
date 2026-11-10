@@ -503,9 +503,12 @@ final class BrowsingModel {
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
         showEntryAfterLeaving()
+        // Leaving closes the folder even when the next destination never opens, so its scan stops
+        // and its scope is not held for a folder the user no longer sees (G1 folder access).
+        await library.closeFolder()
         switch destination {
         case .entry:
-            await library.closeFolder()
+            break
         case .picked(let url):
             await openPickedFolderNow(url)
         case .recent(let recent):
