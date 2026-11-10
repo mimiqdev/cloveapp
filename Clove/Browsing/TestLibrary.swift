@@ -8,11 +8,22 @@ import Foundation
 /// marks, two groups and the save state of each change it receives, and writes nothing anywhere.
 ///
 /// The sample is selected with the launch environment value ``launchVariable``; without it the
-/// app browses an empty library and entry says no folder is open.
+/// app browses an empty library and entry says no folder is open. Launch values can also force a
+/// write failure on chosen photos with a chosen reason, slow the write drain, and report the
+/// folder's location gone, so the UI test drives the PRD's failure and recovery copy without a
+/// file, a fixture or a permission.
 @MainActor
 final class TestLibrary: FolderLibrary {
     /// The launch environment value that selects the sample library: set it to `1`.
     static let launchVariable = "CLOVE_TEST_LIBRARY"
+
+    /// The launch environment value that makes sample photos fail their first write (PRD P0-09).
+    ///
+    /// Its value is a stem suffix: a photo whose stem ends with it reports a failed change once
+    /// and keeps the marks it had, and the next write saves it. The UI test therefore forces a
+    /// partial batch failure without files, sees the PRD's "Saved N photos. M photos couldn't be
+    /// saved." copy, and sees a retry of only the failed photo succeed.
+    static let forcedFailureVariable = "CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX"
 
     /// The launch environment value that makes the first write to named photos fail (PRD P0-08).
     ///
@@ -54,6 +65,7 @@ final class TestLibrary: FolderLibrary {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         return sample(
+            failingStemSuffix: environment[forcedFailureVariable],
             failingStems: stems,
             failureReason: forcedFailureReason(named: environment[forcedFailureReasonVariable]),
             locationLoss: locationLoss(named: environment[locationLossVariable]),
@@ -110,14 +122,21 @@ final class TestLibrary: FolderLibrary {
     private var stored: [GridPhoto]
     private var changes: [PhotoIdentity: MarkChangeStatus]
 
+    /// The stem suffix U4's launch value names, whose photos fail their first write (PRD P0-09).
+    private let failingStemSuffix: String?
+
     /// The stem suffixes whose photos fail their first write (PRD P0-08).
     private let failingStems: [String]
 
     /// The reason a forced failure reports, so a test can show any PRD row (PRD P0-08).
     private let failureReason: MarkWriteFailureReason
 
-    /// The photos whose forced failure already happened, so a retry saves them (PRD P0-08).
+    /// The photos whose forced failure already happened, so a retry saves them (PRD P0-08, P0-09).
     private var alreadyFailed: Set<PhotoIdentity> = []
+
+    /// The batches this library applied, so a retry touches only their failed photos
+    /// (PRD P0-09).
+    private var batches: [MarkBatchID: [BatchMarkItem]] = [:]
 
     /// How long the sample's write drain takes, so a UI test can see the waiting state
     /// (PRD P0-08).
@@ -136,6 +155,7 @@ final class TestLibrary: FolderLibrary {
         groups = []
         allGroups = []
         changes = [:]
+        failingStemSuffix = nil
         failingStems = []
         failureReason = .notConfirmed
         drainDelay = .zero
@@ -149,6 +169,7 @@ final class TestLibrary: FolderLibrary {
         photos: [GridPhoto],
         groups: [BrowsingGroup],
         changes: [MarkChangeStatus] = [],
+        failingStemSuffix: String? = nil,
         detailImages: (any DetailImageSource)? = nil,
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
@@ -162,6 +183,7 @@ final class TestLibrary: FolderLibrary {
         var byPhoto: [PhotoIdentity: MarkChangeStatus] = [:]
         for change in changes { byPhoto[change.identity] = change }
         self.changes = byPhoto
+        self.failingStemSuffix = failingStemSuffix
         self.failingStems = failingStems.map { $0.lowercased() }
         self.failureReason = failureReason
         self.drainDelay = drainDelay
@@ -189,6 +211,41 @@ final class TestLibrary: FolderLibrary {
     /// queue supersedes an older request, and a photo with nothing requested has no status at all.
     /// Nothing is written anywhere.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus {
+        perform(change, for: photo)
+    }
+
+    /// Applies one bar action's per-photo changes as one batch (PRD P0-09).
+    ///
+    /// Each photo is written on its own, the way C4's batch admits each set: a photo the launch
+    /// forced to fail keeps its marks and reports a failure, while the others take the change.
+    /// Per-photo states go through the same stream as a single change, and the batch's handle
+    /// retries only the photos that did not save.
+    func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
+        let outcomes = items.map { perform($0.change, for: $0.photo) }
+        let batch = MarkBatchID()
+        batches[batch] = items
+        return MarkBatchResult(
+            id: batch, change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+    }
+
+    /// Retries only the photos one batch could not save (PRD P0-09).
+    func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult? {
+        guard let items = batches[batch] else { return nil }
+        let failed = items.filter { changes[$0.photo]?.state.isUnfinished == true }
+        let outcomes = failed.map { perform($0.change, for: $0.photo) }
+        let retry = MarkBatchID()
+        batches[retry] = items
+        return MarkBatchResult(
+            id: retry, change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+    }
+
+    /// Applies one change to one photo and reports the state C4 would (PRD P0-08).
+    ///
+    /// A newer change replaces the photo's status the way the queue supersedes an older request,
+    /// and a photo with nothing requested has no status at all. A forced failure leaves the
+    /// photo's marks untouched, keeps the requested change for a retry, and happens only once per
+    /// photo, so a retry shows what retrying does (PRD P0-08, P0-09). Nothing is written anywhere.
+    private func perform(_ change: MarkChange, for photo: PhotoIdentity) -> MarkChangeStatus {
         guard !change.isEmpty else {
             // C4's queue refuses a request that names no marks and records nothing.
             return MarkChangeStatus(
@@ -213,7 +270,7 @@ final class TestLibrary: FolderLibrary {
                 id: MarkChangeID(), identity: photo, requested: change,
                 state: .failed(
                     MarkWriteFailure(
-                        reason: failureReason,
+                        reason: forcedFailureReason(for: photo),
                         message: "The sample library's forced failure.")))
             changes[photo] = status
             updateContinuation.yield(.change(status))
@@ -255,7 +312,7 @@ final class TestLibrary: FolderLibrary {
             id: status.id, identity: photo, requested: status.requested, state: .pending)
         changes[photo] = pending
         updateContinuation.yield(.change(pending))
-        return await apply(status.requested, to: photo)
+        return perform(status.requested, for: photo)
     }
 
     /// Reports the sample folder's location gone, as C11's watch does (PRD P0-02).
@@ -273,8 +330,8 @@ final class TestLibrary: FolderLibrary {
         try? await Task.sleep(for: drainDelay)
     }
 
-    /// Whether a change is still unfinished, so Wait for writes keeps the question
-    /// (PRD P0-08).
+    /// Whether a change admitted in this open is still unfinished, so Wait for writes keeps the
+    /// question (PRD P0-08).
     func hasUnfinishedWrites() async -> Bool {
         changes.values.contains { $0.state.isUnfinished }
     }
@@ -285,6 +342,7 @@ final class TestLibrary: FolderLibrary {
         stored = []
         groups = []
         changes = [:]
+        batches = [:]
         openGeneration += 1
         updateContinuation.yield(.photos([]))
     }
@@ -301,12 +359,49 @@ final class TestLibrary: FolderLibrary {
         updateContinuation.yield(.groups(published))
     }
 
+    /// Whether this photo's first write should fail, and records that it did (PRD P0-08, P0-09).
+    private func shouldFailFirstWrite(to photo: PhotoIdentity) -> Bool {
+        guard !alreadyFailed.contains(photo) else { return false }
+        let suffix = failingStemSuffix.map { photo.stem.hasSuffix($0) } ?? false
+        let listed = failingStems.contains { photo.stem.hasSuffix($0) }
+        guard suffix || listed else { return false }
+        alreadyFailed.insert(photo)
+        return true
+    }
+
+    /// The forced failure's reason, which the named list can choose (PRD P0-08).
+    private func forcedFailureReason(for photo: PhotoIdentity) -> MarkWriteFailureReason {
+        failingStems.contains { photo.stem.hasSuffix($0) } ? failureReason : .notConfirmed
+    }
+
+    /// The forced failure's reason, by its launch value (PRD P0-08).
+    private static func forcedFailureReason(named name: String?) -> MarkWriteFailureReason {
+        switch name {
+        case "permission": .permissionLost
+        case "location": .locationUnavailable
+        case "readOnly": .readOnlyStorage
+        case "space": .insufficientSpace
+        default: .notConfirmed
+        }
+    }
+
+    /// The location loss the sample reports at launch, by its launch value (PRD P0-02).
+    private static func locationLoss(named name: String?) -> FolderLocationLoss.Reason? {
+        switch name {
+        case "drive": .externalVolumeDisconnected
+        case "location": .locationUnavailable
+        default: nil
+        }
+    }
+
     /// The sample: 36 photos across two capture folders, a few marks, two bursts, two sets with
     /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).
     static var sample: TestLibrary { sample() }
 
-    /// The sample, optionally with forced write failures and a lost location (PRD P0-08, P0-02).
+    /// The sample, optionally with forced write failures, a lost location and a slow drain
+    /// (PRD P0-08, P0-09, P0-02).
     static func sample(
+        failingStemSuffix: String? = nil,
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
         locationLoss: FolderLocationLoss.Reason? = nil,
@@ -327,8 +422,9 @@ final class TestLibrary: FolderLibrary {
         }
         return TestLibrary(
             photos: photos, groups: sampleGroups, changes: sampleChanges,
-            detailImages: sampleDetailImages, failingStems: failingStems,
-            failureReason: failureReason, locationLoss: locationLoss, drainDelay: drainDelay)
+            failingStemSuffix: failingStemSuffix, detailImages: sampleDetailImages,
+            failingStems: failingStems, failureReason: failureReason,
+            locationLoss: locationLoss, drainDelay: drainDelay)
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).
@@ -357,35 +453,6 @@ final class TestLibrary: FolderLibrary {
                 requested: .rating(stars(3)),
                 state: .savedInSidecar)
         ]
-    }
-
-    /// Whether this photo's first write should fail, and records that it did (PRD P0-08).
-    private func shouldFailFirstWrite(to photo: PhotoIdentity) -> Bool {
-        guard !alreadyFailed.contains(photo),
-            failingStems.contains(where: { photo.stem.hasSuffix($0) })
-        else { return false }
-        alreadyFailed.insert(photo)
-        return true
-    }
-
-    /// The forced failure's reason, by its launch value (PRD P0-08).
-    private static func forcedFailureReason(named name: String?) -> MarkWriteFailureReason {
-        switch name {
-        case "permission": .permissionLost
-        case "location": .locationUnavailable
-        case "readOnly": .readOnlyStorage
-        case "space": .insufficientSpace
-        default: .notConfirmed
-        }
-    }
-
-    /// The location loss the sample reports at launch, by its launch value (PRD P0-02).
-    private static func locationLoss(named name: String?) -> FolderLocationLoss.Reason? {
-        switch name {
-        case "drive": .externalVolumeDisconnected
-        case "location": .locationUnavailable
-        default: nil
-        }
     }
 
     /// Identities of the sample photos for the given stems, in ascending order.

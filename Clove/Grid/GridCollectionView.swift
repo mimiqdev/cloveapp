@@ -15,7 +15,8 @@ import UIKit
 /// user is looking at.
 ///
 /// A tap opens detail without delay, because the grid adds no double-tap recognizer (PRD Grid,
-/// P0-03). Long-press is left alone for multi-select (PRD P0-09, U4).
+/// P0-03). A long press starts multi-select on the pressed cell, and while the selection is
+/// non-empty a tap toggles a cell instead of opening it (PRD P0-09).
 struct GridCollectionView: UIViewRepresentable {
     /// The cells to show, in grid order (PRD P0-03, P0-11).
     let items: [GridCellItem]
@@ -33,6 +34,12 @@ struct GridCollectionView: UIViewRepresentable {
     /// group, but a photo the filter hides must not claim that cover as its place.
     let shownPhotos: Set<PhotoIdentity>
 
+    /// The photos multi-select has selected (PRD P0-09).
+    ///
+    /// An empty selection means the grid is not in multi-select, so a tap opens detail or a
+    /// group as before. A non-empty one makes every tap a selection toggle.
+    let selection: Set<PhotoIdentity>
+
     /// The thumbnails and companion badges the cells draw (PRD Grid, P0-03).
     let thumbnails: any GridThumbnailSource
 
@@ -42,8 +49,17 @@ struct GridCollectionView: UIViewRepresentable {
     /// Opens one similar group's view (PRD Grid, P0-11).
     let openGroup: (GroupID) -> Void
 
+    /// Starts multi-select on one cell's photos after a long press (PRD P0-09).
+    let beginSelection: (GridCellItem) -> Void
+
+    /// Adds one cell's photos to the selection or removes them (PRD P0-09).
+    let toggleSelection: (GridCellItem) -> Void
+
     func makeCoordinator() -> Coordinator {
-        Coordinator(thumbnails: thumbnails, openPhoto: openPhoto, openGroup: openGroup)
+        Coordinator(
+            thumbnails: thumbnails, openPhoto: openPhoto, openGroup: openGroup,
+            beginSelection: beginSelection, toggleSelection: toggleSelection,
+            selection: selection)
     }
 
     func makeUIView(context: Context) -> UICollectionView {
@@ -61,9 +77,12 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.thumbnails = thumbnails
         context.coordinator.openPhoto = openPhoto
         context.coordinator.openGroup = openGroup
+        context.coordinator.beginSelection = beginSelection
+        context.coordinator.toggleSelection = toggleSelection
         context.coordinator.apply(
             items: items, groups: groups, shownPhotos: shownPhotos,
-            currentPhoto: currentPhoto, sizeClass: context.environment.horizontalSizeClass)
+            currentPhoto: currentPhoto, selection: selection,
+            sizeClass: context.environment.horizontalSizeClass)
     }
 
     /// Three columns at compact width, five at regular width, from a square-ish cell (PRD Grid).
@@ -99,10 +118,13 @@ extension GridCollectionView {
         var thumbnails: any GridThumbnailSource
         var openPhoto: (PhotoIdentity) -> Void
         var openGroup: (GroupID) -> Void
+        var beginSelection: (GridCellItem) -> Void
+        var toggleSelection: (GridCellItem) -> Void
 
         private var items: [GridCellItem] = []
         private var groups: [BrowsingGroup] = []
         private var shownPhotos: Set<PhotoIdentity> = []
+        private var selection: Set<PhotoIdentity>
         private var itemsByID: [GridCellItem.ID: GridCellItem] = [:]
         private struct PrefetchRequest {
             let token: UUID
@@ -117,11 +139,17 @@ extension GridCollectionView {
         init(
             thumbnails: any GridThumbnailSource,
             openPhoto: @escaping (PhotoIdentity) -> Void,
-            openGroup: @escaping (GroupID) -> Void
+            openGroup: @escaping (GroupID) -> Void,
+            beginSelection: @escaping (GridCellItem) -> Void,
+            toggleSelection: @escaping (GridCellItem) -> Void,
+            selection: Set<PhotoIdentity>
         ) {
             self.thumbnails = thumbnails
             self.openPhoto = openPhoto
             self.openGroup = openGroup
+            self.beginSelection = beginSelection
+            self.toggleSelection = toggleSelection
+            self.selection = selection
         }
 
         /// Registers the cell and builds the diffable data source (PRD P0-03, P0-11).
@@ -130,7 +158,10 @@ extension GridCollectionView {
             let registration = UICollectionView.CellRegistration<GridPhotoCell, GridCellItem.ID> {
                 [weak self] cell, _, id in
                 guard let self, let item = self.itemsByID[id] else { return }
-                cell.configure(with: item, thumbnails: self.thumbnails) { [weak self] group in
+                cell.configure(
+                    with: item, isSelected: self.showsSelected(item),
+                    isSelecting: self.isSelecting, thumbnails: self.thumbnails
+                ) { [weak self] group in
                     self?.openGroup(group)
                 }
             }
@@ -139,6 +170,11 @@ extension GridCollectionView {
             ) { view, indexPath, id in
                 view.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: id)
             }
+            // A long press starts multi-select (PRD P0-09). It lives on the collection view, so
+            // a cell needs no recognizer of its own and a reused cell keeps nothing.
+            collectionView.addGestureRecognizer(
+                UILongPressGestureRecognizer(
+                    target: self, action: #selector(handleLongPress(_:))))
         }
 
         /// Applies the cells SwiftUI handed over, holding the anchor cell's place (PRD P0-11).
@@ -153,16 +189,28 @@ extension GridCollectionView {
         func apply(
             items newItems: [GridCellItem], groups newGroups: [BrowsingGroup],
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
-            sizeClass: UserInterfaceSizeClass?
+            selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?
         ) {
             guard let collectionView, let dataSource else { return }
             if sizeClass != lastSizeClass {
                 lastSizeClass = sizeClass
                 collectionView.collectionViewLayout.invalidateLayout()
             }
+            let before = BatchSelection(groups: groups, selection: selection)
+            let after = BatchSelection(groups: newGroups, selection: newSelection)
             guard newItems != items else {
                 groups = newGroups
                 shownPhotos = newShownPhotos
+                selection = newSelection
+                let restyled = items.compactMap { item in
+                    before.showsSelected(item) == after.showsSelected(item) ? nil : item.id
+                }
+                guard !restyled.isEmpty else { return }
+                // Only the cells whose selection changed are redrawn, so a toggle never
+                // re-decodes a thumbnail (PRD P0-09, P0-03).
+                var snapshot = dataSource.snapshot()
+                snapshot.reconfigureItems(restyled)
+                dataSource.apply(snapshot, animatingDifferences: false)
                 return
             }
 
@@ -173,14 +221,16 @@ extension GridCollectionView {
             items = newItems
             groups = newGroups
             shownPhotos = newShownPhotos
+            selection = newSelection
             itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
 
             var snapshot = NSDiffableDataSourceSnapshot<Int, GridCellItem.ID>()
             snapshot.appendSections([0])
             snapshot.appendItems(newItems.map(\.id), toSection: 0)
             let changed: [GridCellItem.ID] = newItems.compactMap { item in
-                guard let old = previousByID[item.id], old != item else { return nil }
-                return item.id
+                guard let old = previousByID[item.id] else { return nil }
+                if old != item { return item.id }
+                return before.showsSelected(old) != after.showsSelected(item) ? item.id : nil
             }
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
             dataSource.apply(snapshot, animatingDifferences: false)
@@ -204,17 +254,34 @@ extension GridCollectionView {
             restore(index: index, offset: held.offset)
         }
 
-        /// One cell tapped: the collapsed cover opens its group, any other cell opens detail.
+        /// One cell tapped: multi-select toggles it, a collapsed cover opens its group, and any
+        /// other cell opens detail (PRD P0-09, PRD Grid).
         func collectionView(
             _ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath
         ) {
             collectionView.deselectItem(at: indexPath, animated: false)
             guard let item = item(at: indexPath) else { return }
-            if let group = item.group, group.isCover {
+            if isSelecting {
+                toggleSelection(item)
+            } else if let group = item.group, group.isCover {
                 openGroup(group.id)
             } else {
                 openPhoto(item.photo.id)
             }
+        }
+
+        /// A long press starts multi-select on the pressed cell's photos (PRD P0-09).
+        ///
+        /// The selection changes on `.began`, so the cell is selected while the finger is still
+        /// down and the bar appears at once. A cell the collection view cannot resolve under the
+        /// finger, such as the space between rows, starts nothing.
+        @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            guard recognizer.state == .began, let collectionView,
+                let indexPath = collectionView.indexPathForItem(
+                    at: recognizer.location(in: collectionView)),
+                let item = item(at: indexPath)
+            else { return }
+            beginSelection(item)
         }
 
         /// Requests the next screenful before the cells appear (PRD P0-03, G1 scheduling row).
@@ -279,6 +346,14 @@ extension GridCollectionView {
         private func item(at indexPath: IndexPath) -> GridCellItem? {
             guard items.indices.contains(indexPath.item) else { return nil }
             return items[indexPath.item]
+        }
+
+        /// Whether the grid is in multi-select, which a non-empty selection means (PRD P0-09).
+        private var isSelecting: Bool { !selection.isEmpty }
+
+        /// Whether one cell draws as selected (PRD P0-09).
+        private func showsSelected(_ item: GridCellItem) -> Bool {
+            BatchSelection(groups: groups, selection: selection).showsSelected(item)
         }
 
         /// One cell's old place on screen, and whether the current photo chose it (PRD P0-11).
