@@ -27,6 +27,12 @@ struct GridCollectionView: UIViewRepresentable {
     /// cell that draws it, including a collapsed group's cover (PRD P0-11).
     let groups: [BrowsingGroup]
 
+    /// The filtered photos the cells were built from (PRD P0-03).
+    ///
+    /// It decides whether the current photo is shown at all: a cover stands for its whole
+    /// group, but a photo the filter hides must not claim that cover as its place.
+    let shownPhotos: Set<PhotoIdentity>
+
     /// The thumbnails and companion badges the cells draw (PRD Grid, P0-03).
     let thumbnails: any GridThumbnailSource
 
@@ -56,8 +62,8 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.openPhoto = openPhoto
         context.coordinator.openGroup = openGroup
         context.coordinator.apply(
-            items: items, groups: groups, currentPhoto: currentPhoto,
-            sizeClass: context.environment.horizontalSizeClass)
+            items: items, groups: groups, shownPhotos: shownPhotos,
+            currentPhoto: currentPhoto, sizeClass: context.environment.horizontalSizeClass)
     }
 
     /// Three columns at compact width, five at regular width, from a square-ish cell (PRD Grid).
@@ -96,6 +102,7 @@ extension GridCollectionView {
 
         private var items: [GridCellItem] = []
         private var groups: [BrowsingGroup] = []
+        private var shownPhotos: Set<PhotoIdentity> = []
         private var itemsByID: [GridCellItem.ID: GridCellItem] = [:]
         private struct PrefetchRequest {
             let token: UUID
@@ -145,7 +152,8 @@ extension GridCollectionView {
         /// old place is measured and after the new cells arrive (PRD Grid, P0-11).
         func apply(
             items newItems: [GridCellItem], groups newGroups: [BrowsingGroup],
-            currentPhoto: PhotoIdentity?, sizeClass: UserInterfaceSizeClass?
+            shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
+            sizeClass: UserInterfaceSizeClass?
         ) {
             guard let collectionView, let dataSource else { return }
             if sizeClass != lastSizeClass {
@@ -154,14 +162,17 @@ extension GridCollectionView {
             }
             guard newItems != items else {
                 groups = newGroups
+                shownPhotos = newShownPhotos
                 return
             }
 
             let previousIDs = items.map(\.id)
             let previousByID = itemsByID
-            let held = hold(currentPhoto: currentPhoto, groups: groups)
+            let held = hold(
+                currentPhoto: currentPhoto, groups: groups, shownPhotos: shownPhotos)
             items = newItems
             groups = newGroups
+            shownPhotos = newShownPhotos
             itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
 
             var snapshot = NSDiffableDataSourceSnapshot<Int, GridCellItem.ID>()
@@ -179,7 +190,8 @@ extension GridCollectionView {
             // a refined group; hold that cell where the photo's old cell was.
             if held.isCurrentPhoto, let currentPhoto,
                 let cell = GridCellItem.cell(
-                    for: currentPhoto, in: newItems, groups: newGroups),
+                    for: currentPhoto, in: newItems, groups: newGroups,
+                    shown: newShownPhotos),
                 let index = newItems.firstIndex(where: { $0.id == cell })
             {
                 restore(index: index, offset: held.offset)
@@ -280,10 +292,14 @@ extension GridCollectionView {
         ///
         /// The current photo wins when the old cells drew it, so a refinement holds the photo.
         /// Otherwise the top visible cell is the anchor, because no photo has a place to keep.
-        private func hold(currentPhoto: PhotoIdentity?, groups: [BrowsingGroup]) -> HeldPlace? {
+        private func hold(
+            currentPhoto: PhotoIdentity?, groups: [BrowsingGroup],
+            shownPhotos: Set<PhotoIdentity>
+        ) -> HeldPlace? {
             guard let collectionView, !items.isEmpty else { return nil }
             if let currentPhoto,
-                let cell = GridCellItem.cell(for: currentPhoto, in: items, groups: groups),
+                let cell = GridCellItem.cell(
+                    for: currentPhoto, in: items, groups: groups, shown: shownPhotos),
                 let offset = viewportOffset(of: cell)
             {
                 return HeldPlace(item: cell, offset: offset, isCurrentPhoto: true)

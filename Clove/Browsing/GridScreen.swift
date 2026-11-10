@@ -28,7 +28,12 @@ struct GridScreen: View {
     }
 
     var body: some View {
-        let cells = cells
+        let photos = browsing.photos
+        let cells = GridDisplay(
+            photos: photos, groups: browsing.groups,
+            groupsEnabled: Self.settings.similarGroupsEnabled,
+            display: Self.settings.gridGroupDisplay
+        ).cells
         VStack(spacing: 0) {
             controls
             Divider()
@@ -39,6 +44,7 @@ struct GridScreen: View {
                     items: cells,
                     currentPhoto: browsing.state.currentPhoto,
                     groups: browsing.groups,
+                    shownPhotos: Set(photos.map(\.id)),
                     thumbnails: thumbnails,
                     openPhoto: { browsing.openPhoto($0) },
                     openGroup: openGroup)
@@ -98,15 +104,6 @@ struct GridScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("clove.grid.empty")
-    }
-
-    /// The cells the grid shows, with similar-group outlines and covers (PRD Grid, P0-11).
-    private var cells: [GridCellItem] {
-        GridDisplay(
-            photos: browsing.photos, groups: browsing.groups,
-            groupsEnabled: Self.settings.similarGroupsEnabled,
-            display: Self.settings.gridGroupDisplay
-        ).cells
     }
 
     /// Opens one similar group's view from its count tag or its cover (PRD Grid, P0-11).

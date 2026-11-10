@@ -106,43 +106,76 @@ struct GridDisplayTests {
 struct GridCellLookupTests {
     /// Expanded display resolves a photo to its own cell.
     @Test func aPhotoResolvesToItsOwnCell() {
-        let cells = GridDisplay(photos: photos(0...2), groups: []).cells
+        let shown = photos(0...2)
+        let cells = GridDisplay(photos: shown, groups: []).cells
         #expect(
-            GridCellItem.cell(for: photos(0...2)[1].id, in: cells, groups: [])
-                == .photo(photos(0...2)[1].id))
+            GridCellItem.cell(
+                for: shown[1].id, in: cells, groups: [], shown: Set(shown.map(\.id)))
+                == .photo(shown[1].id))
     }
 
     /// Collapsed display resolves a member to its group's cover, not to a photo cell it does
     /// not show.
     @Test func aCollapsedMemberResolvesToItsCover() {
-        let burst = group("burst-one", photos(0...2))
-        let cells = GridDisplay(photos: photos(0...2), groups: [burst], display: .collapsed).cells
+        let shown = photos(0...2)
+        let burst = group("burst-one", shown)
+        let cells = GridDisplay(photos: shown, groups: [burst], display: .collapsed).cells
         #expect(
-            GridCellItem.cell(for: photos(0...2)[2].id, in: cells, groups: [burst])
+            GridCellItem.cell(
+                for: shown[2].id, in: cells, groups: [burst], shown: Set(shown.map(\.id)))
+                == .group(burst.id))
+    }
+
+    /// A member the filter hides has no cell, even though its group's cover is on screen.
+    ///
+    /// The cover stands for the group, not for every member: holding it for a hidden photo
+    /// would move the visible photo the cover actually draws (PRD Grid, P0-03).
+    @Test func aHiddenMemberHasNoCellEvenWhenItsCoverShows() {
+        let all = photos(0...2)
+        let shown = [all[1]]
+        let burst = group("burst-one", all)
+        let cells = GridDisplay(photos: shown, groups: [burst], display: .collapsed).cells
+        #expect(
+            GridCellItem.cell(
+                for: all[0].id, in: cells, groups: [burst], shown: Set(shown.map(\.id))) == nil)
+        #expect(
+            GridCellItem.cell(
+                for: shown[0].id, in: cells, groups: [burst], shown: Set(shown.map(\.id)))
                 == .group(burst.id))
     }
 
     /// Refinement can move the photo into a group with a new key; each update resolves against
     /// its own cells and groups, so the mapping survives the key change.
     @Test func aRefinedGroupResolvesToItsNewCover() {
-        let before = group("burst-one", photos(0...1))
-        let after = group("burst-two", photos(1...2))
-        let oldCells = GridDisplay(photos: photos(0...2), groups: [before], display: .collapsed)
-            .cells
-        let newCells = GridDisplay(photos: photos(0...2), groups: [after], display: .collapsed)
-            .cells
-        let photo = photos(0...2)[1].id
-        #expect(GridCellItem.cell(for: photo, in: oldCells, groups: [before]) == .group(before.id))
-        #expect(GridCellItem.cell(for: photo, in: newCells, groups: [after]) == .group(after.id))
+        let all = photos(0...2)
+        let before = group("burst-one", all)
+        let after = group("burst-two", Array(all[1...]))
+        let shown = Set(all.map(\.id))
+        let oldCells = GridDisplay(photos: all, groups: [before], display: .collapsed).cells
+        let newCells = GridDisplay(photos: all, groups: [after], display: .collapsed).cells
+        let photo = all[1].id
+        #expect(
+            GridCellItem.cell(for: photo, in: oldCells, groups: [before], shown: shown)
+                == .group(before.id))
+        #expect(
+            GridCellItem.cell(for: photo, in: newCells, groups: [after], shown: shown)
+                == .group(after.id))
     }
 
     /// A photo the grid does not draw has no cell.
     @Test func aHiddenPhotoHasNoCell() {
-        let burst = group("burst-one", photos(2...3))
-        let cells = GridDisplay(photos: photos(0...1), groups: [burst], display: .collapsed).cells
-        #expect(GridCellItem.cell(for: photos(2...3)[0].id, in: cells, groups: [burst]) == nil)
+        let all = photos(0...5)
+        let shown = Array(all[0...1])
+        let burst = group("burst-one", Array(all[2...3]))
+        let cells = GridDisplay(photos: shown, groups: [burst], display: .collapsed).cells
+        let shownIDs = Set(shown.map(\.id))
+        #expect(
+            GridCellItem.cell(
+                for: all[2].id, in: cells, groups: [burst], shown: shownIDs) == nil)
         // A photo outside the shown list and outside every group has no cell either.
-        #expect(GridCellItem.cell(for: photos(5...5)[0].id, in: cells, groups: [burst]) == nil)
+        #expect(
+            GridCellItem.cell(
+                for: all[5].id, in: cells, groups: [burst], shown: shownIDs) == nil)
     }
 }
 

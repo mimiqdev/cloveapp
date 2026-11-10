@@ -29,6 +29,8 @@ final class GridPhotoCell: UICollectionViewCell {
     private var currentItem: GridCellItem?
     private var currentCompanions = GridCompanions()
     private var isUnavailable = false
+    /// Whether the last unreadable state came from I1's scheduling pressure, not a bad file.
+    private var retriesUnavailable = false
     private var isCover = false
     private var onOpenGroup: ((GroupID) -> Void)?
 
@@ -73,7 +75,7 @@ final class GridPhotoCell: UICollectionViewCell {
         if showsDifferentPhoto {
             isUnavailable = false
             loadThumbnail(for: item.photo.id, thumbnails: thumbnails)
-        } else if thumbnailTask == nil, thumbnailView.image == nil, !isUnavailable {
+        } else if thumbnailTask == nil, thumbnailView.image == nil, canAskAgain {
             // A deferred or interrupted request left the cell without pixels; ask again.
             loadThumbnail(for: item.photo.id, thumbnails: thumbnails)
         }
@@ -85,10 +87,16 @@ final class GridPhotoCell: UICollectionViewCell {
     /// keeps the work it already began (G1 scheduling row).
     func resumeThumbnail(using thumbnails: any GridThumbnailSource) {
         guard thumbnailTask == nil, let photo = currentItem?.photo.id,
-            thumbnailView.image == nil, !isUnavailable
+            thumbnailView.image == nil, canAskAgain
         else { return }
         loadThumbnail(for: photo, thumbnails: thumbnails)
     }
+
+    /// Whether the cell may ask for pixels again: always, unless a file was reported unreadable.
+    ///
+    /// A failure that came from scheduling pressure is marked retryable, so scrolling back asks
+    /// once more; a file that cannot produce a preview stays unreadable (PRD Scan scope).
+    private var canAskAgain: Bool { !isUnavailable || retriesUnavailable }
 
     /// Drops the pending request when the cell scrolls away (PRD P0-03).
     ///
@@ -105,6 +113,7 @@ final class GridPhotoCell: UICollectionViewCell {
         currentItem = nil
         currentCompanions = GridCompanions()
         isUnavailable = false
+        retriesUnavailable = false
         thumbnailView.image = nil
         spinner.stopAnimating()
         unavailableView.isHidden = true
@@ -235,11 +244,12 @@ final class GridPhotoCell: UICollectionViewCell {
     /// A deferred outcome is I1's scheduling pressure or a superseded request, not a broken
     /// file, so the cell keeps its loading state and asks again with a growing delay for about
     /// eight seconds while it stays visible (G1 scheduling row). Only then does it show the
-    /// unreadable state, which the next display or reconfiguration can retry.
+    /// unreadable state, marked retryable so the cell's next display asks once more.
     private func loadThumbnail(
         for photo: PhotoIdentity, thumbnails: any GridThumbnailSource
     ) {
         thumbnailTask?.cancel()
+        retriesUnavailable = false
         thumbnailView.image = nil
         spinner.startAnimating()
         unavailableView.isHidden = true
@@ -260,6 +270,7 @@ final class GridPhotoCell: UICollectionViewCell {
                 }
             }
             guard !Task.isCancelled, let self, self.currentItem?.photo.id == photo else { return }
+            self.retriesUnavailable = true
             self.show(.unavailable)
             self.thumbnailTask = nil
         }
