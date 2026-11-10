@@ -161,8 +161,14 @@ final class BrowsingModel: UndoHistoryHost {
     /// action and C4 admitting that action's writes.
     private var writesInFlight = 0
 
-    /// Callers waiting for ``writesInFlight`` to reach zero.
-    private var writeIdleWaiters: [CheckedContinuation<Void, Never>] = []
+    /// How many undo records this scene started and has not seen answered (PRD P0-05).
+    ///
+    /// A record in flight may already have pushed its entry, so an older step's failure row has to
+    /// treat it as a newer action.
+    private var recordingsInFlight = 0
+
+    /// Callers parked until one of this scene's conditions clears (PRD P0-05, P0-10).
+    private var gateWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// The photo the grid must bring into view after an undo, with a token per request
     /// (PRD P0-05's Undo row).
@@ -438,16 +444,20 @@ final class BrowsingModel: UndoHistoryHost {
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
         let result = await runWrite { await library.runGroupFinishing(plan) }
-        isRunningGroupFinishing = false
         // The action happened, but its result must not land in another folder's group view or
         // make U8 undo a mark in a folder it does not belong to (PRD P0-14).
-        guard state.folder == folder else { return }
-        finishingResults[plan.groupID] = result
-        clearedFinishingGroups.remove(plan.groupID)
-        groupFinishingRuns += 1
-        // One finishing action is one undo step, from C10's own record of what it changed
-        // (PRD P0-12). A retry resends its failed changes and records nothing more.
-        await recordUndoStep(.groupFinishing(result.undo))
+        if state.folder == folder {
+            finishingResults[plan.groupID] = result
+            clearedFinishingGroups.remove(plan.groupID)
+            groupFinishingRuns += 1
+            // One finishing action is one undo step, from C10's own record of what it changed
+            // (PRD P0-12). A retry resends its failed changes and records nothing more. The action
+            // stays "running" until the record lands, so a mark taken meanwhile waits and takes its
+            // place above it in the history.
+            await recordUndoStep(.groupFinishing(result.undo))
+        }
+        isRunningGroupFinishing = false
+        openGates()
     }
 
     /// Retries only the changes that still need it, through C4 (PRD P0-09).
@@ -461,6 +471,7 @@ final class BrowsingModel: UndoHistoryHost {
         isRunningGroupFinishing = true
         let retried = await runWrite { await library.retryGroupFinishing(result) }
         isRunningGroupFinishing = false
+        openGates()
         // A retry that returns after the folder changed belongs to the folder that is gone.
         guard state.folder == folder else { return }
         finishingResults[retried.plan.groupID] = retried
@@ -643,11 +654,14 @@ final class BrowsingModel: UndoHistoryHost {
         isApplyingBatch = true
         defer { isApplyingBatch = false }
         // One bar action is one undo step, whatever the number of photos it writes. It is recorded
-        // when the action starts, so a slow write cannot put it after an action taken later
-        // (PRD P0-09, P0-05).
-        await recordUndoStep(.batch(items: plan.items, marksBefore: marksBefore))
-        guard state.folder == folder else { return }
-        let result = await runWrite { await library.apply(plan.items) }
+        // when the action starts, so a slow write cannot put it after an action taken later, and
+        // the in-flight count covers the record as well as the write (PRD P0-09, P0-05).
+        let result = await runWrite { () -> MarkBatchResult? in
+            await recordUndoStep(.batch(items: plan.items, marksBefore: marksBefore))
+            guard state.folder == folder else { return nil }
+            return await library.apply(plan.items)
+        }
+        guard let result else { return }
         // The batch happened, but its report must not land in another folder's bar or reopen
         // after Done cleared the mode it belonged to.
         guard state.folder == folder else { return }
@@ -706,7 +720,11 @@ final class BrowsingModel: UndoHistoryHost {
     /// C6 drains the mark queue before it moves and skips a set with an unfinished mark change,
     /// so marking stays blocked for the whole run: the detail controls and the batch bar cannot
     /// start a write that would target a path the move is about to change.
-    private(set) var isMovingRejects = false
+    private(set) var isMovingRejects = false {
+        didSet {
+            if !isMovingRejects { openGates() }
+        }
+    }
 
     /// The progress steps of the next or running Move rejects (PRD P0-10).
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
@@ -860,35 +878,45 @@ final class BrowsingModel: UndoHistoryHost {
         // change are the ones undo puts back; a field the user did not see is never restored.
         let folder = state.folder
         let marksBefore = storedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks()
+        // A mark taken while a finishing action still runs waits for that action's record, so the
+        // history keeps the order the actions started in (PRD P0-05, P0-12).
+        await wait(while: isRunningGroupFinishing)
         // The action is recorded when it starts, so the history keeps the user's order and Undo is
-        // live while the write runs; a step waits for this scene's writes before it reads marks.
-        await recordUndoStep(.mark(change: change, photo: photo, marksBefore: marksBefore))
-        guard state.folder == folder else { return nil }
-        return await runWrite { await library.apply(change, to: photo) }
+        // live while the write runs. The in-flight count covers the record too, so a step never
+        // runs between that record and C4 admitting the write.
+        return await runWrite {
+            await recordUndoStep(.mark(change: change, photo: photo, marksBefore: marksBefore))
+            guard state.folder == folder else { return nil }
+            return await library.apply(change, to: photo)
+        }
     }
 
-    /// Runs one library write and keeps the scene's in-flight count (PRD P0-05).
+    /// Runs one library action and keeps the scene's in-flight count (PRD P0-05).
     ///
-    /// A step waits for these writes before it reads any marks, so it cannot undo an action that
-    /// the history already holds while C4 has not admitted that action's write yet.
+    /// A step waits for these actions before it reads any marks, so it cannot undo a step whose
+    /// write has not reached C4's queue yet. The count covers the action's record as well as its
+    /// write, because the record can already be on the history while the write has not started.
     private func runWrite<T>(_ write: () async -> T) async -> T {
         writesInFlight += 1
         defer {
             writesInFlight -= 1
-            if writesInFlight == 0 {
-                let waiters = writeIdleWaiters
-                writeIdleWaiters = []
-                for waiter in waiters { waiter.resume() }
-            }
+            if writesInFlight == 0 { openGates() }
         }
         return await write()
     }
 
-    /// Waits until this scene's own writes have finished (PRD P0-05).
-    private func waitForPendingWrites() async {
-        while writesInFlight > 0 {
-            await withCheckedContinuation { writeIdleWaiters.append($0) }
+    /// Waits while `condition` holds; ``openGates()`` wakes callers to check again (PRD P0-05).
+    private func wait(while condition: @autoclosure () -> Bool) async {
+        while condition() {
+            await withCheckedContinuation { gateWaiters.append($0) }
         }
+    }
+
+    /// Wakes every parked caller, so each can re-check its own condition (PRD P0-05, P0-10).
+    private func openGates() {
+        let waiters = gateWaiters
+        gateWaiters = []
+        for waiter in waiters { waiter.resume() }
     }
 
     // MARK: - Undo
@@ -961,6 +989,8 @@ final class BrowsingModel: UndoHistoryHost {
         // A new action discards the redo future (PRD P0-05), so a failure the user could have
         // retried no longer belongs to the action that is next.
         undoFailure = nil
+        recordingsInFlight += 1
+        defer { recordingsInFlight -= 1 }
         guard await library.recordUndoStep(request) else {
             undoAvailability = library.undoAvailability
             return
@@ -978,11 +1008,17 @@ final class BrowsingModel: UndoHistoryHost {
         // The screen that asked decides where the view returns to, and the folder the step belongs
         // to must still be the open one when it answers (PRD P0-14).
         let folder = state.folder
-        // A step reads the marks C4 has now, so it waits for the writes this scene started: an
-        // undo can otherwise run between recording a mark and that mark reaching the queue.
-        await waitForPendingWrites()
+        let generation = library.openGeneration
+        // A step reads the marks C4 has now, so it waits for the work this scene started: its own
+        // writes (a record can already hold an entry whose write has not been admitted), a running
+        // finishing action (whose record belongs above the marks it wrote) and a Move rejects run,
+        // which PRD P0-10 blocks marking for.
+        await wait(while: writesInFlight > 0 || isRunningGroupFinishing || isMovingRejects)
+        // Those waits suspend, so the folder can have been replaced or reopened meanwhile; a step
+        // for the folder that is gone must not run against this one.
+        guard state.folder == folder, library.openGeneration == generation else { return nil }
         let screen = undoReturnScreen
-        let recorded = recordedActions
+        let activity = recordedActions + recordingsInFlight
         guard let result = await step() else {
             undoAvailability = library.undoAvailability
             return nil
@@ -992,7 +1028,7 @@ final class BrowsingModel: UndoHistoryHost {
         // A newer action recorded during the step takes the failed entry's place at the top of the
         // history, so its retry would run that newer action instead; U7 still shows the writes.
         undoFailure =
-            recordedActions == recorded
+            recordedActions + recordingsInFlight == activity
             ? result.failureSummary.map { UndoFailure(summary: $0, isRedo: isRedo) }
             : nil
         applyCompletionChange(result.completion)
@@ -1447,8 +1483,10 @@ final class BrowsingModel: UndoHistoryHost {
     /// open (entry's Continue browsing) never validated it again, so its warning stays until a
     /// real open or reopen reads it (PRD P0-02). A real open clears the loss itself.
     private func showOpenFolder() {
+        let previousFolder = state.folder
+        let openedFolder = library.folder
         hasLeftFolder = false
-        state.folder = library.folder
+        state.folder = openedFolder
         state.currentPhoto = nil
         state.selection = []
         state.groupPosition = nil
@@ -1458,23 +1496,24 @@ final class BrowsingModel: UndoHistoryHost {
         isRejectMoveToastVisible = false
         leavePrompt = nil
         isWaitingForWrites = false
-        // The finishing action, its failure and its event count belong to the folder that is
-        // gone, so a new folder's group view never shows or advances on the old one (PRD P0-12).
-        finishingResults = [:]
-        clearedFinishingGroups = []
-        dismissedGroupFailure = nil
-        groupFinishingRuns = 0
-
-        // Another folder replaces every selected photo's identity, so the batch's report and
-        // U8's undo snapshot go with the selection.
-        lastBatch = nil
-        batchReport = nil
-        selectionClearances += 1
-        // The folder's undo history starts empty, and continuing in the open folder keeps the one
-        // it already has (PRD P0-05).
+        // Continuing in the folder that is already open keeps its history, its redo future and
+        // the group results; another folder replaces them all (PRD P0-05, P0-12).
+        if previousFolder != openedFolder {
+            // The finishing action, its failure and its event count belong to the folder that is
+            // gone, so a new folder's group view never shows or advances on the old one.
+            finishingResults = [:]
+            clearedFinishingGroups = []
+            dismissedGroupFailure = nil
+            groupFinishingRuns = 0
+            // Another folder replaces every selected photo's identity, so the batch's report and
+            // U8's undo snapshot go with the selection.
+            lastBatch = nil
+            batchReport = nil
+            selectionClearances += 1
+            undoFailure = nil
+            undoBridge.historyDidReset()
+        }
         undoAvailability = library.undoAvailability
-        undoFailure = nil
-        undoBridge.historyDidReset()
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
