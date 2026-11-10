@@ -94,9 +94,11 @@ struct RejectMoveUndoTests {
         let keptBytes = try originalContents(of: [kept], in: fixture.folder)
         let moveResult = try await fixture.move(try await fixture.plan([moved]))
         #expect(moveResult.movedCount == 1)
+        // The run holds the keeps, so the step restores them even when the entry carries none.
+        await fixture.mover.recordKeptPhotos([kept], for: moveResult.id)
 
         let result = try await fixture.mover.undo(
-            undoStep(for: moveResult, keeping: [kept], returningTo: kept.id))
+            undoStep(for: moveResult, returningTo: kept.id))
 
         #expect(result.restoredCount == 2)
         #expect(result.keptCount == 1)
@@ -115,7 +117,7 @@ struct RejectMoveUndoTests {
         }
     }
 
-    /// A retry moves more of the same run, and one undo still restores the whole run.
+    /// A retry stays part of the same step, and one undo restores the whole action.
     @Test func undoCoversTheSetsARetryMoved() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
@@ -125,10 +127,14 @@ struct RejectMoveUndoTests {
         let second = try makeMoveSet(
             root: fixture.folder.url, relativePath: "DCIM/100BBBBB", stem: "IMG_0002",
             formats: [.raw, .jpeg], sidecarName: "IMG_0002.xmp")
-        for set in [first, second] {
+        let kept = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM/100CCCCC", stem: "IMG_0003",
+            formats: [.jpeg])
+        for set in [first, second, kept] {
             try writeMoveSet(set, in: fixture.folder)
             await fixture.queue.apply(.reject(true), to: set)
         }
+        await fixture.queue.apply(.reject(false), to: kept)
         let original = try originalContents(of: [first, second], in: fixture.folder)
         let plan = try await fixture.plan([first, second])
         let blocked = try #require(plan.readyEntries.last?.files.first?.destination)
@@ -137,21 +143,26 @@ struct RejectMoveUndoTests {
         let firstRun = try await fixture.move(plan)
         #expect(firstRun.movedCount == 1)
         #expect(firstRun.failedCount == 1)
+        await fixture.mover.recordKeptPhotos([kept], for: firstRun.id)
         try FileManager.default.removeItem(at: blocked)
         let retried = try await fixture.mover.retryFailed(in: firstRun.id)
         let retry = try #require(retried)
         #expect(retry.movedCount == 1)
+        // One Move rejects action is one undo step, so the retry keeps the run's handle.
+        #expect(retry.id == firstRun.id)
 
         let result = try await fixture.mover.undo(
             undoStep(for: firstRun, returningTo: first.id))
 
-        #expect(result.restoredIdentities == [first.id, second.id])
+        #expect(result.restoredIdentities == [first.id, second.id, kept.id])
+        #expect(result.keptCount == 1)
         #expect(result.isComplete)
         for (path, bytes) in original {
             #expect(fixture.folder.contents(of: path) == bytes)
         }
-        #expect(try await storesReject(first, in: fixture))
-        #expect(try await storesReject(second, in: fixture))
+        for set in [first, second, kept] {
+            #expect(try await storesReject(set, in: fixture))
+        }
     }
 
     /// The run's handle stops working after one undo, whatever handle the caller holds.
@@ -217,8 +228,10 @@ struct RejectMoveUndoTests {
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
     }
 
-    /// An undo pushes each photo's start and end, then its result, as one sequence.
-    @Test func publishesUndoProgressPerPhotoAndTheFinishedResult() async throws {
+    /// An undo pushes each photo's start and end, then its result, all under one attempt handle.
+    @Test(.timeLimit(.minutes(1))) func publishesUndoProgressPerPhotoAndTheFinishedResult()
+        async throws
+    {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
         let sets = try (0..<2).map { index in
@@ -244,20 +257,109 @@ struct RejectMoveUndoTests {
 
         #expect(events.count == 5)
         let started = events.compactMap { event -> PhotoIdentity? in
-            guard case .photoStarted(let identity) = event else { return nil }
-            return identity
+            guard case .photoStarted(_, let photo) = event else { return nil }
+            return photo
         }
         let finished = events.compactMap { event -> RejectMoveUndoOutcome? in
-            guard case .photoFinished(let outcome) = event else { return nil }
+            guard case .photoFinished(_, let outcome) = event else { return nil }
             return outcome
         }
         #expect(started == sets.map(\.id))
         #expect(finished.map(\.identity) == sets.map(\.id))
+        // Every photo event names the attempt, and the result is that same attempt.
+        for event in events.dropLast() {
+            switch event {
+            case .photoStarted(let attempt, _), .photoFinished(let attempt, _):
+                #expect(attempt == result.id)
+            case .finished, .refused:
+                Issue.record("Only the photos belong to the attempt's sequence")
+            }
+        }
         guard case .finished(let published)? = events.last else {
             Issue.record("The undo should end with its result")
             return
         }
         #expect(published == result)
+    }
+
+    /// Two undos running at once stay apart, because every photo event names its attempt.
+    @Test(.timeLimit(.minutes(1))) func tagsProgressWithItsAttempt() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let sets = try (0..<2).map { index in
+            try makeMoveSet(
+                root: fixture.folder.url, relativePath: "DCIM/\(index)", stem: "IMG_000\(index)",
+                formats: [.raw])
+        }
+        for set in sets {
+            try writeMoveSet(set, in: fixture.folder)
+            await fixture.queue.apply(.reject(true), to: set)
+        }
+        let firstRun = try await fixture.move(try await fixture.plan([sets[0]]))
+        let secondRun = try await fixture.move(try await fixture.plan([sets[1]]))
+        let stream = await fixture.mover.undoProgressUpdates()
+        let firstEntry = undoStep(for: firstRun, returningTo: sets[0].id)
+        let secondEntry = undoStep(for: secondRun, returningTo: sets[1].id)
+        let first = Task { try await fixture.mover.undo(firstEntry) }
+        let second = Task { try await fixture.mover.undo(secondEntry) }
+
+        var events: [RejectMoveUndoProgress] = []
+        var finishedCount = 0
+        for await event in stream {
+            events.append(event)
+            if case .finished = event { finishedCount += 1 }
+            if finishedCount == 2 { break }
+        }
+        let firstResult = try await first.value
+        let secondResult = try await second.value
+
+        let attempts = Set([firstResult.id, secondResult.id])
+        let started = events.compactMap { event -> (RejectMoveUndoBatchID, PhotoIdentity)? in
+            guard case .photoStarted(let attempt, let photo) = event else { return nil }
+            return (attempt, photo)
+        }
+        let finished = events.compactMap { event -> (RejectMoveUndoBatchID, PhotoIdentity)? in
+            guard case .photoFinished(let attempt, let outcome) = event else { return nil }
+            return (attempt, outcome.identity)
+        }
+        #expect(started.count == 2)
+        #expect(finished.count == 2)
+        #expect(Set(started.map(\.0)) == attempts)
+        #expect(Set(finished.map(\.0)) == attempts)
+        // Each attempt's own photo carries its own handle, never the other attempt's.
+        for (attempt, photo) in started {
+            let owner = photo == sets[0].id ? firstResult.id : secondResult.id
+            #expect(attempt == owner)
+        }
+        for (attempt, photo) in finished {
+            let owner = photo == sets[0].id ? firstResult.id : secondResult.id
+            #expect(attempt == owner)
+        }
+    }
+
+    /// A refused undo ends the attempt on the stream instead of leaving a reader waiting.
+    @Test(.timeLimit(.minutes(1))) func publishesARefusalForAnUndoThatCannotRun() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let set = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001", formats: [.raw])
+        try writeMoveSet(set, in: fixture.folder)
+        let entry = RejectMoveUndoEntry(batch: RejectMoveBatchID(), photoToReturnTo: set.id)
+        let stream = await fixture.mover.undoProgressUpdates()
+
+        await #expect(throws: RejectMoveUndoRefusal.unknownBatch(entry.batch)) {
+            try await fixture.mover.undo(entry)
+        }
+
+        var events: [RejectMoveUndoProgress] = []
+        for await event in stream {
+            events.append(event)
+            break
+        }
+        #expect(
+            events == [
+                .refused(batch: entry.batch, refusal: .unknownBatch(entry.batch))
+            ])
     }
 }
 
