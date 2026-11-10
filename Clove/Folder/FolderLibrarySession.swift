@@ -118,6 +118,12 @@ final class FolderLibrarySession: FolderLibrary {
     /// group view knows the wait is over (PRD P0-14).
     private var hasPublishedGroups = false
 
+    /// The folder's detail pipeline, closed before its scope is released (PRD P0-04).
+    private var detailPipeline: DetailPipeline?
+
+    /// The detail view's source for the open folder, bound to that folder's session and pipeline.
+    private var detailSource: (any DetailImageSource)?
+
     /// The task keeping this library's save states in step with C4 (PRD P0-08).
     private var writeStatusTask: Task<Void, Never>?
 
@@ -174,6 +180,16 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// The source a grid reads while no folder is open: no tiles and no companions.
     private static let emptyThumbnails = SampleGridThumbnails()
+
+    /// The detail view's source for the open folder's pixels (PRD P0-04, G1 detail row).
+    ///
+    /// It is bound to the folder that was open when it was made and to that folder's I2 pipeline,
+    /// so a request for an earlier folder's photo answers unavailable instead of reading under
+    /// another folder's scope. Closing the folder closes the pipeline after its reads drain.
+    var detailImages: any DetailImageSource { detailSource ?? Self.emptyDetailImages }
+
+    /// The source detail reads while no folder is open: nothing to show.
+    private static let emptyDetailImages = EmptyDetailImages()
 
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes.latest(for: photo) }
@@ -326,6 +342,7 @@ final class FolderLibrarySession: FolderLibrary {
             rejectsFolderName: rejectsFolderName().rawValue)
         let caches = await Self.makeCaches()
         thumbnailSource = makeThumbnailSource(for: session, caches: caches)
+        detailSource = makeDetailSource(for: session)
         grouping = makeGrouping(
             for: session, stores: stores, caches: caches, generation: generation)
         let scan = FolderScan(
@@ -361,6 +378,13 @@ final class FolderLibrarySession: FolderLibrary {
         if let pipeline = thumbnailPipeline {
             thumbnailPipeline = nil
             // I1's close cancels queued work and waits for a decode in flight, so the scope is
+            // never released under one (G1 preview and folder-access rows).
+            await pipeline.close()
+        }
+        detailSource = nil
+        if let pipeline = detailPipeline {
+            detailPipeline = nil
+            // I2's close cancels queued work and waits for a render in flight, so the scope is
             // never released under one (G1 preview and folder-access rows).
             await pipeline.close()
         }
@@ -663,6 +687,59 @@ final class FolderLibrarySession: FolderLibrary {
         } catch {
             return .unavailable
         }
+    }
+
+    // MARK: - Detail pixels
+
+    /// Builds the open folder's detail source over I2's pipeline bound to its session
+    /// (PRD P0-04, G1 "Preview, detail (I2)").
+    ///
+    /// G1 keeps the detail cache in memory (32 MiB plus one native render), so the pipeline needs
+    /// no directory, unlike the grid's disk cache. Its reads are admitted through the folder's
+    /// C11 session, so ending the folder waits for a read before releasing the scope.
+    private func makeDetailSource(for session: FolderAccessSession) -> any DetailImageSource {
+        let pipeline = DetailPipeline()
+        detailPipeline = pipeline
+        let folder = session.folder.id
+        return PipelineDetailImages(
+            pipeline: pipeline,
+            set: { [weak self] photo in self?.store.scannedSet(for: photo)?.photoSet },
+            admitted: DetailWorkAdmission(
+                image: { [weak self] work in
+                    guard let self else { return .unavailable(.noUsablePreview) }
+                    return await self.admittedDetail(work, session: session, folder: folder)
+                },
+                prefetch: { [weak self] work in
+                    guard let self else { return }
+                    await self.admittedDetailPrefetch(work, session: session, folder: folder)
+                }))
+    }
+
+    /// Runs one detail request inside the session that holds the folder's scope.
+    ///
+    /// A request that arrives after the folder ended, or for another folder's photo, answers
+    /// unavailable instead of reading under a scope the folder no longer holds (G1 folder access).
+    private func admittedDetail(
+        _ work: @Sendable () async -> DetailImageOutcome,
+        session: FolderAccessSession,
+        folder: FolderIdentity
+    ) async -> DetailImageOutcome {
+        guard self.folder == folder else { return .unavailable(.noUsablePreview) }
+        do {
+            return try await session.withAdmittedWork { await work() }
+        } catch {
+            return .unavailable(.noUsablePreview)
+        }
+    }
+
+    /// Runs neighbour prefetch inside the same session, so its reads are scoped too.
+    private func admittedDetailPrefetch(
+        _ work: @Sendable () async -> Void,
+        session: FolderAccessSession,
+        folder: FolderIdentity
+    ) async {
+        guard self.folder == folder else { return }
+        _ = try? await session.withAdmittedWork { await work() }
     }
 
     /// Builds the folder's caches over the app's Caches directory, off the main actor.
