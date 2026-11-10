@@ -89,6 +89,7 @@ struct GroupScreen: View {
             GroupCullingHeader(
                 headerText: undecidedCount.headerText,
                 undecidedOnly: $undecidedOnly,
+                isBusy: browsing.isRunningGroupFinishing,
                 keepThisAvailable: plan(for: .keepThis, in: group, photo: photo).availability
                     .isAvailable,
                 keepRatedAvailable: plan(for: .keepRated, in: group, photo: photo).availability
@@ -121,6 +122,7 @@ struct GroupScreen: View {
                 Divider()
                 GroupFinishingFailureBar(
                     summary: failure.partialFailureSummary ?? "",
+                    isBusy: browsing.isRunningGroupFinishing,
                     retry: { Task { await browsing.retryGroupFinishing() } },
                     cancel: { browsing.dismissGroupFinishingFailure() })
             }
@@ -364,7 +366,8 @@ struct GroupScreen: View {
         else {
             // A finishing action that is still running, or one that left changes to retry, keeps
             // the view so the failure bar and its retry stay reachable (PRD P0-09; PRD Failure and
-            // recovery). Any move already waiting is dropped.
+            // recovery), and drops a move that was already waiting. A later update that is neither
+            // — the action's own marks still streaming in — leaves that move alone.
             if current.finishingRunning || current.failure != nil { completionTask?.cancel() }
             return
         }

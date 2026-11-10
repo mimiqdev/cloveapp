@@ -18,6 +18,10 @@ struct GroupCullingHeader: View {
     /// Whether the group view asks for Undecided only (PRD In-group culling).
     @Binding var undecidedOnly: Bool
 
+    /// Whether a finishing action is running, so both actions wait for its per-photo result
+    /// (PRD P0-12; PRD P0-09).
+    let isBusy: Bool
+
     /// Whether Keep this, reject the rest may run (PRD In-group culling).
     let keepThisAvailable: Bool
 
@@ -45,10 +49,10 @@ struct GroupCullingHeader: View {
             }
             HStack(spacing: 8) {
                 Button("Keep this, reject the rest", action: keepThis)
-                    .disabled(!keepThisAvailable)
+                    .disabled(!keepThisAvailable || isBusy)
                     .accessibilityIdentifier("clove.group.keepThis")
                 Button("Keep rated, reject the rest", action: keepRated)
-                    .disabled(!keepRatedAvailable)
+                    .disabled(!keepRatedAvailable || isBusy)
                     .accessibilityIdentifier("clove.group.keepRated")
             }
             .font(.subheadline)

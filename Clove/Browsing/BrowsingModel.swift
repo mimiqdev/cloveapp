@@ -303,8 +303,11 @@ final class BrowsingModel {
     ///
     /// The library applies C10's plan through C4's write queue, so per-photo results, the
     /// partial-failure counts and a retry of only the failed items all come from one place
-    /// (PRD P0-09).
+    /// (PRD P0-09). Only one finishing action runs at a time: a second request while one is
+    /// running is ignored, because two overlapping results would each clear the running flag
+    /// and let completion move the view before the last result's failures are known.
     func runGroupFinishing(_ plan: GroupFinishingPlan) async {
+        guard !isRunningGroupFinishing else { return }
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
         let result = await library.runGroupFinishing(plan)
@@ -314,8 +317,11 @@ final class BrowsingModel {
     }
 
     /// Retries only the changes that still need it, through C4 (PRD P0-09).
+    ///
+    /// It shares the one-action-at-a-time rule with ``runGroupFinishing(_:)``, so a retry can
+    /// never overlap the action it retries.
     func retryGroupFinishing() async {
-        guard let result = lastGroupFinishing else { return }
+        guard !isRunningGroupFinishing, let result = lastGroupFinishing else { return }
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
         let retried = await library.retryGroupFinishing(result)
@@ -337,9 +343,20 @@ final class BrowsingModel {
     /// view returns to the grid. The answer comes from the folder session's completion record,
     /// which the finishing executor writes and the marks complete, so the view never derives a
     /// second rule (``GroupViewCompletion``).
+    ///
+    /// The group, the route and the task are re-checked after the query: leaving the group view,
+    /// opening another group or a finishing failure that arrives meanwhile each cancel the move,
+    /// and none of them may be overridden by the answer to a question asked before it.
     func advanceFromCompletedGroup(_ behaviour: GroupCompletionBehaviour) async {
         guard state.route == .group, let position = state.groupPosition else { return }
-        switch await library.groupCompletion(for: position.group, behaviour: behaviour) {
+        let completion = await library.groupCompletion(
+            for: position.group, behaviour: behaviour)
+        let failure = groupFinishingFailure
+        guard !Task.isCancelled, state.route == .group,
+            state.groupPosition?.group == position.group,
+            failure?.plan.groupID != position.group
+        else { return }
+        switch completion {
         case .inProgress, .stay:
             break
         case .nextGroup(let group):

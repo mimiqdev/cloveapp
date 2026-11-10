@@ -15,6 +15,10 @@ struct GroupFinishingFailureBar: View {
     /// The counts C10 reports for the finished action (PRD Failure and recovery).
     let summary: String
 
+    /// Whether a finishing action or retry is already running, so the retry waits for it
+    /// (PRD P0-09).
+    let isBusy: Bool
+
     /// Sends the failed changes again, and only those (PRD P0-09).
     let retry: () -> Void
 
@@ -31,6 +35,7 @@ struct GroupFinishingFailureBar: View {
                 .accessibilityIdentifier("clove.group.failure")
             Spacer(minLength: 8)
             Button("Retry failed items", action: retry)
+                .disabled(isBusy)
                 .accessibilityIdentifier("clove.group.failure.retry")
             Button("Cancel", action: cancel)
                 .accessibilityIdentifier("clove.group.failure.cancel")
