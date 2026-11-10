@@ -22,20 +22,43 @@ import Foundation
 ///   place for a retry of failed items only, and cancellation stops the run between sets, never
 ///   inside one (PRD P0-10, Failure and recovery).
 ///
-/// The actor holds only in-flight and post-run state: the batches kept for ``retryFailed(in:)``
-/// and the progress streams. All file work goes through the injected ``RejectMoveFileSystem``,
-/// which has no delete or copy operation at all.
+/// The actor holds only in-flight and post-run state: the batches kept for ``retryFailed(in:)``,
+/// the runs ``undo(_:)`` can restore, and the progress streams. All file work goes through the
+/// injected ``RejectMoveFileSystem``, which has no delete or copy operation at all.
 public actor RejectMover {
     /// The injectable file operations every move goes through (PRD P0-10).
-    private let fileSystem: any RejectMoveFileSystem
+    ///
+    /// Not `private` because the undo lane in `RejectMoveUndo.swift` adds its calls in an
+    /// extension in another file; both directions use the same seam, so one injected failure
+    /// covers the whole loop.
+    let fileSystem: any RejectMoveFileSystem
     /// The confirmation-plan builder and the whole-request preconditions (PRD P0-10).
     private let planner: RejectMovePlanner
     /// C4's write queue: drain, the per-set mark-change check and the stored-Reject removal.
-    private let markQueue: MarkWriteQueue
+    ///
+    /// Not `private` for the same reason as ``fileSystem``: undo stores Reject again through
+    /// the queue, which stays the only writer of Clove's stored Reject (G1 decision 5).
+    let markQueue: MarkWriteQueue
     /// One entry per run that still has failed items to retry (PRD P0-10).
     private var batches: [RejectMoveBatchID: AppliedBatch] = [:]
     /// Progress streams handed to a UI or a test (PRD P0-10).
     private var observers: [UUID: AsyncStream<RejectMoveProgress>.Continuation] = [:]
+    /// The completed runs ``undo(_:)`` can restore, by every batch ID they handed out.
+    ///
+    /// PRD P0-10's Undo rule makes a completed move one step, and a retry of that run belongs to
+    /// the same step, so a retry's moved sets join the first attempt's record and both handles
+    /// resolve to it. An undone run stays addressable so a second undo is refused rather than
+    /// moving files twice. `RejectMoveUndo.swift` owns the calls that read this.
+    var undoableRuns: [RejectMoveBatchID: RejectMoveUndoRun] = [:]
+    /// Undo attempts that still have failed photos to retry (PRD P0-10).
+    var undoRetries: [RejectMoveUndoBatchID: RejectMoveUndoRetry] = [:]
+    /// Forward retries still running, by the run's handle, so an undo waits instead of racing one
+    /// (PRD P0-10's Undo rule).
+    var retryCounts: [RejectMoveBatchID: Int] = [:]
+    /// Callers waiting for a run's forward retry to finish, by the run's handle.
+    var retryWaiters: [RejectMoveBatchID: [CheckedContinuation<Void, Never>]] = [:]
+    /// Undo progress streams handed to a UI or a test (PRD P0-10's Undo rule).
+    var undoObservers: [UUID: AsyncStream<RejectMoveUndoProgress>.Continuation] = [:]
 
     /// Creates the mover over C4's queue and the production file system unless a test injects
     /// another.
@@ -105,18 +128,42 @@ public actor RejectMover {
     ///
     /// Moved sets stay moved and split sets are never resent, because their files are in two
     /// places and a retry could not restore them blindly. A set that was skipped is not part of
-    /// the retry either: resolving its mark change is what makes it movable. The returned run
-    /// has its own handle, and the earlier one is dropped so a second retry cannot resend it.
-    public func retryFailed(in batch: RejectMoveBatchID) async throws(RejectMoveRefusal)
-        -> RejectMoveResult?
-    {
+    /// the retry either: resolving its mark change is what makes it movable.
+    ///
+    /// `excluding` drops failed photos whose Reject was cleared after the run, so a retry never
+    /// moves a photo the person un-rejected. One Move rejects action is one undo step, however
+    /// many retries it takes: the returned result carries `batch`, the step covers every set this
+    /// retry moved, and the app records no second undo entry (PRD P0-10's Undo rule). The next
+    /// retry of the same action uses the same handle again, with only the sets that still failed.
+    ///
+    /// - Parameters:
+    ///   - batch: The run whose failed sets should be retried.
+    ///   - excluded: Failed photos C6 must leave alone.
+    /// - Returns: The retry's outcomes under the same handle, or `nil` when the run has no
+    ///   failed sets left.
+    /// - Throws: The plan's whole-request refusal, or ``RejectMoveRefusal/undone(_:)`` when the
+    ///   run was undone. Undo closes the step, so no set of that run may move into the rejects
+    ///   folder again; the call moves nothing.
+    public func retryFailed(
+        in batch: RejectMoveBatchID, excluding excluded: Set<PhotoIdentity> = []
+    ) async throws(RejectMoveRefusal) -> RejectMoveResult? {
+        guard undoableRuns[batch]?.isUndone != true else { throw .undone(batch) }
         guard let applied = batches[batch], !applied.sets.isEmpty else { return nil }
+        let sets = applied.sets.filter { !excluded.contains($0.photoSet.id) }
+        guard !sets.isEmpty else { return nil }
         let request = RejectMoveRequest(
-            rootURL: applied.rootURL, sets: applied.sets,
+            rootURL: applied.rootURL, sets: sets,
             configuration: applied.configuration)
         let plan = try planner.plan(for: request)
-        let result = try await move(plan)
-        batches[batch] = nil
+        // An undo that starts while this retry runs waits for it, so the step it closes already
+        // covers these sets (see `undo(_:)` in RejectMoveUndo.swift).
+        beginRetry(batch)
+        defer { endRetry(batch) }
+        let retried = try await move(plan)
+        let result = RejectMoveResult(id: batch, outcomes: retried.outcomes)
+        adoptUndoRetry(retried, of: batch)
+        // The action keeps its handle; only the sets that still failed stay retryable.
+        batches[batch] = batches.removeValue(forKey: retried.id)
         return result
     }
 
@@ -403,8 +450,17 @@ public actor RejectMover {
         let sets: [ScannedPhotoSet]
     }
 
+    /// Drops a run's failed sets once its undo closed the step (PRD P0-10's Undo rule).
+    ///
+    /// A retry after the undo must move nothing, so the run keeps no failed set to plan again;
+    /// `retryFailed(in:)` refuses it from the run's own record instead.
+    func forgetFailedSets(of batch: RejectMoveBatchID) {
+        batches[batch] = nil
+    }
+
     /// Keeps the failed sets of a run for a retry of failed items only (PRD P0-10).
     private func remember(_ result: RejectMoveResult, plan: RejectMovePlan) {
+        rememberUndo(result, plan: plan)
         let failedIdentities = Set(result.failed.map(\.identity))
         guard !failedIdentities.isEmpty else {
             batches[result.id] = nil
@@ -444,6 +500,7 @@ extension RejectMoveSkipReason {
         case .failedMarkChange: "A mark change for this photo failed and needs its retry first."
         case .insideRejectsFolder: "The photo set is already inside the rejects folder."
         case .cancelled: "The move was cancelled before this photo set started."
+        case .noLongerRejected: "The photo is no longer rejected, so the retry left it alone."
         }
     }
 }

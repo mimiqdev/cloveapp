@@ -2,8 +2,9 @@ import XCTest
 
 /// The Clove UI smoke test: the grid's overlays, its filter, the grid group display setting, the
 /// detail's zoom and marking gestures, multi-select's batch and its partial failure, the save
-/// state's failure and recovery, and U1's path from entry to settings and back, all against the
-/// in-memory test library (PRD Grid, P0-03, P0-06, P0-08, P0-09, P0-13).
+/// state's failure and recovery, Move rejects with its partial failure and retry, and U1's path
+/// from entry to settings and back, all against the in-memory test library (PRD Grid, P0-03,
+/// P0-06, P0-08, P0-09, P0-10, P0-13).
 final class CloveUITests: XCTestCase {
     @MainActor
     func testBrowsingFlowFromEntryToSettings() {
@@ -13,6 +14,11 @@ final class CloveUITests: XCTestCase {
         // Every sample photo whose stem ends in 0 fails its first write, so the batch below has a
         // partial failure to report and retry without a file (PRD P0-09).
         app.launchEnvironment["CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX"] = "0"
+        // A rejected photo whose stem ends in 9 fails its first move once, so Move rejects can
+        // report PRD's partial copy and retry without a file (PRD P0-10).
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX"] = "9"
+        // Keep the move toast up for the Details check; the user-facing timer stays unchanged.
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_KEEP_TOAST"] = "1"
         app.launch()
 
         XCTAssertTrue(
@@ -41,6 +47,10 @@ final class CloveUITests: XCTestCase {
         rateTheSelection(in: app)
         retryTheFailedPhotos(in: app)
         leaveMultiSelect(in: app)
+        clearFinishingReject(in: app)
+        rejectPhotosForMove(in: app)
+        checkMoveRejectsSetting(in: app)
+        moveRejectsWithRetry(in: app)
     }
 
     /// The save state and its recovery: a forced failure shows the PRD's single-photo copy with
@@ -1078,9 +1088,12 @@ final class CloveUITests: XCTestCase {
 
         element(in: app, "clove.grid.photo.mmq02679").tap()
         element(in: app, "clove.grid.photo.mmq02680").tap()
-        let three = expectation(
-            for: NSPredicate(format: "label == %@", "3 photos selected"), evaluatedWith: count)
-        wait(for: [three], timeout: 10)
+        // The sample starts with one more reject; rating it clears that Reject so the Move
+        // rejects check below has exactly the two photos it rejects itself.
+        element(in: app, "clove.grid.photo.mmq02685").tap()
+        let four = expectation(
+            for: NSPredicate(format: "label == %@", "4 photos selected"), evaluatedWith: count)
+        wait(for: [four], timeout: 10)
     }
 
     /// The bar's rating reaches every selected photo, including the rejected one, whose Reject
@@ -1097,7 +1110,11 @@ final class CloveUITests: XCTestCase {
         let second = element(in: app, "clove.grid.photo.mmq02679")
         let alsoRated = expectation(
             for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: second)
-        wait(for: [rated, alsoRated], timeout: 10)
+        let sampleReject = element(in: app, "clove.grid.photo.mmq02685")
+        let rejectCleared = expectation(
+            for: NSPredicate(format: "NOT (label CONTAINS %@)", "Rejected"),
+            evaluatedWith: sampleReject)
+        wait(for: [rated, alsoRated, rejectCleared], timeout: 10)
         XCTAssertFalse(
             second.label.contains("Rejected"), "A rating left Reject on: \(second.label)")
     }
@@ -1107,7 +1124,7 @@ final class CloveUITests: XCTestCase {
     /// recovery).
     @MainActor
     private func retryTheFailedPhotos(in app: XCUIApplication) {
-        let copy = "Saved 2 photos. 1 photos couldn't be saved."
+        let copy = "Saved 3 photos. 1 photos couldn't be saved."
         let failure = element(in: app, "clove.grid.batch.failure")
         XCTAssertTrue(
             failure.waitForExistence(timeout: 10), "The batch did not report its failure")
@@ -1128,6 +1145,165 @@ final class CloveUITests: XCTestCase {
         let rated = expectation(
             for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: retried)
         wait(for: [rated], timeout: 10)
+    }
+
+    /// Clears the reject the group view's finishing action left, so Move rejects starts from a
+    /// known two-photo selection (PRD In-group culling, P0-10).
+    @MainActor
+    private func clearFinishingReject(in app: XCUIApplication) {
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.rejected")
+        let rejected = element(in: app, "clove.grid.photo.mmq02698")
+        XCTAssertTrue(
+            rejected.waitForExistence(timeout: 10),
+            "The group view's finishing reject was not in the filtered grid")
+        rejected.press(forDuration: 1)
+
+        let count = element(in: app, "clove.grid.batch.count")
+        XCTAssertTrue(
+            count.waitForExistence(timeout: 10), "The finishing reject did not start a selection")
+        element(in: app, "clove.grid.batch.rate.2").tap()
+        let cleared = expectation(
+            for: NSPredicate(format: "exists == false"), evaluatedWith: rejected)
+        wait(for: [cleared], timeout: 10)
+
+        element(in: app, "clove.grid.batch.done").tap()
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.all")
+    }
+
+    /// Rejects two photos from the batch bar, so Move rejects has a known count to confirm
+    /// (PRD P0-09, P0-10).
+    @MainActor
+    private func rejectPhotosForMove(in app: XCUIApplication) {
+        let first = element(in: app, "clove.grid.photo.mmq02681")
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "The grid did not show the first photo")
+        first.press(forDuration: 1)
+        element(in: app, "clove.grid.photo.mmq02689").tap()
+
+        let count = element(in: app, "clove.grid.batch.count")
+        let two = expectation(
+            for: NSPredicate(format: "label == %@", "2 photos selected"), evaluatedWith: count)
+        wait(for: [two], timeout: 10)
+
+        element(in: app, "clove.grid.batch.reject").tap()
+        let rejected = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "Rejected"), evaluatedWith: first)
+        wait(for: [rejected], timeout: 10)
+        XCTAssertTrue(
+            element(in: app, "clove.grid.photo.mmq02689").label.contains("Rejected"),
+            "The batch did not reject the second photo")
+
+        element(in: app, "clove.grid.batch.done").tap()
+        let gone = expectation(
+            for: NSPredicate(format: "exists == false"), evaluatedWith: count)
+        wait(for: [gone], timeout: 10)
+    }
+
+    /// Move rejects shows the plan's count, keeps one reject, reports the forced move failure
+    /// with Details, and its retry moves only the failure (design handoff, PRD P0-10).
+    @MainActor
+    private func moveRejectsWithRetry(in app: XCUIApplication) {
+        let move = element(in: app, "clove.grid.moveRejects")
+        XCTAssertTrue(
+            move.waitForExistence(timeout: 10), "The grid did not offer Move rejects")
+        move.tap()
+
+        let confirmation = element(in: app, "clove.moves.confirmation")
+        XCTAssertTrue(
+            confirmation.waitForExistence(timeout: 10), "The confirmation sheet did not appear")
+        XCTAssertEqual(
+            confirmation.label, "Move 2 rejected photos",
+            "The confirmation lost the rejected count")
+        XCTAssertTrue(
+            element(in: app, "clove.moves.body").label
+                == "To _Rejected in this folder. Nothing is deleted.",
+            "The confirmation lost the destination and no-delete promise")
+
+        // Keep the photo that moves successfully, so the forced failure still exercises the
+        // partial toast and Details while the other photo stays behind.
+        element(in: app, "clove.moves.keep.mmq02681").tap()
+        let partial = element(in: app, "clove.moves.partial")
+        XCTAssertTrue(partial.waitForExistence(timeout: 10), "Keeping a photo changed no count")
+        XCTAssertEqual(partial.label, "1 of 2 will move", "The staged keep count was wrong")
+        XCTAssertEqual(
+            element(in: app, "clove.moves.confirm").label, "Move 1",
+            "The Move button did not follow the staged keep")
+
+        element(in: app, "clove.moves.confirm").tap()
+
+        let toast = element(in: app, "clove.moves.toast")
+        XCTAssertTrue(toast.waitForExistence(timeout: 10), "The move did not show its toast")
+        let partialToast = expectation(
+            for: NSPredicate(format: "label == %@", "Moved 0 to _Rejected"),
+            evaluatedWith: toast)
+        wait(for: [partialToast], timeout: 10)
+        let failure = element(in: app, "clove.moves.toast.failure")
+        XCTAssertEqual(
+            failure.label, "1 couldn't be moved", "The partial toast changed its counts")
+
+        // Details opens before the other grid queries, so a long test run never races the toast.
+        element(in: app, "clove.moves.details").tap()
+        let detailsTitle = element(in: app, "clove.moves.details.subtitle")
+        XCTAssertTrue(
+            detailsTitle.waitForExistence(timeout: 10), "Details did not open its sheet")
+        XCTAssertEqual(
+            detailsTitle.label,
+            "They stay rejected in Clove. Nothing was deleted.",
+            "The details subtitle changed")
+        XCTAssertTrue(
+            element(in: app, "clove.moves.details.row.mmq02689").exists,
+            "Details did not list the photo that could not move")
+
+        element(in: app, "clove.moves.details.retry").tap()
+        let retried = expectation(
+            for: NSPredicate(format: "label == %@", "Moved 1 to _Rejected"),
+            evaluatedWith: toast)
+        wait(for: [retried], timeout: 10)
+
+        let kept = element(in: app, "clove.grid.photo.mmq02681")
+        XCTAssertTrue(kept.exists, "The retry moved the kept photo")
+        XCTAssertFalse(
+            kept.label.contains("Rejected"), "The kept photo kept its Reject: \(kept.label)")
+        let moved = element(in: app, "clove.grid.photo.mmq02689")
+        let gone = expectation(
+            for: NSPredicate(format: "exists == false"), evaluatedWith: moved)
+        wait(for: [gone], timeout: 10)
+    }
+
+    /// The Move rejects action shows while rejects exist and the setting is on, and turns off
+    /// with the setting (design handoff, PRD P0-10).
+    @MainActor
+    private func checkMoveRejectsSetting(in app: XCUIApplication) {
+        XCTAssertTrue(
+            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 10),
+            "The grid did not offer Move rejects with rejected photos in the folder")
+
+        openSettingsFromGrid(in: app)
+        setMoveRejects(in: app, on: false)
+        backToGrid(in: app)
+        XCTAssertFalse(
+            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 3),
+            "Turning Move rejects off left its grid action")
+
+        openSettingsFromGrid(in: app)
+        setMoveRejects(in: app, on: true)
+        backToGrid(in: app)
+        XCTAssertTrue(
+            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 10),
+            "Turning Move rejects back on did not restore its grid action")
+    }
+
+    /// Taps the Move rejects switch, scrolling the settings list until it is on screen.
+    @MainActor
+    private func setMoveRejects(in app: XCUIApplication, on: Bool) {
+        let toggle = scrollToSettingsControl("clove.settings.moveRejectsEnabled", in: app)
+        XCTAssertTrue(toggle.exists, "Settings had no Move rejects switch")
+        for _ in 0..<2 {
+            if switchValue(toggle) == (on ? "1" : "0") { return }
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertEqual(
+            switchValue(toggle), on ? "1" : "0",
+            "The Move rejects switch did not turn \(on ? "on" : "off")")
     }
 
     /// Done leaves multi-select and clears the selection (PRD P0-09).

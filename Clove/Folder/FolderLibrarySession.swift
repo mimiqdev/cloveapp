@@ -139,6 +139,18 @@ final class FolderLibrarySession: FolderLibrary {
     /// The task keeping this library's save states in step with C4 (PRD P0-08).
     private var writeStatusTask: Task<Void, Never>?
 
+    /// C6's mover for the open folder, with the batches a retry of failed sets needs (P0-10).
+    ///
+    /// It is replaced with every folder, because another folder's identities, settings and open
+    /// session cannot be retried through this one.
+    private var rejectMover: RejectMover?
+
+    /// The photos a confirmed move took out of the folder (PRD P0-10).
+    ///
+    /// A scan still enumerating when the move runs can deliver a set after its files moved, so
+    /// these identities are dropped from later scan batches instead of reappearing in the grid.
+    private var movedRejectIdentities: Set<PhotoIdentity> = []
+
     /// The watch that reports the open folder's location going away (PRD P0-02, G1 folder access).
     ///
     /// G1 uses presenters plus a 500 ms foreground poll; the watch reports one loss and stops, and
@@ -442,6 +454,79 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
+    // MARK: - Move rejects
+
+    /// Plans Move rejects for the open folder's rejected photos (PRD P0-10).
+    ///
+    /// C6's planner reads existence only, so the sheet can show its counts before the user
+    /// commits. The request is built from the marks the folder holds now and from the settings
+    /// the caller read at move time (PRD Move rejects, C12); a disabled setting or a read-only
+    /// volume refuses the whole request before any file is touched.
+    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
+        guard let mover = rejectMover, let session = openSession else {
+            throw FolderSessionError.ended
+        }
+        let rejected = store.photos.filter(\.marks.isRejected)
+        let sets = rejected.compactMap { store.scannedSet(for: $0.id) }
+        return try await mover.plan(
+            for: RejectMoveRequest(
+                rootURL: session.rootURL, sets: sets, configuration: configuration))
+    }
+
+    /// Runs a confirmed plan under the folder's session and drops the moved photos (PRD P0-10).
+    ///
+    /// The whole move is admitted work, so ending the folder waits for it before releasing the
+    /// scope (G1 folder access). Moved sets leave the folder's photos and grouping runs again over
+    /// the remaining ones, the same way it does after a scan finishes; failed and skipped sets
+    /// stay in place, still rejected, so a retry addresses only the failures.
+    func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
+        guard let mover = rejectMover, let session = openSession else {
+            throw FolderSessionError.ended
+        }
+        let generation = scanGeneration
+        let result = try await session.withAdmittedWork {
+            try await mover.move(plan)
+        }
+        guard generation == scanGeneration, openSession === session else { return result }
+        let moved = result.movedIdentities
+        guard !moved.isEmpty else { return result }
+        movedRejectIdentities.formUnion(moved)
+        store.remove(moved)
+        publish(.photos([]))
+        await startGrouping(generation: scanGeneration)
+        return result
+    }
+
+    /// Retries only the sets an earlier run could not move (PRD P0-10).
+    ///
+    /// The retry is admitted like the first run and drops whatever it moves, so a retry's moved
+    /// sets leave the grid as the first run's did. A folder that closed, or a run this session
+    /// never started, cannot be retried and answers nil.
+    func retryFailedRejects(
+        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
+    ) async throws -> RejectMoveResult? {
+        guard let mover = rejectMover, let session = openSession else { return nil }
+        let generation = scanGeneration
+        let retried = try await session.withAdmittedWork {
+            try await mover.retryFailed(in: batch, excluding: identities)
+        }
+        guard let result = retried else { return nil }
+        guard generation == scanGeneration, openSession === session else { return result }
+        let moved = result.movedIdentities
+        guard !moved.isEmpty else { return result }
+        movedRejectIdentities.formUnion(moved)
+        store.remove(moved)
+        publish(.photos([]))
+        await startGrouping(generation: scanGeneration)
+        return result
+    }
+
+    /// The progress steps of the next or running Move rejects (PRD P0-10).
+    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
+        guard let mover = rejectMover else { return AsyncStream { $0.finish() } }
+        return await mover.progressUpdates()
+    }
+
     // MARK: - In-group culling
 
     /// Runs one finishing action's plan through C10's executor and C4's write queue
@@ -690,8 +775,11 @@ final class FolderLibrarySession: FolderLibrary {
         groupCompletionTracker = GroupCompletionTracker()
 
         batches = [:]
+        movedRejectIdentities = []
+        rejectMover = RejectMover(markQueue: stores.writes)
         publishedGroups = []
         hasPublishedGroups = false
+        publish(.scanStarted)
         publish(.photos([]))
         // PRD How marks reach disk, rule 1: Reject and standalone marks are read when the folder
         // opens. A damaged store is reported by U7's save state; the scan still shows the photos.
@@ -738,6 +826,8 @@ final class FolderLibrarySession: FolderLibrary {
         scanTask?.cancel()
         scanTask = nil
         thumbnailSource = nil
+        rejectMover = nil
+        movedRejectIdentities = []
         publishedGroups = []
         hasPublishedGroups = false
         if let grouping {
@@ -836,6 +926,10 @@ final class FolderLibrarySession: FolderLibrary {
         generation: Int
     ) -> [ScannedPhotoSet] {
         guard generation == scanGeneration else { return [] }
+        let items = items.filter { item in
+            guard case .photo(let set) = item else { return true }
+            return !movedRejectIdentities.contains(set.id)
+        }
         let added = store.insert(items, storedMarks: storedMarks)
         guard !added.isEmpty else { return [] }
         publish(.photos(added))

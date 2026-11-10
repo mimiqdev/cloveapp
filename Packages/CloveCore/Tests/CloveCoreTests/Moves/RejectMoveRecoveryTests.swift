@@ -47,6 +47,36 @@ struct RejectMoveRecoveryTests {
         #expect(try await fixture.mover.retryFailed(in: result.id) == nil)
     }
 
+    /// A retry can exclude a failed set whose Reject was cleared, and never moves it (P0-10).
+    @Test func retryExcludingASetLeavesItsFilesAlone() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let sets = try (0..<2).map { index in
+            try makeMoveSet(
+                root: fixture.folder.url, relativePath: "DCIM/\(index)", stem: "IMG_000\(index)",
+                formats: [.raw], sidecarName: "IMG_000\(index).xmp")
+        }
+        for set in sets { try writeMoveSet(set, in: fixture.folder) }
+        let plan = try await fixture.plan(sets)
+        fixture.fileSystem.fail(
+            .move, where: { $0.path(percentEncoded: false).contains("/_Rejected/") },
+            with: POSIXError(.EIO))
+        let result = try await fixture.move(plan)
+        #expect(result.failedCount == 2)
+        #expect(fixture.folder.exists("DCIM/0/IMG_0000.ARW"))
+        #expect(fixture.folder.exists("DCIM/1/IMG_0001.ARW"))
+
+        fixture.fileSystem.stopFailing(.move)
+        let retried = try await fixture.mover.retryFailed(
+            in: result.id, excluding: [sets[0].id])
+        let retry = try #require(retried)
+        #expect(retry.outcomes.map(\.identity) == [sets[1].id])
+        #expect(retry.movedCount == 1)
+        #expect(fixture.folder.exists("DCIM/0/IMG_0000.ARW"))
+        #expect(!fixture.folder.exists("_Rejected/DCIM/0/IMG_0000.ARW"))
+        #expect(fixture.folder.exists("_Rejected/DCIM/1/IMG_0001.ARW"))
+    }
+
     /// The stored Reject is removed only after a confirmed move (G1 decision 5).
     @Test func removesTheStoredRejectAfterAConfirmedMove() async throws {
         let fixture = try MoveFixture()
