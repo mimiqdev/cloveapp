@@ -2,7 +2,7 @@
 ///
 /// PRD Detail gestures gives the fit view two vertical swipes: up rates by distance and down
 /// rejects. The view asks ``MarkingSwipeRules`` once, as the drag is about to begin, and the
-/// answer says whether the drag is a marking swipe at all or stays free for navigation.
+/// answer says whether the drag is a marking swipe at all or is left unclaimed.
 public enum MarkingSwipe: Hashable, Sendable {
     /// Swiping up: rate by distance (PRD Rating by swipe distance).
     case rating
@@ -13,11 +13,11 @@ public enum MarkingSwipe: Hashable, Sendable {
 
 /// The drag that begins a marking swipe, and the drags that must not (PRD Detail gestures).
 ///
-/// A marking swipe shares the preview with three other gestures: the horizontal swipe that
-/// navigates, the edge single taps and the centre double tap, and the scroll view's own pinch
-/// and pan (PRD Detail gestures). The taps need no help, because a pan never begins without
-/// movement; a drag begins a marking swipe only when it is vertical enough, so a horizontal drag
-/// never starts one and stays free for navigation.
+/// A marking swipe shares the preview with the other gestures PRD Detail gestures lists: the
+/// horizontal swipe that navigates, the edge single taps and the centre double tap, and the
+/// scroll view's own pinch and pan. The taps need no help, because a pan never begins without
+/// movement. A drag begins a marking swipe only when it is vertical enough, so a more horizontal
+/// drag is left unclaimed and a horizontal navigation gesture stays available.
 ///
 /// PRD Detail gestures turns vertical marking swipes off while zoomed, where a one-finger drag
 /// pans instead, and PRD Gesture-related settings can turn marking gestures off entirely. Both

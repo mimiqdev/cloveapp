@@ -81,4 +81,24 @@ import CloveCore
                 horizontalTravel: 10, verticalTravel: 30, isZoomed: false, gesturesEnabled: true)
                 == .rating)
     }
+
+    @Test func theSettingsDecideWhetherASwipeBegins() {
+        // The preview asks the rules, which read the setting, so the recognizer and the settings
+        // cannot disagree (PRD Gesture-related settings).
+        var off = AppSettings()
+        off.gesturesEnabled = false
+        let withoutGestures = MarkingInputRules(settings: off)
+        let on = MarkingInputRules()
+
+        #expect(
+            withoutGestures.beginSwipe(horizontalTravel: 0, verticalTravel: 90, isZoomed: false)
+                == nil)
+        #expect(
+            on.beginSwipe(horizontalTravel: 0, verticalTravel: 90, isZoomed: false) == .rating)
+        #expect(
+            on.beginSwipe(horizontalTravel: 0, verticalTravel: -90, isZoomed: false) == .reject)
+        #expect(
+            on.beginSwipe(horizontalTravel: 90, verticalTravel: 4, isZoomed: false) == nil)
+        #expect(on.beginSwipe(horizontalTravel: 0, verticalTravel: 90, isZoomed: true) == nil)
+    }
 }

@@ -35,6 +35,25 @@ public struct MarkingInputRules: Hashable, Sendable {
 
     // MARK: - Swipe-up rating
 
+    /// The marking swipe a drag on the detail preview begins as, or nil when it begins none
+    /// (PRD Detail gestures).
+    ///
+    /// This is the preview's one question as a drag starts: marking gestures off (PRD
+    /// Gesture-related settings), a zoomed view and a more horizontal than vertical drag all
+    /// answer nil, and the recognizer then leaves the drag alone. The step ladder is separate,
+    /// because it is read on every sample of a swipe that did begin.
+    public func beginSwipe(
+        horizontalTravel: Double,
+        verticalTravel: Double,
+        isZoomed: Bool
+    ) -> MarkingSwipe? {
+        markingSwipeRules.swipe(
+            horizontalTravel: horizontalTravel,
+            verticalTravel: verticalTravel,
+            isZoomed: isZoomed,
+            gesturesEnabled: settings.gesturesEnabled)
+    }
+
     /// Starts a swipe-up gesture that measures with this rule set.
     ///
     /// The session reports the live step for the rating shown near the finger and the per-step
