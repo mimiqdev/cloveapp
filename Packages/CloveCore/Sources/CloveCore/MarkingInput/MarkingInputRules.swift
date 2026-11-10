@@ -17,15 +17,20 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// The swipe-down Reject threshold (PRD Detail gestures); a starting value, tunable.
     public var rejectSwipeRules: RejectSwipeRules
 
-    /// Creates the rules from the current settings and the two gesture constants.
+    /// The drag that begins a marking swipe (PRD Detail gestures); a starting value, tunable.
+    public var markingSwipeRules: MarkingSwipeRules
+
+    /// Creates the rules from the current settings and the gesture constants.
     public init(
         settings: AppSettings = AppSettings(),
         swipeRatingRules: SwipeRatingRules = .standard,
-        rejectSwipeRules: RejectSwipeRules = .standard
+        rejectSwipeRules: RejectSwipeRules = .standard,
+        markingSwipeRules: MarkingSwipeRules = .standard
     ) {
         self.settings = settings
         self.swipeRatingRules = swipeRatingRules
         self.rejectSwipeRules = rejectSwipeRules
+        self.markingSwipeRules = markingSwipeRules
     }
 
     // MARK: - Swipe-up rating
