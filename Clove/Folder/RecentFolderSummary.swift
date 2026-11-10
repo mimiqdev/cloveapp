@@ -23,6 +23,7 @@ enum RecentFolderSummary {
 
     static func count(for recent: RecentFolder) -> String {
         guard let count = recent.progress?.total ?? recent.photoCount else { return "" }
-        return (recent.scanStatus == .partial ? "≥ " : "") + count.formatted()
+        let partial = recent.progress.map { !$0.isComplete } ?? (recent.scanStatus == .partial)
+        return (partial ? "≥ " : "") + count.formatted()
     }
 }

@@ -979,14 +979,15 @@ final class BrowsingModel {
         // The screen leaves the folder before anything that waits for its writes, so no
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
-        let lastViewed = state.currentPhoto
+        if let lastViewed = state.currentPhoto { library.setEntryResumePhoto(lastViewed) }
         showEntryAfterLeaving()
-        await library.recordEntryProgress(lastViewed: lastViewed)
         // Leaving closes the folder even when the next destination never opens, so its scan stops
         // and its scope is not held for a folder the user no longer sees (G1 folder access).
         await library.closeFolder()
         // A folder the user opened while the close drained wins: the destination they were
         // heading for before that must not replace it (PRD P0-08).
+        guard token == openRequests else { return }
+        await reloadRecents()
         guard token == openRequests else { return }
         switch destination {
         case .entry:

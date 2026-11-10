@@ -67,7 +67,7 @@ final class CloveUITests: XCTestCase {
         app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
         app.launchEnvironment["CLOVE_TEST_LIBRARY_FAIL_STEMS"] = "MMQ02678,MMQ02680"
         // A drain long enough to see the waiting state it shows (PRD Failure and recovery).
-        app.launchEnvironment["CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"] = "1200"
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"] = "5000"
         app.launch()
 
         XCTAssertTrue(
@@ -222,8 +222,10 @@ final class CloveUITests: XCTestCase {
         // Wait drains the existing queue and rechecks. A failed change remains unfinished.
         app.alerts.buttons["Wait"].tap()
         XCTAssertTrue(
-            app.alerts.buttons["Leave anyway"].waitForExistence(timeout: 10),
-            "Wait lost the leaving action")
+            app.alerts.staticTexts["Waiting for writes… You can still leave anyway."]
+                .waitForExistence(timeout: 3),
+            "The alert did not expose its waiting state before the five-second drain finished")
+        XCTAssertTrue(app.alerts.buttons["Leave anyway"].exists, "Wait lost the leaving action")
         app.alerts.buttons["Leave anyway"].tap()
 
         XCTAssertTrue(

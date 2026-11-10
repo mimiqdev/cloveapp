@@ -118,8 +118,12 @@ struct EntryScreen: View {
                         if needsReconnect(recent) {
                             Text("Reconnect").font(.subheadline.weight(.semibold))
                         } else if let progress = recent.progress {
-                            Text("\(progress.left.formatted()) left")
-                                .font(.subheadline.weight(.semibold))
+                            Text(
+                                progress.isComplete
+                                    ? "\(progress.left.formatted()) left"
+                                    : "At least \(progress.left.formatted()) left"
+                            )
+                            .font(.subheadline.weight(.semibold))
                         }
                     }
                     if let progress = recent.progress {
