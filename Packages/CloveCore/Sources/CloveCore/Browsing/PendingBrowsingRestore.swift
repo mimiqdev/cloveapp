@@ -29,6 +29,13 @@ public enum PendingBrowsingRestoreDecision: Hashable, Sendable {
 /// restored folder, another folder opened, or a folder that stopped answering drops it, so a
 /// restore can never overwrite what the user did after the launch. The decision is pure: it reads
 /// no file and changes nothing.
+///
+/// A saved group view has one more input: grouping names its groups after the scan, so the saved
+/// group key cannot be checked until grouping published its first result (PRD P0-11, PRD Similar
+/// groups steps 2–3). A saved group view therefore waits for that publication instead of dropping
+/// just because it has not arrived yet; the folder library publishes the time stage — or an empty
+/// result when grouping is off — before it reports the scan finished, so the wait ends with the
+/// scan.
 public struct PendingBrowsingRestore: Hashable, Sendable {
     /// The state read back from the scene's storage.
     public let saved: BrowsingState
@@ -53,11 +60,21 @@ public struct PendingBrowsingRestore: Hashable, Sendable {
     /// included — the saved state is validated either way, so a photo that moved or disappeared
     /// takes U1's fallback (the detail route returns to the grid, the selection drops the missing
     /// photo, the group view drops or moves) instead of waiting for a photo that will never come.
+    ///
+    /// - Parameter groupsPublished: whether grouping has published a result for this folder at
+    ///   all. A saved group view whose photo the folder holds waits until it has, because the
+    ///   group key it names arrives with that result (PRD P0-11, PRD P0-14).
     public func decision(
-        current: BrowsingState, contents: FolderContents, scanFinished: Bool
+        current: BrowsingState, contents: FolderContents, scanFinished: Bool,
+        groupsPublished: Bool
     ) -> PendingBrowsingRestoreDecision {
         guard current == shown, contents.folder == saved.folder else { return .drop }
         guard scanFinished || namedPhotos.isSubset(of: Set(contents.photos)) else { return .wait }
+        if let position = saved.groupPosition, contents.photos.contains(position.photo),
+            !groupsPublished, contents.group(with: position.group) == nil
+        {
+            return .wait
+        }
         return .apply(saved.restored(from: .available(contents)))
     }
 
