@@ -274,6 +274,10 @@ final class FolderLibrarySession: FolderLibrary {
     }
 
     /// Retries only the changes of one finishing action that still need it (PRD P0-09).
+    ///
+    /// A failure C4 admitted has a handle, so the queue retries exactly those changes. A refusal
+    /// that never reached the queue has none, so the plan runs again under the checks the executor
+    /// always applies, which drops whatever no longer needs writing (``rerun(_:executor:)``).
     func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult {
         guard case .success(let stores) = await resolvedStores(), let session = openSession else {
             return result
@@ -281,10 +285,43 @@ final class FolderLibrarySession: FolderLibrary {
         let executor = GroupFinishingExecutor(
             queue: stores.writes, completion: groupCompletionTracker)
         do {
-            return try await session.withAdmittedWork { await executor.retryFailed(in: result) }
+            return try await session.withAdmittedWork {
+                guard result.keptChangeID != nil || result.rejectedBatchID != nil else {
+                    return await self.rerun(result, executor: executor)
+                }
+                return await executor.retryFailed(in: result)
+            }
         } catch {
             return result
         }
+    }
+
+    /// Runs a finishing action again after a refusal that never reached C4's queue (PRD P0-09).
+    ///
+    /// A handle-less result is one the folder refused before writing, so none of its changes is
+    /// stored and running the plan again is the retry. The executor re-reads every photo's marks,
+    /// so a change that gained a rating or label meanwhile is dropped instead of written, and a
+    /// change the first attempt confirmed would be dropped for the same reason. C5's undo record
+    /// stays the one the action produced, because a retry writes the same requested changes
+    /// (PRD P0-12).
+    private func rerun(
+        _ result: GroupFinishingResult, executor: GroupFinishingExecutor
+    ) async -> GroupFinishingResult {
+        let rerun = await executor.execute(
+            result.plan,
+            photoSet: { [weak self] photo in await self?.finishingSet(for: photo) },
+            latestMarks: { [weak self] photo in
+                await self?.finishingMarks(for: photo) ?? PhotoMarks()
+            })
+        var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
+        for outcome in result.outcomes where outcome.status.state.isConfirmed {
+            statuses[outcome.photo] = outcome.status
+        }
+        for outcome in rerun.outcomes { statuses[outcome.photo] = outcome.status }
+        let confirmed = result.outcomes.filter(\.status.state.isConfirmed).map(\.change)
+        let changed = rerun.outcomes.map(\.change)
+        return GroupFinishingResult.applied(
+            result.plan, changes: confirmed + changed, statuses: statuses, undo: result.undo)
     }
 
     /// Whether the group is complete, and where the group view goes next (PRD P0-12).

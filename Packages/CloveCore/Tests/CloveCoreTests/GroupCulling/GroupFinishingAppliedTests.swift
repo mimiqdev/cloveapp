@@ -121,4 +121,28 @@ struct GroupFinishingAppliedTests {
         #expect(result.droppedPhotos.isEmpty)
         #expect(result.undo.entries.isEmpty)
     }
+
+    /// The marks read at execution decide what a plan still does: a kept photo's new rating is
+    /// kept and a labelled photo is never rejected (PRD P0-12; PRD In-group culling, finishing
+    /// actions).
+    @Test func theMarksReadNowDecideWhichChangesStayAllowed() {
+        let plan = GroupFinishingPlan(
+            group: group, action: .keepThis, currentPhoto: kept, marks: marks,
+            enabledRatings: groupCullingTwoAndFour)
+
+        // Unchanged marks: the kept photo gets the lowest enabled rating and the other unmarked
+        // photo is rejected.
+        let unchanged = plan.changesAllowed { marks[$0] ?? PhotoMarks() }
+        #expect(unchanged.map(\.kind) == [.keep, .reject])
+        #expect(unchanged.first?.change.rating == groupCullingRating(2))
+
+        // Both photos gained a mark after the plan was built: keeping has nothing left to
+        // change, and the label makes the planned reject no longer allowed.
+        let markedMeanwhile = groupCullingMarks([
+            (kept, PhotoMarks(rating: groupCullingRating(4))),
+            (rejected, PhotoMarks(label: ColourLabel(colour: .blue))),
+        ])
+        let allowed = plan.changesAllowed { markedMeanwhile[$0] ?? PhotoMarks() }
+        #expect(allowed.isEmpty)
+    }
 }

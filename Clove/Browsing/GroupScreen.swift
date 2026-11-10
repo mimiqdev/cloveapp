@@ -75,6 +75,7 @@ struct GroupScreen: View {
             // Leaving the group view drops a pending advance, so coming back never jumps photos
             // (PRD Auto-advance).
             autoAdvance.cancel()
+            completionTask?.cancel()
         }
         .onChange(of: completionTrigger, initial: true) { previous, current in
             advanceIfCompleted(previous: previous, current: current)
@@ -180,8 +181,15 @@ struct GroupScreen: View {
 
     /// Shows one photo of the group and drops an advance that was still waiting to move
     /// (PRD Auto-advance).
+    ///
+    /// Grouping can refine while an advance waits out its pause, so a photo that is no longer a
+    /// member of the group on screen is refused: the group view must keep showing a member, which
+    /// is what makes its saved position valid (PRD P0-11, P0-14).
     private func show(_ photo: PhotoIdentity) {
         autoAdvance.cancel()
+        // A user who moves within the group is not waiting to be handed the next group.
+        completionTask?.cancel()
+        guard browsing.groupPhotos.contains(where: { $0.id == photo }) else { return }
         browsing.showGroupPhoto(photo)
     }
 
@@ -243,6 +251,7 @@ struct GroupScreen: View {
         let plan = plan(for: action, in: group, photo: photo)
         guard plan.availability.isAvailable else { return }
         autoAdvance.cancel()
+        completionTask?.cancel()
         Task { await browsing.runGroupFinishing(plan) }
     }
 
@@ -258,8 +267,8 @@ struct GroupScreen: View {
 
     /// The values that change when the group on screen can complete (PRD P0-12).
     ///
-    /// The marks, the finishing action and C12's setting are all in the value, so any of them
-    /// completing the group is one event the screen reacts to.
+    /// The marks, the finishing action, the failure the user can still retry and C12's setting are
+    /// all in the value, so any of them is one event the screen reacts to.
     private struct GroupCompletionTrigger: Hashable {
         /// The group on screen, or nil when there is none.
         let group: GroupID?
@@ -267,6 +276,9 @@ struct GroupScreen: View {
         let undecided: Int
         /// The last finishing action, with its completion record (PRD P0-12).
         let finishing: GroupFinishingResult?
+        /// The finishing action's failure while the user can still retry it
+        /// (PRD Failure and recovery).
+        let failure: GroupFinishingResult?
         /// C12's "After a group is complete" (PRD Gesture-related settings).
         let behaviour: GroupCompletionBehaviour
     }
@@ -277,6 +289,7 @@ struct GroupScreen: View {
             group: browsing.state.groupPosition?.group,
             undecided: undecidedCount.undecided,
             finishing: browsing.lastGroupFinishing,
+            failure: browsing.groupFinishingFailure,
             behaviour: settings.groupCompletion)
     }
 
@@ -286,19 +299,49 @@ struct GroupScreen: View {
             || (trigger.group != nil && trigger.finishing?.plan.groupID == trigger.group)
     }
 
+    /// The group whose completion is waiting for the view to move on (PRD P0-12).
+    @State private var completedGroup: GroupID?
+
+    /// The pause before a completed group hands the view on (PRD Auto-advance).
+    @State private var completionTask: Task<Void, Never>?
+
     /// Moves the group view on when this screen watched its group complete (PRD In-group culling,
     /// group completion; PRD P0-12).
     ///
-    /// The completion is an event, not a state: a group the user opens from the grid that is
-    /// already finished stays where it is, and only a group that was in progress on this screen
-    /// hands the view on. The model asks the folder session's completion record, so no second
-    /// definition of "complete" lives in a view.
+    /// A completion is an event, not a state: a group the user opens from the grid that is already
+    /// finished stays where it is, while a group that completed here and a finishing action the
+    /// user runs both hand the view on. The move waits out C13's pause, because PRD Auto-advance
+    /// shows the mark that completed the group for about 0.3 seconds before the view leaves it. A
+    /// finishing action that left changes to retry keeps the view until the user retries or
+    /// cancels, so the failure bar and its retry stay reachable (PRD P0-09; PRD Failure and
+    /// recovery).
     private func advanceIfCompleted(
         previous: GroupCompletionTrigger, current: GroupCompletionTrigger
     ) {
-        guard let group = current.group, group == previous.group else { return }
-        guard isComplete(current), !isComplete(previous) else { return }
+        guard let group = current.group else {
+            completedGroup = nil
+            return
+        }
+        if group != previous.group {
+            // Another group: nothing from the last one carries over (PRD P0-14).
+            completedGroup = nil
+            completionTask?.cancel()
+            autoAdvance.cancel()
+        }
+        let becameComplete = group == previous.group && isComplete(current) && !isComplete(previous)
+        let finishedNow =
+            current.finishing != nil && current.finishing != previous.finishing
+            && current.finishing?.plan.groupID == group
+        if becameComplete || finishedNow { completedGroup = group }
+
+        guard completedGroup == group, isComplete(current), current.failure == nil else { return }
+        completedGroup = nil
         autoAdvance.cancel()
-        Task { await browsing.advanceFromCompletedGroup(current.behaviour) }
+        completionTask?.cancel()
+        completionTask = Task {
+            try? await Task.sleep(for: AutoAdvance.pause)
+            guard !Task.isCancelled else { return }
+            await browsing.advanceFromCompletedGroup(current.behaviour)
+        }
     }
 }

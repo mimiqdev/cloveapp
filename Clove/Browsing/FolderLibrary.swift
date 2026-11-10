@@ -216,7 +216,7 @@ extension FolderLibrary {
     /// A library with no folder to write records no finishing action and completes no group
     /// (PRD In-group culling).
     func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {
-        GroupFinishingResult.applied(plan, statuses: [:], undo: nil)
+        GroupFinishingResult.applied(plan, statuses: [:])
     }
 
     func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult {

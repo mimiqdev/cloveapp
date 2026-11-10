@@ -305,6 +305,9 @@ struct DetailMarkingView: View {
                 zoomMode = .fullResolution(anchor: keptZoom.anchor)
             }
             setZoom(.scale(keptZoom.scale, anchor: keptZoom.anchor.unitPoint))
+            // The retained zoom may need more pixels than a fit-sized preview holds, so the next
+            // photo is not an enlarged embedded preview (G1 "Preview, detail (I2)").
+            upgradeIfNeeded()
             return
         }
         guard case .fullResolution(let anchor) = zoomMode, viewSize.width > 0 else { return }
@@ -369,6 +372,22 @@ struct DetailMarkingView: View {
         setZoom(.scale(target, anchor: anchor))
         upgradeTask?.cancel()
         upgradeTask = Task { await upgrade(need: .fullResolution) }
+    }
+
+    /// Asks I2 for the pixels the zoom on screen needs, if the shown pixels are too small.
+    ///
+    /// A pinch goes through the debounced request in ``zoomChanged(_:)``; this is the path a
+    /// photo that opened at a retained zoom takes, where no pinch follows to ask for the pixels
+    /// (PRD In-group culling, synchronized zoom; G1 "Preview, detail (I2)"). A source that has
+    /// nothing better to give returns the preview with a limitation, which turns ``previewOnly``
+    /// on, so the same request is never repeated for that photo (PRD P0-04).
+    private func upgradeIfNeeded() {
+        guard !previewOnly, let shown else { return }
+        guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
+        upgradeTask?.cancel()
+        upgradeTask = Task {
+            await upgrade(need: isAtFullResolution ? .fullResolution : .morePixels)
+        }
     }
 
     /// Asks I2 for the pixels a pinch or a double tap needs, keeping the preview meanwhile.

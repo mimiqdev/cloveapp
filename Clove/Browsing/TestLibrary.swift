@@ -160,22 +160,25 @@ final class TestLibrary: FolderLibrary {
 
     /// Runs one finishing action's plan through the sample's own mark call (PRD P0-12).
     ///
-    /// The sample has no write queue, so it applies C10's planned changes itself and reports the
-    /// same result shape the real library returns (``GroupFinishingResult/applied(_:statuses:undo:)``).
-    /// The plan is built and applied on the main actor with nothing in between, so the executor's
-    /// re-check of the marks read now has nothing to catch here; the rule that a rated or labelled
-    /// photo is never rejected is C10's plan's (PRD P0-12). An unavailable plan writes nothing and
-    /// records no completion, exactly like the executor (PRD In-group culling, finishing actions).
+    /// The sample has no write queue, so it applies the plan's still-allowed changes itself and
+    /// reports the same result shape the real library returns
+    /// (``GroupFinishingResult/applied(_:changes:statuses:undo:)``). The changes are re-checked
+    /// against the marks the sample holds now through C10's own rule, so a photo rated or labelled
+    /// after the screen built its plan is never rejected and its rating is never overwritten
+    /// (PRD P0-12; ``GroupFinishingPlan/changesAllowed(currentMarks:)``). An unavailable plan
+    /// writes nothing and records no completion, exactly like the executor (PRD In-group culling,
+    /// finishing actions).
     func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {
+        let changes = plan.changesAllowed { self.marks(for: $0) }
         guard plan.availability.isAvailable else {
-            return GroupFinishingResult.applied(plan, statuses: [:])
+            return GroupFinishingResult.applied(plan, changes: changes, statuses: [:])
         }
         await groupCompletion.recordFinishingAction(on: plan.groupID)
         var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
-        for change in plan.changes {
+        for change in changes {
             statuses[change.photo] = await apply(change.change, to: change.photo)
         }
-        return GroupFinishingResult.applied(plan, statuses: statuses)
+        return GroupFinishingResult.applied(plan, changes: changes, statuses: statuses)
     }
 
     /// Sends the finishing action's failed changes again, and only those (PRD P0-09).
@@ -183,9 +186,18 @@ final class TestLibrary: FolderLibrary {
         var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
         for outcome in result.outcomes { statuses[outcome.photo] = outcome.status }
         for outcome in result.outcomes where outcome.status.state.isUnfinished {
+            // A retry applies the same requested marks; the sample's marks still allow them or the
+            // change would have been dropped when the action ran (PRD P0-12).
             statuses[outcome.photo] = await apply(outcome.change.change, to: outcome.photo)
         }
-        return GroupFinishingResult.applied(result.plan, statuses: statuses, undo: result.undo)
+        return GroupFinishingResult.applied(
+            result.plan, changes: result.undo.entries, statuses: statuses, undo: result.undo)
+    }
+
+    /// The marks the sample holds for one photo right now, for a finishing action's re-check
+    /// (PRD P0-12).
+    private func marks(for photo: PhotoIdentity) -> PhotoMarks {
+        stored.first { $0.id == photo }?.marks ?? PhotoMarks()
     }
 
     /// Whether the sample's group is complete, and where the group view goes next (PRD P0-12).
