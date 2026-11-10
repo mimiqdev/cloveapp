@@ -64,6 +64,38 @@ struct PhotoChangeStatesTests {
         #expect(states.latest(for: first)?.state == .savedInSidecar)
     }
 
+    /// PRD P0-08's Retry resends the change it failed under the same identity, so a failure is
+    /// the one finished state that may move back to pending and writing, and its new result is
+    /// accepted (C4's `MarkWriteQueue.retry`).
+    @Test func aRetryOfAFailedChangeMovesBackToWriting() {
+        var states = PhotoChangeStates()
+        let id = MarkChangeID()
+        let failure = MarkWriteFailure(
+            reason: .notConfirmed, message: "The sidecar did not read back.")
+        let failed = states.insert(status(.failed(failure), id: id))
+        let pending = states.insert(status(.pending, id: id))
+        let writing = states.insert(status(.writing, id: id))
+        let saved = states.insert(status(.savedInSidecar, id: id))
+        #expect(failed)
+        #expect(pending)
+        #expect(writing)
+        #expect(saved)
+
+        #expect(states.latest(for: first)?.state == .savedInSidecar)
+        #expect(states.latest(for: first)?.id == id)
+    }
+
+    /// A stored Reject is confirmed too, so only a failure may be retried back to writing.
+    @Test func aStoredChangeNeverMovesBackToWriting() {
+        var states = PhotoChangeStates()
+        let id = MarkChangeID()
+        let stored = states.insert(status(.storedInClove, id: id))
+        let retried = states.insert(status(.pending, id: id))
+        #expect(stored)
+        #expect(!retried)
+        #expect(states.latest(for: first)?.state == .storedInClove)
+    }
+
     @Test func aNewerChangeReplacesTheOlderOne() {
         var states = PhotoChangeStates()
         let older = states.insert(status(.pending))

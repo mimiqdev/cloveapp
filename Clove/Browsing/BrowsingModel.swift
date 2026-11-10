@@ -77,6 +77,31 @@ final class BrowsingModel {
     /// overwrites what the user has done since.
     private var hasRestored = false
 
+    /// The open folder's location loss, as C11's watch reported it (PRD P0-02, P0-08).
+    ///
+    /// A loss explains the folder with the PRD's disconnected-drive or missing-location copy and
+    /// keeps its unfinished changes from reading **Writing…** or **Saved**. It is cleared when
+    /// another folder opens.
+    private(set) var folderLocationLoss: FolderLocationLoss?
+
+    /// The question standing before a destination that leaves the open folder, or nil
+    /// (PRD Failure and recovery, last row).
+    private(set) var leavePrompt: LeaveFolderPrompt?
+
+    /// Whether **Wait for writes** is draining C4 before the question is answered again.
+    private(set) var isWaitingForWrites = false
+
+    /// Whether this scene left its folder and is ignoring that folder's updates until a real open
+    /// shows another one (PRD P0-08's Leave anyway).
+    ///
+    /// The library keeps the departed folder's photos until its session drains, so without this
+    /// a confirmed write could refresh them back onto entry and bring Continue browsing with it.
+    private var hasLeftFolder = false
+
+    /// How many opens this scene started, so a leaving destination never replaces a folder the
+    /// user opened while it waited (PRD P0-08).
+    private var openRequests = 0
+
     /// The saved scene waiting for its folder to hold the photos it names (PRD P0-14).
     ///
     /// It applies as soon as the scan delivered them, at the latest when the scan finishes, and
@@ -180,6 +205,7 @@ final class BrowsingModel {
     /// coming back from the grid does not need the picker again. A folder that opens answers
     /// whatever the last failed open left on entry, so the message goes with it (PRD P0-02).
     func openFolder() {
+        openRequests += 1
         pendingRestore = nil
         folderFailure = nil
         showOpenFolder()
@@ -189,10 +215,24 @@ final class BrowsingModel {
     ///
     /// The library performs C11's validating read; a failure stays on the model so entry explains
     /// it and asks for the folder again, while a success shows the grid as the scan streams in.
+    /// With unfinished writes in the open folder, the question comes first (PRD P0-08).
     func openPickedFolder(_ url: URL) async {
         pendingRestore = nil
+        guard askBeforeLeaving(.picked(url)) else { return }
+        await openPickedFolderNow(url)
+    }
+
+    /// Opens a folder the user chose, once any leaving question is answered (PRD P0-01).
+    private func openPickedFolderNow(_ url: URL) async {
+        openRequests += 1
+        // An earlier folder's loss and save states do not apply to whatever this open installs.
+        // Clearing the loss before the await keeps a loss the new open reports (PRD P0-02).
+        folderLocationLoss = nil
         folderFailure = await library.pick(url)
         guard folderFailure == nil else { return }
+        // PRD Failure and recovery: a real open reads the actual XMP, so what is on screen starts
+        // from this open's changes and never from a failure the closed folder left behind.
+        changes = PhotoChangeStates()
         showOpenFolder()
         await reloadRecents()
     }
@@ -200,15 +240,29 @@ final class BrowsingModel {
     /// Reopens one remembered folder (PRD P0-02).
     ///
     /// A failed reopen keeps C11's reason on that item, so entry can explain it there and ask for
-    /// the folder again instead of failing silently.
+    /// the folder again instead of failing silently. With unfinished writes in the open folder,
+    /// the question comes first; reopening the folder that is already open is not leaving it.
     func reopen(_ recent: RecentFolder) async {
         pendingRestore = nil
+        guard askBeforeLeaving(.recent(recent)) else { return }
+        await reopenNow(recent)
+    }
+
+    /// Reopens one remembered folder, once any leaving question is answered (PRD P0-02).
+    private func reopenNow(_ recent: RecentFolder) async {
+        openRequests += 1
+        // The reopen reads the folder again, so the loss the watch reported is no longer current,
+        // and a loss the new open reports after the await still applies (PRD P0-02).
+        folderLocationLoss = nil
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
             return
         }
         recentFailures[recent.id] = nil
         folderFailure = nil
+        // The reopened folder reads its XMP and Clove-stored marks again, so the states from the
+        // previous open are gone (PRD Failure and recovery).
+        changes = PhotoChangeStates()
         showOpenFolder()
         await reloadRecents()
     }
@@ -383,12 +437,14 @@ final class BrowsingModel {
     ///
     /// The grid's parent is entry, and detail and the group view return to the grid. Settings
     /// keeps the folder it was opened over, so closing them returns to the grid when a folder is
-    /// open and to entry when none is.
+    /// open and to entry when none is. Going back from the grid leaves the folder, so PRD Failure
+    /// and recovery's question comes first when something is unfinished.
     func back() {
         switch state.route {
         case .entry:
             break
         case .grid:
+            guard askBeforeLeaving(.entry) else { return }
             state.route = .entry
         case .detail, .group, .settings:
             state.route = state.folder == nil ? .entry : .grid
@@ -580,6 +636,208 @@ final class BrowsingModel {
         _ = await library.apply(change, to: photo)
     }
 
+    // MARK: - Save state and recovery
+
+    /// The folder indicator's one line (PRD P0-08).
+    ///
+    /// It summarises every photo's latest change in the open folder, so it never claims Saved
+    /// for a write C4 has not confirmed and never misses a photo whose change failed.
+    var saveSummary: FolderSaveSummary {
+        FolderSaveSummary(states: storedPhotos.compactMap { changes.latest(for: $0.id)?.state })
+    }
+
+    /// What the marking HUD's save-state line says for one photo (PRD P0-08).
+    ///
+    /// PRD P0-08 shows **Saved** only for a confirmed sidecar write and **Saved in Clove only**
+    /// only for confirmed Clove storage; a Clove-stored Reject reads **Stored in Clove** because
+    /// G1 decision 5 keeps the word Saved for XMP writes and a confirmed move.
+    func saveText(for photo: PhotoIdentity) -> String {
+        SaveStatus.text(
+            for: latestChange(for: photo)?.state, folderLost: folderLocationLoss != nil)
+    }
+
+    /// The situation the open folder's own loss explains, or nil while it is reachable
+    /// (PRD Failure and recovery, rows 3 and 6).
+    var folderSituation: SaveSituation? {
+        folderLocationLoss.map { SaveStatus.situation(for: $0) }
+    }
+
+    /// The photos whose change has not finished saving, in grid order (PRD P0-08).
+    ///
+    /// The indicator's count opens this list, so each row can retry exactly one photo and the
+    /// whole list can retry them all with the same per-photo call.
+    var unsavedChanges: [UnsavedChange] {
+        storedPhotos.compactMap { photo in
+            guard let status = changes.latest(for: photo.id), status.state.isUnfinished else {
+                return nil
+            }
+            return UnsavedChange(
+                id: status.id, photo: photo.id, fileName: photo.fileName, state: status.state)
+        }
+    }
+
+    /// Whether leaving the open folder asks first (PRD Failure and recovery, last row).
+    var leaveConfirmation: LeaveFolderConfirmation {
+        LeaveFolderConfirmation(
+            states: storedPhotos.compactMap { changes.latest(for: $0.id)?.state })
+    }
+
+    /// Resends one photo's latest failed change through C4 (PRD P0-08).
+    ///
+    /// The retry's transitions arrive on the library's ordered stream like any other change, so a
+    /// retried change shows **Writing…** and then only what its storage confirmed. PRD How marks
+    /// reach disk, rule 8, keeps a superseded change from being retried (the library reads the
+    /// photo's latest change).
+    func retryLatestChange(for photo: PhotoIdentity) async {
+        _ = await library.retryLatestChange(for: photo)
+    }
+
+    /// Retries every photo the indicator lists, one call per photo (PRD P0-08).
+    func retryAllUnfinishedChanges() async {
+        for change in unsavedChanges {
+            await retryLatestChange(for: change.photo)
+        }
+    }
+
+    /// Checks the open folder's location now, as a return to the foreground asks (PRD P0-02).
+    func checkFolderLocation() async {
+        await library.checkFolderLocationNow()
+    }
+
+    /// Reopens the open folder through its Recents record (PRD P0-02).
+    ///
+    /// The disconnected-drive and lost-permission rows offer Reconnect/reopen, and C11 validates
+    /// the location with a real read before anything is scanned again. Reopening the folder that
+    /// is already open is not leaving it, so no question comes first. A folder that no longer
+    /// opens lands on entry with its own reason on the matching Recents item, which is what
+    /// PRD P0-02 asks for instead of a silent failure.
+    func reopenOpenFolder() async {
+        guard let folder = state.folder,
+            let recent = recents.first(where: { $0.identity == folder })
+        else {
+            state.route = .entry
+            return
+        }
+        await reopenNow(recent)
+        if let failure = recentFailures[recent.id] {
+            folderFailure = failure
+            state.route = .entry
+        }
+    }
+
+    /// Waits for C4 to finish, then answers the leaving question again (PRD P0-08).
+    ///
+    /// **Wait for writes** keeps the question on screen with a visible waiting state, and PRD
+    /// Failure and recovery lets the user still choose **Leave anyway**. Once every change is
+    /// confirmed the user's answer proceeds to the destination they named; a change that failed
+    /// stays unfinished and keeps the question, so nobody leaves believing it was saved.
+    func waitForWrites() async {
+        guard let prompt = leavePrompt, !isWaitingForWrites else { return }
+        isWaitingForWrites = true
+        await library.drainWrites()
+        // Cancel, Leave anyway or a new question may have replaced the one that started this wait,
+        // and a stale waiter must never answer the newer question or clear its progress.
+        guard leavePrompt?.id == prompt.id else { return }
+        // The queue's own answer is authoritative: a streamed status can still be on its way to
+        // this screen when the drain returns, and the question must not stay over confirmed work.
+        let unfinished = await library.hasUnfinishedWrites()
+        // Answering takes another await, so the question can have been cancelled or replaced
+        // meanwhile; a stale waiter never acts on the newer one.
+        guard leavePrompt?.id == prompt.id else { return }
+        isWaitingForWrites = false
+        guard !unfinished else { return }
+        await leave(to: prompt.destination)
+    }
+
+    /// Leaves the open folder now, without reporting its unconfirmed changes as saved
+    /// (PRD Failure and recovery, last row).
+    func leaveAnyway() async {
+        guard let prompt = leavePrompt else { return }
+        await leave(to: prompt.destination)
+    }
+
+    /// Dismisses the leaving question and stays in the folder (PRD Failure and recovery).
+    func cancelLeave() {
+        leavePrompt = nil
+        isWaitingForWrites = false
+    }
+
+    /// Shows the question when the destination leaves the open folder with unfinished writes.
+    ///
+    /// - Returns: `false` when the question is now open and the destination must wait for the
+    ///   answer, `true` when the caller may proceed.
+    private func askBeforeLeaving(_ destination: LeaveFolderDestination) -> Bool {
+        guard leavesWithUnfinishedWrites(destination) else { return true }
+        leavePrompt = LeaveFolderPrompt(destination: destination)
+        // A question that was cancelled mid-wait must not leave the new one's Wait disabled.
+        isWaitingForWrites = false
+        return false
+    }
+
+    /// Whether the destination leaves the open folder while something is unfinished.
+    ///
+    /// Reopening the folder that is already open is not leaving it, and a scene with no open
+    /// folder has nothing to leave (PRD Failure and recovery).
+    private func leavesWithUnfinishedWrites(_ destination: LeaveFolderDestination) -> Bool {
+        guard state.folder != nil else { return false }
+        if case .recent(let recent) = destination, recent.identity == state.folder { return false }
+        return leaveConfirmation.shouldAsk
+    }
+
+    /// Performs the destination the user chose after the question (PRD P0-08).
+    ///
+    /// Leaving for entry shows entry before the folder closes, so **Leave anyway** never waits for
+    /// C4 the way **Wait for writes** does: the library still ends the session and releases C11's
+    /// scope, but the screen is already where the user asked to be (PRD Failure and recovery, last
+    /// row).
+    private func leave(to destination: LeaveFolderDestination) async {
+        leavePrompt = nil
+        isWaitingForWrites = false
+        let token = openRequests
+        // The screen leaves the folder before anything that waits for its writes, so no
+        // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
+        // the work ends, but that is not something the user has to watch).
+        showEntryAfterLeaving()
+        // Leaving closes the folder even when the next destination never opens, so its scan stops
+        // and its scope is not held for a folder the user no longer sees (G1 folder access).
+        await library.closeFolder()
+        // A folder the user opened while the close drained wins: the destination they were
+        // heading for before that must not replace it (PRD P0-08).
+        guard token == openRequests else { return }
+        switch destination {
+        case .entry:
+            break
+        case .picked(let url):
+            await openPickedFolderNow(url)
+        case .recent(let recent):
+            await reopenNow(recent)
+        }
+    }
+
+    /// Shows entry and drops the closed folder's state at once (PRD Failure and recovery).
+    ///
+    /// The library ends the folder's session and its write queue keeps the unconfirmed changes,
+    /// so nothing is reported as saved afterwards; the next open reads the actual XMP and
+    /// Clove-stored marks. The filter and order survive, because they describe the grid rather
+    /// than the folder that closed.
+    private func showEntryAfterLeaving() {
+        state.folder = nil
+        state.currentPhoto = nil
+        state.selection = []
+        state.groupPosition = nil
+        state.route = .entry
+        folderLocationLoss = nil
+        changes = PhotoChangeStates()
+        groupsPublishedFor = nil
+        finishedScanFor = nil
+        pendingRestore = nil
+        hasLeftFolder = true
+        storedPhotos = []
+        groups = []
+        thumbnails = library.thumbnails
+        detailImages = library.detailImages
+    }
+
     /// The auto-advance the last mark made in the detail view resolved to, with the photo it
     /// marked (PRD Auto-advance).
     ///
@@ -638,6 +896,12 @@ final class BrowsingModel {
             }
         case .available?:
             folderFailure = nil
+            // C11 reopened and validated the folder, so a loss buffered before this scene caught
+            // up belongs to whatever was open then, not to what it shows now (PRD P0-02). The
+            // open it just installed is the one this scene shows, even when the saved route is
+            // entry or settings and the grid does not appear yet.
+            folderLocationLoss = nil
+            hasLeftFolder = false
             await reloadRecents()
             if saved.showsPhotos {
                 showOpenFolder()
@@ -682,6 +946,9 @@ final class BrowsingModel {
 
     /// Applies one library update on the main actor (PRD P0-03, P0-08).
     private func apply(_ update: FolderLibraryUpdate) async {
+        // A folder this scene left may still be closing; nothing it publishes may bring it back
+        // (PRD P0-08's Leave anyway).
+        guard !hasLeftFolder else { return }
         switch update {
         case .photos, .reads:
             refresh()
@@ -695,6 +962,13 @@ final class BrowsingModel {
             // A streamed transition keeps "Writing…" and "Saved" current without re-reading
             // every photo, and the merge rule keeps a finished change from moving backwards.
             changes.insert(status)
+        case .locationLost(let folder, let loss, let generation):
+            // PRD Failure and recovery forbids keeping Writing… or Saved for the folder's
+            // unfinished changes after a loss; the indicator supplies the copy (PRD P0-02).
+            // A buffered loss can arrive after another folder opened, or after the same folder
+            // opened again, so it only applies to the folder and the open this scene shows.
+            guard folder == library.folder, generation == library.openGeneration else { return }
+            folderLocationLoss = loss
         case .groups(let groups):
             self.groups = groups
             groupsPublishedFor = library.folder
@@ -724,12 +998,19 @@ final class BrowsingModel {
     }
 
     /// Shows the grid on the folder the library just opened (PRD Entry, P0-01).
+    ///
+    /// A loss the last folder reported is not cleared here: opening the folder that is already
+    /// open (entry's Continue browsing) never validated it again, so its warning stays until a
+    /// real open or reopen reads it (PRD P0-02). A real open clears the loss itself.
     private func showOpenFolder() {
+        hasLeftFolder = false
         state.folder = library.folder
         state.currentPhoto = nil
         state.selection = []
         state.groupPosition = nil
         state.route = .grid
+        leavePrompt = nil
+        isWaitingForWrites = false
         // The finishing action, its failure and its event count belong to the folder that is
         // gone, so a new folder's group view never shows or advances on the old one (PRD P0-12).
         lastGroupFinishing = nil
@@ -741,25 +1022,25 @@ final class BrowsingModel {
         lastBatch = nil
         batchReport = nil
         selectionClearances += 1
-        // The folder's groups are whatever grouping published for it, even when the scan
-        // answered before this scene caught up (PRD P0-11).
-        groups = library.groups
+        // Whatever the folder published before this screen caught up (a scan batch that landed
+        // while the old folder closed, or grouping's first result) is read here, so the grid
+        // never waits for one more update (PRD P0-11).
+        refresh()
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change. Detail takes the source bound to the same folder.
         thumbnails = library.thumbnails
         detailImages = library.detailImages
     }
 
-    /// Takes the library's current photos, groups and save states.
+    /// Takes the library's current photos and groups.
     ///
-    /// Scan batches, metadata reads, mark reads and confirmed writes all refresh through this
-    /// path, so the screens keep reading the model while the library changes underneath it.
+    /// Scan batches, metadata reads and confirmed writes all refresh through this path, so the
+    /// screens keep reading the model while the library changes underneath it. Save states are
+    /// deliberately not copied from the library here: they arrive only on the ordered update
+    /// stream, so a snapshot can never paint an older transition over a newer one.
     private func refresh() {
         storedPhotos = library.photos
         groups = library.groups
-        for photo in storedPhotos {
-            if let change = library.latestChange(for: photo.id) { changes.insert(change) }
-        }
     }
 }
 
