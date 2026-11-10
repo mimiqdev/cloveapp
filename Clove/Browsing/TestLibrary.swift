@@ -14,11 +14,20 @@ final class TestLibrary: FolderLibrary {
     /// The launch environment value that selects the sample library: set it to `1`.
     static let launchVariable = "CLOVE_TEST_LIBRARY"
 
+    /// The launch environment value that makes sample photos fail their first write (PRD P0-09).
+    ///
+    /// Its value is a stem suffix: a photo whose stem ends with it reports a failed change once
+    /// and keeps the marks it had, and the next write saves it. The UI test therefore forces a
+    /// partial batch failure without files, sees the PRD's "Saved N photos. M photos couldn't be
+    /// saved." copy, and sees a retry of only the failed photo succeed.
+    static let forcedFailureVariable = "CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX"
+
     /// The library this launch browses: the sample when the launch value asks for it (PRD P0-13).
     static func forLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> any FolderLibrary {
-        environment[launchVariable] == "1" ? sample : TestLibrary()
+        guard environment[launchVariable] == "1" else { return TestLibrary() }
+        return sample(failingStemSuffix: environment[forcedFailureVariable])
     }
 
     /// The sample folder's durable key, spelled so a saved scene never looks like a real folder.
@@ -70,6 +79,16 @@ final class TestLibrary: FolderLibrary {
     private var stored: [GridPhoto]
     private var changes: [PhotoIdentity: MarkChangeStatus]
 
+    /// The stem suffix whose photos fail their first write, or nil when none does (PRD P0-09).
+    private let failingStemSuffix: String?
+
+    /// The photos whose forced failure already happened, so a retry saves them (PRD P0-09).
+    private var alreadyFailed: Set<PhotoIdentity> = []
+
+    /// The batches this library applied, so a retry touches only their failed photos
+    /// (PRD P0-09).
+    private var batches: [MarkBatchID: [BatchMarkItem]] = [:]
+
     /// The folder's photos with their marks, in the sample's capture order (PRD P0-03).
     var photos: [GridPhoto] { stored }
 
@@ -80,6 +99,7 @@ final class TestLibrary: FolderLibrary {
         groups = []
         allGroups = []
         changes = [:]
+        failingStemSuffix = nil
         thumbnails = SampleGridThumbnails()
         detailImages = EmptyDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
@@ -90,6 +110,7 @@ final class TestLibrary: FolderLibrary {
         photos: [GridPhoto],
         groups: [BrowsingGroup],
         changes: [MarkChangeStatus] = [],
+        failingStemSuffix: String? = nil,
         detailImages: (any DetailImageSource)? = nil
     ) {
         folder = TestLibrary.sampleFolderKey
@@ -99,6 +120,7 @@ final class TestLibrary: FolderLibrary {
         var byPhoto: [PhotoIdentity: MarkChangeStatus] = [:]
         for change in changes { byPhoto[change.identity] = change }
         self.changes = byPhoto
+        self.failingStemSuffix = failingStemSuffix
         thumbnails = TestLibrary.sampleThumbnails
         self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
@@ -114,6 +136,46 @@ final class TestLibrary: FolderLibrary {
     /// queue supersedes an older request, and a photo with nothing requested has no status at all.
     /// Nothing is written anywhere.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus {
+        perform(change, for: photo)
+    }
+
+    /// Applies one bar action's per-photo changes as one batch (PRD P0-09).
+    ///
+    /// Each photo is written on its own, the way C4's batch admits each set: a photo the launch
+    /// forced to fail keeps its marks and reports a failure, while the others take the change.
+    /// Per-photo states go through the same stream as a single change, and the batch's handle
+    /// retries only the photos that did not save.
+    func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
+        let outcomes = items.map { perform($0.change, for: $0.photo) }
+        let batch = MarkBatchID()
+        batches[batch] = items
+        return MarkBatchResult(
+            id: batch, change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+    }
+
+    /// Retries only the photos one batch could not save (PRD P0-09).
+    func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult? {
+        guard let items = batches[batch] else { return nil }
+        let failed = items.filter { changes[$0.photo]?.state.isUnfinished == true }
+        let outcomes = failed.map { perform($0.change, for: $0.photo) }
+        let retry = MarkBatchID()
+        batches[retry] = items
+        return MarkBatchResult(
+            id: retry, change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+    }
+
+    /// Applies one change to one photo and reports the state C4 would (PRD P0-08).
+    ///
+    /// Every sample photo is a RAW set, whose rating and label belong to its sidecar, so a change
+    /// that names either reports ``MarkChangeState/savedInSidecar``. A Reject-only change reports
+    /// ``MarkChangeState/storedInClove``, which is confirmed but never shown as Saved (G1
+    /// decision 5). ``MarkChangeState/savedInCloveOnly`` would belong to a standalone JPEG/HIF
+    /// (G1 decision 6); the sample has none. A newer change replaces the photo's status the way the
+    /// queue supersedes an older request, and a photo with nothing requested has no status at all.
+    /// A forced failure leaves the photo's marks untouched and fails only that photo's first
+    /// write, so a retry shows what retrying does (PRD P0-08, P0-09). Nothing is written
+    /// anywhere.
+    private func perform(_ change: MarkChange, for photo: PhotoIdentity) -> MarkChangeStatus {
         guard !change.isEmpty else {
             // C4's queue refuses a request that names no marks and records nothing.
             return MarkChangeStatus(
@@ -130,6 +192,19 @@ final class TestLibrary: FolderLibrary {
                     MarkWriteFailure(
                         reason: .locationUnavailable,
                         message: "The sample library does not hold this photo.")))
+        }
+        if let failingStemSuffix, photo.stem.hasSuffix(failingStemSuffix),
+            alreadyFailed.insert(photo).inserted
+        {
+            let status = MarkChangeStatus(
+                id: MarkChangeID(), identity: photo, requested: change,
+                state: .failed(
+                    MarkWriteFailure(
+                        reason: .notConfirmed,
+                        message: "The sample library was told to fail this photo.")))
+            changes[photo] = status
+            updateContinuation.yield(.change(status))
+            return status
         }
         var marks = stored[index].marks
         if let rating = change.rating { marks.rating = rating }
@@ -166,7 +241,15 @@ final class TestLibrary: FolderLibrary {
 
     /// The sample: 36 photos across two capture folders, a few marks, two bursts, two sets with
     /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).
-    static var sample: TestLibrary {
+    static var sample: TestLibrary { makeSample(failingStemSuffix: nil) }
+
+    /// The sample with the launch's forced write failure (PRD P0-09).
+    static func sample(failingStemSuffix suffix: String?) -> TestLibrary {
+        makeSample(failingStemSuffix: suffix)
+    }
+
+    /// Builds the sample, keeping the forced failure when the launch asked for one.
+    private static func makeSample(failingStemSuffix: String?) -> TestLibrary {
         let captureBase = Date(timeIntervalSince1970: 1_760_000_000)
         let photos = (0..<36).map { index -> GridPhoto in
             let number = 2678 + index
@@ -182,7 +265,7 @@ final class TestLibrary: FolderLibrary {
         }
         return TestLibrary(
             photos: photos, groups: sampleGroups, changes: sampleChanges,
-            detailImages: sampleDetailImages)
+            failingStemSuffix: failingStemSuffix, detailImages: sampleDetailImages)
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).

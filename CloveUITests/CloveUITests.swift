@@ -1,14 +1,18 @@
 import XCTest
 
 /// The Clove UI smoke test: the grid's overlays, its filter, the grid group display setting, the
-/// detail's zoom and marking gestures, and U1's path from entry to settings and back, all against
-/// the in-memory test library (PRD Grid, P0-03, P0-06, P0-13).
+/// detail's zoom and marking gestures, multi-select's batch and its partial failure, and U1's
+/// path from entry to settings and back, all against the in-memory test library (PRD Grid,
+/// P0-03, P0-06, P0-09, P0-13).
 final class CloveUITests: XCTestCase {
     @MainActor
     func testBrowsingFlowFromEntryToSettings() {
         let app = XCUIApplication()
         // The in-memory library, so the path needs no folder, fixture or permission.
         app.launchEnvironment["CLOVE_TEST_LIBRARY"] = "1"
+        // Every sample photo whose stem ends in 0 fails its first write, so the batch below has a
+        // partial failure to report and retry without a file (PRD P0-09).
+        app.launchEnvironment["CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX"] = "0"
         app.launch()
 
         XCTAssertTrue(
@@ -32,6 +36,10 @@ final class CloveUITests: XCTestCase {
         showGroupsAsCollapsedCovers(in: app)
         showGroupsAsExpandedCells(in: app)
         hideAndShowSimilarGroups(in: app)
+        selectPhotosForABatch(in: app)
+        rateTheSelection(in: app)
+        retryTheFailedPhotos(in: app)
+        leaveMultiSelect(in: app)
     }
 
     /// Entry opens the test library and the grid appears.
@@ -505,5 +513,85 @@ final class CloveUITests: XCTestCase {
     @MainActor
     private func element(in app: XCUIApplication, _ identifier: String) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
+    }
+
+    /// A long press starts multi-select on that photo, and two taps add two more (PRD P0-09).
+    @MainActor
+    private func selectPhotosForABatch(in app: XCUIApplication) {
+        let pressed = element(in: app, "clove.grid.photo.mmq02678")
+        XCTAssertTrue(
+            pressed.waitForExistence(timeout: 10), "The grid did not show the first photo")
+        pressed.press(forDuration: 1)
+
+        let count = element(in: app, "clove.grid.batch.count")
+        XCTAssertTrue(
+            count.waitForExistence(timeout: 10), "A long press did not start multi-select")
+        XCTAssertEqual(count.label, "1 photo selected", "The pressed photo was not selected")
+
+        element(in: app, "clove.grid.photo.mmq02679").tap()
+        element(in: app, "clove.grid.photo.mmq02680").tap()
+        let three = expectation(
+            for: NSPredicate(format: "label == %@", "3 photos selected"), evaluatedWith: count)
+        wait(for: [three], timeout: 10)
+    }
+
+    /// The bar's rating reaches every selected photo, including the rejected one, whose Reject
+    /// the positive rating clears (PRD P0-09, PRD Marking rules).
+    @MainActor
+    private func rateTheSelection(in app: XCUIApplication) {
+        let twoStars = element(in: app, "clove.grid.batch.rate.2")
+        XCTAssertTrue(twoStars.waitForExistence(timeout: 10), "The bar had no rating control")
+        twoStars.tap()
+
+        let first = element(in: app, "clove.grid.photo.mmq02678")
+        let rated = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: first)
+        let second = element(in: app, "clove.grid.photo.mmq02679")
+        let alsoRated = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: second)
+        wait(for: [rated, alsoRated], timeout: 10)
+        XCTAssertFalse(
+            second.label.contains("Rejected"), "A rating left Reject on: \(second.label)")
+    }
+
+    /// A partial batch failure shows the PRD copy and keeps the failed photo's marks; Retry
+    /// resends only that photo and clears the report once it saves (PRD P0-09, PRD Failure and
+    /// recovery).
+    @MainActor
+    private func retryTheFailedPhotos(in app: XCUIApplication) {
+        let copy = "Saved 2 photos. 1 photos couldn't be saved."
+        let failure = element(in: app, "clove.grid.batch.failure")
+        XCTAssertTrue(
+            failure.waitForExistence(timeout: 10), "The batch did not report its failure")
+        XCTAssertEqual(failure.label, copy, "The partial-failure copy changed")
+        // The report exists only after the batch finished, so this checks the final state: the
+        // photo that failed keeps the marks it had (PRD P0-09, P0-08).
+        let failed = element(in: app, "clove.grid.photo.mmq02680")
+        XCTAssertFalse(
+            failed.label.contains("stars"),
+            "The grid showed a mark the batch did not save: \(failed.label)")
+
+        element(in: app, "clove.grid.batch.retry").tap()
+        let gone = expectation(
+            for: NSPredicate(format: "exists == false"), evaluatedWith: failure)
+        wait(for: [gone], timeout: 10)
+
+        let retried = element(in: app, "clove.grid.photo.mmq02680")
+        let rated = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: retried)
+        wait(for: [rated], timeout: 10)
+    }
+
+    /// Done leaves multi-select and clears the selection (PRD P0-09).
+    @MainActor
+    private func leaveMultiSelect(in app: XCUIApplication) {
+        element(in: app, "clove.grid.batch.done").tap()
+        let count = element(in: app, "clove.grid.batch.count")
+        let gone = expectation(
+            for: NSPredicate(format: "exists == false"), evaluatedWith: count)
+        wait(for: [gone], timeout: 10)
+        XCTAssertTrue(
+            element(in: app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 10),
+            "The grid did not stay after multi-select")
     }
 }

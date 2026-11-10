@@ -93,6 +93,11 @@ final class FolderLibrarySession: FolderLibrary {
     /// The latest save state per photo, kept in step with C4's ordered stream (PRD P0-08).
     private var changes = PhotoChangeStates()
 
+    /// The batches this library applied, so a retry resends only their failed photos
+    /// (PRD P0-09). It is replaced with every folder, because another folder's identities and
+    /// sidecars cannot be retried through this one.
+    private var batches: [MarkBatchID: AppliedBatch] = [:]
+
     /// The session holding the open folder's scope, ended when another folder opens.
     private var openSession: FolderAccessSession?
 
@@ -228,6 +233,111 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
+    /// Applies one bar action to the open folder's photos in one batch and reports each photo's
+    /// result (PRD P0-09).
+    ///
+    /// C13 resolves the action per photo, so items can name different changes: a rating clears
+    /// Reject on the rejected photos only. The library groups the items by change and admits each
+    /// group through C4's batch write inside the session that holds the folder's scope, then
+    /// reports one result in the caller's order under one handle a retry can use (PRD P0-09). A
+    /// photo the folder no longer holds is refused and published on ``updates``, so the bar
+    /// counts it as a failure and the photo keeps the marks it had (PRD P0-08).
+    func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
+        let change = items.first?.change ?? MarkChange()
+        guard let session = openSession, !items.isEmpty else {
+            return Self.refusedBatch(
+                items, change: change, reason: .locationUnavailable,
+                message: "The open folder no longer holds these photos.")
+        }
+        let scanned = store
+        var order: [PhotoIdentity: Int] = [:]
+        var byChange: [MarkChange: [ScannedPhotoSet]] = [:]
+        var itemsByIdentity: [PhotoIdentity: BatchMarkItem] = [:]
+        var refused: [MarkChangeStatus] = []
+        var unavailable: [BatchMarkItem] = []
+        for (index, item) in items.enumerated() {
+            order[item.photo] = index
+            itemsByIdentity[item.photo] = item
+            guard let set = scanned.scannedSet(for: item.photo) else {
+                unavailable.append(item)
+                let status = Self.refused(
+                    item.change, for: item.photo, reason: .locationUnavailable,
+                    message: "The open folder no longer holds this photo.")
+                publish(.change(status))
+                refused.append(status)
+                continue
+            }
+            byChange[item.change, default: []].append(set)
+        }
+        guard case .success(let stores) = await resolvedStores() else {
+            return Self.refusedBatch(
+                items, change: change, reason: .unknown,
+                message: "Clove's stored marks are unavailable.")
+        }
+        var queueBatches: [MarkBatchID] = []
+        var outcomes = refused
+        for (change, sets) in byChange {
+            let admitted: MarkBatchResult? = try? await session.withAdmittedWork {
+                await stores.writes.apply(change, to: sets)
+            }
+            guard let result = admitted else {
+                for set in sets {
+                    guard let item = itemsByIdentity[set.photoSet.id] else { continue }
+                    unavailable.append(item)
+                    let status = Self.refused(
+                        change, for: item.photo, reason: .locationUnavailable,
+                        message: "The folder closed before the batch could be written.")
+                    publish(.change(status))
+                    outcomes.append(status)
+                }
+                continue
+            }
+            queueBatches.append(result.id)
+            outcomes.append(contentsOf: result.outcomes)
+        }
+        outcomes.sort { (order[$0.identity] ?? .max) < (order[$1.identity] ?? .max) }
+        let batch = MarkBatchID()
+        // The batch is kept even when nothing reached the queue, so a retry reports the photos
+        // the folder no longer holds instead of dropping them (PRD P0-09).
+        batches[batch] = AppliedBatch(
+            change: change, queueBatches: queueBatches, unavailable: unavailable)
+        return MarkBatchResult(id: batch, change: change, outcomes: outcomes)
+    }
+
+    /// Retries only the photos one batch could not save (PRD P0-09).
+    ///
+    /// Each C4 batch the bar action admitted is retried through the same session, so a retry
+    /// writes under the folder's scope like the first attempt. A photo the folder no longer holds
+    /// is reported as failed again instead of disappearing from the counts. A folder that closed,
+    /// or a batch this session never applied, cannot be retried and answers nil.
+    func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult? {
+        guard let applied = batches[batch], let session = openSession else { return nil }
+        switch await resolvedStores() {
+        case .failure:
+            return nil
+        case .success(let stores):
+            var outcomes: [MarkChangeStatus] = []
+            for queueBatch in applied.queueBatches {
+                let retried: MarkBatchResult? = try? await session.withAdmittedWork {
+                    await stores.writes.retryFailed(in: queueBatch)
+                }
+                if let retried { outcomes.append(contentsOf: retried.outcomes) }
+            }
+            for item in applied.unavailable {
+                let status = Self.refused(
+                    item.change, for: item.photo, reason: .locationUnavailable,
+                    message: "The open folder no longer holds this photo.")
+                publish(.change(status))
+                outcomes.append(status)
+            }
+            // The retry's own handle stays usable, so a second attempt touches the same photos
+            // as the first and never repeats a write that already confirmed.
+            let retryBatch = MarkBatchID()
+            batches[retryBatch] = applied
+            return MarkBatchResult(id: retryBatch, change: applied.change, outcomes: outcomes)
+        }
+    }
+
     // MARK: - Entry
 
     /// Re-reads C11's Recents list (PRD P0-02).
@@ -332,6 +442,7 @@ final class FolderLibrarySession: FolderLibrary {
         openSession = session
         store = FolderPhotos()
         changes = PhotoChangeStates()
+        batches = [:]
         publishedGroups = []
         hasPublishedGroups = false
         publish(.photos([]))
@@ -849,9 +960,36 @@ final class FolderLibrarySession: FolderLibrary {
             state: .failed(MarkWriteFailure(reason: reason, message: message)))
     }
 
+    /// A batch every photo of which this library cannot write (PRD P0-09, P0-08).
+    private static func refusedBatch(
+        _ items: [BatchMarkItem],
+        change: MarkChange,
+        reason: MarkWriteFailureReason,
+        message: String
+    ) -> MarkBatchResult {
+        MarkBatchResult(
+            id: MarkBatchID(), change: change,
+            outcomes: items.map { item in
+                refused(item.change, for: item.photo, reason: reason, message: message)
+            })
+    }
+
     /// The reason a saved folder that no longer has a record gives (PRD P0-02).
     private static let missingLocation = FolderAccessFailure.locationUnavailable(
         FolderErrorChain(CocoaError(.fileNoSuchFile)))
+
+    /// One bar action as this session admitted it (PRD P0-09).
+    private struct AppliedBatch {
+        /// The change the action asked for, named on the retry's results (PRD P0-09).
+        let change: MarkChange
+
+        /// The C4 batches the action admitted, one per distinct per-photo change.
+        let queueBatches: [MarkBatchID]
+
+        /// The photos the folder no longer held, which a retry reports as failed again
+        /// (PRD P0-08).
+        let unavailable: [BatchMarkItem]
+    }
 
     deinit {
         // A dropped library must not leave its scan running or its consumer attached; C11's
