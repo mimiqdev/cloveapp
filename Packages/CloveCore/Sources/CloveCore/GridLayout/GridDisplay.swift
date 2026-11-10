@@ -73,7 +73,7 @@ extension GridDisplay {
                 id: .photo(photo.id),
                 photo: photo,
                 group: GridCellItem.GroupMark(
-                    group: group.id, count: group.members.count, showsCount: showsCount,
+                    id: group.id, count: group.members.count, showsCount: showsCount,
                     isCover: false))
         }
     }
@@ -98,7 +98,7 @@ extension GridDisplay {
                     id: .group(group.id),
                     photo: photo,
                     group: GridCellItem.GroupMark(
-                        group: group.id, count: group.members.count, showsCount: true,
+                        id: group.id, count: group.members.count, showsCount: true,
                         isCover: true)))
         }
         return cells

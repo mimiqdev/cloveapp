@@ -47,7 +47,7 @@ extension GridCellItem {
     /// carries the count instead. Both readings come from PRD Grid's similar-group display entry.
     public struct GroupMark: Hashable, Sendable {
         /// The group's stable key; opening the group view uses it (PRD P0-11).
-        public let group: GroupID
+        public let id: GroupID
 
         /// The group's member count as grouping published it (PRD Grid).
         ///
@@ -63,8 +63,8 @@ extension GridCellItem {
         public let isCover: Bool
 
         /// Describes one cell's part in a group.
-        public init(group: GroupID, count: Int, showsCount: Bool, isCover: Bool) {
-            self.group = group
+        public init(id: GroupID, count: Int, showsCount: Bool, isCover: Bool) {
+            self.id = id
             self.count = count
             self.showsCount = showsCount
             self.isCover = isCover

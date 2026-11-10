@@ -17,7 +17,7 @@ struct GridDisplayTests {
         #expect(display.cells.map(\.id) == photos(0...3).map { .photo($0.id) })
 
         let first = try #require(display.cells[0].group)
-        #expect(first.group == burst.id)
+        #expect(first.id == burst.id)
         #expect(first.count == 2)
         #expect(first.showsCount)
         #expect(!first.isCover)
@@ -46,9 +46,10 @@ struct GridDisplayTests {
         let second = group("burst-two", photos(3...3))
         let display = GridDisplay(
             photos: photos(0...3), groups: [first, second], display: .collapsed)
-        #expect(display.cells.map(\.id) == [
-            .group(first.id), .photo(photos(2...2)[0].id), .group(second.id),
-        ])
+        #expect(
+            display.cells.map(\.id) == [
+                .group(first.id), .photo(photos(2...2)[0].id), .group(second.id),
+            ])
         let cover = try #require(display.cells.first?.group)
         #expect(cover.isCover)
         #expect(cover.showsCount)
@@ -93,9 +94,9 @@ struct GridDisplayTests {
         let second = group("burst-two", photos(1...2))
         let cells = GridDisplay(photos: photos(0...2), groups: [first, second]).cells
         let named = try #require(cells[1].group)
-        #expect(named.group == first.id)
+        #expect(named.id == first.id)
         let secondNamed = try #require(cells[2].group)
-        #expect(secondNamed.group == second.id)
+        #expect(secondNamed.id == second.id)
     }
 }
 
