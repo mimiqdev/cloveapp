@@ -45,6 +45,9 @@ final class TestLibrary: FolderLibrary {
     /// path as the real library (PRD P0-08, P0-13).
     let updates: AsyncStream<FolderLibraryUpdate>
 
+    /// The generated tiles this library's grid draws (PRD P0-03).
+    let thumbnails: any GridThumbnailSource
+
     private let updateContinuation: AsyncStream<FolderLibraryUpdate>.Continuation
     private var stored: [GridPhoto]
     private var changes: [PhotoIdentity: MarkChangeStatus]
@@ -58,6 +61,7 @@ final class TestLibrary: FolderLibrary {
         stored = []
         groups = []
         changes = [:]
+        thumbnails = SampleGridThumbnails()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
     }
 
@@ -73,6 +77,7 @@ final class TestLibrary: FolderLibrary {
         var byPhoto: [PhotoIdentity: MarkChangeStatus] = [:]
         for change in changes { byPhoto[change.identity] = change }
         self.changes = byPhoto
+        thumbnails = TestLibrary.sampleThumbnails
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
     }
 

@@ -92,6 +92,13 @@ final class BrowsingModel {
     /// Whether the open folder holds photos to browse (PRD P0-01).
     var hasFolderContents: Bool { !storedPhotos.isEmpty }
 
+    /// The grid's thumbnail source for the open folder (PRD P0-03).
+    ///
+    /// It comes from the library, so the grid draws a real folder's previews through C11's
+    /// session and picks up a new source when another folder opens, without reaching into the
+    /// library itself.
+    var thumbnails: any GridThumbnailSource { library.thumbnails }
+
     /// Whether entry can return to a folder without the picker (PRD P0-01).
     ///
     /// A folder that is open stays open while entry is on screen, and the test library starts

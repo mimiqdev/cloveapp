@@ -74,6 +74,12 @@ final class FolderLibrarySession: FolderLibrary {
     /// The walk behind ``scanTask``, so ending the folder stops its enumeration.
     private var openScan: FolderScan?
 
+    /// The folder's thumbnail pipeline, closed before its scope is released (PRD P0-03).
+    private var thumbnailPipeline: ThumbnailPipeline?
+
+    /// The grid's source for the open folder, bound to that folder's session and pipeline.
+    private var thumbnailSource: (any GridThumbnailSource)?
+
     /// The task keeping this library's save states in step with C4 (PRD P0-08).
     private var writeStatusTask: Task<Void, Never>?
 
@@ -116,6 +122,15 @@ final class FolderLibrarySession: FolderLibrary {
     /// Grouping's groups for the folder. The grouping follow-up publishes them through
     /// ``FolderLibraryUpdate/groups(_:)``; U2 runs no grouping (PRD P0-11).
     var groups: [BrowsingGroup] { [] }
+
+    /// The grid's source for the open folder's previews and companion badges (PRD P0-03).
+    ///
+    /// It is bound to the folder that was open when it was made, so a request for an earlier
+    /// folder's photo answers unavailable instead of decoding under another folder's scope.
+    var thumbnails: any GridThumbnailSource { thumbnailSource ?? Self.emptyThumbnails }
+
+    /// The source a grid reads while no folder is open: no tiles and no companions.
+    private static let emptyThumbnails = SampleGridThumbnails()
 
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes.latest(for: photo) }
@@ -264,6 +279,7 @@ final class FolderLibrarySession: FolderLibrary {
         let storedMarks = (try? await stores.writes.storedMarks(for: session.folder.id)) ?? [:]
         let configuration = ScanConfiguration(
             rejectsFolderName: settings.rejectsFolderName.rawValue)
+        thumbnailSource = await makeThumbnailSource(for: session)
         let scan = FolderScan(
             folderURL: session.rootURL, folderID: session.folder.id,
             configuration: configuration)
@@ -285,6 +301,13 @@ final class FolderLibrarySession: FolderLibrary {
         openScan = nil
         scanTask?.cancel()
         scanTask = nil
+        thumbnailSource = nil
+        if let pipeline = thumbnailPipeline {
+            thumbnailPipeline = nil
+            // I1's close cancels queued work and waits for a decode in flight, so the scope is
+            // never released under one (G1 preview and folder-access rows).
+            await pipeline.close()
+        }
         if case .success(let stores) = await resolvedStores() {
             await stores.writes.drain()
         }
@@ -464,6 +487,66 @@ final class FolderLibrarySession: FolderLibrary {
                 persistence: set.photoSet.markPersistence)
         }
         return marks
+    }
+
+    // MARK: - Thumbnails
+
+    /// Builds the open folder's grid source over a pipeline bound to its session (PRD P0-03).
+    ///
+    /// The pipeline's cache lives in the app's Caches directory, and its requests are admitted
+    /// through the folder's C11 session, so ending the folder drains a decode before releasing
+    /// the scope (G1 preview and folder-access rows). A cache that cannot be created leaves the
+    /// grid without previews rather than failing the open.
+    private func makeThumbnailSource(for session: FolderAccessSession)
+        async -> (any GridThumbnailSource)?
+    {
+        guard let pipeline = await Self.makeThumbnailPipeline() else { return nil }
+        thumbnailPipeline = pipeline
+        let folder = session.folder.id
+        return PipelineGridThumbnails(
+            pipeline: pipeline,
+            set: { [weak self] photo in self?.store.scannedSet(for: photo)?.photoSet },
+            admitted: { [weak self] work in
+                guard let self else { return .unavailable }
+                return await self.admittedThumbnail(work, session: session, folder: folder)
+            })
+    }
+
+    /// Runs one grid request inside the session that holds the folder's scope.
+    ///
+    /// A request that arrives after the folder ended, or for another folder's photo, answers
+    /// unavailable instead of decoding under a scope the folder no longer holds (G1 folder access).
+    private func admittedThumbnail(
+        _ work: @Sendable () async -> GridThumbnailOutcome,
+        session: FolderAccessSession,
+        folder: FolderIdentity
+    ) async -> GridThumbnailOutcome {
+        guard self.folder == folder else { return .unavailable }
+        do {
+            return try await session.withAdmittedWork { await work() }
+        } catch {
+            return .unavailable
+        }
+    }
+
+    /// Builds the grid pipeline over the app's Caches directory, off the main actor.
+    ///
+    /// Creating the cache makes its directory and reads what it already holds, so this runs in a
+    /// detached task; the folder waits for it while opening, and nothing touches the disk during
+    /// the scene's first body evaluation.
+    private nonisolated static func makeThumbnailPipeline() async -> ThumbnailPipeline? {
+        await Task.detached(priority: .userInitiated) {
+            do {
+                let caches = try FileManager.default.url(
+                    for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let cache = try ThumbnailCache(
+                    directory: caches.appendingPathComponent(
+                        "Clove/GridThumbnails", isDirectory: true))
+                return ThumbnailPipeline(cache: cache)
+            } catch {
+                return nil
+            }
+        }.value
     }
 
     // MARK: - Writes

@@ -52,6 +52,14 @@ protocol FolderLibrary: AnyObject {
     /// The groups grouping published for the folder, empty when grouping is off (PRD P0-11).
     var groups: [BrowsingGroup] { get }
 
+    /// The grid's window on the folder's files: preview pixels and companion badges by identity
+    /// (PRD P0-03, G1 preview row).
+    ///
+    /// The grid reads this source, never the folder library, the scan or a file path. The real
+    /// library answers with a source bound to the open folder's pipeline and C11 session; the
+    /// test library answers with its generated tiles. A library that supplies none draws no tiles.
+    var thumbnails: any GridThumbnailSource { get }
+
     /// The one stream of updates this library publishes while it is open (PRD P0-03, P0-08).
     ///
     /// It carries the scan's batches, the metadata reads that finish each photo's time, the mark
@@ -131,6 +139,8 @@ extension FolderLibrary {
     var updates: AsyncStream<FolderLibraryUpdate> {
         AsyncStream { $0.finish() }
     }
+
+    var thumbnails: any GridThumbnailSource { SampleGridThumbnails() }
 
     var recents: [RecentFolder] { [] }
 
