@@ -104,7 +104,10 @@ final class CloveUITests: XCTestCase {
         )
         openTestLibrary(in: app)
 
-        XCTAssertTrue(app.staticTexts["The drive disconnected."].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "label == %@", "The drive disconnected.")
+            ).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Reconnect it, then reopen this folder."].exists)
         XCTAssertEqual(element(in: app, "clove.grid.saveState.subtitle").label, "Not connected")
         XCTAssertTrue(
@@ -218,7 +221,9 @@ final class CloveUITests: XCTestCase {
         XCTAssertEqual(title.label, "Some marks haven't finished saving.")
         // Wait drains the existing queue and rechecks. A failed change remains unfinished.
         app.alerts.buttons["Wait"].tap()
-        XCTAssertTrue(title.waitForExistence(timeout: 10), "Wait lost the unfinished question")
+        XCTAssertTrue(
+            app.alerts.buttons["Leave anyway"].waitForExistence(timeout: 10),
+            "Wait lost the leaving action")
         app.alerts.buttons["Leave anyway"].tap()
 
         XCTAssertTrue(
@@ -469,13 +474,18 @@ final class CloveUITests: XCTestCase {
     @MainActor
     private func checkEntryAndSettings(in app: XCUIApplication) {
         XCTAssertTrue(element(in: app, "clove.entry.openFolder").exists)
-        XCTAssertTrue(app.staticTexts["Done"].exists)
-        XCTAssertTrue(app.staticTexts["Reconnect"].exists)
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "96, Done")).firstMatch
+                .exists)
+        XCTAssertTrue(
+            app.buttons.matching(
+                NSPredicate(format: "label CONTAINS %@", "Drive not connected, Reconnect")
+            ).firstMatch.exists)
         attachScreenshot(named: "entry-resume")
         element(in: app, "clove.nav.settings").tap()
-        XCTAssertTrue(app.staticTexts["Appearance"].exists)
-        XCTAssertTrue(app.staticTexts["Culling"].exists)
-        XCTAssertTrue(app.staticTexts["Move rejects"].exists)
+        XCTAssertTrue(element(in: app, "clove.settings.section.appearance").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.section.culling").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.section.move").exists)
         attachScreenshot(named: "settings-sections")
         back(in: app)
     }

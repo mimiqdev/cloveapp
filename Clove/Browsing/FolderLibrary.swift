@@ -267,6 +267,9 @@ protocol FolderLibrary: AnyObject {
     /// nothing had ever opened, so entry reports this next to the Recents list.
     var recentsFailure: FolderAccessFailure? { get }
 
+    /// Updates the resume identity without doing I/O (handoff Entry).
+    func setEntryResumePhoto(_ photo: PhotoIdentity)
+
     /// Remembers the last viewed photo with confirmed progress (handoff Entry).
     func recordEntryProgress(lastViewed: PhotoIdentity?) async
 
@@ -316,6 +319,8 @@ extension FolderLibrary {
     var recents: [RecentFolder] { [] }
 
     var recentsFailure: FolderAccessFailure? { nil }
+
+    func setEntryResumePhoto(_ photo: PhotoIdentity) {}
 
     func recordEntryProgress(lastViewed: PhotoIdentity?) async {}
 

@@ -53,23 +53,27 @@ struct SettingsScreen: View {
     private var appearanceSection: some View {
         Section {
             Toggle("Match system light/dark", isOn: binding(\.appearance.matchesSystemAppearance))
+                .tint(theme.tokens.saved.color)
                 .accessibilityIdentifier("clove.settings.appearance.matchSystem")
             ThemePicker(selection: theme) { tile in
                 store.update { $0.appearance = $0.appearance.choosing(tile) }
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
         } header: {
-            Text("Appearance")
+            Text("Appearance").font(.caption).foregroundStyle(Color.clove.text.secondary)
+                .accessibilityIdentifier("clove.settings.section.appearance")
         } footer: {
             Text("Photos are never tinted. Only the app around them changes.")
+                .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
     }
 
     /// Culling controls in the main list (handoff Settings).
     private var cullingSection: some View {
-        Section("Culling") {
+        Section {
             Toggle("Similar groups", isOn: binding(\.similarGroupsEnabled))
+                .tint(theme.tokens.saved.color)
                 .accessibilityIdentifier("clove.settings.similarGroupsEnabled")
             Toggle(
                 "Auto-advance after marking",
@@ -79,6 +83,7 @@ struct SettingsScreen: View {
                         store.update { $0.autoAdvance.destination = enabled ? .nextPhoto : .stay }
                     })
             )
+            .tint(theme.tokens.saved.color)
             .accessibilityIdentifier("clove.settings.autoAdvanceEnabled")
             NavigationLink {
                 List {
@@ -88,6 +93,7 @@ struct SettingsScreen: View {
                     zoomSection
                     colourLabelsSection
                     similarGroupsSection
+                    saveFailureSection
                     resetSection
                 }
                 .navigationTitle("Culling")
@@ -98,6 +104,9 @@ struct SettingsScreen: View {
                     "Rating scale", value: "\(store.settings.enabledRatings.count) stars")
             }
             .accessibilityIdentifier("clove.settings.ratingScale")
+        } header: {
+            Text("Culling").font(.caption).foregroundStyle(Color.clove.text.secondary)
+                .accessibilityIdentifier("clove.settings.section.culling")
         }
         .listRowBackground(theme.tokens.card.color)
     }
@@ -193,6 +202,7 @@ struct SettingsScreen: View {
     private var moveRejectsSection: some View {
         Section {
             Toggle("Move Rejects", isOn: binding(\.moveRejectsEnabled))
+                .tint(theme.tokens.saved.color)
                 .accessibilityIdentifier("clove.settings.moveRejectsEnabled")
             NavigationLink {
                 Form {
@@ -208,15 +218,18 @@ struct SettingsScreen: View {
                             .foregroundStyle(Color.clove.status.failed)
                             .accessibilityIdentifier("clove.settings.rejectsFolderNameProblem")
                     }
+                    saveFailureSection
                 }
                 .navigationTitle("Folder name")
             } label: {
                 LabeledContent("Folder name", value: store.settings.rejectsFolderName.rawValue)
             }
         } header: {
-            Text("Move rejects")
+            Text("Move rejects").font(.caption).foregroundStyle(Color.clove.text.secondary)
+                .accessibilityIdentifier("clove.settings.section.move")
         } footer: {
             Text("Rejected photos are moved, never deleted.")
+                .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
     }

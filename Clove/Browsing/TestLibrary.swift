@@ -163,6 +163,7 @@ final class TestLibrary: FolderLibrary {
 
     func reopen(_ recent: RecentFolder) async -> FolderAccessFailure? {
         guard recent.identity == folder else { return .unknownRecent(recent.id) }
+        for change in changes.values { updateContinuation.yield(.change(change)) }
         if let sampleLocationLoss { reportLocationLoss(sampleLocationLoss) }
         return nil
     }

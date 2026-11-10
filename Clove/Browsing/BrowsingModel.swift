@@ -209,8 +209,7 @@ final class BrowsingModel {
 
     /// Remembers the open folder's confirmed progress and current photo (handoff Entry).
     func recordEntryProgress() async {
-        await library.recordEntryProgress(
-            lastViewed: state.groupPosition?.photo ?? state.currentPhoto)
+        await library.recordEntryProgress(lastViewed: state.currentPhoto)
         await reloadRecents()
     }
 
@@ -310,6 +309,7 @@ final class BrowsingModel {
     /// Shows one photo's detail (PRD Detail and marking).
     func openPhoto(_ photo: PhotoIdentity) {
         state.currentPhoto = photo
+        library.setEntryResumePhoto(photo)
         state.route = .detail
     }
 
@@ -317,6 +317,8 @@ final class BrowsingModel {
     func openGroup(_ group: BrowsingGroup) {
         guard let first = group.members.first else { return }
         state.groupPosition = BrowsingGroupPosition(group: group.id, photo: first)
+        state.currentPhoto = first
+        library.setEntryResumePhoto(first)
         state.route = .group
     }
 
@@ -341,6 +343,8 @@ final class BrowsingModel {
     func showGroupPhoto(_ photo: PhotoIdentity) {
         guard let position = state.groupPosition else { return }
         state.groupPosition = BrowsingGroupPosition(group: position.group, photo: photo)
+        state.currentPhoto = photo
+        library.setEntryResumePhoto(photo)
     }
 
     // MARK: - In-group culling
@@ -975,9 +979,9 @@ final class BrowsingModel {
         // The screen leaves the folder before anything that waits for its writes, so no
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
-        await library.recordEntryProgress(
-            lastViewed: state.groupPosition?.photo ?? state.currentPhoto)
+        let lastViewed = state.currentPhoto
         showEntryAfterLeaving()
+        await library.recordEntryProgress(lastViewed: lastViewed)
         // Leaving closes the folder even when the next destination never opens, so its scan stops
         // and its scope is not held for a folder the user no longer sees (G1 folder access).
         await library.closeFolder()

@@ -8,6 +8,32 @@ struct EntryScreen: View {
     @State private var isPickingFolder = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Clove").font(.title.bold())
+                Spacer()
+                GlassIconButton(
+                    label: "Settings", symbol: "gearshape", identifier: "clove.nav.settings"
+                ) {
+                    browsing.showSettings()
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            entryContent
+        }
+        .background(Color.clove.bg.canvas)
+        .foregroundStyle(Color.clove.text.primary)
+        .toolbar(.hidden, for: .navigationBar)
+        .folderPicker(isPresented: $isPickingFolder) { url in
+            await browsing.openPickedFolder(url)
+        }
+        .task { await browsing.reloadRecents() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clove.entry")
+    }
+
+    @ViewBuilder private var entryContent: some View {
         Group {
             if let hero = browsing.recents.first {
                 ScrollView {
@@ -56,16 +82,6 @@ struct EntryScreen: View {
                 .accessibilityIdentifier("clove.entry.noRecents")
             }
         }
-        .background(Color.clove.bg.canvas)
-        .foregroundStyle(Color.clove.text.primary)
-        .navigationTitle("Clove")
-        .navigationBarTitleDisplayMode(.large)
-        .folderPicker(isPresented: $isPickingFolder) { url in
-            await browsing.openPickedFolder(url)
-        }
-        .task { await browsing.reloadRecents() }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.entry")
     }
 
     private func needsReconnect(_ recent: RecentFolder) -> Bool {
