@@ -73,6 +73,7 @@ final class BrowsingModel {
         self.groups = library.groups
         self.recents = library.recents
         self.thumbnails = library.thumbnails
+        self.detailImages = library.detailImages
         self.recentFailures = [:]
         self.storedPhotos = library.photos
         refresh()
@@ -101,6 +102,13 @@ final class BrowsingModel {
     /// the grid draws a real folder's previews through C11's session without reaching into the
     /// library itself.
     private(set) var thumbnails: any GridThumbnailSource
+
+    /// The detail view's source for the open folder (PRD P0-04).
+    ///
+    /// It is kept beside ``thumbnails`` for the same reason: the source is bound to one folder's
+    /// I2 pipeline and C11 session, so detail must read the source that belongs to the folder
+    /// that is open now, never a pipeline whose folder ended.
+    private(set) var detailImages: any DetailImageSource
 
     /// Whether entry can return to a folder without the picker (PRD P0-01).
     ///
@@ -435,6 +443,7 @@ final class BrowsingModel {
                 resolvePendingRestore(scanFinished: false)
             } else {
                 thumbnails = library.thumbnails
+                detailImages = library.detailImages
                 state = saved.restored(from: .available(library.contents)).state
             }
         case nil:
@@ -498,8 +507,9 @@ final class BrowsingModel {
         batchReport = nil
         selectionClearances += 1
         // The library replaced its pipeline with the folder's, so the grid takes the new source
-        // even when the route does not change.
+        // even when the route does not change. Detail takes the source bound to the same folder.
         thumbnails = library.thumbnails
+        detailImages = library.detailImages
     }
 
     /// Takes the library's current photos, groups and save states.

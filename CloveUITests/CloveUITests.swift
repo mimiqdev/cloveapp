@@ -23,7 +23,9 @@ final class CloveUITests: XCTestCase {
         checkGridOverlays(in: app)
         showOnlyRejectedThenAll(in: app)
         openFirstPhoto(in: app)
+        checkDoubleTapZoom(in: app)
         markThePhoto(in: app)
+        advanceByEdgeTap(in: app)
         returnToGrid(in: app)
         openGroup(in: app)
         openSettings(in: app)
@@ -91,6 +93,20 @@ final class CloveUITests: XCTestCase {
         )
     }
 
+    /// Waits for an element's value with a tight poll, so an informational measurement is not
+    /// dominated by XCTest's one-second predicate polling. The wait is bounded by `timeout`.
+    @MainActor
+    private func waitForValue(
+        _ value: String, of element: XCUIElement, timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.value as? String == value { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return element.value as? String == value
+    }
+
     /// Taps a menu control, then its item (PRD P0-03).
     @MainActor
     private func selectMenuItem(
@@ -105,15 +121,27 @@ final class CloveUITests: XCTestCase {
         choice.tap()
     }
 
-    /// The grid opens the first photo's detail, which shows its file name and saved marks.
+    /// The grid opens the first photo's detail, which shows its preview, file name and marks.
     ///
     /// Identifiers carry the photo's identity stem, which is folded to lower case, so the first
-    /// sample photo is `mmq02678`.
+    /// sample photo is `mmq02678`. The time from the tap to the preview's loaded state is
+    /// informational only (G1's first detail preview target), never an assertion.
     @MainActor
     private func openFirstPhoto(in app: XCUIApplication) {
         let first = element(in: app, "clove.grid.photo.mmq02678")
         XCTAssertTrue(first.waitForExistence(timeout: 10), "The grid did not show the first photo")
+        let started = Date()
         first.tap()
+
+        let preview = element(in: app, "clove.detail.preview")
+        XCTAssertTrue(
+            waitForValue("Loaded", of: preview, timeout: 10),
+            "The detail preview did not load")
+        let milliseconds = Date().timeIntervalSince(started) * 1000
+        print("DETAIL_FIRST_PREVIEW_MS=\(Int(milliseconds.rounded()))")
+        XCTContext.runActivity(
+            named: "Detail open to first preview: \(Int(milliseconds.rounded())) ms"
+        ) { _ in }
 
         let fileName = element(in: app, "clove.detail.fileName")
         XCTAssertTrue(
@@ -126,6 +154,24 @@ final class CloveUITests: XCTestCase {
             marks.label.contains("5 stars"),
             "The detail view did not show the saved rating: \(marks.label)"
         )
+    }
+
+    /// A double tap in the middle goes to 100% and another returns to fit (PRD P0-04).
+    @MainActor
+    private func checkDoubleTapZoom(in app: XCUIApplication) {
+        let preview = element(in: app, "clove.detail.preview")
+        let zoom = element(in: app, "clove.detail.zoom")
+        XCTAssertTrue(zoom.waitForExistence(timeout: 10), "The detail view had no zoom state")
+        XCTAssertEqual(zoom.label, "Fit", "The detail view did not open at fit")
+
+        preview.doubleTap()
+        let full = expectation(
+            for: NSPredicate(format: "label == %@", "100%"), evaluatedWith: zoom)
+        wait(for: [full], timeout: 10)
+
+        preview.doubleTap()
+        let fit = expectation(for: NSPredicate(format: "label == %@", "Fit"), evaluatedWith: zoom)
+        wait(for: [fit], timeout: 10)
     }
 
     /// A rating applied in detail writes through the seam and the detail shows the confirmed save
@@ -149,6 +195,21 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(
             marks.label.contains("4 stars"),
             "The detail view did not show the new rating: \(marks.label)")
+    }
+
+    /// The right edge is a single-tap navigation zone, and it shows the next photo at once
+    /// (PRD P0-04: edge taps navigate without waiting for a double tap).
+    @MainActor
+    private func advanceByEdgeTap(in app: XCUIApplication) {
+        let preview = element(in: app, "clove.detail.preview")
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The detail view had no preview")
+        // The outer 18% on each side navigates; 94% is inside the right zone on any width.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+
+        let fileName = element(in: app, "clove.detail.fileName")
+        let next = expectation(
+            for: NSPredicate(format: "label == %@", "MMQ02679.ARW"), evaluatedWith: fileName)
+        wait(for: [next], timeout: 10)
     }
 
     /// Back returns from detail to the grid, and the grid shows the saved rating the update path

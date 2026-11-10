@@ -47,6 +47,16 @@ final class TestLibrary: FolderLibrary {
         SampleGridThumbnails(companions: sampleCompanions, unavailable: [unreadablePhoto])
     }
 
+    /// The sample photo whose detail answers with its preview only, so the screen has a
+    /// "preview only" note to show (PRD P0-04, G1 detail row).
+    static let previewOnlyPhoto = samplePhoto(2706)
+
+    /// The generated detail images the sample shows: the unreadable file answers unavailable and
+    /// one photo cannot go past its preview (PRD P0-04, PRD Scan scope).
+    static var sampleDetailImages: any DetailImageSource {
+        SampleDetailImages(unavailable: [unreadablePhoto], previewOnly: [previewOnlyPhoto])
+    }
+
     let folder: FolderIdentity
     let groups: [BrowsingGroup]
 
@@ -56,6 +66,9 @@ final class TestLibrary: FolderLibrary {
 
     /// The generated tiles this library's grid draws (PRD P0-03).
     let thumbnails: any GridThumbnailSource
+
+    /// The generated detail images this library's detail view draws (PRD P0-04).
+    let detailImages: any DetailImageSource
 
     private let updateContinuation: AsyncStream<FolderLibraryUpdate>.Continuation
     private var stored: [GridPhoto]
@@ -82,6 +95,7 @@ final class TestLibrary: FolderLibrary {
         changes = [:]
         failingStemSuffix = nil
         thumbnails = SampleGridThumbnails()
+        detailImages = EmptyDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
     }
 
@@ -90,7 +104,8 @@ final class TestLibrary: FolderLibrary {
         photos: [GridPhoto],
         groups: [BrowsingGroup],
         changes: [MarkChangeStatus] = [],
-        failingStemSuffix: String? = nil
+        failingStemSuffix: String? = nil,
+        detailImages: (any DetailImageSource)? = nil
     ) {
         folder = TestLibrary.sampleFolderKey
         stored = photos
@@ -100,6 +115,7 @@ final class TestLibrary: FolderLibrary {
         self.changes = byPhoto
         self.failingStemSuffix = failingStemSuffix
         thumbnails = TestLibrary.sampleThumbnails
+        self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
     }
 
@@ -230,7 +246,7 @@ final class TestLibrary: FolderLibrary {
         }
         return TestLibrary(
             photos: photos, groups: sampleGroups, changes: sampleChanges,
-            failingStemSuffix: failingStemSuffix)
+            failingStemSuffix: failingStemSuffix, detailImages: sampleDetailImages)
     }
 
     /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).
