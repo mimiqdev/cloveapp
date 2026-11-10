@@ -20,7 +20,7 @@ struct SettingsScreen: View {
     /// typed without being saved; only a name ``RejectsFolderName`` accepts reaches the store.
     @State private var rejectsFolderNameDraft = ""
 
-    /// The one star rating whose toggle may not be turned off (PRD Enabled rating levels).
+    /// The rating levels the Gestures section offers, in order (PRD Enabled rating levels).
     private static let ratingLevels = (1...5).compactMap { Rating(rawValue: $0) }
 
     var body: some View {
