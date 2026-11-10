@@ -2,6 +2,16 @@ import CloveCore
 import SwiftUI
 import UIKit
 
+/// The scale above fit at which the preview counts as zoomed (PRD Detail gestures, PRD P0-04).
+///
+/// A pinch that comes back to fit can settle a hair above the minimum scale, and the marking
+/// gesture, the zoom name and the double-tap action all have to agree on where "fit" ends; one
+/// tolerance keeps them from drifting apart.
+enum DetailFitScale {
+    /// How far above the fit scale a view may sit and still count as fit.
+    static let tolerance: CGFloat = 1.005
+}
+
 /// One zoom the screen asks the preview to show (PRD P0-04).
 ///
 /// The screen computes the scale and the image point from ``DetailZoom``'s geometry; the view
@@ -25,8 +35,22 @@ struct DetailZoomCommand: Equatable {
     }
 }
 
+/// What one marking swipe ended with, for the screen to resolve through C13's rules
+/// (PRD Rating by swipe distance, PRD Detail gestures).
+///
+/// Only a swipe that began at fit reports an end, so the screen resolves it as an unzoomed
+/// release; a system cancel reports nothing and writes nothing.
+enum DetailMarkingSwipeEnd: Equatable {
+    /// A swipe up released at this travel, in points with up positive.
+    case rating(travel: Double)
+
+    /// A swipe down released at this travel, in points with up positive, so down is negative.
+    case reject(travel: Double)
+}
+
 /// The detail preview: a scroll view with pinch zoom, pan, one centre double-tap and single
-/// taps on the two edges (PRD P0-04, PRD Gestures and keyboard).
+/// taps on the two edges (PRD P0-04, PRD Gestures and keyboard), plus the vertical marking
+/// swipes that rate and reject (PRD P0-06, PRD Detail gestures).
 ///
 /// The scroll view is the system zoom container the plan names: pinch and one-finger pan are its
 /// own, the image is drawn aspect-fit in it, and the minimum scale of 1 is the fit view. The
@@ -39,8 +63,15 @@ struct DetailZoomCommand: Equatable {
 /// and the document states that width in ``DetailEdgeZone/edgeFraction``. Double taps while
 /// zoomed are reported to the screen, which decides between 100% and fit.
 ///
+/// The marking pan is the container's own one-finger pan, not the scroll view's, so it can begin
+/// while the image is at fit without touching the scroll view's zoom. It asks
+/// ``MarkingSwipeRules`` once, in `gestureRecognizerShouldBegin`, whether the drag is a marking
+/// swipe: a horizontal drag, a zoomed view and marking gestures off all leave it unstarted, so
+/// nothing else on the preview loses a touch to it. The taps never need that help, because a pan
+/// only begins after the finger moves.
+///
 /// Design placeholder: the dark canvas and the plain image are replaced by the visual design;
-/// the gestures themselves are the ones P0-04 fixes.
+/// the gestures themselves are the ones P0-04 and P0-06 fix.
 struct DetailZoomView: UIViewRepresentable {
     /// The pixels to show, or nil while the screen is loading or has nothing to show.
     let image: CGImage?
@@ -51,6 +82,14 @@ struct DetailZoomView: UIViewRepresentable {
     /// Whether the centre double-tap does anything (C12's `doubleTap` setting).
     let doubleTapZoomEnabled: Bool
 
+    /// C13's rules for the current settings: the drag that begins a marking swipe, the two
+    /// session ladders that measure it, and the gesture switches it reads (PRD Detail gestures,
+    /// PRD Rating by swipe distance, PRD Gesture-related settings).
+    let rules: MarkingInputRules
+
+    /// The live rating or Reject badge the swipe shows near the finger (PRD P0-06).
+    let feedback: DetailSwipeFeedback
+
     /// Reports every scale the scroll view shows, for the screen's pixel-demand decision.
     let onZoomChange: (CGFloat) -> Void
 
@@ -60,11 +99,21 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports a double tap in the centre area, with the tapped point in unit image coordinates.
     let onDoubleTap: (UnitPoint) -> Void
 
+    /// Reports one finished marking swipe, with its release travel (PRD Rating by swipe distance).
+    let onMarkingSwipe: (DetailMarkingSwipeEnd) -> Void
+
+    /// Reports that a marking swipe began, before any travel is measured (PRD Auto-advance).
+    let onMarkingSwipeBegin: () -> Void
+
     func makeUIView(context: Context) -> DetailZoomContainerView {
         let view = DetailZoomContainerView()
         view.onZoomChange = onZoomChange
         view.onEdgeTap = onEdgeTap
         view.onDoubleTap = onDoubleTap
+        view.onMarkingSwipe = onMarkingSwipe
+        view.onMarkingSwipeBegin = onMarkingSwipeBegin
+        view.feedback = feedback
+        view.rules = rules
         return view
     }
 
@@ -72,6 +121,10 @@ struct DetailZoomView: UIViewRepresentable {
         view.onZoomChange = onZoomChange
         view.onEdgeTap = onEdgeTap
         view.onDoubleTap = onDoubleTap
+        view.onMarkingSwipe = onMarkingSwipe
+        view.onMarkingSwipeBegin = onMarkingSwipeBegin
+        view.feedback = feedback
+        view.rules = rules
         view.setDoubleTapEnabled(doubleTapZoomEnabled)
         // The image goes in before the command, so a 100% command for new pixels uses the new
         // pixel size and a quality change never needs a second pass.
@@ -80,13 +133,28 @@ struct DetailZoomView: UIViewRepresentable {
     }
 }
 
-/// The scroll view and its one image view, plus the page's tap zones and the zoom application.
+/// The scroll view and its one image view, plus the page's tap zones, the marking pan and the
+/// zoom application.
 @MainActor
-final class DetailZoomContainerView: UIView, UIScrollViewDelegate {
+final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
     private let edgeTap = UITapGestureRecognizer()
     private let centreDoubleTap = UITapGestureRecognizer()
+    private let markingPan = UIPanGestureRecognizer()
+    private let haptics = MarkingSwipeHaptics()
+
+    /// The marking swipe the current drag began as, or nil when the drag is not one.
+    private var swipe: MarkingSwipe?
+
+    /// The live step ladder of an upward swipe (PRD Rating by swipe distance).
+    private var ratingSession: SwipeRatingSession?
+
+    /// The live threshold of a downward swipe (PRD Detail gestures).
+    private var rejectSession: RejectSwipeSession?
+
+    /// Whether the last sample was past the Reject threshold, so each crossing ticks once.
+    private var wasPastRejectThreshold = false
 
     /// The pixels on screen, so a command can clamp and a double tap can report an image point.
     private var shownPixels: CGSize = .zero
@@ -104,6 +172,17 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate {
     var onZoomChange: ((CGFloat) -> Void)?
     var onEdgeTap: ((DetailEdgeZone) -> Void)?
     var onDoubleTap: ((UnitPoint) -> Void)?
+    var onMarkingSwipe: ((DetailMarkingSwipeEnd) -> Void)?
+    var onMarkingSwipeBegin: (() -> Void)?
+
+    /// The live badge the swipe shows near the finger (PRD P0-06).
+    var feedback: DetailSwipeFeedback?
+
+    /// The rules for the current settings, which also say whether marking gestures are on
+    /// (PRD Detail gestures, PRD Gesture-related settings).
+    var rules = MarkingInputRules() {
+        didSet { updateGestureAvailability() }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -125,11 +204,20 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate {
         scrollView.addGestureRecognizer(edgeTap)
         scrollView.addGestureRecognizer(centreDoubleTap)
 
+        // The marking pan belongs to the container rather than the scroll view, so it is not one
+        // of the scroll view's own gestures. One finger only: a second finger is a pinch, which
+        // stays the scroll view's (PRD Detail gestures: pinch always zooms).
+        markingPan.maximumNumberOfTouches = 1
+        markingPan.delegate = self
+        markingPan.addTarget(self, action: #selector(handleMarkingPan))
+        addGestureRecognizer(markingPan)
+
         isAccessibilityElement = true
         accessibilityIdentifier = "clove.detail.preview"
         accessibilityLabel = "Detail preview"
         accessibilityTraits = .image
         accessibilityValue = "Loading"
+        updateGestureAvailability()
     }
 
     /// SwiftUI never decodes this view from a storyboard; the initializer exists because UIView
@@ -156,6 +244,18 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate {
         centreDoubleTap.isEnabled = isEnabled
     }
 
+    /// Switches the marking pan off while the view is zoomed, where a one-finger drag pans
+    /// instead of marking (PRD Detail gestures).
+    ///
+    /// The scroll view's own pan stays enabled throughout: at fit there is nothing to scroll, so
+    /// the two pans cannot compete, and simultaneous recognition below means neither cancels the
+    /// other. Turning the scroll view's pan off at fit would also cost U5's pinch, which needs it
+    /// for two-finger panning as it zooms.
+    private func updateGestureAvailability() {
+        let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
+        markingPan.isEnabled = rules.settings.gesturesEnabled && !isZoomed
+    }
+
     /// Applies one command exactly once (PRD P0-04).
     func apply(_ command: DetailZoomCommand) {
         guard lastCommand != command.id else { return }
@@ -169,6 +269,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate {
         case .scale(let scale, let anchor):
             zoom(to: scale, around: anchor)
         }
+        // A programmatic zoom is the same handoff as a pinch, whether or not the delegate fires.
+        updateGestureAvailability()
     }
 
     override func layoutSubviews() {
@@ -190,6 +292,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate {
             zoom(to: previousScale, around: .center)
         }
         isApplyingCommand = false
+        updateGestureAvailability()
     }
 
     // MARK: - UIScrollViewDelegate
@@ -197,8 +300,127 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate {
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        // The zoom level decides whether a one-finger drag pans or marks, so the split follows
+        // every pinch, including one the screen did not ask for (PRD Detail gestures).
+        updateGestureAvailability()
         guard !isApplyingCommand else { return }
         onZoomChange?(scrollView.zoomScale)
+    }
+
+    // MARK: - Marking swipe
+
+    /// Starts a marking swipe only for a drag the rules accept (PRD Detail gestures).
+    ///
+    /// This is the one place the direction is decided, so a more horizontal drag never becomes a
+    /// marking swipe; the drag's later samples only move the step. The rules read the settings
+    /// and the zoom state, so the recognizer keeps no rule of its own.
+    override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        guard recognizer === markingPan else { return true }
+        let translation = markingPan.translation(in: self)
+        swipe = rules.beginSwipe(
+            horizontalTravel: Double(translation.x),
+            verticalTravel: -Double(translation.y),
+            isZoomed: scrollView.zoomScale > DetailFitScale.tolerance)
+        return swipe != nil
+    }
+
+    /// Lets the marking pan and the scroll view's own pan read the same drag.
+    ///
+    /// Without this the two pans cancel each other, and which one wins is undefined. At fit the
+    /// scroll view has nothing to scroll, so the drag reaches the marking pan intact; while
+    /// zoomed the marking pan is off and the scroll view pans alone (PRD Detail gestures).
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === markingPan && other === scrollView.panGestureRecognizer
+    }
+
+    /// Feeds one sample of the drag to the session and shows the step it reached.
+    ///
+    /// UIKit counts down as positive and C13's sessions count up as positive, so the travel is
+    /// the negated translation; velocity is never read (PRD Rating by swipe distance).
+    @objc private func handleMarkingPan(_ pan: UIPanGestureRecognizer) {
+        let travel = -Double(pan.translation(in: self).y)
+        let location = pan.location(in: self)
+        switch pan.state {
+        case .began:
+            beginMarkingSwipe()
+        case .changed:
+            updateMarkingSwipe(travel: travel, at: location)
+        case .ended:
+            updateMarkingSwipe(travel: travel, at: location)
+            finishMarkingSwipe(travel: travel)
+        case .cancelled, .failed:
+            // A system cancel writes nothing and leaves the marks as they were (PRD P0-06).
+            clearMarkingSwipe()
+        default:
+            break
+        }
+    }
+
+    /// Starts the session for the direction the drag began as.
+    private func beginMarkingSwipe() {
+        // The screen drops a pending auto-advance before it can swap the photo out from under the
+        // finger and send this swipe's travel to a different photo (PRD Auto-advance). A drag that
+        // ends up writing nothing therefore also keeps the current photo, which is what the user
+        // still working on it expects.
+        onMarkingSwipeBegin?()
+        haptics.prepare()
+        feedback?.clear()
+        wasPastRejectThreshold = false
+        switch swipe {
+        case .rating:
+            ratingSession = rules.swipeRatingSession()
+            rejectSession = nil
+        case .reject:
+            rejectSession = rules.rejectSwipeSession()
+            ratingSession = nil
+        case nil:
+            break
+        }
+    }
+
+    /// Moves the live session and reports the step boundary and the badge it reached.
+    private func updateMarkingSwipe(travel: Double, at location: CGPoint) {
+        feedback?.location = location
+        switch swipe {
+        case .rating:
+            guard var session = ratingSession else { return }
+            for _ in session.update(travel: travel) { haptics.crossedStep() }
+            ratingSession = session
+            feedback?.rating = session.rating
+        case .reject:
+            guard var session = rejectSession else { return }
+            session.update(travel: travel)
+            rejectSession = session
+            let isPast = session.isPastThreshold
+            if isPast != wasPastRejectThreshold { haptics.crossedRejectThreshold() }
+            wasPastRejectThreshold = isPast
+            feedback?.isReject = isPast
+        case nil:
+            break
+        }
+    }
+
+    /// Reports the release and hides the badge; the screen decides what the release writes.
+    private func finishMarkingSwipe(travel: Double) {
+        let finished = swipe
+        clearMarkingSwipe()
+        switch finished {
+        case .rating: onMarkingSwipe?(.rating(travel: travel))
+        case .reject: onMarkingSwipe?(.reject(travel: travel))
+        case nil: break
+        }
+    }
+
+    /// Drops the session and the badge, which is what a cancel and a release both look like.
+    private func clearMarkingSwipe() {
+        swipe = nil
+        ratingSession = nil
+        rejectSession = nil
+        wasPastRejectThreshold = false
+        feedback?.clear()
     }
 
     // MARK: - Taps
