@@ -165,9 +165,13 @@ struct GroupScreen: View {
 
     /// The marks the group's rules read now, so a plan or a navigation step never uses a stale
     /// copy (PRD P0-12).
+    ///
+    /// A photo whose rating or label is still being written counts as marked, so a finishing
+    /// action planned within the write's time never rejects it
+    /// (``BrowsingModel/cullingMarks(for:)``).
     private var marks: [PhotoIdentity: PhotoMarks] {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
-        for photo in browsing.groupPhotos { marks[photo.id] = photo.marks }
+        for photo in browsing.groupPhotos { marks[photo.id] = browsing.cullingMarks(for: photo) }
         return marks
     }
 

@@ -44,20 +44,18 @@ extension GroupCompletionTracker {
         behaviour: GroupCompletionBehaviour,
         marks: [PhotoIdentity: PhotoMarks]
     ) -> GroupViewCompletion {
-        guard let index = groups.firstIndex(where: { $0.id == groupID }) else {
+        guard let group = groups.first(where: { $0.id == groupID }) else {
             // A group the folder no longer publishes has no place in the order, so nothing can
             // have completed it here.
             return .inProgress
         }
-        guard isComplete(groups[index].cullingGroup, marks: marks) else { return .inProgress }
+        guard isComplete(group.cullingGroup, marks: marks) else { return .inProgress }
         switch behaviour {
         case .stay:
             return .stay
         case .nextGroup:
-            let next = groups[(index + 1)...].first {
-                !isComplete($0.cullingGroup, marks: marks)
-            }
-            return next.map(GroupViewCompletion.nextGroup) ?? .grid
+            return nextIncompleteGroup(after: groupID, in: groups, marks: marks)
+                .map(GroupViewCompletion.nextGroup) ?? .grid
         }
     }
 }

@@ -9,9 +9,9 @@ extension GroupFinishingPlan {
     /// was built is kept instead of overwritten, and also a rating the plan did not have to change
     /// but a later delete did; a planned reject survives only while the photo is still unmarked,
     /// so a photo rated or labelled since the plan is never rejected (PRD In-group culling: "Neither
-    /// action ever rejects a photo that already has a rating or color label"). A library that
-    /// applies a plan without C4's write queue uses this instead of planning a second copy of the
-    /// rule.
+    /// action ever rejects a photo that already has a rating or color label"). The executor and a
+    /// library that applies a plan without C4's write queue both use this one rule instead of
+    /// keeping a copy each.
     public func changesAllowed(
         currentMarks: (PhotoIdentity) -> PhotoMarks
     ) -> [GroupFinishingChange] {

@@ -146,6 +146,27 @@ struct GroupFinishingAppliedTests {
         #expect(allowed.isEmpty)
     }
 
+    /// A rating or label that is still being written counts as marked, so a plan built while it
+    /// runs never rejects that photo (PRD P0-12; PRD How marks reach disk, rule 8).
+    @Test func requestedMarksProtectAPhotoFromThePlannedRejects() {
+        let plan = GroupFinishingPlan(
+            group: group, action: .keepThis, currentPhoto: kept, marks: marks,
+            enabledRatings: groupCullingTwoAndFour)
+        // The other unmarked photo's rating was requested a moment ago and is still being written;
+        // only the request has reached Clove so far.
+        let requested = MarkChange(rating: groupCullingRating(3))
+        let requestedMarks = groupCullingMarks([
+            (kept, PhotoMarks()),
+            (rejected, PhotoMarks().including(requested)),
+        ])
+
+        #expect(requestedMarks[rejected]?.isUnmarked == false)
+        let allowed = plan.changesAllowed { requestedMarks[$0] ?? marks[$0] ?? PhotoMarks() }
+
+        #expect(allowed.map(\.kind) == [.keep])
+        #expect(allowed.allSatisfy { $0.photo != rejected })
+    }
+
     /// A current photo the plan had nothing to change is still kept when it is rejected before the
     /// action runs (PRD In-group culling, finishing actions; PRD P0-12).
     @Test func aCurrentPhotoRejectedAfterPlanningIsStillKept() {

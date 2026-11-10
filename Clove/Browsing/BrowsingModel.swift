@@ -308,12 +308,16 @@ final class BrowsingModel {
     /// and let completion move the view before the last result's failures are known.
     func runGroupFinishing(_ plan: GroupFinishingPlan) async {
         guard !isRunningGroupFinishing else { return }
+        let folder = state.folder
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
         let result = await library.runGroupFinishing(plan)
+        isRunningGroupFinishing = false
+        // The action happened, but its result must not land in another folder's group view or
+        // make U8 undo a mark in a folder it does not belong to (PRD P0-14).
+        guard state.folder == folder else { return }
         lastGroupFinishing = result
         groupFinishingRuns += 1
-        isRunningGroupFinishing = false
     }
 
     /// Retries only the changes that still need it, through C4 (PRD P0-09).
@@ -322,12 +326,15 @@ final class BrowsingModel {
     /// never overlap the action it retries.
     func retryGroupFinishing() async {
         guard !isRunningGroupFinishing, let result = lastGroupFinishing else { return }
+        let folder = state.folder
         dismissedGroupFailure = nil
         isRunningGroupFinishing = true
         let retried = await library.retryGroupFinishing(result)
+        isRunningGroupFinishing = false
+        // A retry that returns after the folder changed belongs to the folder that is gone.
+        guard state.folder == folder else { return }
         lastGroupFinishing = retried
         groupFinishingRuns += 1
-        isRunningGroupFinishing = false
     }
 
     /// Hides the finishing action's failure without retrying it (PRD Failure and recovery).
@@ -411,6 +418,21 @@ final class BrowsingModel {
     /// (PRD P0-08). U7 reads the same status for its retry.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? {
         changes.latest(for: photo)
+    }
+
+    /// The marks in-group culling reads for one photo, including a requested change C4 has not
+    /// saved yet (PRD P0-12; PRD How marks reach disk, rule 8).
+    ///
+    /// A finishing action must never reject a photo whose rating or colour label the user has
+    /// already asked for, and auto-advance can bring the next photo onto the screen while the
+    /// previous photo's write is still running. C4 keeps a request's marks until a newer change
+    /// replaces them, so an unfinished change counts as marked here, exactly as it does in the
+    /// open folder's own re-check (``FolderLibrary/runGroupFinishing(_:)``).
+    func cullingMarks(for photo: GridPhoto) -> PhotoMarks {
+        guard let latest = latestChange(for: photo.id), latest.state.isUnfinished else {
+            return photo.marks
+        }
+        return photo.marks.including(latest.requested)
     }
 
     /// Applies one change to one photo through the library and shows its marks and save state
@@ -575,6 +597,11 @@ final class BrowsingModel {
         state.selection = []
         state.groupPosition = nil
         state.route = .grid
+        // The finishing action, its failure and its event count belong to the folder that is
+        // gone, so a new folder's group view never shows or advances on the old one (PRD P0-12).
+        lastGroupFinishing = nil
+        dismissedGroupFailure = nil
+        groupFinishingRuns = 0
         // The folder's groups are whatever grouping published for it, even when the scan
         // answered before this scene caught up (PRD P0-11).
         groups = library.groups

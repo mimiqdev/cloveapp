@@ -29,6 +29,28 @@ extension GroupPhotoNavigation {
     }
 }
 
+extension GroupCompletionTracker {
+    /// The next published group in grid order that is not complete, skipping completed ones
+    /// (PRD In-group culling, group completion; PRD P0-12).
+    ///
+    /// The completion definition and the search are C10's
+    /// (``GroupCompletionTracker/nextIncompleteGroup(after:in:marks:)``); this supplies the
+    /// groups the browsing screens hold and answers with the published group, so the group view
+    /// never keeps a second copy of the rule. Only the analysis marker differs: browsing does not
+    /// publish refinement progress, and no completion rule reads it.
+    public func nextIncompleteGroup(
+        after groupID: GroupID,
+        in groups: [BrowsingGroup],
+        marks: [PhotoIdentity: PhotoMarks]
+    ) -> BrowsingGroup? {
+        let published = SimilarGroups(groups: groups.map(\.cullingGroup), analysis: .timeOnly)
+        guard let next = nextIncompleteGroup(after: groupID, in: published, marks: marks) else {
+            return nil
+        }
+        return groups.first { $0.id == next.id }
+    }
+}
+
 extension GroupFinishingPlan {
     /// Plans one finishing action for one published group (PRD In-group culling; PRD P0-12).
     ///

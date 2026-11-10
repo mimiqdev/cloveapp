@@ -247,14 +247,16 @@ final class FolderLibrarySession: FolderLibrary {
     /// A folder that closed, or whose stored marks are unavailable, reports the refused changes
     /// instead of claiming they were saved (PRD P0-08).
     func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {
+        // The session is read before anything is awaited, so the action can only run inside the
+        // folder that was open when it started (G1 folder access).
+        guard let session = openSession else {
+            return finishingResult(plan, refused: "No folder is open.")
+        }
         switch await resolvedStores() {
         case .failure(let error):
             return finishingResult(
                 plan, refused: "Clove's stored marks are unavailable: \(error)")
         case .success(let stores):
-            guard let session = openSession else {
-                return finishingResult(plan, refused: "No folder is open.")
-            }
             let executor = GroupFinishingExecutor(
                 queue: stores.writes, completion: groupCompletionTracker)
             do {
@@ -262,8 +264,8 @@ final class FolderLibrarySession: FolderLibrary {
                     await executor.execute(
                         plan,
                         photoSet: { [weak self] photo in await self?.finishingSet(for: photo) },
-                        latestMarks: { [weak self] photo in
-                            await self?.finishingMarks(for: photo) ?? PhotoMarks()
+                        latestMarks: { [weak self, writes = stores.writes] photo in
+                            await self?.finishingMarks(for: photo, in: writes) ?? PhotoMarks()
                         })
                 }
             } catch {
@@ -279,15 +281,15 @@ final class FolderLibrarySession: FolderLibrary {
     /// that never reached the queue has none, so the plan runs again under the checks the executor
     /// always applies, which drops whatever no longer needs writing (``rerun(_:executor:)``).
     func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult {
-        guard case .success(let stores) = await resolvedStores(), let session = openSession else {
-            return result
-        }
+        guard let session = openSession else { return result }
+        guard case .success(let stores) = await resolvedStores() else { return result }
         let executor = GroupFinishingExecutor(
             queue: stores.writes, completion: groupCompletionTracker)
         do {
             return try await session.withAdmittedWork {
                 guard result.keptChangeID != nil || result.rejectedBatchID != nil else {
-                    return await self.rerun(result, executor: executor)
+                    return await self.rerun(
+                        result, executor: executor, writes: stores.writes)
                 }
                 return await executor.retryFailed(in: result)
             }
@@ -300,18 +302,17 @@ final class FolderLibrarySession: FolderLibrary {
     ///
     /// A handle-less result is one the folder refused before writing, so none of its changes is
     /// stored and running the plan again is the retry. The executor re-reads every photo's marks,
-    /// so a change that gained a rating or label meanwhile is dropped instead of written, and a
-    /// change the first attempt confirmed would be dropped for the same reason. C5's undo record
-    /// stays the one the action produced, because a retry writes the same requested changes
-    /// (PRD P0-12).
+    /// so a change that gained a rating or label meanwhile is dropped instead of written. The undo
+    /// record is built from the changes both runs actually confirmed, so a photo the retry skipped
+    /// cannot be undone back over a newer mark (PRD P0-12; DEV-PLAN C5).
     private func rerun(
-        _ result: GroupFinishingResult, executor: GroupFinishingExecutor
+        _ result: GroupFinishingResult, executor: GroupFinishingExecutor, writes: MarkWriteQueue
     ) async -> GroupFinishingResult {
         let rerun = await executor.execute(
             result.plan,
             photoSet: { [weak self] photo in await self?.finishingSet(for: photo) },
             latestMarks: { [weak self] photo in
-                await self?.finishingMarks(for: photo) ?? PhotoMarks()
+                await self?.finishingMarks(for: photo, in: writes) ?? PhotoMarks()
             })
         var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
         for outcome in result.outcomes where outcome.status.state.isConfirmed {
@@ -321,7 +322,7 @@ final class FolderLibrarySession: FolderLibrary {
         let confirmed = result.outcomes.filter(\.status.state.isConfirmed).map(\.change)
         let changed = rerun.outcomes.map(\.change)
         return GroupFinishingResult.applied(
-            result.plan, changes: confirmed + changed, statuses: statuses, undo: result.undo)
+            result.plan, changes: confirmed + changed, statuses: statuses)
     }
 
     /// Whether the group is complete, and where the group view goes next (PRD P0-12).
@@ -343,9 +344,22 @@ final class FolderLibrarySession: FolderLibrary {
         store.scannedSet(for: photo)
     }
 
-    /// The marks read now for one finishing action's re-check (PRD P0-12).
-    private func finishingMarks(for photo: PhotoIdentity) -> PhotoMarks {
-        store.photo(for: photo)?.marks ?? PhotoMarks()
+    /// The marks one finishing action re-checks against (PRD P0-12).
+    ///
+    /// A photo whose rating or label is still being written counts as marked: auto-advance can
+    /// bring the next photo onto the screen within the write's time, and rejecting such a photo
+    /// would leave one photo both rated and rejected. C4 keeps the request until a newer change
+    /// replaces it (PRD How marks reach disk, rule 8), so the requested fields are applied to the
+    /// confirmed marks here, exactly as the plan's input does
+    /// (``BrowsingModel/cullingMarks(for:)``).
+    private func finishingMarks(
+        for photo: PhotoIdentity, in writes: MarkWriteQueue
+    ) async -> PhotoMarks {
+        let confirmed = store.photo(for: photo)?.marks ?? PhotoMarks()
+        guard let latest = await writes.latestChange(for: photo), latest.state.isUnfinished else {
+            return confirmed
+        }
+        return confirmed.including(latest.requested)
     }
 
     /// A finishing action the folder could not run: every planned change reports the refusal, so
