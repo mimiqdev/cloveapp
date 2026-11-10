@@ -264,6 +264,18 @@ final class BrowsingModel {
         BatchSelection(groups: groups, selection: state.selection)
     }
 
+    /// Whether a batch write or a retry is running, so the bar cannot start a second one
+    /// (PRD P0-09).
+    ///
+    /// A batch is planned from the marks on screen, so two actions at once would both plan from
+    /// the marks the first one is about to replace, and the later report could describe the
+    /// action the earlier one superseded.
+    private(set) var isApplyingBatch = false
+
+    /// How many times multi-select ended, so a batch that finishes after Done reports nothing
+    /// into a later session (PRD P0-09).
+    private var selectionClearances = 0
+
     /// Enters multi-select on one cell's photos (PRD P0-09).
     ///
     /// A photo's cell adds that photo; a collapsed group's cover adds every photo in its group,
@@ -292,32 +304,52 @@ final class BrowsingModel {
     func clearSelection() {
         state.selection = []
         batchReport = nil
+        selectionClearances += 1
     }
 
     /// Applies one bar action to the selected photos the grid shows (PRD P0-09).
     ///
-    /// One call is one batch: the library admits every photo before awaiting any result, so a bar
-    /// action over 50 photos writes them concurrently and reports one result with one retry
-    /// handle. Each photo's save state still arrives through the library's stream, like any other
-    /// change, so a failed photo never shows a mark it did not save (PRD P0-08).
+    /// One call is one batch: the library admits each change group's photos before awaiting that
+    /// group's results, so a bar action over 50 photos writes them concurrently and reports one
+    /// result with one retry handle. Each photo's save state still arrives through the library's
+    /// stream, like any other change, so a failed photo never shows a mark it did not save
+    /// (PRD P0-08). A second action is refused while one runs, so both plans cannot read the same
+    /// pre-batch marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings) async {
+        guard !isApplyingBatch else { return }
         let targets = batchTargets
         let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
         guard !plan.items.isEmpty else { return }
         var marksBefore: [PhotoIdentity: PhotoMarks] = [:]
         for photo in targets { marksBefore[photo.id] = photo.marks }
+        let folder = state.folder
+        let clearances = selectionClearances
+        isApplyingBatch = true
         let result = await library.apply(plan.items)
+        isApplyingBatch = false
+        // The batch happened, but its report must not land in another folder's bar or reopen
+        // after Done cleared the mode it belonged to.
+        guard state.folder == folder else { return }
         lastBatch = BatchMarkApplication(result: result, marksBefore: marksBefore)
+        guard clearances == selectionClearances else { return }
         batchReport = BatchMarkReport(result)
     }
 
     /// Retries only the photos the last batch could not save (PRD P0-09).
     ///
     /// The saved photos are left alone, and the retry's result merges with the action's, so the
-    /// bar keeps counting the whole action instead of only the photos the retry resent.
+    /// bar keeps counting the whole action instead of only the photos the retry resent. A library
+    /// that can no longer retry, such as one whose folder closed, answers nil; the report then
+    /// stays as it was, so the bar still names the photos that did not save (PRD P0-08).
     func retryFailedBatch() async {
-        guard let report = batchReport, report.canRetry else { return }
-        guard let result = await library.retryFailed(in: report.batch) else { return }
+        guard !isApplyingBatch, let report = batchReport, report.canRetry else { return }
+        let folder = state.folder
+        let clearances = selectionClearances
+        isApplyingBatch = true
+        defer { isApplyingBatch = false }
+        guard let result = await library.retryFailed(in: report.batch),
+            state.folder == folder, clearances == selectionClearances
+        else { return }
         batchReport = report.merging(result)
     }
 
@@ -454,6 +486,7 @@ final class BrowsingModel {
         // U8's undo snapshot go with the selection.
         lastBatch = nil
         batchReport = nil
+        selectionClearances += 1
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change.
         thumbnails = library.thumbnails

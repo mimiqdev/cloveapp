@@ -37,6 +37,10 @@ public struct BatchMarkItem: Hashable, Sendable, Identifiable {
 /// but inside a mixed selection that would clear some photos and set others from one tap, so the
 /// batch bar applies the mark and photo already carrying it receives nothing. Clear is its own
 /// control: rating `0` and label Clear (PRD Marking rules).
+///
+/// A photo that already carries the requested mark therefore has no item. The mark the user asked
+/// for is on it, so nothing is missing from the grid, but the batch's report counts only the
+/// photos it wrote: the bar's count can be higher than the copy's (PRD P0-09).
 public struct BatchMarkPlan: Hashable, Sendable {
     /// The mark the bar applied (PRD P0-09).
     public let action: BatchMarkAction

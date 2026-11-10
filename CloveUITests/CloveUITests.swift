@@ -285,8 +285,8 @@ final class CloveUITests: XCTestCase {
         wait(for: [three], timeout: 10)
     }
 
-    /// The bar's rating reaches every selected photo, and the photo the launch makes fail keeps
-    /// the marks it had (PRD P0-09, P0-08).
+    /// The bar's rating reaches every selected photo, including the rejected one, whose Reject
+    /// the positive rating clears (PRD P0-09, PRD Marking rules).
     @MainActor
     private func rateTheSelection(in app: XCUIApplication) {
         let twoStars = element(in: app, "clove.grid.batch.rate.2")
@@ -296,21 +296,17 @@ final class CloveUITests: XCTestCase {
         let first = element(in: app, "clove.grid.photo.mmq02678")
         let rated = expectation(
             for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: first)
-        wait(for: [rated], timeout: 10)
-
         let second = element(in: app, "clove.grid.photo.mmq02679")
-        XCTAssertTrue(second.label.contains("2 stars"), "The batch missed a photo: \(second.label)")
+        let alsoRated = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: second)
+        wait(for: [rated, alsoRated], timeout: 10)
         XCTAssertFalse(
             second.label.contains("Rejected"), "A rating left Reject on: \(second.label)")
-
-        let failed = element(in: app, "clove.grid.photo.mmq02680")
-        XCTAssertFalse(
-            failed.label.contains("stars"),
-            "The grid showed a mark the batch did not save: \(failed.label)")
     }
 
-    /// A partial batch failure shows the PRD copy, and Retry resends only the failed photo and
-    /// clears the report once it saves (PRD P0-09, PRD Failure and recovery).
+    /// A partial batch failure shows the PRD copy and keeps the failed photo's marks; Retry
+    /// resends only that photo and clears the report once it saves (PRD P0-09, PRD Failure and
+    /// recovery).
     @MainActor
     private func retryTheFailedPhotos(in app: XCUIApplication) {
         let copy = "Saved 2 photos. 1 photos couldn't be saved."
@@ -318,6 +314,12 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(
             failure.waitForExistence(timeout: 10), "The batch did not report its failure")
         XCTAssertEqual(failure.label, copy, "The partial-failure copy changed")
+        // The report exists only after the batch finished, so this checks the final state: the
+        // photo that failed keeps the marks it had (PRD P0-09, P0-08).
+        let failed = element(in: app, "clove.grid.photo.mmq02680")
+        XCTAssertFalse(
+            failed.label.contains("stars"),
+            "The grid showed a mark the batch did not save: \(failed.label)")
 
         element(in: app, "clove.grid.batch.retry").tap()
         let gone = expectation(

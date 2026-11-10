@@ -50,6 +50,12 @@ struct GridBatchBar: View {
             Text(countText)
                 .font(.subheadline.weight(.semibold))
                 .accessibilityIdentifier("clove.grid.batch.count")
+            if browsing.isApplyingBatch {
+                // The mark controls are off while one batch runs, so the bar says why rather
+                // than looking broken on a slow write (PRD P0-09).
+                ProgressView()
+                    .controlSize(.small)
+            }
             Spacer()
             Button("Select all") { browsing.selectAllVisible(cells) }
                 .accessibilityIdentifier("clove.grid.batch.selectAll")
@@ -90,8 +96,9 @@ struct GridBatchBar: View {
             .padding(.vertical, 2)
         }
         // A selection the current filter hides has no photo to mark, so the marks stay off
-        // until a visible photo is selected (PRD P0-09).
-        .disabled(browsing.batchTargets.isEmpty)
+        // until a visible photo is selected, and one batch at a time keeps two plans from
+        // reading the same marks (PRD P0-09).
+        .disabled(browsing.batchTargets.isEmpty || browsing.isApplyingBatch)
     }
 
     /// The PRD's partial-batch copy with a retry of the failed photos only (PRD P0-09).
@@ -104,6 +111,7 @@ struct GridBatchBar: View {
                 Button("Retry failed items") {
                     Task { await browsing.retryFailedBatch() }
                 }
+                .disabled(browsing.isApplyingBatch)
                 .accessibilityIdentifier("clove.grid.batch.retry")
                 Button("Cancel", role: .cancel) { browsing.dismissBatchReport() }
                     .accessibilityIdentifier("clove.grid.batch.cancel")

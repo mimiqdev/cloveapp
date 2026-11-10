@@ -85,7 +85,9 @@ protocol FolderLibrary: AnyObject {
     /// name different changes because C13 resolves the action per photo, and the library applies
     /// them together. Each photo's save state still arrives through ``updates``, like a
     /// single-photo change; a photo the folder no longer holds is reported as failed instead of
-    /// being written somewhere else.
+    /// being written somewhere else. The result's ``MarkBatchResult/change`` names the first
+    /// item's change, because a mixed batch has no single one, while its outcomes and counts
+    /// cover every item.
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult
 
     /// Retries only the photos a batch could not save and reports the retry's own result
@@ -94,7 +96,6 @@ protocol FolderLibrary: AnyObject {
     /// Saved and superseded photos are left alone. Nil means the library can no longer retry that
     /// batch, for example because the folder it belonged to closed.
     func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult?
-
     /// The latest change to one photo with its save state (PRD P0-08).
     ///
     /// It answers from the library's current records, synchronously, so a screen can render it.
