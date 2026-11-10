@@ -43,8 +43,14 @@ final class FolderLibrarySession: FolderLibrary {
     /// The stores, prepared off the main actor so the first scene never waits on disk.
     private let stores: Task<Stores, any Error>
     private let metadata: MetadataReader
-    private let settings: AppSettings
     private let codec = XMPCodec()
+
+    /// The rejects folder name the scan skips, read each time a folder opens (PRD Move rejects).
+    ///
+    /// A closure rather than a value, because the user can rename the folder while a folder is
+    /// open; the scan reads it when the folder opens, so a new name applies to the next open. The
+    /// PRD does not apply a rename to a folder that is already scanned.
+    private let rejectsFolderName: @MainActor () -> RejectsFolderName
 
     /// The one stream this library publishes, consumed by ``BrowsingModel``.
     let updates: AsyncStream<FolderLibraryUpdate>
@@ -97,16 +103,18 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Creates the library over a task that prepares its app-private stores.
     ///
-    /// The metadata reader and the settings are injectable so a test can keep the work small;
-    /// production passes what ``FolderLibraryLaunch`` builds.
+    /// The metadata reader and the rejects folder name are injectable so a test can keep the work
+    /// small; production passes what ``FolderLibraryLaunch`` builds.
     init(
         stores: Task<Stores, any Error>,
         metadata: MetadataReader = MetadataReader(),
-        settings: AppSettings = AppSettings()
+        rejectsFolderName: @escaping @MainActor () -> RejectsFolderName = {
+            .defaultFolderName
+        }
     ) {
         self.stores = stores
         self.metadata = metadata
-        self.settings = settings
+        self.rejectsFolderName = rejectsFolderName
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         updates = stream
         updatesContinuation = continuation
@@ -294,7 +302,7 @@ final class FolderLibrarySession: FolderLibrary {
         // opens. A damaged store is reported by U7's save state; the scan still shows the photos.
         let storedMarks = (try? await stores.writes.storedMarks(for: session.folder.id)) ?? [:]
         let configuration = ScanConfiguration(
-            rejectsFolderName: settings.rejectsFolderName.rawValue)
+            rejectsFolderName: rejectsFolderName().rawValue)
         thumbnailSource = await makeThumbnailSource(for: session)
         detailSource = makeDetailSource(for: session)
         let scan = FolderScan(
