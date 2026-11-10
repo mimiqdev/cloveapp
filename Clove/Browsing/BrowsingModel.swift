@@ -276,6 +276,10 @@ final class BrowsingModel {
     /// into a later session (PRD P0-09).
     private var selectionClearances = 0
 
+    /// How many times the bar dismissed its report, so a retry that finishes after Cancel does
+    /// not bring the report the user dismissed back (PRD P0-09).
+    private var reportDismissals = 0
+
     /// Enters multi-select on one cell's photos (PRD P0-09).
     ///
     /// A photo's cell adds that photo; a collapsed group's cover adds every photo in its group,
@@ -325,8 +329,8 @@ final class BrowsingModel {
         let folder = state.folder
         let clearances = selectionClearances
         isApplyingBatch = true
+        defer { isApplyingBatch = false }
         let result = await library.apply(plan.items)
-        isApplyingBatch = false
         // The batch happened, but its report must not land in another folder's bar or reopen
         // after Done cleared the mode it belonged to.
         guard state.folder == folder else { return }
@@ -345,17 +349,23 @@ final class BrowsingModel {
         guard !isApplyingBatch, let report = batchReport, report.canRetry else { return }
         let folder = state.folder
         let clearances = selectionClearances
+        let dismissals = reportDismissals
         isApplyingBatch = true
         defer { isApplyingBatch = false }
         guard let result = await library.retryFailed(in: report.batch),
-            state.folder == folder, clearances == selectionClearances
+            state.folder == folder, clearances == selectionClearances,
+            dismissals == reportDismissals
         else { return }
         batchReport = report.merging(result)
     }
 
     /// Dismisses the batch's report without retrying (PRD Failure and recovery: Cancel).
+    ///
+    /// A retry that is already running will not put the report back, so Cancel leaves the bar
+    /// without a failure report; the photos that did not save keep their failed status for U7.
     func dismissBatchReport() {
         batchReport = nil
+        reportDismissals += 1
     }
 
     /// The latest change to one photo with its save state, or nil when nothing was requested
