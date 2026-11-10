@@ -1,0 +1,342 @@
+{
+  "$schema-note": "Clove theme tokens exported from Figma variable collection 'Clove Theme'. Colors are #RRGGBB or #RRGGBBAA (alpha last).",
+  "source": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=181-2391",
+  "rules": [
+    "Photos are never tinted or recolored by a theme; only chrome changes.",
+    "Light and Dark follow the system when 'Match system light/dark' is on; otherwise the chosen theme applies in both.",
+    "When a token is used with extra transparency in the design (e.g. group tint at 25%), apply opacity on the layer, not by editing the token."
+  ],
+  "themes": [
+    {
+      "id": "light",
+      "name": "Light",
+      "appearance": "light",
+      "tokens": {
+        "bg/canvas": "#FFFFFF",
+        "bg/stage": "#E6E6EB",
+        "surface/glass": "#FFFFFFCC",
+        "surface/sheet": "#F2F2F7",
+        "surface/card": "#FFFFFF",
+        "text/primary": "#000000",
+        "text/secondary": "#3C3C4399",
+        "separator": "#3C3C431F",
+        "accent": "#007AFF",
+        "rating/on": "#FF9500",
+        "rating/off": "#3C3C434D",
+        "reject": "#D4574E",
+        "status/saved": "#34C759",
+        "status/failed": "#D4574E",
+        "label/red": "#FF3B30",
+        "label/yellow": "#FFCC00",
+        "label/green": "#34C759",
+        "label/blue": "#007AFF",
+        "label/purple": "#AF52DE",
+        "group": "#007AFF",
+        "opacity/rejected": 0.28
+      }
+    },
+    {
+      "id": "dark",
+      "name": "Dark",
+      "appearance": "dark",
+      "tokens": {
+        "bg/canvas": "#000000",
+        "bg/stage": "#000000",
+        "surface/glass": "#1E1E20B8",
+        "surface/sheet": "#1C1C1E",
+        "surface/card": "#2C2C2E",
+        "text/primary": "#FFFFFF",
+        "text/secondary": "#EBEBF599",
+        "separator": "#FFFFFF1F",
+        "accent": "#0A84FF",
+        "rating/on": "#FF9F0A",
+        "rating/off": "#EBEBF54D",
+        "reject": "#E5675E",
+        "status/saved": "#30D158",
+        "status/failed": "#E5675E",
+        "label/red": "#FF453A",
+        "label/yellow": "#FFD60A",
+        "label/green": "#30D158",
+        "label/blue": "#0A84FF",
+        "label/purple": "#BF5AF2",
+        "group": "#0A84FF",
+        "opacity/rejected": 0.3
+      }
+    },
+    {
+      "id": "darkroom",
+      "name": "Darkroom",
+      "appearance": "dark",
+      "tokens": {
+        "bg/canvas": "#1E1E1E",
+        "bg/stage": "#474747",
+        "surface/glass": "#2E2E2ED1",
+        "surface/sheet": "#262626",
+        "surface/card": "#333333",
+        "text/primary": "#EDEDED",
+        "text/secondary": "#BDBDBD",
+        "separator": "#FFFFFF1A",
+        "accent": "#8AB4F8",
+        "rating/on": "#E8A33D",
+        "rating/off": "#FFFFFF40",
+        "reject": "#C7665F",
+        "status/saved": "#4CB86A",
+        "status/failed": "#C7665F",
+        "label/red": "#E5534B",
+        "label/yellow": "#E0C04A",
+        "label/green": "#4CB86A",
+        "label/blue": "#5A8FD8",
+        "label/purple": "#A374C9",
+        "group": "#8AB4F8",
+        "opacity/rejected": 0.35
+      }
+    },
+    {
+      "id": "night",
+      "name": "Night",
+      "appearance": "dark",
+      "tokens": {
+        "bg/canvas": "#0C0908",
+        "bg/stage": "#000000",
+        "surface/glass": "#1C1614D9",
+        "surface/sheet": "#141010",
+        "surface/card": "#1E1816",
+        "text/primary": "#E6C9B8",
+        "text/secondary": "#9C8576",
+        "separator": "#E6C9B81A",
+        "accent": "#E0A15E",
+        "rating/on": "#E0A15E",
+        "rating/off": "#E6C9B838",
+        "reject": "#C8665A",
+        "status/saved": "#8FA36A",
+        "status/failed": "#C8665A",
+        "label/red": "#B85A4E",
+        "label/yellow": "#C9A24A",
+        "label/green": "#7F9A5A",
+        "label/blue": "#6F86A8",
+        "label/purple": "#9A7AA8",
+        "group": "#E0A15E",
+        "opacity/rejected": 0.3
+      }
+    },
+    {
+      "id": "catppuccin-latte",
+      "name": "Catppuccin Latte",
+      "appearance": "light",
+      "tokens": {
+        "bg/canvas": "#EFF1F5",
+        "bg/stage": "#DCE0E8",
+        "surface/glass": "#EFF1F5CC",
+        "surface/sheet": "#E6E9EF",
+        "surface/card": "#EFF1F5",
+        "text/primary": "#4C4F69",
+        "text/secondary": "#6C6F85",
+        "separator": "#4C4F691F",
+        "accent": "#8839EF",
+        "rating/on": "#DF8E1D",
+        "rating/off": "#4C4F6940",
+        "reject": "#E64553",
+        "status/saved": "#40A02B",
+        "status/failed": "#E64553",
+        "label/red": "#D20F39",
+        "label/yellow": "#DF8E1D",
+        "label/green": "#40A02B",
+        "label/blue": "#1E66F5",
+        "label/purple": "#8839EF",
+        "group": "#8839EF",
+        "opacity/rejected": 0.28
+      }
+    },
+    {
+      "id": "catppuccin-mocha",
+      "name": "Catppuccin Mocha",
+      "appearance": "dark",
+      "tokens": {
+        "bg/canvas": "#1E1E2E",
+        "bg/stage": "#11111B",
+        "surface/glass": "#313244D9",
+        "surface/sheet": "#181825",
+        "surface/card": "#313244",
+        "text/primary": "#CDD6F4",
+        "text/secondary": "#A6ADC8",
+        "separator": "#CDD6F41A",
+        "accent": "#CBA6F7",
+        "rating/on": "#F9E2AF",
+        "rating/off": "#CDD6F438",
+        "reject": "#EBA0AC",
+        "status/saved": "#A6E3A1",
+        "status/failed": "#EBA0AC",
+        "label/red": "#F38BA8",
+        "label/yellow": "#F9E2AF",
+        "label/green": "#A6E3A1",
+        "label/blue": "#89B4FA",
+        "label/purple": "#CBA6F7",
+        "group": "#CBA6F7",
+        "opacity/rejected": 0.3
+      }
+    },
+    {
+      "id": "nord",
+      "name": "Nord",
+      "appearance": "dark",
+      "tokens": {
+        "bg/canvas": "#2E3440",
+        "bg/stage": "#242933",
+        "surface/glass": "#3B4252D9",
+        "surface/sheet": "#2E3440",
+        "surface/card": "#3B4252",
+        "text/primary": "#ECEFF4",
+        "text/secondary": "#D8DEE999",
+        "separator": "#ECEFF41A",
+        "accent": "#88C0D0",
+        "rating/on": "#EBCB8B",
+        "rating/off": "#D8DEE940",
+        "reject": "#BF616A",
+        "status/saved": "#A3BE8C",
+        "status/failed": "#BF616A",
+        "label/red": "#BF616A",
+        "label/yellow": "#EBCB8B",
+        "label/green": "#A3BE8C",
+        "label/blue": "#81A1C1",
+        "label/purple": "#B48EAD",
+        "group": "#88C0D0",
+        "opacity/rejected": 0.3
+      }
+    },
+    {
+      "id": "gruvbox",
+      "name": "Gruvbox",
+      "appearance": "dark",
+      "tokens": {
+        "bg/canvas": "#282828",
+        "bg/stage": "#1D2021",
+        "surface/glass": "#3C3836D9",
+        "surface/sheet": "#282828",
+        "surface/card": "#3C3836",
+        "text/primary": "#EBDBB2",
+        "text/secondary": "#A89984",
+        "separator": "#EBDBB21A",
+        "accent": "#83A598",
+        "rating/on": "#FABD2F",
+        "rating/off": "#EBDBB238",
+        "reject": "#EA6962",
+        "status/saved": "#B8BB26",
+        "status/failed": "#EA6962",
+        "label/red": "#FB4934",
+        "label/yellow": "#FABD2F",
+        "label/green": "#B8BB26",
+        "label/blue": "#83A598",
+        "label/purple": "#D3869B",
+        "group": "#83A598",
+        "opacity/rejected": 0.3
+      }
+    }
+  ],
+  "tokenDocs": {
+    "bg/canvas": {
+      "type": "color",
+      "swiftName": "Color.clove.bg.canvas",
+      "use": "App background behind lists, grids and chrome."
+    },
+    "bg/stage": {
+      "type": "color",
+      "swiftName": "Color.clove.bg.stage",
+      "use": "Area around a photo in detail / zoom. Never tints the photo."
+    },
+    "surface/glass": {
+      "type": "color",
+      "swiftName": "Color.clove.surface.glass",
+      "use": "Floating glass controls (capsule, dock, toasts, banners). Pair with a background blur of about 36 pt."
+    },
+    "surface/sheet": {
+      "type": "color",
+      "swiftName": "Color.clove.surface.sheet",
+      "use": "Sheets, menus, grouped-list background."
+    },
+    "surface/card": {
+      "type": "color",
+      "swiftName": "Color.clove.surface.card",
+      "use": "Cells / cards on a sheet."
+    },
+    "text/primary": {
+      "type": "color",
+      "swiftName": "Color.clove.text.primary",
+      "use": "Primary text and icons."
+    },
+    "text/secondary": {
+      "type": "color",
+      "swiftName": "Color.clove.text.secondary",
+      "use": "Secondary text, counts, metadata."
+    },
+    "separator": {
+      "type": "color",
+      "swiftName": "Color.clove.separator",
+      "use": "Hairlines and tracks."
+    },
+    "accent": {
+      "type": "color",
+      "swiftName": "Color.clove.accent",
+      "use": "Buttons, links, selection, progress while reading."
+    },
+    "rating/on": {
+      "type": "color",
+      "swiftName": "Color.clove.rating.on",
+      "use": "Filled stars."
+    },
+    "rating/off": {
+      "type": "color",
+      "swiftName": "Color.clove.rating.off",
+      "use": "Empty stars."
+    },
+    "reject": {
+      "type": "color",
+      "swiftName": "Color.clove.reject",
+      "use": "Reject circle, destructive text. Softer than the system red on purpose."
+    },
+    "status/saved": {
+      "type": "color",
+      "swiftName": "Color.clove.status.saved",
+      "use": "Saved dot, toggles on."
+    },
+    "status/failed": {
+      "type": "color",
+      "swiftName": "Color.clove.status.failed",
+      "use": "Save or move failures."
+    },
+    "label/red": {
+      "type": "color",
+      "swiftName": "Color.clove.label.red",
+      "use": "Color label red (XMP 'Red')."
+    },
+    "label/yellow": {
+      "type": "color",
+      "swiftName": "Color.clove.label.yellow",
+      "use": "Color label yellow."
+    },
+    "label/green": {
+      "type": "color",
+      "swiftName": "Color.clove.label.green",
+      "use": "Color label green."
+    },
+    "label/blue": {
+      "type": "color",
+      "swiftName": "Color.clove.label.blue",
+      "use": "Color label blue."
+    },
+    "label/purple": {
+      "type": "color",
+      "swiftName": "Color.clove.label.purple",
+      "use": "Color label purple."
+    },
+    "group": {
+      "type": "color",
+      "swiftName": "Color.clove.group",
+      "use": "Similar groups: count badge on stacks, and a tint at 25% behind an expanded group in filmstrips."
+    },
+    "opacity/rejected": {
+      "type": "float",
+      "swiftName": null,
+      "use": "Opacity of a rejected photo in the grid and strips."
+    }
+  }
+}
