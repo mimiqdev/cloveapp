@@ -64,8 +64,8 @@ public enum DetailZoom {
         return max(1, horizontal, vertical)
     }
 
-    /// The scroll-view scale a double tap to 100% adopts, or nil while the photo's 100% is
-    /// unknown (PRD P0-04; G1 "Preview, detail (I2)").
+    /// The scroll-view scale a double tap to 100% adopts, or nil while the view must wait for a
+    /// render (PRD P0-04; G1 "Preview, detail (I2)").
     ///
     /// A photo whose 100% is its RAW's sensor pixels has no target until that size is known: the
     /// preview on screen is smaller than the sensor, so its own pixels are never 100% (G1 "Preview,
@@ -75,13 +75,25 @@ public enum DetailZoom {
     /// A photo without a RAW always has a size of its own, so nil is only the RAW's unknown size.
     /// That is why the caller passes nil rather than the preview's pixels: ``fullResolutionScale``
     /// already answers those for the photos where they are the truth.
+    ///
+    /// The one exception is a photo whose render can no longer bring the size — the RAW render
+    /// failed, so the preview is all it will ever give. A double tap must not do nothing then: it
+    /// inspects the preview at ``inspectionScale`` around the tapped point instead (#111).
+    ///
+    /// - Parameters:
+    ///   - nativePixels: The photo's 100% size, or nil while it is unknown.
+    ///   - shownPixels: The bitmap on screen, used only for a photo whose own pixels are 100%.
+    ///   - previewIsAll: Whether the shown preview is the last pixels this photo will give.
     public static func fullResolutionTarget(
-        nativePixels: CGSize?, shownPixels: CGSize, viewSize: CGSize, screenScale: CGFloat
+        nativePixels: CGSize?, shownPixels: CGSize, viewSize: CGSize, screenScale: CGFloat,
+        previewIsAll: Bool = false
     ) -> CGFloat? {
-        guard let nativePixels, nativePixels.width > 0, nativePixels.height > 0 else { return nil }
-        return fullResolutionScale(
-            nativePixels: nativePixels, shownPixels: shownPixels, viewSize: viewSize,
-            screenScale: screenScale)
+        if let nativePixels, nativePixels.width > 0, nativePixels.height > 0 {
+            return fullResolutionScale(
+                nativePixels: nativePixels, shownPixels: shownPixels, viewSize: viewSize,
+                screenScale: screenScale)
+        }
+        return previewIsAll ? inspectionScale : nil
     }
 
     /// The zoom a requested 100% must move to when pixels of another size arrive, or nil when it

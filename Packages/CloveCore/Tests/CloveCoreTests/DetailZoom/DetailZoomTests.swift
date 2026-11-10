@@ -311,6 +311,30 @@ struct DetailZoomTests {
         }
     }
 
+    /// A photo whose RAW render failed has no 100% size to wait for any more, so a double tap
+    /// inspects the preview rather than doing nothing for good (PRD P0-04; G1 "Preview, detail
+    /// (I2)"; #111).
+    @Test func aPhotoWhoseRenderFailedStillDoubleTapsToInspection() {
+        let preview = CGSize(width: 1616, height: 1080)
+        let view = CGSize(width: 393, height: 852)
+        let previewTarget = DetailZoom.fullResolutionScale(
+            imagePixels: preview, viewSize: view, screenScale: 3)
+
+        // While a render can still bring the size, the tap has no target yet.
+        #expect(
+            DetailZoom.fullResolutionTarget(
+                nativePixels: nil, shownPixels: preview, viewSize: view, screenScale: 3,
+                previewIsAll: false) == nil)
+
+        // The render failed: the preview is all this photo will give, so the tap inspects it.
+        #expect(
+            DetailZoom.fullResolutionTarget(
+                nativePixels: nil, shownPixels: preview, viewSize: view, screenScale: 3,
+                previewIsAll: true) == DetailZoom.inspectionScale)
+        // That fallback is an inspection zoom, never the preview's own 100%.
+        #expect(DetailZoom.inspectionScale != previewTarget)
+    }
+
     /// A 100% zoom computed from a wrong size is corrected once when the render lands, and a zoom
     /// computed from the right size is left alone (PRD P0-04; G1 "Preview, detail (I2)"; #111).
     @Test func aWrongSizeIsCorrectedOnceWhenTheRenderLands() {
