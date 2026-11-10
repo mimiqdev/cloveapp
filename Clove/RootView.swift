@@ -18,8 +18,12 @@ struct RootView: View {
     @State private var browsing: BrowsingModel
 
     /// Creates the scene over the library this launch browses (PRD P0-01, P0-13).
-    init(library: any FolderLibrary = TestLibrary.forLaunch()) {
-        _browsing = State(initialValue: BrowsingModel(library: library))
+    ///
+    /// The library is created once per scene, so two windows never share one folder's scan or
+    /// write queue. A preview passes its own library.
+    init(library: (any FolderLibrary)? = nil) {
+        _browsing = State(
+            initialValue: BrowsingModel(library: library ?? FolderLibraryLaunch.make()))
     }
 
     var body: some View {
