@@ -362,9 +362,10 @@ struct GroupScreen: View {
             !current.finishingRunning,
             current.failure == nil
         else {
-            // A completion that was waiting must not outlive this state: a failure that arrives
-            // during the pause keeps the view, so its retry stays reachable (PRD P0-09).
-            completionTask?.cancel()
+            // A finishing action that is still running, or one that left changes to retry, keeps
+            // the view so the failure bar and its retry stay reachable (PRD P0-09; PRD Failure and
+            // recovery). Any move already waiting is dropped.
+            if current.finishingRunning || current.failure != nil { completionTask?.cancel() }
             return
         }
         completedGroup = nil
