@@ -207,6 +207,7 @@ struct DetailMarkingView: View {
     private var previewArea: some View {
         DetailZoomView(
             image: shown?.image,
+            fullResolutionPixels: shown?.fullResolutionSize,
             command: command,
             doubleTapZoomEnabled: settings.doubleTap == .zoom,
             rules: rules,
@@ -331,10 +332,12 @@ struct DetailMarkingView: View {
     /// Shows pixels, keeping the zoom and the position the policy keeps.
     ///
     /// A preview replaced by a RAW render is the same path, so the scroll view keeps its scale and
-    /// offset across a quality change (PRD P0-04). The next photo of a group is the exception the
-    /// policy names: the position the previous photo was on is applied to the new pixels, so the
-    /// same spot stays under the viewport (PRD In-group culling, synchronized zoom). A 100% target
-    /// follows the new bitmap's size, because its scale is one image pixel per screen pixel.
+    /// offset across a quality change: the 100% target already came from the photo's native size,
+    /// so the render sharpens the picture instead of zooming a second time (PRD P0-04; G1
+    /// "Preview, detail (I2)"). The next photo of a group is the exception the policy names: the
+    /// position the previous photo was on is applied to the new pixels, and an explicit 100% is
+    /// 100% of the new photo's native size, so the same spot stays under the viewport at the same
+    /// native-relative zoom (PRD In-group culling, synchronized zoom; PRD P0-12).
     private func show(_ image: DetailImage) {
         shown = image
         limitation = image.limitation
@@ -342,21 +345,21 @@ struct DetailMarkingView: View {
         if image.limitation != nil {
             previewOnly = true
         }
-        if let keptZoom {
-            self.keptZoom = nil
-            if case .fullResolution = zoomMode {
-                zoomMode = .fullResolution(anchor: keptZoom.anchor)
-            }
-            setZoom(.scale(keptZoom.scale, anchor: keptZoom.anchor.unitPoint))
-            // The retained zoom may need more pixels than a fit-sized preview holds, so the next
-            // photo is not an enlarged embedded preview (G1 "Preview, detail (I2)").
-            upgradeIfNeeded()
-            return
+        guard let keptZoom else { return }
+        self.keptZoom = nil
+        let keptScale: CGFloat
+        if case .fullResolution = zoomMode, viewSize.width > 0 {
+            zoomMode = .fullResolution(anchor: keptZoom.anchor)
+            keptScale = DetailZoom.fullResolutionScale(
+                nativePixels: image.fullResolutionSize, shownPixels: pixelSize(image),
+                viewSize: viewSize, screenScale: displayScale)
+        } else {
+            keptScale = keptZoom.scale
         }
-        guard case .fullResolution(let anchor) = zoomMode, viewSize.width > 0 else { return }
-        let target = DetailZoom.fullResolutionScale(
-            imagePixels: pixelSize(image), viewSize: viewSize, screenScale: displayScale)
-        setZoom(.scale(target, anchor: anchor.unitPoint))
+        setZoom(.scale(keptScale, anchor: keptZoom.anchor.unitPoint))
+        // The retained zoom may need more pixels than a fit-sized preview holds, so the next
+        // photo is not an enlarged embedded preview (G1 "Preview, detail (I2)").
+        upgradeIfNeeded()
     }
 
     /// The neighbours' previews, so the next edge tap starts from a cache hit.
@@ -401,6 +404,12 @@ struct DetailMarkingView: View {
     }
 
     /// The double-tap action: 100% around the tapped point, or back to fit (PRD P0-04).
+    ///
+    /// The target is the photo's native 100%, computed from the header size that arrived with the
+    /// first preview, so the embedded preview is drawn enlarged and the RAW render later replaces
+    /// it at the same scale: one zoom, not two (G1 "Preview, detail (I2)"). An image with no
+    /// larger size known, such as a HIF that is never fully decoded, keeps the shown bitmap's own
+    /// 100%.
     private func doubleTap(at anchor: UnitPoint) {
         guard settings.doubleTap == .zoom else { return }
         guard scale <= DetailFitScale.tolerance else {
@@ -410,7 +419,8 @@ struct DetailMarkingView: View {
         }
         guard let shown else { return }
         let target = DetailZoom.fullResolutionScale(
-            imagePixels: pixelSize(shown), viewSize: viewSize, screenScale: displayScale)
+            nativePixels: shown.fullResolutionSize, shownPixels: pixelSize(shown),
+            viewSize: viewSize, screenScale: displayScale)
         zoomMode = .fullResolution(anchor: DetailZoomAnchor(x: anchor.x, y: anchor.y))
         setZoom(.scale(target, anchor: anchor))
         upgradeTask?.cancel()

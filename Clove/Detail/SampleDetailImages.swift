@@ -8,9 +8,11 @@ import UIKit
 /// instead of reading a RAW. The preview is the long edge G1's detail row expects from the
 /// owner's HIF embedded preview (1616 px), and the "native" image is a larger raster, so a
 /// double-tap to 100% and a pinch past the preview go through the same quality change the real
-/// pipeline produces. One sample photo answers with a preview only, which gives the view a
-/// "preview only" note to show, and the sample's unreadable photo answers unavailable, so no
-/// blank image is ever presented as loaded (PRD Scan scope).
+/// pipeline produces. Both carry the larger raster's size as their full resolution, so a
+/// double-tap on the preview computes the native 100% at once and the render does not zoom a
+/// second time (G1 "Preview, detail (I2)"). One sample photo answers with a preview only, which
+/// gives the view a "preview only" note to show, and the sample's unreadable photo answers
+/// unavailable, so no blank image is ever presented as loaded (PRD Scan scope).
 ///
 /// Design placeholder: the tiles are flat generated pictures rather than test photographs.
 @MainActor
@@ -20,6 +22,11 @@ final class SampleDetailImages: DetailImageSource {
 
     /// The generated full render's long edge: enough to inspect at 100% on a phone.
     static let fullLongEdge = 3000
+
+    /// The generated photo's full-resolution size, which both the preview and the render report
+    /// as their 100% (PRD P0-04; G1 "Preview, detail (I2)").
+    private static let fullResolutionSize = CGSize(
+        width: CGFloat(fullLongEdge), height: CGFloat(fullLongEdge) * 2 / 3)
 
     /// How many generated previews stay in memory, so browsing the sample cannot grow without
     /// bound. The filmstrip draws grid thumbnails, not these images.
@@ -146,14 +153,16 @@ final class SampleDetailImages: DetailImageSource {
             preconditionFailure("the sample detail renderer must produce a Core Graphics image")
         }
         return DetailImage(
-            image: pixels, source: Self.source(for: photo), quality: quality)
+            image: pixels, source: Self.source(for: photo), quality: quality,
+            fullResolutionSize: Self.fullResolutionSize)
     }
 
     /// The same pixels with a shortfall attached, because I2's `limited` is internal.
     private func limited(_ image: DetailImage, by limitation: DetailLimitation) -> DetailImage {
         DetailImage(
             image: image.image, source: image.source, quality: image.quality,
-            limitation: image.limitation ?? limitation)
+            limitation: image.limitation ?? limitation,
+            fullResolutionSize: image.fullResolutionSize)
     }
 
     /// A stable source identity for generated pixels, with no file behind it.

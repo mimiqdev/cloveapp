@@ -108,6 +108,14 @@ struct DetailZoomView: UIViewRepresentable {
     /// The pixels to show, or nil while the screen is loading or has nothing to show.
     let image: CGImage?
 
+    /// The photo's oriented full-resolution pixel size, or nil when it is unknown.
+    ///
+    /// The scroll view's zoom limit follows it, so a pinch can reach native 100% and
+    /// ``DetailZoom/inspectionScale`` past it while a smaller embedded preview is still on
+    /// screen (PRD P0-04; G1 "Preview, detail (I2)"). Without it the shown bitmap's own size is
+    /// the full resolution, which is the behaviour before the native size was known.
+    let fullResolutionPixels: CGSize?
+
     /// The zoom the screen wants, or nil to leave the view's own pinch alone.
     let command: DetailZoomCommand?
 
@@ -165,7 +173,7 @@ struct DetailZoomView: UIViewRepresentable {
         view.setDoubleTapEnabled(doubleTapZoomEnabled)
         // The image goes in before the command, so a 100% command for new pixels uses the new
         // pixel size and a quality change never needs a second pass.
-        view.setImage(image)
+        view.setImage(image, fullResolutionPixels: fullResolutionPixels)
         if let command { view.apply(command) }
     }
 }
@@ -195,6 +203,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// The pixels on screen, so a command can clamp and a double tap can report an image point.
     private var shownPixels: CGSize = .zero
+
+    /// The photo's full-resolution size, which sets the zoom limit before the render lands
+    /// (PRD P0-04; G1 "Preview, detail (I2)").
+    private var fullResolutionPixels: CGSize = .zero
 
     /// The last command applied, so a repeated SwiftUI update never re-applies it.
     private var lastCommand: Int?
@@ -279,15 +291,45 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Replaces the pixels without touching the zoom or the position (PRD P0-04).
     ///
-    /// A quality change from a preview to a native render is the same call, so the view keeps
-    /// whatever scale and offset the user had; the screen issues a command only when the photo
-    /// changes or a 100% target must follow the new pixel size.
-    func setImage(_ pixels: CGImage?) {
-        guard pixels !== imageView.image?.cgImage else { return }
+    /// A quality change from an embedded preview to a native render is the same call, so the
+    /// view keeps whatever scale and offset the user had, and the render only sharpens the
+    /// picture (G1 "Preview, detail (I2)"). The screen issues a command only when the photo
+    /// changes or a group keeps a zoom, never for the quality change itself.
+    ///
+    /// A preview and its render share the photo's aspect, so the image's drawn rect does not
+    /// move. A camera that crops its embedded preview can give it another aspect; that rect then
+    /// changes, so the image point at the viewport's centre is kept explicitly, and the visible
+    /// point stays under the same place on screen (PRD P0-04; G1 "Preview, detail (I2)").
+    func setImage(_ pixels: CGImage?, fullResolutionPixels: CGSize? = nil) {
+        let fullResolution = fullResolutionPixels ?? .zero
+        guard pixels !== imageView.image?.cgImage || fullResolution != self.fullResolutionPixels
+        else { return }
+        let previousPixels = shownPixels
+        // Read before the pixels change: the point the viewport centres on in the old bitmap.
+        let kept = zoomSnapshot
         imageView.image = pixels.map { UIImage(cgImage: $0) }
         shownPixels = pixels.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
+        self.fullResolutionPixels = fullResolution
         updateMaximumZoom()
         accessibilityValue = pixels == nil ? "Loading" : "Loaded"
+        if let kept, Self.aspectDiffers(previousPixels, shownPixels) {
+            isApplyingCommand = true
+            zoom(to: kept.scale, around: kept.anchor)
+            isApplyingCommand = false
+        }
+    }
+
+    /// Whether two bitmaps have a materially different aspect ratio.
+    ///
+    /// Rounding in a camera's embedded preview moves the ratio by far less than this; a preview
+    /// cropped to another shape moves it by more, and only that needs the visible point restored
+    /// (PRD P0-04; G1 "Preview, detail (I2)").
+    private static func aspectDiffers(_ first: CGSize, _ second: CGSize) -> Bool {
+        guard first.width > 0, first.height > 0, second.width > 0, second.height > 0
+        else { return false }
+        let firstAspect = first.width / first.height
+        let secondAspect = second.width / second.height
+        return abs(firstAspect - secondAspect) / max(firstAspect, secondAspect) > 0.005
     }
 
     /// Enables or disables the centre double-tap (C12's `doubleTap` setting).
@@ -527,11 +569,15 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             width: fitted.width, height: fitted.height)
     }
 
-    /// The largest zoom: enough to reach 100%, and at least the inspection scale.
+    /// The largest zoom: enough to reach native 100%, and at least the inspection scale.
+    ///
+    /// The photo's full-resolution size sets it rather than the shown preview, so a pinch can
+    /// reach native 100% while the preview is still on screen (PRD P0-04; G1 "Preview, detail
+    /// (I2)").
     private func updateMaximumZoom() {
         guard bounds.width > 0, bounds.height > 0 else { return }
         let scale = DetailZoom.maximumScale(
-            imagePixels: shownPixels, viewSize: bounds.size,
+            nativePixels: fullResolutionPixels, shownPixels: shownPixels, viewSize: bounds.size,
             screenScale: traitCollection.displayScale)
         scrollView.maximumZoomScale = max(scale, scrollView.zoomScale)
     }
