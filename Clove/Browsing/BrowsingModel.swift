@@ -98,9 +98,9 @@ final class BrowsingModel {
     /// a confirmed write could refresh them back onto entry and bring Continue browsing with it.
     private var hasLeftFolder = false
 
-    /// The open this scene shows, so a loss from an earlier open of the same folder is dropped
-    /// (PRD P0-02).
-    private var shownOpenGeneration = 0
+    /// How many opens this scene started, so a leaving destination never replaces a folder the
+    /// user opened while it waited (PRD P0-08).
+    private var openRequests = 0
 
     /// The saved scene waiting for its folder to hold the photos it names (PRD P0-14).
     ///
@@ -189,6 +189,7 @@ final class BrowsingModel {
     /// coming back from the grid does not need the picker again. A folder that opens answers
     /// whatever the last failed open left on entry, so the message goes with it (PRD P0-02).
     func openFolder() {
+        openRequests += 1
         pendingRestore = nil
         folderFailure = nil
         showOpenFolder()
@@ -207,11 +208,15 @@ final class BrowsingModel {
 
     /// Opens a folder the user chose, once any leaving question is answered (PRD P0-01).
     private func openPickedFolderNow(_ url: URL) async {
+        openRequests += 1
+        // An earlier folder's loss and save states do not apply to whatever this open installs.
+        // Clearing the loss before the await keeps a loss the new open reports (PRD P0-02).
+        folderLocationLoss = nil
         folderFailure = await library.pick(url)
         guard folderFailure == nil else { return }
-        // C11 just validated this folder with a real read, so an earlier folder's loss no longer
-        // applies (PRD P0-02).
-        folderLocationLoss = nil
+        // PRD Failure and recovery: a real open reads the actual XMP, so what is on screen starts
+        // from this open's changes and never from a failure the closed folder left behind.
+        changes = PhotoChangeStates()
         showOpenFolder()
         await reloadRecents()
     }
@@ -229,14 +234,19 @@ final class BrowsingModel {
 
     /// Reopens one remembered folder, once any leaving question is answered (PRD P0-02).
     private func reopenNow(_ recent: RecentFolder) async {
+        openRequests += 1
+        // The reopen reads the folder again, so the loss the watch reported is no longer current,
+        // and a loss the new open reports after the await still applies (PRD P0-02).
+        folderLocationLoss = nil
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
             return
         }
         recentFailures[recent.id] = nil
         folderFailure = nil
-        // The reopen read the folder, so the loss the watch reported is no longer current.
-        folderLocationLoss = nil
+        // The reopened folder reads its XMP and Clove-stored marks again, so the states from the
+        // previous open are gone (PRD Failure and recovery).
+        changes = PhotoChangeStates()
         showOpenFolder()
         await reloadRecents()
     }
@@ -634,6 +644,7 @@ final class BrowsingModel {
     private func leave(to destination: LeaveFolderDestination) async {
         leavePrompt = nil
         isWaitingForWrites = false
+        let token = openRequests
         // The screen leaves the folder before anything that waits for its writes, so no
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
@@ -641,6 +652,9 @@ final class BrowsingModel {
         // Leaving closes the folder even when the next destination never opens, so its scan stops
         // and its scope is not held for a folder the user no longer sees (G1 folder access).
         await library.closeFolder()
+        // A folder the user opened while the close drained wins: the destination they were
+        // heading for before that must not replace it (PRD P0-08).
+        guard token == openRequests else { return }
         switch destination {
         case .entry:
             break
@@ -738,7 +752,6 @@ final class BrowsingModel {
             // open it just installed is the one this scene shows, even when the saved route is
             // entry or settings and the grid does not appear yet.
             folderLocationLoss = nil
-            shownOpenGeneration = library.openGeneration
             hasLeftFolder = false
             await reloadRecents()
             if saved.showsPhotos {
@@ -805,7 +818,7 @@ final class BrowsingModel {
             // unfinished changes after a loss; the indicator supplies the copy (PRD P0-02).
             // A buffered loss can arrive after another folder opened, or after the same folder
             // opened again, so it only applies to the folder and the open this scene shows.
-            guard folder == library.folder, generation == shownOpenGeneration else { return }
+            guard folder == library.folder, generation == library.openGeneration else { return }
             folderLocationLoss = loss
         case .groups(let groups):
             self.groups = groups
@@ -842,7 +855,6 @@ final class BrowsingModel {
     /// real open or reopen reads it (PRD P0-02). A real open clears the loss itself.
     private func showOpenFolder() {
         hasLeftFolder = false
-        shownOpenGeneration = library.openGeneration
         state.folder = library.folder
         state.currentPhoto = nil
         state.selection = []

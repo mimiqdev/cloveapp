@@ -532,3 +532,69 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
         }
     }
 }
+
+@Test func forgettingAClosedFoldersChangesLeavesNoUnfinishedWork() async throws {
+    let folder = try WriteTestFolder()
+    defer { folder.remove() }
+    let double = WriteFileSystemDouble()
+    let queue = makeQueue(folder, double)
+    let closed = makeFolderIdentity("closed")
+    let open = makeFolderIdentity("open")
+    let closedSet = try makeScannedSet(
+        folder: closed, root: folder.url, stem: "MMQ05184", relativeFolderPath: "closed")
+    let openSet = try makeScannedSet(
+        folder: open, root: folder.url, stem: "MMQ05185", relativeFolderPath: "open")
+    try FileManager.default.createDirectory(
+        at: folder.file("closed"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+        at: folder.file("open"), withIntermediateDirectories: true)
+    let closedSidecar = folder.file("closed/MMQ05184.xmp")
+    let openSidecar = folder.file("open/MMQ05185.xmp")
+    double.fail(.replace, at: closedSidecar, with: POSIXError(.EACCES))
+    double.fail(.replace, at: openSidecar, with: POSIXError(.EACCES))
+    let closedFailure = await queue.apply(.rating(three), to: closedSet)
+    let openFailure = await queue.apply(.rating(four), to: openSet)
+    #expect(closedFailure.state.failure != nil)
+    #expect(openFailure.state.failure != nil)
+
+    let forgotten = await queue.forgetUnfinishedChanges(in: closed)
+    let remaining = await queue.unfinishedChanges()
+    let closedLatest = await queue.latestChange(for: closedSet.photoSet.id)
+    let forgottenRetry = await queue.retry(closedFailure.id)
+
+    // PRD Failure and recovery: a closed folder's unconfirmed changes are not saved and are
+    // forgotten, so a later leaving question only counts the folder that is open.
+    #expect(forgotten == 1)
+    #expect(remaining.map(\.identity) == [openSet.photoSet.id])
+    #expect(closedLatest == nil)
+    #expect(forgottenRetry == nil)
+
+    let forgottenOpen = await queue.forgetUnfinishedChanges(in: open)
+    let empty = await queue.unfinishedChanges()
+    #expect(forgottenOpen == 1)
+    #expect(empty.isEmpty)
+}
+
+@Test func aMarkAfterAForgetDoesNotCarryAbandonedFields() async throws {
+    let folder = try WriteTestFolder()
+    defer { folder.remove() }
+    let double = WriteFileSystemDouble()
+    let queue = makeQueue(folder, double)
+    let identity = makeFolderIdentity("abandoned")
+    let set = try makeScannedSet(folder: identity, root: folder.url, stem: "MMQ05184")
+    let sidecar = folder.file("MMQ05184.xmp")
+    double.fail(.replace, at: sidecar, with: POSIXError(.ENOSPC))
+    let abandoned = await queue.apply(.rating(three), to: set)
+    #expect(abandoned.state.failure?.reason == .insufficientSpace)
+
+    await queue.drain()
+    await queue.forgetUnfinishedChanges(in: identity)
+    double.stopFailing(.replace)
+    let later = await queue.apply(.label(green), to: set)
+
+    // PRD Failure and recovery: the next open reads the actual XMP, so a later mark starts from
+    // what is on disk instead of merging a request the user abandoned.
+    #expect(later.requested.rating == nil)
+    #expect(later.state == .savedInSidecar)
+    #expect(try marks(at: sidecar) == XMPMarks(label: green))
+}

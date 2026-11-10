@@ -11,27 +11,47 @@ struct FolderSaveSummaryTests {
     }
 
     /// PRD P0-08 shows Writing… while a change is unfinished, Saved only once every change
-    /// confirmed, and a count for the photos whose change did not.
+    /// confirmed in a sidecar, and a count for the photos whose change did not.
     @Test func theSummaryReportsWritingSavedOrUnconfirmed() {
         #expect(FolderSaveSummary(states: []).text == "No changes yet")
-        #expect(FolderSaveSummary(states: []).unsavedCount == 0)
-        #expect(
-            FolderSaveSummary(states: [.savedInSidecar, .savedInCloveOnly]).text == "All saved")
-        // A Clove-stored Reject is confirmed but never saved, so the folder line says how many
-        // are only stored instead of folding them into All saved (G1 decision 5, PRD P0-08).
-        #expect(FolderSaveSummary(states: [.storedInClove]).text == "1 stored in Clove")
-        #expect(
-            FolderSaveSummary(states: [.storedInClove, .storedInClove]).text == "2 stored in Clove")
-        #expect(
-            FolderSaveSummary(states: [.savedInSidecar, .storedInClove]).text == "1 stored in Clove"
-        )
+        #expect(FolderSaveSummary(states: []).hasUnfinished == false)
+        #expect(FolderSaveSummary(states: [.savedInSidecar, .savedInSidecar]).text == "All saved")
         // A waiting or running write wins over a finished one, so the folder never reads saved
         // while a change is still on its way to storage.
         #expect(FolderSaveSummary(states: [.savedInSidecar, .pending]).text == "Writing…")
         #expect(FolderSaveSummary(states: [.writing]).text == "Writing…")
         #expect(FolderSaveSummary(states: [.savedInSidecar, failed()]).text == "1 photo not saved")
         #expect(FolderSaveSummary(states: [failed(), failed()]).text == "2 photos not saved")
-        #expect(FolderSaveSummary(states: [failed(), failed()]).unsavedCount == 2)
+        #expect(FolderSaveSummary(states: [failed(), failed()]).failed == 2)
+        #expect(FolderSaveSummary(states: [.writing]).hasUnfinished)
+    }
+
+    /// PRD Failure and recovery keeps a failure visible while other writes run, so a running
+    /// write never hides the count or takes the unsaved list away.
+    @Test func aRunningWriteDoesNotHideAFailure() {
+        let summary = FolderSaveSummary(states: [.writing, failed(), .savedInSidecar])
+        #expect(summary.text == "Writing…, 1 not saved")
+        #expect(summary.hasUnfinished)
+    }
+
+    /// G1 decisions 5 and 6 keep the Confirmed kinds apart: a Clove-only mark is not Saved, and a
+    /// stored Reject is never folded into All saved.
+    @Test func cloveStorageKeepsItsOwnWords() {
+        #expect(FolderSaveSummary(states: [.savedInCloveOnly]).text == "1 saved in Clove only")
+        #expect(
+            FolderSaveSummary(states: [.savedInCloveOnly, .savedInCloveOnly]).text
+                == "2 saved in Clove only")
+        #expect(FolderSaveSummary(states: [.storedInClove]).text == "1 stored in Clove")
+        #expect(
+            FolderSaveSummary(states: [.storedInClove, .storedInClove]).text == "2 stored in Clove")
+        #expect(
+            FolderSaveSummary(states: [.savedInSidecar, .storedInClove]).text
+                == "1 saved, 1 stored in Clove")
+        #expect(
+            FolderSaveSummary(states: [.savedInSidecar, .savedInCloveOnly]).text
+                == "1 saved, 1 saved in Clove only")
+        #expect(!FolderSaveSummary(states: [.savedInCloveOnly]).isAllSaved)
+        #expect(!FolderSaveSummary(states: [.savedInCloveOnly]).text.contains("All saved"))
     }
 
     /// A superseded change counts as neither saved nor unsaved, because a newer change the user

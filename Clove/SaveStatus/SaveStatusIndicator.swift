@@ -46,16 +46,10 @@ struct SaveStatusIndicator: View {
             UnsavedChangesView(browsing: browsing)
         }
         // PRD Failure and recovery's Select-it-through-Open action opens the system picker here
-        // too, so a lost location is recoverable from the grid and from detail (PRD P0-01).
-        .sheet(isPresented: $isPickingFolder) {
-            FolderPicker(
-                onPick: { url in
-                    isPickingFolder = false
-                    Task { await browsing.openPickedFolder(url) }
-                },
-                onCancel: { isPickingFolder = false }
-            )
-            .ignoresSafeArea()
+        // too, so a lost location is recoverable from the grid and from detail (PRD P0-01). The
+        // choice arrives after the picker dismisses, so a leaving question can present.
+        .folderPicker(isPresented: $isPickingFolder) { url in
+            await browsing.openPickedFolder(url)
         }
     }
 
@@ -63,7 +57,9 @@ struct SaveStatusIndicator: View {
     private var summaryControl: some View {
         let summary = browsing.saveSummary
         return Group {
-            if summary.unsavedCount > 0 {
+            // The list stays reachable while anything is unfinished, even when the line is
+            // showing Writing… (PRD Failure and recovery).
+            if !browsing.unsavedChanges.isEmpty {
                 Button {
                     showingUnsaved = true
                 } label: {
@@ -92,20 +88,14 @@ struct SaveStatusIndicator: View {
         .accessibilityValue(summary.text)
     }
 
-    /// One symbol per reading, so the state is not carried by words alone (PRD P0-15).
+    /// One symbol per reading, so the state is not carried by words alone (PRD P0-15). A failure
+    /// wins, so it is never hidden behind a running write (PRD Failure and recovery).
     private func symbol(for summary: FolderSaveSummary) -> String {
-        switch summary {
-        case .noChanges:
-            "circle.dashed"
-        case .writing:
-            "arrow.triangle.2.circlepath"
-        case .saved:
-            "checkmark.circle"
-        case .storedInClove:
-            "internaldrive"
-        case .unsaved:
-            "exclamationmark.triangle"
-        }
+        if summary.failed > 0 { return "exclamationmark.triangle" }
+        if summary.writing > 0 { return "arrow.triangle.2.circlepath" }
+        if summary.isAllSaved { return "checkmark.circle" }
+        if summary.savedInCloveOnly > 0 || summary.storedInClove > 0 { return "internaldrive" }
+        return "circle.dashed"
     }
 
     /// Performs one recovery action from the PRD's table (PRD Failure and recovery).

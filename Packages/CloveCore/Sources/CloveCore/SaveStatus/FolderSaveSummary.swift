@@ -6,87 +6,94 @@ import Foundation
 /// PRD P0-08 keeps save status always visible and confirms each change in its own storage, so
 /// the indicator summarises the folder instead of repeating every photo: **Writing…** while a
 /// change is admitted and unfinished, **All saved** only once every requested change read back
-/// from the storage it uses, and a count of the photos whose change is not saved. A folder with
-/// nothing requested has nothing to confirm and says so, rather than claiming everything saved.
-public enum FolderSaveSummary: Hashable, Sendable {
-    /// No change was requested in this folder, so there is nothing to confirm.
-    case noChanges
-    /// At least one change is waiting for or running its write (PRD P0-08: **Writing…**).
-    case writing
-    /// Every requested change is confirmed in its storage and saved there (PRD P0-08).
-    case saved
-    /// This many photos have a change that did not confirm.
-    case unsaved(Int)
-    /// At least one change is confirmed only in Clove storage, so nothing in the folder may be
-    /// summarised as saved.
-    ///
-    /// G1 decision 5 keeps the word Saved for XMP writes and a confirmed move, so a folder with
-    /// a stored Reject says how many are stored rather than calling the folder saved.
-    case storedInClove(Int)
+/// as a sidecar write, and a count for the photos whose change did not confirm or is only
+/// confirmed in Clove. PRD Failure and recovery requires the failed count to stay visible while
+/// other writes run, so a failure never hides behind **Writing…**.
+///
+/// G1 decisions 5 and 6 keep three confirmed kinds apart: a sidecar write is **Saved**, a
+/// standalone JPEG/HIF mark is **Saved in Clove only**, and a Reject that is merely stored is
+/// **Stored in Clove**. The folder line never folds either Clove kind into **All saved**, and a
+/// folder with nothing requested says so rather than claiming everything was saved.
+public struct FolderSaveSummary: Hashable, Sendable {
+    /// How many changes read back from their sidecar (PRD P0-08's **Saved**).
+    public let savedInSidecar: Int
+    /// How many standalone marks are confirmed in Clove storage only (G1 decision 6).
+    public let savedInCloveOnly: Int
+    /// How many Rejects are confirmed in Clove storage and not moved yet (G1 decision 5).
+    public let storedInClove: Int
+    /// How many changes are waiting for or running their write.
+    public let writing: Int
+    /// How many changes did not confirm (PRD P0-08).
+    public let failed: Int
 
     /// Summarises every photo's latest state in the open folder.
     ///
-    /// A change still in progress wins, because PRD P0-08 shows **Writing…** until it settles; a
-    /// finished failure counts as unsaved, and a superseded change counts as neither, because a
-    /// newer change the user asked for replaced it (PRD How marks reach disk, rule 8). A Clove
-    /// Reject counts as confirmed but not as saved, so it never turns the count down and a folder
-    /// of only Rejects never reads **All saved**.
+    /// A superseded change counts as neither saved nor unsaved, because a newer change the user
+    /// asked for replaced it (PRD How marks reach disk, rule 8).
     public init(states: [MarkChangeState]) {
-        var isWriting = false
+        var savedInSidecar = 0
+        var savedInCloveOnly = 0
+        var storedInClove = 0
+        var writing = 0
         var failed = 0
-        var saved = 0
-        var stored = 0
         for state in states {
             switch state {
             case .pending, .writing:
-                isWriting = true
+                writing += 1
             case .failed:
                 failed += 1
-            case .savedInSidecar, .savedInCloveOnly:
-                saved += 1
+            case .savedInSidecar:
+                savedInSidecar += 1
+            case .savedInCloveOnly:
+                savedInCloveOnly += 1
             case .storedInClove:
-                stored += 1
+                storedInClove += 1
             case .superseded:
                 break
             }
         }
-        if isWriting {
-            self = .writing
-        } else if failed > 0 {
-            self = .unsaved(failed)
-        } else if stored > 0 {
-            self = .storedInClove(stored)
-        } else if saved > 0 {
-            self = .saved
-        } else {
-            self = .noChanges
-        }
+        self.savedInSidecar = savedInSidecar
+        self.savedInCloveOnly = savedInCloveOnly
+        self.storedInClove = storedInClove
+        self.writing = writing
+        self.failed = failed
+    }
+
+    /// Whether a change is unfinished, so the unsaved list has something to show.
+    public var hasUnfinished: Bool { writing > 0 || failed > 0 }
+
+    /// Whether every recorded change is a confirmed sidecar write.
+    public var isAllSaved: Bool {
+        failed == 0 && writing == 0 && savedInCloveOnly == 0 && storedInClove == 0
+            && savedInSidecar > 0
     }
 
     /// What the indicator reads.
     ///
-    /// **All saved** requires that no confirmed change is only stored in Clove: any stored Reject
-    /// makes the line report the stored count, so the folder never claims a save a Reject has not
-    /// had (G1 decision 5, PRD How marks reach disk, rule 7).
+    /// A failure is never hidden by a running write (PRD Failure and recovery), and a Clove-only
+    /// mark or a stored Reject keeps its own words instead of being called saved
+    /// (G1 decisions 5–6).
     public var text: String {
-        switch self {
-        case .noChanges:
-            "No changes yet"
-        case .writing:
-            "Writing…"
-        case .saved:
-            "All saved"
-        case .storedInClove(let count):
-            count == 1 ? "1 stored in Clove" : "\(count) stored in Clove"
-        case .unsaved(let count):
-            count == 1 ? "1 photo not saved" : "\(count) photos not saved"
+        if failed > 0 {
+            let unsaved = failed == 1 ? "1 photo not saved" : "\(failed) photos not saved"
+            return writing > 0 ? "Writing…, \(failed) not saved" : unsaved
         }
-    }
-
-    /// How many photos have a change that is not saved, which is what the list opens.
-    public var unsavedCount: Int {
-        if case .unsaved(let count) = self { return count }
-        return 0
+        if writing > 0 { return "Writing…" }
+        if isAllSaved { return "All saved" }
+        var parts: [String] = []
+        if savedInSidecar > 0 {
+            parts.append(savedInSidecar == 1 ? "1 saved" : "\(savedInSidecar) saved")
+        }
+        if savedInCloveOnly > 0 {
+            parts.append(
+                savedInCloveOnly == 1
+                    ? "1 saved in Clove only" : "\(savedInCloveOnly) saved in Clove only")
+        }
+        if storedInClove > 0 {
+            parts.append(
+                storedInClove == 1 ? "1 stored in Clove" : "\(storedInClove) stored in Clove")
+        }
+        return parts.isEmpty ? "No changes yet" : parts.joined(separator: ", ")
     }
 }
 

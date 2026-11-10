@@ -117,15 +117,8 @@ struct DetailScreen: View {
                 .accessibilityIdentifier("clove.detail.noPhoto")
             }
         }
-        .sheet(isPresented: $isPickingFolder) {
-            FolderPicker(
-                onPick: { url in
-                    isPickingFolder = false
-                    Task { await browsing.openPickedFolder(url) }
-                },
-                onCancel: { isPickingFolder = false }
-            )
-            .ignoresSafeArea()
+        .folderPicker(isPresented: $isPickingFolder) { url in
+            await browsing.openPickedFolder(url)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail")

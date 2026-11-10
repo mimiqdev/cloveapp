@@ -265,17 +265,19 @@ final class FolderLibrarySession: FolderLibrary {
     /// report an unconfirmed change as saved. The write is admitted through C11's session for the
     /// same reason ``apply(_:to:)`` is (G1 folder access, PRD P0-08).
     func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus? {
-        guard let status = changes.latest(for: photo), status.state.failure != nil else {
+        guard case .success(let stores) = await resolvedStores() else {
             return changes.latest(for: photo)
         }
-        guard let session = openSession else { return status }
-        guard case .success(let stores) = await resolvedStores() else { return status }
+        // C4's own record is the authority: a session copy can lag a transition, and a change
+        // this open already forgot must not be retried (PRD Failure and recovery).
+        guard let status = await stores.writes.latestChange(for: photo) else { return nil }
+        guard status.state.failure != nil, let session = openSession else { return status }
         do {
             return try await session.withAdmittedWork {
                 await stores.writes.retry(status.id)
             }
         } catch {
-            return changes.latest(for: photo) ?? status
+            return status
         }
     }
 
@@ -609,6 +611,12 @@ final class FolderLibrarySession: FolderLibrary {
         }
         if case .success(let stores) = await resolvedStores() {
             await stores.writes.drain()
+            // PRD Failure and recovery: a folder that closes takes its unconfirmed changes with
+            // it, so the next open reads the actual XMP and no later leaving question counts
+            // marks the user abandoned.
+            if folder != Self.noFolder {
+                await stores.writes.forgetUnfinishedChanges(in: folder)
+            }
         }
         guard let session = openSession else { return }
         openSession = nil
