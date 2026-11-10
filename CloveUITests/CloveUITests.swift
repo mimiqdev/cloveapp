@@ -18,6 +18,7 @@ final class CloveUITests: XCTestCase {
         openTestLibrary(in: app)
         checkGridOverlays(in: app)
         showOnlyRejectedThenAll(in: app)
+        rerunGrouping(in: app)
         openFirstPhoto(in: app)
         markThePhoto(in: app)
         returnToGrid(in: app)
@@ -79,6 +80,16 @@ final class CloveUITests: XCTestCase {
             element(in: app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 10),
             "The All filter did not bring the photos back"
         )
+    }
+
+    /// The grouping menu runs similar groups again and the grid keeps its group tag
+    /// (PRD P0-11: Run again is always available; the test library's groups stay as they are).
+    @MainActor
+    private func rerunGrouping(in app: XCUIApplication) {
+        selectMenuItem(in: app, "clove.grid.grouping", item: "clove.grid.grouping.runAgain")
+        let group = element(in: app, "clove.grid.group.burst-2678")
+        XCTAssertTrue(
+            group.waitForExistence(timeout: 10), "Run again dropped the grid's similar group")
     }
 
     /// Taps a menu control, then its item (PRD P0-03).
