@@ -58,3 +58,27 @@ public struct RejectsFolderName: RawRepresentable, Hashable, Sendable {
         self.rawValue = validText
     }
 }
+
+extension RejectsFolderNameError {
+    /// A plain-text explanation the settings screen shows under the name field (PRD Move rejects,
+    /// and PRD Failure and recovery: states and errors use accurate, nontechnical wording).
+    ///
+    /// One sentence per refusal, so an invalid name is explained where it is typed and is never
+    /// silently trimmed, corrected, or saved.
+    public var message: String {
+        switch self {
+        case .empty:
+            "Enter a folder name."
+        case .pathSeparator:
+            "Use one folder name, without a slash."
+        case .relativeComponent:
+            "\".\" and \"..\" can't name a folder here."
+        case .hidden:
+            "A folder name can't start with a dot."
+        case .controlCharacter:
+            "A folder name can't contain invisible control characters."
+        case .tooLong:
+            "Use a shorter name: at most 64 bytes."
+        }
+    }
+}
