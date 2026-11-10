@@ -44,6 +44,7 @@ final class CloveUITests: XCTestCase {
         rateTheSelection(in: app)
         retryTheFailedPhotos(in: app)
         leaveMultiSelect(in: app)
+        clearFinishingReject(in: app)
         rejectPhotosForMove(in: app)
         checkMoveRejectsSetting(in: app)
         moveRejectsWithRetry(in: app)
@@ -709,6 +710,29 @@ final class CloveUITests: XCTestCase {
         let rated = expectation(
             for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: retried)
         wait(for: [rated], timeout: 10)
+    }
+
+    /// Clears the reject the group view's finishing action left, so Move rejects starts from a
+    /// known two-photo selection (PRD In-group culling, P0-10).
+    @MainActor
+    private func clearFinishingReject(in app: XCUIApplication) {
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.rejected")
+        let rejected = element(in: app, "clove.grid.photo.mmq02698")
+        XCTAssertTrue(
+            rejected.waitForExistence(timeout: 10),
+            "The group view's finishing reject was not in the filtered grid")
+        rejected.press(forDuration: 1)
+
+        let count = element(in: app, "clove.grid.batch.count")
+        XCTAssertTrue(
+            count.waitForExistence(timeout: 10), "The finishing reject did not start a selection")
+        element(in: app, "clove.grid.batch.rate.2").tap()
+        let cleared = expectation(
+            for: NSPredicate(format: "exists == false"), evaluatedWith: rejected)
+        wait(for: [cleared], timeout: 10)
+
+        element(in: app, "clove.grid.batch.done").tap()
+        selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.all")
     }
 
     /// Rejects two photos from the batch bar, so Move rejects has a known count to confirm
