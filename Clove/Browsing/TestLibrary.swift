@@ -363,6 +363,9 @@ final class TestLibrary: FolderLibrary {
             change.rating == nil && change.label == nil ? .storedInClove : .savedInSidecar
         let status = MarkChangeStatus(
             id: MarkChangeID(), identity: photo, requested: change, state: state)
+        // The sample mirrors C4's shown marks for every confirmed write, including the restores
+        // an undo or redo performs through this same call (PRD P0-05).
+        shownMarks[photo] = marks
         changes[photo] = status
         // The sample publishes through the same stream as the real library, so every verify
         // exercises the model's update path (PRD P0-08, P0-13).
@@ -657,9 +660,6 @@ final class TestLibrary: FolderLibrary {
             requests.remove(at: index)
             inFlight[admission.photo] = requests.isEmpty ? nil : requests
         }
-        if status.state.isConfirmed, let shown = shownMarks[admission.photo] {
-            shownMarks[admission.photo] = shown.including(admission.change)
-        }
         return status
     }
 
@@ -675,9 +675,11 @@ final class TestLibrary: FolderLibrary {
         let change = items.first?.change ?? MarkChange()
         var order: [PhotoIdentity: Int] = [:]
         for (index, item) in items.enumerated() { order[item.photo] = index }
+        let libraryBatch = MarkBatchID()
+        batches[libraryBatch] = items
         return BatchWriteAdmission(
             change: change, batches: [], admissions: admissions, unavailable: [],
-            libraryBatch: MarkBatchID(), order: order)
+            libraryBatch: libraryBatch, order: order)
     }
 
     /// Writes one admitted bar action and reports each photo's result (PRD P0-09).
