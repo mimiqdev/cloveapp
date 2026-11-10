@@ -668,10 +668,11 @@ final class BrowsingModel {
     /// Records one completed move, so the toast can show it and C14 can undo it (PRD P0-10).
     func recordRejectMove(
         _ result: RejectMoveResult, keptIdentities: [PhotoIdentity],
-        rejectsFolderName: RejectsFolderName
+        rejectsFolderName: RejectsFolderName, folder: FolderIdentity?, openGeneration: Int
     ) {
         lastRejectMove = CompletedRejectMove(
-            result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName)
+            result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
+            folder: folder, openGeneration: openGeneration)
         isRejectMoveToastVisible = true
     }
 
@@ -686,8 +687,14 @@ final class BrowsingModel {
     /// every photo the run moved. A batch the library can no longer retry answers nil.
     func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
-        let folder = state.folder
-        let generation = openGeneration
+        // The details sheet can outlive its folder open. A record from another open must not
+        // clear Reject or move anything in the replacement, even when the folder identity is the
+        // same after a reopen (PRD P0-02, P0-10).
+        guard
+            completed.openGeneration == openGeneration, completed.folder == state.folder
+        else { return nil }
+        let folder = completed.folder
+        let generation = completed.openGeneration
         let selection = RejectMoveRetrySelection(
             result: completed.result,
             keptIdentities: Set(completed.keptIdentities),
@@ -729,7 +736,8 @@ final class BrowsingModel {
             noLongerRejected: selection.noLongerRejected.map(\.identity))
         lastRejectMove = CompletedRejectMove(
             result: combined, keptIdentities: completed.keptIdentities,
-            rejectsFolderName: completed.rejectsFolderName)
+            rejectsFolderName: completed.rejectsFolderName,
+            folder: completed.folder, openGeneration: completed.openGeneration)
         isRejectMoveToastVisible = true
         return combined
     }
@@ -1248,6 +1256,10 @@ struct CompletedRejectMove: Sendable, Identifiable {
     let keptIdentities: [PhotoIdentity]
     /// The rejects folder name that run used, for the toast (PRD Move rejects).
     let rejectsFolderName: RejectsFolderName
+    /// The folder open the run belonged to (PRD P0-02).
+    let folder: FolderIdentity?
+    /// The open generation the run belonged to, so a reopen invalidates it (PRD P0-02).
+    let openGeneration: Int
 
     /// The run's id, so the grid can key the toast on it (PRD P0-10).
     var id: RejectMoveBatchID { result.id }

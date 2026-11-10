@@ -40,6 +40,12 @@ final class MoveRejectsFlow: Identifiable {
     /// The staged keeps for the plan, or nil before one is built (PRD P0-10).
     private(set) var keepSelection: RejectMoveKeepSelection?
 
+    /// The folder open that produced the confirmation (PRD P0-02, P0-10).
+    ///
+    /// A reopen, even of the same folder, gets a new generation; a confirmation from an older
+    /// open must never clear Reject or move files in the new one.
+    private var confirmationContext: FolderContext?
+
     /// The thumbnails the keep grid draws for the open folder (PRD P0-10, P0-03).
     var thumbnails: any GridThumbnailSource { browsing.thumbnails }
 
@@ -62,9 +68,15 @@ final class MoveRejectsFlow: Identifiable {
 
     /// Builds the confirmation plan for the open folder's rejected photos (PRD P0-10).
     func plan(configuration: RejectMoveConfiguration) async {
+        let context = FolderContext(browsing: browsing)
         stage = .planning
         do {
             let plan = try await browsing.planRejectMove(configuration: configuration)
+            guard context.isCurrent(browsing) else {
+                stage = .failed("The folder changed while preparing the move.")
+                return
+            }
+            confirmationContext = context
             keepSelection = RejectMoveKeepSelection(plan: plan)
             stage = .confirming(plan)
         } catch let refusal as RejectMoveRefusal {
@@ -90,26 +102,28 @@ final class MoveRejectsFlow: Identifiable {
         // The stage becomes moving synchronously before the first await, so a second tap on Move
         // cannot start a second run or overwrite the completed move (PRD P0-10).
         guard case .confirming(let confirmed) = stage, confirmed == plan,
-            let selection = keepSelection
-        else { return false }
-        let folder = browsing.state.folder
-        let generation = browsing.openGeneration
+            let selection = keepSelection, let context = confirmationContext,
+            context.isCurrent(browsing)
+        else {
+            stage = .failed("The folder changed before the move started.")
+            return false
+        }
         let kept = selection.orderedKeptIdentities
         let moving = selection.movingPlan
         stage = .moving(finished: 0, total: moving.photoCount)
 
         var clearing = RejectMoveKeepClearing()
         for identity in kept {
-            guard isCurrent(folder, generation) else { return true }
+            guard context.isCurrent(browsing) else { return true }
             let status = await browsing.apply(.reject(false), to: identity)
             clearing.record(
                 status, for: identity,
                 files: plan.readyEntries.first { $0.identity == identity }?.files ?? [])
         }
-        guard isCurrent(folder, generation) else { return true }
+        guard context.isCurrent(browsing) else { return true }
 
         let progress = await browsing.rejectMoveProgress()
-        guard isCurrent(folder, generation) else { return true }
+        guard context.isCurrent(browsing) else { return true }
         startProgress(progress)
         do {
             let result = try await browsing.runRejectMove(moving)
@@ -119,26 +133,25 @@ final class MoveRejectsFlow: Identifiable {
             let completed = RejectMoveResult(id: result.id, outcomes: outcomes)
             // A folder replaced while the move ran must not record its result against the new
             // one; the model already cleared the old record when that open happened.
-            guard isCurrent(folder, generation) else { return true }
+            guard context.isCurrent(browsing) else { return true }
             browsing.recordRejectMove(
                 completed, keptIdentities: kept,
-                rejectsFolderName: plan.configuration.rejectsFolderName)
+                rejectsFolderName: plan.configuration.rejectsFolderName,
+                folder: context.folder, openGeneration: context.generation)
             return true
         } catch let refusal as RejectMoveRefusal {
             cancelProgress()
             // Nothing moved, so the keep clears are restored; a whole-request refusal must not
             // leave the kept photos changed without a completed record C14 can undo.
-            if isCurrent(folder, generation) {
-                await restore(
-                    clearing.restorationIdentities, folder: folder, generation: generation)
+            if context.isCurrent(browsing) {
+                await restore(clearing.restorationIdentities, context: context)
             }
             stage = Self.stage(for: refusal)
             return false
         } catch {
             cancelProgress()
-            if isCurrent(folder, generation) {
-                await restore(
-                    clearing.restorationIdentities, folder: folder, generation: generation)
+            if context.isCurrent(browsing) {
+                await restore(clearing.restorationIdentities, context: context)
             }
             stage = .failed("The rejected photos couldn't be moved.")
             return false
@@ -146,18 +159,27 @@ final class MoveRejectsFlow: Identifiable {
     }
 
     /// Restores Reject on kept photos whose clear ran before a whole-request failure (P0-10).
-    private func restore(
-        _ identities: [PhotoIdentity], folder: FolderIdentity?, generation: Int
-    ) async {
+    private func restore(_ identities: [PhotoIdentity], context: FolderContext) async {
         for identity in identities {
-            guard isCurrent(folder, generation) else { return }
+            guard context.isCurrent(browsing) else { return }
             _ = await browsing.apply(.reject(true), to: identity)
         }
     }
 
-    /// Whether the folder that started this move is still the open one (PRD P0-02).
-    private func isCurrent(_ folder: FolderIdentity?, _ generation: Int) -> Bool {
-        browsing.state.folder == folder && browsing.openGeneration == generation
+    /// The folder open a confirmation belongs to (PRD P0-02, P0-10).
+    @MainActor
+    private struct FolderContext: Equatable {
+        let folder: FolderIdentity?
+        let generation: Int
+
+        init(browsing: BrowsingModel) {
+            folder = browsing.state.folder
+            generation = browsing.openGeneration
+        }
+
+        func isCurrent(_ browsing: BrowsingModel) -> Bool {
+            browsing.state.folder == folder && browsing.openGeneration == generation
+        }
     }
 
     /// Subscribes to C6's progress before a run starts (PRD P0-10).

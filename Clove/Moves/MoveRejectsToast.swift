@@ -170,7 +170,8 @@ struct MoveRejectsDetailsSheet: View {
                 result = retried
                 current = CompletedRejectMove(
                     result: retried, keptIdentities: current.keptIdentities,
-                    rejectsFolderName: current.rejectsFolderName)
+                    rejectsFolderName: current.rejectsFolderName,
+                    folder: current.folder, openGeneration: current.openGeneration)
                 let details = RejectMoveDetails(result: retried)
                 if details.rows.isEmpty {
                     // The updated toast now reports the retry's total; closing the sheet leaves
