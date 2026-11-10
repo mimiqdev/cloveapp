@@ -41,8 +41,12 @@ final class FolderGrouping {
 
     /// The folder's photos as grouping receives them, replaced by Run again (PRD P0-11).
     private var inputs: [GroupingPhoto] = []
+    /// The caller's cache token for these inputs, replaced with them (PRD Similar groups rules).
+    private var revision = GroupingInputRevision(rawValue: "")
     /// C12's similar-groups setting for this folder (PRD P0-11).
     private var enabled = true
+    /// Whether the folder ended, so a pass that resumes late starts nothing (G1 folder access).
+    private var isClosed = false
     /// The result the library last received, so an unchanged publication stays quiet.
     private var published: [BrowsingGroup] = []
     /// The background feature and refinement pass, cancelled by a new run or by closing.
@@ -50,12 +54,12 @@ final class FolderGrouping {
     /// The grouper's published results, so a refinement reaches the grid (PRD P0-11).
     private var updatesTask: Task<Void, Never>?
 
-    /// The token the group cache is keyed by, on top of the eligible photos' fingerprint.
+    /// The feature pipeline's part of the group cache's token (PRD Similar groups rules).
     ///
-    /// The fingerprint covers the photos, their times, bodies and names, so only a change to what
-    /// the features are made of has to appear here: G1's feature revision 2 and the grid's 400 px
-    /// preview. A changed feature pipeline then groups again instead of restoring older groups.
-    static let revision = GroupingInputRevision(rawValue: "preview:400|feature:2")
+    /// C9's fingerprint covers the photos, their times, bodies and names; the folder library adds
+    /// each photo set's file revision to this token, so a changed file or a changed feature
+    /// pipeline groups again instead of restoring older groups (G1's Grouping row).
+    static let featureRevision = "preview:400|feature:2"
 
     /// Builds one folder's grouping over its caches, sets and publication.
     ///
@@ -100,8 +104,11 @@ final class FolderGrouping {
     /// It returns once the time-only groups — or the cache's finished result — are published, so
     /// the library can report the scan finished knowing the folder's groups exist (P0-14). The
     /// refinement that needs features keeps running afterwards.
-    func begin(photos: [GroupingPhoto], enabled: Bool) async {
+    func begin(
+        photos: [GroupingPhoto], revision: GroupingInputRevision, enabled: Bool
+    ) async {
         inputs = photos
+        self.revision = revision
         self.enabled = enabled
         await run(reusingCache: true)
     }
@@ -118,7 +125,7 @@ final class FolderGrouping {
     /// turning it back on shows the finished result at once. The settings screen reaches this
     /// through the folder library's one call.
     func setEnabled(_ enabled: Bool, photos: [GroupingPhoto]) async {
-        guard enabled != self.enabled else { return }
+        guard !isClosed, enabled != self.enabled else { return }
         inputs = photos
         self.enabled = enabled
         await run(reusingCache: true)
@@ -129,6 +136,7 @@ final class FolderGrouping {
     /// Queued feature work is dropped, a preview read already running may finish and is
     /// discarded, and the grouper's stream is removed; the caller can then release the scope.
     func close() async {
+        isClosed = true
         let analysis = analysisTask
         analysisTask = nil
         updatesTask?.cancel()
@@ -141,13 +149,21 @@ final class FolderGrouping {
     // MARK: - Running
 
     /// Runs step 2 and starts the background pass for the current inputs.
+    ///
+    /// A pass this run replaces is cancelled and awaited before the new one starts, so a Run again
+    /// or a changed setting can never leave two passes queueing file work, and no pass that
+    /// resumes late can publish into the new result.
     private func run(reusingCache: Bool) async {
-        analysisTask?.cancel()
+        let earlier = analysisTask
         analysisTask = nil
+        earlier?.cancel()
         await features.cancel(folder: folder.rawValue)
+        await earlier?.value
+        guard !isClosed else { return }
         await grouping.run(
-            photos: inputs, revision: Self.revision, similarGroupsEnabled: enabled,
+            photos: inputs, revision: revision, similarGroupsEnabled: enabled,
             reuseCache: reusingCache)
+        guard !isClosed else { return }
         // The grouper's own result, read here rather than waited for, so the caller's next step
         // runs after the first publication instead of racing it (PRD P0-14).
         let groups = await grouping.current.browsingGroups
@@ -157,13 +173,17 @@ final class FolderGrouping {
     }
 
     /// Watches the grouper's later results, so a refinement reaches the grid (PRD P0-11).
+    ///
+    /// The loop borrows `self` only for each publication: a stream lasts until ``close()``, so
+    /// holding the folder strongly for its whole lifetime would keep a closed folder's grouping,
+    /// pipeline and caches alive behind the observer.
     private func startUpdates() {
         guard updatesTask == nil else { return }
         updatesTask = Task { [weak self] in
-            guard let self else { return }
-            for await result in await self.grouping.updates() {
+            guard let stream = await self?.grouping.updates() else { return }
+            for await result in stream {
                 guard !Task.isCancelled else { return }
-                self.adopt(result.browsingGroups)
+                self?.adopt(result.browsingGroups)
             }
         }
     }
@@ -179,7 +199,7 @@ final class FolderGrouping {
     private func startAnalysis() {
         analysisTask?.cancel()
         analysisTask = nil
-        guard enabled else { return }
+        guard enabled, !isClosed else { return }
         let candidates = GroupingFeatureCandidates.photos(in: inputs)
         analysisTask = Task { [weak self] in
             await self?.analyse(candidates)
@@ -195,6 +215,7 @@ final class FolderGrouping {
     /// unsettled boundary per call, so asking for a pass per feature would make the work grow
     /// with the square of the folder's photo count.
     private func analyse(_ candidates: [GroupingPhoto]) async {
+        guard !isClosed, enabled else { return }
         await similarity.start(photos: candidates.map(\.id))
         let sets = sets
         var sources: [(photo: GroupingPhoto, url: URL)] = []
@@ -218,6 +239,9 @@ final class FolderGrouping {
                 // (G1 folder access, I1's request identity).
                 var byRequest: [ImageFeatureRequest: PhotoIdentity] = [:]
                 for source in admittedSources {
+                    // A cancelled pass must stop reading files, or a Run again or a lost folder
+                    // would leave it queueing work behind the new state (G1 folder access).
+                    guard !Task.isCancelled else { return }
                     guard let revision = try? ThumbnailRevision.read(from: source.url) else {
                         await similarity.settle(.unavailable, for: source.photo.id)
                         continue
@@ -228,6 +252,7 @@ final class FolderGrouping {
                             locationIdentity: folder.rawValue))
                     byRequest[request] = source.photo.id
                 }
+                guard !Task.isCancelled else { return }
                 for await result in await features.run(Array(byRequest.keys)) {
                     guard let photo = byRequest[result.request] else { continue }
                     switch result.outcome {

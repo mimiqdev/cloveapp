@@ -474,14 +474,18 @@ final class FolderLibrarySession: FolderLibrary {
             status: summary.status == .complete ? .complete : .partial)
         try? await stores.access.recordScan(recorded, for: session)
         await reloadRecents()
-        await startGrouping()
+        await startGrouping(generation: generation)
+        // The folder can be replaced while grouping runs above, so the report is re-checked
+        // against the generation it belongs to before it reaches the model.
+        guard generation == scanGeneration else { return }
         publish(.scanFinished(recorded))
     }
 
     /// Reports a scan that could not run as partial, without recording a count (PRD P0-01).
     private func failedScan(generation: Int) async {
         guard generation == scanGeneration else { return }
-        await startGrouping()
+        await startGrouping(generation: generation)
+        guard generation == scanGeneration else { return }
         publish(
             .scanFinished(
                 FolderScanSummary(photoCount: store.count, status: .partial)))
@@ -594,12 +598,27 @@ final class FolderLibrarySession: FolderLibrary {
     /// The first publication always lands, even with no groups, before the scan reports itself
     /// finished: a saved group view waits for it instead of dropping its place on every launch
     /// (PRD P0-14). A folder that could not build grouping publishes an empty result here too.
-    private func startGrouping() async {
+    /// The pass suspends, so the generation is re-checked before anything reaches the model: a
+    /// folder replaced meanwhile must publish neither its groups nor its empty result.
+    private func startGrouping(generation: Int) async {
         let photos = store.groupingPhotos
+        let revision = groupingRevision()
         if let grouping {
-            await grouping.begin(photos: photos, enabled: settings.similarGroupsEnabled)
+            await grouping.begin(
+                photos: photos, revision: revision, enabled: settings.similarGroupsEnabled)
         }
+        guard generation == scanGeneration else { return }
         if !hasPublishedGroups { publishGroups([]) }
+    }
+
+    /// The group cache's token for the folder as the scan found it (PRD Similar groups rules).
+    ///
+    /// C9's fingerprint covers each photo's identity, name, capture time and body; the scan's
+    /// primary-file revisions cover a file replaced in place, so neither a changed file nor a
+    /// changed feature pipeline can restore older groups (PRD P0-11).
+    private func groupingRevision() -> GroupingInputRevision {
+        let sets = store.photos.compactMap { store.scannedSet(for: $0.id) }
+        return .scanned(sets, feature: FolderGrouping.featureRevision)
     }
 
     /// Publishes grouping's groups for the open folder (PRD P0-11).
@@ -747,6 +766,12 @@ final class FolderLibrarySession: FolderLibrary {
         openScan?.cancel()
         scanTask?.cancel()
         writeStatusTask?.cancel()
+        if let grouping {
+            // Closing drains a preview read in flight, which cannot happen here, so it runs in
+            // its own task; the grouping keeps the session alive until that read ends, and the
+            // session's own deinit releases the scope if the library outlives it.
+            Task { await grouping.close() }
+        }
         updatesContinuation.finish()
     }
 }

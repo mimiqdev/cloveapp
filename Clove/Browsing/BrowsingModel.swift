@@ -391,8 +391,28 @@ final class BrowsingModel {
         case .groups(let groups):
             self.groups = groups
             groupsPublishedFor = library.folder
+            keepGroupViewOnItsPhoto()
             // A saved group view waited for this publication (PRD P0-11, P0-14).
             resolvePendingRestore(scanFinished: hasFinishedScan)
+        }
+    }
+
+    /// Keeps the open group view on its photo when grouping refines or reruns (PRD P0-11, P0-14).
+    ///
+    /// A split can move the viewed photo to another group or out of every group, and grouping
+    /// never re-keys a group to prevent it (C9's ancestry keeps only the surviving group's key).
+    /// The saved-scene validation already defines the fallback, so the live view uses the same
+    /// one: the group still holding the photo, otherwise the group that holds it now, otherwise
+    /// no group place and the grid.
+    private func keepGroupViewOnItsPhoto() {
+        guard let position = state.groupPosition else { return }
+        if let moved = library.contents.position(for: position) {
+            state.groupPosition = moved
+            return
+        }
+        state.groupPosition = nil
+        if state.route == .group {
+            state.route = .grid
         }
     }
 
