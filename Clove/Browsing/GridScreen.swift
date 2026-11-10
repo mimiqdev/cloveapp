@@ -14,6 +14,10 @@ struct GridScreen: View {
     /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
 
+    /// The app-wide settings, read live so a change on the settings screen shows here at once
+    /// (PRD Grid, Similar groups).
+    @Environment(SettingsStore.self) private var store
+
     /// The thumbnails the cells draw (PRD P0-03).
     ///
     /// The browsing model supplies the open folder's source, so opening another folder brings a
@@ -31,8 +35,8 @@ struct GridScreen: View {
         let photos = browsing.photos
         let cells = GridDisplay(
             photos: photos, groups: browsing.groups,
-            groupsEnabled: Self.settings.similarGroupsEnabled,
-            display: Self.settings.gridGroupDisplay
+            groupsEnabled: store.settings.similarGroupsEnabled,
+            display: store.settings.gridGroupDisplay
         ).cells
         VStack(spacing: 0) {
             controls
@@ -93,7 +97,7 @@ struct GridScreen: View {
             }
             .accessibilityIdentifier("clove.grid.order")
 
-            if Self.settings.similarGroupsEnabled {
+            if store.settings.similarGroupsEnabled {
                 Menu {
                     Button("Run again") { Task { await browsing.runGroupingAgain() } }
                         .accessibilityIdentifier("clove.grid.grouping.runAgain")
@@ -144,11 +148,4 @@ struct GridScreen: View {
     private var orderName: String {
         browsing.state.order == .captureTime ? "Capture time" : "File name"
     }
-
-    /// C12's launch settings the grid reads: whether similar groups are offered and how they
-    /// appear (PRD Grid, Similar groups).
-    ///
-    /// The settings screen (U11) supplies live changes; this build reads the persisted values
-    /// once, which are the launch defaults while nothing writes them.
-    private static let settings = SettingsPersistence(storage: UserDefaultsSettingsStorage()).load()
 }

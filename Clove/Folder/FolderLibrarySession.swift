@@ -58,10 +58,21 @@ final class FolderLibrarySession: FolderLibrary {
     /// The stores, prepared off the main actor so the first scene never waits on disk.
     private let stores: Task<Stores, any Error>
     private let metadata: MetadataReader
-    /// The launch settings, plus the similar-groups choice the folder keeps while it is open
-    /// (PRD P0-11). Persistence stays with the settings store.
-    private var settings: AppSettings
     private let codec = XMPCodec()
+
+    /// The rejects folder name the scan skips, read each time a folder opens (PRD Move rejects).
+    ///
+    /// A closure rather than a value, because the user can rename the folder while a folder is
+    /// open; the scan reads it when the folder opens, so a new name applies to the next open. The
+    /// PRD does not apply a rename to a folder that is already scanned.
+    private let rejectsFolderName: @MainActor () -> RejectsFolderName
+
+    /// Whether similar groups are offered, read each time grouping runs (PRD P0-11).
+    ///
+    /// It is a closure rather than a value for the same reason as the rejects folder name: the
+    /// settings screen can change it while nothing is open, and the next folder must group by
+    /// what the store says then, not by what this library was created with.
+    private let similarGroupsEnabled: @MainActor () -> Bool
 
     /// The one stream this library publishes, consumed by ``BrowsingModel``.
     let updates: AsyncStream<FolderLibraryUpdate>
@@ -118,16 +129,20 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Creates the library over a task that prepares its app-private stores.
     ///
-    /// The metadata reader and the settings are injectable so a test can keep the work small;
-    /// production passes what ``FolderLibraryLaunch`` builds.
+    /// The metadata reader and the rejects folder name are injectable so a test can keep the work
+    /// small; production passes what ``FolderLibraryLaunch`` builds.
     init(
         stores: Task<Stores, any Error>,
         metadata: MetadataReader = MetadataReader(),
-        settings: AppSettings = AppSettings()
+        rejectsFolderName: @escaping @MainActor () -> RejectsFolderName = {
+            .defaultFolderName
+        },
+        similarGroupsEnabled: @escaping @MainActor () -> Bool = { true }
     ) {
         self.stores = stores
         self.metadata = metadata
-        self.settings = settings
+        self.rejectsFolderName = rejectsFolderName
+        self.similarGroupsEnabled = similarGroupsEnabled
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         updates = stream
         updatesContinuation = continuation
@@ -308,7 +323,7 @@ final class FolderLibrarySession: FolderLibrary {
         // opens. A damaged store is reported by U7's save state; the scan still shows the photos.
         let storedMarks = (try? await stores.writes.storedMarks(for: session.folder.id)) ?? [:]
         let configuration = ScanConfiguration(
-            rejectsFolderName: settings.rejectsFolderName.rawValue)
+            rejectsFolderName: rejectsFolderName().rawValue)
         let caches = await Self.makeCaches()
         thumbnailSource = makeThumbnailSource(for: session, caches: caches)
         grouping = makeGrouping(
@@ -605,7 +620,7 @@ final class FolderLibrarySession: FolderLibrary {
         let revision = groupingRevision()
         if let grouping {
             await grouping.begin(
-                photos: photos, revision: revision, enabled: settings.similarGroupsEnabled)
+                photos: photos, revision: revision, enabled: similarGroupsEnabled())
         }
         guard generation == scanGeneration else { return }
         if !hasPublishedGroups { publishGroups([]) }
@@ -706,11 +721,12 @@ final class FolderLibrarySession: FolderLibrary {
     /// Applies C12's similar-groups setting to the open folder (PRD P0-11).
     ///
     /// Off publishes no groups and stops feature work; on publishes the cached or time-only
-    /// result at once and refines again. The settings screen reaches this through the same seam
-    /// as the other screens' calls, and later opens in this launch read the value the library
-    /// keeps here. Persisting the choice stays with the settings store.
+    /// result at once and refines again. The settings store keeps and persists the value; this
+    /// only applies it to the folder that is open, and ``similarGroupsEnabled`` reads the store
+    /// again when the next folder opens. Grouping that has not started yet needs nothing: its
+    /// time stage reads the store when the scan finishes, so a change during the scan is covered.
     func setSimilarGroupsEnabled(_ enabled: Bool) async {
-        settings.similarGroupsEnabled = enabled
+        guard hasPublishedGroups else { return }
         await grouping?.setEnabled(enabled, photos: store.groupingPhotos)
     }
 
