@@ -280,6 +280,20 @@ struct PhotoActionsTests {
         #expect(model.photos.contains { $0.id == moved && $0.marks.isRejected })
     }
 
+    @Test func leavingAndResumingTheSampleReadsItsStoredMarks() async throws {
+        let library = TestLibrary.sample
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = try #require(model.photos.first?.id)
+        let recent = try #require(library.recents.first)
+        model.apply(.label(ColourLabel(colour: .blue)), to: photo)
+        model.back()
+        #expect(model.state.route == .entry)
+        await model.resume(recent)
+        #expect(model.hasFolderContents)
+        #expect(model.shownMarks(for: photo).label.colour == .blue)
+    }
+
     @Test func aReopenRefusesNewMarksUntilItsGenerationIsInstalled() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)

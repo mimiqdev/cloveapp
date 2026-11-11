@@ -645,13 +645,9 @@ final class TestLibrary: FolderLibrary {
         try? await Task.sleep(for: drainDelay)
     }
 
-    /// Closes the sample folder, so leaving with unfinished writes really drops its photos
-    /// (PRD P0-08).
+    /// Closing a presentation leaves the sample's simulated files available to Reopen.
     func closeFolder() async {
-        stored = []
-        groups = []
         openGeneration += 1
-        updateContinuation.yield(.photos([]))
     }
 
     /// Deterministic Info without a file or device path (handoff Detail).
