@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# An explicit bash shell adds -o pipefail, so `| tee` never hides a failure.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: verify-${{ github.event.pull_request.number || inputs.pr || github.ref }}
   cancel-in-progress: true
@@ -87,8 +92,30 @@ jobs:
           key: clove-fixtures-${{ hashFiles('fixtures/manifest.json') }}
       - name: Fetch fixtures and build the sets
         run: mise run fixtures-sets 2>&1 | tee .build/ci-logs/fixtures-sets.log
-      - name: mise run verify
-        run: mise run verify 2>&1 | tee .build/ci-logs/verify.log
+      # Today's `mise run verify`, one task per step for the timings. The CloveCore
+      # tests run serially here: in parallel, tests that block on semaphores starve
+      # the runner's 3-thread cooperative pool.
+      - name: mise run generate
+        run: mise run generate 2>&1 | tee .build/ci-logs/generate.log
+      - name: mise run lint
+        run: mise run lint 2>&1 | tee .build/ci-logs/lint.log
+      - name: mise run test-fixtures
+        run: mise run test-fixtures 2>&1 | tee .build/ci-logs/test-fixtures.log
+      - name: mise run test-release
+        run: mise run test-release 2>&1 | tee .build/ci-logs/test-release.log
+      - name: mise run test-core (serial)
+        run: mise run test-core --no-parallel 2>&1 | tee .build/ci-logs/test-core.log
+      - name: mise run test-imaging
+        run: mise run test-imaging 2>&1 | tee .build/ci-logs/test-imaging.log
+      - name: mise run test-lab
+        run: mise run test-lab 2>&1 | tee .build/ci-logs/test-lab.log
+      - name: mise run build
+        run: mise run build 2>&1 | tee .build/ci-logs/build.log
+      - name: mise run smoke
+        run: mise run smoke 2>&1 | tee .build/ci-logs/smoke.log
+      - name: Test case times
+        if: always()
+        run: grep -h -E "^Test [Cc]ase .*(passed|failed|skipped)" .build/ci-logs/smoke.log || true
       - name: Upload logs and test results
         if: failure()
         uses: actions/upload-artifact@v7
