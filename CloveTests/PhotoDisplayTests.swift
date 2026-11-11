@@ -7,31 +7,32 @@ import Testing
 
 @MainActor
 struct PhotoDisplayTests {
-    @Test func measurementPersistsAcrossLaunchAndResetKeepsDeviceDefault() {
-        let storage = SampleSettingsStorage()
-        let persistence = SettingsPersistence(storage: storage)
-        let store = SettingsStore(
-            persistence: persistence, rememberedAdvanceStorage: storage,
-            physicalMemory: 8 * 1024 * 1024 * 1024)
-        store.recordScreenRenderDurations([900, 800, 750, 1000])
-        #expect(store.photoDisplayMode == .rawFirst)
-        let relaunched = SettingsStore(
-            persistence: persistence, rememberedAdvanceStorage: storage,
-            physicalMemory: 8 * 1024 * 1024 * 1024)
-        #expect(relaunched.renderMeasurement.samples.count == 4)
-        relaunched.recordScreenRenderDurations([850, 1, 1])
-        #expect(relaunched.photoDisplayMode == .cameraPreviewFirst)
-        #expect(relaunched.renderMeasurement.samples.count == 5)
-        relaunched.update { $0.photoDisplayMode = .rawFirst }
-        #expect(relaunched.photoDisplayMode == .rawFirst)
-        relaunched.resetToDefaults()
-        #expect(relaunched.settings.photoDisplayMode == nil)
-        #expect(relaunched.photoDisplayMode == .cameraPreviewFirst)
-        let again = SettingsStore(
-            persistence: persistence, rememberedAdvanceStorage: storage,
-            physicalMemory: 8 * 1024 * 1024 * 1024)
-        #expect(again.renderMeasurement.medianMilliseconds == 850)
-        #expect(again.photoDisplayMode == .cameraPreviewFirst)
+    @Test func explicitChoicePersistsAndResetReturnsToMemoryDefault() {
+        let memories: [UInt64] = [4 * 1024 * 1024 * 1024, 5 * 1024 * 1024 * 1024]
+        for memory in memories {
+            let storage = SampleSettingsStorage()
+            let persistence = SettingsPersistence(storage: storage)
+            let store = SettingsStore(
+                persistence: persistence,
+                rememberedAdvanceStorage: storage, physicalMemory: memory)
+            let expected: PhotoDisplayMode =
+                memory < 5 * 1024 * 1024 * 1024
+                ? .cameraPreviewFirst : .rawFirst
+            #expect(store.photoDisplayMode == expected)
+            let choice: PhotoDisplayMode = expected == .rawFirst ? .cameraPreviewFirst : .rawFirst
+            store.update { $0.photoDisplayMode = choice }
+            let relaunched = SettingsStore(
+                persistence: persistence,
+                rememberedAdvanceStorage: storage, physicalMemory: memory)
+            #expect(relaunched.photoDisplayMode == choice)
+            relaunched.resetToDefaults()
+            #expect(relaunched.settings.photoDisplayMode == nil)
+            #expect(relaunched.photoDisplayMode == expected)
+            let resetLaunch = SettingsStore(
+                persistence: persistence,
+                rememberedAdvanceStorage: storage, physicalMemory: memory)
+            #expect(resetLaunch.photoDisplayMode == expected)
+        }
     }
 
     @Test func sampleSwapsRawPreviewAndCameraModeNeverRendersRaw() async throws {

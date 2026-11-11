@@ -8,8 +8,7 @@ enum DetailImageOutcome: Sendable {
     case deferred
 }
 
-/// The display mode is frozen at arrival, even if the fifth timing changes the
-/// device default while this photo is still on screen.
+/// The selected colour source and pixel demand for one photo.
 struct DetailPixelRequest: Hashable, Sendable {
     enum Need: Hashable, Sendable {
         case preview
@@ -68,14 +67,12 @@ protocol DetailImageSource: AnyObject {
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async
     func leave(window: UUID) async
-    func takeScreenRenderDurations() async -> [Double]
 }
 
 extension DetailImageSource {
     func prepare(_ window: DetailPhotoWindow) async {}
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {}
     func leave(window: UUID) async {}
-    func takeScreenRenderDurations() async -> [Double] { [] }
 }
 
 @MainActor

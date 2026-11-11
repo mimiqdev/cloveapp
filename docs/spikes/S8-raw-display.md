@@ -468,12 +468,14 @@ Only one full decode is held, released on leaving the photo. A RAW set without a
 usable camera full image uses RAW first for that whole photo. JPEG-only and
 HIF-only behaviour is unchanged. The grid stays on embedded previews.
 
-The supervisor's pure device-default rule chooses Camera preview first below
-6 GiB physical memory or when the median of the first five successful screen RAW
-renders exceeds 700 ms. Until five samples exist, speed does not decide. The
-measurement is stored once, never re-measured, and a crossing applies from the
-next photo. An explicit Settings choice wins. Reset clears that choice and returns
-to the device default; the UI offers only RAW and Camera preview.
+The supervisor's revised device default is memory only: below 5 GiB reported
+physical memory gives Camera preview first; otherwise RAW first. Exactly 5 GiB
+gives RAW. The 5 GiB boundary replaces issue #132's 6 GiB boundary because nominal
+6 GB iPhones report about 5.5–5.8 GiB, while 4 GB phones report about 3.7 GiB.
+The owner prefers no extra state, so the product collects no render-time samples,
+stores no measurement, and applies no speed rule. An explicit Settings choice
+wins. Reset clears that choice and returns to the memory-only device default;
+the UI offers only RAW and Camera preview.
 
 ## Remaining questions
 

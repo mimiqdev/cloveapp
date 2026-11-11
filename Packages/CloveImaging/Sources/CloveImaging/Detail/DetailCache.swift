@@ -73,7 +73,6 @@ public final class DetailCache: Sendable {
         var screenWindow: Set<DetailCacheKey>?
         var currentPhoto: DetailCacheKey?
         var cameraFailures: Set<DetailSource> = []
-        var renderDurations: [Double] = []
         var tick: UInt64 = 0
     }
 
@@ -164,20 +163,6 @@ public final class DetailCache: Sendable {
 
     func recordCameraFailure(_ source: DetailSource) {
         state.withLock { _ = $0.cameraFailures.insert(source) }
-    }
-
-    func recordRenderDuration(_ milliseconds: Double) {
-        state.withLock {
-            if $0.renderDurations.count < 5 { $0.renderDurations.append(milliseconds) }
-        }
-    }
-
-    func takeRenderDurations() -> [Double] {
-        state.withLock {
-            let durations = $0.renderDurations
-            $0.renderDurations.removeAll()
-            return durations
-        }
     }
 
     /// Releases the single native render without touching previews.

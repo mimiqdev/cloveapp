@@ -13,7 +13,9 @@ private final class ObservedDetailImages: DetailImageSource {
     private(set) var requests: [(PhotoIdentity, DetailPixelRequest)] = []
     private(set) var delivered: [DetailQuality] = []
     private(set) var windows: [DetailPhotoWindow] = []
-    private var reportedMeasurement = false
+    private(set) var deliveries: [(PhotoIdentity, DetailPixelRequest.Need, DetailQuality)] = []
+    private(set) var prefetched: [DetailPhotoWindow] = []
+    var prefetchEnabled = true
 
     func prepare(_ window: DetailPhotoWindow) async {
         windows.append(window)
@@ -23,38 +25,31 @@ private final class ObservedDetailImages: DetailImageSource {
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
         requests.append((photo, request))
         let outcome = await sample.image(for: photo, request: request)
-        if case .image(let image) = outcome { delivered.append(image.quality) }
+        if case .image(let image) = outcome {
+            delivered.append(image.quality)
+            deliveries.append((photo, request.need, image.quality))
+        }
         return outcome
     }
 
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
-        await sample.prefetch(window, renderAhead: renderAhead)
+        if prefetchEnabled { await sample.prefetch(window, renderAhead: renderAhead) }
+        prefetched.append(window)
     }
 
     func leave(window: UUID) async { await sample.leave(window: window) }
-
-    func takeScreenRenderDurations() async -> [Double] {
-        guard delivered.contains(.screenRAW), !reportedMeasurement else { return [] }
-        reportedMeasurement = true
-        return [900]
-    }
 }
 
-/// Runs the shared SwiftUI detail view in the hosted simulator, with generated
-/// camera/RAW pixels and a controlled fifth duration. No folder or device is needed.
+/// Runs the shared SwiftUI detail view with generated camera/RAW pixels.
 @Suite(.serialized)
 @MainActor
 struct DetailDisplayPresentationTests {
-    @Test func rawSwapModeFreezeAndCameraZoomThroughTheSharedView() async throws {
+    @Test func rawSwapOrderRefreshAndCameraZoomThroughTheSharedView() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
-        let storage = SampleSettingsStorage()
-        let store = SettingsStore(
-            persistence: SettingsPersistence(storage: storage),
-            rememberedAdvanceStorage: storage, physicalMemory: 8 * 1024 * 1024 * 1024)
-        store.recordScreenRenderDurations([900, 900, 900, 900])
-        let library = TestLibrary.sample()
-        let browsing = BrowsingModel(library: library)
+        let store = SettingsStore.sample
+        store.update { $0.photoDisplayMode = .rawFirst }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
         let photos = browsing.photos
         try #require(photos.count >= 4)
@@ -70,12 +65,9 @@ struct DetailDisplayPresentationTests {
             window.isHidden = true
             window.rootViewController = nil
         }
-        try await waitFor {
-            source.delivered.contains(.screenRAW) && store.photoDisplayMode == .cameraPreviewFirst
-        }
+        try await waitFor { source.delivered.contains(.screenRAW) }
         #expect(source.delivered.first == .preview)
         #expect(source.windows.first?.mode == .rawFirst)
-        // The same shared view receives a new order when group filtering changes.
         browsing.setFilter(.unmarked)
         try await waitFor { source.windows.count >= 2 }
         #expect(source.windows.last?.current.photo == first)
@@ -85,15 +77,11 @@ struct DetailDisplayPresentationTests {
         #expect(source.windows.last?.neighbours.map(\.photo) == [next])
         let preview = try #require(findPreview(in: window))
         preview.onDoubleTap?(.center)
-        try await waitFor {
-            source.requests.contains { $0.0 == first && $0.1.need == .fullResolution }
-        }
-        #expect(source.requests.last(where: { $0.1.need == .fullResolution })?.1.mode == .rawFirst)
         try await waitFor { source.delivered.contains(.nativeRAW) }
+        #expect(source.requests.last(where: { $0.1.need == .fullResolution })?.1.mode == .rawFirst)
+        store.update { $0.photoDisplayMode = .cameraPreviewFirst }
         browsing.openPhoto(next)
-        try await waitFor {
-            source.requests.contains { $0.0 == next && $0.1.need == .screenRender }
-        }
+        try await waitFor { source.prefetched.last?.current.photo == next }
         #expect(source.windows.last?.mode == .cameraPreviewFirst)
         let rawCount = source.sample.rawRenderCount
         let cameraPreview = try #require(findPreview(in: window))
@@ -105,8 +93,98 @@ struct DetailDisplayPresentationTests {
         #expect(source.sample.rawRenderCount == rawCount)
         #expect(source.sample.cameraDecodeCount == 1)
         print(
-            "DISPLAY simulator shared view: preview -> screen RAW; fifth sample changes next photo only; camera fit/100% adds zero RAW renders"
+            "DISPLAY simulator shared view: preview -> screen RAW; camera fit/100% adds zero RAW renders"
         )
+    }
+
+    @Test(arguments: PhotoDisplayMode.allCases)
+    func regularKeptZoomWaitsForOwnGestureBeforeUpgrading(mode: PhotoDisplayMode) async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let store = SettingsStore.sample
+        store.update {
+            $0.photoDisplayMode = mode
+            $0.keepZoom.inDetail = true
+        }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        let first = photos[2].id
+        let next = photos[3].id
+        browsing.openPhoto(first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == first }
+        let preview = try #require(findPreview(in: window))
+        preview.onDoubleTap?(.center)
+        try await waitFor {
+            source.deliveries.contains { $0.0 == first && $0.1 == .fullResolution }
+                && preview.zoomSnapshot != nil
+        }
+        browsing.openPhoto(next)
+        try await waitFor { source.prefetched.last?.current.photo == next }
+        try await waitFor { preview.zoomSnapshot != nil }
+        #expect(
+            !source.requests.contains {
+                $0.0 == next && ($0.1.need == .morePixels || $0.1.need == .fullResolution)
+            })
+        // Retaining zoom did not decode; a person's own pinch still does.
+        preview.onZoomChange?(4)
+        try await waitFor { source.requests.contains { $0.0 == next && $0.1.need == .morePixels } }
+        if mode == .cameraPreviewFirst { #expect(source.sample.rawRenderCount == 0) }
+    }
+
+    @Test func attachmentUsesStableDisplayEdgeAndReturningToFirstUsesHeldRaw() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        source.prefetchEnabled = false
+        let store = SettingsStore.sample
+        store.update { $0.photoDisplayMode = .rawFirst }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        let first = photos[2].id
+        let next = photos[3].id
+        browsing.openPhoto(first)
+        let host = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        host.loadViewIfNeeded()
+        host.view.frame = CGRect(x: 0, y: 0, width: 500, height: 300)
+        host.beginAppearanceTransition(true, animated: false)
+        host.endAppearanceTransition()
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(source.windows.isEmpty)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == first }
+        let expectedEdge = Int(
+            max(scene.screen.nativeBounds.width, scene.screen.nativeBounds.height))
+        #expect(source.windows.first?.screenPixels == expectedEdge)
+        browsing.openPhoto(next)
+        try await waitFor { source.prefetched.last?.current.photo == next }
+        #expect(source.sample.rawRenderCount == 2)
+        let beforeReturn = source.prefetched.count
+        browsing.openPhoto(first)
+        try await waitFor {
+            source.prefetched.count > beforeReturn && source.prefetched.last?.current.photo == first
+        }
+        #expect(source.windows.allSatisfy { $0.screenPixels == expectedEdge })
+        #expect(
+            source.deliveries.last(where: { $0.0 == first && $0.1 == .preview })?.2 == .screenRAW)
+        #expect(source.sample.rawRenderCount == 2)
     }
 
     private func waitFor(_ condition: () -> Bool) async throws {

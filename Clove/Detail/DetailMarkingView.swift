@@ -90,7 +90,6 @@ struct DetailMarkingView: View {
     /// The pixels to show, normally the open folder's source from the browsing model.
     let images: any DetailImageSource
     var displayMode: PhotoDisplayMode = .rawFirst
-    var recordRenderDurations: ([Double]) -> Void = { _ in }
 
     /// What the next photo keeps of this one's zoom (PRD P0-04; PRD In-group culling).
     let zoomPolicy: DetailZoomPolicy
@@ -420,13 +419,18 @@ struct DetailMarkingView: View {
         phase = .loading
         limitation = nil
         previewOnly = false
-        // The first layout gives the view its size; a preview requested from a zero-sized view
-        // would ask a JPEG only for a one-pixel raster.
-        for _ in 0..<10 where viewSize == .zero {
+        // Wait for the display, not just layout: the first render must use the
+        // same physical screen edge as later photos and their held-render keys.
+        for _ in 0..<120 {
+            guard !Task.isCancelled else { return }
+            if viewSize != .zero, probe.container?.window?.windowScene != nil { break }
             try? await Task.sleep(for: .milliseconds(16))
         }
-        guard !Task.isCancelled else { return }
-        let window = photoWindow(for: photo)
+        guard !Task.isCancelled, let screen = probe.container?.window?.windowScene?.screen else {
+            return
+        }
+        let screenPixels = Int(max(screen.nativeBounds.width, screen.nativeBounds.height))
+        let window = photoWindow(for: photo, screenPixels: screenPixels)
         currentWindow = window
         previousPosition = window.current.position
         await images.prepare(window)
@@ -498,7 +502,7 @@ struct DetailMarkingView: View {
             // A group's retained zoom may need more pixels than the preview holds (G1 "Preview,
             // detail (I2)"); a regular detail view keeps its level without starting a render, as
             // before.
-            if !isLoadingFit { upgradeIfNeeded() }
+            if zoomPolicy.keepsPosition && !isLoadingFit { upgradeIfNeeded() }
         } else if case .fullResolution(let chosen, let targetSize) = zoomMode, viewSize.width > 0 {
             if let pixels = image.fullResolutionPixels {
                 if let target = DetailZoom.retargetedFullResolutionScale(
@@ -551,7 +555,7 @@ struct DetailMarkingView: View {
             screenScale: displayScale)
     }
 
-    private func photoWindow(for photo: GridPhoto) -> DetailPhotoWindow {
+    private func photoWindow(for photo: GridPhoto, screenPixels: Int) -> DetailPhotoWindow {
         let index = order.firstIndex(where: { $0.id == photo.id }) ?? 0
         let direction: Int
         if let currentWindow, currentWindow.current.photo == photo.id {
@@ -563,10 +567,6 @@ struct DetailMarkingView: View {
             guard order.indices.contains(position) else { return nil }
             return DetailNeighbour(photo: order[position].id, position: position)
         }
-        let bounds = probe.container?.window?.screen.nativeBounds
-        let screenPixels =
-            bounds.map { Int(max($0.width, $0.height)) }
-            ?? requestPixels(scale: 1)
         return DetailPhotoWindow(
             id: windowID,
             current: DetailNeighbour(photo: photo.id, position: index), neighbours: neighbours,
@@ -587,13 +587,11 @@ struct DetailMarkingView: View {
             show(image)
         }
         isLoadingFit = false
-        recordRenderDurations(await images.takeScreenRenderDurations())
-        upgradeIfNeeded()
-        guard !Task.isCancelled, let shown, shown.limitation == nil else { return }
+        if zoomPolicy.keepsPosition { upgradeIfNeeded() }
+        guard let shown, shown.limitation == nil else { return }
         let renderAhead =
             shown.quality == .screenRAW || shown.quality == .nativeRAW || !shown.hasRAW
         await images.prefetch(window, renderAhead: renderAhead)
-        recordRenderDurations(await images.takeScreenRenderDurations())
     }
 
     // MARK: - Zoom

@@ -38,12 +38,6 @@ struct DetailDisplayModeTests {
         #expect(returning.image === rendered.image)
         #expect(await gate.nativePaths.count == 2)
         #expect(cache.screenCount == 2)
-        let durations = await pipeline.takeScreenRenderDurations()
-        #expect(durations.count == 2)
-        print(
-            "DISPLAY screen RAW fixture n=\(durations.count) ms=\(durations.map { String(format: "%.1f", $0) }.joined(separator: ",")); macOS debug, shared host, informational only"
-        )
-        #expect(await pipeline.takeScreenRenderDurations().isEmpty)
     }
 
     @Test func heldRenderLimitEvictsFarthestAndWindowDropsDistantPhotos() async throws {
@@ -78,14 +72,40 @@ struct DetailDisplayModeTests {
         try await eventually { await gate.nativePaths.count == 1 }
         let queued = Task { try await pipeline.screen(for: second, priority: .prefetch) }
         try await eventually { await pipeline.queuedCount == 1 }
-        await pipeline.navigate(to: first, neighbours: [second])
+        let departed = try request(position: 2, location: "departed")
+        await pipeline.navigate(to: departed, neighbours: [])
         await expectCancelled(queued)
         await expectCancelled(active)
         try await letEntriesFinish(gate, natives: 1)
         try await eventually { await pipeline.activeCount == 0 }
         #expect(await gate.nativePaths.count == 1)
         #expect(cache.screenCount == 0)
-        #expect(await pipeline.takeScreenRenderDurations().isEmpty)
+    }
+
+    @Test func arrivalReusesRunningOneAheadEvenWhenItsCallerCancels() async throws {
+        let gate = DetailReadGate()
+        await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
+        let cache = DetailCache()
+        let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
+        let first = try request()
+        let next = try request(position: 1, location: "next")
+        await pipeline.beginNavigation(1)
+        await pipeline.navigate(to: first, neighbours: [next], generation: 1)
+        let ahead = Task { try await pipeline.screen(for: next, priority: .prefetch) }
+        defer { Task { await gate.release() } }
+        try await eventually { await gate.nativePaths.count == 1 }
+        ahead.cancel()
+        await pipeline.beginNavigation(2)
+        await pipeline.navigate(to: next, neighbours: [first], generation: 2)
+        let visible = Task { try await pipeline.screen(for: next) }
+        try await eventually { await pipeline.queuedCount == 1 }
+        try await letEntriesFinish(gate, natives: 1)
+        await expectCancelled(ahead)
+        let shown = try availableDetail(try await visible.value)
+        #expect(shown.quality == .screenRAW)
+        #expect(cache.screen(for: next)?.image === shown.image)
+        #expect(await gate.nativePaths.count == 1)
+        #expect(await gate.maximumNativeEntries == 1)
     }
 
     @Test func cameraModeUsesFullHeicAndReleasesOnLeaving() async throws {
@@ -108,7 +128,6 @@ struct DetailDisplayModeTests {
             position: 1, mode: .cameraPreviewFirst, camera: heic, location: "next")
         await pipeline.navigate(to: next, neighbours: [])
         #expect(!cache.holdsNativeImage)
-        #expect(await pipeline.takeScreenRenderDurations().isEmpty)
     }
 
     @Test func cameraModeRawOnlyAndUnreadableCameraUseRawAtFitAndZoom() async throws {

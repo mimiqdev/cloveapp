@@ -9,15 +9,42 @@ public enum DetailPipelineError: Error, Sendable {
 
 /// Cancellation closes admission synchronously, before the cancellation actor hop.
 private final class DetailCancellation: Sendable {
-    private let cancelled = Mutex(false)
-    var isCancelled: Bool { cancelled.withLock { $0 } }
-    func cancel() { cancelled.withLock { $0 = true } }
-    func deliver(_ body: (Bool) -> Void) { cancelled.withLock { body($0) } }
+    private struct State {
+        var callerCancelled = false
+        var discarded = false
+        var retainsRunningScreen = false
+    }
+    private let state = Mutex(State())
+    var isCancelled: Bool { state.withLock { $0.discarded } }
+
+    func start(retainingScreen: Bool) -> Bool {
+        state.withLock {
+            guard !$0.discarded else { return false }
+            $0.retainsRunningScreen = retainingScreen
+            return true
+        }
+    }
+
+    func cancelCaller() {
+        state.withLock {
+            $0.callerCancelled = true
+            if !$0.retainsRunningScreen { $0.discarded = true }
+        }
+    }
+
+    func discard() { state.withLock { $0.discarded = true } }
+    func deliver(_ body: (Bool) -> Void) {
+        state.withLock { body($0.callerCancelled || $0.discarded) }
+    }
+    func storeIfActive(_ body: () -> Void) {
+        state.withLock { if !$0.discarded { body() } }
+    }
 }
 
 /// Detail and group review's shared image scheduler. Embedded previews have their
 /// own bounded lane. Screen RAW, native RAW and full camera decodes share one lane.
-/// Cancelled native calls drain in that lane and never publish or cache their pixels.
+/// Obsolete full-size calls drain without publishing. Running screen renders can
+/// survive caller cancellation; the current window decides whether to hold them.
 public actor DetailPipeline {
     private enum Lane: Sendable { case preview, render }
     private enum Effort: Sendable { case previewOnly, screen, best }
@@ -72,8 +99,16 @@ public actor DetailPipeline {
     ) {
         guard !closed, !Task.isCancelled else { return }
         if let generation, generation != navigationGeneration { return }
-        for job in Array(jobs.values) { cancel(job.id) }
         cache.navigate(to: current, neighbours: neighbours)
+        let window = Set(([current] + neighbours.prefix(2)).compactMap(DetailCache.screenKey))
+        for job in Array(jobs.values) {
+            if isRunningScreen(job), let key = DetailCache.screenKey(job.request),
+                window.contains(key)
+            {
+                continue
+            }
+            cancel(job.id)
+        }
     }
 
     /// The app reserves arrival ownership before any file-system work. An older
@@ -81,7 +116,7 @@ public actor DetailPipeline {
     public func beginNavigation(_ generation: UInt64) {
         guard !closed, generation > navigationGeneration else { return }
         navigationGeneration = generation
-        for job in Array(jobs.values) { cancel(job.id) }
+        for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
     }
 
     /// Immediate fit pixels: held screen RAW in RAW mode, otherwise the camera preview.
@@ -119,7 +154,9 @@ public actor DetailPipeline {
     }
 
     public func cancelPrefetch() {
-        for job in Array(jobs.values) where job.priority == .prefetch { cancel(job.id) }
+        for job in Array(jobs.values) where job.priority == .prefetch {
+            cancel(job.id, preservingRunningScreen: true)
+        }
     }
 
     /// Leaving the detail stage keeps neighbouring screen renders, but never a
@@ -127,10 +164,9 @@ public actor DetailPipeline {
     public func leavePhoto(generation: UInt64) {
         guard generation > navigationGeneration else { return }
         beginNavigation(generation)
+        for job in Array(jobs.values) { cancel(job.id) }
         cache.releaseNative()
     }
-
-    public func takeScreenRenderDurations() -> [Double] { cache.takeRenderDurations() }
 
     public func releaseCachedImages() {
         for job in Array(jobs.values) { cancel(job.id) }
@@ -159,7 +195,7 @@ public actor DetailPipeline {
             try Task.checkCancellation()
             guard !closed else { throw DetailPipelineError.closed }
             return try await withCheckedThrowingContinuation { continuation in
-                if let old = latest[consumer] { cancel(old) }
+                if let old = latest[consumer] { cancel(old, preservingRunningScreen: true) }
                 if queue.count >= queueLimit {
                     if priority == .visible,
                         let victim = queue.last(where: { jobs[$0]?.priority == .prefetch })
@@ -181,14 +217,20 @@ public actor DetailPipeline {
                 drain()
             }
         } onCancel: {
-            cancellation.cancel()
-            Task { await self.cancel(id) }
+            cancellation.cancelCaller()
+            Task { await self.cancel(id, preservingRunningScreen: true) }
         }
     }
 
-    private func cancel(_ id: UUID) {
-        guard let job = jobs.removeValue(forKey: id) else { return }
-        job.cancellation.cancel()
+    private func isRunningScreen(_ job: Job) -> Bool {
+        active[job.id] == .render && job.effort == .screen && job.request.raw != nil
+    }
+
+    private func cancel(_ id: UUID, preservingRunningScreen: Bool = false) {
+        guard let job = jobs[id] else { return }
+        if preservingRunningScreen && isRunningScreen(job) { return }
+        jobs[id] = nil
+        job.cancellation.discard()
         queue.removeAll { $0 == id }
         if latest[job.consumer] == id { latest[job.consumer] = nil }
         job.continuation.resume(throwing: CancellationError())
@@ -210,7 +252,9 @@ public actor DetailPipeline {
 
     private func start(_ id: UUID) {
         guard let job = jobs[id] else { return }
-        guard !job.cancellation.isCancelled else { cancel(id); return }
+        guard
+            job.cancellation.start(retainingScreen: job.effort == .screen && job.request.raw != nil)
+        else { cancel(id); return }
         active[id] = job.lane
         let cache = cache
         let reader = reader
@@ -404,32 +448,26 @@ public actor DetailPipeline {
     ) async -> DetailResult {
         if let held = cache.screen(for: job.request) { return verified(.available(held)) }
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-        let start = ContinuousClock.now
         guard let pixels = await reader.screenRAW(raw, longEdge: job.request.screenPixels) else {
             return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
                 ?? missing(failures)
         }
-        let duration = start.duration(to: .now)
-        let milliseconds =
-            Double(duration.components.seconds) * 1000
-            + Double(duration.components.attoseconds) / 1e15
         let rendered = DetailImage(
             image: pixels, source: raw, quality: .screenRAW,
             hasRAW: true, fullResolutionSize: fullSize)
         return publish(rendered, job: job) {
             cache.storeScreen(rendered, for: job.request)
-            cache.recordRenderDuration(milliseconds)
         }
     }
 
-    /// Cache insertion and cancellation share the same lock, so obsolete renders
-    /// cannot re-populate a cache cleared on navigation, close or memory pressure.
+    /// Cache insertion and explicit discard share the same lock. Caller cancellation
+    /// can leave a useful running screen render alive for the new window.
     private nonisolated static func publish(
         _ image: DetailImage, job: Job,
         store: () -> Void
     ) -> DetailResult {
         guard isCurrent(image.source) else { return .unavailable(.sourceChanged) }
-        job.cancellation.deliver { cancelled in if !cancelled { store() } }
+        job.cancellation.storeIfActive(store)
         return .available(image)
     }
 

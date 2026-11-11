@@ -106,10 +106,6 @@ final class PipelineDetailImages: DetailImageSource {
         await pipeline.leavePhoto(generation: navigationGeneration)
     }
 
-    func takeScreenRenderDurations() async -> [Double] {
-        await pipeline.takeScreenRenderDurations()
-    }
-
     private func sources(for photo: PhotoIdentity) -> PhotoSources? {
         set(photo).map(PhotoSources.init)
     }
