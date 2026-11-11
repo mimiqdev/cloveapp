@@ -18,6 +18,56 @@ struct PhotoActionsTests {
         )
     }
 
+    private func labelledGroupScenario() -> (
+        BrowsingModel, ControlledPhotoLibrary, GroupFinishingPlan
+    ) {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["a", "b", "c", "d", "next"])
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "labelled-keep"),
+            members: ["a", "b", "c", "d"].map { library.identity($0) })
+        library.groups = [group]
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        model.apply(.label(ColourLabel(colour: .green)), to: library.identity("a"))
+        model.openGroup(group)
+        let plan = GroupFinishingPlan(
+            group: group, action: .rejectUnmarked, currentPhoto: library.identity("b"),
+            marks: Dictionary(uniqueKeysWithValues: model.groupPhotos.map { ($0.id, $0.marks) }))
+        return (model, library, plan)
+    }
+
+    @Test func aLabelledOnlyKeepFinishesAndContinuesToTheNextGridItem() async throws {
+        let (model, library, plan) = labelledGroupScenario()
+        #expect(model.groupPhoto?.id == library.identity("b"))
+        #expect(GroupUndecidedCount(model.groupPhotos.map(\.marks)).undecided == 3)
+        #expect(
+            model.groupPhotos.filter { $0.marks.isUndecided }.map(\.id)
+                == ["b", "c", "d"].map { library.identity($0) })
+        model.runGroupFinishing(plan)
+        #expect(GroupUndecidedCount(model.groupPhotos.map(\.marks)).isCompleteByMarks)
+        #expect(
+            model.shownMarks(for: library.identity("a"))
+                == PhotoMarks(label: ColourLabel(colour: .green)))
+        try await Task.sleep(for: .milliseconds(550))
+        model.continueFromGroup()
+        #expect(model.state.route == .detail)
+        #expect(model.state.currentPhoto == library.identity("next"))
+        await model.drainActions()
+        #expect(
+            library.photos.first { $0.id == library.identity("a") }?.marks
+                == PhotoMarks(label: ColourLabel(colour: .green)))
+    }
+
+    @Test func aContinueTapImmediatelyAfterRejectUnmarkedStaysInTheGroup() async {
+        let (model, _, plan) = labelledGroupScenario()
+        model.runGroupFinishing(plan)
+        #expect(GroupUndecidedCount(model.groupPhotos.map(\.marks)).isCompleteByMarks)
+        model.continueFromGroup()
+        #expect(model.state.route == .group)
+        #expect(model.state.groupPosition?.group == plan.groupID)
+        await model.drainActions()
+    }
+
     @Test func toastUndoRestoresBothMovedAndKeptSamplePhotos() async throws {
         let library = TestLibrary.sample
         let model = BrowsingModel(library: library)
@@ -166,7 +216,6 @@ struct PhotoActionsTests {
         model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
         await model.drainActions()
         let finished = try #require(model.lastGroupFinishing)
-        let runs = model.groupFinishingRuns
         model.back()
         model.openGroup(group)
         library.failNext.insert(a)
@@ -176,7 +225,6 @@ struct PhotoActionsTests {
         await model.drainActions()
         try await waitUntil { model.latestChange(for: a)?.state.isConfirmed == true }
         #expect(model.lastGroupFinishing == finished)
-        #expect(model.groupFinishingRuns == runs)
         #expect(model.state.route == .group)
         #expect(model.state.groupPosition?.group == group.id)
     }
@@ -193,17 +241,19 @@ struct PhotoActionsTests {
         model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
         await model.drainActions()
         let finished = try #require(model.lastGroupFinishing)
-        let runs = model.groupFinishingRuns
+        #expect(model.saveSummary.failed == 1)
+        #expect(model.isSaveFailureToastVisible)
         library.failNext.insert(c)
         model.apply(.label(ColourLabel(colour: .red)), to: c)
         await model.drainActions()
         model.retryFailedChange(for: c)
         await model.drainActions()
         #expect(model.lastGroupFinishing == finished)
-        #expect(model.groupFinishingRuns == runs)
-        model.retryFailedChange(for: a)
+        #expect(model.saveSummary.failed == 1)
+        model.retryAllUnfinishedChanges()
         await model.drainActions()
-        #expect(model.groupFinishingRuns == runs + 1)
+        #expect(model.saveSummary.failed == 0)
+        #expect(model.latestChange(for: a)?.state.isConfirmed == true)
         #expect(model.lastGroupFinishing?.failedCount == 0)
         #expect(model.lastGroupFinishing?.savedCount == 2)
     }
@@ -297,7 +347,7 @@ struct PhotoActionsTests {
         #expect(model.photos.first { $0.id == b }?.marks.rating == five)
     }
 
-    @Test func supersededFinishingFailureDoesNotBlockCompletionOrRetry() async throws {
+    @Test func supersededFinishingFailureClearsTheSharedFailedState() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
         model.openFolder()
@@ -308,14 +358,16 @@ struct PhotoActionsTests {
         let plan = finishingPlan(group: group, model: model, library: library)
         model.runGroupFinishing(plan)
         await model.drainActions()
-        #expect(model.groupFinishingFailure?.failedCount == 1)
+        #expect(model.saveSummary.failed == 1)
+        #expect(model.isSaveFailureToastVisible)
         model.apply(.rating(try #require(Rating(rawValue: 4))), to: a)
         await model.drainActions()
-        try await waitUntil { model.groupFinishingFailure == nil }
+        try await waitUntil { model.saveSummary.failed == 0 }
         let writes = library.events.count
-        model.retryGroupFinishing()
+        model.retryAllUnfinishedChanges()
         await model.drainActions()
-        #expect(model.groupFinishingFailure == nil)
+        #expect(model.saveSummary.failed == 0)
+        #expect(!model.isSaveFailureToastVisible)
         #expect(library.events.count == writes)
     }
 
@@ -331,7 +383,8 @@ struct PhotoActionsTests {
         await model.drainActions()
         try await waitUntil { model.latestChange(for: a)?.state == .pending }
         #expect(model.lastGroupFinishing?.savedCount == 2)
-        #expect(model.groupFinishingFailure == nil)
+        #expect(model.saveSummary.failed == 0)
+        #expect(!model.isSaveFailureToastVisible)
     }
 
     @Test func moveUndoFoldsTheCompleteConfirmedDesiredMarks() async throws {
@@ -510,7 +563,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
     let folder: FolderIdentity
     private let recentID: UUID
     var photos: [GridPhoto] = []
-    let groups: [BrowsingGroup] = []
+    var groups: [BrowsingGroup] = []
     let updates: AsyncStream<FolderLibraryUpdate>
     private let continuation: AsyncStream<FolderLibraryUpdate>.Continuation
     private var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
@@ -531,11 +584,11 @@ private final class ControlledPhotoLibrary: FolderLibrary {
     var moves: [[PhotoIdentity]] = []
     var writtenMarks: [PhotoIdentity: PhotoMarks] = [:]
 
-    init(rejected: Set<String> = ["c"]) {
+    init(rejected: Set<String> = ["c"], stems: [String] = ["a", "b", "c"]) {
         recentID = UUID()
         folder = FolderIdentity(rawValue: recentID.uuidString)
         (updates, continuation) = AsyncStream.makeStream()
-        photos = ["a", "b", "c"].map { stem in
+        photos = stems.map { stem in
             GridPhoto(
                 id: identity(stem), fileName: "\(stem).ARW", time: .unavailable,
                 marks: PhotoMarks(rating: rejected.contains(stem) ? .rejected : .unrated))

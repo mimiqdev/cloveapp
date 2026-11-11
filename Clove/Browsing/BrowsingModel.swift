@@ -122,7 +122,6 @@ final class BrowsingModel {
     private var desiredStatusIDs: [PhotoIdentity: MarkChangeID] = [:]
     private var actionPipeline = PhotoActionPipeline()
     private var actionConsumer: Task<Void, Never>?
-    private var finishingActions = 0
     private var shownGeneration: Int
     private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
     private var keptEditsByMove: [RejectMoveBatchID: [DesiredMarkEdit]] = [:]
@@ -448,55 +447,12 @@ final class BrowsingModel {
 
     // MARK: - In-group culling
 
-    /// The last finishing action the group view ran, with its result and C5's undo record
-    /// (PRD P0-12: finishing actions can be undone).
-    ///
-    /// The result carries ``GroupFinishingResult/undo``, so one property holds both what the
-    /// group view shows and what U8 records as one undo entry. A later action or a retry replaces
-    /// it.
+    /// The latest finishing result and its before marks, retained as one undo entry.
+    /// Retry updates only outcomes that belong to this action; completion follows current marks.
     private(set) var lastGroupFinishing: GroupFinishingResult?
 
-    /// Whether a finishing action is running, so the group view holds its completion until the
-    /// action's per-photo result arrives (PRD P0-12; PRD P0-09).
-    ///
-    /// A finishing action's marks stream in one photo at a time, so the group can look complete
-    /// before the action returns and its failures are known; advancing meanwhile would hide the
-    /// retry (PRD Failure and recovery).
-    var isRunningGroupFinishing: Bool { finishingActions > 0 }
-
-    /// Counts the finishing actions and retries this scene has run (PRD P0-12).
-    ///
-    /// Two finishing actions can produce equal results — Reject unmarked on a group that is already
-    /// fully decided changes nothing — so the group view needs an identity for the event itself,
-    /// not only for the value it produced.
-    private(set) var groupFinishingRuns = 0
-
-    /// The finishing action the user already dismissed, so its bar does not return on the next
-    /// redraw (PRD Failure and recovery: Cancel hides it without retrying).
-    private var dismissedGroupFailure: GroupFinishingResult?
-
-    /// The finishing action's result while it still has changes to retry, or nil
-    /// (PRD P0-09; PRD Failure and recovery).
-    ///
-    /// U4's batch bar and this one report the same counts, and a confirmed change is never part
-    /// of a retry. Dismissing hides the bar without retrying, which leaves the failed changes
-    /// unsaved (PRD P0-08).
-    var groupFinishingFailure: GroupFinishingResult? {
-        guard let result = lastGroupFinishing, result != dismissedGroupFailure else { return nil }
-        let statuses = Dictionary(
-            uniqueKeysWithValues: result.outcomes.map { outcome in
-                // A confirmed result stays final even while its UI stream catches up.
-                // Only unfinished outcomes follow a newer marking action or retry.
-                let status =
-                    outcome.status.state.isConfirmed
-                    ? outcome.status : latestChange(for: outcome.photo) ?? outcome.status
-                return (outcome.photo, status)
-            })
-        let current = GroupFinishingResult.applied(
-            result.plan, changes: result.outcomes.map(\.change), statuses: statuses,
-            undo: result.undo)
-        return current.failedCount > 0 ? current : nil
-    }
+    /// Prevent a second tap on Reject unmarked from activating the replacement Continue pill.
+    private var groupContinueDelay: (group: GroupID, until: ContinuousClock.Instant)?
 
     /// Snapshots the allowed changes from shown marks and submits one finishing action.
     func runGroupFinishing(_ plan: GroupFinishingPlan) {
@@ -504,28 +460,21 @@ final class BrowsingModel {
         let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
             request($0.change, for: $0.photo)
         }
-        dismissedGroupFailure = nil
-        finishingActions += 1
+        groupContinueDelay = (plan.groupID, ContinuousClock().now.advanced(by: .milliseconds(500)))
         lastMarkEdits = edits
         submit(.finishing(plan, edits))
-    }
-
-    /// Retries the failed photos through the same entry used by the Failed glyph.
-    func retryGroupFinishing() {
-        dismissedGroupFailure = nil
-        retryAllUnfinishedChanges()
-    }
-
-    /// Hides the finishing action's failure without retrying it (PRD Failure and recovery).
-    func dismissGroupFinishingFailure() {
-        dismissedGroupFailure = lastGroupFinishing
     }
 
     /// Continue is explicit and follows the filtered grid, including completed groups and singles.
     func continueFromGroup() {
         guard state.route == .group, let group = currentGroup,
-            GroupUndecidedCount(groupPhotos.map(\.marks)).undecided == 0
+            GroupUndecidedCount(groupPhotos.map(\.marks)).isCompleteByMarks
         else { return }
+        if let delay = groupContinueDelay, delay.group == group.id,
+            ContinuousClock().now < delay.until
+        {
+            return
+        }
         switch GroupContinueDestination.next(
             after: group.id, orderedPhotos: allPlacedPhotos, groups: groups,
             visiblePhotos: Set(photos.map(\.id)), entryCover: groupEntryCover)
@@ -840,7 +789,6 @@ final class BrowsingModel {
             case .batch(let edits):
                 _ = await persist(edits)
             case .finishing(let plan, let edits):
-                await library.recordGroupFinishing(plan.groupID)
                 let result = await persist(edits)
                 lastGroupFinishing = GroupFinishingResult.applied(
                     plan,
@@ -848,8 +796,6 @@ final class BrowsingModel {
                         uniqueKeysWithValues: result.outcomes.map {
                             ($0.identity, $0)
                         }))
-                finishingActions -= 1
-                groupFinishingRuns += 1
             case .retry(let edits):
                 let eligible = edits.filter {
                     DesiredMarkRestore.retry($0, current: shownMarks(for: $0.photo)) != nil
@@ -868,7 +814,6 @@ final class BrowsingModel {
                         lastGroupFinishing = GroupFinishingResult.applied(
                             previous.plan, changes: previous.outcomes.map(\.change),
                             statuses: statuses, undo: previous.undo)
-                        groupFinishingRuns += 1
                     }
                 }
             case .keep(let edits):
@@ -1112,16 +1057,6 @@ final class BrowsingModel {
     /// for a write C4 has not confirmed and never misses a photo whose change failed.
     var saveSummary: FolderSaveSummary {
         FolderSaveSummary(states: storedPhotos.compactMap { latestChange(for: $0.id)?.state })
-    }
-
-    /// What the marking HUD's save-state line says for one photo (PRD P0-08).
-    ///
-    /// PRD P0-08 shows **Saved** only for a confirmed sidecar write and **Saved in Clove only**
-    /// only for confirmed Clove storage; Reject is a rating, so it reports the state of the
-    /// storage its photo uses.
-    func saveText(for photo: PhotoIdentity) -> String {
-        SaveStatus.text(
-            for: latestChange(for: photo)?.state, folderLost: folderLocationLoss != nil)
     }
 
     /// The situation the open folder's own loss explains, or nil while it is reachable
@@ -1497,12 +1432,10 @@ final class BrowsingModel {
         lastRejectMove = nil
         isRejectMoveToastVisible = false
         leavePrompt = nil
-        // The finishing action, its failure and its event count belong to the folder that is
-        // gone, so a new folder's group view never shows or advances on the old one (PRD P0-12).
+        // Finishing results, the grid anchor and the tap guard belong to the folder that closed.
         groupEntryCover = nil
         lastGroupFinishing = nil
-        dismissedGroupFailure = nil
-        groupFinishingRuns = 0
+        groupContinueDelay = nil
 
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid

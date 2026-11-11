@@ -73,7 +73,6 @@ struct DetailScreen: View {
             browsing: browsing,
             photo: photo,
             settings: settings,
-            saveState: browsing.saveText(for: photo.id),
             images: images,
             zoomPolicy: .detail(settings),
             order: browsing.photos,

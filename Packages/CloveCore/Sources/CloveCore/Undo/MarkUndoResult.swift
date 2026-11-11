@@ -55,39 +55,11 @@ public struct MarkUndoPhotoOutcome: Hashable, Sendable {
     public var leftAloneFields: [MarkUndoField] { leftAlone.map(\.field) }
 }
 
-/// The completion record one finishing-action step changed (PRD P0-12; DEV-PLAN C5).
-///
-/// PRD P0-12's group completion has two sources: the group's marks and the finishing action the
-/// user ran. Undoing the action removes the session record through C10's
-/// ``GroupCompletionTracker``, and redoing it puts the record back; a group can still be complete
-/// by its marks either way.
-public struct MarkUndoCompletionUpdate: Hashable, Sendable {
-    /// Whether the step cleared the record or restored it (PRD P0-12).
-    public enum State: Hashable, Sendable {
-        /// Undo removed the session's finishing-action record for the group.
-        case cleared
-        /// Redo restored the session's finishing-action record for the group.
-        case restored
-    }
-
-    /// The group the finishing action ran on (PRD P0-12).
-    public let groupID: GroupID
-    /// What the step did to the group's completion record (PRD P0-12).
-    public let state: State
-
-    /// Describes the completion change one step made.
-    init(groupID: GroupID, state: State) {
-        self.groupID = groupID
-        self.state = state
-    }
-}
-
 /// What one undo or redo produced, per photo and for the view (PRD P0-05, P0-12; DEV-PLAN C5).
 ///
 /// The plan's C5 row asks every step to report per-photo outcomes, the batch counts behind
 /// "Saved N photos. M photos couldn't be saved." (PRD Failure and recovery, partial batch
-/// failure), the photo to return to, and — for a finishing action — the group whose completion
-/// changed. ``actionName`` is the short menu title; the final user-facing copy belongs to U8.
+/// failure), and the photo to return to. ``actionName`` is the short undo menu title.
 ///
 /// A confirmed restore counts as saved here even when the marks live in Clove storage rather
 /// than XMP, matching C10's ``GroupFinishingResult``: a standalone mark confirmed in Clove is
@@ -100,11 +72,6 @@ public struct MarkUndoResult: Hashable, Sendable {
     public let photoToReturnTo: PhotoIdentity
     /// One outcome per photo in the entry, in the entry's order.
     public let outcomes: [MarkUndoPhotoOutcome]
-    /// The group whose completion changed, for a finishing-action step (PRD P0-12).
-    ///
-    /// This is `nil` when nothing reached its target, including when a finishing action's marks
-    /// were all replaced by newer marks; the group keeps its completion record then.
-    public let completion: MarkUndoCompletionUpdate?
     /// Whether the step removed its entry from the history because it restored nothing.
     ///
     /// Every field kept a newer mark or its photo was unavailable, and no write is left to
@@ -120,13 +87,11 @@ public struct MarkUndoResult: Hashable, Sendable {
         actionName: String,
         photoToReturnTo: PhotoIdentity,
         outcomes: [MarkUndoPhotoOutcome],
-        completion: MarkUndoCompletionUpdate?,
         droppedFromHistory: Bool
     ) {
         self.actionName = actionName
         self.photoToReturnTo = photoToReturnTo
         self.outcomes = outcomes
-        self.completion = completion
         self.droppedFromHistory = droppedFromHistory
     }
 

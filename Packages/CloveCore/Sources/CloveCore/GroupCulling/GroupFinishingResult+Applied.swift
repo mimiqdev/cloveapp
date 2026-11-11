@@ -48,8 +48,6 @@ extension GroupFinishingResult {
             droppedPhotos: droppedPhotos,
             undo: undo
                 ?? GroupFinishingUndo(
-                    groupID: plan.groupID,
-                    action: plan.action,
                     photoToReturnTo: plan.currentPhoto,
                     entries: outcomes.map(\.change)))
     }

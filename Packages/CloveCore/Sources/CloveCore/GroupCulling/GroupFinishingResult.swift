@@ -25,7 +25,7 @@ public struct GroupFinishingResult: Hashable, Sendable {
     /// The plan that ran (PRD In-group culling, finishing actions).
     public let plan: GroupFinishingPlan
 
-    /// One outcome per requested change, the current photo's keep change first (PRD P0-09).
+    /// One outcome per requested reject, in input order.
     public let outcomes: [GroupFinishingOutcome]
 
     /// Photos whose planned change was not requested, because their marks changed after the

@@ -122,9 +122,7 @@ struct UndoTestFixture {
     let double: WriteFileSystemDouble
     /// C4's queue, rooted at the folder's Clove storage.
     let queue: MarkWriteQueue
-    /// The session's finishing-action records, shared with ``history`` (PRD P0-12).
-    let completion: GroupCompletionTracker
-    /// C5's history over that queue and those records.
+    /// C5's history over that queue.
     let history: MarkUndoHistory
     /// The marks source a step reads.
     let reader: UndoFolderReader
@@ -139,8 +137,7 @@ struct UndoTestFixture {
         folder = testFolder
         double = WriteFileSystemDouble()
         queue = MarkWriteQueue(storeDirectory: testFolder.file("store"), fileSystem: double)
-        completion = GroupCompletionTracker()
-        history = MarkUndoHistory(queue: queue, completion: completion)
+        history = MarkUndoHistory(queue: queue)
         photoSets = try stems.map {
             try makeScannedSet(folder: folderID, root: testFolder.url, stem: $0)
         }

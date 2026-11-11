@@ -23,11 +23,6 @@ func groupCullingGroup(_ name: String, members: [PhotoIdentity]) -> SimilarGroup
         usedFallbackSimilarity: false)
 }
 
-/// A published grouping of the groups in grid order (PRD Similar groups rules).
-func groupCullingGroups(_ groups: [SimilarGroup]) -> SimilarGroups {
-    SimilarGroups(groups: groups, analysis: .analyzed)
-}
-
 /// A valid rating for tests; an out-of-range value records an issue instead of passing.
 func groupCullingRating(_ value: Int) -> Rating {
     guard let rating = Rating(rawValue: value) else {
@@ -36,9 +31,6 @@ func groupCullingRating(_ value: Int) -> Rating {
     }
     return rating
 }
-
-/// Marks a photo has when it has no rating, no label and no Reject (PRD P0-05).
-let groupCullingUnmarked = PhotoMarks()
 
 /// A dictionary of marks, built one photo at a time so tests read like the group view.
 func groupCullingMarks(_ entries: [(PhotoIdentity, PhotoMarks)]) -> [PhotoIdentity: PhotoMarks] {

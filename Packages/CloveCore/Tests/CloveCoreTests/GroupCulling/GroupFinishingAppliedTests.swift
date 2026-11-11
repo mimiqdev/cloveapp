@@ -23,7 +23,5 @@ struct GroupFinishingAppliedTests {
         #expect(result.undo.entries.map(\.photo) == [photos[1], photos[2]])
         #expect(result.undo.entries.allSatisfy { $0.marksBefore == PhotoMarks() })
         #expect(result.undo.photoToReturnTo == photos[0])
-        #expect(result.undo.action == .rejectUnmarked)
-        #expect(result.undo.groupID == group.id)
     }
 }

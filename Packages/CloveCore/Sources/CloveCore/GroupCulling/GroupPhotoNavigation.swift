@@ -7,7 +7,7 @@
 /// writes a mark. A photo that is not a member has no place in the order, so every answer for
 /// it is `nil`.
 ///
-/// With Undecided only on, a plain next or previous skips every rated or rejected photo
+/// With Undecided only on, a plain next or previous skips every rated, labelled or rejected photo
 /// (PRD In-group culling, comparison and elimination). After marking, the group view asks for
 /// the next undecided photo, which searches forward and then wraps to the start, and returns
 /// `nil` when no other member is undecided (PRD In-group culling, comparison and elimination).
@@ -26,7 +26,7 @@ public struct GroupPhotoNavigation: Hashable, Sendable {
 
     /// The next member after `photo`, or `nil` at the group's end.
     ///
-    /// With ``undecidedOnly`` on, rated and rejected members are skipped and the search still
+    /// With ``undecidedOnly`` on, rated, labelled and rejected members are skipped and the search
     /// stops at the end instead of wrapping (PRD In-group culling, comparison and elimination).
     public func nextPhoto(
         after photo: PhotoIdentity,
@@ -41,7 +41,7 @@ public struct GroupPhotoNavigation: Hashable, Sendable {
 
     /// The member before `photo`, or `nil` at the group's start.
     ///
-    /// With ``undecidedOnly`` on, rated and rejected members are skipped and the search still
+    /// With ``undecidedOnly`` on, rated, labelled and rejected members are skipped and the search
     /// stops at the start instead of wrapping (PRD In-group culling, comparison and
     /// elimination).
     public func previousPhoto(
@@ -59,7 +59,7 @@ public struct GroupPhotoNavigation: Hashable, Sendable {
     /// The next undecided member after `photo`, wrapping to the group's start.
     ///
     /// This is the photo the group view shows after a mark is written (PRD In-group culling,
-    /// comparison and elimination; PRD P0-12): rated and rejected members are skipped, the
+    /// comparison and elimination; PRD P0-12): rated, labelled and rejected members are skipped, the
     /// search continues from the start after the last member, and `nil` means no other member
     /// is undecided. The current photo is never its own answer, because advancing must move.
     public func nextUndecidedPhoto(

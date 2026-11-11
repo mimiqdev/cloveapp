@@ -202,9 +202,6 @@ protocol FolderLibrary: AnyObject {
     /// it showed the folder.
     var openGeneration: Int { get }
 
-    /// Records the explicit finishing action for the folder's undo history.
-    func recordGroupFinishing(_ group: GroupID) async
-
     /// The scanned set behind one photo, for writes, thumbnails and the grouping follow-up
     /// (PRD P0-08, P0-11).
     ///
@@ -324,8 +321,6 @@ extension FolderLibrary {
 
     /// A library with no folder to close keeps the folder key it has.
     func closeFolder() async {}
-
-    func recordGroupFinishing(_ group: GroupID) async {}
 
     /// A library with no batch write reports every photo as failed instead of claiming a save
     /// (PRD P0-09, P0-08).

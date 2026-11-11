@@ -201,7 +201,6 @@ final class TestLibrary: FolderLibrary {
     /// The stem suffix U4's launch value names, whose photos fail their first write (PRD P0-09).
     /// The sample's finishing-action records, so a group it finishes counts as complete like the
     /// real session's (PRD In-group culling, group completion; PRD P0-12).
-    private let groupCompletion = GroupCompletionTracker()
 
     /// The stem suffix whose photos fail their first write, or nil when none does (PRD P0-09).
     private let failingStemSuffix: String?
@@ -713,7 +712,9 @@ final class TestLibrary: FolderLibrary {
             for index in stored.indices where group.members.contains(stored[index].id) {
                 stored[index].marks =
                     state == "done"
-                    ? PhotoMarks(rating: index == 0 ? Self.stars(3) : .rejected) : PhotoMarks()
+                    ? PhotoMarks(
+                        rating: stored[index].id == group.members.first ? Self.stars(3) : .rejected)
+                    : PhotoMarks()
             }
         }
         if let opening = environment["CLOVE_TEST_LIBRARY_OPENING"] {
@@ -741,13 +742,6 @@ final class TestLibrary: FolderLibrary {
             id: MarkChangeID(), identity: photo, requested: .rating(Self.stars(3)), state: state)
         changes[photo] = status
         updateContinuation.yield(.change(status))
-    }
-
-    // MARK: - In-group culling
-
-    /// Whether the sample's group is complete, and where the group view goes next (PRD P0-12).
-    func recordGroupFinishing(_ group: GroupID) async {
-        await groupCompletion.recordFinishingAction(on: group)
     }
 
     /// Turns the sample's groups on or off through the same call the settings screen makes

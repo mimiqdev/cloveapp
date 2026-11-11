@@ -158,7 +158,6 @@ extension View {
                         ) {
                             browsing.showSettings()
                         }
-
                     }
                 }
             }

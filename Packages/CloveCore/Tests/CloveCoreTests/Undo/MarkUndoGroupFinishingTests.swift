@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Undo Reject unmarked")
 struct MarkUndoGroupFinishingTests {
-    @Test func undoRestoresRejectsAsOneStepAndRedoRestoresCompletion() async throws {
+    @Test func undoAndRedoRestoreTheFinishingMarksAsOneStep() async throws {
         let fixture = try UndoTestFixture(stems: ["A", "B", "C"])
         defer { fixture.remove() }
         let photos = fixture.photoSets.map(\.id)
@@ -15,7 +15,6 @@ struct MarkUndoGroupFinishingTests {
         let plan = GroupFinishingPlan(
             group: group, action: .rejectUnmarked, currentPhoto: photos[0],
             marks: [photos[0]: PhotoMarks(rating: rating)])
-        await fixture.completion.recordFinishingAction(on: group.id)
         var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
         for change in plan.changes {
             let set = try #require(fixture.photoSets.first { $0.id == change.photo })
@@ -31,15 +30,12 @@ struct MarkUndoGroupFinishingTests {
         let undo = try #require(await undoStep(fixture))
         #expect(undo.savedCount == 2)
         #expect(undo.photoToReturnTo == photos[1])
-        #expect(undo.completion?.state == .cleared)
-        #expect(await fixture.completion.hasFinishingAction(on: group.id) == false)
         #expect(try undoSidecarMarks(at: fixture.sidecar(0)).rating == .rated(rating))
         for index in 1...2 {
             #expect(try undoSidecarMarks(at: fixture.sidecar(index)).rating == .rated(.unrated))
         }
         let redo = try #require(await undoRedoStep(fixture))
-        #expect(redo.completion?.state == .restored)
-        #expect(await fixture.completion.hasFinishingAction(on: group.id))
+        #expect(redo.savedCount == 2)
         for index in 1...2 {
             #expect(try undoSidecarMarks(at: fixture.sidecar(index)).rating == .rated(.rejected))
         }

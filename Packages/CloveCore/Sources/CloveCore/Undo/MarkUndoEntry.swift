@@ -83,30 +83,6 @@ public enum MarkUndoEntryKind: Hashable, Sendable {
     case groupFinishing
 }
 
-/// The group and action one finishing-action entry undoes (PRD P0-12).
-///
-/// Undoing the entry also clears the group's finishing-action record in C10's
-/// ``GroupCompletionTracker``; redoing restores it (PRD P0-12: finishing actions can be undone).
-public struct MarkUndoGroupFinishing: Hashable, Sendable {
-    /// The group the action finished, for the completion record (PRD P0-12).
-    public let groupID: GroupID
-    /// The action that ran (PRD In-group culling, finishing actions).
-    public let action: GroupFinishingAction
-
-    /// Builds the group part of an entry; only the history builds these.
-    init(groupID: GroupID, action: GroupFinishingAction) {
-        self.groupID = groupID
-        self.action = action
-    }
-
-    /// A short action name for the undo menu title; the final copy belongs to U8.
-    public var actionName: String {
-        switch action {
-        case .rejectUnmarked: "Reject unmarked"
-        }
-    }
-}
-
 /// A stable handle for one recorded action, so a UI can match a menu item to its entry.
 public struct MarkUndoEntryID: Hashable, Sendable, CustomStringConvertible {
     /// The underlying value; a new one per recorded action.
@@ -124,7 +100,7 @@ public struct MarkUndoEntryID: Hashable, Sendable, CustomStringConvertible {
 /// A record is a `Sendable` value with no reference to C4's queue or to the file system, so the
 /// history keeps it in memory and a test can compare it. The three kinds follow the plan's C5
 /// row and the PRD: a mark change on one photo (P0-05), a batch from multi-select (P0-09), and
-/// one of the two in-group finishing actions (P0-12).
+/// the in-group finishing action (P0-12).
 public struct MarkUndoEntry: Hashable, Sendable, Identifiable {
     /// The entry's handle, for a UI that refers to one recorded action.
     public let id: MarkUndoEntryID
@@ -138,22 +114,17 @@ public struct MarkUndoEntry: Hashable, Sendable, Identifiable {
     /// that was marked, not the one now on screen, so undo after auto-advance returns to the
     /// photo whose mark it restored.
     public let photoToReturnTo: PhotoIdentity
-    /// The group and action when this entry came from a finishing action (PRD P0-12).
-    public let groupFinishing: MarkUndoGroupFinishing?
-
     /// Collects one record; the history builds these so every entry is consistent.
     init(
         id: MarkUndoEntryID,
         kind: MarkUndoEntryKind,
         photos: [MarkUndoPhoto],
-        photoToReturnTo: PhotoIdentity,
-        groupFinishing: MarkUndoGroupFinishing?
+        photoToReturnTo: PhotoIdentity
     ) {
         self.id = id
         self.kind = kind
         self.photos = photos
         self.photoToReturnTo = photoToReturnTo
-        self.groupFinishing = groupFinishing
     }
 
     /// A short action name for the undo menu title; the final copy belongs to U8.
@@ -161,7 +132,7 @@ public struct MarkUndoEntry: Hashable, Sendable, Identifiable {
     /// A single or batch change is named after the field it set: a rating of −1 (PRD Marking
     /// rules) reads as "Reject", and any other rating reads as "Rating".
     public var actionName: String {
-        if let groupFinishing { return groupFinishing.actionName }
+        if kind == .groupFinishing { return "Reject unmarked" }
         return MarkUndoEntry.actionName(for: photos.first?.change ?? MarkChange())
     }
 
@@ -188,7 +159,6 @@ public struct MarkUndoEntry: Hashable, Sendable, Identifiable {
             id: id,
             kind: kind,
             photos: remaining,
-            photoToReturnTo: returnTo,
-            groupFinishing: groupFinishing)
+            photoToReturnTo: returnTo)
     }
 }

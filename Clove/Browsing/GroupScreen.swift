@@ -51,7 +51,7 @@ struct GroupScreen: View {
     private func markingView(group: BrowsingGroup, photo: GridPhoto) -> some View {
         DetailMarkingView(
             browsing: browsing, photo: photo, settings: store.settings,
-            saveState: browsing.saveText(for: photo.id), images: browsing.detailImages,
+            images: browsing.detailImages,
             zoomPolicy: .group, order: visiblePhotos,
             actions: DetailMarkingActions(
                 apply: { change, photo in browsing.apply(change, to: photo.id) },
@@ -67,7 +67,7 @@ struct GroupScreen: View {
         let count = GroupUndecidedCount(browsing.groupPhotos.map(\.marks))
         let plan = GroupFinishingPlan(
             group: group, action: .rejectUnmarked, currentPhoto: photo.id, marks: marks)
-        if count.undecided == 0 {
+        if count.isCompleteByMarks {
             return PillAction(
                 title: "Continue →", tone: .accent, identifier: "clove.group.continue"
             ) {

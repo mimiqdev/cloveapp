@@ -31,14 +31,12 @@ struct GroupPhotoNavigationTests {
         #expect(navigation.previousPhoto(before: members[0], marks: marks) == nil)
     }
 
-    @Test func undecidedOnlySkipsRatedAndRejectedButKeepsALabelOnlyPhoto() {
+    @Test func undecidedOnlySkipsRatingsLabelsAndRejects() {
         let navigation = GroupPhotoNavigation(group: group, undecidedOnly: true)
 
-        // PRD In-group culling: rated and rejected photos are skipped; a label alone is
-        // still undecided, so d is a stop.
-        #expect(navigation.nextPhoto(after: members[0], marks: marks) == members[3])
+        #expect(navigation.nextPhoto(after: members[0], marks: marks) == nil)
         #expect(navigation.previousPhoto(before: members[3], marks: marks) == members[0])
-        #expect(navigation.nextPhoto(after: members[1], marks: marks) == members[3])
+        #expect(navigation.nextPhoto(after: members[1], marks: marks) == nil)
     }
 
     @Test func undecidedOnlyStopsAtTheEndsInsteadOfWrapping() {
@@ -59,7 +57,7 @@ struct GroupPhotoNavigationTests {
 
         // d is the last member; the only earlier undecided photo is a.
         #expect(navigation.nextUndecidedPhoto(after: members[3], marks: marks) == members[0])
-        #expect(navigation.nextUndecidedPhoto(after: members[1], marks: marks) == members[3])
+        #expect(navigation.nextUndecidedPhoto(after: members[1], marks: marks) == members[0])
     }
 
     @Test func nextUndecidedReturnsNothingWhenNoneIsLeft() {
