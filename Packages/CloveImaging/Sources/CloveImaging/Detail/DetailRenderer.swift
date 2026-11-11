@@ -19,15 +19,15 @@ protocol DetailReading: Sendable {
     func read(_ step: DetailPreviewStep, displayPixels: Int) async -> DetailReadOutcome
     func fullRaster(_ source: DetailSource) async -> DetailReadOutcome
     func nativeRAW(_ source: DetailSource) async -> CGImage?
+    func screenRAW(_ source: DetailSource, longEdge: Int) async -> CGImage?
 }
 
 /// Reads system image capabilities with ImageIO and Core Image only.
 ///
-/// No UIKit, so the module builds and tests on macOS (G1 "Scheduling and cache"), and no
-/// stored Core Image context, so the type is `Sendable` without an unchecked conformance.
-/// Every call opens a fresh source with caching disabled: a detail request measures and
-/// shows current pixels rather than stale framework state (S2).
-struct DetailRenderer: DetailReading {
+/// Each read opens a fresh source. CIContext supports concurrent use and stores no
+/// per-request state; the pipeline serializes all full-image and RAW work.
+final class DetailRenderer: DetailReading, @unchecked Sendable {
+    private let context = CIContext(options: [.cacheIntermediates: false])
     /// G1 "Preview, detail (I2)": the embedded preview is requested at about 2000 px.
     ///
     /// This is a cap, not a guarantee: the owner's A1 II exposes 1616 px and the ARW
@@ -45,8 +45,7 @@ struct DetailRenderer: DetailReading {
         }
     }
 
-    /// G1 "Preview, detail (I2)": a JPEG-primary 100% request decodes the full JPEG, a
-    /// bounded raster route rather than a RAW render.
+    /// Full camera pixels for a JPEG or HIF. RAW files never enter this route.
     func fullRaster(_ source: DetailSource) async -> DetailReadOutcome {
         autoreleasepool {
             guard
@@ -60,26 +59,52 @@ struct DetailRenderer: DetailReading {
             let height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
             let pixels = max(width, height)
             guard pixels > 0 else { return .noUsablePreview }
-            return raster(
-                source, maxPixels: min(pixels, Self.maximumRasterPixels), imageSource: imageSource)
+            guard let type = Self.containerType(imageSource), !type.conforms(to: .rawImage) else {
+                return .noUsablePreview
+            }
+            if pixels > Self.maximumRasterPixels {
+                return raster(source, maxPixels: Self.maximumRasterPixels, imageSource: imageSource)
+            }
+            guard
+                let image = CGImageSourceCreateImageAtIndex(
+                    imageSource, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
+                let data = image.dataProvider?.data, CFDataGetLength(data) > 0
+            else { return .noUsablePreview }
+            let orientation = properties?[kCGImagePropertyOrientation] as? Int ?? 1
+            guard orientation != 1 else { return .image(image) }
+            let oriented = CIImage(cgImage: image).oriented(forExifOrientation: Int32(orientation))
+            guard let transformed = context.createCGImage(oriented, from: oriented.extent) else {
+                return .noUsablePreview
+            }
+            return .image(transformed)
         }
     }
 
-    /// Native sensor pixels (G1 "Preview, detail (I2)").
-    ///
-    /// Output is never scaled down: S2 measured a 2000 px RAW render at 592.8 ms against
-    /// 529.1 ms at native size on the owner's device, so the smaller output is not cheaper.
-    /// `CIRAWFilter` applies orientation, which is why the result can be trusted as oriented.
     func nativeRAW(_ source: DetailSource) async -> CGImage? {
+        raw(source, longEdge: nil)
+    }
+
+    func screenRAW(_ source: DetailSource, longEdge: Int) async -> CGImage? {
+        raw(source, longEdge: longEdge)
+    }
+
+    /// Decode-time scaling, with draft explicitly off. CIRAWFilter applies orientation.
+    private func raw(_ source: DetailSource, longEdge: Int?) -> CGImage? {
         autoreleasepool {
             guard let filter = CIRAWFilter(imageURL: source.url) else { return nil }
+            if let longEdge {
+                let nativeEdge = max(filter.nativeSize.width, filter.nativeSize.height)
+                guard nativeEdge > 0 else { return nil }
+                filter.scaleFactor = min(1, Float(longEdge) / Float(nativeEdge))
+            }
+            filter.isDraftModeEnabled = false
             guard let output = filter.outputImage else { return nil }
-            let context = CIContext(options: [.cacheIntermediates: false])
             guard
                 let image = context.createCGImage(
                     output, from: output.extent, format: .RGBA8,
                     colorSpace: CGColorSpace(name: CGColorSpace.sRGB)),
-                image.width > 0, image.height > 0
+                image.width > 0, image.height > 0,
+                let data = image.dataProvider?.data, CFDataGetLength(data) > 0
             else { return nil }
             // S2: a filter that initialises can still fail at rendering, so pixels are the
             // only evidence of support.

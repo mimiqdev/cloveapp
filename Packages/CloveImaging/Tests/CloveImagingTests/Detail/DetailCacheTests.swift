@@ -17,6 +17,10 @@ private struct NativeHeldProbe: DetailReading {
         await DetailRenderer().fullRaster(source)
     }
 
+    func screenRAW(_ source: DetailSource, longEdge: Int) async -> CGImage? {
+        await DetailRenderer().screenRAW(source, longEdge: longEdge)
+    }
+
     func nativeRAW(_ source: DetailSource) async -> CGImage? {
         await gate.recordNativeHeld(cache.holdsNativeImage)
         return try? makeDetailImage(width: 64, height: 48)

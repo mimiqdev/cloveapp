@@ -6,16 +6,15 @@ import Testing
 /// When the RAW route is allowed to run (G1 "Preview, detail (I2)"; PRD P0-04).
 @Suite(.serialized, .enabled(if: DetailFixtures.hasFormats))
 struct DetailRenderTests {
-    @Test func fitViewNeverRendersTheRaw() async throws {
+    @Test func rawFitUpgradeRendersAtScreenSize() async throws {
         let gate = DetailReadGate()
         let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
         let image = try availableDetail(
-            try await pipeline.image(
+            try await pipeline.screen(
                 for: try rawRequest(DetailFixtures.file("canon-eos-r6.CR3"), displayPixels: 1200)))
-        // G1: never render a RAW during plain fit-view navigation.
-        #expect(await gate.nativePaths.isEmpty)
-        #expect(image.quality == .preview)
-        #expect(image.longEdge == 2000)
+        #expect(await gate.nativePaths.count == 1)
+        #expect(image.quality == .screenRAW)
+        #expect(image.longEdge == 1200)
         #expect(image.limitation == nil)
     }
 
@@ -59,6 +58,25 @@ struct DetailRenderTests {
         #expect(image.quality == .raster)
         #expect(image.width == 5472 && image.height == 3648)
         #expect(await gate.nativePaths.isEmpty)
+    }
+
+    @Test func jpegPinchCanKeepRequestingMoreUntilNativeResolution() async throws {
+        let pipeline = DetailPipeline()
+        let file = DetailFixtures.file("canon-eos-6d.JPG")
+        for pixels in [800, 1500] {
+            let image = try availableDetail(
+                try await pipeline.image(
+                    for: try rasterRequest(file, displayPixels: pixels)))
+            #expect(image.quality == .raster)
+            #expect(image.longEdge == pixels)
+            #expect(image.limitation == nil)
+            #expect(!image.isBestAvailable)
+        }
+        let native = try availableDetail(
+            try await pipeline.image(
+                for: try rasterRequest(file, native: true)))
+        #expect(native.isBestAvailable)
+        #expect(native.longEdge == 5472)
     }
 
     @Test func hifOnlyNativeStaysAtPreviewQualityAndReportsIt() async throws {

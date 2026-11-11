@@ -69,9 +69,10 @@ import CloveCore
             { $0.appearance.matchesSystemAppearance = defaults.appearance.matchesSystemAppearance }
         ),
         ("appearance.theme", invalid, { $0.appearance.theme = defaults.appearance.theme }),
+        ("detail.photoDisplayMode", invalid, { $0.photoDisplayMode = nil }),
     ]
     // The table covers every persisted key, so a new key cannot skip the fallback rule.
-    #expect(cases.map(\.key).sorted() == launchSettingKeys)
+    #expect(cases.map(\.key).sorted() == (launchSettingKeys + ["detail.photoDisplayMode"]).sorted())
 
     for (key, corrupt, applyDefault) in cases {
         let storage = InMemorySettingsStorage()
@@ -181,5 +182,5 @@ import CloveCore
         .filter { $0.hasPrefix(prefix) }
         .map { String($0.dropFirst(prefix.count)) }
         .sorted()
-    #expect(storedKeys == launchSettingKeys)
+    #expect(storedKeys == (launchSettingKeys + ["detail.photoDisplayMode"]).sorted())
 }
