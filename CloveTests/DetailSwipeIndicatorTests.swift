@@ -36,6 +36,3 @@ struct DetailSwipeIndicatorTests {
                 == CGPoint(x: 354, y: 325))
     }
 }
-
-// Deliberately broken to check that CI fails and uploads its logs; reverted next.
-private let deliberatelyBroken: Int = "not a number"
