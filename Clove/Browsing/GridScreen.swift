@@ -1,41 +1,18 @@
 import CloveCore
 import SwiftUI
 
-/// The grid: the open folder's photos in the state's order and filter (PRD Grid, P0-03).
-///
-/// A `UICollectionView` draws the cells, their overlays, the similar-group outlines and counts,
-/// and the collapsed covers, while the browsing state keeps the filter and the order per scene
-/// (PRD P0-03, P0-11, P0-14). The filter and order menus change the state through
-/// ``BrowsingModel`` only, so a fold, a resize or a relaunch restores them. The save-state row
-/// under the controls is the folder's one indicator (PRD P0-08).
-///
-/// A long press starts multi-select on a cell, a tap toggles a cell while the selection is
-/// non-empty, and the batch bar applies a rating, a label or Reject to the selected photos
-/// (PRD P0-09). The selection itself lives in ``BrowsingState/selection``, so folding, resizing or
-/// relaunching keeps it with the rest of the scene (PRD P0-14).
-///
-/// The toolbar also offers Move rejects while the setting is on and the folder holds a rejected
-/// photo (PRD P0-10). The action opens ``MoveRejectsSheet``, which plans, confirms, runs and
-/// reports the move; it never runs without the confirmation.
-///
-/// Design placeholder: system menus, symbols and colours stand in for the visual design's
-/// controls and overlays.
+/// The handoff's iPhone grid: compact navigation, stacked groups and a floating batch capsule.
+/// Marks and navigation still go through BrowsingModel; this view owns only presentation.
 struct GridScreen: View {
-    /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
+    let thumbnails: any GridThumbnailSource
 
-    /// The app-wide settings, read live so a change on the settings screen shows here at once
-    /// (PRD Grid, Similar groups).
     @Environment(SettingsStore.self) private var store
-
-    /// The Move rejects sheet or its details sheet, or nil while both are closed (PRD P0-10).
-    ///
-    /// One item drives one sheet, so the confirmation and the failure details never try to
-    /// present at the same time.
     @State private var moveSheet: MoveSheetRoute?
     @State private var isPickingEmptyFolder = false
+    @State private var showsFilters = false
+    @State private var selectsEmpty = false
 
-    /// One Move rejects presentation: the confirmation flow or its failure details (P0-10).
     private enum MoveSheetRoute: Identifiable {
         case flow(MoveRejectsFlow)
         case details(CompletedRejectMove)
@@ -48,100 +25,84 @@ struct GridScreen: View {
         }
     }
 
-    /// The thumbnails the cells draw (PRD P0-03).
-    ///
-    /// The browsing model supplies the open folder's source, so opening another folder brings a
-    /// source bound to that folder and no screen reaches into the folder library itself. A caller
-    /// can pass its own for a preview.
-    let thumbnails: any GridThumbnailSource
-
-    /// Uses the supplied thumbnail source, or the browsing model's source for the open folder.
     init(browsing: BrowsingModel, thumbnails: (any GridThumbnailSource)? = nil) {
         self.browsing = browsing
         self.thumbnails = thumbnails ?? browsing.thumbnails
     }
 
-    var body: some View {
-        let photos = browsing.photos
-        let cells = GridDisplay(
-            photos: photos, groups: browsing.groups,
+    private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }
+
+    private var cells: [GridCellItem] {
+        GridDisplay(
+            photos: browsing.photos, groups: browsing.groups,
             groupsEnabled: store.settings.similarGroupsEnabled,
-            display: store.settings.gridGroupDisplay
+            display: .collapsed
         ).cells
+    }
+
+    var body: some View {
         VStack(spacing: 0) {
-            controls
-            // The folder's one save state, beside the grid's other folder-level readings
-            // (PRD P0-08). It opens the photos whose marks are not saved yet.
-            SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.grid.saveState")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-            Divider()
+            header
+            if let progress = browsing.readingProgress {
+                ProgressLine(
+                    progress: progress.total > 0
+                        ? Double(progress.read) / Double(progress.total) : 0)
+            } else if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
+                ProgressLine(progress: 1, tone: .grouping)
+            }
+            FolderSaveBanner(browsing: browsing, identifierPrefix: "clove.grid.saveState.failure")
             if cells.isEmpty {
                 emptyState
             } else {
                 GridCollectionView(
-                    items: cells,
-                    currentPhoto: browsing.state.currentPhoto,
-                    groups: browsing.groups,
-                    shownPhotos: Set(photos.map(\.id)),
-                    selection: browsing.state.selection,
-                    thumbnails: thumbnails,
-                    openPhoto: { browsing.openPhoto($0) },
-                    openGroup: openGroup,
+                    items: cells, currentPhoto: browsing.state.currentPhoto,
+                    groups: browsing.groups, shownPhotos: Set(browsing.photos.map(\.id)),
+                    selection: browsing.state.selection, thumbnails: thumbnails,
+                    failedPhotos: Set(
+                        browsing.unsavedChanges.filter { $0.state.failure != nil }.map(\.photo)),
+                    isSelectingEmpty: selectsEmpty,
+                    openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },
                     toggleSelection: { browsing.toggleSelection(of: $0) }
                 )
                 .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            if browsing.isSelecting {
-                GridBatchBar(browsing: browsing, cells: cells)
-                    // PRD P0-10 blocks marking while a move runs; C6's rule is also enforced in
-                    // the model, and this keeps the bar from looking ready.
-                    .disabled(browsing.isMovingRejects)
+        .background(Color.clove.bg.canvas)
+        .overlay(alignment: .bottomTrailing) {
+            if store.settings.moveRejectsEnabled, browsing.rejectedPhotoCount > 0,
+                !browsing.isFolderOpening, !browsing.isMovingRejects, !isSelecting
+            {
+                MoveRejectsButton(identifier: "clove.grid.moveRejects") {
+                    moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                }
+                .padding(16)
             }
         }
-        .toolbar {
-            // The handoff hides Move Rejects while opening and when there is nothing to move,
-            // rather than leaving a disabled action on screen (design handoff, P0-10).
-            if store.settings.moveRejectsEnabled, browsing.rejectedPhotoCount > 0,
-                !browsing.isFolderOpening, !browsing.isMovingRejects
-            {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Move rejects", systemImage: "tray.and.arrow.up") {
-                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
-                    }
-                    .accessibilityIdentifier("clove.grid.moveRejects")
-                }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isSelecting {
+                GridBatchBar(browsing: browsing, cells: cells)
+                    .disabled(browsing.isMovingRejects)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
         }
         .overlay(alignment: .bottom) {
-            if let completed = browsing.lastRejectMove,
-                browsing.isRejectMoveToastVisible
-            {
-                MoveRejectsToast(completed: completed) {
-                    moveSheet = .details(completed)
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 12)
+            if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible {
+                MoveRejectsToast(completed: completed) { moveSheet = .details(completed) }
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
             }
         }
         .task(id: browsing.rejectMoveToastAttempt) {
             guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
-            // Toast timings are still proposed in the handoff; the details remain reachable
-            // from the same result until this presentation ends.
             try? await Task.sleep(for: .seconds(10))
-            // A newer move cancels this task; swallowing the sleep's cancellation must not
-            // dismiss the toast the newer result just showed.
             guard !Task.isCancelled else { return }
             browsing.dismissRejectMoveToast()
         }
         .sheet(item: $moveSheet) { route in
             switch route {
-            case .flow(let flow):
-                MoveRejectsSheet(flow: flow)
+            case .flow(let flow): MoveRejectsSheet(flow: flow)
             case .details(let completed):
                 MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
             }
@@ -153,60 +114,177 @@ struct GridScreen: View {
         .accessibilityIdentifier("clove.grid")
     }
 
-    /// The filter and the order, read from and written to the browsing state (PRD P0-03).
-    ///
-    /// The grouping menu holds PRD P0-11's Run again and hides with the similar-groups setting,
-    /// because turning grouping off hides every grouping entry point (PRD Similar groups rules).
-    /// Design placeholder: the visual design replaces the menu, its label and its symbol.
-    private var controls: some View {
-        HStack(spacing: 16) {
-            Menu {
-                Button("All") { browsing.setFilter(.all) }
-                    .accessibilityIdentifier("clove.grid.filter.all")
-                Button("Unmarked") { browsing.setFilter(.unmarked) }
-                    .accessibilityIdentifier("clove.grid.filter.unmarked")
-                Button("Rejected") { browsing.setFilter(.rejected) }
-                    .accessibilityIdentifier("clove.grid.filter.rejected")
-                ForEach(1...5, id: \.self) { stars in
-                    if let rating = Rating(rawValue: stars) {
-                        Button("\(stars) stars or more") {
-                            browsing.setFilter(.ratedAtLeast(rating))
-                        }
-                        .accessibilityIdentifier("clove.grid.filter.stars\(stars)")
-                    }
+    private var header: some View {
+        BrowsingHeader(
+            title: isSelecting
+                ? "\(browsing.state.selection.count.formatted()) selected" : browsing.folderTitle,
+            titleIdentifier: isSelecting ? "clove.grid.batch.count" : "clove.grid.title",
+            back: { browsing.back() }
+        ) {
+            HStack(spacing: 0) {
+                Text(subtitle).lineLimit(1)
+                if browsing.readingProgress == nil && !browsing.isFindingSimilarShots || isSelecting
+                {
+                    SaveStatusIndicator(
+                        browsing: browsing, identifierPrefix: "clove.grid.saveState")
                 }
-            } label: {
-                Label(filterName, systemImage: "line.3.horizontal.decrease")
             }
-            .accessibilityIdentifier("clove.grid.filter")
-
-            Spacer()
-
-            Menu {
-                Button("Capture time") { browsing.setOrder(.captureTime) }
-                    .accessibilityIdentifier("clove.grid.order.captureTime")
-                Button("File name") { browsing.setOrder(.fileName) }
-                    .accessibilityIdentifier("clove.grid.order.fileName")
-            } label: {
-                Label(orderName, systemImage: "arrow.up.arrow.down")
-            }
-            .accessibilityIdentifier("clove.grid.order")
-
-            if store.settings.similarGroupsEnabled {
-                Menu {
-                    Button("Run again") { Task { await browsing.runGroupingAgain() } }
-                        .accessibilityIdentifier("clove.grid.grouping.runAgain")
-                } label: {
-                    Label("Similar groups", systemImage: "square.grid.2x2")
+        } tools: {
+            if isSelecting {
+                Button("Done") {
+                    browsing.clearSelection()
+                    selectsEmpty = false
                 }
-                .accessibilityIdentifier("clove.grid.grouping")
+                .foregroundStyle(Color.clove.accent)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .cloveGlass(in: Capsule())
+                .accessibilityIdentifier("clove.grid.batch.done")
+            } else {
+                GlassIconButton(
+                    label: "Filter", symbol: "line.3.horizontal.decrease", isActive: hasFilter,
+                    identifier: "clove.grid.filter"
+                ) { showsFilters.toggle() }
+                .popover(isPresented: $showsFilters, arrowEdge: .top) {
+                    filterMenu.presentationCompactAdaptation(.popover)
+                }
+                moreMenu
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
     }
 
-    /// What the grid shows when it has no cell to draw (PRD P0-01, P0-03).
+    private var moreMenu: some View {
+        Menu {
+            Section("Sort by") {
+                Button {
+                    browsing.setOrder(.captureTime)
+                } label: {
+                    Label(
+                        "Capture time",
+                        systemImage: browsing.state.order == .captureTime ? "checkmark" : "")
+                }
+                .accessibilityIdentifier("clove.grid.order.captureTime")
+                Button {
+                    browsing.setOrder(.fileName)
+                } label: {
+                    Label(
+                        "Filename",
+                        systemImage: browsing.state.order == .fileName ? "checkmark" : "")
+                }
+                .accessibilityIdentifier("clove.grid.order.fileName")
+            }
+            Button("Select") { selectsEmpty = true }
+                .accessibilityIdentifier("clove.grid.select")
+            if store.settings.similarGroupsEnabled {
+                Button("Find similar shots again") { Task { await browsing.runGroupingAgain() } }
+                    .accessibilityIdentifier("clove.grid.grouping.runAgain")
+            }
+            Section {
+                Button("Settings") { browsing.showSettings() }
+                    .accessibilityIdentifier("clove.nav.settings")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.title3)
+                .foregroundStyle(Color.clove.text.primary)
+                .frame(width: 44, height: 44)
+                .cloveGlass(in: Circle())
+        }
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("clove.grid.more")
+    }
+
+    private var filterMenu: some View {
+        VStack(spacing: 0) {
+            filterRow("All", filter: .all, identifier: "all")
+            filterRow("Unmarked", filter: .unmarked, identifier: "unmarked")
+            filterRow("Rejected", filter: .rejected, identifier: "rejected")
+            Divider().overlay(Color.clove.separator)
+            HStack {
+                Text("Rating ≥")
+                Spacer()
+                StarRow(rating: minimumRating, identifier: "clove.grid.filter.stars") { rating in
+                    browsing.setFilter(rating == .unrated ? .all : .ratedAtLeast(rating))
+                    showsFilters = false
+                }
+                .scaleEffect(0.75, anchor: .trailing)
+                .frame(width: 126)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            HStack(spacing: 12) {
+                Text("Label")
+                Spacer()
+                ForEach(LabelColour.allCases.filter { !$0.isExtended }, id: \.self) { label in
+                    Button {
+                        browsing.setLabelFilter(label)
+                        showsFilters = false
+                    } label: {
+                        Circle().fill(Color.clove.label.colour(for: label))
+                            .frame(width: 16, height: 16)
+                            .frame(height: 32)
+                    }
+                    .accessibilityLabel("Label, \(label.rawValue)")
+                    .accessibilityIdentifier(
+                        "clove.grid.filter.label.\(label.rawValue.lowercased())")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+        .font(.subheadline)
+        .foregroundStyle(Color.clove.text.primary)
+        .frame(width: 280)
+        .background(Color.clove.surface.sheet)
+    }
+
+    private func filterRow(_ name: String, filter: PhotoFilter, identifier: String) -> some View {
+        Button {
+            browsing.setFilter(filter)
+            showsFilters = false
+        } label: {
+            HStack {
+                Image(systemName: "checkmark")
+                    .opacity(browsing.state.filter == filter && browsing.labelFilter == nil ? 1 : 0)
+                    .frame(width: 16)
+                Text(name)
+                Spacer()
+                Text(browsing.allPlacedPhotos.filter { filter.matches($0.marks) }.count.formatted())
+                    .foregroundStyle(Color.clove.text.secondary)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("clove.grid.filter.\(identifier)")
+    }
+
+    private var minimumRating: Rating {
+        if case .ratedAtLeast(let rating) = browsing.state.filter { return rating }
+        return .unrated
+    }
+
+    private var hasFilter: Bool { browsing.state.filter != .all || browsing.labelFilter != nil }
+
+    private var subtitle: String {
+        if isSelecting { return browsing.folderTitle }
+        if let progress = browsing.readingProgress {
+            return "\(progress.read.formatted()) of \(progress.total.formatted())"
+        }
+        if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
+            return "Finding similar shots…"
+        }
+        let count = browsing.photos.count.formatted()
+        if let label = browsing.labelFilter { return "\(label.rawValue) · \(count)" }
+        switch browsing.state.filter {
+        case .all: return "\(count) photos"
+        case .unmarked: return "Unmarked · \(count)"
+        case .rejected: return "Rejected · \(count)"
+        case .ratedAtLeast(let rating): return "Rating ≥ \(rating.rawValue) · \(count)"
+        }
+    }
+
     @ViewBuilder private var emptyState: some View {
         if !browsing.hasFolderContents && !browsing.isFolderOpening {
             EntryEmptyState(isEmptyFolder: true) { isPickingEmptyFolder = true }
@@ -222,28 +300,8 @@ struct GridScreen: View {
         }
     }
 
-    /// Opens one similar group's view from its count tag or its cover (PRD Grid, P0-11).
     private func openGroup(_ id: GroupID) {
         guard let group = browsing.groups.first(where: { $0.id == id }) else { return }
         browsing.openGroup(group)
-    }
-
-    /// The current filter's name, so the grid shows the filter it is applying (PRD P0-03).
-    private var filterName: String {
-        switch browsing.state.filter {
-        case .all:
-            "All"
-        case .unmarked:
-            "Unmarked"
-        case .rejected:
-            "Rejected"
-        case .ratedAtLeast(let rating):
-            "\(rating.rawValue)+ stars"
-        }
-    }
-
-    /// The current order's name (PRD P0-03).
-    private var orderName: String {
-        browsing.state.order == .captureTime ? "Capture time" : "File name"
     }
 }

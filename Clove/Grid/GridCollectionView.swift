@@ -43,6 +43,9 @@ struct GridCollectionView: UIViewRepresentable {
     /// The thumbnails and companion badges the cells draw (PRD Grid, P0-03).
     let thumbnails: any GridThumbnailSource
 
+    var failedPhotos: Set<PhotoIdentity> = []
+    var isSelectingEmpty = false
+
     /// Opens one photo's detail (PRD Grid, P0-03). A single tap never waits for a second one.
     let openPhoto: (PhotoIdentity) -> Void
 
@@ -82,7 +85,9 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.apply(
             items: items, groups: groups, shownPhotos: shownPhotos,
             currentPhoto: currentPhoto, selection: selection,
-            sizeClass: context.environment.horizontalSizeClass)
+            sizeClass: context.environment.horizontalSizeClass,
+            theme: context.environment.cloveTheme, failedPhotos: failedPhotos,
+            isSelectingEmpty: isSelectingEmpty)
     }
 
     /// Three columns at compact width, five at regular width, from a square-ish cell (PRD Grid).
@@ -135,6 +140,9 @@ extension GridCollectionView {
         private weak var collectionView: UICollectionView?
         private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
+        private var theme = CloveTheme.light
+        private var failedPhotos: Set<PhotoIdentity> = []
+        private var isSelectingEmpty = false
 
         init(
             thumbnails: any GridThumbnailSource,
@@ -160,7 +168,8 @@ extension GridCollectionView {
                 guard let self, let item = self.itemsByID[id] else { return }
                 cell.configure(
                     with: item, isSelected: self.showsSelected(item),
-                    isSelecting: self.isSelecting, thumbnails: self.thumbnails
+                    isSelecting: self.isSelecting, thumbnails: self.thumbnails,
+                    theme: self.theme, hasFailed: self.failedPhotos.contains(item.photo.id)
                 ) { [weak self] group in
                     self?.openGroup(group)
                 }
@@ -189,9 +198,17 @@ extension GridCollectionView {
         func apply(
             items newItems: [GridCellItem], groups newGroups: [BrowsingGroup],
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
-            selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?
+            selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?,
+            theme newTheme: CloveTheme, failedPhotos newFailures: Set<PhotoIdentity>,
+            isSelectingEmpty newSelectingEmpty: Bool
         ) {
             guard let collectionView, let dataSource else { return }
+            let styleChanged =
+                theme != newTheme || failedPhotos != newFailures
+                || isSelectingEmpty != newSelectingEmpty
+            theme = newTheme
+            failedPhotos = newFailures
+            isSelectingEmpty = newSelectingEmpty
             if sizeClass != lastSizeClass {
                 lastSizeClass = sizeClass
                 collectionView.collectionViewLayout.invalidateLayout()
@@ -203,7 +220,8 @@ extension GridCollectionView {
                 shownPhotos = newShownPhotos
                 selection = newSelection
                 let restyled = items.compactMap { item in
-                    before.showsSelected(item) == after.showsSelected(item) ? nil : item.id
+                    !styleChanged && before.showsSelected(item) == after.showsSelected(item)
+                        ? nil : item.id
                 }
                 guard !restyled.isEmpty else { return }
                 // Only the cells whose selection changed are redrawn, so a toggle never
@@ -229,7 +247,7 @@ extension GridCollectionView {
             snapshot.appendItems(newItems.map(\.id), toSection: 0)
             let changed: [GridCellItem.ID] = newItems.compactMap { item in
                 guard let old = previousByID[item.id] else { return nil }
-                if old != item { return item.id }
+                if old != item || styleChanged { return item.id }
                 return before.showsSelected(old) != after.showsSelected(item) ? item.id : nil
             }
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
@@ -349,7 +367,7 @@ extension GridCollectionView {
         }
 
         /// Whether the grid is in multi-select, which a non-empty selection means (PRD P0-09).
-        private var isSelecting: Bool { !selection.isEmpty }
+        private var isSelecting: Bool { isSelectingEmpty || !selection.isEmpty }
 
         /// Whether one cell draws as selected (PRD P0-09).
         private func showsSelected(_ item: GridCellItem) -> Bool {

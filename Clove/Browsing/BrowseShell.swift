@@ -117,9 +117,16 @@ extension View {
     /// (PRD P0-13; handoff Entry and Settings).
     func browsingChrome(title: String, browsing: BrowsingModel) -> some View {
         self
-            .navigationTitle(title)
+            .navigationTitle(
+                browsing.state.route == .grid || browsing.state.route == .detail ? "" : title
+            )
+            .toolbar(
+                browsing.state.route == .grid || browsing.state.route == .detail
+                    ? .hidden : .visible,
+                for: .navigationBar
+            )
             .toolbar {
-                if browsing.state.route != .entry && browsing.state.route != .settings {
+                if browsing.state.route == .group {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Back", systemImage: "chevron.left") { browsing.back() }
                             .accessibilityIdentifier("clove.nav.back")
@@ -135,7 +142,7 @@ extension View {
                         ) {
                             browsing.showSettings()
                         }
-                    } else {
+                    } else if browsing.state.route == .group {
                         Button("Settings", systemImage: "gearshape") { browsing.showSettings() }
                             .accessibilityIdentifier("clove.nav.settings")
                     }

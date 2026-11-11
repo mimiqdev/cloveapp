@@ -1,20 +1,10 @@
 import CloveCore
 import SwiftUI
 
-/// The open folder's one save-state indicator, with the PRD's recovery copy when the folder
-/// itself failed (PRD P0-08).
+/// A wordless save glyph in the navigation subtitle (owner decision, 2026-11-11).
 ///
-/// The grid and the detail view both show it, and both read ``BrowsingModel``: the summary
-/// (**Writing…**, **All saved**, or how many photos are not saved), the folder's own location
-/// loss, and the photos whose change has not finished. A save state is never guessed here: the
-/// words come from CloveCore's mapping, which shows **Saved** only for a confirmed sidecar write
-/// and **Saved in Clove only** only for confirmed Clove storage.
-///
-/// The unsaved count opens a short list of those photos, each with Retry, plus Retry all, which
-/// makes the same per-photo call for each. Reaching a lost folder offers the PRD's
-/// Reconnect/reopen or Select-through-Open action.
-///
-/// Folder losses use the handoff's glass banner and subtitle (screens.md, Errors).
+/// The write state remains owned by CloveCore. Failed glyphs retry the failed change or batch.
+/// A long press opens the existing unsaved list. Folder recovery keeps its separate glass banner.
 struct SaveStatusIndicator: View {
     /// The scene's browsing state and the operations this indicator performs on it.
     let browsing: BrowsingModel
@@ -23,26 +13,55 @@ struct SaveStatusIndicator: View {
     /// view can be told apart when both are on screen.
     let identifierPrefix: String
 
+    /// Nil summarises the folder; a photo reads only its own latest change.
+    var photo: PhotoIdentity?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var savingIsVisible = false
+    @State private var pulse = false
+
     /// Whether the unsaved photos' list is presented (PRD P0-08).
     @State private var showingUnsaved = false
 
-    /// Whether the system folder picker is presented for an Open action (PRD P0-01).
-    @State private var isPickingFolder = false
-
     var body: some View {
-        Group {
-            if let situation = browsing.folderSituation {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(situation == .driveDisconnected ? "Not connected" : "View only")
-                        .font(.caption)
-                        .foregroundStyle(Color.clove.text.secondary)
-                        .accessibilityIdentifier("\(identifierPrefix).subtitle")
-                    SaveFailureBanner(
-                        situation: situation, identifierPrefix: "\(identifierPrefix).failure",
-                        perform: perform)
+        Button {
+            guard state == .failed else { return }
+            Task {
+                if let photo {
+                    await browsing.retryLatestChange(for: photo)
+                } else if browsing.batchReport?.canRetry == true {
+                    await browsing.retryFailedBatch()
+                } else {
+                    for change in browsing.unsavedChanges where change.state.failure != nil {
+                        await browsing.retryLatestChange(for: change.photo)
+                    }
                 }
-            } else {
-                summaryControl
+            }
+        } label: {
+            glyph
+                .frame(width: 28, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(state.label)
+        .accessibilityIdentifier(identifierPrefix)
+        .accessibilityHidden(state == .saving && !savingIsVisible)
+        .contextMenu {
+            if !browsing.unsavedChanges.isEmpty {
+                Button("Unsaved marks") { showingUnsaved = true }
+            }
+        }
+        .task(id: state) {
+            savingIsVisible = false
+            pulse = false
+            guard state == .saving else { return }
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            savingIsVisible = true
+            if !reduceMotion {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
             }
         }
         // The sheet hangs off the indicator itself, not off the button that opens it, so it is
@@ -50,70 +69,89 @@ struct SaveStatusIndicator: View {
         .sheet(isPresented: $showingUnsaved) {
             UnsavedChangesView(browsing: browsing)
         }
-        // PRD Failure and recovery's Select-it-through-Open action opens the system picker here
-        // too, so a lost location is recoverable from the grid and from detail (PRD P0-01). The
-        // choice arrives after the picker dismisses, so a leaving question can present.
-        .folderPicker(isPresented: $isPickingFolder) { url in
-            await browsing.openPickedFolder(url)
+    }
+
+    @ViewBuilder private var glyph: some View {
+        switch state {
+        case .saved, .cloveOnly:
+            Circle().fill(Color.clove.status.saved).frame(width: 8, height: 8)
+        case .saving:
+            Circle().fill(Color.clove.text.secondary).frame(width: 8, height: 8)
+                .opacity(savingIsVisible ? (pulse ? 0.4 : 1) : 0)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(Color.clove.status.failed)
+        case .disconnected, .viewOnly, .stored:
+            Image(
+                systemName: state == .disconnected
+                    ? "externaldrive.badge.xmark"
+                    : state == .viewOnly ? "lock.fill" : "internaldrive"
+            )
+            .foregroundStyle(Color.clove.text.secondary)
         }
     }
 
-    /// The folder's one save-state line, which opens the unsaved list when there is one.
-    private var summaryControl: some View {
-        let summary = browsing.saveSummary
-        return Group {
-            // The list stays reachable while anything is unfinished, even when the line is
-            // showing Writing… (PRD Failure and recovery).
-            if !browsing.unsavedChanges.isEmpty {
-                Button {
-                    showingUnsaved = true
-                } label: {
-                    summaryLabel(summary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(identifierPrefix)
-                .accessibilityHint("Shows the photos whose marks haven't been saved")
-            } else {
-                summaryLabel(summary)
-                    .accessibilityIdentifier(identifierPrefix)
+    private var state: SaveGlyphState {
+        if let situation = browsing.folderSituation {
+            return situation == .driveDisconnected ? .disconnected : .viewOnly
+        }
+        if let photo {
+            switch browsing.latestChange(for: photo)?.state {
+            case .pending, .writing: return .saving
+            case .failed: return .failed
+            case .storedInClove: return .stored
+            case .savedInCloveOnly: return .cloveOnly
+            default: return .saved
             }
         }
+        let summary = browsing.saveSummary
+        if summary.failed > 0 { return .failed }
+        if summary.writing > 0 { return .saving }
+        if summary.savedInCloveOnly > 0 { return .cloveOnly }
+        if summary.storedInClove > 0 { return .stored }
+        return .saved
     }
 
-    /// One line with a symbol and the summary's own words (PRD P0-08).
-    private func summaryLabel(_ summary: FolderSaveSummary) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol(for: summary))
-            Text(summary.text)
+}
+
+private enum SaveGlyphState: Equatable {
+    case saved, saving, failed, disconnected, viewOnly, stored, cloveOnly
+
+    var label: String {
+        switch self {
+        case .saved: "Saved"
+        case .saving: "Saving"
+        case .failed: "Save failed. Double-tap to retry."
+        case .disconnected: "Not connected"
+        case .viewOnly: "View only"
+        case .stored: "Stored in Clove"
+        case .cloveOnly: "Saved in Clove only"
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(summary.text)
-        .accessibilityValue(summary.text)
     }
+}
 
-    /// One symbol per reading, so the state is not carried by words alone (PRD P0-15). A failure
-    /// wins, so it is never hidden behind a running write (PRD Failure and recovery).
-    private func symbol(for summary: FolderSaveSummary) -> String {
-        if summary.failed > 0 { return "exclamationmark.triangle" }
-        if summary.writing > 0 { return "arrow.triangle.2.circlepath" }
-        if summary.isAllSaved { return "checkmark.circle" }
-        if summary.savedInCloveOnly > 0 || summary.storedInClove > 0 { return "internaldrive" }
-        return "circle.dashed"
-    }
+/// The folder's recovery banner retains V4's words below the wordless navigation subtitle.
+struct FolderSaveBanner: View {
+    let browsing: BrowsingModel
+    let identifierPrefix: String
+    @State private var isPickingFolder = false
 
-    /// Performs one recovery action from the PRD's table (PRD Failure and recovery).
-    private func perform(_ action: SaveAction) {
-        switch action {
-        case .retry, .freeSpaceAndRetry:
-            Task { await browsing.retryAllUnfinishedChanges() }
-        case .cancel:
-            break
-        case .reopenFolder:
-            Task { await browsing.reopenOpenFolder() }
-        case .openFolder:
-            isPickingFolder = true
+    var body: some View {
+        Group {
+            if let situation = browsing.folderSituation {
+                SaveFailureBanner(situation: situation, identifierPrefix: identifierPrefix) {
+                    action in
+                    if action == .reopenFolder {
+                        Task { await browsing.reopenOpenFolder() }
+                    } else if action == .openFolder {
+                        isPickingFolder = true
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .folderPicker(isPresented: $isPickingFolder) { url in
+            await browsing.openPickedFolder(url)
         }
     }
 }

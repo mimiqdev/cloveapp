@@ -32,70 +32,36 @@ final class DetailSwipeFeedback {
     }
 }
 
-/// The rating or Reject badge that follows the finger during a marking swipe (PRD P0-06,
-/// PRD Rating by swipe distance).
-///
-/// Design placeholder: a capsule of system stars, and the Reject symbol, stand in for the visual
-/// design's own indicator. The position near the finger, the stars for the enabled level the
-/// finger is on and the light haptic at each step are the behaviour P0-06 fixes.
+/// The handoff's vertical ladder mirrors the gesture's existing resolved step.
+/// It has no gesture of its own here; release still commits through the original input rules.
 struct DetailSwipeFeedbackBadge: View {
-    /// The live state the swipe writes as the finger moves.
     let feedback: DetailSwipeFeedback
+    var enabledRatings: EnabledRatings = .all
 
     var body: some View {
         GeometryReader { proxy in
             if feedback.isShowing {
-                indicator
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
-                    .position(badgeCentre(in: proxy.size))
-                    .allowsHitTesting(false)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityIdentifier("clove.detail.swipeFeedback")
-                    .accessibilityLabel(indicatorName)
-            }
-        }
-    }
-
-    /// The badge sits just above the finger, and inside the preview, so the hand never covers the
-    /// step it is on (PRD Rating by swipe distance; PRD Detail and marking keeps marks out from
-    /// under the hand).
-    ///
-    /// Design placeholder: the lift and the half extents are the indicator's own size, which the
-    /// visual design replaces.
-    private func badgeCentre(in size: CGSize) -> CGPoint {
-        let lift: CGFloat = 56
-        let halfWidth: CGFloat = 76
-        let halfHeight: CGFloat = 20
-        return CGPoint(
-            x: min(max(feedback.location.x, halfWidth), max(size.width - halfWidth, halfWidth)),
-            y: min(
-                max(feedback.location.y - lift, halfHeight),
-                max(size.height - halfHeight, halfHeight)))
-    }
-
-    /// The rating the finger is on, or the Reject symbol past the threshold (PRD P0-15 colours).
-    @ViewBuilder private var indicator: some View {
-        if feedback.isReject {
-            Image(systemName: "xmark.circle.fill")
-                .font(.title2)
-                .foregroundStyle(.red)
-        } else if let rating = feedback.rating {
-            HStack(spacing: 2) {
-                ForEach(0..<rating.rawValue, id: \.self) { _ in
-                    Image(systemName: "star.fill")
+                Group {
+                    if feedback.isReject {
+                        RejectCircle(isRejected: true, onToggle: {})
+                            .padding(4).cloveGlass(in: Circle())
+                    } else {
+                        VerticalStarBar(
+                            rating: feedback.rating ?? .unrated, enabledRatings: enabledRatings,
+                            onPreview: { _ in }, onCommit: { _ in }, onReject: {})
+                    }
                 }
+                .position(
+                    x: max(proxy.size.width - 40, 24),
+                    y: min(max(feedback.location.y, 150), max(proxy.size.height - 160, 150))
+                )
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityIdentifier("clove.detail.swipeFeedback")
+                .accessibilityLabel(
+                    feedback.isReject ? "Reject" : "\(feedback.rating?.rawValue ?? 0) stars")
             }
-            .font(.title3)
-            .foregroundStyle(.orange)
         }
-    }
-
-    /// What VoiceOver reads for the badge, which is the same words the marks use.
-    private var indicatorName: String {
-        if feedback.isReject { return "Reject" }
-        return "\(feedback.rating?.rawValue ?? 0) stars"
     }
 }
 

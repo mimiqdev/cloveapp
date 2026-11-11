@@ -65,6 +65,7 @@ struct DesignGalleryScreen: View {
                     // A fixed width, so no control's ideal width can widen the page; the gallery
                     // is a test screen, not a layout that adapts to its content.
                     .frame(width: min(proxy.size.width, 520), alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .background(Rectangle().fill(Color.clove.bg.canvas).ignoresSafeArea())
                 .navigationTitle("Design gallery")
