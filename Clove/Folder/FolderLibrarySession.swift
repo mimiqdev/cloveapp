@@ -308,7 +308,10 @@ final class FolderLibrarySession: FolderLibrary {
     /// counts it as a failure and the photo keeps the marks it had (PRD P0-08).
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         let change = items.first?.change ?? MarkChange()
-        guard !isDisconnected, !Task.isCancelled, let session = openSession, !items.isEmpty else {
+        guard !Task.isCancelled else {
+            return MarkBatchResult(id: MarkBatchID(), change: change, outcomes: [])
+        }
+        guard !isDisconnected, let session = openSession, !items.isEmpty else {
             return Self.refusedBatch(
                 items, change: change, reason: .locationUnavailable,
                 message: "The open folder no longer holds these photos.")

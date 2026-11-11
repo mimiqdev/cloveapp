@@ -102,7 +102,9 @@ public actor MarkWriteQueue {
     @discardableResult
     public func apply(_ change: MarkChange, to set: ScannedPhotoSet) async -> MarkChangeStatus {
         guard !Task.isCancelled else {
-            return Self.disconnected(id: MarkChangeID(), photo: set.id, change: change)
+            return MarkChangeStatus(
+                id: MarkChangeID(), identity: set.id, requested: change,
+                state: .failed(MarkWriteFailure(classifying: CancellationError())))
         }
         guard !change.isEmpty else {
             return MarkChangeStatus(
@@ -132,7 +134,9 @@ public actor MarkWriteQueue {
             return MarkBatchResult(
                 id: batchID, change: change,
                 outcomes: sets.map {
-                    Self.disconnected(id: MarkChangeID(), photo: $0.id, change: change)
+                    MarkChangeStatus(
+                        id: MarkChangeID(), identity: $0.id, requested: change,
+                        state: .failed(MarkWriteFailure(classifying: CancellationError())))
                 })
         }
         var ids: [MarkChangeID] = []
