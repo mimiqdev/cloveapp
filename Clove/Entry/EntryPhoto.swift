@@ -30,8 +30,8 @@ struct EntryPhoto: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .clipped()
+        .onChange(of: photo) { image = nil }
         .task(id: Request(photo: photo, generation: browsing.entryPreviewGeneration)) {
-            image = nil
             guard let photo else { return }
             if case .image(let loaded) = await browsing.entryThumbnail(for: photo),
                 !Task.isCancelled

@@ -38,7 +38,7 @@ Things to know about the frames:
 
 1. **Each device gets the layout that suits it.** Device fit beats cross-device consistency (iPhone capsule, iPad rail, Duo dock).
 2. **Less is more.** Show a control only when it's needed, with no always-on bars. Move Rejects appears only when there are rejects.
-3. **Let the layout tell.** Encode state in the image and layout (stacks, dimming, position, the filmstrip as progress) before adding labels or badges. Rejected photos are dimmed, never badged.
+3. **Let the layout tell.** Encode state in the image and layout (stacks, dimming, position, the filmstrip as progress) before adding labels or badges. Rejected photos are dimmed without badges in the grid, filmstrip and Move Rejects quick grid. Detail shows them at full brightness with a corner reject glyph.
 4. **Photos are never tinted.** Themes change only the chrome.
 5. **Nothing is destructive.** Reject never deletes; Move Rejects always confirms first and can be undone.
 

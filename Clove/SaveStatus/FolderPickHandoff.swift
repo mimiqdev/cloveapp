@@ -29,10 +29,12 @@ struct FolderPickHandoff {
         return takeReadyPick()
     }
 
-    mutating func dismissed(_ source: Presentation) -> URL? {
+    mutating func dismissed(_ source: Presentation, requestedAgain: inout Bool) -> URL? {
         guard source == presentation, case .waiting(let picked, _) = phase else { return nil }
         phase = .waiting(picked: picked, dismissed: true)
-        return takeReadyPick()
+        let readyPick = takeReadyPick()
+        if readyPick != nil { requestedAgain = false }
+        return readyPick
     }
 
     mutating func cancel(_ source: Presentation) {

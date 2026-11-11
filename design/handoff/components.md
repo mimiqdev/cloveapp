@@ -41,7 +41,8 @@ All floating controls use one glass material:
 
 | Component | Spec |
 |---|---|
-| **Photo stage** | The photo is aspect fit on `bg/stage`. It is never tinted. Double-tap zooms to 100%. |
+| **Photo stage** | The photo is aspect fit on `bg/stage`. It is never tinted or dimmed, including when rejected. Double-tap zooms to 100%. |
+| **Detail reject glyph** | A white `xmark` in a 22 pt filled `reject` circle, inset 8 pt in the stage's top-trailing corner inside the safe area. Shown only for rejected photos. Fixed while zooming or panning and visible with chrome hidden. Decorative and ignores taps. VoiceOver reads "Rejected" in the photo label, with no separate glyph element. |
 | **Nav title and subtitle** | The filename (or folder name), with a subtitle built from counts and companion segments joined by " · ". Only folder access problems add an indicator: Not connected or View only. |
 | **Filmstrip** | Thumbnails 54 × 60 with a gap of 8. Follows grid order. **Other groups** are collapsed to one stacked thumbnail with a count badge (radius 8, `group`). The **current group** is expanded in place on a rounded rectangle (radius 9, padding 3, gap 3) of `group` at **25% layer opacity**, with no outline. The **current frame** has a 1.5–2 pt ring in `text/primary` (radius 5). Rejected thumbnails are dimmed. |
 | **100% chip** | A small glass pill reading "100%", fading out after about 1 s. |
