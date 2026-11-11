@@ -55,6 +55,7 @@ struct VerticalStarBar: View {
 
     /// The value the stars fill to: the drag's live value while one runs, else the photo's rating.
     private var shownRating: Rating { preview ?? rating }
+    private var metrics: VerticalStarBarMetrics { VerticalStarBarMetrics(size: size) }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -70,14 +71,11 @@ struct VerticalStarBar: View {
     /// The glass pill of stars, top to bottom from five to one (components.md).
     private var pill: some View {
         GeometryReader { proxy in
-            VStack(spacing: gap) {
-                ForEach(EnabledRatings.all.levels.reversed(), id: \.rawValue) { level in
-                    star(level)
-                }
-            }
-            .padding(padding)
+            VerticalStarBarStars(
+                rating: shownRating, enabledRatings: enabledRatings, size: size
+            )
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .updating($isDragging) { _, state, _ in
@@ -103,20 +101,8 @@ struct VerticalStarBar: View {
             .accessibilityValue(accessibilityValue)
             .accessibilityAdjustableAction(adjustRating)
         }
-        .frame(width: width, height: height)
-        .cloveGlass(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-    }
-
-    /// One star; the filled ones start at the bottom, and a disabled level is dimmed
-    /// (components.md, PRD Enabled rating levels).
-    private func star(_ level: Rating) -> some View {
-        let isFilled = level <= shownRating
-        let isEnabled = enabledRatings.contains(level)
-        return Image(systemName: isFilled ? "star.fill" : "star")
-            .font(.title3)
-            .foregroundStyle(isFilled ? Color.clove.rating.on : Color.clove.rating.off)
-            .opacity(isEnabled ? 1 : 0.35)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: metrics.width, height: metrics.height)
+        .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
     }
 
     /// The ✕ chip the swipe down lands on (components.md): a light, thin ✕ on its own glass chip.
@@ -197,9 +183,10 @@ struct VerticalStarBar: View {
     /// The star a drag at `y` points at: the stars fill from the bottom (components.md).
     private func drawnLevel(at y: CGFloat, in height: CGFloat) -> Rating {
         let levels = EnabledRatings.all.levels
-        let innerHeight = max(height - 2 * padding, 1)
+        let innerHeight = max(height - 2 * metrics.padding, 1)
         let filled = Int(
-            ((innerHeight - (y - padding)) / innerHeight * CGFloat(levels.count)).rounded(.up))
+            ((innerHeight - (y - metrics.padding)) / innerHeight * CGFloat(levels.count)).rounded(
+                .up))
         return levels[min(max(filled, 1), levels.count) - 1]
     }
 
@@ -210,8 +197,60 @@ struct VerticalStarBar: View {
         return enabledRatings.levels.last { $0 <= drawn }
     }
 
+    /// How far a gesture may move and still count as a tap.
+    private static let tapSlop: CGFloat = 4
+}
+
+/// A read-out for photo swipes. It installs no gestures, buttons or adjustable actions.
+struct VerticalStarBarDisplay: View {
+    let rating: Rating
+    var enabledRatings: EnabledRatings = .all
+    var isReject = false
+
+    private let metrics = VerticalStarBarMetrics(size: .phone)
+
+    var body: some View {
+        VStack(spacing: 10) {
+            VerticalStarBarStars(rating: rating, enabledRatings: enabledRatings, size: .phone)
+                .frame(width: metrics.width, height: metrics.height)
+                .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius))
+            Image(systemName: "xmark")
+                .font(.subheadline)
+                .foregroundStyle(isReject ? Color.clove.reject : Color.clove.text.secondary)
+                .frame(width: 40, height: 40)
+                .cloveGlass(in: Circle())
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Shared pixels for the interactive rail and the display-only swipe indicator.
+private struct VerticalStarBarStars: View {
+    let rating: Rating
+    let enabledRatings: EnabledRatings
+    let size: ControlSize
+
+    var body: some View {
+        let metrics = VerticalStarBarMetrics(size: size)
+        VStack(spacing: metrics.gap) {
+            ForEach(EnabledRatings.all.levels.reversed(), id: \.rawValue) { level in
+                let filled = level <= rating
+                Image(systemName: filled ? "star.fill" : "star")
+                    .font(.title3)
+                    .foregroundStyle(filled ? Color.clove.rating.on : Color.clove.rating.off)
+                    .opacity(enabledRatings.contains(level) ? 1 : 0.35)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(metrics.padding)
+    }
+}
+
+private struct VerticalStarBarMetrics {
+    let size: ControlSize
+
     /// The pill's width: 40 on iPhone, 43 on the iPad rail (components.md).
-    private var width: CGFloat {
+    var width: CGFloat {
         switch size {
         case .phone: 40
         case .pad: 43
@@ -221,7 +260,7 @@ struct VerticalStarBar: View {
 
     /// The pill's height: five rows of 30 with a gap of 6 and a padding of 10; the iPad rail is
     /// 174 high with 26 pt rows (components.md).
-    private var height: CGFloat {
+    var height: CGFloat {
         switch size {
         case .phone: 5 * 30 + 4 * gap + 2 * padding
         case .pad: 174
@@ -230,7 +269,7 @@ struct VerticalStarBar: View {
     }
 
     /// The corner radius: 22 on the iPad rail, half the width on iPhone (components.md).
-    private var cornerRadius: CGFloat {
+    var cornerRadius: CGFloat {
         switch size {
         case .phone: width / 2
         case .pad: 22
@@ -239,13 +278,10 @@ struct VerticalStarBar: View {
     }
 
     /// The gap between the rows: 6 on the iPad rail (components.md).
-    private var gap: CGFloat { 6 }
+    var gap: CGFloat { 6 }
 
     /// The pill's inner padding: 10 (components.md).
-    private var padding: CGFloat { 10 }
-
-    /// How far a gesture may move and still count as a tap.
-    private static let tapSlop: CGFloat = 4
+    var padding: CGFloat { 10 }
 }
 
 #Preview("Vertical star bar") {

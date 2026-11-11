@@ -24,27 +24,30 @@ public struct GridCellItem: Identifiable, Hashable, Sendable {
     /// The identity a diffable data source tracks (PRD P0-11).
     public let id: ID
 
-    /// The photo the cell draws: the photo itself, or a cover's first shown member (PRD Grid).
+    /// The photo the cell draws, chosen by `GridDisplay` from the shown members.
     public let photo: GridPhoto
 
     /// How the cell takes part in a similar group, or nil when grouping is off or the photo is
     /// not grouped (PRD P0-11).
     public let group: GroupMark?
 
-    /// Collects one cell from its photo and, when it takes part in a group, its group mark.
-    public init(id: ID, photo: GridPhoto, group: GroupMark? = nil) {
+    /// Whether the tile is dimmed. A collapsed stack requires every shown member to be rejected.
+    public let isDimmed: Bool
+
+    /// Collects the presentation decided by `GridDisplay`.
+    public init(id: ID, photo: GridPhoto, group: GroupMark? = nil, isDimmed: Bool) {
         self.id = id
         self.photo = photo
         self.group = group
+        self.isDimmed = isDimmed
     }
 }
 
 extension GridCellItem {
     /// How one cell takes part in a similar group (PRD Grid, P0-11).
     ///
-    /// Expanded display outlines every member cell in blue and draws the group's count once, on
-    /// the group's first shown cell. Collapsed display draws one cover per group, and the cover
-    /// carries the count instead. Both readings come from PRD Grid's similar-group display entry.
+    /// Expanded display draws the count on the first shown cell, without an outline.
+    /// Collapsed display draws one cover per group with its count (handoff components.md).
     public struct GroupMark: Hashable, Sendable {
         /// The group's stable key; opening the group view uses it (PRD P0-11).
         public let id: GroupID
@@ -52,7 +55,7 @@ extension GridCellItem {
         /// The group's member count as grouping published it (PRD Grid).
         ///
         /// It is the published group's count, not the number of members a filter happens to
-        /// show, so the outline always names the group the user can open (PRD P0-11).
+        /// show, so the badge always names the group the user can open.
         public let count: Int
 
         /// Whether this cell draws the count: a group's first shown cell, or its cover

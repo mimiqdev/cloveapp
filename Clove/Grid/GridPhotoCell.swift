@@ -139,29 +139,22 @@ private struct GridTile: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack(alignment: .bottom) {
+            Group {
                 if isCover {
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(Color.clove.text.secondary).opacity(0.35)
-                        .padding(.horizontal, 10).padding(.bottom, 6)
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(Color.clove.surface.card)
-                        .padding(.horizontal, 5).padding(.top, 4).padding(.bottom, 3)
+                    GroupStack { image }
+                } else {
+                    image.frame(width: proxy.size.width, height: proxy.size.height).clipped()
                 }
-                image
-                    .frame(width: proxy.size.width, height: proxy.size.height - (isCover ? 8 : 0))
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: isCover ? 5 : 0))
-                    .opacity(item.photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)
-                    .overlay {
-                        if item.group != nil && !isCover {
-                            Rectangle().strokeBorder(Color.clove.group, lineWidth: 2)
-                        }
-                    }
-                    .overlay(alignment: .bottomLeading) { rating }
-                    .overlay(alignment: .topTrailing) { label }
-                    .overlay(alignment: .topLeading) { cornerMarkers }
-                    .overlay(alignment: .bottomTrailing) { bottomMarkers }
+            }
+            .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
+            .overlay(alignment: .bottomLeading) { rating }
+            .overlay(alignment: .bottomTrailing) { label }
+            .overlay(alignment: .topLeading) { cornerMarkers }
+            .overlay(alignment: .bottomTrailing) { bottomMarkers }
+            .overlay(alignment: .topTrailing) {
+                if let group = item.group, isCover {
+                    GroupCountBadge(count: group.count).padding(4)
+                }
             }
             .background(Color.clove.surface.card)
         }
@@ -173,17 +166,12 @@ private struct GridTile: View {
                 ? "clove.grid.group.\(item.group?.id.rawValue ?? "")"
                 : "clove.grid.photo.\(item.photo.id.stem)"
         )
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .topTrailing) {
             if let group = item.group, !isCover, group.showsCount {
                 Button {
                     openGroup(group.id)
                 } label: {
-                    Text(group.count.formatted())
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color.clove.bg.canvas)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.clove.group, in: Capsule())
-                        .padding(4)
+                    GroupCountBadge(count: group.count).padding(4)
                 }
                 .buttonStyle(.plain)
                 .allowsHitTesting(!isSelecting)
@@ -237,13 +225,6 @@ private struct GridTile: View {
 
     private var cornerMarkers: some View {
         HStack(spacing: 3) {
-            if companions.badgeText != nil {
-                Image(systemName: "square.on.square")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Color.clove.text.primary)
-                    .padding(2)
-                    .background(Color.clove.surface.glass, in: RoundedRectangle(cornerRadius: 2))
-            }
             if hasFailed {
                 Circle().fill(Color.clove.status.failed).frame(width: 7, height: 7)
             }
@@ -253,13 +234,6 @@ private struct GridTile: View {
 
     private var bottomMarkers: some View {
         HStack(spacing: 3) {
-            if let group = item.group, isCover {
-                Text(group.count.formatted())
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.clove.bg.canvas)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color.clove.group, in: Capsule())
-            }
             if isSelected {
                 Image(systemName: "checkmark.circle.fill")
                     .symbolRenderingMode(.palette)
