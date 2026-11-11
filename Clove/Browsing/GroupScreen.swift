@@ -52,6 +52,8 @@ struct GroupScreen: View {
         DetailMarkingView(
             browsing: browsing, photo: photo, settings: store.settings,
             images: browsing.detailImages,
+            displayMode: store.photoDisplayMode,
+            recordRenderDurations: store.recordScreenRenderDurations,
             zoomPolicy: .group, order: visiblePhotos,
             actions: DetailMarkingActions(
                 apply: { change, photo in browsing.apply(change, to: photo.id) },

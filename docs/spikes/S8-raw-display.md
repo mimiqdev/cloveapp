@@ -516,10 +516,10 @@ Part 1 writes the checklist; part 2 and the owner's run fill the device tables.
    minutes of progress, then a second **Finished: clove-lab-S8-<timestamp>.json**.
    Keep the app in the foreground; note whether the phone becomes warm.
 6. Use **Export** in the footer for each report, or find both in Files › On My
-   iPhone › Clove Lab. They are also written into the tested folder. Attach both
-   JSON files to issue [#122](https://github.com/mimiqdev/cloveapp/issues/122) and
-   identify the device and iOS version; the reports contain no names, only `raw-NN`
-   labels. Battery levels are recorded in 5% steps.
+   iPhone › Clove Lab. They are also written into the tested folder. Share both
+   reports privately with the supervisor, identifying the device and iOS version.
+   Do not attach the JSON to the public issue or repository. Only summary numbers
+   belong in this report. Battery levels are recorded in 5% steps.
 7. Repeat steps 1–6 on **iPad Pro**, recording its model and installed iPadOS
    version. The screen long edge is read from that device, so c–e and g change
    size.

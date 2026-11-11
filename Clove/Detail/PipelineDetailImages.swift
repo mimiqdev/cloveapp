@@ -2,49 +2,25 @@ import CloveCore
 import CloveImaging
 import Foundation
 
-/// Admits detail work through the folder's C11 session (G1 folder access).
-///
-/// The folder library supplies both closures, so ending the folder waits for a read instead of
-/// releasing the scope under it. They are separate because a stored property cannot hold a
-/// generic closure: one carries an image outcome and one is preview-only work.
+/// The folder supplies session admission, so its security scope outlives every
+/// read, including an uncancellable render draining after navigation.
 struct DetailWorkAdmission: Sendable {
-    /// Runs one image request inside the session, or answers unavailable after it closed.
     let image: @Sendable (@Sendable () async -> DetailImageOutcome) async -> DetailImageOutcome
-    /// Runs preview-only work inside the same session.
     let prefetch: @Sendable (@Sendable () async -> Void) async -> Void
 }
 
 extension DetailWorkAdmission {
-    /// Runs work straight through, for a caller that holds no folder session.
-    static let direct = DetailWorkAdmission(
-        image: { await $0() },
-        prefetch: { await $0() })
+    static let direct = DetailWorkAdmission(image: { await $0() }, prefetch: { await $0() })
 }
 
-/// Detail pixels from I2's pipeline for one folder's scanned photo sets
-/// (G1 "Preview, detail (I2)" and "Scheduling and cache").
-///
-/// The folder owns the pipeline and C11's session, so the caller supplies a lookup from a
-/// photo's identity to its scanned set. The source never reaches into the folder library: a
-/// folder that closed its pipeline stops answering, and the library's admitted-work closure
-/// answers unavailable for a photo from an earlier folder (G1 folder-access row).
-///
-/// Every request uses one consumer, because one detail view is on screen at a time. I2 uses that
-/// to supersede an older request for the same view, so the preview a fast edge tap asked for can
-/// never paint over the 100% render that replaced it. Prefetch and neighbour reads never render
-/// (``DetailPipeline/prefetch(_:)``), so a swipe to the next photo stays cheap.
 @MainActor
 final class PipelineDetailImages: DetailImageSource {
     private let pipeline: DetailPipeline
     private let set: @MainActor (PhotoIdentity) -> PhotoSet?
     private let admitted: DetailWorkAdmission
     private let consumer = UUID()
+    private var activeWindow: DetailPhotoWindow?
 
-    /// Uses one folder's pipeline and the folder's lookup from identity to scanned set.
-    ///
-    /// The folder library passes work admission through its C11 session, so ending the folder
-    /// waits for a read instead of releasing the scope under it. A caller with no session passes
-    /// ``DetailWorkAdmission/direct``.
     init(
         pipeline: DetailPipeline,
         set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
@@ -55,12 +31,22 @@ final class PipelineDetailImages: DetailImageSource {
         self.admitted = admitted
     }
 
-    /// Reads the photo's files and asks I2 for preview or render pixels (G1 detail row).
-    ///
-    /// The revisions are read inside the admitted closure, off the main actor, because both
-    /// stats ask the file system and a card must never stall the detail screen. A file that
-    /// disappeared between the scan and the request is dropped; a set with no readable file
-    /// answers unavailable rather than a blank image (PRD Scan scope).
+    func prepare(_ window: DetailPhotoWindow) async {
+        activeWindow = window
+        guard let current = sources(for: window.current.photo) else { return }
+        let neighbours = window.neighbours.compactMap { neighbour in
+            sources(for: neighbour.photo).map { ($0, window.request(for: neighbour)) }
+        }
+        _ = await admitted.image { [pipeline] in
+            guard !Task.isCancelled,
+                let request = current.request(for: window.request(for: window.current))
+            else { return .deferred }
+            let adjacent = neighbours.compactMap { $0.0.request(for: $0.1) }
+            await pipeline.navigate(to: request, neighbours: adjacent)
+            return .deferred
+        }
+    }
+
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
         guard let sources = sources(for: photo) else { return .unavailable(.cannotOpen) }
         return await admitted.image { [pipeline, consumer] in
@@ -72,62 +58,60 @@ final class PipelineDetailImages: DetailImageSource {
                 switch request.need {
                 case .preview:
                     result = try await pipeline.preview(for: detailRequest, consumer: consumer)
+                case .screenRender:
+                    result = try await pipeline.screen(for: detailRequest, consumer: consumer)
                 case .morePixels, .fullResolution:
                     result = try await pipeline.image(for: detailRequest, consumer: consumer)
                 }
                 switch result {
-                case .available(let image):
-                    return .image(image)
-                case .unavailable(let failure):
-                    return .unavailable(failure)
+                case .available(let image): return .image(image)
+                case .unavailable(let failure): return .unavailable(failure)
                 }
-            } catch {
-                // A superseded request or a closed pipeline may be perfectly readable later;
-                // the screen keeps its preview and asks again only within its retry bound.
-                return .deferred
-            }
+            } catch { return .deferred }
         }
     }
 
-    /// Fills I2's cache with the neighbours' embedded previews (G1 "Scheduling and cache").
-    ///
-    /// The whole prefetch is admitted through C11's session, so ending the folder waits for the
-    /// reads it started. The requests never render.
-    func prefetch(_ photos: [PhotoIdentity], displayPixels: Int) async {
-        let requests = photos.compactMap { photo -> DetailRequest? in
-            guard let sources = sources(for: photo) else { return nil }
-            return sources.request(
-                for: DetailPixelRequest(displayPixels: displayPixels, need: .preview))
+    /// Warm both embedded neighbours, then render exactly one ahead. The shared
+    /// view calls this only after showing the current photo's screen result.
+    func prefetch(_ window: DetailPhotoWindow) async {
+        guard activeWindow == window else { return }
+        let neighbours = window.neighbours.compactMap { neighbour -> (DetailRequest, Bool)? in
+            guard let sources = sources(for: neighbour.photo),
+                let request = sources.request(for: window.request(for: neighbour))
+            else { return nil }
+            let ahead = neighbour.position == window.current.position + window.direction
+            return (request, ahead)
         }
-        guard !requests.isEmpty else { return }
         await admitted.prefetch { [pipeline] in
-            await pipeline.prefetch(requests)
+            guard !Task.isCancelled else { return }
+            await pipeline.prefetch(neighbours.map(\.0))
+            guard !Task.isCancelled, let ahead = neighbours.first(where: \.1)?.0 else { return }
+            _ = try? await pipeline.screen(for: ahead, priority: .prefetch)
         }
     }
 
-    /// Drops queued prefetch so it never competes with the photo on screen (G1 scheduling).
-    func cancelPrefetch() async {
-        await pipeline.cancelPrefetch()
+    func leave(window: UUID) async {
+        guard activeWindow?.id == window else { return }
+        activeWindow = nil
+        await pipeline.leavePhoto()
     }
 
-    /// The photo's image files, resolved on the main actor because the lookup reads the folder's
-    /// store. `CloveImaging` does not depend on `CloveCore`, so the URLs cross into the
-    /// admitted work rather than the scanned set.
+    func takeScreenRenderDurations() async -> [Double] {
+        await pipeline.takeScreenRenderDurations()
+    }
+
     private func sources(for photo: PhotoIdentity) -> PhotoSources? {
-        guard let set = set(photo) else { return nil }
-        return PhotoSources(set: set)
+        set(photo).map(PhotoSources.init)
     }
 }
 
-/// One photo's role-tagged file URLs and the folder identity I2 keys its cache by
-/// (``DetailRequest``).
+/// Role-tagged URLs cross the session boundary instead of the scanned domain set.
 private struct PhotoSources: Sendable {
     var raw: URL?
     var jpeg: URL?
     var heif: URL?
     var locationIdentity: String
 
-    /// Takes the primary and companions in G1 decision 1's roles.
     init(set: PhotoSet) {
         locationIdentity = set.id.folderID.rawValue
         switch set.primary.format {
@@ -143,18 +127,17 @@ private struct PhotoSources: Sendable {
         }
     }
 
-    /// Builds I2's request with the revision each readable file has now.
-    ///
-    /// A file whose revision cannot be read is left out, so a set with no readable file has no
-    /// request rather than a request I2 would refuse at its precondition.
     func request(for request: DetailPixelRequest) -> DetailRequest? {
         let raw = raw.flatMap { try? DetailSource.read($0) }
         let jpeg = jpeg.flatMap { try? DetailSource.read($0) }
         let heif = heif.flatMap { try? DetailSource.read($0) }
         guard raw != nil || jpeg != nil || heif != nil else { return nil }
         return DetailRequest(
-            raw: raw, jpeg: jpeg, heif: heif, displayPixels: request.displayPixels,
+            raw: raw, jpeg: jpeg, heif: heif,
+            displayPixels: request.displayPixels,
             wantsNativeResolution: request.need == .fullResolution,
-            locationIdentity: locationIdentity)
+            locationIdentity: locationIdentity,
+            mode: request.mode == .rawFirst ? .rawFirst : .cameraPreviewFirst,
+            screenPixels: request.screenPixels, position: request.position)
     }
 }

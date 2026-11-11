@@ -34,7 +34,7 @@ final class SampleDetailImages: DetailImageSource {
 
     /// At most two full renders stay in memory, the same one-image-at-a-time budget G1 gives
     /// the real pipeline (its single native render is held outside the preview cache).
-    private static let fullCacheLimit = 2
+    private static let fullCacheLimit = 1
 
     private let unavailable: Set<PhotoIdentity>
     private let previewOnly: Set<PhotoIdentity>
@@ -42,6 +42,10 @@ final class SampleDetailImages: DetailImageSource {
     private var previewOrder: [PhotoIdentity] = []
     private var fulls: [PhotoIdentity: DetailImage] = [:]
     private var fullOrder: [PhotoIdentity] = []
+    private var screens: [PhotoIdentity: DetailImage] = [:]
+    private var activeWindow: DetailPhotoWindow?
+    private(set) var rawRenderCount = 0
+    private(set) var cameraDecodeCount = 0
 
     /// Builds the sample source, naming the photos with no image and with a preview only.
     init(
@@ -61,20 +65,53 @@ final class SampleDetailImages: DetailImageSource {
         guard !unavailable.contains(photo) else { return .unavailable(.cannotOpen) }
         switch request.need {
         case .preview:
-            return .image(preview(for: photo))
+            return .image(
+                request.mode == .rawFirst
+                    ? (screens[photo] ?? preview(for: photo)) : preview(for: photo))
+        case .screenRender:
+            guard request.mode == .rawFirst, !previewOnly.contains(photo) else {
+                return .image(preview(for: photo))
+            }
+            if let held = screens[photo] { return .image(held) }
+            do { try await Task.sleep(for: .milliseconds(30)) } catch { return .deferred }
+            let image = render(
+                photo, longEdge: min(request.screenPixels, Self.fullLongEdge), quality: .screenRAW)
+            rawRenderCount += 1
+            if screens.count < 3 { screens[photo] = image }
+            return .image(image)
         case .morePixels, .fullResolution:
             guard !previewOnly.contains(photo) else {
                 return .image(limited(preview(for: photo), by: .noHigherResolution))
             }
-            return .image(full(for: photo))
+            return .image(full(for: photo, mode: request.mode))
         }
     }
 
-    /// The sample has nothing to prefetch: every image is generated on demand.
-    func prefetch(_ photos: [PhotoIdentity], displayPixels: Int) async {}
+    func prepare(_ window: DetailPhotoWindow) async {
+        if activeWindow?.current != window.current || activeWindow?.mode != window.mode {
+            fulls.removeAll()
+            fullOrder.removeAll()
+        }
+        activeWindow = window
+        let held = Set(([window.current] + window.neighbours).map(\.photo))
+        screens = screens.filter { held.contains($0.key) }
+    }
 
-    /// The sample never queues speculative work.
-    func cancelPrefetch() async {}
+    func prefetch(_ window: DetailPhotoWindow) async {
+        guard activeWindow == window,
+            let ahead = window.neighbours.first(where: {
+                $0.position == window.current.position + window.direction
+            })
+        else { return }
+        _ = await image(for: ahead.photo, request: window.request(for: ahead, need: .screenRender))
+    }
+
+    func leave(window: UUID) async {
+        guard activeWindow?.id == window else { return }
+        activeWindow = nil
+        fulls.removeAll()
+        fullOrder.removeAll()
+    }
 
     /// The photo's 1616 px preview, generated once and kept in a small cache.
     private func preview(for photo: PhotoIdentity) -> DetailImage {
@@ -89,9 +126,16 @@ final class SampleDetailImages: DetailImageSource {
     }
 
     /// The photo's larger render, held only for the photos the view recently asked for.
-    private func full(for photo: PhotoIdentity) -> DetailImage {
-        if let image = fulls[photo] { return image }
-        let image = render(photo, longEdge: Self.fullLongEdge, quality: .nativeRAW)
+    private func full(for photo: PhotoIdentity, mode: PhotoDisplayMode) -> DetailImage {
+        if let image = fulls[photo], image.quality == (mode == .rawFirst ? .nativeRAW : .raster) {
+            return image
+        }
+        fulls.removeAll()
+        fullOrder.removeAll()
+        if mode == .rawFirst { rawRenderCount += 1 } else { cameraDecodeCount += 1 }
+        let image = render(
+            photo, longEdge: Self.fullLongEdge,
+            quality: mode == .rawFirst ? .nativeRAW : .raster)
         fulls[photo] = image
         fullOrder.append(photo)
         if fullOrder.count > Self.fullCacheLimit {
@@ -153,7 +197,8 @@ final class SampleDetailImages: DetailImageSource {
             preconditionFailure("the sample detail renderer must produce a Core Graphics image")
         }
         return DetailImage(
-            image: pixels, source: Self.source(for: photo), quality: quality, hasRAW: true,
+            image: pixels, source: Self.source(for: photo, camera: quality == .raster),
+            quality: quality, hasRAW: true,
             fullResolutionSize: Self.fullResolutionSize)
     }
 
@@ -166,11 +211,12 @@ final class SampleDetailImages: DetailImageSource {
     }
 
     /// A stable source identity for generated pixels, with no file behind it.
-    private static func source(for photo: PhotoIdentity) -> DetailSource {
+    private static func source(for photo: PhotoIdentity, camera: Bool) -> DetailSource {
         DetailSource(
             url: URL(
                 fileURLWithPath:
-                    "/clove.test-library/\(photo.relativeFolderPath)/\(photo.stem).ARW"),
+                    "/clove.test-library/\(photo.relativeFolderPath)/\(photo.stem).\(camera ? "HIF" : "ARW")"
+            ),
             revision: ThumbnailRevision(size: 0, modificationTime: .distantPast))
     }
 

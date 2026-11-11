@@ -38,7 +38,11 @@ struct DetailDisplayModeTests {
         #expect(returning.image === rendered.image)
         #expect(await gate.nativePaths.count == 2)
         #expect(cache.screenCount == 2)
-        #expect(await pipeline.takeScreenRenderDurations().count == 2)
+        let durations = await pipeline.takeScreenRenderDurations()
+        #expect(durations.count == 2)
+        print(
+            "DISPLAY screen RAW fixture n=\(durations.count) ms=\(durations.map { String(format: "%.1f", $0) }.joined(separator: ",")); macOS debug, shared host, informational only"
+        )
         #expect(await pipeline.takeScreenRenderDurations().isEmpty)
     }
 

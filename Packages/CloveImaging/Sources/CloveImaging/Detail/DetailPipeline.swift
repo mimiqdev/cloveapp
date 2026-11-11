@@ -108,6 +108,13 @@ public actor DetailPipeline {
         for job in Array(jobs.values) where job.priority == .prefetch { cancel(job.id) }
     }
 
+    /// Leaving the detail stage keeps neighbouring screen renders, but never a
+    /// full camera decode or native RAW allocation.
+    public func leavePhoto() {
+        for job in Array(jobs.values) { cancel(job.id) }
+        cache.releaseNative()
+    }
+
     public func takeScreenRenderDurations() -> [Double] { cache.takeRenderDurations() }
 
     public func releaseCachedImages() {

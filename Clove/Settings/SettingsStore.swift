@@ -25,6 +25,17 @@ final class SettingsStore {
     private let persistence: SettingsPersistence
     private let rememberedAdvanceStorage: any SettingsStorage
     private static let rememberedAdvanceKey = "autoAdvance.lastEnabledDestination"
+    private static let renderSamplesKey = "detail.rawRenderSamples"
+    private let physicalMemory: UInt64
+    private(set) var renderMeasurement: RAWRenderMeasurement
+
+    /// The optional choice stays separate from the device measurement. Reset can
+    /// therefore clear the choice without re-measuring this device.
+    var photoDisplayMode: PhotoDisplayMode {
+        PhotoDisplayDefault.mode(
+            physicalMemory: physicalMemory,
+            measurement: renderMeasurement, choice: settings.photoDisplayMode)
+    }
 
     /// The last enabled destination, persisted so an off/on toggle survives an app relaunch.
     private(set) var rememberedAdvanceDestination: AutoAdvanceDestination
@@ -43,10 +54,17 @@ final class SettingsStore {
     init(
         persistence: SettingsPersistence = SettingsPersistence(
             storage: UserDefaultsSettingsStorage()),
-        rememberedAdvanceStorage: any SettingsStorage = UserDefaultsSettingsStorage()
+        rememberedAdvanceStorage: any SettingsStorage = UserDefaultsSettingsStorage(),
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) {
         self.persistence = persistence
         self.rememberedAdvanceStorage = rememberedAdvanceStorage
+        self.physicalMemory = physicalMemory
+        let samples =
+            rememberedAdvanceStorage.string(forKey: Self.renderSamplesKey)
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode([Double].self, from: $0) } ?? []
+        self.renderMeasurement = RAWRenderMeasurement(samples: samples)
         let loaded = persistence.load()
         self.settings = loaded
         let remembered = rememberedAdvanceStorage.string(forKey: Self.rememberedAdvanceKey)
@@ -100,6 +118,24 @@ final class SettingsStore {
         if persistence.saveVerified(next) && rememberedSaved {
             saveFailureMessage = nil
         } else {
+            saveFailureMessage =
+                "This change couldn't be saved. It applies now, but Clove will forget it when it quits."
+        }
+    }
+
+    /// Records successful screen renders, including one-ahead work, only until
+    /// five exist. The current photo keeps its selected mode; the next arrival
+    /// reads the newly measured default.
+    func recordScreenRenderDurations(_ milliseconds: [Double]) {
+        var next = renderMeasurement
+        for sample in milliseconds.prefix(5) { next.record(milliseconds: sample) }
+        guard next != renderMeasurement else { return }
+        renderMeasurement = next
+        guard let data = try? JSONEncoder().encode(next.samples),
+            let text = String(data: data, encoding: .utf8)
+        else { return }
+        rememberedAdvanceStorage.setString(text, forKey: Self.renderSamplesKey)
+        if rememberedAdvanceStorage.string(forKey: Self.renderSamplesKey) != text {
             saveFailureMessage =
                 "This change couldn't be saved. It applies now, but Clove will forget it when it quits."
         }

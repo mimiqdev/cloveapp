@@ -59,10 +59,10 @@ struct DetailMarkingActions {
 /// edge tap moves through, and the zoom the next photo opens with, through
 /// ``DetailMarkingActions`` and ``DetailZoomPolicy``.
 ///
-/// The screen asks for the embedded preview first and only then, for a pinch that needs more
-/// pixels or a double-tap to 100%, asks I2 for a render (G1 "Preview, detail (I2)"). A quality
-/// change replaces the pixels in place, so it never resets the zoom or the position and never
-/// leaves a blank image presented as loaded (PRD Scan scope).
+/// The selected display mode controls fit and zoom together. A held screen RAW
+/// appears immediately; otherwise the camera preview fills the screen-render wait.
+/// Camera mode keeps its preview at fit and decodes its full camera image for zoom.
+/// Every quality replacement preserves zoom and position.
 ///
 /// The edge zones are ``DetailEdgeZone``'s: the outer 18% of the preview's width on each side
 /// navigates, with single taps only, so a tap there never waits for a double tap. The middle
@@ -89,6 +89,8 @@ struct DetailMarkingView: View {
 
     /// The pixels to show, normally the open folder's source from the browsing model.
     let images: any DetailImageSource
+    var displayMode: PhotoDisplayMode = .rawFirst
+    var recordRenderDurations: ([Double]) -> Void = { _ in }
 
     /// What the next photo keeps of this one's zoom (PRD P0-04; PRD In-group culling).
     let zoomPolicy: DetailZoomPolicy
@@ -109,6 +111,10 @@ struct DetailMarkingView: View {
     @Environment(\.displayScale) private var displayScale
     @Environment(\.cloveTheme) private var theme
     @State private var hidesChrome = false
+    @State private var windowID = UUID()
+    @State private var currentWindow: DetailPhotoWindow?
+    @State private var previousPosition: Int?
+    @State private var isLoadingFit = false
     @State private var showsInformation = false
     @State private var showsZoomChip = false
 
@@ -168,7 +174,9 @@ struct DetailMarkingView: View {
             .task(id: photo.id) { await loadPreview(for: photo) }
             .onDisappear {
                 upgradeTask?.cancel()
-                Task { await images.cancelPrefetch() }
+                shown = nil
+                currentWindow = nil
+                Task { await images.leave(window: windowID) }
             }
     }
 
@@ -388,6 +396,7 @@ struct DetailMarkingView: View {
     /// pixels are on screen, so an edge tap to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
         upgradeTask?.cancel()
+        isLoadingFit = true
         if !zoomPolicy.keepsScale {
             keptZoom = nil
             keptScale = nil
@@ -413,13 +422,17 @@ struct DetailMarkingView: View {
         phase = .loading
         limitation = nil
         previewOnly = false
-        await images.cancelPrefetch()
         // The first layout gives the view its size; a preview requested from a zero-sized view
         // would ask a JPEG only for a one-pixel raster.
         for _ in 0..<10 where viewSize == .zero {
             try? await Task.sleep(for: .milliseconds(16))
         }
-        let request = DetailPixelRequest(displayPixels: requestPixels(scale: 1), need: .preview)
+        guard !Task.isCancelled else { return }
+        let window = photoWindow(for: photo)
+        currentWindow = window
+        previousPosition = window.current.position
+        await images.prepare(window)
+        let request = window.request(for: window.current)
         var attempts = 0
         while true {
             let outcome = await images.image(for: photo.id, request: request)
@@ -427,10 +440,11 @@ struct DetailMarkingView: View {
             switch outcome {
             case .image(let image):
                 show(image)
-                prefetchNeighbours(of: photo)
+                await renderFitAndPrefetch(window)
                 return
             case .unavailable(let failure):
                 phase = .unavailable(failure)
+                await renderFitAndPrefetch(window)
                 return
             case .deferred:
                 attempts += 1
@@ -486,7 +500,7 @@ struct DetailMarkingView: View {
             // A group's retained zoom may need more pixels than the preview holds (G1 "Preview,
             // detail (I2)"); a regular detail view keeps its level without starting a render, as
             // before.
-            if zoomPolicy.keepsPosition { upgradeIfNeeded() }
+            if !isLoadingFit { upgradeIfNeeded() }
         } else if case .fullResolution(let chosen, let targetSize) = zoomMode, viewSize.width > 0 {
             if let pixels = image.fullResolutionPixels {
                 if let target = DetailZoom.retargetedFullResolutionScale(
@@ -539,16 +553,39 @@ struct DetailMarkingView: View {
             screenScale: displayScale)
     }
 
-    /// The neighbours' previews, so the next edge tap starts from a cache hit.
-    private func prefetchNeighbours(of photo: GridPhoto) {
-        let photos = order
-        guard let index = photos.firstIndex(where: { $0.id == photo.id }) else { return }
-        var neighbours: [PhotoIdentity] = []
-        if index > 0 { neighbours.append(photos[index - 1].id) }
-        if index + 1 < photos.count { neighbours.append(photos[index + 1].id) }
-        guard !neighbours.isEmpty else { return }
-        let pixels = requestPixels(scale: 1)
-        Task { await images.prefetch(neighbours, displayPixels: pixels) }
+    private func photoWindow(for photo: GridPhoto) -> DetailPhotoWindow {
+        let index = order.firstIndex(where: { $0.id == photo.id }) ?? 0
+        let direction = previousPosition.map { index < $0 ? -1 : 1 } ?? 1
+        let neighbours = [index - 1, index + 1].compactMap { position -> DetailNeighbour? in
+            guard order.indices.contains(position) else { return nil }
+            return DetailNeighbour(photo: order[position].id, position: position)
+        }
+        let bounds = probe.container?.window?.screen.nativeBounds
+        let screenPixels =
+            bounds.map { Int(max($0.width, $0.height)) }
+            ?? requestPixels(scale: 1)
+        return DetailPhotoWindow(
+            id: windowID,
+            current: DetailNeighbour(photo: photo.id, position: index), neighbours: neighbours,
+            direction: direction, mode: displayMode, screenPixels: screenPixels)
+    }
+
+    /// The preview stays on screen throughout the RAW fit upgrade, with no cue
+    /// or status word. One-ahead work starts only after the current render shows.
+    private func renderFitAndPrefetch(_ window: DetailPhotoWindow) async {
+        let outcome = await images.image(
+            for: window.current.photo,
+            request: window.request(for: window.current, need: .screenRender))
+        guard !Task.isCancelled else { return }
+        if case .image(let image) = outcome, shown?.isBestAvailable != true {
+            show(image)
+        }
+        isLoadingFit = false
+        recordRenderDurations(await images.takeScreenRenderDurations())
+        upgradeIfNeeded()
+        guard !Task.isCancelled, shown?.limitation == nil else { return }
+        await images.prefetch(window)
+        recordRenderDurations(await images.takeScreenRenderDurations())
     }
 
     // MARK: - Zoom
@@ -564,7 +601,7 @@ struct DetailMarkingView: View {
         if abs(value - commandedScale) > 0.01 {
             zoomMode = .manual
         }
-        guard !previewOnly, let shown else { return }
+        guard value > DetailFitScale.tolerance, !previewOnly, let shown else { return }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
         upgradeTask?.cancel()
         upgradeTask = Task {
@@ -624,7 +661,7 @@ struct DetailMarkingView: View {
     /// nothing better to give returns the preview with a limitation, which turns ``previewOnly``
     /// on, so the same request is never repeated for that photo (PRD P0-04).
     private func upgradeIfNeeded() {
-        guard !previewOnly, let shown else { return }
+        guard scale > DetailFitScale.tolerance, !previewOnly, let shown else { return }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
         upgradeTask?.cancel()
         upgradeTask = Task {
@@ -638,7 +675,10 @@ struct DetailMarkingView: View {
     /// so the same failing render is never requested again for this photo (PRD P0-04).
     private func upgrade(need: DetailPixelRequest.Need) async {
         guard !previewOnly else { return }
-        let request = DetailPixelRequest(displayPixels: requestPixels(scale: scale), need: need)
+        guard let window = currentWindow else { return }
+        let request = DetailPixelRequest(
+            displayPixels: requestPixels(scale: scale), need: need,
+            mode: window.mode, screenPixels: window.screenPixels, position: window.current.position)
         let outcome = await images.image(for: photo.id, request: request)
         guard !Task.isCancelled else { return }
         switch outcome {
