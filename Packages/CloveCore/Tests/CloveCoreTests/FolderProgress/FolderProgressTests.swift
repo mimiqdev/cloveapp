@@ -57,7 +57,7 @@ import Testing
         #expect(partial.previewPhotos == [oldPhoto])
     }
 
-    @Test func partialScanPreservesDoneOnlyWhenNothingBecameUnmarked() throws {
+    @Test func partialScanRestoresDoneWhenAClearIsUndone() throws {
         let folder = FolderIdentity(rawValue: "progress-folder")
         let photo = PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "IMG_001")
         let previous = FolderProgress(marked: 0, rejected: 1, total: 1)
@@ -74,12 +74,31 @@ import Testing
         #expect(partial.total == 1)
         #expect(partial.rejected == 1)
         #expect(partial.left == 0)
-        #expect(!partial.finished)
+        #expect(!restored.becameUnmarked)
+        #expect(partial.finished)
         let decoded = try JSONDecoder().decode(
             FolderProgress.self, from: JSONEncoder().encode(partial))
-        #expect(!decoded.finished)
+        #expect(decoded.finished)
         let old = #"{"marked":1,"rejected":0,"total":1,"isComplete":true,"previewPhotos":[]}"#
         #expect(try JSONDecoder().decode(FolderProgress.self, from: Data(old.utf8)).finished)
+    }
+
+    @Test func partialScanCountsAClearAgainAfterItsUndo() {
+        let photo = PhotoIdentity(
+            folderID: FolderIdentity(rawValue: "progress-folder"), relativeFolderPath: "",
+            stem: "IMG_001")
+        let rejected = PhotoMarks(rating: .rejected)
+        let previous = FolderProgress(marked: 0, rejected: 1, total: 1)
+        let clear = FolderProgress.ConfirmedChange(before: rejected, after: PhotoMarks())
+        let undo = clear.updating(to: rejected)
+        let clearAgain = undo.updating(to: PhotoMarks())
+        for change in [clear, undo, clearAgain] {
+            let partial = FolderProgress.snapshot(
+                confirmedMarks: [], scanIsComplete: false, previous: previous,
+                lastViewedPhoto: photo, previewPhotos: [], confirmedChanges: [photo: change])
+            #expect(partial.finished == (change.after == rejected))
+            #expect(partial.left == (change.after == rejected ? 0 : 1))
+        }
     }
 
     @Test func partialChangesUseOneOriginalBaselineAcrossRepeatedFlushes() {

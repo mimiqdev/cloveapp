@@ -57,10 +57,12 @@ public struct FolderProgress: Codable, Hashable, Sendable {
         public init(before: PhotoMarks, after: PhotoMarks, becameUnmarked: Bool = false) {
             self.before = before
             self.after = after
-            self.becameUnmarked = becameUnmarked || (Self.decided(before) && !Self.decided(after))
+            self.becameUnmarked =
+                before != after
+                && (becameUnmarked || (Self.decided(before) && !Self.decided(after)))
         }
 
-        /// Retains the original baseline and any intervening clear when the same photo changes again.
+        /// Retains the baseline and intervening clears until the marks return to that baseline.
         public func updating(to marks: PhotoMarks) -> ConfirmedChange {
             ConfirmedChange(
                 before: before, after: marks,
