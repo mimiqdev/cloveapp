@@ -156,6 +156,11 @@ struct PhotoActionsTests {
         #expect(!model.canMark)
         #expect(advances == 0)
         #expect(library.events.isEmpty)
+        library.reopenFailure = .locationUnavailable(FolderErrorChain(CocoaError(.fileNoSuchFile)))
+        await model.reopenOpenFolder()
+        #expect(!model.canMark)
+        #expect(model.folderLocationLoss != nil)
+        library.reopenFailure = nil
         let disk = PhotoMarks(
             rating: try #require(Rating(rawValue: 2)), label: ColourLabel(colour: .blue))
         library.reopenedMarks[photo.id] = disk
@@ -681,6 +686,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
     var withholdsFinalStatuses = false
     var holdsReopen = false
     var isReopening = false
+    var reopenFailure: FolderAccessFailure?
     var events: [String] = []
     var moves: [[PhotoIdentity]] = []
     var holdsMove = false
@@ -875,6 +881,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
         reopenCount += 1
         isReopening = true
         defer { isReopening = false }
+        if let reopenFailure { return reopenFailure }
         for _ in 0..<1000 {
             if !holdsReopen { break }
             try? await Task.sleep(for: .milliseconds(5))

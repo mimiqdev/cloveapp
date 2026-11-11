@@ -309,13 +309,17 @@ final class BrowsingModel {
         folderReplacements += 1
         defer { folderReplacements -= 1 }
         openRequests += 1
-        // An earlier folder's loss and save states do not apply to whatever this open installs.
-        // Clearing the loss before the await keeps a loss the new open reports (PRD P0-02).
+        // Clearing before the await keeps a loss the new open reports. A failed pick has not
+        // reconnected the old folder, so its disconnected gate must remain in effect.
+        let previousLoss = folderLocationLoss
         folderLocationLoss = nil
         await folderClose?.value
         await drainActions()
         folderFailure = await library.pick(url)
-        guard folderFailure == nil else { return }
+        guard folderFailure == nil else {
+            if folderLocationLoss == nil { folderLocationLoss = previousLoss }
+            return
+        }
         // PRD Failure and recovery: a real open reads the actual XMP, so what is on screen starts
         // from this open's changes and never from a failure the closed folder left behind.
         changes = PhotoChangeStates()
@@ -372,13 +376,14 @@ final class BrowsingModel {
         folderReplacements += 1
         defer { folderReplacements -= 1 }
         openRequests += 1
-        // The reopen reads the folder again, so the loss the watch reported is no longer current,
-        // and a loss the new open reports after the await still applies (PRD P0-02).
+        // Keep a new open's own loss, and retain the old gate if reopening fails.
+        let previousLoss = folderLocationLoss
         folderLocationLoss = nil
         await folderClose?.value
         await drainActions()
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
+            if folderLocationLoss == nil { folderLocationLoss = previousLoss }
             return
         }
         recentFailures[recent.id] = nil
