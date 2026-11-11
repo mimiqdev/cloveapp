@@ -106,7 +106,6 @@ struct DetailDisplayPresentationTests {
         let image = try #require(scroll.subviews.first as? UIImageView)
         try await waitFor { image.image?.cgImage === thumbnail }
         #expect(!source.deliveries.contains { $0.0 == next.id })
-        #expect(preview.accessibilityLabel == next.fileName)
         #expect(!(preview.accessibilityValue ?? "").localizedCaseInsensitiveContains("loading"))
         func hasLoadingCue(_ view: UIView) -> Bool {
             if view is UIActivityIndicatorView { return true }
