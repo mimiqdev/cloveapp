@@ -4,7 +4,7 @@ import Testing
 import CloveCore
 
 /// PRD Grid's similar-group display and PRD P0-11: expanded shows every photo with the group's
-/// outline and one count, collapsed shows one cover per group with its count, and grouping off
+/// membership and one count, collapsed shows one cover per group with its count, and grouping off
 /// hides the group marks. These tests pin how the grid's cells are composed.
 @Suite("Grid display cells")
 struct GridDisplayTests {
@@ -68,6 +68,52 @@ struct GridDisplayTests {
         #expect(display.cells[0].group?.count == 3)
     }
 
+    @Test func collapsedCoverSkipsRejectedMembersInShownOrder() {
+        let rejected = photo("reject", time: capture(seconds(0)), marks: marks(rejected: true))
+        let kept = photo("kept", time: capture(seconds(1)), marks: marks(stars: 3))
+        let later = photo("later", time: capture(seconds(2)))
+        let members = [rejected, kept, later]
+        let cells = GridDisplay(
+            photos: members, groups: [group("mixed", members.reversed())], display: .collapsed
+        ).cells
+        #expect(cells.first?.photo.id == kept.id)
+        #expect(cells.first?.isDimmed == false)
+    }
+
+    @Test func collapsedAllRejectedUsesFirstShownAndDims() {
+        let members = (0..<3).map {
+            photo("r\($0)", time: capture(seconds(Double($0))), marks: marks(rejected: true))
+        }
+        let cells = GridDisplay(
+            photos: members, groups: [group("rejected", members)], display: .collapsed
+        ).cells
+        #expect(cells.first?.photo.id == members[0].id)
+        #expect(cells.first?.isDimmed == true)
+    }
+
+    @Test func collapsedFilterUsesOnlyShownMembersForCoverAndDimming() {
+        let hiddenKept = photo("hidden", time: capture(seconds(0)), marks: marks(stars: 5))
+        let rejected = photo("shown", time: capture(seconds(1)), marks: marks(rejected: true))
+        let burst = group("filtered", [hiddenKept, rejected])
+        let cells = GridDisplay(photos: [rejected], groups: [burst], display: .collapsed).cells
+        #expect(cells.first?.photo.id == rejected.id)
+        #expect(cells.first?.isDimmed == true)
+        #expect(cells.first?.group?.count == 2)
+    }
+
+    @Test func expandedAndUngroupedDimmingFollowsEachPhoto() {
+        let members = [
+            photo("r", time: capture(seconds(0)), marks: marks(rejected: true)),
+            photo("k", time: capture(seconds(1))),
+        ]
+        for enabled in [true, false] {
+            let cells = GridDisplay(
+                photos: members, groups: [group("pair", members)], groupsEnabled: enabled
+            ).cells
+            #expect(cells.map(\.isDimmed) == [true, false])
+        }
+    }
+
     /// A group with no shown member has no cover, because a cover always names a drawn photo.
     @Test func aGroupWithNoShownMemberHasNoCover() {
         let burst = group("burst-one", photos(2...3))
@@ -88,7 +134,7 @@ struct GridDisplayTests {
         }
     }
 
-    /// A photo that two groups name carries the first published group, never two outlines.
+    /// A photo that two groups name carries the first published group.
     @Test func theFirstPublishedGroupMarksAPhotoNamedByTwo() throws {
         let first = group("burst-one", photos(0...1))
         let second = group("burst-two", photos(1...2))
