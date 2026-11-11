@@ -8,8 +8,9 @@ import CloveCore
 /// single-photo control would give it, and that a photo with nothing to change writes nothing.
 @Suite("Batch mark plan")
 struct BatchMarkPlanTests {
-    /// Every photo gets the rating, and a rejected photo also clears Reject (PRD Marking rules).
-    @Test func aRatingSetsEveryPhotoAndClearsRejectOnRejectedPhotos() {
+    /// Every photo gets the rating, and a rejected photo's −1 is replaced by it
+    /// (PRD Marking rules).
+    @Test func aRatingSetsEveryPhotoAndReplacesRejectOnRejectedPhotos() {
         let photos = [
             BatchMarkFixtures.gridPhoto("a", stars: 5),
             BatchMarkFixtures.gridPhoto("b", stars: 3, rejected: true),
@@ -21,7 +22,7 @@ struct BatchMarkPlanTests {
         #expect(
             plan.items.map(\.change) == [
                 MarkChange(rating: BatchMarkFixtures.stars(2)),
-                MarkChange(rating: BatchMarkFixtures.stars(2), reject: false),
+                MarkChange(rating: BatchMarkFixtures.stars(2)),
                 MarkChange(rating: BatchMarkFixtures.stars(2)),
             ])
     }
@@ -48,14 +49,13 @@ struct BatchMarkPlanTests {
             ).isEmpty)
     }
 
-    /// Clearing a rating keeps Reject, because only applying 1–5 stars says "keep this photo"
+    /// Clearing a rating sets 0, so a rejected photo becomes unrated rather than staying rejected
     /// (PRD Marking rules).
-    @Test func clearingARatingKeepsReject() throws {
-        let photo = BatchMarkFixtures.gridPhoto("a", stars: 3, rejected: true)
+    @Test func clearingARatingReplacesRejectWithUnrated() throws {
+        let photo = BatchMarkFixtures.gridPhoto("a", rejected: true)
         let plan = BatchMarkPlan(action: .rating(.unrated), photos: [photo])
         let item = try #require(plan.items.first)
         #expect(item.change == MarkChange(rating: .unrated))
-        #expect(item.change.reject == nil)
     }
 
     /// A photo that already carries the rating has nothing to write (PRD P0-06's no-change
@@ -110,9 +110,9 @@ struct BatchMarkPlanTests {
                 .items.map(\.change) == [MarkChange(label: orange)])
     }
 
-    /// Reject keeps every rating, and a photo already rejected gets nothing (PRD Marking rules,
-    /// G1 decision 5).
-    @Test func rejectKeepsTheRatingAndSkipsRejectedPhotos() throws {
+    /// Reject replaces every rating with −1, and a photo already rejected gets nothing
+    /// (PRD Marking rules).
+    @Test func rejectReplacesTheRatingAndSkipsRejectedPhotos() throws {
         let photos = [
             BatchMarkFixtures.gridPhoto("a", stars: 4),
             BatchMarkFixtures.gridPhoto("b", stars: 2, rejected: true),
@@ -121,6 +121,6 @@ struct BatchMarkPlanTests {
         let item = try #require(plan.items.first)
         #expect(plan.items.count == 1)
         #expect(item.photo == BatchMarkFixtures.photo("a"))
-        #expect(item.change == MarkChange(reject: true))
+        #expect(item.change == MarkChange(rating: .rejected))
     }
 }

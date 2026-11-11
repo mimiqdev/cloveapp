@@ -28,15 +28,16 @@ It does no file I/O and has no dependencies beyond Foundation.
   not a guarantee of system decoding support. JPEG accepts JPG/JPEG and HEIF
   accepts HIF/HEIF/HEIC. Classification is case-insensitive and never requests
   content types.
-- `Rating` accepts only 0–5. `ColourLabel` preserves every external string
-  exactly; `colour` recognizes only exact English names from `LabelColour`.
-  Empty means clear. Unknown text, including differently cased names, remains
-  a non-clear label. A codec must pass `rawValue` back unchanged when retaining
-  that label. `PhotoMarks` keeps rating, label and Reject independent.
-- `photo.markPersistence` routes each mark independently. RAW rating/label
-  writes target `xmpSidecar`, reusing a supplied sidecar URL or replacing the
-  RAW extension with `.xmp`. Every Reject and every new standalone JPEG/HIF
-  mark targets `cloveStorage`. Existing standalone embedded marks are read-only
+- `Rating` accepts −1 to 5: −1 is Reject, 0 is unrated, and 1–5 are stars.
+  `ColourLabel` preserves every external string exactly; `colour` recognizes
+  only exact English names from `LabelColour`. Empty means clear. Unknown text,
+  including differently cased names, remains a non-clear label. A codec must
+  pass `rawValue` back unchanged when retaining that label. `PhotoMarks` holds
+  one rating, which carries Reject, and one label; `isRejected` is computed.
+- `photo.markPersistence` routes each mark independently. RAW rating (Reject
+  included) and label writes target `xmpSidecar`, reusing a supplied sidecar URL
+  or replacing the RAW extension with `.xmp`. A new standalone JPEG/HIF mark
+  targets `cloveStorage`. Existing standalone embedded marks are read-only
   input. `MarkDestination` names the storage mechanism so later embedded JPEG
   writes can add a destination without replacing the routing interface.
 - `fileURLs` includes only supplied image members and the resolved sidecar,

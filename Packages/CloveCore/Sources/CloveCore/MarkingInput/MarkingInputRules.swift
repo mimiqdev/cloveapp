@@ -68,8 +68,9 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// The release position decides (PRD Rating by swipe distance). Step 0 writes nothing, and
     /// a short flick past the dead zone gives the lowest enabled step. The applied rating is the
     /// enabled level for the step, so a current rating that another app wrote at a disabled
-    /// level is still replaced by the step's enabled level. Rating a rejected photo also clears
-    /// Reject (PRD Detail gestures); a swipe never clears a rating.
+    /// level is still replaced by the step's enabled level. The ladder starts at 0 and never
+    /// produces Reject, so a swipe on a rejected photo replaces −1 with stars (PRD Detail
+    /// gestures); a swipe never clears a rating.
     public func result(
         forSwipeUpTravel travel: Double,
         marks: PhotoMarks,
@@ -93,9 +94,10 @@ public struct MarkingInputRules: Hashable, Sendable {
 
     /// The result of releasing a swipe-down at this travel, in points with up positive.
     ///
-    /// Past the threshold the photo is rejected; released back inside it, nothing happens
-    /// (PRD Detail gestures). A photo that is already rejected yields no change, because
-    /// applying the same Reject leaves the marks equal (PRD P0-06 acceptance).
+    /// Past the threshold the photo is rejected, which sets the rating to −1 and replaces any
+    /// stars; released back inside it, nothing happens (PRD Detail gestures). A photo that is
+    /// already rejected yields no change, because applying the same Reject leaves the marks equal
+    /// (PRD P0-06 acceptance).
     public func result(
         forSwipeDownTravel travel: Double,
         marks: PhotoMarks,
@@ -104,7 +106,7 @@ public struct MarkingInputRules: Hashable, Sendable {
         guard settings.gesturesEnabled, !isZoomed,
             rejectSwipeRules.isPastThreshold(travel: travel)
         else { return .noChange }
-        return markResult(MarkChange(reject: true), kind: .reject, marks: marks)
+        return markResult(MarkChange(rating: .rejected), kind: .reject, marks: marks)
     }
 
     // MARK: - Keyboard and controls
@@ -113,10 +115,9 @@ public struct MarkingInputRules: Hashable, Sendable {
     ///
     /// `0` clears and `1`–`5` set only enabled levels (PRD keyboard table and Enabled rating
     /// levels). `↑` uses the enabled ladder's next value (PRD keyboard table). A label key sets
-    /// that label, or clears it when it is already applied. `↓` rejects. `←` and `→` navigate.
-    /// `⌘Z` is reported as undo for C5. A rating key behaves like the rating bar rather than the
-    /// bar's toggle: pressing the level already applied changes nothing, except that a positive
-    /// rating also clears Reject.
+    /// that label, or clears it when it is already applied. `↓` rejects, which sets −1. `←` and
+    /// `→` navigate. `⌘Z` is reported as undo for C5. A rating key behaves like the rating bar
+    /// rather than the bar's toggle: pressing the level already applied changes nothing.
     public func result(for key: MarkingKey, marks: PhotoMarks) -> MarkingResult {
         switch key {
         case .rating(let rating):
@@ -132,7 +133,7 @@ public struct MarkingInputRules: Hashable, Sendable {
             return markResult(
                 ratingChange(applying: next, to: marks), kind: .rating, marks: marks)
         case .reject:
-            return markResult(MarkChange(reject: true), kind: .reject, marks: marks)
+            return markResult(MarkChange(rating: .rejected), kind: .reject, marks: marks)
         case .previousPhoto:
             return .previousPhoto
         case .nextPhoto:
@@ -145,9 +146,8 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// The result of tapping a level in the rating bar (PRD Marking rules).
     ///
     /// Tapping the level already applied clears the rating, and only enabled levels may be
-    /// applied (PRD Marking rules and Enabled rating levels). A rating of 1 to 5 also clears
-    /// Reject, the same as a swipe or a key, because the same mark should mean the same thing
-    /// whatever applied it; clearing a rating leaves Reject alone.
+    /// applied (PRD Marking rules and Enabled rating levels). A rating of 1 to 5 replaces Reject
+    /// with those stars, because the same value carries both; clearing a rating sets 0.
     public func result(forRating level: Rating, marks: PhotoMarks) -> MarkingResult {
         guard settings.enabledRatings.canApply(level) else { return .noChange }
         let applied = level > .unrated && level == marks.rating ? Rating.unrated : level
@@ -206,13 +206,12 @@ public struct MarkingInputRules: Hashable, Sendable {
 
     // MARK: - Shared pieces
 
-    /// The change that applies `rating`, clearing Reject only when the rating is positive.
+    /// The change that applies `rating`.
     ///
-    /// Clearing the rating never touches Reject: only applying 1–5 stars says "keep this photo".
+    /// The rating is the photo's one Reject value, so setting stars or 0 replaces −1 in the same
+    /// change; nothing else is touched.
     private func ratingChange(applying rating: Rating, to marks: PhotoMarks) -> MarkChange {
-        MarkChange(
-            rating: rating,
-            reject: rating > .unrated && marks.isRejected ? false : nil)
+        MarkChange(rating: rating)
     }
 
     /// A change that would leave the marks equal is reported as no change (PRD P0-06).
@@ -228,9 +227,6 @@ public struct MarkingInputRules: Hashable, Sendable {
 extension PhotoMarks {
     /// The marks after `change`, which replaces only the fields it names.
     func applying(_ change: MarkChange) -> PhotoMarks {
-        PhotoMarks(
-            rating: change.rating ?? rating,
-            label: change.label ?? label,
-            isRejected: change.reject ?? isRejected)
+        PhotoMarks(rating: change.rating ?? rating, label: change.label ?? label)
     }
 }

@@ -3,12 +3,11 @@ import Foundation
 /// One mark the multi-select bar applies to every selected photo (PRD P0-09, PRD Marking rules).
 ///
 /// PRD P0-09's bar offers a rating, a colour label and Reject. PRD Marking rules decide what each
-/// one means: a rating from 0 to 5 where 0 clears, a colour label where Clear removes it, and
-/// Reject as its own toggle that keeps the rating (G1 decision 5 keeps Reject in Clove, never in
-/// XMP). The action is the bar's request only; ``BatchMarkPlan`` turns it into one change per
-/// photo through C13's rules.
+/// one means: a rating from −1 to 5 where −1 is Reject and 0 clears, a colour label where Clear
+/// removes it, and Reject as the rating −1. The action is the bar's request only;
+/// ``BatchMarkPlan`` turns it into one change per photo through C13's rules.
 public enum BatchMarkAction: Hashable, Sendable {
-    /// A 0–5 rating for every photo; zero clears the rating and keeps Reject (PRD Marking rules).
+    /// A −1…5 rating for every photo; zero clears the rating, Reject included (PRD Marking rules).
     ///
     /// Only a level Settings enables can be applied, except zero, which always clears
     /// (PRD Enabled rating levels).
@@ -21,9 +20,9 @@ public enum BatchMarkAction: Hashable, Sendable {
     /// (PRD Marking rules and PRD Gesture-related settings).
     case label(ColourLabel)
 
-    /// Reject every photo, which keeps each rating (PRD Marking rules).
+    /// Reject every photo, which replaces each rating with −1 (PRD Marking rules).
     ///
-    /// G1 decision 5 keeps Reject in Clove's storage for every photo set, never in XMP, and the
-    /// move to the rejects folder is its durable result.
+    /// The rating's own storage holds the value (G1 decisions 2 and 6), and the move to the
+    /// rejects folder is Reject's durable result.
     case reject
 }

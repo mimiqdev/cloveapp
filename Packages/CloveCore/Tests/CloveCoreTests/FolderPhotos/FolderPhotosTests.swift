@@ -50,7 +50,7 @@ struct FolderPhotosTests {
         var photos = FolderPhotos()
         let added = photos.insert(
             [try rawItem("MMQ05184"), try jpegItem("IMG_0001")],
-            storedMarks: [identity("IMG_0001"): CloveStoredMarks(isRejected: true)])
+            storedMarks: [identity("IMG_0001"): CloveStoredMarks(rating: .rejected)])
 
         #expect(added.map(\.id) == [identity("MMQ05184"), identity("IMG_0001")])
         #expect(photos.count == 2)
@@ -105,14 +105,15 @@ struct FolderPhotosTests {
             PhotoMarks(rating: Rating(rawValue: 2) ?? .unrated, label: ColourLabel(colour: .green)),
             for: id)
 
-        photos.apply(MarkChange(reject: true), to: id)
-        #expect(photos.photo(for: id)?.marks.rating.rawValue == 2)
+        // Reject replaces the rating and keeps the label (PRD P0-05).
+        photos.apply(MarkChange(rating: .rejected), to: id)
+        #expect(photos.photo(for: id)?.marks.rating == .rejected)
         #expect(photos.photo(for: id)?.marks.label.colour == .green)
         #expect(photos.photo(for: id)?.marks.isRejected == true)
 
         photos.apply(MarkChange.rating(Rating(rawValue: 5) ?? .unrated), to: id)
         #expect(photos.photo(for: id)?.marks.rating.rawValue == 5)
-        #expect(photos.photo(for: id)?.marks.isRejected == true)
+        #expect(photos.photo(for: id)?.marks.isRejected == false)
 
         photos.apply(MarkChange.label(.clear), to: id)
         #expect(photos.photo(for: id)?.marks.label.isClear == true)

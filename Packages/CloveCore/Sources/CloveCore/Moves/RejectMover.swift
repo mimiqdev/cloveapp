@@ -37,7 +37,7 @@ public actor RejectMover {
     /// C4's write queue: drain, the per-set mark-change check and the stored-Reject removal.
     ///
     /// Not `private` for the same reason as ``fileSystem``: undo stores Reject again through
-    /// the queue, which stays the only writer of Clove's stored Reject (G1 decision 5).
+    /// the queue, which stays the only writer of a stored mark (G1 decisions 2 and 6).
     let markQueue: MarkWriteQueue
     /// One entry per run that still has failed items to retry (PRD P0-10).
     private var batches: [RejectMoveBatchID: AppliedBatch] = [:]
@@ -63,7 +63,7 @@ public actor RejectMover {
     /// Creates the mover over C4's queue and the production file system unless a test injects
     /// another.
     ///
-    /// The queue is the only writer of Clove's stored Reject, so the mover never touches app
+    /// The queue is the only writer of a stored Reject, so the mover never touches app
     /// storage directly; tests inject a temporary store directory and a file-system double so
     /// nothing reaches real photos or the app's Application Support container.
     public init(
@@ -406,16 +406,17 @@ public actor RejectMover {
         }
     }
 
-    /// Drops the stored Reject after a confirmed move (G1 decision 5, PRD P0-08).
+    /// Drops a stored Reject after a confirmed move (PRD P0-08).
     ///
-    /// The move is the durable Reject result, so the record is removed only now. A removal that
+    /// A RAW set's Reject is in its sidecar and moves with it; a standalone JPEG/HIF keeps it in
+    /// Clove storage, so that stored rating −1 is cleared only now. A removal that
     /// throws leaves the set counted as moved and the stale record as a diagnostic, because the
     /// files are already in the rejects folder and reporting the set as unmoved would be wrong.
     private func confirmed(_ plan: RejectMoveSetPlan) async -> RejectMoveOutcome {
         var removed = false
         var stale: RejectMoveFailure?
         do {
-            removed = try await markQueue.removeReject(for: plan.identity)
+            removed = try await markQueue.clearReject(for: plan.identity)
         } catch {
             stale = RejectMoveFailure(classifying: error)
         }
@@ -433,7 +434,7 @@ public actor RejectMover {
             return skipped(identity, reason: .unfinishedMarkChange)
         case .failed:
             return skipped(identity, reason: .failedMarkChange)
-        case .savedInSidecar, .savedInCloveOnly, .storedInClove, .superseded:
+        case .savedInSidecar, .savedInCloveOnly, .superseded:
             return nil
         }
     }

@@ -142,7 +142,7 @@ public struct MarkWriteFailure: Error, Hashable, Sendable, CustomStringConvertib
     /// The codec's own refusal, kept when ``reason`` is `packetRefused` (PRD P0-07).
     public let codecError: XMPCodecError?
     /// Clove storage's own refusal, kept when the stored marks could not be read or written
-    /// (G1 decisions 5–6).
+    /// (G1 decision 6).
     public let storeError: CloveMarkStoreError?
 
     /// Describes a failure the write already classified, for example an ambiguous sidecar.

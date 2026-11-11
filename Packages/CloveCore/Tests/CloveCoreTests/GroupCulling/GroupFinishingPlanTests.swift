@@ -51,38 +51,30 @@ struct GroupFinishingPlanTests {
         // photo is rejected.
         #expect(plan.keptPhoto == nil)
         #expect(plan.rejects.map(\.photo) == [other])
-        #expect(plan.rejects.first?.change == MarkChange(reject: true))
+        #expect(plan.rejects.first?.change == MarkChange(rating: .rejected))
     }
 
-    @Test func keepThisClearsRejectAndKeepsAnExistingRating() throws {
+    @Test func keepThisReplacesRejectWithTheLowestEnabledRating() throws {
         let current = groupCullingPhoto("current")
         let other = groupCullingPhoto("other")
         let group = groupCullingGroup("rejected", members: [current, other])
 
-        let rated = GroupFinishingPlan(
+        let plan = GroupFinishingPlan(
             group: group,
             action: .keepThis,
             currentPhoto: current,
             marks: [
-                current: PhotoMarks(
-                    rating: groupCullingRating(3), isRejected: true),
-                other: PhotoMarks(isRejected: true),
+                current: PhotoMarks(rating: .rejected),
+                other: PhotoMarks(rating: .rejected),
             ],
             enabledRatings: groupCullingTwoAndFour)
-        let keptRated = try #require(rated.keptPhoto)
-        // "Keep" means keep, so Reject is cleared and the rating stays (PRD In-group culling).
-        #expect(keptRated.change == MarkChange(reject: false))
-
-        let unrated = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: current,
-            marks: [current: PhotoMarks(isRejected: true), other: PhotoMarks()],
-            enabledRatings: groupCullingTwoAndFour)
-        let keptUnrated = try #require(unrated.keptPhoto)
-        #expect(
-            keptUnrated.change
-                == MarkChange(rating: groupCullingRating(2), reject: false))
+        let kept = try #require(plan.keptPhoto)
+        // "Keep" means keep, so the current photo gets a rating and stops being rejected
+        // (PRD In-group culling).
+        #expect(kept.marksBefore == PhotoMarks(rating: .rejected))
+        #expect(kept.change == MarkChange(rating: groupCullingRating(2)))
+        // A rejected member is marked, so the finishing action does not plan it again.
+        #expect(plan.rejects.isEmpty)
     }
 
     @Test func keepThisWithNothingToChangeIsEmpty() {
@@ -111,7 +103,7 @@ struct GroupFinishingPlanTests {
         let marks = groupCullingMarks([
             (members[0], PhotoMarks()),
             (members[1], PhotoMarks(label: ColourLabel(colour: .green))),
-            (members[2], PhotoMarks(isRejected: true)),
+            (members[2], PhotoMarks(rating: .rejected)),
             (members[3], PhotoMarks()),
         ])
 
@@ -136,7 +128,7 @@ struct GroupFinishingPlanTests {
         let marks = groupCullingMarks([
             (members[0], PhotoMarks(rating: groupCullingRating(5))),
             (members[1], PhotoMarks(label: ColourLabel(colour: .yellow))),
-            (members[2], PhotoMarks(isRejected: true)),
+            (members[2], PhotoMarks(rating: .rejected)),
             (members[3], PhotoMarks()),
         ])
 
@@ -166,7 +158,7 @@ struct GroupFinishingPlanTests {
                 (members[index], PhotoMarks(label: ColourLabel(colour: .purple))))
         }
         for index in 12..<16 {
-            entries.append((members[index], PhotoMarks(isRejected: true)))
+            entries.append((members[index], PhotoMarks(rating: .rejected)))
         }
         let unmarked = Array(members[16...])
         let marks = groupCullingMarks(entries)
@@ -188,8 +180,8 @@ struct GroupFinishingPlanTests {
         // photo, and the unmarked photos are exactly what is rejected.
         #expect(keepThis.rejects.map(\.photo) == unmarked)
         #expect(keepRated.rejects.map(\.photo) == unmarked)
-        #expect(keepThis.rejects.allSatisfy { $0.change == MarkChange(reject: true) })
-        #expect(keepRated.rejects.allSatisfy { $0.change == MarkChange(reject: true) })
+        #expect(keepThis.rejects.allSatisfy { $0.change == MarkChange(rating: .rejected) })
+        #expect(keepRated.rejects.allSatisfy { $0.change == MarkChange(rating: .rejected) })
         #expect(
             keepThis.changes.allSatisfy { change in
                 group.members.contains(change.photo)

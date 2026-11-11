@@ -3,9 +3,9 @@ import Foundation
 /// One photo's share of a batch write (PRD P0-09).
 ///
 /// PRD P0-09 applies one bar action to photos that may not share marks, so the action resolves
-/// to a change per photo before anything is written: a rating also clears Reject on a rejected
-/// photo (PRD Marking rules), and a photo that already carries the requested mark has nothing to
-/// write (PRD P0-06's no-change rule). C4's batch write takes one change for many photo sets, so
+/// to a change per photo before anything is written: a rating replaces Reject on a rejected photo
+/// (PRD Marking rules), and a photo that already carries the requested mark has nothing to write
+/// (PRD P0-06's no-change rule). C4's batch write takes one change for many photo sets, so
 /// the library groups these items by change and still applies the action as one batch.
 public struct BatchMarkItem: Hashable, Sendable, Identifiable {
     /// The photo the change belongs to (C1's stable identity).
@@ -81,10 +81,10 @@ public struct BatchMarkPlan: Hashable, Sendable {
     /// (PRD P0-06).
     ///
     /// Every case goes through C13's rules, so a photo marked from the bar receives exactly the
-    /// change a single-photo control would give it: a positive rating clears Reject on a
-    /// rejected photo (PRD Marking rules), an enabled level or an available label is required
-    /// (PRD Enabled rating levels and Marking rules), and a change that leaves the marks equal
-    /// writes nothing (PRD P0-06).
+    /// change a single-photo control would give it: a rating replaces Reject on a rejected photo
+    /// (PRD Marking rules), an enabled level or an available label is required (PRD Enabled
+    /// rating levels and Marking rules), and a change that leaves the marks equal writes nothing
+    /// (PRD P0-06).
     private static func change(
         for action: BatchMarkAction, marks: PhotoMarks, rules: MarkingInputRules
     ) -> MarkChange? {

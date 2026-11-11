@@ -85,15 +85,15 @@ struct PhotoChangeStatesTests {
         #expect(states.latest(for: first)?.id == id)
     }
 
-    /// A stored Reject is confirmed too, so only a failure may be retried back to writing.
+    /// A confirmed Clove-only mark never moves back to writing, so only a failure is retried.
     @Test func aStoredChangeNeverMovesBackToWriting() {
         var states = PhotoChangeStates()
         let id = MarkChangeID()
-        let stored = states.insert(status(.storedInClove, id: id))
+        let stored = states.insert(status(.savedInCloveOnly, id: id))
         let retried = states.insert(status(.pending, id: id))
         #expect(stored)
         #expect(!retried)
-        #expect(states.latest(for: first)?.state == .storedInClove)
+        #expect(states.latest(for: first)?.state == .savedInCloveOnly)
     }
 
     @Test func aNewerChangeReplacesTheOlderOne() {

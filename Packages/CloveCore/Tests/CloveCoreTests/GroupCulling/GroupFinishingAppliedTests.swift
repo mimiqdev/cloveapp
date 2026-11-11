@@ -39,10 +39,10 @@ struct GroupFinishingAppliedTests {
             group: group, action: .keepThis, currentPhoto: kept, marks: marks,
             enabledRatings: groupCullingEnabledRatings([1, 3]))
         let keptChange = MarkChange(rating: groupCullingRating(1))
-        let rejectChange = MarkChange(reject: true)
+        let rejectChange = MarkChange(rating: .rejected)
         let statuses: [PhotoIdentity: MarkChangeStatus] = [
             kept: status(kept, change: keptChange, state: .savedInSidecar),
-            rejected: status(rejected, change: rejectChange, state: .storedInClove),
+            rejected: status(rejected, change: rejectChange, state: .savedInSidecar),
         ]
 
         let result = GroupFinishingResult.applied(plan, statuses: statuses)
@@ -91,7 +91,8 @@ struct GroupFinishingAppliedTests {
             kept: status(
                 kept, change: MarkChange(rating: groupCullingRating(2)),
                 state: .savedInSidecar),
-            rejected: status(rejected, change: MarkChange(reject: true), state: .failed(failure)),
+            rejected: status(
+                rejected, change: MarkChange(rating: .rejected), state: .failed(failure)),
         ]
 
         let result = GroupFinishingResult.applied(plan, statuses: statuses)
@@ -180,11 +181,10 @@ struct GroupFinishingAppliedTests {
             enabledRatings: groupCullingTwoAndFour)
         #expect(plan.keptPhoto == nil)
 
-        let rejectedSince = groupCullingMarks([(kept, PhotoMarks(isRejected: true))])
+        let rejectedSince = groupCullingMarks([(kept, PhotoMarks(rating: .rejected))])
         let allowed = plan.changesAllowed { rejectedSince[$0] ?? allRated[$0] ?? PhotoMarks() }
 
         #expect(allowed.map(\.kind) == [.keep])
-        #expect(allowed.first?.change.reject == false)
-        #expect(allowed.first?.change.rating == groupCullingRating(2))
+        #expect(allowed.first?.change == MarkChange(rating: groupCullingRating(2)))
     }
 }

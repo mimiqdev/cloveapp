@@ -50,9 +50,9 @@ struct BatchMarkReportTests {
     /// (PRD How marks reach disk, rule 8).
     @Test func aSupersededPhotoIsNeitherSavedNorRetried() {
         let result = MarkBatchResult(
-            id: MarkBatchID(), change: MarkChange(reject: true),
+            id: MarkBatchID(), change: MarkChange(rating: .rejected),
             outcomes: [
-                status("a", .storedInClove),
+                status("a", .savedInSidecar),
                 status("b", .superseded(by: MarkChangeID())),
             ])
         let report = BatchMarkReport(result)
@@ -60,8 +60,8 @@ struct BatchMarkReportTests {
         #expect(report.summary == nil)
         #expect(!report.canRetry)
         #expect(report.failedPhotos.isEmpty)
-        // Reject is confirmed in Clove but is never shown as Saved (G1 decision 5).
-        #expect(report.savedPhotos.isEmpty)
+        // Reject writes the sidecar like any rating, so a confirmed reject is Saved.
+        #expect(report.savedPhotos == [BatchMarkFixtures.photo("a")])
     }
 
     /// One change's status for one fixture photo.

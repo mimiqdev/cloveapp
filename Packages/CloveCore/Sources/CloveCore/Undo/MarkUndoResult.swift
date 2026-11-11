@@ -90,9 +90,9 @@ public struct MarkUndoCompletionUpdate: Hashable, Sendable {
 /// changed. ``actionName`` is the short menu title; the final user-facing copy belongs to U8.
 ///
 /// A confirmed restore counts as saved here even when the marks live in Clove storage rather
-/// than XMP, matching C10's ``GroupFinishingResult``: a Reject undo restores a stored reject
-/// (G1 decision 5), and reporting "Saved 0 photos" for a successful undo would misstate it.
-/// PRD P0-08 keeps the word **Saved** for XMP writes, so U8 decides the copy it shows.
+/// than XMP, matching C10's ``GroupFinishingResult``: a standalone mark confirmed in Clove is
+/// **Saved in Clove only**, and reporting "Saved 0 photos" for a successful undo would misstate
+/// it. PRD P0-08 keeps the wording per storage, so U8 decides the copy it shows.
 public struct MarkUndoResult: Hashable, Sendable {
     /// A short action name for the undo menu title (the UI owns the final copy).
     public let actionName: String

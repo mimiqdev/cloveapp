@@ -3,7 +3,7 @@ import Testing
 
 import CloveCore
 
-@Test(arguments: 0...5)
+@Test(arguments: -1...5)
 func classifiesInRangeRatings(value: Int) throws {
     let rating = XMPRating(value)
     #expect(rating == .rated(try #require(Rating(rawValue: value))))
@@ -11,12 +11,18 @@ func classifiesInRangeRatings(value: Int) throws {
     #expect(rating.externalValue == nil)
 }
 
-@Test(arguments: [Int.min, -2, -1, 6, 7, Int.max])
+@Test(arguments: [Int.min, -2, 6, 7, Int.max])
 func keepsOutOfRangeRatingsExternal(value: Int) {
     let rating = XMPRating(value)
     #expect(rating == .external(value))
     #expect(rating.rating == nil)
     #expect(rating.externalValue == value)
+}
+
+@Test func ratingMinusOneIsReject() {
+    #expect(XMPRating(-1) == .rated(.rejected))
+    #expect(XMPRating(-1).rating == .rejected)
+    #expect(XMPRating(-1).externalValue == nil)
 }
 
 @Test func unmarkedIsTheReadingOfAnEmptyPacket() {

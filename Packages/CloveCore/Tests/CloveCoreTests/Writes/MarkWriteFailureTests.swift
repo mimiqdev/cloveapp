@@ -109,8 +109,6 @@ import Testing
 @Test func statesNeverReportAnUnconfirmedChangeAsSaved() {
     #expect(MarkChangeState.pending.isSaved == false)
     #expect(MarkChangeState.writing.isSaved == false)
-    #expect(MarkChangeState.storedInClove.isSaved == false)
-    #expect(MarkChangeState.storedInClove.isConfirmed)
     #expect(
         MarkChangeState.failed(
             MarkWriteFailure(reason: .conflict, message: "changed twice")
@@ -127,14 +125,14 @@ import Testing
 @Test func aChangeMergesNewerFieldsWithoutDroppingOlderOnes() throws {
     let blue = ColourLabel(colour: .blue)
     let older = MarkChange(rating: try #require(Rating(rawValue: 3)), label: blue)
-    let newer = MarkChange(reject: true)
+    let newer = MarkChange(label: ColourLabel(colour: .red))
 
     let merged = older.merged(with: newer)
 
     #expect(merged.rating == older.rating)
-    #expect(merged.label == blue)
-    #expect(merged.reject == true)
-    #expect(merged.covers(older))
+    #expect(merged.label == ColourLabel(colour: .red))
     #expect(merged.covers(newer))
+    // The newer change replaced the label, so the older request is superseded (rule 8).
+    #expect(merged.covers(older) == false)
     #expect(older.merged(with: MarkChange(rating: .unrated)).covers(older) == false)
 }

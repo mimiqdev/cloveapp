@@ -33,7 +33,7 @@ struct RejectMoveUndoTests {
         ]
         for set in sets {
             try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.reject(true), to: set)
+            await fixture.queue.apply(.rating(.rejected), to: set)
         }
         let before = fixture.folder.files()
         let original = try originalContents(of: sets, in: fixture.folder)
@@ -85,12 +85,12 @@ struct RejectMoveUndoTests {
             root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0002", formats: [.jpeg])
         for set in [moved, kept] {
             try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.reject(true), to: set)
+            await fixture.queue.apply(.rating(.rejected), to: set)
         }
         await fixture.queue.apply(
             MarkChange(rating: Rating(rawValue: 3), label: ColourLabel(colour: .red)), to: kept)
         // PRD Move rejects: a keep is applied on Move, which clears only the kept photo's Reject.
-        await fixture.queue.apply(.reject(false), to: kept)
+        await fixture.queue.apply(.rating(.unrated), to: kept)
         let keptBytes = try originalContents(of: [kept], in: fixture.folder)
         let moveResult = try await fixture.move(try await fixture.plan([moved]))
         #expect(moveResult.movedCount == 1)
@@ -105,8 +105,10 @@ struct RejectMoveUndoTests {
         #expect(result.restoredIdentities == [moved.id, kept.id])
         #expect(try await storesReject(moved, in: fixture))
         #expect(try await storesReject(kept, in: fixture))
+        // Undo re-rejects the kept photo, so its stored rating is −1 again; the stars the
+        // reject replaced are gone, as the owner decided (decision record `reject-as-rating.md`).
         let keptMarks = try await fixture.queue.storedMarks(for: kept.id)
-        #expect(keptMarks?.rating == Rating(rawValue: 3))
+        #expect(keptMarks?.rating == .rejected)
         #expect(keptMarks?.label == ColourLabel(colour: .red))
         let restored = try #require(result.kept.first)
         #expect(restored.identity == kept.id)
@@ -115,6 +117,36 @@ struct RejectMoveUndoTests {
         for (path, bytes) in keptBytes {
             #expect(fixture.folder.contents(of: path) == bytes)
         }
+    }
+
+    /// A kept RAW set is written rating 0 to its sidecar on Move, and undo writes −1 again.
+    @Test func keepingARawSetWritesRatingZeroAndUndoRejectsAgain() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let moved = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
+            formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
+        let kept = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0002", formats: [.raw],
+            sidecarName: "IMG_0002.xmp")
+        for set in [moved, kept] {
+            try writeMoveSet(set, in: fixture.folder)
+            await fixture.queue.apply(.rating(.rejected), to: set)
+        }
+        let keptSidecar = try #require(kept.photoSet.sidecarURL)
+        #expect(try sidecarRating(at: keptSidecar) == .rated(.rejected))
+
+        // The confirmation's keep is the rating-0 write the move flow applies (PRD Move rejects).
+        await fixture.queue.apply(.rating(.unrated), to: kept)
+        #expect(try sidecarRating(at: keptSidecar) == .rated(.unrated))
+
+        let moveResult = try await fixture.move(try await fixture.plan([moved]))
+        await fixture.mover.recordKeptPhotos([kept], for: moveResult.id)
+        let result = try await fixture.mover.undo(
+            undoStep(for: moveResult, returningTo: kept.id))
+
+        #expect(result.restoredCount == 2)
+        #expect(try sidecarRating(at: keptSidecar) == .rated(.rejected))
     }
 
     /// A retry stays part of the same step, and one undo restores the whole action.
@@ -132,9 +164,9 @@ struct RejectMoveUndoTests {
             formats: [.jpeg])
         for set in [first, second, kept] {
             try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.reject(true), to: set)
+            await fixture.queue.apply(.rating(.rejected), to: set)
         }
-        await fixture.queue.apply(.reject(false), to: kept)
+        await fixture.queue.apply(.rating(.unrated), to: kept)
         let original = try originalContents(of: [first, second], in: fixture.folder)
         let plan = try await fixture.plan([first, second])
         let blocked = try #require(plan.readyEntries.last?.files.first?.destination)
@@ -173,7 +205,7 @@ struct RejectMoveUndoTests {
             root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
             formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
         try writeMoveSet(set, in: fixture.folder)
-        await fixture.queue.apply(.reject(true), to: set)
+        await fixture.queue.apply(.rating(.rejected), to: set)
         let moveResult = try await fixture.move(try await fixture.plan([set]))
         let entry = undoStep(for: moveResult, returningTo: set.id)
 
@@ -210,7 +242,7 @@ struct RejectMoveUndoTests {
         let set = try makeMoveSet(
             root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001", formats: [.raw])
         try writeMoveSet(set, in: fixture.folder)
-        await fixture.queue.apply(.reject(true), to: set)
+        await fixture.queue.apply(.rating(.rejected), to: set)
         let moveResult = try await fixture.move(try await fixture.plan([set]))
         let entry = undoStep(for: moveResult, returningTo: set.id)
         let moves = fixture.fileSystem.count(of: .move)
@@ -241,7 +273,7 @@ struct RejectMoveUndoTests {
         }
         for set in sets {
             try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.reject(true), to: set)
+            await fixture.queue.apply(.rating(.rejected), to: set)
         }
         let moveResult = try await fixture.move(try await fixture.plan(sets))
         let entry = undoStep(for: moveResult, returningTo: sets[0].id)
@@ -293,7 +325,7 @@ struct RejectMoveUndoTests {
         }
         for set in sets {
             try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.reject(true), to: set)
+            await fixture.queue.apply(.rating(.rejected), to: set)
         }
         let firstRun = try await fixture.move(try await fixture.plan([sets[0]]))
         let secondRun = try await fixture.move(try await fixture.plan([sets[1]]))
@@ -371,6 +403,11 @@ private func undoStep(
     RejectMoveUndoEntry(batch: run.id, keptPhotos: kept, photoToReturnTo: photo)
 }
 
+/// One sidecar's rating, read the way a folder open would read it.
+private func sidecarRating(at url: URL) throws -> XMPRating {
+    try XMPCodec().read(try Data(contentsOf: url)).rating
+}
+
 /// Every file of `sets` with the exact bytes it held before a move, by relative path.
 private func originalContents(
     of sets: [ScannedPhotoSet], in folder: MoveTestFolder
@@ -385,7 +422,13 @@ private func originalContents(
     return contents
 }
 
-/// Whether Clove stores Reject for the photo again (G1 decision 5).
+/// Whether the photo is rejected again in the storage its rating uses (G1 decisions 2 and 6).
 private func storesReject(_ photo: ScannedPhotoSet, in fixture: MoveFixture) async throws -> Bool {
-    try await fixture.queue.storedMarks(for: photo.id)?.isRejected == true
+    switch photo.photoSet.markPersistence.rating {
+    case .cloveStorage:
+        return try await fixture.queue.storedMarks(for: photo.id)?.isRejected == true
+    case .xmpSidecar(let url):
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        return try XMPCodec().read(try Data(contentsOf: url)).rating == .rated(.rejected)
+    }
 }

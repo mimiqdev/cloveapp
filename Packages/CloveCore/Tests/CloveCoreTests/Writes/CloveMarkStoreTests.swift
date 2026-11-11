@@ -20,10 +20,10 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let store = makeStore(folder, WriteFileSystemDouble())
     let identity = try makeIdentity()
 
-    try await store.apply(CloveMarkChange(rating: three, label: green, reject: true), to: identity)
+    try await store.apply(CloveMarkChange(rating: .rejected, label: green), to: identity)
 
     let stored = try await store.marks(for: identity)
-    #expect(stored?.rating == three)
+    #expect(stored?.rating == .rejected)
     #expect(stored?.label == green)
     #expect(stored?.isRejected == true)
     let byFolder = try await store.marks(for: identity.folderID)
@@ -43,10 +43,10 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
 
     try await store.apply(CloveMarkChange(rating: three), to: identity)
     try await store.apply(CloveMarkChange(label: green), to: identity)
-    try await store.apply(CloveMarkChange(reject: true), to: identity)
+    try await store.apply(CloveMarkChange(rating: .rejected), to: identity)
 
     let stored = try #require(try await store.marks(for: identity))
-    #expect(stored.rating == three)
+    #expect(stored.rating == .rejected)
     #expect(stored.label == green)
     #expect(stored.isRejected)
 }
@@ -65,20 +65,22 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(stored.rating == five)
 }
 
-@Test func removingARejectKeepsTheOtherStoredMarks() async throws {
+@Test func clearingARejectKeepsTheStoredLabel() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let store = makeStore(folder, WriteFileSystemDouble())
     let identity = try makeIdentity()
-    try await store.apply(CloveMarkChange(rating: three, reject: true), to: identity)
+    try await store.apply(CloveMarkChange(rating: .rejected, label: green), to: identity)
 
-    let removed = try await store.removeReject(for: identity)
+    let cleared = try await store.clearReject(for: identity)
     let stored = try #require(try await store.marks(for: identity))
 
-    #expect(removed)
+    #expect(cleared)
     #expect(stored.isRejected == false)
-    #expect(stored.rating == three)
-    #expect(try await store.removeReject(for: identity) == false)
+    // Clearing Reject leaves the photo unrated (PRD P0-05).
+    #expect(stored.rating == nil)
+    #expect(stored.label == green)
+    #expect(try await store.clearReject(for: identity) == false)
 }
 
 @Test func aPhotoWithNothingStoredIsRemovedFromTheFile() async throws {
@@ -86,10 +88,9 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     defer { folder.remove() }
     let store = makeStore(folder, WriteFileSystemDouble())
     let identity = try makeIdentity()
-    try await store.apply(CloveMarkChange(rating: three, reject: true), to: identity)
+    try await store.apply(CloveMarkChange(rating: .rejected), to: identity)
 
-    try await store.apply(
-        CloveMarkChange(rating: .unrated, label: .clear, reject: false), to: identity)
+    try await store.apply(CloveMarkChange(rating: .unrated, label: .clear), to: identity)
 
     #expect(try await store.marks(for: identity) == nil)
 }
@@ -102,8 +103,8 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let second = PhotoIdentity(
         folderID: makeFolderIdentity("other"), relativeFolderPath: "", stem: "MMQ05184")
 
-    try await store.apply(CloveMarkChange(reject: true), to: first)
-    try await store.apply(CloveMarkChange(reject: true), to: second)
+    try await store.apply(CloveMarkChange(rating: .rejected), to: first)
+    try await store.apply(CloveMarkChange(rating: .rejected), to: second)
 
     #expect(try await store.marks(for: first.folderID).count == 1)
     #expect(try await store.marks(for: second.folderID).count == 1)
@@ -116,12 +117,12 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     defer { folder.remove() }
     let first = makeStore(folder, WriteFileSystemDouble())
     let identity = try makeIdentity()
-    try await first.apply(CloveMarkChange(rating: three, label: green, reject: true), to: identity)
+    try await first.apply(CloveMarkChange(rating: .rejected, label: green), to: identity)
 
     let second = makeStore(folder, WriteFileSystemDouble())
     let stored = try #require(try await second.marks(for: identity))
 
-    #expect(stored.rating == three)
+    #expect(stored.rating == .rejected)
     #expect(stored.label == green)
     #expect(stored.isRejected)
 }
@@ -131,13 +132,13 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     defer { folder.remove() }
     let store = makeStore(folder, WriteFileSystemDouble())
     let identity = try makeIdentity()
-    try await store.apply(CloveMarkChange(reject: true), to: identity)
+    try await store.apply(CloveMarkChange(rating: .rejected), to: identity)
     let file = await store.fileURL(for: identity.folderID)
     let corrupt = Data("{ this is not Clove storage".utf8)
     try corrupt.write(to: file)
 
     do {
-        try await store.apply(CloveMarkChange(reject: false), to: identity)
+        try await store.apply(CloveMarkChange(rating: .unrated), to: identity)
         Issue.record("Expected the damaged file to be refused")
     } catch let error as CloveMarkStoreError {
         guard case .corruptStorage(let url, _) = error else {
@@ -184,13 +185,43 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     }
 }
 
+@Test func anOldFileWithARejectFieldStillDecodesAndDropsTheReject() async throws {
+    let folder = try WriteTestFolder()
+    defer { folder.remove() }
+    let store = makeStore(folder, WriteFileSystemDouble())
+    let identity = try makeIdentity()
+    let rejectedIdentity = PhotoIdentity(
+        folderID: identity.folderID, relativeFolderPath: "DCIM", stem: "mmq05185")
+    try FileManager.default.createDirectory(
+        at: folder.file("store"), withIntermediateDirectories: true)
+    let file = await store.fileURL(for: identity.folderID)
+    // The old shape stored Reject in its own field; no migration runs, so it is ignored. The
+    // new shape stores Reject as the rating −1.
+    let json = """
+        {"version":1,"folderID":"\(identity.folderID.rawValue)","photos":[
+        {"relativeFolderPath":"DCIM","stem":"mmq05184","isRejected":true},
+        {"relativeFolderPath":"DCIM","stem":"mmq05185","isRejected":false,"rating":-1}]}
+        """
+    try Data(json.utf8).write(to: file)
+
+    let old = try await store.marks(for: identity)
+    let new = try await store.marks(for: rejectedIdentity)
+
+    // The old reject is dropped, as the owner decided, and the file still decodes.
+    #expect(old?.rating == nil)
+    #expect(old?.isRejected == false)
+    // A rating of −1 in the new shape is the stored Reject.
+    #expect(new?.rating == .rejected)
+    #expect(new?.isRejected == true)
+}
+
 @Test func aWriteFailureKeepsThePreviousFileAndLeavesNoStaging() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let double = WriteFileSystemDouble()
     let store = makeStore(folder, double)
     let identity = try makeIdentity()
-    try await store.apply(CloveMarkChange(reject: true), to: identity)
+    try await store.apply(CloveMarkChange(rating: .rejected), to: identity)
     let file = await store.fileURL(for: identity.folderID)
     let before = try Data(contentsOf: file)
     double.fail(.replace, at: file, with: POSIXError(.ENOSPC))
@@ -219,7 +250,7 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     }
 
     do {
-        try await store.apply(CloveMarkChange(reject: true), to: identity)
+        try await store.apply(CloveMarkChange(rating: .rejected), to: identity)
         Issue.record("Expected the unconfirmed write to throw")
     } catch let error as CloveMarkStoreError {
         guard case .readBackMismatch(let url) = error else {
@@ -241,7 +272,7 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
         for index in 0..<20 {
             group.addTask {
                 try await store.apply(
-                    CloveMarkChange(reject: true),
+                    CloveMarkChange(rating: .rejected),
                     to: PhotoIdentity(
                         folderID: folderID, relativeFolderPath: "DCIM", stem: "IMG_\(index)"))
             }

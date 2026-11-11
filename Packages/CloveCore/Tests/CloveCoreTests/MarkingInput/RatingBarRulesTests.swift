@@ -22,14 +22,14 @@ import CloveCore
                 == .mark(MarkChange(rating: four), .rating))
     }
 
-    @Test func tappingTheAppliedRatingClearsItWithoutClearingReject() throws {
+    @Test func tappingARatingOnARejectedPhotoReplacesReject() throws {
         let rules = MarkingInputRules()
-        let marks = try MarkingFixtures.marks(stars: 3, rejected: true)
+        let marks = try MarkingFixtures.marks(rejected: true)
 
-        // Clearing the rating is not a decision to keep the photo, so Reject stays (PRD P0-05).
+        // Reject is the rating −1, so choosing stars replaces it (PRD P0-05).
         #expect(
             rules.result(forRating: try MarkingFixtures.stars(3), marks: marks)
-                == .mark(MarkChange(rating: .unrated), .rating))
+                == .mark(MarkChange(rating: try MarkingFixtures.stars(3)), .rating))
     }
 
     @Test func aDisabledLevelTapDoesNothing() throws {
@@ -50,14 +50,14 @@ import CloveCore
         #expect(rules.result(forRating: .unrated, marks: PhotoMarks()) == .noChange)
     }
 
-    @Test func aPositiveRatingTapAlsoClearsReject() throws {
+    @Test func aPositiveRatingTapReplacesReject() throws {
         let rules = MarkingInputRules()
-        let marks = try MarkingFixtures.marks(stars: 2, rejected: true)
+        let marks = try MarkingFixtures.marks(rejected: true)
         let four = try MarkingFixtures.stars(4)
 
         #expect(
             rules.result(forRating: four, marks: marks)
-                == .mark(MarkChange(rating: four, reject: false), .rating))
+                == .mark(MarkChange(rating: four), .rating))
     }
 
     @Test func aRatingOnAnUnknownExternalLabelKeepsTheLabel() throws {

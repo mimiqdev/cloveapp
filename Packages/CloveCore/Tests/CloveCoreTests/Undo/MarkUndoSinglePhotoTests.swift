@@ -73,57 +73,54 @@ struct MarkUndoSinglePhotoTests {
                 == XMPMarks(rating: .rated(undoRating(4)), label: undoGreen))
     }
 
-    /// A Reject undo clears Clove's stored reject and never touches the sidecar (G1 decision 5).
-    @Test func aRejectUndoClearsTheStoredRejectAndRedoStoresItAgain() async throws {
+    /// A Reject undo restores the stars it replaced, in the sidecar; redo writes −1 again.
+    @Test func aRejectUndoRestoresTheStarsAndRedoRejectsAgain() async throws {
         let fixture = try UndoTestFixture()
         defer { fixture.remove() }
         let set = try #require(fixture.photoSets.first)
         await undoSeedSidecar(PhotoMarks(rating: undoRating(3)), at: fixture.sidecar())
 
-        let status = await fixture.record(.reject(true), on: set.id)
-        #expect(status?.state == .storedInClove)
-        #expect(try await fixture.queue.storedMarks(for: set.id)?.isRejected == true)
+        let status = await fixture.record(.rating(.rejected), on: set.id)
+        #expect(status?.state == .savedInSidecar)
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.rejected))
         #expect(await fixture.history.nextUndoActionName == "Reject")
 
         let undoResult = try #require(await undoStep(fixture))
         #expect(undoResult.savedCount == 1)
-        #expect(undoResult.outcomes[0].status?.state == .storedInClove)
-        #expect(try await fixture.queue.storedMarks(for: set.id) == nil)
-        // G1 decision 5: Reject is never in XMP, so the rating packet keeps its bytes.
+        #expect(undoResult.outcomes[0].status?.state == .savedInSidecar)
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
+        #expect(try await fixture.queue.storedMarks(for: set.id) == nil)
 
         let redoResult = try #require(await undoRedoStep(fixture))
         #expect(redoResult.savedCount == 1)
-        #expect(try await fixture.queue.storedMarks(for: set.id)?.isRejected == true)
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.rejected))
     }
 
-    /// C13's rating rule clears Reject; undo restores both fields the change set.
-    @Test func aRatingThatClearedRejectRestoresBothFieldsOnUndo() async throws {
+    /// A rating replaces Reject; undo restores −1, and redo writes the stars again (C13).
+    @Test func aRatingThatReplacedRejectRestoresItOnUndo() async throws {
         let fixture = try UndoTestFixture()
         defer { fixture.remove() }
         let set = try #require(fixture.photoSets.first)
-        let before = PhotoMarks(isRejected: true)
-        _ = await fixture.queue.apply(.reject(true), to: set)
+        let before = PhotoMarks(rating: .rejected)
+        _ = await fixture.queue.apply(.rating(.rejected), to: set)
 
         let marking = MarkingInputRules().result(forRating: undoRating(3), marks: before)
         guard case .mark(let change, _) = marking else {
-            Issue.record("A rating on a rejected photo should clear Reject (C13)")
+            Issue.record("A rating on a rejected photo should replace Reject (C13)")
             return
         }
-        #expect(change == MarkChange(rating: undoRating(3), reject: false))
+        #expect(change == MarkChange(rating: undoRating(3)))
 
         let status = await fixture.record(change, on: set.id)
         #expect(status?.state == .savedInSidecar)
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
-        // Storing Reject false leaves Clove nothing to keep for this photo (G1 decision 5).
         #expect(try await fixture.queue.storedMarks(for: set.id) == nil)
 
         let undoResult = try #require(await undoStep(fixture))
         #expect(undoResult.savedCount == 1)
         #expect(undoResult.outcomes[0].isWritten)
-        // PRD P0-05: the rating is back in XMP and the stored Reject is back in Clove.
-        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.unrated))
-        #expect(try await fixture.queue.storedMarks(for: set.id)?.isRejected == true)
+        // PRD P0-05: undo restores the Reject rating the change replaced.
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.rejected))
 
         let redoResult = try #require(await undoRedoStep(fixture))
         #expect(redoResult.savedCount == 1)

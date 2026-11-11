@@ -32,7 +32,7 @@
                     stem: "IMG_\(index)", formats: [.raw, .heif],
                     sidecarName: "IMG_\(index).xmp")
                 try writeMoveSet(set, in: fixture.folder)
-                await queue.apply(.reject(true), to: set)
+                await queue.apply(.rating(.rejected), to: set)
                 sets.append(set)
             }
             let plan = try await mover.plan(

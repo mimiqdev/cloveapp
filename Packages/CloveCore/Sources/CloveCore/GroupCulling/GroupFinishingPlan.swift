@@ -7,9 +7,9 @@
 /// group ever appear in ``changes``, and a photo with a rating, a colour label or Reject is
 /// never planned for a reject (PRD P0-12; PRD In-group culling, finishing actions).
 ///
-/// Keep this, reject the rest gives the current photo the lowest enabled rating when it has
-/// none, clears its Reject when it is rejected, and leaves an existing rating and label alone;
-/// every other unmarked member is rejected (PRD In-group culling, finishing actions). It is
+/// Keep this, reject the rest gives the current photo the lowest enabled rating when it is
+/// unrated or rejected, and leaves an existing rating and label alone; every other unmarked
+/// member is rejected (PRD In-group culling, finishing actions). It is
 /// unavailable when the current photo is not a member, because there would be nothing to keep
 /// (``GroupFinishingAvailability/currentPhotoNotInGroup``).
 /// Keep rated, reject the rest leaves rated photos unchanged and rejects the other unmarked
@@ -72,7 +72,7 @@ public struct GroupFinishingPlan: Hashable, Sendable {
                     changes.append(
                         GroupFinishingChange(
                             photo: member, kind: .reject, marksBefore: memberMarks,
-                            change: MarkChange(reject: true)))
+                            change: MarkChange(rating: .rejected)))
                 }
                 self.availability = .available
             } else {
@@ -90,7 +90,7 @@ public struct GroupFinishingPlan: Hashable, Sendable {
                     changes.append(
                         GroupFinishingChange(
                             photo: member, kind: .reject, marksBefore: memberMarks,
-                            change: MarkChange(reject: true)))
+                            change: MarkChange(rating: .rejected)))
                 }
             }
             self.availability = hasRatedPhoto ? .available : .noRatedPhoto
@@ -117,13 +117,11 @@ public struct GroupFinishingPlan: Hashable, Sendable {
 
     /// Keep this's change for the marks read now, used to plan and again at execution.
     ///
-    /// The rule is independent of when it runs: an unrated photo gets `keepRating`, a rejected
-    /// photo has its Reject cleared, and an existing rating and label stay untouched (PRD
+    /// The rule is independent of when it runs: an unrated or rejected photo gets `keepRating`,
+    /// which replaces a Reject with stars, and an existing rating and label stay untouched (PRD
     /// In-group culling, finishing actions). Running it again at execution means a photo rated
     /// after the plan was built keeps its rating instead of being overwritten.
     static func keepChange(for marks: PhotoMarks, keepRating: Rating) -> MarkChange {
-        MarkChange(
-            rating: marks.rating == .unrated ? keepRating : nil,
-            reject: marks.isRejected ? false : nil)
+        marks.rating > .unrated ? MarkChange() : MarkChange(rating: keepRating)
     }
 }

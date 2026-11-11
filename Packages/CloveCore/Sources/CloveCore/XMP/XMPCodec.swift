@@ -4,8 +4,9 @@ import Foundation
 ///
 /// G1's XMP codec row selects a validated, preserving editor: it changes only the fields
 /// Clove owns, keeps every other byte another app wrote, and refuses malformed or ambiguous
-/// packets instead of repairing them. PRD P0-07 limits the fields to the star rating and
-/// the colour label, so Reject and any Clove namespace never reach XMP (G1 decision 5).
+/// packets instead of repairing them. PRD P0-07 limits the fields to the rating and the colour
+/// label, so there is no Clove namespace; Reject is the standard rating −1 (decision record
+/// `reject-as-rating.md`).
 ///
 /// The codec is pure: it takes packet bytes, or `nil` when no sidecar exists yet, and
 /// returns marks or new bytes. Staging, renaming, read-back and the write queue belong to
@@ -42,8 +43,8 @@ public struct XMPCodec: Sendable {
     /// whitespace, comments, CDATA, other namespaces, develop settings and history are
     /// kept byte for byte (PRD P0-07; How marks reach disk, rule 9). A label set to
     /// `.clear` loses its property; rating zero is written as `xmp:Rating="0"`, which other
-    /// software reads as unrated, so clearing the rating is an explicit value and not a
-    /// missing field.
+    /// software reads as unrated, and Reject as `xmp:Rating="-1"`, so both are explicit values
+    /// and not a missing field.
     ///
     /// - Parameters:
     ///   - edit: The changes to make. Fields left `.keep` are not touched.
