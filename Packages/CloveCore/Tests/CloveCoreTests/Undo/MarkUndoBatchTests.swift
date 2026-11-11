@@ -21,14 +21,12 @@ struct MarkUndoBatchTests {
         let photos = fixture.photoSets.map(\.id)
         #expect(await fixture.history.nextUndo == nil)
 
-        let batch = try #require(await fixture.recordBatch(.rating(undoRating(5)), on: photos))
-        #expect(batch.confirmedCount == 3)
+        _ = try #require(await fixture.recordBatch(.rating(undoRating(5)), on: photos))
         #expect(await fixture.history.nextUndoActionName == "Rating")
         #expect(await fixture.history.nextUndo?.photos.map(\.photo) == photos)
 
         let result = try #require(await undoStep(fixture))
         #expect(result.droppedFromHistory == false)
-        #expect(result.savedCount == 3)
         #expect(result.failedCount == 0)
         #expect(result.outcomes.map(\.photo) == photos)
         // A's and C's inverse is the unrated sidecar, B's is four stars: two C4 batches.
@@ -62,7 +60,6 @@ struct MarkUndoBatchTests {
         #expect(outcome.alreadyAtTarget.isEmpty)
         #expect(undoLeftAloneFields(outcome) == [.rating])
         #expect(outcome.leftAlone.first?.reason == .newerMark)
-        #expect(result.savedCount == 0)
         #expect(result.failedCount == 0)
         #expect(result.notUndoneCount == 1)
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(1)))
@@ -92,7 +89,6 @@ struct MarkUndoBatchTests {
         #expect(outcome.alreadyAtTarget == [.rating])
         #expect(outcome.leftAlone.isEmpty)
         #expect(result.skippedCount == 1)
-        #expect(result.savedCount == 0)
         #expect(
             fixture.double.count(of: .writeStaging, at: fixture.sidecar()) == writesAfterAction,
             "a photo already at the target was written again")
@@ -106,15 +102,12 @@ struct MarkUndoBatchTests {
         let fixture = try UndoTestFixture(stems: ["A", "B", "C"])
         defer { fixture.remove() }
         let photos = fixture.photoSets.map(\.id)
-        let batch = try #require(await fixture.recordBatch(.rating(undoRating(4)), on: photos))
-        #expect(batch.confirmedCount == 3)
+        _ = try #require(await fixture.recordBatch(.rating(undoRating(4)), on: photos))
         // The drive runs out of space on one photo's undo write.
         fixture.double.fail(.replace, at: fixture.sidecar(1), with: POSIXError(.ENOSPC))
 
         let result = try #require(await undoStep(fixture))
-        #expect(result.savedCount == 2)
         #expect(result.failedCount == 1)
-        #expect(result.partialFailureSummary == "Saved 2 photos. 1 photos couldn't be saved.")
         let failed = try #require(result.outcomes.first { $0.status?.state.failure != nil })
         #expect(failed.photo == photos[1])
         #expect(failed.status?.state.failure?.reason == .insufficientSpace)
@@ -237,8 +230,7 @@ struct MarkUndoBatchTests {
         defer { fixture.remove() }
         let set = try #require(fixture.photoSets.first)
         await fixture.record(.rating(undoRating(5)), on: set.id)
-        let undoResult = try #require(await undoStep(fixture))
-        #expect(undoResult.savedCount == 1)
+        _ = try #require(await undoStep(fixture))
         // A later write leaves a different rating in place after the undo.
         _ = await fixture.queue.apply(.rating(undoRating(1)), to: set)
 

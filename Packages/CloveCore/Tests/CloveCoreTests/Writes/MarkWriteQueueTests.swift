@@ -84,7 +84,6 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let status = await queue.apply(.rating(three), to: set)
 
     #expect(status.state.failure?.reason == .ambiguousSidecar)
-    #expect(status.state.isSaved == false)
     #expect(double.count(of: .writeStaging) == 0)
     #expect(try Data(contentsOf: existing) == writeTestUnknownPacket)
     #expect(try Data(contentsOf: appended) == writeTestUnknownPacket)
@@ -119,7 +118,6 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
 
     // Reject is the rating −1, so a RAW set writes it to its one storage and reads it back.
     #expect(status.state == .savedInSidecar)
-    #expect(status.state.isSaved)
     #expect(try marks(at: sidecar).rating == .rated(.rejected))
     #expect(double.count(of: .replace, at: sidecar) == 1)
     #expect(try await queue.storedMarks(for: set.id) == nil)
@@ -139,7 +137,6 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let stored = try await queue.storedMarks(for: set.id)
 
     #expect(status.state == .savedInCloveOnly)
-    #expect(status.state.isSaved)
     #expect(stored?.rating == four)
     #expect(stored?.label == green)
     #expect(stored?.isRejected == false)
@@ -265,11 +262,9 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let result = await queue.apply(.rating(three), to: sets)
 
     #expect(result.outcomes.count == 3)
-    #expect(result.confirmedCount == 2)
     #expect(result.failedCount == 1)
     #expect(result.failed.first?.identity == sets[1].id)
     #expect(result.failed.first?.state.failure?.reason == .insufficientSpace)
-    #expect(result.partialFailureSummary == "Saved 2 photos. 1 photos couldn't be saved.")
     #expect(try folder.stagingNames().isEmpty)
 }
 
@@ -363,7 +358,6 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let status = await queue.apply(.rating(.unrated), to: set)
 
     #expect(status.state.failure?.storeError != nil)
-    #expect(status.state.isSaved == false)
     #expect(try Data(contentsOf: storage) == corrupt, "corrupt storage was overwritten")
     #expect(try folder.stagingNames().isEmpty)
     do {

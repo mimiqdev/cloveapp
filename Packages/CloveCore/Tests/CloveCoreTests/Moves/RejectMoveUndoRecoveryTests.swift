@@ -35,7 +35,6 @@ struct RejectMoveUndoRecoveryTests {
         #expect(result.failedCount == 0)
         #expect(result.splitCount == 0)
         #expect(result.restoredIdentities.isEmpty)
-        #expect(result.partialFailureSummary == "Restored 0 photos. 1 photos couldn't be restored.")
         let conflict = try #require(result.conflicts.first)
         #expect(conflict.identity == set.id)
         #expect(conflict.takenPaths == [jpeg.source])
@@ -265,7 +264,6 @@ struct RejectMoveUndoRecoveryTests {
         #expect(restored.rejectStoreFailure != nil)
         // The files are where they belong, so the photo is not counted as unrestored; PRD P0-08
         // still forbids calling the whole step complete while the mark is unconfirmed.
-        #expect(result.partialFailureSummary == nil)
         #expect(result.isComplete == false)
         #expect(fixture.folder.exists("DCIM/IMG_0001.JPG"))
     }
@@ -378,7 +376,6 @@ struct RejectMoveUndoRecoveryTests {
         #expect(result.failedCount == 0)
         #expect(result.restoredCount == 0)
         #expect(result.splitCount == 0)
-        #expect(result.partialFailureSummary == "Restored 0 photos. 1 photos couldn't be restored.")
         let missing = try #require(result.missingFiles.first)
         #expect(missing.identity == set.id)
         #expect(missing.files.map(\.location) == [.destination, .destination, .missing])

@@ -94,6 +94,50 @@ struct FolderWriteFailureTests {
         await library.closeFolder()
     }
 
+    @Test func unreadableSidecarsPreserveKnownMarksAndDoNotHidePhotos() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let photos = root.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: photos, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("photo.ARW"))
+        let sidecar = photos.appendingPathComponent("photo.xmp")
+        let three = try #require(Rating(rawValue: 3))
+        try XMPCodec().write(.rating(three), into: nil).write(to: sidecar)
+        let stores = FolderLibrarySession.Stores(
+            access: FolderAccess(
+                store: RecentFolderStore(fileURL: root.appendingPathComponent("recents.json"))),
+            writes: MarkWriteQueue(storeDirectory: root.appendingPathComponent("marks")),
+            groups: SimilarGroupsCache(directory: root.appendingPathComponent("groups")))
+        let library = FolderLibrarySession(stores: Task { stores }, similarGroupsEnabled: { false })
+        let model = BrowsingModel(library: library)
+        await model.openPickedFolder(photos)
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 1 }
+        let photo = try #require(model.photos.first?.id)
+        #expect(model.shownMarks(for: photo).rating == three)
+        try FileManager.default.removeItem(at: sidecar)
+        try FileManager.default.createDirectory(at: sidecar, withIntermediateDirectories: false)
+        model.apply(.label(ColourLabel(colour: .red)), to: photo)
+        await model.drainActions()
+        #expect(model.shownMarks(for: photo) == PhotoMarks(rating: three))
+        #expect(model.isSaveFailureToastVisible)
+        #expect(model.saveFailureToastBurst == 1)
+        try FileManager.default.removeItem(at: sidecar)
+        try await library.rereadMarks(for: [photo])
+        try await waitUntil { model.shownMarks(for: photo) == PhotoMarks() }
+        model.dismissSaveFailureToast()
+        try FileManager.default.createDirectory(at: sidecar, withIntermediateDirectories: false)
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("other.ARW"))
+        try XMPCodec().write(.rating(three), into: nil).write(
+            to: photos.appendingPathComponent("other.xmp"))
+        await model.reopenOpenFolder()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 2 }
+        let other = try #require(model.photos.first { $0.id.stem == "other" }?.id)
+        #expect(model.shownMarks(for: other).rating == three)
+        #expect(model.isSaveFailureToastVisible)
+        #expect(model.saveFailureToastBurst == 2)
+        await library.closeFolder()
+    }
+
     private func waitUntil(_ condition: () -> Bool) async throws {
         for _ in 0..<1000 {
             if condition() { return }

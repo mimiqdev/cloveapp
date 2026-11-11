@@ -50,8 +50,11 @@ public struct PhotoActionPipeline: Sendable {
     }
 
     /// Disconnection drops queued actions. The consumer finishes its active entry.
-    public mutating func removePending() {
+    @discardableResult
+    public mutating func removePending() -> [Entry] {
+        let dropped = pending
         pending.removeAll()
+        return dropped
     }
 
     public mutating func finish(_ id: UInt64) {
