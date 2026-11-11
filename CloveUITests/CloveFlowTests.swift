@@ -5,10 +5,10 @@ import XCTest
 /// `mise run ui-flows` runs them; the smoke test is `CloveSmokeTests`.
 final class CloveFlowTests: XCTestCase {
     @MainActor
-    func testGridSavedGlyphAndDetailControls() {
+    func testGridAndDetailControls() {
         let app = launchSample()
         openLibrary(app)
-        XCTAssertEqual(element(app, "clove.grid.saveState").label, "Saved")
+        XCTAssertFalse(element(app, "clove.grid.saveState").exists)
         let companion = element(app, "clove.grid.photo.mmq02680")
         XCTAssertTrue(companion.waitForExistence(timeout: 5))
         XCTAssertTrue(companion.label.contains("JPEG companion"))
@@ -20,30 +20,7 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testFailureToastRetriesOnlyTheFailedBatchItems() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX": "0"])
-        openLibrary(app)
-        let failed = element(app, "clove.grid.photo.mmq02680")
-        XCTAssertTrue(failed.waitForExistence(timeout: 5))
-        failed.press(forDuration: 0.6)
-        element(app, "clove.grid.photo.mmq02682").tap()
-        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "2 selected")
-        element(app, "clove.grid.batch.stars.3").tap()
-        let status = element(app, "clove.grid.saveState")
-        XCTAssertTrue(waitForLabel("Save failed. Double-tap to retry.", status))
-        XCTAssertTrue(element(app, "clove.grid.photo.mmq02682").label.contains("3 stars"))
-        XCTAssertTrue(failed.label.contains("3 stars"))
-        let retry = element(app, "clove.save.toast.action")
-        XCTAssertTrue(retry.waitForExistence(timeout: 3))
-        retry.tap()
-        XCTAssertTrue(waitForLabel("Saved", status))
-        XCTAssertTrue(failed.label.contains("3 stars"))
-        element(app, "clove.grid.batch.done").tap()
-        XCTAssertFalse(element(app, "clove.grid.batch").exists)
-    }
-
-    @MainActor
-    func testFailedSingleMarkStaysVisibleAndGlyphRetriesIt() {
+    func testSaveFailureShowsToastAndTheFilesMarks() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEMS": "2680"])
         openLibrary(app)
         element(app, "clove.grid.photo.mmq02680").tap()
@@ -51,14 +28,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(label.waitForExistence(timeout: 5))
         label.tap()
         element(app, "clove.detail.labels.red").tap()
-        let status = element(app, "clove.detail.saveState")
-        XCTAssertTrue(waitForLabel("Save failed. Double-tap to retry.", status))
-        XCTAssertEqual(label.label, "Label, Red")
-        XCTAssertTrue(element(app, "clove.save.toast").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Some marks weren't saved."].exists)
-        status.tap()
-        XCTAssertTrue(waitForLabel("Saved", status))
-        XCTAssertEqual(label.label, "Label, Red")
+        XCTAssertTrue(app.staticTexts["Couldn't save the mark."].waitForExistence(timeout: 3))
+        XCTAssertTrue(waitForLabel("Label", label))
+        XCTAssertFalse(element(app, "clove.detail.saveState").exists)
+        XCTAssertFalse(element(app, "clove.save.toast.action").exists)
     }
 
     @MainActor
@@ -79,29 +52,6 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(label.isEnabled)
         element(app, "clove.nav.back").tap()
         XCTAssertFalse(element(app, "clove.grid.photo.mmq02680").label.contains("Red"))
-    }
-
-    @MainActor
-    func testFailureToastHidesWhileTheFailedMarkRemains() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEMS": "2680"])
-        openLibrary(app)
-        element(app, "clove.grid.photo.mmq02680").tap()
-        let label = element(app, "clove.detail.capsule.label")
-        XCTAssertTrue(label.waitForExistence(timeout: 5))
-        label.tap()
-        element(app, "clove.detail.labels.red").tap()
-        let toast = element(app, "clove.save.toast")
-        XCTAssertTrue(toast.waitForExistence(timeout: 3))
-        XCTAssertEqual(
-            XCTWaiter.wait(
-                for: [
-                    XCTNSPredicateExpectation(
-                        predicate: NSPredicate(format: "exists == false"), object: toast)
-                ], timeout: 8),
-            .completed)
-        XCTAssertEqual(label.label, "Label, Red")
-        XCTAssertEqual(
-            element(app, "clove.detail.saveState").label, "Save failed. Double-tap to retry.")
     }
 
     @MainActor
@@ -139,7 +89,7 @@ final class CloveFlowTests: XCTestCase {
         print(
             "Tap to shown mark, test library with a 5000 ms pending write (informational, includes XCTest input and observation): \(elapsed)"
         )
-        XCTAssertTrue(waitForLabel("Saving", element(app, "clove.detail.saveState")))
+        XCTAssertFalse(element(app, "clove.detail.saveState").exists)
         XCTAssertEqual(label.label, "Label, Red")
     }
 
@@ -248,11 +198,7 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testSavingAndDisconnectedGlyphs() {
-        let saving = launchSample(["CLOVE_TEST_LIBRARY_SAVE_STATE": "saving"])
-        openLibrary(saving)
-        XCTAssertTrue(waitForLabel("Saving", element(saving, "clove.grid.saveState")))
-        saving.terminate()
+    func testDisconnectedFolderBanner() {
         let disconnected = launchSample(["CLOVE_TEST_LIBRARY_LOCATION_LOSS": "drive"])
         openLibrary(disconnected)
         XCTAssertEqual(element(disconnected, "clove.grid.saveState").label, "Not connected")
@@ -296,7 +242,7 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testMoveRejectsStillConfirmsAndRetries() {
+    func testMoveRejectsConfirmsAndReportsFilesLeftInPlace() {
         let app = launchSample([
             "CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX": "5",
             "CLOVE_TEST_LIBRARY_KEEP_TOAST": "1",
@@ -309,11 +255,11 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.moves.keep.mmq02679").tap()
         element(app, "clove.moves.confirm").tap()
         XCTAssertTrue(element(app, "clove.moves.toast.action").waitForExistence(timeout: 5))
-        XCTAssertEqual(element(app, "clove.moves.toast.action").label, "Details")
-        element(app, "clove.moves.toast.action").tap()
+        XCTAssertEqual(element(app, "clove.moves.toast.action").label, "Undo")
+        element(app, "clove.moves.toast.details").tap()
         XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").waitForExistence(timeout: 5))
-        element(app, "clove.moves.details.retry").tap()
-        XCTAssertTrue(app.staticTexts["Moved 1 to _Rejected"].waitForExistence(timeout: 5))
+        element(app, "clove.moves.details.done").tap()
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02685").label.contains("Rejected"))
     }
 
     @MainActor
@@ -483,18 +429,6 @@ final class CloveFlowTests: XCTestCase {
             app.swipeUp()
             XCTAssertTrue(element(app, "clove.grid.photo.mmq02700").waitForExistence(timeout: 5))
             capture("grid-no-preview-\(theme)")
-            app.terminate()
-        }
-        for state in ["saving", "failed"] {
-            let app = launchSample(["CLOVE_TEST_LIBRARY_SAVE_STATE": state])
-            openLibrary(app)
-            XCTAssertTrue(
-                waitForLabel(
-                    state == "saving" ? "Saving" : "Save failed. Double-tap to retry.",
-                    element(app, "clove.grid.saveState")))
-            capture("grid-\(state)")
-            element(app, "clove.grid.photo.mmq02680").tap()
-            capture("detail-\(state)")
             app.terminate()
         }
         for stage in ["reading", "grouping"] {

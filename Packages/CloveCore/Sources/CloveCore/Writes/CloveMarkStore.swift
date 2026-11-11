@@ -11,16 +11,12 @@ public enum CloveMarkStoreError: Error, Hashable, Sendable, CustomStringConverti
     /// The stored file is not a valid Clove mark file, or names a different folder.
     /// The store refuses to overwrite it and reports the path and reason.
     case corruptStorage(URL, reason: String)
-    /// The stored file did not read back as the values just written (PRD P0-08).
-    case readBackMismatch(URL)
 
     /// A developer-facing explanation; product copy belongs to the save-state UI.
     public var description: String {
         switch self {
         case .corruptStorage(let url, let reason):
             return "Clove's stored marks at \(url.lastPathComponent) are unreadable: \(reason)"
-        case .readBackMismatch(let url):
-            return "Clove's stored marks at \(url.lastPathComponent) did not read back as written."
         }
     }
 }
@@ -28,11 +24,9 @@ public enum CloveMarkStoreError: Error, Hashable, Sendable, CustomStringConverti
 /// Clove's own mark storage: one atomic JSON file per folder identity.
 ///
 /// G1 decision 6 keeps new standalone JPEG/HIF marks in Clove rather than in XMP or in the
-/// image, Reject included as the rating −1. PRD P0-08 shows them as "Saved in Clove only"
-/// only after the stored copy is confirmed, and PRD How marks reach disk, rule 1, reads that
-/// storage when a folder opens. Each folder identity gets one file at `marks-v1-<hash>.json`
-/// below the injected directory, written through the same staged replacement and read-back the
-/// sidecar write uses; the production directory is app-private Application Support.
+/// image, Reject included as the rating −1. Each folder identity gets one file at
+/// `marks-v1-<hash>.json` below the injected directory, written through a staged replacement.
+/// The production directory is app-private Application Support.
 ///
 /// The store is an actor because the write queue and the open path can read and write the
 /// same folder's file, and its actor isolation is the only lock it needs.
@@ -95,13 +89,7 @@ public actor CloveMarkStore {
         try load(folderID: identity.folderID).photo(for: identity)?.marks
     }
 
-    /// Confirms a partial change into Clove storage and reads the file back.
-    ///
-    /// G1 decision 6 sends standalone marks here, Reject included, and PRD P0-08 permits
-    /// "Saved in Clove only" only after this returns: the file is staged, synchronized,
-    /// renamed into place, then decoded again and compared. A failed or unconfirmed write
-    /// throws and leaves the previous file untouched; a damaged file throws instead of being
-    /// overwritten.
+    /// Writes a partial change through a staged replacement. A damaged store is never overwritten.
     public func apply(_ change: CloveMarkChange, to identity: PhotoIdentity) throws {
         guard !change.isEmpty else { return }
         var storage = try load(folderID: identity.folderID)
@@ -182,22 +170,14 @@ public actor CloveMarkStore {
         } catch {
             throw CloveMarkStoreError.corruptStorage(url, reason: "\(error)")
         }
-        try Task.checkCancellation()
         try fileSystem.createDirectory(directory)
         let staging = directory.appendingPathComponent(".clove-marks-\(UUID().uuidString)")
         var replaced = false
         defer { if !replaced { try? fileSystem.remove(staging) } }
         try fileSystem.writeStaging(data, to: staging)
         try fileSystem.synchronize(staging)
-        try Task.checkCancellation()
         try fileSystem.replace(url, withItemAt: staging)
         replaced = true
-        guard let readBack = try fileSystem.read(url),
-            let decoded = try? JSONDecoder().decode(CloveMarkStorageFile.self, from: readBack),
-            decoded == storage
-        else {
-            throw CloveMarkStoreError.readBackMismatch(url)
-        }
     }
 }
 

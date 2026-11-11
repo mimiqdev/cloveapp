@@ -43,7 +43,6 @@ struct GridCollectionView: UIViewRepresentable {
     /// The thumbnails and companion badges the cells draw (PRD Grid, P0-03).
     let thumbnails: any GridThumbnailSource
 
-    var failedPhotos: Set<PhotoIdentity> = []
     var isSelectingEmpty = false
     var placeholderCount = 0
 
@@ -95,7 +94,7 @@ struct GridCollectionView: UIViewRepresentable {
             items: items, groups: groups, shownPhotos: shownPhotos,
             currentPhoto: currentPhoto, selection: selection,
             sizeClass: context.environment.horizontalSizeClass,
-            theme: context.environment.cloveTheme, failedPhotos: failedPhotos,
+            theme: context.environment.cloveTheme,
             isSelectingEmpty: isSelectingEmpty)
         for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
             ofKind: UICollectionView.elementKindSectionFooter)
@@ -173,7 +172,6 @@ extension GridCollectionView {
         private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
         private var theme = CloveTheme.light
-        private var failedPhotos: Set<PhotoIdentity> = []
         private var isSelectingEmpty = false
         var placeholderCount = 0
 
@@ -202,7 +200,7 @@ extension GridCollectionView {
                 cell.configure(
                     with: item, isSelected: self.showsSelected(item),
                     isSelecting: self.isSelecting, thumbnails: self.thumbnails,
-                    theme: self.theme, hasFailed: self.hasFailedPhoto(in: item)
+                    theme: self.theme
                 ) { [weak self] group in
                     self?.openGroup(group)
                 }
@@ -251,15 +249,13 @@ extension GridCollectionView {
             items newItems: [GridCellItem], groups newGroups: [BrowsingGroup],
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
             selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?,
-            theme newTheme: CloveTheme, failedPhotos newFailures: Set<PhotoIdentity>,
+            theme newTheme: CloveTheme,
             isSelectingEmpty newSelectingEmpty: Bool
         ) {
             guard let collectionView, let dataSource else { return }
             let styleChanged =
-                theme != newTheme || failedPhotos != newFailures
-                || isSelectingEmpty != newSelectingEmpty
+                theme != newTheme || isSelectingEmpty != newSelectingEmpty
             theme = newTheme
-            failedPhotos = newFailures
             isSelectingEmpty = newSelectingEmpty
             if sizeClass != lastSizeClass {
                 lastSizeClass = sizeClass
@@ -411,17 +407,6 @@ extension GridCollectionView {
         private func finishPrefetch(_ id: GridCellItem.ID, token: UUID) {
             guard prefetchRequests[id]?.token == token else { return }
             prefetchRequests[id] = nil
-        }
-
-        private func hasFailedPhoto(in item: GridCellItem) -> Bool {
-            if let cover = item.group, cover.isCover,
-                let group = groups.first(where: { $0.id == cover.id })
-            {
-                return group.members.contains {
-                    shownPhotos.contains($0) && failedPhotos.contains($0)
-                }
-            }
-            return failedPhotos.contains(item.photo.id)
         }
 
         private func item(at indexPath: IndexPath) -> GridCellItem? {

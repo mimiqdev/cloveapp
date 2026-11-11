@@ -109,24 +109,9 @@ public struct RejectMoveFailure: Error, Hashable, Sendable, CustomStringConverti
 /// items, so a skip names the condition the user has to resolve and leaves every file where it
 /// was.
 public enum RejectMoveSkipReason: String, CaseIterable, Hashable, Sendable {
-    /// A mark change for the set is still pending or writing, so a later retry of that change
-    /// would address the old path (G1 decision 5, PRD P0-08).
-    case unfinishedMarkChange
-    /// A mark change for the set failed and is waiting for its own retry; moving now would
-    /// leave the failed write pointing at the old path (PRD P0-08, P0-10).
-    case failedMarkChange
     /// The set already sits inside the rejects folder, so moving it again would nest the
     /// rejects folder inside itself (PRD P0-10).
     case insideRejectsFolder
-    /// The caller cancelled the move before this set started; cancellation only takes effect
-    /// between sets, never inside one (PRD P0-10).
-    case cancelled
-    /// A retry skipped the set because its photo is no longer rejected (PRD P0-10).
-    ///
-    /// C6's retry replans its stored failures and only checks write state, so the caller removes
-    /// sets whose Reject was cleared after the earlier run. Reporting the removal as a skip keeps
-    /// it out of "couldn't be moved" and never moves a photo the person un-rejected.
-    case noLongerRejected
 }
 
 extension Array where Element == MarkWriteErrorEntry {

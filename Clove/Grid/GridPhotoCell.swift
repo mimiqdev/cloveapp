@@ -12,7 +12,6 @@ final class GridPhotoCell: UICollectionViewCell {
     private var retriesUnavailable = false
     private var showsSelection = false
     private var theme = CloveTheme.light
-    private var hasFailed = false
     private var isSelecting = false
     private var onOpenGroup: (GroupID) -> Void = { _ in }
 
@@ -27,7 +26,7 @@ final class GridPhotoCell: UICollectionViewCell {
 
     func configure(
         with item: GridCellItem, isSelected: Bool, isSelecting: Bool,
-        thumbnails: any GridThumbnailSource, theme: CloveTheme, hasFailed: Bool,
+        thumbnails: any GridThumbnailSource, theme: CloveTheme,
         onOpenGroup: @escaping (GroupID) -> Void
     ) {
         let changesPhoto = currentItem?.photo.id != item.photo.id
@@ -35,7 +34,6 @@ final class GridPhotoCell: UICollectionViewCell {
         currentCompanions = thumbnails.companions(for: item.photo.id)
         showsSelection = isSelected
         self.theme = theme
-        self.hasFailed = hasFailed
         self.isSelecting = isSelecting
         self.onOpenGroup = onOpenGroup
         if changesPhoto {
@@ -76,7 +74,7 @@ final class GridPhotoCell: UICollectionViewCell {
         guard let item = currentItem else { return }
         let tile = GridTile(
             item: item, thumbnail: thumbnail, companions: currentCompanions,
-            isUnavailable: isUnavailable, isSelected: showsSelection, hasFailed: hasFailed,
+            isUnavailable: isUnavailable, isSelected: showsSelection,
             isSelecting: isSelecting, openGroup: onOpenGroup)
         let theme = theme
         contentConfiguration = UIHostingConfiguration {
@@ -130,7 +128,6 @@ private struct GridTile: View {
     let companions: GridCompanions
     let isUnavailable: Bool
     let isSelected: Bool
-    let hasFailed: Bool
     let isSelecting: Bool
     let openGroup: (GroupID) -> Void
     @Environment(\.cloveTheme) private var theme
@@ -149,7 +146,6 @@ private struct GridTile: View {
             .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
             .overlay(alignment: .bottomLeading) { rating }
             .overlay(alignment: .bottomTrailing) { label }
-            .overlay(alignment: .topLeading) { cornerMarkers }
             .overlay(alignment: .bottomTrailing) { bottomMarkers }
             .overlay(alignment: .topTrailing) {
                 if let group = item.group, isCover {
@@ -223,15 +219,6 @@ private struct GridTile: View {
         }
     }
 
-    private var cornerMarkers: some View {
-        HStack(spacing: 3) {
-            if hasFailed {
-                Circle().fill(Color.clove.status.failed).frame(width: 7, height: 7)
-            }
-        }
-        .padding(4)
-    }
-
     private var bottomMarkers: some View {
         HStack(spacing: 3) {
             if isSelected {
@@ -247,7 +234,6 @@ private struct GridTile: View {
     private var accessibilityLabel: String {
         if isCover {
             return "Similar group of \(item.group?.count ?? 0) photos"
-                + (hasFailed ? ", Save failed" : "")
         }
         var parts = [item.photo.fileName]
         if let stars = item.photo.marks.rating.starCount {
@@ -263,7 +249,6 @@ private struct GridTile: View {
         if companions.hasHEIF { parts.append("HIF companion") }
         if isUnavailable { parts.append("No preview") }
         if isSelected { parts.append("Selected") }
-        if hasFailed { parts.append("Save failed") }
         return parts.joined(separator: ", ")
     }
 }

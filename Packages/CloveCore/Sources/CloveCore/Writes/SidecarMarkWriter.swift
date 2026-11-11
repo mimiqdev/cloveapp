@@ -1,15 +1,10 @@
 import Foundation
 
-/// The confirmed result of one sidecar write.
-///
-/// G1's Safe writes row makes the destination read-after-write the only proof: the change is
-/// saved when this value carries no failure, and ``attemptCount`` records whether the
-/// destination changed once before the replacement. PRD P0-08 forbids reporting a change as
-/// saved on anything less.
+/// The result of one staged sidecar replacement.
 public struct SidecarWriteResult: Hashable, Sendable {
     /// The sidecar the change targeted, with the spelling discovery resolved (G1 naming).
     public let destination: URL
-    /// Why the write is not confirmed, or `nil` when the read-back matched the request.
+    /// Why the replacement failed, or nil on success.
     public let failure: MarkWriteFailure?
     /// How many read-modify-write attempts ran: one normally, two after one external change.
     public let attemptCount: Int
@@ -21,7 +16,7 @@ public struct SidecarWriteResult: Hashable, Sendable {
         self.attemptCount = attemptCount
     }
 
-    /// Whether the destination read back as the requested marks (PRD P0-08's "Saved").
+    /// Whether the staged replacement succeeded.
     public var isSaved: Bool { failure == nil }
 }
 
@@ -30,9 +25,8 @@ public struct SidecarWriteResult: Hashable, Sendable {
 /// G1's Safe writes row fixes the sequence for one write: read the current packet (or nothing
 /// when no sidecar exists), apply the edit through C3's codec, write a hidden staging file in
 /// the same folder, synchronize it, POSIX `rename` it over the destination keeping the
-/// destination's spelling, then read the destination back and decode it. Only a read-back
-/// that equals the requested marks is saved (PRD P0-08). The staging file is removed on every
-/// failure path, and the previous packet stays in place until the `rename`. The old
+/// destination's spelling. The staging file is removed on every failure path, and the
+/// previous packet stays in place until the `rename`. The old
 /// sidecar's POSIX permissions are applied to the staging file before it replaces the
 /// destination, so a permission failure cannot report a change as failed after installing it.
 ///
@@ -66,8 +60,7 @@ public actor SidecarMarkWriter {
     /// - Parameters:
     ///   - edit: The rating and/or label change; fields left `.keep` keep their bytes.
     ///   - destination: The sidecar URL with its actual spelling (G1 Sidecar naming).
-    /// - Returns: The confirmed outcome; ``SidecarWriteResult/isSaved`` is true only when the
-    ///   destination read back as the requested marks (PRD P0-08).
+    /// - Returns: Whether the replacement succeeded.
     public func write(_ edit: XMPEdit, to destination: URL) -> SidecarWriteResult {
         var attempt = 1
         while true {
@@ -96,7 +89,7 @@ public actor SidecarMarkWriter {
 
     /// The result of one read-modify-write attempt.
     private enum AttemptResult {
-        /// The destination read back as the requested marks.
+        /// The replacement succeeded.
         case saved
         /// The destination changed after Clove read it; start again from a fresh read once.
         case changed
@@ -104,14 +97,13 @@ public actor SidecarMarkWriter {
         case failed(MarkWriteFailure)
     }
 
-    /// Runs one staged replacement and the read-back G1's Safe writes row requires.
+    /// Reads for merging, then stages and replaces the packet.
     private func attemptOnce(_ edit: XMPEdit, to destination: URL) -> AttemptResult {
         let staging = Self.stagingURL(for: destination)
         var replaced = false
         // Every exit path before the replacement leaves no staging file behind (G1 Safe writes).
         defer { if !replaced { try? fileSystem.remove(staging) } }
         do {
-            try Task.checkCancellation()
             let before = try fileSystem.attributes(of: destination)
             let packet: Data?
             do {
@@ -130,7 +122,6 @@ public actor SidecarMarkWriter {
                 throw MarkWriteFailure(classifying: error)
             }
 
-            try Task.checkCancellation()
             try fileSystem.writeStaging(edited, to: staging)
 
             // `rename` installs the staging file's inode, so the old sidecar's permissions
@@ -147,59 +138,15 @@ public actor SidecarMarkWriter {
             let now = try fileSystem.attributes(of: destination)
             if before?.stamp != now?.stamp { return .changed }
 
-            try Task.checkCancellation()
             try fileSystem.replace(destination, withItemAt: staging)
             replaced = true
 
-            let readBack: Data?
-            do {
-                readBack = try fileSystem.read(destination)
-            } catch {
-                throw MarkWriteFailure(classifying: error)
-            }
-            guard let readBack else {
-                throw MarkWriteFailure(
-                    reason: .notConfirmed,
-                    message: "The sidecar disappeared after Clove replaced it.")
-            }
-            let marks: XMPMarks
-            do {
-                marks = try codec.read(readBack)
-            } catch let error as XMPCodecError {
-                throw MarkWriteFailure(
-                    reason: .notConfirmed,
-                    message: "The written sidecar did not read back as an XMP packet.",
-                    codecError: error)
-            } catch {
-                throw MarkWriteFailure(classifying: error)
-            }
-            guard Self.matches(edit, marks) else {
-                throw MarkWriteFailure(
-                    reason: .notConfirmed,
-                    message: "The sidecar did not read back as the requested marks.")
-            }
             return .saved
         } catch let failure as MarkWriteFailure {
             return .failed(failure)
         } catch {
             return .failed(MarkWriteFailure(classifying: error))
         }
-    }
-
-    /// Whether the marks read back from the destination equal the fields the edit set.
-    ///
-    /// PRD P0-08 asks for the requested change, not the whole packet: a rating-only edit is
-    /// confirmed by the rating, and an untouched label keeps whatever another app wrote.
-    static func matches(_ edit: XMPEdit, _ marks: XMPMarks) -> Bool {
-        if case .set(let rating) = edit.rating, marks.rating != .rated(rating) { return false }
-        if case .set(let label) = edit.label {
-            if label.isClear {
-                if !marks.label.isClear { return false }
-            } else if marks.label != label {
-                return false
-            }
-        }
-        return true
     }
 
     /// A hidden sibling name for the staging file.

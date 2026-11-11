@@ -135,11 +135,12 @@ extension CloveFlowTests {
     /// - the group view's finishing actions: `testGroupFinishingContinueAndMoveUndo`,
     ///   `undecidedCountsLabelOnlyRatedRejectedAndUnmarkedPhotos`,
     ///   `rejectingUnmarkedFinishesAGroupWithOnlyALabelledKeep`;
-    /// - a batch rating with a failed write and its retry:
-    ///   `testFailureToastRetriesOnlyTheFailedBatchItems`, `testSavingAndDisconnectedGlyphs`,
+    /// - a batch rating with a failed write: `testSaveFailureShowsToastAndTheFilesMarks`,
+    ///   `aBatchFailureShowsOneToastAndRestoresOnlyItsFailedPhoto`,
     ///   `aRatingSetsEveryPhotoAndReplacesRejectOnRejectedPhotos`;
     /// - the Rejected filter: `rejectedShowsRejectedPhotosOnly`;
-    /// - Move rejects with a keep, a failure and a retry: `testMoveRejectsStillConfirmsAndRetries`,
+    /// - Move rejects with a keep and a failure:
+    ///   `testMoveRejectsConfirmsAndReportsFilesLeftInPlace`,
     ///   `testGroupFinishingContinueAndMoveUndo`, `RejectMoveCopyTests`.
     @MainActor @objc
     func testBrowsingFlowFromEntryToSettings() {
@@ -325,7 +326,6 @@ extension CloveFlowTests {
 
         // A pinch still zooms, and while zoomed a one-finger drag pans instead of marking
         // (PRD Detail gestures: vertical marking swipes are disabled while zoomed).
-        let saveState = element(in: app, "clove.detail.saveState")
         let marks = element(in: app, "clove.detail.marks")
         let marksAtFit = marks.value as? String
         preview.pinch(withScale: 2, velocity: 1)
@@ -345,22 +345,10 @@ extension CloveFlowTests {
         XCTAssertEqual(
             marks.value as? String, marksAtFit, "The zoomed drag rated the photo instead of panning"
         )
-        waitForSavedGlyph(saveState)
-    }
-
-    @MainActor
-    private func waitForSavedGlyph(_ glyph: XCUIElement) {
-        let saved = expectation(
-            for: NSPredicate(format: "exists == true AND label == %@", "Saved"),
-            evaluatedWith: glyph)
-        wait(for: [saved], timeout: 10)
     }
 
     @MainActor
     private func markThePhoto(in app: XCUIApplication) {
-        let saveState = element(in: app, "clove.detail.saveState")
-        waitForSavedGlyph(saveState)
-
         let fourStars = element(in: app, "clove.detail.rate.4")
         XCTAssertTrue(
             fourStars.waitForExistence(timeout: 10), "The detail view had no rating buttons")
@@ -392,8 +380,6 @@ extension CloveFlowTests {
             for: NSPredicate(format: "value CONTAINS %@", "2 stars"), evaluatedWith: marks)
         wait(for: [twoStars], timeout: 10)
 
-        let saveState = element(in: app, "clove.detail.saveState")
-        waitForSavedGlyph(saveState)
     }
 
     @MainActor

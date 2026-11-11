@@ -4,10 +4,8 @@ public enum PhotoAction: Sendable {
     case batch([DesiredMarkEdit])
     case finishing(GroupFinishingPlan, [DesiredMarkEdit])
     case keep([DesiredMarkEdit])
-    case move(RejectMovePlan, kept: [DesiredMarkEdit], revisions: [PhotoIdentity: UInt64])
+    case move(RejectMovePlan, kept: [DesiredMarkEdit])
     case moveUndo(RejectMoveUndoEntry, [DesiredMarkEdit])
-    case retry([DesiredMarkEdit])
-    case retryMove(RejectMoveResult, kept: [DesiredMarkEdit])
 }
 
 /// FIFO admission and a single active entry. The consumer completes an entry only after
@@ -26,6 +24,18 @@ public struct PhotoActionPipeline: Sendable {
 
     public var isEmpty: Bool { active == nil && pending.isEmpty }
 
+    public func hasPendingMark(for photo: PhotoIdentity) -> Bool {
+        pending.contains { entry in
+            switch entry.action {
+            case .mark(let edit): edit.photo == photo
+            case .batch(let edits), .keep(let edits), .finishing(_, let edits),
+                .moveUndo(_, let edits):
+                edits.contains { $0.photo == photo }
+            case .move: false
+            }
+        }
+    }
+
     @discardableResult
     public mutating func submit(_ action: PhotoAction) -> UInt64 {
         nextID += 1
@@ -39,7 +49,7 @@ public struct PhotoActionPipeline: Sendable {
         return active
     }
 
-    /// Disconnection drops queued actions. The canceled consumer still finishes its active entry.
+    /// Disconnection drops queued actions. The consumer finishes its active entry.
     public mutating func removePending() {
         pending.removeAll()
     }

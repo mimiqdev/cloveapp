@@ -58,8 +58,6 @@ struct GridScreen: View {
                     items: cells, currentPhoto: browsing.state.currentPhoto,
                     groups: browsing.groups, shownPhotos: Set(browsing.photos.map(\.id)),
                     selection: browsing.state.selection, thumbnails: thumbnails,
-                    failedPhotos: Set(
-                        browsing.unsavedChanges.filter { $0.state.failure != nil }.map(\.photo)),
                     isSelectingEmpty: selectsEmpty,
                     placeholderCount: browsing.readingProgress.map {
                         $0.total == 0 ? 9 : max($0.total - $0.read, 0)
@@ -85,7 +83,7 @@ struct GridScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if isSelecting {
                 GridBatchBar(browsing: browsing, cells: cells)
-                    .disabled(browsing.isMovingRejects)
+                    .disabled(!browsing.canMark)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
             }
@@ -94,9 +92,7 @@ struct GridScreen: View {
             if browsing.isSaveFailureToastVisible {
                 Toast(
                     message: BrowsingModel.saveFailureToastMessage,
-                    actionTitle: BrowsingModel.saveFailureToastRetryTitle,
-                    identifier: "clove.save.toast",
-                    onAction: { browsing.retryAllUnfinishedChanges() }
+                    identifier: "clove.save.toast"
                 )
                 .padding(.horizontal)
                 .padding(.bottom, 12)
@@ -138,8 +134,7 @@ struct GridScreen: View {
             HStack(spacing: 0) {
                 Text(subtitle).lineLimit(1)
                 SaveStatusIndicator(
-                    browsing: browsing, identifierPrefix: "clove.grid.saveState",
-                    showsOnlyProblems: browsing.isFolderOpening && !isSelecting)
+                    browsing: browsing, identifierPrefix: "clove.grid.saveState")
             }
         } tools: {
             if isSelecting {

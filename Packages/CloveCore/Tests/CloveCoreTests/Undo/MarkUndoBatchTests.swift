@@ -101,8 +101,8 @@ struct MarkUndoBatchTests {
         #expect(await fixture.history.canRedo)
     }
 
-    /// A failed undo write is reported with counts, stays visible, and retries through C4.
-    @Test func aFailedUndoReportsCountsAndRetriesThroughC4() async throws {
+    /// A partial undo reports counts without retaining a failed action for another attempt.
+    @Test func aFailedUndoReportsCountsAndLeavesTheFilesMarks() async throws {
         let fixture = try UndoTestFixture(stems: ["A", "B", "C"])
         defer { fixture.remove() }
         let photos = fixture.photoSets.map(\.id)
@@ -119,55 +119,8 @@ struct MarkUndoBatchTests {
         #expect(failed.photo == photos[1])
         #expect(failed.status?.state.failure?.reason == .insufficientSpace)
         #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(undoRating(4)))
-        // A failed undo stays undoable so the user can try again (DEV-PLAN C5 decision).
-        #expect(await fixture.history.canUndo)
-        #expect(await fixture.history.canRedo == false)
-
-        // PRD P0-08's retry applies to exactly that change.
-        let failedStatus = try #require(failed.status)
-        fixture.double.stopFailing(.replace)
-        let retried = try #require(await fixture.queue.retry(failedStatus.id))
-        #expect(retried.state.isConfirmed)
-        #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(.unrated))
-    }
-
-    /// A failed undo that restored nothing keeps its entry for C4's retry (PRD P0-08).
-    @Test func aFailedUndoThatRestoredNothingKeepsItsEntry() async throws {
-        let fixture = try UndoTestFixture()
-        defer { fixture.remove() }
-        let set = try #require(fixture.photoSets.first)
-        await fixture.record(.rating(undoRating(3)), on: set.id)
-        // The undo's only write fails, so no field reaches the target.
-        fixture.double.fail(.replace, at: fixture.sidecar(), with: POSIXError(.ENOSPC))
-
-        let result = try #require(await undoStep(fixture))
-        #expect(result.droppedFromHistory == false)
-        #expect(result.failedCount == 1)
-        #expect(result.savedCount == 0)
-        #expect(result.outcomes[0].reachedTarget == false)
-        #expect(await fixture.history.canUndo)
-        #expect(await fixture.history.nextUndo != nil)
-        #expect(await fixture.history.redoCount == 0)
-        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
-    }
-
-    /// A failed redo that restored nothing keeps its entry too (PRD P0-08).
-    @Test func aFailedRedoThatRestoredNothingKeepsItsEntry() async throws {
-        let fixture = try UndoTestFixture()
-        defer { fixture.remove() }
-        let set = try #require(fixture.photoSets.first)
-        await fixture.record(.rating(undoRating(3)), on: set.id)
-        _ = try #require(await undoStep(fixture))
-        #expect(await fixture.history.canRedo)
-        fixture.double.fail(.replace, at: fixture.sidecar(), with: POSIXError(.ENOSPC))
-
-        let result = try #require(await undoRedoStep(fixture))
-        #expect(result.droppedFromHistory == false)
-        #expect(result.failedCount == 1)
-        #expect(result.outcomes[0].reachedTarget == false)
-        #expect(await fixture.history.canRedo)
         #expect(await fixture.history.canUndo == false)
-        #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.unrated))
+        #expect(await fixture.history.canRedo)
     }
 
     /// A redo whose photo is gone is dropped instead of blocking the older undone action.

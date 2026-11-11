@@ -187,59 +187,6 @@ struct RejectMoveUndoTests {
         #expect(try sidecarRating(at: keptSidecar) == .rated(.rejected))
     }
 
-    /// A retry stays part of the same step, and one undo restores the whole action.
-    @Test func undoCoversTheSetsARetryMoved() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let first = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM/100AAAAA", stem: "IMG_0001",
-            formats: [.raw])
-        let second = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM/100BBBBB", stem: "IMG_0002",
-            formats: [.raw, .jpeg], sidecarName: "IMG_0002.xmp")
-        let kept = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM/100CCCCC", stem: "IMG_0003",
-            formats: [.jpeg])
-        for set in [first, second, kept] {
-            try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.rating(.rejected), to: set)
-        }
-        await fixture.queue.apply(.rating(.unrated), to: kept)
-        let original = try originalContents(of: [first, second], in: fixture.folder)
-        let plan = try await fixture.plan([first, second])
-        let blocked = try #require(plan.readyEntries.last?.files.first?.destination)
-        // A destination occupied after re-planning still fails the exclusive rename.
-        fixture.fileSystem.beforeOperation = { record in
-            if record.step == .move, record.url == blocked, record.count == 1 {
-                try? Data("intruder".utf8).write(to: blocked)
-            }
-        }
-        let firstRun = try await fixture.move(plan)
-        #expect(firstRun.movedCount == 1)
-        #expect(firstRun.failedCount == 1)
-        await fixture.mover.recordKeptPhotos(
-            [RejectMoveKeptPhoto(set: kept, marksAfter: PhotoMarks())], for: firstRun.id)
-        try FileManager.default.removeItem(at: blocked)
-        let retried = try await fixture.mover.retryFailed(in: firstRun.id)
-        let retry = try #require(retried)
-        #expect(retry.movedCount == 1)
-        // One Move rejects action is one undo step, so the retry keeps the run's handle.
-        #expect(retry.id == firstRun.id)
-
-        let result = try await fixture.mover.undo(
-            undoStep(for: firstRun, returningTo: first.id), currentMarks: { _ in PhotoMarks() })
-
-        #expect(result.restoredIdentities == [first.id, second.id, kept.id])
-        #expect(result.keptCount == 1)
-        #expect(result.isComplete)
-        for (path, bytes) in original {
-            #expect(fixture.folder.contents(of: path) == bytes)
-        }
-        for set in [first, second, kept] {
-            #expect(try await storesReject(set, in: fixture))
-        }
-    }
-
     /// The run's handle stops working after one undo, whatever handle the caller holds.
     @Test func refusesASecondUndoOfTheSameRun() async throws {
         let fixture = try MoveFixture()

@@ -27,13 +27,6 @@ struct PhotoInformationSheet: View {
                             "Marks",
                             MarkSummary.text(for: photo.marks) + " · "
                                 + (information.usesSidecar ? "XMP sidecar" : "Clove only"))
-                        HStack {
-                            Text("Status")
-                            Spacer()
-                            SaveStatusIndicator(
-                                browsing: browsing, identifierPrefix: "clove.detail.info.saveState",
-                                photo: photo.id)
-                        }
                     }
                     .listRowBackground(theme.tokens.card.color)
                 }
