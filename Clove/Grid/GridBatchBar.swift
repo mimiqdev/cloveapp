@@ -2,7 +2,7 @@ import CloveCore
 import SwiftUI
 
 /// The same floating capsule as detail, applying one mark to the visible selection.
-/// Partial failures are reported by the header glyph and tile dots (owner decision, 2026-11-11).
+/// Write failures are reported once by the shared toast.
 struct GridBatchBar: View {
     let browsing: BrowsingModel
     let cells: [GridCellItem]
@@ -38,7 +38,7 @@ struct GridBatchBar: View {
             Button("Select all") { browsing.selectAllVisible(cells) }
                 .accessibilityIdentifier("clove.grid.batch.selectAll")
         }
-        .disabled(browsing.batchTargets.isEmpty || browsing.isMovingRejects)
+        .disabled(browsing.batchTargets.isEmpty || !browsing.canMark)
     }
 
     private var isRejected: Bool {

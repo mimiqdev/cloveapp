@@ -32,7 +32,6 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | grid.more.settings | Settings |
 | grid.select.title | {n} selected |
 | grid.select.done | Done |
-| grid.batch.result | Saved {ok} · {failed} failed · Retry (accessibility only; failure bursts announce save.toast.failed) |
 | tile.nopreview | No preview |
 | a11y.moveRejects | Move rejects |
 | a11y.filter | Filter |
@@ -43,7 +42,6 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 |---|---|
 | detail.subtitle | {i} / {n} · + JPG |
 | detail.subtitle.rejected | Rejected (accessibility label only) |
-| detail.subtitle.failed | Save failed. Double-tap to retry. (accessibility label only) |
 | detail.zoom | 100% |
 | info.section.capture | Capture |
 | info.section.file | File |
@@ -52,30 +50,22 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | a11y.label | Label, {color} |
 | a11y.info / a11y.undo | Info / Undo |
 
-## Save glyph accessibility (owner decision, 2026-11-11)
+## Folder access accessibility
 
-Save glyphs replace visible status words in grid and detail subtitles and in batch results.
-The counts and companion text remain visible. V4's error banners retain their words.
+Counts and companion text remain visible. Only access problems add a subtitle indicator.
 
 | Key | Accessibility label only |
 |---|---|
-| a11y.save.saved | Saved |
-| a11y.save.saving | Saving |
-| a11y.save.failed | Save failed. Double-tap to retry. |
 | a11y.save.disconnected | Not connected |
 | a11y.save.viewOnly | View only |
-| a11y.save.cloveOnly | Saved in Clove only |
-
-The Saved in Clove only label retains G1 decision 6's distinction between confirmed app storage and an XMP write.
 
 ## Save-failure toast (owner decision, 2026-11-11)
 
 | Key | String |
 |---|---|
-| save.toast.failed | Some marks weren't saved. |
-| save.toast.retry | Retry |
+| save.toast.failed | Couldn't save the mark. |
 
-Show one toast per failure burst, above the bottom edge in the Move rejects toast position. Hide it after about six seconds. Retry resends all failed photos through one ordered action. Announce `save.toast.failed` with VoiceOver, including for partial batch failures. Drive loss and lost access use the error banner instead. The marks, Failed glyph, and corner dots remain after the toast hides.
+Show one toast per failure burst, above the bottom edge in the Move rejects toast position. Hide it after about six seconds. Announce `save.toast.failed` with VoiceOver, including for partial batch failures. Re-read failed photos and display their file's marks. Drive loss uses the error banner instead.
 
 ## Group review
 | Key | String |
@@ -86,7 +76,7 @@ Show one toast per failure burst, above the bottom edge in the Move rejects toas
 | group.continue | Continue → |
 | group.more.undecided | Undecided only |
 
-Follow the group subtitle with the save glyph described above. Keep the count visible; do not add visible status words.
+Keep the group count visible without a save indicator.
 
 ## Move Rejects
 | Key | String |
@@ -101,7 +91,7 @@ Follow the group subtitle with the save glyph described above. Keep the count vi
 | move.toast.details | Details |
 | move.details.title | {n} photos couldn't be moved |
 | move.details.subtitle | They stay rejected in place. Nothing was deleted. |
-| move.details.done / retry | Done / Try again |
+| move.details.done | Done |
 
 ## Settings
 | Key | String |
@@ -128,6 +118,3 @@ Follow the group subtitle with the save glyph described above. Keep the count vi
 | error.access.subtitle | View only (accessibility label only) |
 | error.access.banner | Access to this folder is no longer available. |
 | error.access.action | Open |
-| error.unsaved.title | Some marks haven't finished saving. |
-| error.unsaved.leave | Leave anyway |
-| error.unsaved.wait | Wait |

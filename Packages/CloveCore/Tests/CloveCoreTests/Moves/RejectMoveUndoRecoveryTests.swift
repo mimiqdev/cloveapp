@@ -165,10 +165,6 @@ struct RejectMoveUndoRecoveryTests {
         let split = try #require(result.split.first)
         #expect(!split.rollbackFailures.isEmpty)
         #expect(split.files.map(\.location) == [.source, .destination, .destination])
-        // The split set's files are in two places, so a retry is never offered for it.
-        #expect(
-            try await fixture.mover.retryFailedUndo(
-                in: result.id, currentMarks: { _ in PhotoMarks() }) == nil)
     }
 
     /// A file the rollback returned is under the rejects folder even when its old path is reused.
@@ -274,8 +270,8 @@ struct RejectMoveUndoRecoveryTests {
         #expect(fixture.folder.exists("DCIM/IMG_0001.JPG"))
     }
 
-    /// A retry sends the failed photos only, and the attempt's handle is spent afterwards.
-    @Test func retriesOnlyThePhotosThatFailedToComeBack() async throws {
+    /// A partial undo reports the photos that returned and the ones left on disk.
+    @Test func reportsThePhotosThatFailedToComeBack() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
         let sets = [
@@ -303,27 +299,10 @@ struct RejectMoveUndoRecoveryTests {
         #expect(result.restoredIdentities == [sets[0].id])
         #expect(fixture.folder.exists("_Rejected/DCIM/100BBBBB/IMG_0002.ARW"))
 
-        fixture.fileSystem.stopFailing(.move)
-        let retried = try await fixture.mover.retryFailedUndo(
-            in: result.id, currentMarks: { _ in PhotoMarks() })
-        let retry = try #require(retried)
-
-        #expect(retry.outcomes.map(\.identity) == [sets[1].id])
-        #expect(retry.restoredCount == 1)
-        #expect(retry.failedCount == 0)
-        for set in sets {
-            #expect(try await undoTestStoresReject(set, in: fixture))
-            for url in set.photoSet.fileURLs {
-                #expect(fixture.folder.exists(relativePath(of: url, in: fixture.folder)))
-            }
-        }
-        #expect(
-            try await fixture.mover.retryFailedUndo(
-                in: result.id, currentMarks: { _ in PhotoMarks() }) == nil)
     }
 
-    /// A retry sends the failed photos of a mixed attempt: no restored, conflicted or split one.
-    @Test func retriesOnlyTheFailedPhotosOfAMixedAttempt() async throws {
+    /// A mixed undo reports the files in every location.
+    @Test func reportsEveryOutcomeOfAMixedAttempt() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
         let restored = try makeMoveSet(
@@ -367,59 +346,12 @@ struct RejectMoveUndoRecoveryTests {
         #expect(result.failed.map(\.identity) == [failed.id])
         #expect(result.split.map(\.identity) == [split.id])
 
-        fixture.fileSystem.stopFailing(.move)
-        let retried = try await fixture.mover.retryFailedUndo(
-            in: result.id, currentMarks: { _ in PhotoMarks() })
-        let retry = try #require(retried)
-
-        #expect(retry.outcomes.map(\.identity) == [failed.id])
-        #expect(retry.restoredCount == 1)
-        #expect(fixture.folder.exists("DCIM/100CCCCC/IMG_0003.ARW"))
         // The conflict's and the split's files stay exactly where the undo left them.
         #expect(
             fixture.folder.contents(of: relativePath(of: conflictedRaw.source, in: fixture.folder))
                 == Data("intruder".utf8))
         #expect(fixture.folder.exists(relativePath(of: splitRaw.source, in: fixture.folder)))
         #expect(fixture.folder.exists(relativePath(of: splitJpeg.destination, in: fixture.folder)))
-    }
-
-    /// A retry after the undo is refused, so nothing moves into the rejects folder again.
-    @Test func refusesARetryOfAMoveThatWasUndone() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let first = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM/100AAAAA", stem: "IMG_0001",
-            formats: [.raw])
-        let second = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM/100BBBBB", stem: "IMG_0002",
-            formats: [.raw, .jpeg], sidecarName: "IMG_0002.xmp")
-        for set in [first, second] {
-            try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.rating(.rejected), to: set)
-        }
-        let plan = try await fixture.plan([first, second])
-        let blocked = try #require(plan.readyEntries.last?.files.first?.destination)
-        try fixture.folder.write("intruder", to: relativePath(of: blocked, in: fixture.folder))
-        let firstRun = try await fixture.move(plan)
-        let entry = undoEntry(for: firstRun, returningTo: first.id)
-        _ = try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
-        #expect(fixture.folder.exists("DCIM/100AAAAA/IMG_0001.ARW"))
-
-        try FileManager.default.removeItem(at: blocked)
-        let moves = fixture.fileSystem.count(of: .move)
-
-        // PRD P0-10's Undo rule closes the step, so the failed set can no longer move.
-        await #expect(throws: RejectMoveRefusal.undone(firstRun.id)) {
-            try await fixture.mover.retryFailed(in: firstRun.id)
-        }
-        #expect(fixture.fileSystem.count(of: .move) == moves)
-        #expect(fixture.folder.exists("DCIM/100BBBBB/IMG_0002.ARW"))
-        #expect(!fixture.folder.exists("_Rejected/DCIM/100BBBBB/IMG_0002.ARW"))
-        // The set never moved, so its Reject was never removed and is still there.
-        #expect(try await undoTestStoresReject(second, in: fixture))
-        await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(entry.batch)) {
-            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
-        }
     }
 
     /// A file the user moved back before the undo is reported, never promised as still there.
@@ -458,9 +390,6 @@ struct RejectMoveUndoRecoveryTests {
             let original = bytes[relativePath(of: file.source, in: fixture.folder)]
             #expect(fixture.folder.contents(of: path) == original)
         }
-        #expect(
-            try await fixture.mover.retryFailedUndo(
-                in: result.id, currentMarks: { _ in PhotoMarks() }) == nil)
     }
 
     /// A file no longer where the last rename put it is unknown, never the file at its old path.

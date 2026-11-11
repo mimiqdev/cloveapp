@@ -140,7 +140,7 @@ struct RejectMoveCopyTests {
                 .skipped(
                     RejectMoveSkippedSet(
                         identity: identity("skipped", index),
-                        reason: .unfinishedMarkChange, message: "skipped")))
+                        reason: .insideRejectsFolder, message: "skipped")))
         }
         return RejectMoveResult(id: RejectMoveBatchID(), outcomes: outcomes)
     }
@@ -238,11 +238,9 @@ struct RejectMoveCopyTests {
         #expect(details.rows[0].fileName == "failed_0.CR3 + JPG")
         #expect(details.rows[0].reason == "The location is read-only.")
         #expect(details.rows[1].fileName == "split_0")
-        #expect(details.canRetry)
 
         let one = RejectMoveDetails(result: makeResult(failed: 1))
         #expect(one.title == "1 photo couldn't be moved")
-        #expect(!RejectMoveDetails(result: makeResult(moved: 2)).canRetry)
     }
 
     /// The read-only sentence PRD Failure and recovery proposes lives in one place.
@@ -250,24 +248,6 @@ struct RejectMoveCopyTests {
         #expect(
             RejectMoveCopy.viewOnlyLocation
                 == "You can view this location, but can't save marks here.")
-    }
-    /// The toast and details show a cleared reject as no longer rejected, not as a failure.
-    @Test func copyReportsNoLongerRejectedSeparately() {
-        let result = RejectMoveResult(
-            id: RejectMoveBatchID(),
-            outcomes: [
-                .skipped(
-                    RejectMoveSkippedSet(
-                        identity: makeResult(failed: 1).failed[0].identity,
-                        reason: .noLongerRejected, message: "Changed since"))
-            ])
-        let toast = RejectMoveToast(result: result, rejectsFolderName: .defaultFolderName)
-        #expect(toast.skippedMessage == nil)
-        #expect(toast.noLongerRejectedMessage == "1 photo is no longer rejected.")
-        #expect(!toast.showsDetails)
-        let details = RejectMoveDetails(result: result)
-        #expect(details.noLongerRejectedMessage == "1 photo is no longer rejected.")
-        #expect(details.rows.isEmpty)
     }
 
 }

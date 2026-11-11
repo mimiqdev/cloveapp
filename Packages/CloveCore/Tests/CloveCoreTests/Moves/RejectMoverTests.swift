@@ -278,94 +278,6 @@ struct RejectMoverTests {
         #expect(fixture.folder.files() == before)
     }
 
-    /// A set whose mark change failed is skipped, then moves after the change is retried.
-    @Test func skipsASetWhoseMarkChangeFailed() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let set = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
-            formats: [.raw], sidecarName: "IMG_0001.xmp")
-        try writeMoveSet(set, in: fixture.folder)
-        let plan = try await fixture.plan([set])
-        let before = fixture.folder.files()
-        let sidecarFolder = fixture.folder.file("DCIM")
-        fixture.markFileSystem.failWrites { url in
-            RejectMovePath.matches(url.deletingLastPathComponent(), sidecarFolder)
-                ? POSIXError(.EIO) : nil
-        }
-        let rating = try #require(Rating(rawValue: 3))
-        let change = await fixture.queue.apply(.rating(rating), to: set)
-        #expect(change.state.failure != nil)
-
-        let skipped = try await fixture.move(plan)
-
-        #expect(skipped.skippedCount == 1)
-        #expect(skipped.skipped.first?.reason == .failedMarkChange)
-        #expect(fixture.folder.files() == before)
-
-        fixture.markFileSystem.failWrites { _ in nil }
-        let retried = await fixture.queue.retry(change.id)
-        #expect(retried?.state == .savedInSidecar)
-        let moved = try await fixture.move(plan)
-        #expect(moved.movedCount == 1)
-        #expect(fixture.folder.fileCount() == before.count)
-    }
-
-    /// A mark change admitted after the drain keeps its set in place until it finishes.
-    @Test func skipsASetWhoseMarkChangeIsStillWriting() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let movable = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM/A", stem: "IMG_0001",
-            formats: [.raw], sidecarName: "IMG_0001.xmp")
-        let writing = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM/B", stem: "IMG_0002",
-            formats: [.raw], sidecarName: "IMG_0002.xmp")
-        for set in [movable, writing] { try writeMoveSet(set, in: fixture.folder) }
-        let plan = try await fixture.plan([movable, writing])
-        let before = fixture.folder.files()
-
-        // Hold the first set's rename until the second set's mark write is admitted, so the
-        // mover's per-set check sees a change that is still writing.
-        let moveGate = DispatchSemaphore(value: 0)
-        let movablePrimary = try #require(plan.readyEntries.first?.files.first?.destination)
-        fixture.fileSystem.beforeOperation = { record in
-            if record.step == .move, record.url == movablePrimary { moveGate.wait() }
-        }
-        let writeGate = DispatchSemaphore(value: 0)
-        let writingFolder = fixture.folder.file("DCIM/B")
-        fixture.markFileSystem.blockWrites { url in
-            RejectMovePath.matches(url.deletingLastPathComponent(), writingFolder)
-                ? writeGate : nil
-        }
-        let moveTask = Task { try await fixture.mover.move(plan) }
-        let started = await eventually {
-            fixture.fileSystem.allRecords.contains(where: { $0.step == .move })
-        }
-        let rating = try #require(Rating(rawValue: 2))
-        let changeTask = Task { await fixture.queue.apply(.rating(rating), to: writing) }
-        let admitted = await eventually { await fixture.queue.unfinishedChanges().isEmpty == false }
-        moveGate.signal()
-        guard started, admitted else {
-            writeGate.signal()
-            _ = await changeTask.value
-            _ = try? await moveTask.value
-            Issue.record("The move or the mark write never reached its waiting point")
-            return
-        }
-
-        let result = try await moveTask.value
-
-        writeGate.signal()
-        _ = await changeTask.value
-        #expect(result.movedCount == 1)
-        #expect(result.outcomes.map(\.identity) == [movable.id, writing.id])
-        #expect(result.skipped.first?.identity == writing.id)
-        #expect(result.skipped.first?.reason == .unfinishedMarkChange)
-        #expect(fixture.folder.exists("DCIM/B/IMG_0002.ARW"))
-        #expect(fixture.folder.fileCount() == before.count)
-    }
-
     /// A disabled setting refuses the plan and the run before any file is touched.
     @Test func refusesTheWholeRequestWhenTheSettingIsOff() async throws {
         let fixture = try MoveFixture(enabled: false)
@@ -481,8 +393,8 @@ struct RejectMoverTests {
             .map { $0.base64EncodedString() }.sorted()
     }
 
-    /// Cancellation stops the run between sets and leaves the rest untouched.
-    @Test func cancelsBetweenSetsOnly() async throws {
+    /// Caller cancellation does not interrupt an admitted move.
+    @Test func callerCancellationDoesNotInterruptAnAdmittedMove() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
         let sets = try (0..<3).map { index in
@@ -501,16 +413,9 @@ struct RejectMoverTests {
 
         let result = try await Task { try await fixture.mover.move(plan) }.value
 
-        #expect(result.movedCount == 1)
+        #expect(result.movedCount == 3)
         #expect(result.outcomes.map(\.identity) == sets.map(\.id))
-        #expect(result.skippedCount == 2)
-        #expect(result.skipped.allSatisfy { $0.reason == .cancelled })
-        #expect(result.isCancelled)
-        #expect(fixture.fileSystem.count(of: .move) == 1)
-        for set in sets.dropFirst() {
-            #expect(
-                fixture.folder.exists(
-                    relativePath(of: set.photoSet.primary.url, in: fixture.folder)))
-        }
+        #expect(result.skippedCount == 0)
+        #expect(fixture.fileSystem.count(of: .move) == 3)
     }
 }

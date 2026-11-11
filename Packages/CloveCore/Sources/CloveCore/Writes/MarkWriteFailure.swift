@@ -176,7 +176,6 @@ public struct MarkWriteFailure: Error, Hashable, Sendable, CustomStringConvertib
             // A store read-back that does not match is the same unconfirmed save as a
             // sidecar mismatch (PRD P0-08); damaged storage stays unknown.
             switch store {
-            case .readBackMismatch: self.reason = .notConfirmed
             case .corruptStorage: self.reason = .unknown
             }
             self.codecError = nil

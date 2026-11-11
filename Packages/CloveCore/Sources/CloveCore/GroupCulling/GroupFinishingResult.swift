@@ -52,10 +52,7 @@ public struct GroupFinishingResult: Hashable, Sendable {
     public var savedCount: Int { outcomes.filter { $0.status.state.isConfirmed }.count }
 
     /// Photos whose change still needs a retry (PRD P0-09).
-    public var failedCount: Int { outcomes.filter { $0.status.state.isUnfinished }.count }
-
-    /// Photos whose change a newer change replaced (PRD How marks reach disk, rule 8).
-    public var supersededCount: Int { outcomes.filter { $0.status.state.isSuperseded }.count }
+    public var failedCount: Int { outcomes.filter { $0.status.state.failure != nil }.count }
 
     /// The PRD's "Partial batch failure" wording, or `nil` when every change was confirmed.
     ///

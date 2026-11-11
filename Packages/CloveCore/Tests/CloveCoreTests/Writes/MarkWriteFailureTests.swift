@@ -88,14 +88,10 @@ import Testing
     let url = URL(fileURLWithPath: "/tmp/Clove-test-marks.json")
     let corrupt = MarkWriteFailure(
         classifying: CloveMarkStoreError.corruptStorage(url, reason: "not JSON"))
-    let unconfirmed = MarkWriteFailure(classifying: CloveMarkStoreError.readBackMismatch(url))
 
     #expect(corrupt.reason == .unknown)
     #expect(corrupt.storeError == .corruptStorage(url, reason: "not JSON"))
     #expect(corrupt.codecError == nil)
-    // PRD P0-08: a store write that did not read back is known and unconfirmed, not unknown.
-    #expect(unconfirmed.reason == .notConfirmed)
-    #expect(unconfirmed.storeError == .readBackMismatch(url))
 }
 
 @Test func anAmbiguousSidecarHasItsOwnReason() {
@@ -107,32 +103,10 @@ import Testing
 }
 
 @Test func statesNeverReportAnUnconfirmedChangeAsSaved() {
-    #expect(MarkChangeState.pending.isSaved == false)
-    #expect(MarkChangeState.writing.isSaved == false)
     #expect(
         MarkChangeState.failed(
             MarkWriteFailure(reason: .conflict, message: "changed twice")
         ).isSaved == false)
     #expect(MarkChangeState.savedInSidecar.isSaved)
     #expect(MarkChangeState.savedInCloveOnly.isSaved)
-    #expect(MarkChangeState.pending.isUnfinished)
-    #expect(MarkChangeState.writing.isUnfinished)
-    #expect(
-        MarkChangeState.failed(MarkWriteFailure(reason: .unknown, message: "x")).isUnfinished)
-    #expect(MarkChangeState.savedInSidecar.isUnfinished == false)
-}
-
-@Test func aChangeMergesNewerFieldsWithoutDroppingOlderOnes() throws {
-    let blue = ColourLabel(colour: .blue)
-    let older = MarkChange(rating: try #require(Rating(rawValue: 3)), label: blue)
-    let newer = MarkChange(label: ColourLabel(colour: .red))
-
-    let merged = older.merged(with: newer)
-
-    #expect(merged.rating == older.rating)
-    #expect(merged.label == ColourLabel(colour: .red))
-    #expect(merged.covers(newer))
-    // The newer change replaced the label, so the older request is superseded (rule 8).
-    #expect(merged.covers(older) == false)
-    #expect(older.merged(with: MarkChange(rating: .unrated)).covers(older) == false)
 }

@@ -141,9 +141,7 @@ public struct RejectMoveSplitSet: Hashable, Sendable {
 
 /// One photo set that was deliberately not attempted, with the condition to resolve first.
 ///
-/// PRD P0-10 skips a set whose mark change is unfinished or failed, because a later retry of
-/// that change would address the old path. A skip is reported apart from a failure so "Retry
-/// failed" never resends it (PRD Failure and recovery).
+/// A skipped set's files stay where they were.
 public struct RejectMoveSkippedSet: Hashable, Sendable {
     /// C1's stable identity of the set (G1 decision 5).
     public let identity: PhotoIdentity
@@ -252,23 +250,11 @@ public struct RejectMoveResult: Hashable, Sendable {
     /// Sets not attempted; PRD "Failure and recovery" retries failed items only.
     public var skippedCount: Int { skipped.count }
 
-    /// Skipped sets whose Reject was cleared after an earlier run, so a retry left them alone
-    /// (PRD P0-10).
-    public var noLongerRejectedCount: Int {
-        skipped.filter { $0.reason == .noLongerRejected }.count
-    }
-
-    /// Skipped sets for reasons other than a cleared Reject (PRD P0-10).
-    public var otherSkippedCount: Int { skippedCount - noLongerRejectedCount }
-
     /// PRD P0-10's "M photos couldn't be moved": failed and split sets, never skipped ones.
     public var unmovedCount: Int { failedCount + splitCount }
 
     /// The identities the grid drops after a confirmed run (PRD P0-10).
     public var movedIdentities: [PhotoIdentity] { moved.map(\.identity) }
-
-    /// Whether cancellation stopped the run before every set was attempted (PRD P0-10).
-    public var isCancelled: Bool { skipped.contains { $0.reason == .cancelled } }
 
     /// PRD P0-10's "Moved N photos. M photos couldn't be moved.", or `nil` when nothing failed.
     ///

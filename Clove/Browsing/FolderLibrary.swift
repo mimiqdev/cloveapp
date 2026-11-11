@@ -22,9 +22,6 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// P0-02). A scan that could not read everything finishes as `.partial`.
     case scanFinished(FolderScanSummary)
 
-    /// A change's save state moved (PRD P0-08).
-    case change(MarkChangeStatus)
-
     /// A new open started scanning, so the previous scan's finished state no longer applies
     /// (PRD P0-01, design handoff: Move Rejects hides while opening).
     case scanStarted
@@ -143,19 +140,9 @@ protocol FolderLibrary: AnyObject {
     ///
     /// The call waits for C4's admitted writes, moves every ready set as one unit and reports one
     /// outcome per requested set. Moved sets leave the library's photos and their Reject records
-    /// with them; failed and skipped sets stay where they are, so a retry addresses only the
-    /// failures. Progress arrives on ``rejectMoveProgress()`` while the call runs.
+    /// with them; failed and skipped sets stay where they are.
+    /// Progress arrives on ``rejectMoveProgress()`` while the call runs.
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult
-
-    /// Retries only the sets an earlier Move rejects run could not move (PRD P0-10).
-    ///
-    /// Moved sets stay moved and split or skipped sets are not resent. `excluding` names failed
-    /// photos whose Reject was cleared after the run, so C6's retry never moves a photo the
-    /// person un-rejected. Nil means the library can no longer retry that run, for example
-    /// because the folder it belonged to closed.
-    func retryFailedRejects(
-        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
-    ) async throws -> RejectMoveResult?
 
     /// The progress steps of the next or running Move rejects (PRD P0-10).
     ///
@@ -168,21 +155,13 @@ protocol FolderLibrary: AnyObject {
         restoring edits: [DesiredMarkEdit]
     ) async throws -> RejectMoveUndoResult
 
-    /// The latest change to one photo with its save state (PRD P0-08).
-    ///
-    /// It answers from the library's current records, synchronously, so a screen can render it.
-    /// C4's `MarkWriteQueue.latestChange(for:)` is actor-isolated, so the library keeps this
-    /// answer in step with the statuses the queue streams; U7 reads the same status for its
-    /// retry. Nil means nothing has been requested for the photo, not that everything is saved.
-    func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus?
+    /// Reads the marks from the files again after a failed write.
+    func rereadMarks(for photos: [PhotoIdentity]) async
 
-    /// Waits until every admitted write has finished, for the leaving question (PRD P0-08).
-    ///
-    /// PRD Failure and recovery's "Wait for writes" holds the folder while C4 drains; a failed
-    /// change is finished for this purpose and stays for an explicit retry.
+    /// Waits until every admitted write finishes before moving files or releasing folder access.
     func drainWrites() async
 
-    /// A disconnected folder drops queued writes and all unsaved status.
+    /// A disconnected folder drops queued writes.
     func discardPendingChanges() async
 
     /// Checks the open folder's location now, as a return to the foreground asks (PRD P0-02).
@@ -318,6 +297,8 @@ extension FolderLibrary {
     /// with no writes has nothing unfinished (PRD P0-02, P0-08).
     var openGeneration: Int { 0 }
 
+    func rereadMarks(for photos: [PhotoIdentity]) async {}
+
     func drainWrites() async {}
 
     func discardPendingChanges() async {}
@@ -351,10 +332,6 @@ extension FolderLibrary {
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
         throw RejectMoveRefusal.disabled
     }
-
-    func retryFailedRejects(
-        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
-    ) async throws -> RejectMoveResult? { nil }
 
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
         AsyncStream { $0.finish() }

@@ -91,28 +91,6 @@ private func marks(at url: URL) throws -> XMPMarks {
     #expect((attributes[.posixPermissions] as? NSNumber)?.uint16Value == 0o640)
 }
 
-@Test func aReadBackMismatchIsNeverSaved() async throws {
-    let folder = try WriteTestFolder()
-    defer { folder.remove() }
-    let sidecar = folder.file("MMQ05184.xmp")
-    try writeTestUnknownPacket.write(to: sidecar)
-    let original = try Data(contentsOf: sidecar)
-    let double = WriteFileSystemDouble()
-    // The first read is the packet Clove edits; the second is the read-back after the rename.
-    double.readResult = { record in
-        record.url == sidecar && record.count == 2 ? original : nil
-    }
-    let writer = SidecarMarkWriter(fileSystem: double)
-
-    let result = await writer.write(XMPEdit.rating(three), to: sidecar)
-
-    #expect(result.failure?.reason == .notConfirmed)
-    #expect(result.isSaved == false)
-    #expect(try folder.stagingNames().isEmpty)
-    // The packet really was replaced; the change is merely unconfirmed.
-    #expect(try marks(at: sidecar).rating == .rated(three))
-}
-
 @Test func anExternalChangeIsRetriedOnceAndKeepsTheOtherAppsBytes() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
@@ -201,44 +179,6 @@ private func marks(at url: URL) throws -> XMPMarks {
     #expect(results.filter { !$0.isSaved }.isEmpty)
     // Each read-modify-write saw the other's rename, so neither field was lost.
     #expect(try marks(at: sidecar) == XMPMarks(rating: .rated(three), label: green))
-}
-
-@Test func aReadBackThatIsNotAPacketIsNotConfirmed() async throws {
-    let folder = try WriteTestFolder()
-    defer { folder.remove() }
-    let sidecar = folder.file("MMQ05184.xmp")
-    let double = WriteFileSystemDouble()
-    // The read-back after the rename returns bytes the codec must refuse.
-    double.readResult = { record in
-        record.url == sidecar && record.count == 2 ? Data("<broken".utf8) : nil
-    }
-    let writer = SidecarMarkWriter(fileSystem: double)
-
-    let result = await writer.write(XMPEdit.rating(three), to: sidecar)
-
-    #expect(result.failure?.reason == .notConfirmed)
-    #expect(result.failure?.codecError != nil)
-    #expect(try folder.stagingNames().isEmpty)
-}
-
-@Test func aSidecarMissingAfterTheReplaceIsNotConfirmed() async throws {
-    let folder = try WriteTestFolder()
-    defer { folder.remove() }
-    let sidecar = folder.file("MMQ05184.xmp")
-    try writeTestUnknownPacket.write(to: sidecar)
-    let double = WriteFileSystemDouble()
-    // Another presenter removes the packet between the rename and the read-back.
-    double.beforeOperation = { record in
-        guard record.step == .read, record.url == sidecar, record.count == 2 else { return }
-        try? FileManager.default.removeItem(at: sidecar)
-    }
-    let writer = SidecarMarkWriter(fileSystem: double)
-
-    let result = await writer.write(XMPEdit.rating(three), to: sidecar)
-
-    #expect(result.failure?.reason == .notConfirmed)
-    #expect(!FileManager.default.fileExists(atPath: sidecar.path))
-    #expect(try folder.stagingNames().isEmpty)
 }
 
 @Test func aCodecRefusalKeepsTheErrorAndWritesNothing() async throws {

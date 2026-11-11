@@ -46,16 +46,6 @@ final class RejectMoveUndoRun {
         self.isUndone = false
     }
 
-    /// Adds a retry's moved sets to this run, so one step covers the whole action.
-    ///
-    /// PRD P0-10 retries only the failed items, and PRD P0-10's Undo rule makes one Move rejects
-    /// action one step however many retries it takes: every retry moves under the run's own
-    /// handle, and its sets join this record.
-    func adopt(_ retry: RejectMoveUndoRun) {
-        guard retry !== self, !retry.moved.isEmpty else { return }
-        moved.append(contentsOf: retry.moved)
-    }
-
     /// Records the photos the confirmation kept, once each (PRD Move rejects).
     func keep(_ photos: [RejectMoveKeptPhoto]) {
         var seen = Set(kept.map(\.set.id))
@@ -74,16 +64,6 @@ final class RejectMoveUndoRun {
         moved.removeAll()
         kept.removeAll()
     }
-}
-
-/// One undo attempt's failed photos, kept so a retry can send exactly those (PRD P0-10).
-struct RejectMoveUndoRetry: Sendable {
-    /// The run the attempt undid, so a refusal and its progress name the step (PRD P0-10).
-    let batch: RejectMoveBatchID
-    /// The opened folder, for the retry's read-only check (PRD "Failure and recovery").
-    let rootURL: URL
-    /// The photos a retry may address again, never a conflict or a split one (PRD P0-10).
-    let jobs: [RejectMoveUndoJob]
 }
 
 /// Restores one photo's files and Reject: the move in reverse.
@@ -421,10 +401,6 @@ extension RejectMover {
         guard !run.isUndone else {
             throw publishing(.alreadyUndone(entry.batch), for: entry.batch)
         }
-        await waitForRetries(of: entry.batch)
-        guard !run.isUndone else {
-            throw publishing(.alreadyUndone(entry.batch), for: entry.batch)
-        }
         do {
             try preflightUndo(run.rootURL)
         } catch {
@@ -435,7 +411,6 @@ extension RejectMover {
         // PRD P0-10's Undo applies once: the step closes before anything awaits, so a second undo
         // and a forward retry of this run are both refused from here on.
         run.close()
-        forgetFailedSets(of: entry.batch)
         return await performUndo(
             jobs, rootURL: run.rootURL, batch: entry.batch, currentMarks: currentMarks)
     }
@@ -448,33 +423,6 @@ extension RejectMover {
     /// the mover does not hold is ignored.
     public func recordKeptPhotos(_ photos: [RejectMoveKeptPhoto], for batch: RejectMoveBatchID) {
         undoableRuns[batch]?.keep(photos)
-    }
-
-    /// Retries the photos an earlier undo attempt could not restore (PRD P0-10).
-    ///
-    /// PRD "Failure and recovery" retries only the failed items, so restored photos are left
-    /// alone and a conflict or a split set is never resent: their files are in a place a blind
-    /// retry could overwrite or duplicate. The returned attempt has its own handle, and the
-    /// earlier one is dropped so it cannot be retried twice.
-    ///
-    /// - Parameter batch: The undo attempt whose failed photos should be retried.
-    /// - Returns: The retry's outcomes, or `nil` when the attempt is unknown or had no failures
-    ///   left to retry.
-    /// - Throws: ``RejectMoveUndoRefusal/readOnlyLocation(_:)`` when the location is read-only,
-    ///   which also ends the attempt on the progress stream.
-    public func retryFailedUndo(
-        in batch: RejectMoveUndoBatchID,
-        currentMarks: @Sendable (PhotoIdentity) async -> PhotoMarks?
-    ) async throws(RejectMoveUndoRefusal) -> RejectMoveUndoResult? {
-        guard let retry = undoRetries[batch] else { return nil }
-        do {
-            try preflightUndo(retry.rootURL)
-        } catch {
-            throw publishing(error, for: retry.batch)
-        }
-        undoRetries[batch] = nil
-        return await performUndo(
-            retry.jobs, rootURL: retry.rootURL, batch: retry.batch, currentMarks: currentMarks)
     }
 
     /// Every undo progress step, as a stream a UI can wrap into its own observation.
@@ -528,7 +476,6 @@ extension RejectMover {
         let runner = RejectMoveUndoRunner(fileSystem: fileSystem, markQueue: markQueue)
         var outcomes: [RejectMoveUndoOutcome] = []
         outcomes.reserveCapacity(jobs.count)
-        var failedJobs: [RejectMoveUndoJob] = []
         for job in jobs {
             publishUndo(.photoStarted(attempt: id, photo: job.identity))
             let outcome: RejectMoveUndoOutcome
@@ -550,13 +497,8 @@ extension RejectMover {
             }
             outcomes.append(outcome)
             publishUndo(.photoFinished(attempt: id, outcome: outcome))
-            if case .failed = outcome { failedJobs.append(job) }
         }
         let result = RejectMoveUndoResult(id: id, outcomes: outcomes)
-        if !failedJobs.isEmpty {
-            undoRetries[result.id] = RejectMoveUndoRetry(
-                batch: batch, rootURL: rootURL, jobs: failedJobs)
-        }
         publishUndo(.finished(result))
         return result
     }
@@ -606,38 +548,6 @@ extension RejectMover {
         return refusal
     }
 
-    /// Notes that a forward retry of `batch` is running (PRD P0-10's Undo rule).
-    ///
-    /// Internal because ``RejectMover/retryFailed(in:)`` sits in `RejectMover.swift`, which began
-    /// the retry a caller may try to undo underneath.
-    func beginRetry(_ batch: RejectMoveBatchID) {
-        retryCounts[batch, default: 0] += 1
-    }
-
-    /// Clears a forward retry and resumes the undo that waited for it (PRD P0-10's Undo rule).
-    func endRetry(_ batch: RejectMoveBatchID) {
-        guard let count = retryCounts[batch] else { return }
-        guard count > 1 else {
-            retryCounts[batch] = nil
-            for waiter in retryWaiters.removeValue(forKey: batch) ?? [] { waiter.resume() }
-            return
-        }
-        retryCounts[batch] = count - 1
-    }
-
-    /// Waits until no forward retry of `batch` runs, so the undo closes a settled run.
-    ///
-    /// PRD P0-10's Undo rule makes one Move rejects action one step, so a retry that started
-    /// before the undo belongs to it: the undo lets the retry finish and restores what it moved
-    /// instead of racing it into a set the step no longer covers.
-    private func waitForRetries(of batch: RejectMoveBatchID) async {
-        while retryCounts[batch] != nil {
-            await withCheckedContinuation { continuation in
-                retryWaiters[batch, default: []].append(continuation)
-            }
-        }
-    }
-
     /// Keeps a completed run's moved sets so an undo can restore them (PRD P0-10).
     ///
     /// The record pairs each set's confirmed files with the scanned set C4 stores Reject for,
@@ -658,16 +568,4 @@ extension RejectMover {
         undoableRuns[result.id] = RejectMoveUndoRun(rootURL: plan.rootURL, moved: moved)
     }
 
-    /// Folds a retry's moved sets into the run the app holds, so one action is one undo step.
-    ///
-    /// PRD "Failure and recovery" retries only the unmoved items of one run, and PRD P0-10's Undo
-    /// rule makes one Move rejects action one step however many retries it takes: the retry moves
-    /// under the run's own handle, so its own record and failed-set entry are dropped and its
-    /// moved sets join the run. A run can only be retried before it is undone, so no retry can
-    /// reach here after the step closed.
-    func adoptUndoRetry(_ retried: RejectMoveResult, of batch: RejectMoveBatchID) {
-        let retryRecord = undoableRuns.removeValue(forKey: retried.id)
-        guard let root = undoableRuns[batch], let retryRecord else { return }
-        root.adopt(retryRecord)
-    }
 }

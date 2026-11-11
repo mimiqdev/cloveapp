@@ -5,7 +5,7 @@ Items tagged **(proposed)** were not reviewed in the design. They are sensible d
 ## Core model
 
 - A **mark** is a rating and a label (none or one of 5 colors). The rating can be −1, which is Reject, so a photo is never rated and rejected at once: rejecting replaces the stars, and undoing restores them. Marks are written to the photo's XMP sidecar, in the folder where the photos live; a standalone JPEG/HIF keeps its rating and label in Clove. Nothing is imported or copied.
-- Every mark change saves right away. The subtitle shows the state: "● Saved", "● Save failed · Retry", "Not connected" or "View only".
+- Every mark appears at once and saves in user action order. A pending mark is shown until its write finishes; otherwise the files supply the marks. There is no save status. Only folder access problems appear in the subtitle: "Not connected" or "View only".
 - **Undo** (top bar, or the Duo dock) reverts the last mark change, a "Reject N unmarked", or a Move Rejects. It is a stack and works across photos.
 - **Reject never deletes.** Rejected photos stay in place, dimmed, until the person runs Move Rejects, which moves them to `_Rejected/` inside the same folder.
 
@@ -54,7 +54,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 1. Tap Move Rejects. The confirm sheet always opens; nothing moves on the first tap.
 2. Optionally, tap the fanned stack to see the rejects in a quick grid, and tap a photo to keep it. The button count updates. A keep is only staged here: nothing is written yet, and tapping again un-keeps.
 3. Tap Move. The kept photos have their reject cleared by setting the rating to 0 (written to XMP; the label is untouched), then the rest of the files (RAW, JPEG and XMP together) move to `_Rejected/` (the name is configurable in Settings). Swiping the sheet down instead discards the keeps, and every photo stays rejected.
-4. A toast offers Undo, which moves the files back and re-rejects the kept photos, as one step. On a partial failure the toast offers Details, which lists the failures with Try again. Photos that failed stay rejected in place.
+4. A toast offers Undo, which moves the files back and re-rejects the kept photos, as one step. A partial failure reports how many did not move; Details lists those photos without a retry action. The grid shows the files left on disk.
 
 ## iPad
 
@@ -94,15 +94,15 @@ Photo only ──Back──▶ Grid
 1. The picker returns a folder. The grid appears at once with placeholders.
 2. **Reading**: the subtitle reads "412 of 1,284", and the 2 pt progress line fills in `accent`. Thumbnails and existing XMP marks fill in as they are read. The person can already open and mark photos.
 3. **Grouping**: the subtitle reads "Finding similar shots…", and the line turns `group`. Stacks form one by one. The photo being viewed never moves, and the grid keeps its scroll anchor.
-4. When done, the subtitle returns to "1,284 photos · ● Saved". Move Rejects is hidden until then.
+4. When done, the subtitle returns to "1,284 photos". Move Rejects is hidden until then.
 - If Similar groups is off in Settings, stage 2 is skipped.
 
 ## Errors
 
-- **Drive disconnected**: stop the queue and drop unsaved marks and their status. Show the banner, dim the grid, and show the photos' last-read marks. Marking is off until **Reopen**. **Reopen** reads the XMP sidecars fresh; no unsaved marks are carried over.
+- **Drive disconnected**: drop queued work and pending marks. Show the banner, dim the grid, and show the photos' last-read marks. Marking is off until **Reopen**, which reads the XMP sidecars fresh. An operation already touching a file finishes normally.
 - **Lost access** (the security-scoped bookmark is stale): view only from the cache. **Open** re-runs the folder picker.
-- **Leaving with unsaved marks**: on Back or app switch, if a write is pending, show the alert. "Wait" stays; "Leave anyway" drops the pending writes.
-- **Save failed** on one photo: the subtitle shows Retry. Marks stay set in the UI and are retried on the next change as well.
+- **Leaving the folder**: leave immediately without a prompt. Pending writes finish in the background or are dropped when the folder closes.
+- **A connected write fails**: show one "Couldn't save the mark." toast, read that photo's marks from the files again and show them. Retain no failed mark and do not retry.
 - **Entry**: a folder whose drive is gone shows a faded row with Reconnect, which re-runs the picker for that folder.
 
 ## Theme switching

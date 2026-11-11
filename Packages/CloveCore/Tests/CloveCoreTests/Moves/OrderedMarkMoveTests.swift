@@ -4,7 +4,7 @@ import Testing
 @testable import CloveCore
 
 struct OrderedMarkMoveTests {
-    @Test func failedKeepClearCannotRetryOverLaterFourStars() async throws {
+    @Test func failedKeepClearDropsItsPendingMarkBeforeLaterFourStars() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
         let set = try makeMoveSet(
@@ -16,17 +16,18 @@ struct OrderedMarkMoveTests {
             .rating(.unrated), to: set.id, confirmed: PhotoMarks(rating: .rejected))
         fixture.markFileSystem.failWrites { _ in CocoaError(.fileWriteNoPermission) }
         let failed = await fixture.queue.apply(clear.change, to: set)
-        desired.finish(clear, state: failed.state)
+        desired.finish(for: clear.photo)
         #expect(failed.state.failure != nil)
         #expect(
-            desired.shown(for: set.id, confirmed: PhotoMarks(rating: .rejected)).rating == .unrated)
+            desired.shown(for: set.id, confirmed: PhotoMarks(rating: .rejected)).rating == .rejected
+        )
         let four = try #require(Rating(rawValue: 4))
         let newer = desired.apply(
             .rating(four), to: set.id, confirmed: PhotoMarks(rating: .rejected))
         fixture.markFileSystem.failWrites { _ in nil }
         let confirmed = await fixture.queue.apply(newer.change, to: set)
-        desired.finish(newer, state: confirmed.state)
-        #expect(DesiredMarkRestore.retry(clear, current: newer.after) == nil)
+        #expect(confirmed.state.isConfirmed)
+        desired.finish(for: newer.photo)
         let bytes = try Data(
             contentsOf: set.photoSet.primary.url.deletingPathExtension().appendingPathExtension(
                 "xmp"))
@@ -68,9 +69,13 @@ struct OrderedMarkMoveTests {
         #expect(preview.sidecarCount == 0)
         let gate = DispatchSemaphore(value: 0)
         defer { gate.signal() }
-        fixture.markFileSystem.blockWrites { _ in gate }
+        let entered = DispatchSemaphore(value: 0)
+        fixture.markFileSystem.blockWrites { _ in
+            entered.signal()
+            return gate
+        }
         let write = Task { await fixture.queue.apply(.rating(.rejected), to: set) }
-        try await eventually { await fixture.queue.latestChange(for: set.id)?.state == .writing }
+        #expect(waitForTestSignal(entered))
         let move = Task { try await fixture.move(preview) }
         try await eventually { fixture.fileSystem.count(of: .isReadOnlyVolume) >= 2 }
         #expect(fixture.fileSystem.count(of: .move) == 0)

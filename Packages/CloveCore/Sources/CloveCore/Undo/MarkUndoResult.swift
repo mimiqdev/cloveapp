@@ -62,8 +62,7 @@ public struct MarkUndoPhotoOutcome: Hashable, Sendable {
 /// failure), and the photo to return to. ``actionName`` is the short undo menu title.
 ///
 /// A confirmed restore counts as saved here even when the marks live in Clove storage rather
-/// than XMP, matching C10's ``GroupFinishingResult``: a standalone mark confirmed in Clove is
-/// **Saved in Clove only**, and reporting "Saved 0 photos" for a successful undo would misstate
+/// than XMP. Reporting "Saved 0 photos" for a successful undo would misstate
 /// it. PRD P0-08 keeps the wording per storage, so U8 decides the copy it shows.
 public struct MarkUndoResult: Hashable, Sendable {
     /// A short action name for the undo menu title (the UI owns the final copy).
@@ -102,7 +101,7 @@ public struct MarkUndoResult: Hashable, Sendable {
 
     /// Photos whose restore still needs a retry through C4 (PRD P0-09).
     public var failedCount: Int {
-        outcomes.filter { $0.status?.state.isUnfinished == true }.count
+        outcomes.filter { $0.status?.state.failure != nil }.count
     }
 
     /// Photos that already held the restored value, so nothing was written (PRD P0-05).
