@@ -225,7 +225,10 @@ public actor MarkWriteQueue {
             if let retried = await retry(id) { outcomes.append(retried) }
         }
         let result = MarkBatchResult(id: MarkBatchID(), change: batch.change, outcomes: outcomes)
-        batches[result.id] = AppliedBatch(change: batch.change, ids: outcomes.map(\.id))
+        let remaining = outcomes.map(\.id).filter { changes[$0] != nil }
+        if !remaining.isEmpty {
+            batches[result.id] = AppliedBatch(change: batch.change, ids: remaining)
+        }
         return result
     }
 

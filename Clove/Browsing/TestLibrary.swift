@@ -344,8 +344,15 @@ final class TestLibrary: FolderLibrary {
                                 reason: .locationUnavailable, message: "The drive disconnected.")))
                 })
         }
-        let outcomes = zip(items, ids).map { item, id in
-            perform(item.change, for: item.photo, id: id)
+        var outcomes: [MarkChangeStatus] = []
+        for (item, id) in zip(items, ids) {
+            let status = perform(item.change, for: item.photo, id: id)
+            outcomes.append(status)
+            if status.state.failure?.reason == .locationUnavailable {
+                changes = [:]
+                reportLocationLoss(.externalVolumeDisconnected)
+                break
+            }
         }
         let batch = MarkBatchID()
         return MarkBatchResult(

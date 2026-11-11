@@ -183,6 +183,11 @@ final class FolderLibrarySession: FolderLibrary {
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         updates = stream
         updatesContinuation = continuation
+        observeWriteStates()
+    }
+
+    private func observeWriteStates() {
+        writeStatusTask?.cancel()
         // The observer holds the queue and the stream, never the library: a closed scene must be
         // able to release the library and, with it, the folder's scope.
         writeStatusTask = Task { [weak self, stores] in
@@ -244,6 +249,8 @@ final class FolderLibrarySession: FolderLibrary {
     func discardPendingChanges() async {
         isDisconnected = true
         changes = PhotoChangeStates()
+        writeStatusTask?.cancel()
+        writeStatusTask = nil
         openScan?.cancel()
         scanTask?.cancel()
         guard case .success(let stores) = await resolvedStores() else { return }
@@ -698,6 +705,7 @@ final class FolderLibrarySession: FolderLibrary {
         let generation = scanGeneration
         folder = session.folder.id
         isDisconnected = false
+        observeWriteStates()
         openSession = session
         store = FolderPhotos()
         changes = PhotoChangeStates()
@@ -1230,6 +1238,8 @@ final class FolderLibrarySession: FolderLibrary {
         guard generation == scanGeneration, !isDisconnected else { return }
         isDisconnected = true
         changes = PhotoChangeStates()
+        writeStatusTask?.cancel()
+        writeStatusTask = nil
         openScan?.cancel()
         scanTask?.cancel()
         publish(.locationLost(folder: folder, loss: loss, generation: generation))
