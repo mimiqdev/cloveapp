@@ -1,41 +1,84 @@
 import SwiftUI
 
-/// Presents the system folder picker and reports the chosen folder once it has dismissed.
-///
-/// PRD Failure and recovery's "Select it through Open" opens the picker from the save-state
-/// banner, and a chosen folder can leave the open folder with unfinished writes, which raises the
-/// leaving question. Presenting that question while the picker sheet is still dismissing makes
-/// UIKit refuse the presentation, so the choice is handed back from the sheet's `onDismiss`,
-/// after the dismissal has finished (PRD P0-01, P0-02).
-///
-/// The picker is the system document picker (PRD P0-01).
+/// Reports the chosen folder only after the system picker has finished dismissing.
+/// A leave confirmation cannot be presented while that sheet is still dismissing.
 struct FolderPickingModifier: ViewModifier {
-    /// Whether the picker is presented.
     @Binding var isPresented: Bool
-
-    /// Runs with the chosen folder, after the picker finished dismissing.
     let onPick: (URL) async -> Void
 
-    /// The folder the picker reported, kept until the dismissal completes.
-    @State private var picked: URL?
+    @State private var handoff = FolderPickHandoff()
+    @State private var activePresentation: FolderPickHandoff.Presentation?
+    @State private var shownPresentation: FolderPickHandoff.Presentation?
 
     func body(content: Content) -> some View {
-        content.sheet(isPresented: $isPresented, onDismiss: handOff) {
-            FolderPicker(
-                onPick: { url in
-                    picked = url
-                    isPresented = false
-                },
-                onCancel: { isPresented = false }
-            )
-            .ignoresSafeArea()
+        content
+            .sheet(item: sheetPresentation, onDismiss: pickerDismissed) { presentation in
+                FolderPicker(
+                    onPick: { receive($0, from: presentation) },
+                    onCancel: { cancel(presentation) }
+                )
+                .ignoresSafeArea()
+            }
+            .onChange(of: isPresented, initial: true) { _, requested in
+                if requested {
+                    presentIfRequested()
+                } else {
+                    shownPresentation = nil
+                }
+            }
+    }
+
+    private var sheetPresentation: Binding<FolderPickHandoff.Presentation?> {
+        Binding(
+            get: { shownPresentation },
+            set: { next in
+                let wasShown = shownPresentation != nil
+                shownPresentation = next
+                if next == nil, wasShown { isPresented = false }
+            })
+    }
+
+    private func presentIfRequested() {
+        // A second request waits for the previous sheet's dismissal callback.
+        guard isPresented, activePresentation == nil else { return }
+        let presentation = handoff.beginPresentation()
+        activePresentation = presentation
+        shownPresentation = presentation
+    }
+
+    private func receive(_ url: URL, from presentation: FolderPickHandoff.Presentation) {
+        presentIfRequested()
+        guard handoff.presentation == presentation else { return }
+        handOff(handoff.picked(url, from: presentation))
+        dismiss(presentation)
+    }
+
+    private func cancel(_ presentation: FolderPickHandoff.Presentation) {
+        guard handoff.presentation == presentation else { return }
+        handoff.cancel(presentation)
+        dismiss(presentation)
+    }
+
+    private func dismiss(_ presentation: FolderPickHandoff.Presentation) {
+        guard shownPresentation == presentation else { return }
+        shownPresentation = nil
+        isPresented = false
+    }
+
+    private func pickerDismissed() {
+        guard let presentation = activePresentation else { return }
+        dismiss(presentation)
+        activePresentation = nil
+        let picked = handoff.dismissed(presentation)
+        if isPresented {
+            presentIfRequested()
+        } else {
+            handOff(picked)
         }
     }
 
-    /// Hands the chosen folder on once nothing is presenting over the screen any more.
-    private func handOff() {
-        guard let url = picked else { return }
-        picked = nil
+    private func handOff(_ url: URL?) {
+        guard let url else { return }
         Task { await onPick(url) }
     }
 }
