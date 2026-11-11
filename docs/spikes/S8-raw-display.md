@@ -35,7 +35,11 @@ and two reduced HIF decodes next to the RAW variants.
   `CLOVE_RAW_DISPLAY_REPORT` set. Every count is clamped to the files present, so
   the Mac run used 1 RAW, 1 camera-preview pair, 1 colour file and 1 cache file and
   a 10-render sustained bound. Screen long edge was **2000 px**, a stand-in for a
-  device screen, not a measured screen size.
+  device screen, not a measured screen size. The display run took **5.1 s** on the
+  loaded Mac; the device estimate below is derived from that.
+- Report rows never contain the folder or file names: a RAW is `raw-01.<EXT>` and
+  its camera preview shares the number (`raw-01.HIF`). The two JSON files are the
+  only artifacts the owner shares.
 - JSON artifacts stay out of git, in the gitignored `.build/rawdisplay/` folder:
   `macOS.json` and `macOS-sustained.json`. On device the same runs write
   `clove-lab-S8-<timestamp>.json` into the tested folder and into Files › Clove
@@ -76,27 +80,34 @@ size and then transformed the output, which is why its 592.8 ms sat next to the
 529.1 ms native number; S2 said so in its method. Every c–e row in this probe is a
 different route and must not be compared with S2's 2000 px row.
 
-The camera HEIF full and subsample decodes apply EXIF orientation after decoding,
-because `CGImageSourceCreateImageAtIndex` leaves orientation to the caller and a
-100% source must be displayed the same way as the embedded preview. The thumbnail
-route already applies it through `CreateThumbnailWithTransform`. Output sizes for
-f and g are therefore display-oriented (edges swapped for orientations 5–8), and a
-rotated file's f/g time includes the orientation redraw. The RAW routes are
-unaffected because `CIRAWFilter` applies orientation itself.
+Orientation is a display transform in production, so it is excluded from the timed
+section. `CGImageSourceCreateImageAtIndex` leaves EXIF orientation to the caller,
+and the thumbnail route already applies it through `CreateThumbnailWithTransform`.
+Output sizes are still reported display-oriented: the edges are swapped for
+orientations 5–8, which costs no pixel work. Every render row carries its source
+orientation as a tag, and the colour comparison applies the orientation once before
+comparing. The RAW routes are unaffected because `CIRAWFilter` applies orientation
+itself.
 
 The probe records the requested long edge, the actual output size and the time to
 a **materialized CPU bitmap** (`image.dataProvider?.data`). It does not inspect
 which internal decoder stage honours `scaleFactor` or draft mode, and it does not
 measure GPU-only completion or on-screen presentation.
 
-### Cold and warm
+### Startup, cold and warm
 
-Each variant's first render in the run is `cold`; every later render is `warm`.
-Warm repeats are three per variant per file. Cold is *not* a cold process, cold
-framework cache or cold card read: by the time a later variant has its cold render,
-the same process has already rendered other variants of the same file. The report
-tags every row with its phase, and `render-summary-cold` keeps the cold value
-separate.
+One extra render of variant a runs before the cold pass and is reported on its own
+`phase: startup` row. It absorbs the process's first Core Image and RAW setup, so
+variant a's cold number is comparable with the other variants instead of carrying a
+one-off cost. On the Mac it took 151.3 ms; after it, a's cold render was 92.3 ms
+against a 98.0 ms warm median, i.e. within noise.
+
+Each variant's first measured render after the startup row is `cold`; every later
+render is `warm`. Warm repeats are three per variant per file. Cold is *not* a cold
+process, cold framework cache or cold card read: by the time a later variant has its
+cold render, the same process has already rendered other variants of the same file.
+The report tags every row with its phase, and `render-summary-cold` keeps the cold
+value separate.
 
 Warm median and p90 use all warm samples for the variant. The percentile is
 nearest-rank, so **p90 of 3 repeats is the largest of the three**.
@@ -120,21 +131,22 @@ Three comparisons are reported:
 
 ### Swipe simulation
 
-Walks up to 20 photos per dwell (0, 300 and 800 ms). Arrival is the instant the
-reader lands on a photo. From there it requests the embedded preview at 2000 px,
-waits the dwell, then requests the fastest screen-size RAW variant measured earlier
-in the run in a background task and moves on. One render is in flight at a time, as
-in production. A render that has not finished **before the next arrival** is
-superseded: it is cancelled, drained, and its drain is timed. At the end of the walk
-the last render is awaited, because the reader stays on that photo.
+Walks up to 20 photos per dwell (0, 300 and 800 ms). **The dwell is the time spent
+on the photo.** For each photo the walk records arrival, requests the embedded
+preview at 2000 px, starts the fastest screen-size RAW variant measured earlier in
+the run right away, waits out the dwell, then leaves. A render is `ready` when it
+finished before leaving, with pixels; one that returns no pixels is `failed`; one
+that is still running at the end of the dwell is `wasted` and keeps running, because
+Core Image cannot cancel mid-render. The next photo's render is queued behind it, so
+only one decoder is busy at a time, as in production; the next photo's preview is
+the contended case.
 
-Two times are recorded for a render that succeeds: `swipe-render-ready` from
-requesting the render to its completion, and `swipe-arrival-to-ready` from arrival
-to completion, which therefore also contains the preview request and the dwell.
-Neither is an on-screen presentation measurement; completion of the bitmap is the
-proxy for "showing". A render that finishes before the next arrival but returns no
-pixels is recorded as `swipe-render-failed`, not ready. `swipe-renders-started`,
-`-ready`, `-wasted` and `-failed` classify every started render exactly once.
+Two times are recorded for a ready render: `swipe-render-ready` from requesting the
+render to its completion, and `swipe-arrival-to-ready` from arrival to completion,
+which is preview plus render for that photo. Neither is an on-screen presentation
+measurement; completion of the bitmap is the proxy for "showing".
+`swipe-renders-started`, `-ready`, `-wasted` and `-failed` classify every started
+render exactly once, and progress counts photos, not dwells.
 
 Preview time is tagged with `renderRunning`, sampled at arrival: a photo whose
 previous render is still running is the contention case. If the camera HEIF preview
@@ -150,15 +162,17 @@ last render can run past it. Each render's time, every `ProcessInfo.thermalState
 change with its elapsed seconds, and the start/end thermal state are recorded.
 Battery level is read by the **Lab app layer** (`UIDevice.batteryLevel`); the
 probe module stays UIKit-free, and the view appends `battery-end` plus both
-battery states to the report. A level the system does not report is recorded as
+battery states to the report. `batteryLevel` moves in **5% steps**, so compare the
+ends only at that resolution. A level the system does not report is recorded as
 -1.
 
 ### Cache cost
 
 For the screen-size variant: encode to HEIC and JPEG at quality **0.9** into a
 temporary folder, record encode time, file bytes and decode time, then hold six
-decoded renders at once and record their summed bitmap bytes and the sampled
-process RSS. The temporary folder is removed after the run.
+decoded renders at once. `cache-held-resident` is RSS after all six are held minus
+RSS before the loop; `cache-held-resident-absolute` and `cache-held-render-peak`
+are separate columns. The temporary folder is removed after the run.
 
 ### Grid estimate
 
@@ -182,58 +196,98 @@ a concurrent measurement; the concurrency-2 row assumes perfect division.
   File discovery has the preview probe's rules — it skips hidden files and
   `_Rejected`, keeps RAW and camera HEIF paths, checks cancellation during the
   walk, and sorts — then samples the first N. Those counts bound every image decode
-  and every retained bitmap; discovery itself reads paths only.
+  and every retained bitmap; discovery itself reads paths only. The swipe progress
+  counts photos; each draw is one step.
+
+**Time estimate.** The Mac display run took 5.1 s with one RAW and one pair. The
+per-file RAW variant work dominates: about 2.1 s per RAW on this host, so 12 RAWs
+would be about 25 s on the Mac. Scaling that by S2's roughly 5.5× Mac-to-device
+native render ratio gives about 2.5 minutes of RAW variants, plus the fixed HIF,
+colour, swipe and cache phases. The device run is therefore expected to take
+**about 5 minutes**, and `run-duration` records the actual number. The sustained
+step is a separate 5-minute bound.
 
 ### Memory
 
-`render-sampled-peak-resident` and `cache-held-resident` sample absolute **process
-RSS every 5 ms**. They are lower bounds that include framework caches and other
-work in the process, and a decode buffer can be missed between samples. The report
-also records the RSS immediately before each render, so the Mac tables below show
-both the peak and the median baseline. The difference is not an isolated
+Every timed render and its `dataProvider` copy runs inside a per-render
+`autoreleasepool`, including the cache, sustained and swipe loops.
+
+`render-sampled-peak-resident` samples absolute **process RSS every 5 ms**; it is a
+lower bound that includes framework caches and other work, and a decode buffer can
+be missed between samples. The report also records the RSS immediately before each
+render. With per-render `autoreleasepool` wrapping, the baseline no longer grows
+inside a variant: within each RAW variant it moved by at most 0.2 MiB and the RAW
+pass stayed near 90–121 MiB, against the earlier build whose baseline climbed from
+about 120 MiB to 585 MiB over the same variants. The camera rows sit higher
+(168–196 MiB) and rise by up to about 13 MiB across their repeats, consistent with
+framework caches. The difference between peak and baseline is still not an isolated
 allocation count.
 
 ## Data
 
 ### macOS: RAW variants, not device numbers
 
-One fixture ARW, 2768×1848, one warm repeat set of 3. Times in milliseconds to a
-materialized bitmap. Memory is MiB (2²⁰ bytes); peak and baseline are medians of
-the warm renders, and the baseline grows across this serial run, so read the
-**delta** as a lower bound on working memory, not as a per-variant budget.
+One fixture ARW, 2768×1848, one warm repeat set of 3, after the startup row
+(**151.3 ms**, `phase: startup`). Times in milliseconds to a materialized bitmap.
+Memory is MiB (2²⁰ bytes); peak and baseline are medians of the warm renders. The
+baseline no longer grows across the run, so the peak is a useful working-memory
+bound rather than an artifact of earlier variants.
 
 | Variant | Long edge asked | Actual output | Cold ms | Warm median ms | Warm p90 ms | Decoded MiB | Peak RSS MiB / baseline |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| a native, fresh context | native | 2768×1848 | 275.9 | 95.0 | 99.3 | 19.51 | 163.0 / 120.4 |
-| b native, reused context | native | 2768×1848 | 93.0 | 82.1 | 87.9 | 19.51 | 212.1 / 195.8 |
-| c screen `scaleFactor` | 2000 | 2000×1336 | 80.7 | 74.6 | 75.6 | 10.19 | 307.7 / 281.2 |
-| d screen `scaleFactor`, draft | 2000 | 2000×1336 | 75.7 | 74.4 | 75.2 | 10.19 | 362.7 / 346.3 |
-| e grid `scaleFactor` | 400 | 400×268 | 68.8 | 69.7 | 70.0 | 0.41 | 428.7 / 412.3 |
-| e grid `scaleFactor`, draft | 400 | 400×268 | 69.8 | 68.1 | 69.3 | 0.41 | 494.2 / 477.9 |
+| a native, fresh context | native | 2768×1848 | 92.3 | 98.0 | 99.4 | 19.51 | 134.5 / 89.7 |
+| b native, reused context | native | 2768×1848 | 87.0 | 84.6 | 85.3 | 19.51 | 115.2 / 99.9 |
+| c screen `scaleFactor` | 2000 | 2000×1336 | 79.2 | 74.5 | 74.6 | 10.19 | 135.7 / 120.4 |
+| d screen `scaleFactor`, draft | 2000 | 2000×1336 | 73.2 | 73.4 | 74.9 | 10.19 | 135.7 / 120.5 |
+| e grid `scaleFactor` | 400 | 400×268 | 68.0 | 67.9 | 70.1 | 0.41 | 136.4 / 121.1 |
+| e grid `scaleFactor`, draft | 400 | 400×268 | 68.5 | 68.6 | 69.8 | 0.41 | 136.5 / 121.2 |
 
 Every row succeeded. The requested long edge arrived within 2 px on this fixture.
-On this host `scaleFactor` saved about **7.5 ms** at screen size and **12.4 ms**
-(draft off) or **14.0 ms** (draft on) at grid size against the native reused-context
-render; against the fresh-context native render the saving was about **20–27 ms**.
-Draft mode did not separate from non-draft at either size. The first cold
-fresh-context native render paid about **181 ms** over its warm median. Those are
-Mac numbers from a loaded host and must not be read as iPhone ratios.
+On this host `scaleFactor` saved about **10–11 ms** at screen size and **16–17 ms**
+at grid size against the native reused-context render, or about **24–30 ms**
+against the fresh-context one. Draft mode did not separate from non-draft at either
+size. After the startup row, variant a's cold render is within noise of its warm
+median; the earlier 181 ms cold penalty was process setup and is now attributed to
+the startup row instead. Those are Mac numbers from a loaded host and must not be
+read as iPhone ratios.
+
+Baseline flatness across the same run, first → last of the three warm renders:
+
+| Variant | Baseline MiB first → last |
+| --- | --- |
+| a native, fresh context | 89.6 → 89.8 |
+| b native, reused context | 99.9 → 99.9 |
+| c screen `scaleFactor` | 120.4 → 120.4 |
+| d screen draft | 120.4 → 120.5 |
+| e grid `scaleFactor` | 121.1 → 121.2 |
+| e grid draft | 121.2 → 121.2 |
+| f full decode | 168.3 → 180.9 |
+| g subsample factor 2 | 169.0 → 172.1 |
+| g screen thumbnail | 188.6 → 194.6 |
+
+The earlier build's baseline climbed from about 120 to 585 MiB over the same
+variants; per-render `autoreleasepool` wrapping removed that growth. The camera
+rows still show a small rise (up to about 13 MiB), attributed to framework caches
+rather than retained render bitmaps. These are process-wide RSS baselines, not
+isolated allocations.
 
 ### macOS: camera HEIF variants, not device numbers
 
 Same fixture session; the HEIC is the generated fixture, not a camera HIF.
 
-| Variant | Actual output | Cold ms | Warm median ms | Warm p90 ms | Decoded MiB | Peak RSS MiB / baseline |
-| --- | --- | --- | --- | --- | --- | --- |
-| f full decode | 2768×1848 | 143.2 | 82.4 | 83.6 | 19.51 | 585.9 / 570.6 |
-| g subsample factor 2 | 1384×924 | 41.2 | 40.1 | 41.4 | 4.88 | 563.7 / 561.9 |
-| g screen thumbnail, always | 2000×1336 | 50.0 | 49.3 | 50.7 | 10.19 | 586.3 / 584.5 |
+| Variant | Actual output | Orientation | Cold ms | Warm median ms | Warm p90 ms | Decoded MiB | Peak RSS MiB / baseline |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| f full decode | 2768×1848 | 1 | 144.0 | 85.6 | 87.5 | 19.51 | 184.6 / 180.9 |
+| g subsample factor 2 | 1384×924 | 1 | 41.1 | 40.6 | 41.4 | 4.88 | 173.9 / 172.1 |
+| g screen thumbnail, always | 2000×1336 | 1 | 49.8 | 50.0 | 50.1 | 10.19 | 196.3 / 194.4 |
 
 The full decode produced exactly the container's pixel size and the subsample
 factor halved both edges, so both requests are honoured on this platform. This
-fixture carries no rotation; the orientation handling is covered by a generated
-orientation-6 JPEG test instead. Again, macOS numbers from a loaded host; the A1 II
-HIF is 8640×5760 and the device run is what matters.
+fixture carries no rotation, so its orientation tag is 1; the orientation handling
+is covered by a generated orientation-6 JPEG test that checks the swapped output
+size and the tag. The f and g rows are timed decodes without the display-orientation
+redraw. Again, macOS numbers from a loaded host; the A1 II HIF is 8640×5760 and the
+device run is what matters.
 
 ### macOS: colour agreement, not device numbers
 
@@ -257,22 +311,22 @@ table should have both rows.
 
 ### macOS: swipe simulation, not device numbers
 
-One photo per walk, so no render was ever superseded and the preview never ran
-while a render was in flight. These rows exercise the path and its counters, not
-contention.
+One photo per walk, so the preview never had a previous render running and the
+walk cannot show contention. The rows show the classification model.
 
 | Dwell | Preview median ms (source, 1616 px) | Render ready ms | Arrival → ready ms | Started / ready / wasted / failed |
 | --- | --- | --- | --- | --- |
-| 0 ms | 16.9, RAW fallback, no render running | 82.7 | 100.6 | 1 / 1 / 0 / 0 |
-| 300 ms | 15.7, RAW fallback, no render running | 119.0 | 437.4 | 1 / 1 / 0 / 0 |
-| 800 ms | 15.3, RAW fallback, no render running | 119.3 | 967.9 | 1 / 1 / 0 / 0 |
+| 0 ms | 16.4, RAW fallback, no render running | — | — | 1 / 0 / 1 / 0 |
+| 300 ms | 14.8, RAW fallback, no render running | 78.3 | 94.4 | 1 / 1 / 0 / 0 |
+| 800 ms | 34.9, RAW fallback, no render running | 101.3 | 141.5 | 1 / 1 / 0 / 0 |
 
 The HEIC fixture has no embedded preview on macOS, so these preview requests used
-the RAW's own 1616 px preview. With one photo per walk, the preview never had a
-render running, nothing was superseded, and the arrival-to-ready rows are simply
-the preview request plus the dwell plus the render plus process noise. They are not
-evidence that a longer dwell slows the render, and they say nothing about
-contention.
+the RAW's own 1616 px preview. With a 0 ms dwell the render (about 67–100 ms on
+this host) had not finished before the reader left, so it counts as wasted; the
+300 and 800 ms rows finish inside the dwell and count as ready, with
+arrival-to-ready equal to preview plus render. A 20-photo device walk is what
+measures contention, because only then does one photo's render run into the next
+photo's preview.
 
 ### macOS: cache cost, not device numbers
 
@@ -280,41 +334,45 @@ One screen-size render (2000×1336, 10.19 MiB decoded), encoded at quality 0.9.
 
 | Measurement | HEIC | JPEG |
 | --- | --- | --- |
-| Encode ms | 40.9 | 14.2 |
+| Encode ms | 40.7 | 13.9 |
 | File bytes | 708,390 | 854,362 |
-| Decode ms | 17.0 | 7.3 |
+| Decode ms | 16.0 | 7.0 |
 | Decoded bytes | 10,688,000 | 10,688,000 |
 
 The six-held-image sample has one image on this run: 10,688,000 B summed bitmap
-bytes, 216,121,344 B (206.1 MiB) sampled process RSS, 74.1 ms of renders. The device
-run with six files is what answers the six-image question.
+bytes, **10,715,136 B (10.2 MiB) RSS growth** over the pre-loop baseline,
+226,115,584 B absolute (215.6 MiB), 231,407,616 B peak during the renders
+(220.7 MiB), and 119.4 ms of renders. The device run with six files is what answers
+the six-image question; the delta and the peak are separate columns.
 
 ### macOS: grid projection, not device numbers
 
-Best 400 px variant in this run: `raw-grid-scale-draft`, warm median **68.1 ms**
-per photo.
+Best 400 px variant in this run: `raw-grid-scale`, warm median **67.9 ms** per
+photo.
 
 | Projection | 2000 photos |
 | --- | --- |
-| Concurrency 1, arithmetic | 136.1 s |
-| Concurrency 2, arithmetic, perfect division | 68.1 s |
+| Concurrency 1, arithmetic | 135.7 s |
+| Concurrency 2, arithmetic, perfect division | 67.9 s |
 
 The device run's numbers replace this projection; it is not a concurrent
 measurement and not a promise that two decoders halve the time.
 
 ### macOS: sustained-load path check, not device numbers
 
-10-render bound, one file, selected variant `raw-screen-scale-draft` (76.4 ms
-selection median against 82.9 ms for draft off). Total 744.4 ms; individual renders
-71.4–76.5 ms; thermal state `nominal` at start and end, no transitions; no battery
-reading on macOS. This only shows that the second button's code path runs. Heat,
+10-render bound, one file, selected variant `raw-screen-scale-draft` (72.0 ms
+selection warm median against 75.1 ms for draft off; the 84.4 ms startup row is
+excluded from selection). Total 782.2 ms; individual renders 71.5–76.9 ms; thermal
+state `nominal` at start and end, no transitions; no battery reading on macOS. This only shows that the second button's code path runs. Heat,
 thermal transitions and battery drain need the device.
 
 ### Device: pending the owner's run
 
 Nothing below is measured yet. Each row is filled from the two S8 JSON reports on
 issue [#122](https://github.com/mimiqdev/cloveapp/issues/122), on the A1 II ARW+HIF
-pairs, iPhone 17 Pro Max and iPad Pro.
+pairs, iPhone 17 Pro Max and iPad Pro. Every render row in the JSON carries its
+source orientation tag; the tables omit that column for width. The run keeps the
+screen awake through `UIApplication.shared.isIdleTimerDisabled` while it is active.
 
 | Status | RAW variant | Cold ms | Warm median / p90 ms | Output | Decoded MiB | Peak RSS MiB |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -355,21 +413,21 @@ pairs, iPhone 17 Pro Max and iPad Pro.
 | Pending | Screen-size cache: JPEG encode / bytes / decode | Pending |
 | Pending | Six decoded screen renders held: bytes / RSS | Pending |
 | Pending | Grid per-photo and 2000-photo projection, concurrency 1 / 2 | Pending |
-| Pending | Suite duration (10-minute budget check) | Pending |
+| Pending | Suite duration (5-minute estimate check) | Pending |
 
 ## Open questions
 
 - Does the iPhone honour `scaleFactor` and draft mode by the same margin the Mac
-  shows? The Mac's 17–25 ms saving against a 67–92 ms render is not a device
-  ratio; the device table decides whether a screen-size RAW render is materially
-  cheaper than a native one.
+  shows? The Mac's 10–17 ms saving against a 68–85 ms render is not a device ratio;
+  the device table decides whether a screen-size RAW render is materially cheaper
+  than a native one.
 - Does draft mode change colour or detail visibly? This probe measures colour
   difference only, and on the Mac fixture draft and non-draft were identical;
   visual quality needs the owner's eye on the device.
 - How does a RAW render affect the next photo's preview in practice? The Mac walk
   had one photo and never contended; the 20-photo device walk is what measures
-  preview latency while a render is running, wasted renders and drain after
-  supersede.
+  preview latency while a render is running and how many renders finish inside the
+  dwell.
 - Is the full HIF decode a usable 100% source at 8640×5760? S2 measured about 1.8 s
   and 1.3 GB peak through `CIRAWFilter` on the previous build; this probe repeats
   it through ImageIO on the device build. A 100% source that is correct but slow
@@ -394,26 +452,29 @@ Part 1 writes the checklist; part 2 and the owner's run fill the device tables.
 
 1. After the supervisor publishes the merged Lab build, install **Clove Lab** from
    TestFlight on **iPhone 17 Pro Max**. Note the installed iOS version; the report
-   records the hardware identifier, iOS version and app build itself.
+   records the hardware identifier, iOS version and app build itself. Set
+   **Auto-Lock to Never** for the run; the app also keeps the screen awake while a
+   run is active.
 2. Copy **12 or more A1 II ARW + HIF pairs** (each `.ARW` with its same-name `.HIF`)
    to local storage, not a card or reader. Unplug the charger and let the phone sit
    at room temperature.
-3. Open **Clove Lab → S8 · RAW display**. Choose the folder and confirm its name
-   appears under the picker. Check **Screen long edge** matches the phone's panel;
-   adjust it only if it is wrong.
+3. Open **Clove Lab → S8 · RAW display**, choose the local-storage folder (the
+   report does not record its name), and check **Screen long edge** matches the
+   phone's panel. Adjust it only if it is wrong.
 4. Tap **Run display suite**. Expect a progress count that moves through RAW
    variants, camera HEIF variants, colour, swipes, cache and the grid projection,
    then **Finished: clove-lab-S8-<timestamp>.json**. The app must stay responsive
-   and **Cancel** must be available. Allow about 10 minutes; if the run takes much
-   longer, record the last progress message instead of repeating it.
+   and **Cancel** must be available. Allow **about 5 minutes** (see the estimate
+   below); if the run takes much longer, record the last progress message instead
+   of repeating it.
 5. Tap **Run sustained load (up to 5 min)**. Expect up to 300 renders or five
    minutes of progress, then a second **Finished: clove-lab-S8-<timestamp>.json**.
    Keep the app in the foreground; note whether the phone becomes warm.
 6. Use **Export** in the footer for each report, or find both in Files › On My
    iPhone › Clove Lab. They are also written into the tested folder. Attach both
    JSON files to issue [#122](https://github.com/mimiqdev/cloveapp/issues/122) and
-   identify the device, iOS version and folder. Do not attach screenshots of the
-   folder path.
+   identify the device and iOS version; the reports contain no folder or file
+   names, only `raw-NN` labels. Battery levels are recorded in 5% steps.
 7. Repeat steps 1–6 on **iPad Pro**, recording its model and installed iPadOS
    version. The screen long edge is read from that device, so c–e and g change
    size.
