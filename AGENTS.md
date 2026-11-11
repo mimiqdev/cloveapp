@@ -82,8 +82,9 @@ XcodeGen. Every task is listed here.
   fixture tests run instead of skipping.
 - The package tests run with `--no-parallel` in CI. In parallel on the 3-core
   runner, tests that block on semaphores starve the cooperative thread pool:
-  some CloveCore tests time out and CloveImaging hangs. Locally they run in
-  parallel as before.
+  some CloveCore tests time out and CloveImaging hangs
+  ([#146](https://github.com/mimiqdev/cloveapp/issues/146)). Locally they run
+  in parallel as before.
 - The check to require is **`verify`**: the last job, which passes only when
   every other job passed.
 - No secrets, no signing, read-only `contents` permission, `pull_request` only.

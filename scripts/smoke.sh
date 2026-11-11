@@ -49,17 +49,22 @@ else
 import json
 import sys
 
+# Only runtimes that can run the device type: some images also ship a runtime
+# for one device model only, with the same version.
+device_type = sys.argv[1]
 runtimes = json.load(sys.stdin)["runtimes"]
 ios = [
     runtime
     for runtime in runtimes
-    if runtime.get("isAvailable") and runtime.get("platform") == "iOS"
+    if runtime.get("isAvailable")
+    and runtime.get("platform") == "iOS"
+    and any(device["name"] == device_type for device in runtime.get("supportedDeviceTypes", []))
 ]
 if not ios:
-    raise SystemExit("no available iOS simulator runtime")
+    raise SystemExit("no available iOS simulator runtime runs " + device_type)
 newest = max(ios, key=lambda runtime: tuple(int(part) for part in runtime["version"].split(".")))
 print(newest["identifier"])
-'
+' "$device_type"
     )
 fi
 
