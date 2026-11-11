@@ -2,18 +2,12 @@ import CoreGraphics
 import Foundation
 import Synchronization
 
-/// Errors a detail request can be refused with, before any pixels are read.
 public enum DetailPipelineError: Error, Sendable {
-    /// The queue is full and this request is not more important than what it holds.
     case queueFull
-    /// The pipeline was closed, for example after its folder was closed.
     case closed
 }
 
-/// Cancellation is signalled synchronously from `onCancel`, before its actor hop.
-///
-/// This closes the race between a queued native entry and its cancellation: a request that
-/// was cancelled before the read starts still cannot deliver pixels.
+/// Cancellation closes admission synchronously, before the cancellation actor hop.
 private final class DetailCancellation: Sendable {
     private let cancelled = Mutex(false)
     var isCancelled: Bool { cancelled.withLock { $0 } }
@@ -21,39 +15,12 @@ private final class DetailCancellation: Sendable {
     func deliver(_ body: (Bool) -> Void) { cancelled.withLock { body($0) } }
 }
 
-/// Shows one photo's detail pixels: a camera preview first, then native RAW only when the
-/// view needs more (PRD P0-04; G1 "Preview, detail (I2)" and "Scheduling and cache").
-///
-/// Fit-view navigation (a swipe or an edge tap, PRD P0-04) uses
-/// ``preview(for:consumer:priority:)``, which never renders. ``image(for:consumer:)`` is only
-/// for a zoom past the preview's pixels or an explicit double-tap to 100%: it reuses the first
-/// call's cached preview and then renders. Both take a consumer ID per view:
-/// a newer request from the same consumer supersedes the older one, which is cancelled
-/// before it enters a read or has its drained result discarded.
-///
-/// ```swift
-/// let shown = try await pipeline.preview(for: request, consumer: viewID)
-/// let detailed = try await pipeline.image(for: request, consumer: viewID)
-/// ```
-///
-/// Scheduling follows G1 "Scheduling and cache": at most one RAW render at a time, the
-/// photo on screen before neighbour prefetch, queued stale work cancelled before it starts,
-/// and an in-flight render that cannot be interrupted is drained and discarded rather than
-/// left to pile up.
+/// Detail and group review's shared image scheduler. Embedded previews have their
+/// own bounded lane. Screen RAW, native RAW and full camera decodes share one lane.
+/// Cancelled native calls drain in that lane and never publish or cache their pixels.
 public actor DetailPipeline {
-    private enum Lane: Sendable, Hashable {
-        /// Preview and display-size reads; a few run at once.
-        case preview
-        /// Native RAW and full-JPEG routes; exactly one runs at a time.
-        case render
-    }
-
-    private enum Effort: Sendable, Hashable {
-        /// Preview pixels only, never a render (`preview(for:)` and prefetch).
-        case previewOnly
-        /// Preview first, then a render when the view needs more (`image(for:)`).
-        case best
-    }
+    private enum Lane: Sendable { case preview, render }
+    private enum Effort: Sendable { case previewOnly, screen, best }
 
     private struct Job {
         let id: UUID
@@ -63,8 +30,7 @@ public actor DetailPipeline {
         let priority: DetailPriority
         let cancellation: DetailCancellation
         let continuation: CheckedContinuation<DetailResult, any Error>
-
-        var lane: Lane { effort == .best ? .render : .preview }
+        var lane: Lane { effort == .previewOnly ? .preview : .render }
     }
 
     private let cache: DetailCache
@@ -79,8 +45,6 @@ public actor DetailPipeline {
     private var closed = false
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
 
-    /// Builds a pipeline over one cache. More than two preview readers buys little for the
-    /// 6–13 ms first-preview work measured in S2, and the render lane is always single.
     public init(cache: DetailCache = DetailCache(), previewWorkers: Int = 2, queueLimit: Int = 16) {
         self.init(
             cache: cache, previewWorkers: previewWorkers, queueLimit: queueLimit,
@@ -99,97 +63,64 @@ public actor DetailPipeline {
         self.sizes = sizes
     }
 
-    /// Fit-view pixels for the photo on screen: fit-view navigation calls this and nothing
-    /// else (PRD P0-04 full-width preview).
-    ///
-    /// The source order is G1 "Preview, detail (I2)" and it stops at the first usable
-    /// preview: the HIF's embedded preview for RAW + HIF, the RAW's embedded preview when the
-    /// HIF cannot be opened, has no preview or is tiny, the RAW's embedded preview for RAW
-    /// alone or RAW + JPEG, a JPEG raster at display size when that preview is missing or
-    /// tiny, the JPEG raster for JPEG alone, and the embedded preview only for HIF alone
-    /// (reported as ``DetailQuality/preview``).
-    ///
-    /// This never renders a RAW, whatever ``DetailRequest/wantsNativeResolution`` says, so a
-    /// swipe or edge tap can never start native work on a camera file. Swiping to the next
-    /// photo stays cheap because pixels beyond the preview come from
-    /// ``image(for:consumer:)`` only.
-    ///
-    /// Cancellation and supersession throw `CancellationError`; nothing else throws.
-    public func preview(
-        for request: DetailRequest, consumer: UUID = UUID(), priority: DetailPriority = .visible
-    ) async throws -> DetailResult {
-        try await enqueue(
-            request, consumer: consumer, effort: .previewOnly, priority: priority)
+    /// Called before arrival reads. Releases the full image on photo/mode change,
+    /// keeps only this photo's screen render and its two neighbours, and drops old work.
+    public func navigate(to current: DetailRequest, neighbours: [DetailRequest]) {
+        for job in Array(jobs.values) { cancel(job.id) }
+        cache.navigate(to: current, neighbours: neighbours)
     }
 
-    /// More pixels for the photo on screen: zoom past what the preview holds, or the explicit
-    /// double-tap to 100% (PRD P0-04 "pinch zoom and double-tap to 100% for focus inspection").
-    ///
-    /// Call this only for those two cases. Fit-view navigation calls
-    /// ``preview(for:consumer:priority:)`` instead, because this call may render a RAW and G1
-    /// "Preview, detail (I2)" allows that only when the needed pixel size is larger than the
-    /// preview's or on an explicit 100% request — never for a swipe.
-    ///
-    /// G1 "Preview, detail (I2)": a RAW is rendered by `CIRAWFilter` at native size only when
-    /// the needed pixel size is larger than the preview's, or on ``DetailRequest/wantsNativeResolution``.
-    /// A plain fit-view request therefore never renders. A JPEG-primary photo answers 100% by
-    /// decoding the full JPEG, and a HIF-only photo stays at preview quality and reports
-    /// ``DetailLimitation/noHigherResolution``.
-    ///
-    /// A failed RAW render never hides the preview: the result stays ``DetailResult/available``
-    /// with ``DetailLimitation/rawRenderFailed``. Cancellation and supersession throw
-    /// `CancellationError`.
-    ///
-    /// There is no prefetch priority here: speculative work is limited to
-    /// ``preview(for:consumer:priority:)``, so a neighbour can never queue a RAW render.
-    public func image(
-        for request: DetailRequest, consumer: UUID = UUID()
+    /// Immediate fit pixels: held screen RAW in RAW mode, otherwise the camera preview.
+    /// This method never starts a render.
+    public func preview(
+        for request: DetailRequest, consumer: UUID = UUID(),
+        priority: DetailPriority = .visible
     ) async throws -> DetailResult {
+        try await enqueue(request, consumer: consumer, effort: .previewOnly, priority: priority)
+    }
+
+    /// The fit upgrade. RAW mode renders at screen size with draft off; camera mode
+    /// keeps its preview. A RAW set without a usable full camera source takes RAW mode.
+    public func screen(
+        for request: DetailRequest, consumer: UUID = UUID(),
+        priority: DetailPriority = .visible
+    ) async throws -> DetailResult {
+        try await enqueue(request, consumer: consumer, effort: .screen, priority: priority)
+    }
+
+    /// Zoom beyond the shown pixels, or an explicit 100% request.
+    public func image(for request: DetailRequest, consumer: UUID = UUID()) async throws
+        -> DetailResult
+    {
         try await enqueue(request, consumer: consumer, effort: .best, priority: .visible)
     }
 
-    /// Fills the cache with the neighbours' embedded previews.
-    ///
-    /// G1 "Scheduling and cache": prefetch covers embedded previews only, never a RAW render,
-    /// and is the first work dropped when the queue is full or ``cancelPrefetch()`` is called.
-    /// Results are discarded; this returns once every request has settled or been dropped.
+    /// Embedded previews only. One-ahead RAW work is explicitly requested through screen().
     public func prefetch(_ requests: [DetailRequest]) async {
         await withTaskGroup(of: Void.self) { group in
-            for request in requests {
-                group.addTask {
-                    _ = try? await self.preview(for: request, priority: .prefetch)
-                }
+            for request in requests.prefix(2) {
+                group.addTask { _ = try? await self.preview(for: request, priority: .prefetch) }
             }
         }
     }
 
-    /// Drops every queued prefetch. Running previews keep their slot until they finish, so a
-    /// dropped request never delivers late pixels.
     public func cancelPrefetch() {
         for job in Array(jobs.values) where job.priority == .prefetch { cancel(job.id) }
     }
 
-    /// Releases every cached image, previews and the native render, and drops queued
-    /// prefetch.
-    ///
-    /// The app calls this from its memory-warning handler; nothing in this module observes
-    /// UIKit, so it builds and tests on macOS (G1 "Scheduling and cache"). Neighbour
-    /// prefetch is the first work dropped.
+    public func takeScreenRenderDurations() -> [Double] { cache.takeRenderDurations() }
+
     public func releaseCachedImages() {
+        for job in Array(jobs.values) { cancel(job.id) }
         cache.releaseAll()
-        cancelPrefetch()
     }
 
-    /// Stops accepting work, cancels requests and waits for running reads to drain.
-    ///
-    /// After this returns the caller can release the folder's security scope. An in-flight
-    /// native render cannot be interrupted, so `close` waits for it and discards its result.
+    /// Waits for uncancellable reads before the folder's security scope can end.
     public func close() async {
         closed = true
         for id in Array(jobs.keys) { cancel(id) }
-        if !active.isEmpty {
-            await withCheckedContinuation { closeWaiters.append($0) }
-        }
+        cache.releaseAll()
+        if !active.isEmpty { await withCheckedContinuation { closeWaiters.append($0) } }
     }
 
     var queuedCount: Int { queue.count }
@@ -197,7 +128,8 @@ public actor DetailPipeline {
     var activeRenderCount: Int { active.values.filter { $0 == .render }.count }
 
     private func enqueue(
-        _ request: DetailRequest, consumer: UUID, effort: Effort, priority: DetailPriority
+        _ request: DetailRequest, consumer: UUID, effort: Effort,
+        priority: DetailPriority
     ) async throws -> DetailResult {
         let id = UUID()
         let cancellation = DetailCancellation()
@@ -216,16 +148,12 @@ public actor DetailPipeline {
                         return
                     }
                 }
-                if effort == .best {
-                    // G1 "Scheduling and cache": obsolete RAW work never piles up. A queued
-                    // render can only be stale once a newer one is requested, so drop it
-                    // before it enters the native call and let the latest render next.
+                if effort != .previewOnly && priority == .visible {
                     for queued in queue where jobs[queued]?.lane == .render { cancel(queued) }
                 }
-                let job = Job(
+                jobs[id] = Job(
                     id: id, consumer: consumer, request: request, effort: effort,
                     priority: priority, cancellation: cancellation, continuation: continuation)
-                jobs[id] = job
                 latest[consumer] = id
                 queue.append(id)
                 drain()
@@ -242,38 +170,25 @@ public actor DetailPipeline {
         queue.removeAll { $0 == id }
         if latest[job.consumer] == id { latest[job.consumer] = nil }
         job.continuation.resume(throwing: CancellationError())
-        // An active slot is released only by complete(), after its read drains.
     }
 
     private func drain() {
-        while active.values.filter({ $0 == .render }).count < 1,
-            let index = nextIndex(lane: .render, priority: nil)
-        {
+        while activeRenderCount < 1, let index = nextIndex(lane: .render) {
             start(queue.remove(at: index))
         }
         while active.values.filter({ $0 == .preview }).count < previewWorkers,
-            let index = nextIndex(lane: .preview, priority: nil)
-        {
-            start(queue.remove(at: index))
-        }
+            let index = nextIndex(lane: .preview)
+        { start(queue.remove(at: index)) }
     }
 
-    /// The photo on screen comes before neighbour prefetch (G1 "Scheduling and cache").
-    private func nextIndex(lane: Lane, priority: DetailPriority?) -> Int? {
-        if let priority {
-            queue.firstIndex { jobs[$0]?.lane == lane && jobs[$0]?.priority == priority }
-        } else {
-            queue.firstIndex { jobs[$0]?.lane == lane && jobs[$0]?.priority == .visible }
-                ?? queue.firstIndex { jobs[$0]?.lane == lane }
-        }
+    private func nextIndex(lane: Lane) -> Int? {
+        queue.firstIndex { jobs[$0]?.lane == lane && jobs[$0]?.priority == .visible }
+            ?? queue.firstIndex { jobs[$0]?.lane == lane }
     }
 
     private func start(_ id: UUID) {
         guard let job = jobs[id] else { return }
-        guard !job.cancellation.isCancelled else {
-            cancel(id)
-            return
-        }
+        guard !job.cancellation.isCancelled else { cancel(id); return }
         active[id] = job.lane
         let cache = cache
         let reader = reader
@@ -304,166 +219,187 @@ public actor DetailPipeline {
         }
     }
 
-    /// One request, end to end, off the actor: previews, cache and at most one render.
+    private nonisolated static func cameraSource(_ request: DetailRequest, cache: DetailCache)
+        -> DetailSource?
+    {
+        guard request.raw != nil, request.mode == .cameraPreviewFirst else { return nil }
+        for source in [request.heif, request.jpeg].compactMap({ $0 }) {
+            if !cache.cameraFailed(source), isCurrent(source),
+                DetailNativeSize.header(source) != nil
+            {
+                return source
+            }
+        }
+        return nil
+    }
+
     private nonisolated static func perform(
-        _ job: Job, cache: DetailCache, reader: any DetailReading,
-        sizes: any DetailNativeSizeReading
+        _ job: Job, cache: DetailCache,
+        reader: any DetailReading, sizes: any DetailNativeSizeReading
     ) async -> DetailResult {
+        let request = job.request
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-        var best: DetailImage?
+        if let raw = request.raw, !isCurrent(raw) { return .unavailable(.sourceChanged) }
+        var camera = cameraSource(request, cache: cache)
+        let usesRAW = request.raw != nil && camera == nil
+        if usesRAW, let held = cache.screen(for: request), job.effort != .best {
+            return verified(.available(held))
+        }
+
+        var best: DetailImage? = usesRAW ? cache.screen(for: request) : nil
         var failures: [DetailFailure] = []
-        for step in DetailPreviewPlan.steps(for: job.request) {
-            let source = step.source
-            // A file that changed since the request was built must not deliver pixels.
-            guard isCurrent(source) else { return .unavailable(.sourceChanged) }
+        for step in best == nil ? DetailPreviewPlan.steps(for: request) : [] {
+            guard isCurrent(step.source) else { return .unavailable(.sourceChanged) }
             let key = DetailCacheKey(
-                source: source, locationIdentity: job.request.locationIdentity,
-                purpose: step.purpose(displayPixels: job.request.displayPixels))
+                source: step.source, locationIdentity: request.locationIdentity,
+                purpose: step.purpose(displayPixels: request.displayPixels))
             var image = cache.preview(for: key)
             if image == nil {
                 if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-                switch await reader.read(step, displayPixels: job.request.displayPixels) {
+                switch await reader.read(step, displayPixels: request.displayPixels) {
                 case .image(let pixels):
                     let candidate = DetailImage(
-                        image: pixels, source: source, quality: step.quality, hasRAW: false)
+                        image: pixels, source: step.source,
+                        quality: step.quality, hasRAW: false)
                     cache.storePreview(candidate, for: key)
                     image = candidate
-                case .cannotOpen:
-                    failures.append(.cannotOpen)
-                case .noUsablePreview:
-                    failures.append(.noUsablePreview)
+                case .cannotOpen: failures.append(.cannotOpen)
+                case .noUsablePreview: failures.append(.noUsablePreview)
                 }
             }
             guard let image else { continue }
-            // G1 "Preview, detail (I2)": stop at the first source with a usable preview. A
-            // later source is only tried when this one could not be opened, has no preview
-            // or is tiny; a bigger view never reads more preview sources by itself, because
-            // that is `image(for:)`'s render route, not navigation's.
-            if DetailPreviewPlan.isUsable(image, from: step) {
-                best = image
-                break
-            }
-            // Every source is tiny: show the earliest preferred one rather than none.
+            if DetailPreviewPlan.isUsable(image, from: step) { best = image; break }
             if best == nil { best = image }
         }
-
-        guard let preview = best else {
-            // "Cannot open" only when no route even opened a file, so a readable file with
-            // no preview is never reported as unreadable.
-            let failure =
-                failures.allSatisfy { $0 == .cannotOpen } && !failures.isEmpty
-                ? DetailFailure.cannotOpen : DetailFailure.noUsablePreview
-            return .unavailable(failure)
-        }
-        // A request that was cancelled before the preview arrived must not pay for the size read:
-        // the pure-preview swipe path runs this off the main actor, and the read is the slowest
-        // thing in it (PRD P0-04; G1 "Scheduling and cache").
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-        // Read once per photo, against the preview that is about to be shown: a RAW is never
-        // smaller than its embedded preview, which is how a size that describes the preview is
-        // told apart from the sensor's (PRD P0-04; G1 "Preview, detail (I2)").
-        let fullResolutionSize = fullResolutionSize(
-            for: job.request, previewLongEdge: preview.longEdge, cache: cache, sizes: sizes)
-        // A cached bitmap can outlive the request that stored it: a HIF companion has its own
-        // cache identity while the photo's size comes from the RAW. This request's answer wins,
-        // so a companion preview never answers with another reference's 100% (PRD P0-04).
-        let shown = preview.withFullResolution(
-            fullResolutionSize, hasRAW: job.request.raw != nil)
-        guard job.effort == .best else { return verified(.available(shown)) }
+        let fullSize: CGSize?
+        if let camera {
+            fullSize = sizes.nativeSize(of: camera, isRAW: false)
+        } else {
+            fullSize = fullResolutionSize(
+                for: request, previewLongEdge: best?.longEdge ?? 0,
+                cache: cache, sizes: sizes)
+        }
+        let shown = best?.withFullResolution(fullSize, hasRAW: request.raw != nil)
+        if job.effort == .previewOnly {
+            if let shown { return verified(.available(shown)) }
+            return missing(failures)
+        }
+        if job.effort == .screen, camera != nil || request.raw == nil {
+            return shown.map { verified(.available($0)) } ?? missing(failures)
+        }
 
-        let needsMorePixels =
-            job.request.wantsNativeResolution || preview.longEdge < job.request.displayPixels
-        guard needsMorePixels else { return verified(.available(shown)) }
-
-        if let raw = job.request.raw {
-            guard isCurrent(raw) else { return .unavailable(.sourceChanged) }
+        if job.effort == .best, let fullCamera = camera {
             let key = DetailCacheKey(
-                source: raw, locationIdentity: job.request.locationIdentity, purpose: .nativeRAW)
-            // The revision is part of the key, so a hit is already this photo's render.
-            if let cached = cache.native(for: key) { return verified(.available(cached)) }
+                source: fullCamera, locationIdentity: request.locationIdentity,
+                purpose: .fullRaster)
+            if let held = cache.native(for: key) { return verified(.available(held)) }
+            cache.releaseNative()
+            if case .image(let pixels) = await reader.fullRaster(fullCamera) {
+                let decoded = DetailImage(
+                    image: pixels, source: fullCamera, quality: .raster,
+                    hasRAW: true, fullResolutionSize: pixelSize(pixels))
+                return publish(decoded, job: job) { cache.storeNative(decoded, for: key) }
+            }
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-            // G1 "Scheduling and cache": release the old native image before rendering next.
+            cache.recordCameraFailure(fullCamera)
+            // A failed HIF may still have a JPEG companion. Otherwise this entire photo
+            // uses RAW, including subsequent fit requests and held-render returns.
+            camera = cameraSource(request, cache: cache)
+            if camera != nil {
+                return await perform(job, cache: cache, reader: reader, sizes: sizes)
+            }
+        }
+
+        if let raw = request.raw {
+            if job.effort == .screen {
+                let start = ContinuousClock.now
+                guard let pixels = await reader.screenRAW(raw, longEdge: request.screenPixels)
+                else {
+                    return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
+                        ?? missing(failures)
+                }
+                let duration = start.duration(to: .now)
+                let milliseconds =
+                    Double(duration.components.seconds) * 1000
+                    + Double(duration.components.attoseconds) / 1e15
+                let rendered = DetailImage(
+                    image: pixels, source: raw, quality: .screenRAW,
+                    hasRAW: true, fullResolutionSize: fullSize)
+                return publish(rendered, job: job) {
+                    cache.storeScreen(rendered, for: request)
+                    cache.recordRenderDuration(milliseconds)
+                }
+            }
+            let key = DetailCacheKey(
+                source: raw, locationIdentity: request.locationIdentity,
+                purpose: .nativeRAW)
+            if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
             guard let pixels = await reader.nativeRAW(raw) else {
-                return verified(.available(shown.limited(by: .rawRenderFailed)))
+                return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
+                    ?? missing(failures)
             }
-            guard isCurrent(raw) else { return .unavailable(.sourceChanged) }
             let rendered = DetailImage(
-                image: pixels, source: raw, quality: .nativeRAW, hasRAW: true,
-                fullResolutionSize: renderedSize(
-                    pixels, known: fullResolutionSize, source: raw))
-            cache.storeNative(rendered, for: key)
-            // The render is the photo's own pixels, so its size is the native size a later read
-            // would have looked for. Remembering it means coming back to this photo needs no new
-            // decoder read (PRD P0-04; G1 "Preview, detail (I2)").
-            if fullResolutionSize == nil {
+                image: pixels, source: raw, quality: .nativeRAW,
+                hasRAW: true, fullResolutionSize: renderedSize(pixels, known: fullSize, source: raw)
+            )
+            return publish(rendered, job: job) {
+                cache.storeNative(rendered, for: key)
                 cache.store(nativeSize: .known(pixelSize(pixels)), for: raw)
             }
-            return verified(.available(rendered))
         }
 
-        if let jpeg = job.request.jpeg, job.request.wantsNativeResolution {
-            // G1 "Preview, detail (I2)": JPEG-primary 100% is a bounded raster decode. A
-            // zoomed display request was already answered at its own size by the raster
-            // step above, and decoding the file again would produce the same pixels.
-            guard isCurrent(jpeg) else { return .unavailable(.sourceChanged) }
+        if let jpeg = request.jpeg, request.wantsNativeResolution {
             let key = DetailCacheKey(
-                source: jpeg, locationIdentity: job.request.locationIdentity, purpose: .fullRaster)
-            if let cached = cache.preview(for: key) { return verified(.available(cached)) }
-            if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
+                source: jpeg, locationIdentity: request.locationIdentity,
+                purpose: .fullRaster)
+            if let held = cache.native(for: key) { return verified(.available(held)) }
+            cache.releaseNative()
             if case .image(let pixels) = await reader.fullRaster(jpeg) {
                 var decoded = DetailImage(
-                    image: pixels, source: jpeg, quality: .raster, hasRAW: false,
-                    fullResolutionSize: renderedSize(
-                        pixels, known: fullResolutionSize, source: jpeg))
-                // A decode capped below the photo's size is all this route can give, so the
-                // shortfall is reported instead of asked for again (PRD P0-04; G1 "Preview,
-                // detail (I2)").
-                if let fullResolutionSize,
-                    max(fullResolutionSize.width, fullResolutionSize.height)
-                        > CGFloat(max(pixels.width, pixels.height))
-                {
+                    image: pixels, source: jpeg, quality: .raster,
+                    hasRAW: false, fullResolutionSize: fullSize ?? pixelSize(pixels))
+                if let fullSize, max(fullSize.width, fullSize.height) > CGFloat(decoded.longEdge) {
                     decoded = decoded.limited(by: .noHigherResolution)
                 }
-                cache.storePreview(decoded, for: key)
-                return verified(.available(decoded))
+                return publish(decoded, job: job) { cache.storeNative(decoded, for: key) }
             }
-            return verified(.available(shown.limited(by: .noHigherResolution)))
         }
-
-        // No RAW and no JPEG: a HIF is never fully decoded (G1 "Preview, detail (I2)"), so
-        // the preview is the maximum and the shortfall is reported rather than hidden.
-        return verified(.available(shown.limited(by: .noHigherResolution)))
+        return shown.map { verified(.available($0.limited(by: .noHigherResolution))) }
+            ?? missing(failures)
     }
 
-    /// Checks the delivered file's revision once more, after all IO, so no stale pixels leave.
+    /// Cache insertion and cancellation share the same lock, so obsolete renders
+    /// cannot re-populate a cache cleared on navigation, close or memory pressure.
+    private nonisolated static func publish(
+        _ image: DetailImage, job: Job,
+        store: () -> Void
+    ) -> DetailResult {
+        guard isCurrent(image.source) else { return .unavailable(.sourceChanged) }
+        job.cancellation.deliver { cancelled in if !cancelled { store() } }
+        return .available(image)
+    }
+
+    private nonisolated static func missing(_ failures: [DetailFailure]) -> DetailResult {
+        .unavailable(
+            !failures.isEmpty && failures.allSatisfy { $0 == .cannotOpen }
+                ? .cannotOpen : .noUsablePreview)
+    }
+
     private nonisolated static func verified(_ result: DetailResult) -> DetailResult {
         guard case .available(let image) = result else { return result }
         return isCurrent(image.source) ? result : .unavailable(.sourceChanged)
     }
 
-    /// The photo's oriented full-resolution pixel size, read once per photo (PRD P0-04; G1
-    /// "Preview, detail (I2)").
-    ///
-    /// G1 decision 1: with a RAW, the RAW is the photo; without one, the JPEG is. A HIF is never
-    /// fully decoded, so it has no larger size to report and the pixels' own size stands in. The
-    /// answer is cached per source revision, including an unknown one, so a preview and its
-    /// render read the file once. A file whose revision changed since the request was built
-    /// answers nil, so no stale size reaches the view; the pixel steps report that change
-    /// themselves.
-    ///
-    /// A RAW's answer must be larger than the preview on screen: a RAW is never smaller than its
-    /// embedded preview, so a size that is no larger describes the preview rather than the sensor.
-    /// That answer is treated as unknown and printed once per photo, so a device log shows the
-    /// cause (#111).
     private nonisolated static func fullResolutionSize(
-        for request: DetailRequest, previewLongEdge: Int, cache: DetailCache,
-        sizes: any DetailNativeSizeReading
+        for request: DetailRequest,
+        previewLongEdge: Int, cache: DetailCache, sizes: any DetailNativeSizeReading
     ) -> CGSize? {
         guard let reference = request.raw ?? request.jpeg, isCurrent(reference) else { return nil }
         if let cached = cache.nativeSize(for: reference) {
             switch cached {
-            case .known(let size): return size
+            case .known(let size): return size;
             case .unknown: return nil
             }
         }
@@ -471,32 +407,22 @@ public actor DetailPipeline {
         if let read = size, request.raw != nil,
             max(read.width, read.height) <= CGFloat(previewLongEdge)
         {
-            print(
-                "DETAIL native-size-untrusted read=\(Int(read.width))x\(Int(read.height))"
-                    + " preview_long_edge=\(previewLongEdge)"
-                    + " file=\(reference.url.lastPathComponent)")
             size = nil
         }
-        cache.store(
-            nativeSize: size.map(DetailCache.NativeSize.known) ?? .unknown, for: reference)
+        cache.store(nativeSize: size.map(DetailCache.NativeSize.known) ?? .unknown, for: reference)
         return size
     }
 
-    /// The size a render reports as 100% (PRD P0-04; G1 "Preview, detail (I2)").
-    ///
-    /// The rendered pixels are what 100% means; a size read from a header can be rounded or
-    /// cropped by the decoder, and the device check wants to see where. A difference is printed
-    /// once per render instead of silently correcting the pixels, and the render's own size is
-    /// what the view uses from then on.
     private nonisolated static func renderedSize(
-        _ pixels: CGImage, known: CGSize?, source: DetailSource
+        _ pixels: CGImage, known: CGSize?,
+        source: DetailSource
     ) -> CGSize {
         let size = pixelSize(pixels)
         if let known, known != size {
             print(
                 "DETAIL native-size-mismatch known=\(Int(known.width))x\(Int(known.height))"
-                    + " render=\(pixels.width)x\(pixels.height)"
-                    + " file=\(source.url.lastPathComponent)")
+                    + " render=\(pixels.width)x\(pixels.height) file=\(source.url.lastPathComponent)"
+            )
         }
         return size
     }

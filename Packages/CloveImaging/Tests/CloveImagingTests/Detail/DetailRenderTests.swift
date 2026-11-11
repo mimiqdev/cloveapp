@@ -6,16 +6,15 @@ import Testing
 /// When the RAW route is allowed to run (G1 "Preview, detail (I2)"; PRD P0-04).
 @Suite(.serialized, .enabled(if: DetailFixtures.hasFormats))
 struct DetailRenderTests {
-    @Test func fitViewNeverRendersTheRaw() async throws {
+    @Test func rawFitUpgradeRendersAtScreenSize() async throws {
         let gate = DetailReadGate()
         let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
         let image = try availableDetail(
-            try await pipeline.image(
+            try await pipeline.screen(
                 for: try rawRequest(DetailFixtures.file("canon-eos-r6.CR3"), displayPixels: 1200)))
-        // G1: never render a RAW during plain fit-view navigation.
-        #expect(await gate.nativePaths.isEmpty)
-        #expect(image.quality == .preview)
-        #expect(image.longEdge == 2000)
+        #expect(await gate.nativePaths.count == 1)
+        #expect(image.quality == .screenRAW)
+        #expect(image.longEdge == 1200)
         #expect(image.limitation == nil)
     }
 

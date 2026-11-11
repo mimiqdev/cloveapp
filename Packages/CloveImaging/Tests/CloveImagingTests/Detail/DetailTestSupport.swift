@@ -292,6 +292,19 @@ struct GatedDetailReader: DetailReading {
         await delegate.fullRaster(source)
     }
 
+    func screenRAW(_ source: DetailSource, longEdge: Int) async -> CGImage? {
+        await gate.beginNative(source)
+        let pixels: CGImage?
+        switch await gate.behaviour {
+        case .synthetic:
+            pixels = try? makeDetailImage(width: longEdge, height: max(1, longEdge * 2 / 3))
+        case .real: pixels = await delegate.screenRAW(source, longEdge: longEdge)
+        case .fail: pixels = nil
+        }
+        await gate.endNative()
+        return pixels
+    }
+
     func nativeRAW(_ source: DetailSource) async -> CGImage? {
         await gate.beginNative(source)
         let behaviour = await gate.behaviour

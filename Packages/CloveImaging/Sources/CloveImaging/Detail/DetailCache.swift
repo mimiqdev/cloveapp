@@ -9,6 +9,7 @@ enum DetailCachePurpose: Hashable, Sendable {
     case displayRaster(Int)
     case fullRaster
     case nativeRAW
+    case screenRAW(Int)
 }
 
 /// Identity of one detail image (G1 "Scheduling and cache": source identity and revision).
@@ -67,6 +68,12 @@ public final class DetailCache: Sendable {
         var previewCost = 0
         var native: (key: DetailCacheKey, image: DetailImage)?
         var nativeSizes: [DetailSource: NativeSize] = [:]
+        var screens: [DetailCacheKey: (image: DetailImage, position: Int)] = [:]
+        var currentPosition = 0
+        var screenWindow: Set<DetailCacheKey>?
+        var currentPhoto: DetailCacheKey?
+        var cameraFailures: Set<DetailSource> = []
+        var renderDurations: [Double] = []
         var tick: UInt64 = 0
     }
 
@@ -92,6 +99,80 @@ public final class DetailCache: Sendable {
             state.previewCost = 0
             state.native = nil
             state.nativeSizes.removeAll()
+            state.screens.removeAll()
+        }
+    }
+
+    /// Retains only the current photo and its immediate neighbours. Changing photo
+    /// releases the sole full decode before the next one can be allocated.
+    func navigate(to request: DetailRequest, neighbours: [DetailRequest]) {
+        state.withLock { state in
+            let photo = Self.fullKey(request)
+            if state.currentPhoto != photo { state.native = nil }
+            state.currentPhoto = photo
+            state.currentPosition = request.position
+            let window = Set(([request] + neighbours.prefix(2)).compactMap(Self.screenKey))
+            state.screenWindow = window
+            state.screens = state.screens.filter { window.contains($0.key) }
+        }
+    }
+
+    static func screenKey(_ request: DetailRequest) -> DetailCacheKey? {
+        request.raw.map {
+            DetailCacheKey(
+                source: $0, locationIdentity: request.locationIdentity,
+                purpose: .screenRAW(request.screenPixels))
+        }
+    }
+
+    static func fullKey(_ request: DetailRequest) -> DetailCacheKey {
+        DetailCacheKey(
+            source: request.raw ?? request.jpeg ?? request.heif!,
+            locationIdentity: request.locationIdentity,
+            purpose: request.mode == .rawFirst ? .nativeRAW : .fullRaster)
+    }
+
+    func screen(for request: DetailRequest) -> DetailImage? {
+        guard let key = Self.screenKey(request) else { return nil }
+        return state.withLock { $0.screens[key]?.image }
+    }
+
+    func storeScreen(_ image: DetailImage, for request: DetailRequest) {
+        guard let key = Self.screenKey(request) else { return }
+        state.withLock { state in
+            if let window = state.screenWindow, !window.contains(key) { return }
+            state.screens[key] = (image, request.position)
+            while state.screens.count > 3 {
+                let farthest = state.screens.max {
+                    abs($0.value.position - state.currentPosition)
+                        < abs($1.value.position - state.currentPosition)
+                }!.key
+                state.screens[farthest] = nil
+            }
+        }
+    }
+
+    var screenCount: Int { state.withLock { $0.screens.count } }
+
+    func cameraFailed(_ source: DetailSource) -> Bool {
+        state.withLock { $0.cameraFailures.contains(source) }
+    }
+
+    func recordCameraFailure(_ source: DetailSource) {
+        state.withLock { _ = $0.cameraFailures.insert(source) }
+    }
+
+    func recordRenderDuration(_ milliseconds: Double) {
+        state.withLock {
+            if $0.renderDurations.count < 5 { $0.renderDurations.append(milliseconds) }
+        }
+    }
+
+    func takeRenderDurations() -> [Double] {
+        state.withLock {
+            let durations = $0.renderDurations
+            $0.renderDurations.removeAll()
+            return durations
         }
     }
 
