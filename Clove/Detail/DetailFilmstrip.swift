@@ -55,23 +55,14 @@ struct DetailFilmstrip: View {
                             Button {
                                 open(photo.id)
                             } label: {
-                                DetailPhotoFrame(
-                                    photo: photo, isCurrent: false, thumbnails: thumbnails,
-                                    side: 54, height: 60, showsMarks: false
-                                )
-                                .padding(.top, 4)
-                                .background {
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .fill(Color.clove.text.secondary).opacity(0.35)
-                                        .padding(.horizontal, 4)
+                                GroupStack(peek: 4) {
+                                    DetailPhotoFrame(
+                                        photo: photo, isCurrent: false, thumbnails: thumbnails,
+                                        side: 54, height: 60, showsMarks: false)
                                 }
-                                .overlay(alignment: .bottomTrailing) {
-                                    Text(group.members.count.formatted())
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(Color.clove.bg.canvas)
-                                        .padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(Color.clove.group, in: Capsule())
-                                        .padding(2)
+                                .frame(width: 54, height: 64)
+                                .overlay(alignment: .topTrailing) {
+                                    GroupCountBadge(count: group.members.count).padding(2)
                                 }
                             }
                             .buttonStyle(.plain)
