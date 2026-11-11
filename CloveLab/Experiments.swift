@@ -1,5 +1,6 @@
 import FolderAccessProbe
 import PreviewProbe
+import RAWDisplayProbe
 import XMPProbe
 import EmbeddedMetadataProbe
 import GroupingProbe
@@ -45,5 +46,6 @@ enum Experiments {
         Experiment(GroupingProbe.descriptor, topic: "Grouping") { GroupingView() },
         Experiment(ScanProbe.descriptor, topic: "Scan") { ScanView() },
         Experiment(FoldStateProbe.descriptor, topic: "Fold state") { FoldStateView() },
+        Experiment(RAWDisplayProbe.descriptor, topic: "RAW display") { RAWDisplayView() },
     ]
 }
