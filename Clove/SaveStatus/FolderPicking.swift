@@ -69,7 +69,7 @@ struct FolderPickingModifier: ViewModifier {
         guard let presentation = activePresentation else { return }
         dismiss(presentation)
         activePresentation = nil
-        let picked = handoff.dismissed(presentation)
+        let picked = handoff.dismissed(presentation, requestedAgain: &isPresented)
         if isPresented {
             presentIfRequested()
         } else {
