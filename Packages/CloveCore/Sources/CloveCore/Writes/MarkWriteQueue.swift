@@ -474,8 +474,8 @@ public actor MarkWriteQueue {
     ///
     /// G1 decisions 2 and 6 route a RAW set's rating (Reject included) and label to its sidecar
     /// and a standalone JPEG/HIF's to Clove storage, so one photo never needs two writes for one
-    /// mark. Both parts are attempted before a failure is reported, so a rating survives a label
-    /// refusal and a retry repeats only what is still unconfirmed.
+    /// mark. A failure is reported after both parts were attempted, and a retry repeats only what
+    /// is still unconfirmed.
     private func perform(_ change: MarkChange, for set: ScannedPhotoSet) async -> MarkWriteFailure?
     {
         let persistence = set.photoSet.markPersistence
