@@ -30,7 +30,7 @@ How tasks in the [development plan](DEV-PLAN.md) move from a GitHub issue to a m
 
 ### 1. Issue (supervisor)
 
-Every task starts as a GitHub issue created from the [task template](../.github/ISSUE_TEMPLATE/task.md). The title is `[<ID>] <task name>`, for example `[T0.2] Repository skeleton`. The issue is the worker's complete brief: goal, scope, acceptance criteria, files to read, and the checks to run. The issue lists its dependencies, and the supervisor starts it only after they have merged.
+Every task starts as a GitHub issue created from the [task template](../.github/ISSUE_TEMPLATE/task.md). The title is `[<ID>] <task name>`, for example `[T0.2] Repository skeleton`. The issue is the worker's complete brief: goal, scope, acceptance criteria, files to read, and the checks to run. The issue lists its dependencies, and the supervisor starts it only after they have merged. Before writing the issue's decisions, the supervisor puts every piece of state and failure handling the issue adds through the three questions in [AGENTS.md](../AGENTS.md#keep-it-simple), "Keep it simple", and cuts what fails them.
 
 Labels: `task` or `spike`, plus `device` when real-device verification is needed, `blocked`, and `needs-decision`.
 
@@ -85,8 +85,9 @@ For `blocked` or `needs-decision`, the worker also comments the same block on th
 ### 5. Review (supervisor)
 
 1. Read the diff against the issue's acceptance criteria and the PRD.
-2. Check the CI run on the pull request's latest push. Re-run on the Mac only what CI cannot cover, such as device checks or a timing the issue asks for. The worker's pasted output is not enough on its own.
-3. Then one of:
+2. Ask whether each new state, branch or recovery path is needed ([AGENTS.md](../AGENTS.md#keep-it-simple), "Keep it simple"). When a finding sits inside machinery that isn't needed, the fix is to delete the machinery, not patch it.
+3. Check the CI run on the pull request's latest push. Re-run on the Mac only what CI cannot cover, such as device checks or a timing the issue asks for. The worker's pasted output is not enough on its own.
+4. Then one of:
    - **Small problems:** the supervisor fixes them on the branch.
    - **Larger problems:** a new worker thread on the same checkout, briefed with the findings as a review comment on the pull request. Its report uses the same block.
    - **Product or scope questions:** go to the product owner. The issue gets `needs-decision`.

@@ -176,6 +176,15 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.photo.mmq02680").tap()
         let info = element(app, "clove.detail.info")
         XCTAssertTrue(info.waitForExistence(timeout: 5))
+        let navigationPreview = element(app, "clove.detail.preview")
+        let navigationStart = ContinuousClock.now
+        navigationPreview.swipeLeft()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+        print(
+            "Detail navigation swipe to next filename (informational, XCTest input included): \(navigationStart.duration(to: .now))"
+        )
+        navigationPreview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
         info.tap()
         XCTAssertTrue(app.staticTexts["Sample camera · 0123"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["24–70 mm"].exists)
@@ -351,6 +360,27 @@ final class CloveFlowTests: XCTestCase {
                 element(partial, "clove.moves.details.sheet").waitForExistence(timeout: 5))
             capture("move-details-\(theme)")
             partial.terminate()
+        }
+    }
+
+    /// Opt-in visual evidence for the shared stack and badge in the three reference themes.
+    @MainActor
+    func testCaptureStackReferencesWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_STACKS"] == "1")
+        for theme in ["light", "dark", "nord"] {
+            let app = launchSample()
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            capture("stacks-expanded-\(theme)")
+            element(app, "clove.grid.more").tap()
+            app.buttons["Settings"].tap()
+            chooseCollapsedGrid(app)
+            element(app, "clove.nav.back").tap()
+            capture("stacks-collapsed-\(theme)")
+            element(app, "clove.grid.photo.mmq02682").tap()
+            XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+            capture("stacks-filmstrip-\(theme)")
+            app.terminate()
         }
     }
 

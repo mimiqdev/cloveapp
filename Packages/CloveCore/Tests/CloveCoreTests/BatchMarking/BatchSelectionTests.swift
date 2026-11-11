@@ -11,7 +11,7 @@ struct BatchSelectionTests {
     @Test func aPhotoCellSelectsAndTogglesOnlyThatPhoto() {
         let photo = BatchMarkFixtures.photo("a")
         let cell = GridCellItem(
-            id: .photo(photo), photo: BatchMarkFixtures.gridPhoto("a"))
+            id: .photo(photo), photo: BatchMarkFixtures.gridPhoto("a"), isDimmed: false)
         let empty = BatchSelection()
 
         #expect(empty.identities(for: cell) == [photo])
