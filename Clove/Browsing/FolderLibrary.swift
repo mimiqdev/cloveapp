@@ -163,6 +163,10 @@ protocol FolderLibrary: AnyObject {
     /// cannot move answers with a stream that finishes at once.
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress>
 
+    func undoRejectMove(
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+    ) async throws -> RejectMoveUndoResult
+
     /// The latest change to one photo with its save state (PRD P0-08).
     ///
     /// It answers from the library's current records, synchronously, so a screen can render it.
@@ -379,6 +383,12 @@ extension FolderLibrary {
 
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
         AsyncStream { $0.finish() }
+    }
+
+    func undoRejectMove(
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+    ) async throws -> RejectMoveUndoResult {
+        throw RejectMoveUndoRefusal.unknownBatch(entry.batch)
     }
 
     func runGroupingAgain() async {}

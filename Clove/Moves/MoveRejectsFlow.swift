@@ -18,7 +18,16 @@ final class MoveRejectsFlow: Identifiable {
 
     let id = UUID()
     private let browsing: BrowsingModel
-    private(set) var stage: Stage = .planning
+    private var storedStage: Stage = .planning
+    private(set) var stage: Stage {
+        get {
+            if case .moving(_, let total) = storedStage {
+                return .moving(finished: browsing.rejectMoveFinishedCount, total: total)
+            }
+            return storedStage
+        }
+        set { storedStage = newValue }
+    }
     private(set) var keepSelection: RejectMoveKeepSelection?
     private var confirmationFolder: FolderIdentity?
     private var confirmationGeneration: Int?

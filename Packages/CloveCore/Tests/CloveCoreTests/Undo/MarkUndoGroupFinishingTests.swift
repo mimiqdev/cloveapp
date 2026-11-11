@@ -6,7 +6,7 @@ import Testing
 /// PRD P0-12's finishing actions and DEV-PLAN C5: both can be undone, and completion follows.
 @Suite("Undo of a finishing action")
 struct MarkUndoGroupFinishingTests {
-    /// Runs one finishing action through C10's executor and records it in the history.
+    /// Applies a submitted finishing plan and records its desired before marks in the history.
     private func run(
         _ action: GroupFinishingAction,
         group: SimilarGroup,
@@ -15,19 +15,21 @@ struct MarkUndoGroupFinishingTests {
         fixture: UndoTestFixture,
         completion: GroupCompletionTracker
     ) async -> (result: GroupFinishingResult, entry: MarkUndoEntryID?) {
-        let executor = GroupFinishingExecutor(queue: fixture.queue, completion: completion)
         let plan = GroupFinishingPlan(
             group: group,
             action: action,
             currentPhoto: currentPhoto,
             marks: marks,
             enabledRatings: EnabledRatings.all)
-        let reader = fixture.reader
-        let photoSets = fixture.photoSets
-        let result = await executor.execute(
-            plan,
-            photoSet: { identity in photoSets.first { $0.id == identity } },
-            latestMarks: { await reader.marks(for: $0) })
+        await completion.recordFinishingAction(on: group.id)
+        var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
+        for change in plan.changes {
+            guard let set = fixture.photoSets.first(where: { $0.id == change.photo }) else {
+                continue
+            }
+            statuses[change.photo] = await fixture.queue.apply(change.change, to: set)
+        }
+        let result = GroupFinishingResult.applied(plan, statuses: statuses)
         let entry = await fixture.history.recordGroupFinishing(result.undo)
         return (result, entry)
     }

@@ -227,6 +227,7 @@ final class TestLibrary: FolderLibrary {
 
     /// The entries a retry may resend, one batch per run that had a failure (PRD P0-10).
     private var rejectMoveBatches: [RejectMoveBatchID: [RejectMovePlanEntry]] = [:]
+    private var movedPhotoRecords: [RejectMoveBatchID: [GridPhoto]] = [:]
 
     /// The progress stream the move sheet reads while a sample move runs (PRD P0-10).
     ///
@@ -364,8 +365,8 @@ final class TestLibrary: FolderLibrary {
                         message: "The sample library does not hold this photo.")))
         }
         if disconnectsOnWrite || shouldFailFirstWrite(to: photo) {
-            // PRD How marks reach disk, rule 8: the requested marks stay for a retry and are not
-            // painted onto the photo, so nothing unconfirmed appears as saved.
+            // Keep confirmed storage unchanged. BrowsingModel retains the desired marks and
+            // shows Failed until a later write confirms them.
             let status = MarkChangeStatus(
                 id: id, identity: photo, requested: change,
                 state: .failed(
@@ -425,6 +426,49 @@ final class TestLibrary: FolderLibrary {
         rejectMoveBatches[batch] = nil
         return simulateMove(
             entries.filter { !identities.contains($0.identity) }, batchID: batch)
+    }
+
+    func undoRejectMove(
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+    ) async throws -> RejectMoveUndoResult {
+        guard let moved = movedPhotoRecords.removeValue(forKey: entry.batch) else {
+            throw RejectMoveUndoRefusal.unknownBatch(entry.batch)
+        }
+        var outcomes: [RejectMoveUndoOutcome] = []
+        for photo in moved {
+            guard let set = scannedSet(for: photo) else { continue }
+            stored.append(photo)
+            let status = perform(.rating(.rejected), for: photo.id, id: MarkChangeID())
+            outcomes.append(
+                .restored(
+                    RejectMoveUndoRestoredPhoto(
+                        identity: photo.id, set: set, files: [], keptInConfirmation: false,
+                        rejectStoreFailure: status.state.failure.map {
+                            RejectMoveFailure(classifying: $0)
+                        })))
+        }
+        for kept in entry.keptPhotos {
+            var target = kept.marksAfter
+            target.rating = .rejected
+            guard let current = currentMarks[kept.set.id],
+                DesiredMarkRestore.change(
+                    photo: kept.set.id, current: current, expected: kept.marksAfter,
+                    target: target, fields: .rating(kept.marksAfter.rating)) != nil
+            else {
+                outcomes.append(.changedSince(kept.set.id))
+                continue
+            }
+            let status = perform(.rating(.rejected), for: kept.set.id, id: MarkChangeID())
+            outcomes.append(
+                .restored(
+                    RejectMoveUndoRestoredPhoto(
+                        identity: kept.set.id, set: kept.set, files: [], keptInConfirmation: true,
+                        rejectStoreFailure: status.state.failure.map {
+                            RejectMoveFailure(classifying: $0)
+                        })))
+        }
+        updateContinuation.yield(.photos([]))
+        return RejectMoveUndoResult(id: RejectMoveUndoBatchID(), outcomes: outcomes)
     }
 
     /// The sample's progress steps for one run (PRD P0-10).
@@ -534,13 +578,16 @@ final class TestLibrary: FolderLibrary {
             if case .moved(let set) = outcome { moved.insert(set.identity) }
             rejectMoveContinuation?.yield(.setFinished(outcome))
         }
+        let id = batchID ?? RejectMoveBatchID()
+        movedPhotoRecords[id, default: []].append(
+            contentsOf: stored.filter { moved.contains($0.id) })
         if !moved.isEmpty {
             stored.removeAll { moved.contains($0.id) }
             changes = changes.filter { !moved.contains($0.key) }
             updateGroupsAfterMove(moved)
             updateContinuation.yield(.photos([]))
         }
-        let result = RejectMoveResult(id: batchID ?? RejectMoveBatchID(), outcomes: outcomes)
+        let result = RejectMoveResult(id: id, outcomes: outcomes)
         let failed = Set(result.failed.map(\.identity))
         let retryable = entries.filter { failed.contains($0.identity) }
         if !retryable.isEmpty { rejectMoveBatches[result.id] = retryable }

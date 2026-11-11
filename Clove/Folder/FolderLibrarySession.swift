@@ -145,6 +145,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// A scan still enumerating when the move runs can deliver a set after its files moved, so
     /// these identities are dropped from later scan batches instead of reappearing in the grid.
     private var movedRejectIdentities: Set<PhotoIdentity> = []
+    private var movedPhotoRecords: [PhotoIdentity: GridPhoto] = [:]
 
     /// The watch that reports the open folder's location going away (PRD P0-02, G1 folder access).
     ///
@@ -400,6 +401,9 @@ final class FolderLibrarySession: FolderLibrary {
         let moved = result.movedIdentities
         guard !moved.isEmpty else { return result }
         movedRejectIdentities.formUnion(moved)
+        for photo in store.photos where moved.contains(photo.id) {
+            movedPhotoRecords[photo.id] = photo
+        }
         store.remove(moved)
         publish(.photos([]))
         await startGrouping(generation: scanGeneration)
@@ -424,7 +428,39 @@ final class FolderLibrarySession: FolderLibrary {
         let moved = result.movedIdentities
         guard !moved.isEmpty else { return result }
         movedRejectIdentities.formUnion(moved)
+        for photo in store.photos where moved.contains(photo.id) {
+            movedPhotoRecords[photo.id] = photo
+        }
         store.remove(moved)
+        publish(.photos([]))
+        await startGrouping(generation: scanGeneration)
+        return result
+    }
+
+    func undoRejectMove(
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+    ) async throws -> RejectMoveUndoResult {
+        guard let mover = rejectMover, let session = openSession else {
+            throw FolderSessionError.ended
+        }
+        let result = try await session.withAdmittedWork {
+            try await mover.undo(entry, currentMarks: { currentMarks[$0] })
+        }
+        for restored in result.restored where !restored.keptInConfirmation {
+            store.insert([.photo(restored.set)])
+            if let photo = movedPhotoRecords.removeValue(forKey: restored.identity) {
+                store.setTime(photo.time, for: restored.identity)
+                store.setMarks(photo.marks, for: restored.identity)
+            }
+            movedRejectIdentities.remove(restored.identity)
+        }
+        if case .success(let stores) = await resolvedStores() {
+            for restored in result.restored {
+                if let status = await stores.writes.latestChange(for: restored.identity) {
+                    record(status)
+                }
+            }
+        }
         publish(.photos([]))
         await startGrouping(generation: scanGeneration)
         return result
@@ -682,6 +718,7 @@ final class FolderLibrarySession: FolderLibrary {
         groupCompletionTracker = GroupCompletionTracker()
 
         movedRejectIdentities = []
+        movedPhotoRecords = [:]
         rejectMover = RejectMover(markQueue: stores.writes)
         publishedGroups = []
         hasPublishedGroups = false
@@ -739,6 +776,7 @@ final class FolderLibrarySession: FolderLibrary {
         thumbnailSource = nil
         rejectMover = nil
         movedRejectIdentities = []
+        movedPhotoRecords = [:]
         publishedGroups = []
         hasPublishedGroups = false
         if let grouping {

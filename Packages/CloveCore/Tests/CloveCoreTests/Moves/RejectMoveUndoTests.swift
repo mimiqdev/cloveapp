@@ -44,7 +44,7 @@ struct RejectMoveUndoTests {
         }
 
         let result = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: sets[0].id))
+            undoStep(for: moveResult, returningTo: sets[0].id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.restoredCount == sets.count)
         #expect(result.keptCount == 0)
@@ -98,10 +98,11 @@ struct RejectMoveUndoTests {
         let moveResult = try await fixture.move(try await fixture.plan([moved]))
         #expect(moveResult.movedCount == 1)
         // The run holds the keeps, so the step restores them even when the entry carries none.
-        await fixture.mover.recordKeptPhotos([kept], for: moveResult.id)
+        await fixture.mover.recordKeptPhotos(
+            [RejectMoveKeptPhoto(set: kept, marksAfter: PhotoMarks())], for: moveResult.id)
 
         let result = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: kept.id))
+            undoStep(for: moveResult, returningTo: kept.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.restoredCount == 2)
         #expect(result.keptCount == 1)
@@ -147,7 +148,7 @@ struct RejectMoveUndoTests {
         #expect(fixture.folder.exists("_Rejected/\(sidecarPath)"))
 
         let undoResult = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: set.id))
+            undoStep(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
         #expect(undoResult.restoredCount == 1)
         #expect(fixture.folder.exists(sidecarPath))
         #expect(
@@ -177,9 +178,10 @@ struct RejectMoveUndoTests {
         #expect(try sidecarRating(at: keptSidecar) == .rated(.unrated))
 
         let moveResult = try await fixture.move(try await fixture.plan([moved]))
-        await fixture.mover.recordKeptPhotos([kept], for: moveResult.id)
+        await fixture.mover.recordKeptPhotos(
+            [RejectMoveKeptPhoto(set: kept, marksAfter: PhotoMarks())], for: moveResult.id)
         let result = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: kept.id))
+            undoStep(for: moveResult, returningTo: kept.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.restoredCount == 2)
         #expect(try sidecarRating(at: keptSidecar) == .rated(.rejected))
@@ -206,12 +208,17 @@ struct RejectMoveUndoTests {
         let original = try originalContents(of: [first, second], in: fixture.folder)
         let plan = try await fixture.plan([first, second])
         let blocked = try #require(plan.readyEntries.last?.files.first?.destination)
-        // A file at the second set's destination makes that set fail its first attempt.
-        try fixture.folder.write("intruder", to: relativePath(of: blocked, in: fixture.folder))
+        // A destination occupied after re-planning still fails the exclusive rename.
+        fixture.fileSystem.beforeOperation = { record in
+            if record.step == .move, record.url == blocked, record.count == 1 {
+                try? Data("intruder".utf8).write(to: blocked)
+            }
+        }
         let firstRun = try await fixture.move(plan)
         #expect(firstRun.movedCount == 1)
         #expect(firstRun.failedCount == 1)
-        await fixture.mover.recordKeptPhotos([kept], for: firstRun.id)
+        await fixture.mover.recordKeptPhotos(
+            [RejectMoveKeptPhoto(set: kept, marksAfter: PhotoMarks())], for: firstRun.id)
         try FileManager.default.removeItem(at: blocked)
         let retried = try await fixture.mover.retryFailed(in: firstRun.id)
         let retry = try #require(retried)
@@ -220,7 +227,7 @@ struct RejectMoveUndoTests {
         #expect(retry.id == firstRun.id)
 
         let result = try await fixture.mover.undo(
-            undoStep(for: firstRun, returningTo: first.id))
+            undoStep(for: firstRun, returningTo: first.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.restoredIdentities == [first.id, second.id, kept.id])
         #expect(result.keptCount == 1)
@@ -245,11 +252,11 @@ struct RejectMoveUndoTests {
         let moveResult = try await fixture.move(try await fixture.plan([set]))
         let entry = undoStep(for: moveResult, returningTo: set.id)
 
-        let result = try await fixture.mover.undo(entry)
+        let result = try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         #expect(result.restoredCount == 1)
 
         await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(entry.batch)) {
-            try await fixture.mover.undo(entry)
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         }
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
         #expect(try await storesReject(set, in: fixture))
@@ -266,7 +273,7 @@ struct RejectMoveUndoTests {
             batch: RejectMoveBatchID(), photoToReturnTo: set.id)
 
         await #expect(throws: RejectMoveUndoRefusal.unknownBatch(entry.batch)) {
-            try await fixture.mover.undo(entry)
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         }
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
     }
@@ -285,13 +292,13 @@ struct RejectMoveUndoTests {
         fixture.fileSystem.reportsReadOnlyVolume = true
 
         await #expect(throws: RejectMoveUndoRefusal.self) {
-            try await fixture.mover.undo(entry)
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         }
         #expect(fixture.fileSystem.count(of: .move) == moves)
         #expect(fixture.folder.exists("_Rejected/DCIM/IMG_0001.ARW"))
 
         fixture.fileSystem.reportsReadOnlyVolume = false
-        let result = try await fixture.mover.undo(entry)
+        let result = try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         #expect(result.restoredCount == 1)
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
     }
@@ -314,7 +321,9 @@ struct RejectMoveUndoTests {
         let moveResult = try await fixture.move(try await fixture.plan(sets))
         let entry = undoStep(for: moveResult, returningTo: sets[0].id)
         let stream = await fixture.mover.undoProgressUpdates()
-        let undoTask = Task { try await fixture.mover.undo(entry) }
+        let undoTask = Task {
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+        }
 
         var events: [RejectMoveUndoProgress] = []
         for await event in stream {
@@ -368,8 +377,12 @@ struct RejectMoveUndoTests {
         let stream = await fixture.mover.undoProgressUpdates()
         let firstEntry = undoStep(for: firstRun, returningTo: sets[0].id)
         let secondEntry = undoStep(for: secondRun, returningTo: sets[1].id)
-        let first = Task { try await fixture.mover.undo(firstEntry) }
-        let second = Task { try await fixture.mover.undo(secondEntry) }
+        let first = Task {
+            try await fixture.mover.undo(firstEntry, currentMarks: { _ in PhotoMarks() })
+        }
+        let second = Task {
+            try await fixture.mover.undo(secondEntry, currentMarks: { _ in PhotoMarks() })
+        }
 
         var events: [RejectMoveUndoProgress] = []
         var finishedCount = 0
@@ -416,7 +429,7 @@ struct RejectMoveUndoTests {
         let stream = await fixture.mover.undoProgressUpdates()
 
         await #expect(throws: RejectMoveUndoRefusal.unknownBatch(entry.batch)) {
-            try await fixture.mover.undo(entry)
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         }
 
         var events: [RejectMoveUndoProgress] = []
@@ -436,7 +449,10 @@ private func undoStep(
     for run: RejectMoveResult, keeping kept: [ScannedPhotoSet] = [],
     returningTo photo: PhotoIdentity
 ) -> RejectMoveUndoEntry {
-    RejectMoveUndoEntry(batch: run.id, keptPhotos: kept, photoToReturnTo: photo)
+    RejectMoveUndoEntry(
+        batch: run.id,
+        keptPhotos: kept.map { RejectMoveKeptPhoto(set: $0, marksAfter: PhotoMarks()) },
+        photoToReturnTo: photo)
 }
 
 /// One sidecar's rating, read the way a folder open would read it.

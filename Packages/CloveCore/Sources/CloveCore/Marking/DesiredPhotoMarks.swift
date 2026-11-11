@@ -36,7 +36,7 @@ public struct DesiredPhotoMarks: Sendable {
         revisions[photo] = revision
         let edit = DesiredMarkEdit(
             photo: photo, revision: revision, before: before,
-            after: before.including(change),
+            after: before.applying(change),
             change: entries[photo]?.edit.change.merged(with: change) ?? change)
         entries[photo] = Entry(edit: edit, state: .pending)
         return edit
@@ -61,6 +61,12 @@ public struct DesiredPhotoMarks: Sendable {
 /// Restores only when the complete shown marks still equal what the earlier action left.
 /// The field replacement itself uses the same rule as mark undo.
 public enum DesiredMarkRestore {
+    /// A failed clear or keep must never be retried over a later requested mark.
+    public static func retry(_ edit: DesiredMarkEdit, current: PhotoMarks) -> MarkChange? {
+        guard current == edit.after else { return nil }
+        return edit.change
+    }
+
     public static func change(
         photo: PhotoIdentity, current: PhotoMarks, expected: PhotoMarks,
         target: PhotoMarks, fields: MarkChange

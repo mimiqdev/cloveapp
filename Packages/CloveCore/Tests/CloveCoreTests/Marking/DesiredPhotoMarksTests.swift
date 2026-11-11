@@ -69,7 +69,7 @@ struct DesiredPhotoMarksTests {
         let mark = queue.submit(.mark(edit))
         let move = queue.submit(
             .moveUndo(
-                RejectMoveUndoEntry(batch: RejectMoveBatchID(), photoToReturnTo: photo)))
+                RejectMoveUndoEntry(batch: RejectMoveBatchID(), photoToReturnTo: photo), []))
         let later = queue.submit(.mark(edit))
         #expect(queue.beginNext()?.id == mark)
         #expect(queue.beginNext() == nil)

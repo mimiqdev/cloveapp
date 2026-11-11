@@ -95,11 +95,16 @@ public actor RejectMover {
     /// is honoured between sets only, so a set is never half-attempted.
     ///
     /// Throws only a whole-request refusal; every per-set problem is an outcome.
-    public func move(_ plan: RejectMovePlan) async throws(RejectMoveRefusal) -> RejectMoveResult {
-        try planner.preflight(rootURL: plan.rootURL, configuration: plan.configuration)
+    public func move(_ preview: RejectMovePlan) async throws(RejectMoveRefusal) -> RejectMoveResult
+    {
+        try planner.preflight(rootURL: preview.rootURL, configuration: preview.configuration)
         // G1 decision 5: a mark write still in flight would target the old path, so the run
         // starts after C4 has nothing left to write (PRD P0-08, Failure and recovery).
         await markQueue.drain()
+        let plan = try planner.plan(
+            for: RejectMoveRequest(
+                rootURL: preview.rootURL, sets: preview.sets, configuration: preview.configuration))
+        let difference = RejectMovePlanDifference(preview: preview, actual: plan)
 
         let id = RejectMoveBatchID()
         var outcomes: [RejectMoveOutcome] = []
@@ -118,7 +123,8 @@ public actor RejectMover {
             outcomes.append(outcome)
             publish(.setFinished(outcome))
         }
-        let result = RejectMoveResult(id: id, outcomes: outcomes)
+        let result = RejectMoveResult(
+            id: id, outcomes: outcomes, planDifference: difference.hasChanges ? difference : nil)
         remember(result, plan: plan)
         publish(.finished(result))
         return result
@@ -160,7 +166,8 @@ public actor RejectMover {
         beginRetry(batch)
         defer { endRetry(batch) }
         let retried = try await move(plan)
-        let result = RejectMoveResult(id: batch, outcomes: retried.outcomes)
+        let result = RejectMoveResult(
+            id: batch, outcomes: retried.outcomes, planDifference: retried.planDifference)
         adoptUndoRetry(retried, of: batch)
         // The action keeps its handle; only the sets that still failed stay retryable.
         batches[batch] = batches.removeValue(forKey: retried.id)
