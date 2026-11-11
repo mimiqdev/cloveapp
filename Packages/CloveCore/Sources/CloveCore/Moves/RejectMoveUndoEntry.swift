@@ -19,7 +19,7 @@ public struct RejectMoveUndoEntry: Hashable, Sendable, Identifiable {
     /// set, and the set also lets the grid show the photo again without a rescan. The mover keeps
     /// the same photos on the run as well, so the step restores them whichever handle the caller
     /// holds; passing them here is how one entry carries them all.
-    public let keptPhotos: [ScannedPhotoSet]
+    public let keptPhotos: [RejectMoveKeptPhoto]
     /// Where undo sends the view back to (PRD Undo row: the photo whose mark was undone).
     public let photoToReturnTo: PhotoIdentity
 
@@ -37,7 +37,7 @@ public struct RejectMoveUndoEntry: Hashable, Sendable, Identifiable {
     ///   - photoToReturnTo: The photo the view should return to after undo.
     public init(
         batch: RejectMoveBatchID,
-        keptPhotos: [ScannedPhotoSet] = [],
+        keptPhotos: [RejectMoveKeptPhoto] = [],
         photoToReturnTo: PhotoIdentity
     ) {
         self.batch = batch

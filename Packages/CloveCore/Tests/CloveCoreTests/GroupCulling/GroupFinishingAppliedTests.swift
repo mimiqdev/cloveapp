@@ -158,7 +158,7 @@ struct GroupFinishingAppliedTests {
         let requested = MarkChange(rating: groupCullingRating(3))
         let requestedMarks = groupCullingMarks([
             (kept, PhotoMarks()),
-            (rejected, PhotoMarks().including(requested)),
+            (rejected, PhotoMarks().applying(requested)),
         ])
 
         #expect(requestedMarks[rejected]?.isUnmarked == false)

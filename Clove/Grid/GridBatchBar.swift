@@ -38,7 +38,7 @@ struct GridBatchBar: View {
             Button("Select all") { browsing.selectAllVisible(cells) }
                 .accessibilityIdentifier("clove.grid.batch.selectAll")
         }
-        .disabled(browsing.batchTargets.isEmpty || browsing.isApplyingBatch)
+        .disabled(browsing.batchTargets.isEmpty || browsing.isMovingRejects)
     }
 
     private var isRejected: Bool {
@@ -60,6 +60,6 @@ struct GridBatchBar: View {
     }
 
     private func apply(_ action: BatchMarkAction) {
-        Task { await browsing.applyBatch(action, settings: store.settings) }
+        browsing.applyBatch(action, settings: store.settings)
     }
 }

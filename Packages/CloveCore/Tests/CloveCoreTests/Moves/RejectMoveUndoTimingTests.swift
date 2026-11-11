@@ -42,7 +42,7 @@
             #expect(moved.outcomes.count == 50)
             let entry = RejectMoveUndoEntry(batch: moved.id, photoToReturnTo: sets[0].id)
             let start = clock.now
-            let result = try await mover.undo(entry)
+            let result = try await mover.undo(entry, currentMarks: { _ in PhotoMarks() })
             let elapsed = clock.now - start
             #expect(result.outcomes.count == 50)
             print(

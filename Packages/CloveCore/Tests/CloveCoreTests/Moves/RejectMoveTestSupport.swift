@@ -364,7 +364,9 @@ final class MoveMarkFileSystem: MarkWriteFileSystem, @unchecked Sendable {
         let gate = self.gate
         let failure = self.failure
         lock.unlock()
-        if let semaphore = gate?(url) { semaphore.wait() }
+        if let semaphore = gate?(url), semaphore.wait(timeout: .now() + 5) == .timedOut {
+            throw CocoaError(.fileWriteUnknown)
+        }
         log.append("markWrite")
         if let error = failure?(url) { throw error }
         try backing.writeStaging(data, to: url)

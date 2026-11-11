@@ -84,7 +84,7 @@ struct DetailScreen: View {
     /// through the grid's order and filter (PRD P0-04, P0-06; PRD Auto-advance).
     private var actions: DetailMarkingActions {
         DetailMarkingActions(
-            apply: { change, photo in await browsing.apply(change, to: photo.id) },
+            apply: { change, photo in browsing.apply(change, to: photo.id) },
             marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
             step: { offset in showPhoto(offset: offset) },
             markingSwipeBegan: { autoAdvance.cancel() },

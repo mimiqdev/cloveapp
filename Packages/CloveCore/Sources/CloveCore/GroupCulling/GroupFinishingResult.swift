@@ -14,8 +14,7 @@ public struct GroupFinishingOutcome: Hashable, Sendable {
 /// What one executed finishing action produced, per photo and for C5 (PRD P0-12, P0-09).
 ///
 /// The result keeps the plan that ran, one outcome per requested change in plan order, the
-/// photos the executor dropped because their marks no longer allowed the change, and the
-/// handles C4 needs to retry. ``savedCount`` and ``failedCount`` follow the PRD's batch rules
+/// photos dropped because their marks no longer allowed the change. ``savedCount`` and ``failedCount`` follow the PRD's batch rules
 /// ("Partial batch failure": "Saved N photos. M photos couldn't be saved."), and the undo
 /// record carries the marks from before the action (DEV-PLAN C5).
 ///
@@ -33,29 +32,19 @@ public struct GroupFinishingResult: Hashable, Sendable {
     /// plan was built or their photo set was not supplied (PRD P0-12).
     public let droppedPhotos: [PhotoIdentity]
 
-    /// The current photo's change handle, for a retry through C4 (PRD P0-09).
-    public let keptChangeID: MarkChangeID?
-
-    /// C4's handle for the batch of rejects, for a retry of failed items (PRD P0-09).
-    public let rejectedBatchID: MarkBatchID?
-
     /// The record C5 undoes from (PRD P0-12; DEV-PLAN C5).
     public let undo: GroupFinishingUndo
 
-    /// Builds one result; only the executor and its retry produce these.
+    /// Builds the result of an ordered finishing action.
     init(
         plan: GroupFinishingPlan,
         outcomes: [GroupFinishingOutcome],
         droppedPhotos: [PhotoIdentity],
-        keptChangeID: MarkChangeID?,
-        rejectedBatchID: MarkBatchID?,
         undo: GroupFinishingUndo
     ) {
         self.plan = plan
         self.outcomes = outcomes
         self.droppedPhotos = droppedPhotos
-        self.keptChangeID = keptChangeID
-        self.rejectedBatchID = rejectedBatchID
         self.undo = undo
     }
 

@@ -239,10 +239,6 @@ struct CloveMarkStorageFile: Codable, Hashable, Sendable {
 }
 
 /// One photo's stored marks in the JSON file.
-///
-/// An older TestFlight build stored Reject in its own `isRejected` field. That field is no
-/// longer written or read: the decoder ignores an unknown key, so an old file still opens and
-/// its rejects are dropped, as the owner decided (no migration).
 struct CloveStoredPhoto: Codable, Hashable, Sendable {
     /// The containing directory relative to the opened folder, empty at its root.
     var relativeFolderPath: String
