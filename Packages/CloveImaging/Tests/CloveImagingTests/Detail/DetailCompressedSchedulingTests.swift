@@ -41,6 +41,12 @@ struct DetailCompressedSchedulingTests {
         }
         defer { queued.cancel() }
         try await eventually { await pipeline.queuedCount == 1 }
+        if screen {
+            try await pipeline.prefetchScreen(for: cached)
+        } else {
+            try await pipeline.prefetchPreview(for: cached)
+        }
+        #expect(await pipeline.queuedCount == 1)
         let completed = Mutex(false)
         let hit = Task {
             defer { completed.withLock { $0 = true } }

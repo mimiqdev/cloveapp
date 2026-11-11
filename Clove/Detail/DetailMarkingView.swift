@@ -422,13 +422,14 @@ struct DetailMarkingView: View {
             zoomMode = .fit
             setZoom(.fit)
         }
+        shown = nil
+        phase = .placeholder(nil)
+        limitation = nil
+        previewOnly = false
         let thumbnail = await images.placeholder(
             for: photo.id, gridThumbnails: browsing.thumbnails)
         guard !Task.isCancelled else { return }
-        shown = nil
         phase = .placeholder(thumbnail)
-        limitation = nil
-        previewOnly = false
         // Wait for the display, not just layout: the first render must use the
         // same physical screen edge as later photos and their held-render keys.
         for _ in 0..<120 {
@@ -444,7 +445,7 @@ struct DetailMarkingView: View {
         currentWindow = window
         previousPosition = window.current.position
         await images.prepare(window)
-        let request = window.request(for: window.current)
+        let request = window.request()
         var attempts = 0
         while true {
             let outcome = await images.image(for: photo.id, request: request)
@@ -591,7 +592,7 @@ struct DetailMarkingView: View {
     private func renderFitAndPrefetch(_ window: DetailPhotoWindow) async {
         let outcome = await images.image(
             for: window.current.photo,
-            request: window.request(for: window.current, need: .screenRender))
+            request: window.request(need: .screenRender))
         guard !Task.isCancelled else { return }
         if case .image(let image) = outcome, shown?.isBestAvailable != true {
             show(image)
@@ -694,7 +695,7 @@ struct DetailMarkingView: View {
         guard let window = currentWindow else { return }
         let request = DetailPixelRequest(
             displayPixels: requestPixels(scale: scale), need: need,
-            mode: window.mode, screenPixels: window.screenPixels, position: window.current.position)
+            mode: window.mode, screenPixels: window.screenPixels)
         let outcome = await images.image(for: photo.id, request: request)
         guard !Task.isCancelled else { return }
         switch outcome {

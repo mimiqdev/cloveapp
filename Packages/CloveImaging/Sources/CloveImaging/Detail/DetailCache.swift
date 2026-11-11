@@ -142,13 +142,22 @@ public final class DetailCache: Sendable {
     }
 
     func image(for key: DetailCacheKey) -> DetailImage? {
-        let compressed = state.withLock { state -> DetailCompressedImage? in
+        compressed(for: key)?.decoded()
+    }
+
+    /// A prefetch needs only presence and usability, never decoded pixels.
+    func contains(_ key: DetailCacheKey, minimumLongEdge: Int = 0) -> Bool {
+        guard let image = compressed(for: key) else { return false }
+        return image.longEdge >= minimumLongEdge
+    }
+
+    private func compressed(for key: DetailCacheKey) -> DetailCompressedImage? {
+        state.withLock { state -> DetailCompressedImage? in
             guard let entry = state.images[key] else { return nil }
             state.tick &+= 1
             state.images[key] = Entry(image: entry.image, access: state.tick)
             return entry.image
         }
-        return compressed?.decoded()
     }
 
     /// Inserts encoded bytes under the caller's cancellation guard, without doing pixel work.

@@ -7,13 +7,13 @@ import Testing
 @Suite(.serialized, .enabled(if: DetailFixtures.hasFormats))
 struct DetailDisplayModeTests {
     private func request(
-        position: Int = 0, mode: DetailDisplayMode = .rawFirst,
+        mode: DetailDisplayMode = .rawFirst,
         camera: DetailSource? = nil, location: String = "display-tests"
     ) throws -> DetailRequest {
         DetailRequest(
             raw: try detailSource(DetailFixtures.file("sony-ilce-7s.ARW")),
             heif: camera, displayPixels: 1800, wantsNativeResolution: false,
-            locationIdentity: location, mode: mode, screenPixels: 1800, position: position)
+            locationIdentity: location, mode: mode, screenPixels: 1800)
     }
 
     @Test func scaledRawLongEdgeAndHeldReturn() async throws {
@@ -22,7 +22,7 @@ struct DetailDisplayModeTests {
         let cache = DetailCache()
         let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let first = try request()
-        let next = try request(position: 1, location: "next")
+        let next = try request(location: "next")
         await pipeline.navigate(to: first)
         let preview = try availableDetail(try await pipeline.preview(for: first))
         #expect(preview.quality == .preview)
@@ -31,7 +31,7 @@ struct DetailDisplayModeTests {
         #expect(abs(rendered.longEdge - 1800) <= 2)
         #expect(rendered.fullResolutionSize == CGSize(width: 2768, height: 1848))
         await pipeline.navigate(to: next)
-        _ = try await pipeline.screen(for: next, priority: .prefetch)
+        _ = try await pipeline.prefetchScreen(for: next)
         await pipeline.navigate(to: first)
         let returning = try availableDetail(try await pipeline.preview(for: first))
         #expect(returning.quality == .screenRAW)
@@ -49,7 +49,7 @@ struct DetailDisplayModeTests {
         let first = try request()
         for index in 0...10 {
             let photo =
-                index == 0 ? first : try request(position: index, location: "photo-\(index)")
+                index == 0 ? first : try request(location: "photo-\(index)")
             await pipeline.navigate(to: photo)
             if screen {
                 _ = try await pipeline.screen(for: photo)
@@ -72,11 +72,11 @@ struct DetailDisplayModeTests {
         let cache = DetailCache()
         let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let first = try request()
-        let second = try request(position: 1, location: "next")
+        let second = try request(location: "next")
         let active = Task { try await pipeline.screen(for: first) }
         defer { Task { await gate.release() } }
         try await eventually { await gate.nativePaths.count == 1 }
-        let queued = Task { try await pipeline.screen(for: second, priority: .prefetch) }
+        let queued = Task { try await pipeline.prefetchScreen(for: second) }
         try await eventually { await pipeline.queuedCount == 1 }
         await pipeline.leavePhoto(generation: 1)
         await expectCancelled(queued)
@@ -93,10 +93,10 @@ struct DetailDisplayModeTests {
         let cache = DetailCache()
         let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let first = try request()
-        let next = try request(position: 1, location: "next")
+        let next = try request(location: "next")
         await pipeline.beginNavigation(1)
         await pipeline.navigate(to: first, generation: 1)
-        let ahead = Task { try await pipeline.screen(for: next, priority: .prefetch) }
+        let ahead = Task { try await pipeline.prefetchScreen(for: next) }
         defer { Task { await gate.release() } }
         try await eventually { await gate.nativePaths.count == 1 }
         ahead.cancel()
@@ -130,7 +130,7 @@ struct DetailDisplayModeTests {
         #expect(cache.holdsNativeImage)
         #expect(cache.imageCount > 0)
         let next = try request(
-            position: 1, mode: .cameraPreviewFirst, camera: heic, location: "next")
+            mode: .cameraPreviewFirst, camera: heic, location: "next")
         await pipeline.navigate(to: next)
         #expect(!cache.holdsNativeImage)
     }

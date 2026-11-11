@@ -22,17 +22,15 @@ struct DetailPixelRequest: Hashable, Sendable {
     let need: Need
     let mode: PhotoDisplayMode
     let screenPixels: Int
-    let position: Int
 
     init(
         displayPixels: Int, need: Need, mode: PhotoDisplayMode = .rawFirst,
-        screenPixels: Int? = nil, position: Int = 0
+        screenPixels: Int? = nil
     ) {
         self.displayPixels = min(max(displayPixels, 1), DetailPixelLimit.maximumEdge)
         self.need = need
         self.mode = mode
         self.screenPixels = min(max(screenPixels ?? displayPixels, 1), DetailPixelLimit.maximumEdge)
-        self.position = position
     }
 }
 
@@ -50,12 +48,10 @@ struct DetailPhotoWindow: Hashable, Sendable {
     let mode: PhotoDisplayMode
     let screenPixels: Int
 
-    func request(for photo: DetailNeighbour, need: DetailPixelRequest.Need = .preview)
-        -> DetailPixelRequest
-    {
+    func request(need: DetailPixelRequest.Need = .preview) -> DetailPixelRequest {
         DetailPixelRequest(
             displayPixels: screenPixels, need: need, mode: mode,
-            screenPixels: screenPixels, position: photo.position)
+            screenPixels: screenPixels)
     }
 }
 

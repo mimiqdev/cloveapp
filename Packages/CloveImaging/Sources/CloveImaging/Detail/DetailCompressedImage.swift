@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 /// Encoding and decoding are called only from detail workers.
 struct DetailCompressedImage: Sendable {
     let data: Data
+    let longEdge: Int
     private let source: DetailSource
     private let quality: DetailQuality
     private let hasRAW: Bool
@@ -24,6 +25,7 @@ struct DetailCompressedImage: Sendable {
             [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
         data = bytes as Data
+        longEdge = image.longEdge
         source = image.source
         quality = image.quality
         hasRAW = image.hasRAW

@@ -17,6 +17,27 @@ private final class ObservedDetailImages: DetailImageSource {
     private(set) var prefetched: [DetailPhotoWindow] = []
     var prefetchEnabled = true
     var heldPhoto: PhotoIdentity?
+    var heldPlaceholder: PhotoIdentity?
+    var releasesPlaceholder = false
+    private(set) var placeholderRequests: [PhotoIdentity] = []
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        placeholderRequests.append(photo)
+        if photo == heldPlaceholder {
+            for _ in 0..<250 {
+                guard !Task.isCancelled else { return nil }
+                if releasesPlaceholder { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        if case .image(let pixels) = await gridThumbnails.thumbnail(for: photo, priority: .visible)
+        {
+            return pixels
+        }
+        return nil
+    }
 
     func prepare(_ window: DetailPhotoWindow) async {
         windows.append(window)
@@ -83,6 +104,7 @@ struct DetailDisplayPresentationTests {
         let first = browsing.photos[2]
         let next = browsing.photos[3]
         source.heldPhoto = next.id
+        source.heldPlaceholder = next.id
         guard
             case .image(let thumbnail) = await browsing.thumbnails.thumbnail(
                 for: next.id, priority: .visible)
@@ -99,11 +121,17 @@ struct DetailDisplayPresentationTests {
             window.rootViewController = nil
         }
         try await waitFor { source.prefetched.last?.current.photo == first.id }
-        browsing.openPhoto(next.id)
-        try await waitFor { source.requests.contains { $0.0 == next.id } }
         let preview = try #require(findPreview(in: window))
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let image = try #require(scroll.subviews.first as? UIImageView)
+        try #require(image.image?.cgImage != nil)
+        browsing.openPhoto(next.id)
+        try await waitFor { source.placeholderRequests.contains(next.id) }
+        try await waitFor { image.image == nil }
+        #expect(!source.releasesPlaceholder)
+        #expect(!source.requests.contains { $0.0 == next.id })
+        source.releasesPlaceholder = true
+        try await waitFor { source.requests.contains { $0.0 == next.id } }
         try await waitFor { image.image?.cgImage === thumbnail }
         #expect(!source.deliveries.contains { $0.0 == next.id })
         #expect(!(preview.accessibilityValue ?? "").localizedCaseInsensitiveContains("loading"))

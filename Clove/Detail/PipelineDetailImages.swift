@@ -72,7 +72,7 @@ final class PipelineDetailImages: DetailImageSource {
         else { return }
         _ = await admitted.image { [pipeline] in
             guard !Task.isCancelled,
-                let request = current.request(for: window.request(for: window.current))
+                let request = current.request(for: window.request())
             else { return .deferred }
             await pipeline.navigate(to: request, generation: generation)
             return .deferred
@@ -109,7 +109,7 @@ final class PipelineDetailImages: DetailImageSource {
         guard activeWindow == window else { return }
         let neighbours = window.neighbours.compactMap { neighbour -> (DetailRequest, Bool)? in
             guard let sources = sources(for: neighbour.photo),
-                let request = sources.request(for: window.request(for: neighbour))
+                let request = sources.request(for: window.request())
             else { return nil }
             let ahead = neighbour.position == window.current.position + window.direction
             return (request, ahead)
@@ -120,7 +120,7 @@ final class PipelineDetailImages: DetailImageSource {
             guard renderAhead, !Task.isCancelled, let ahead = neighbours.first(where: \.1)?.0 else {
                 return
             }
-            _ = try? await pipeline.screen(for: ahead, priority: .prefetch)
+            try? await pipeline.prefetchScreen(for: ahead)
         }
     }
 
@@ -169,6 +169,6 @@ private struct PhotoSources: Sendable {
             wantsNativeResolution: request.need == .fullResolution,
             locationIdentity: locationIdentity,
             mode: request.mode == .rawFirst ? .rawFirst : .cameraPreviewFirst,
-            screenPixels: request.screenPixels, position: request.position)
+            screenPixels: request.screenPixels)
     }
 }

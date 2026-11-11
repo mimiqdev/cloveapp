@@ -103,7 +103,7 @@ final class SampleDetailImages: DetailImageSource {
                 $0.position == window.current.position + window.direction
             })
         else { return }
-        _ = await image(for: ahead.photo, request: window.request(for: ahead, need: .screenRender))
+        _ = await image(for: ahead.photo, request: window.request(need: .screenRender))
     }
 
     func leave(window: UUID) async {

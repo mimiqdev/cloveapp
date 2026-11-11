@@ -50,13 +50,13 @@ struct PhotoDisplayTests {
         let preview = try image(
             await sample.image(
                 for: photo,
-                request: window.request(for: window.current)))
+                request: window.request()))
         #expect(preview.quality == .preview)
         #expect(sample.rawRenderCount == 0)
         let fit = try image(
             await sample.image(
                 for: photo,
-                request: window.request(for: window.current, need: .screenRender)))
+                request: window.request(need: .screenRender)))
         #expect(fit.quality == .screenRAW)
         #expect(fit.width == 2000)
         #expect(sample.rawRenderCount == 1)
@@ -65,7 +65,7 @@ struct PhotoDisplayTests {
         let held = try image(
             await sample.image(
                 for: photo,
-                request: window.request(for: window.current)))
+                request: window.request()))
         #expect(held.image === fit.image)
 
         let cameraWindow = DetailPhotoWindow(
@@ -76,12 +76,12 @@ struct PhotoDisplayTests {
         let cameraFit = try image(
             await sample.image(
                 for: photo,
-                request: cameraWindow.request(for: cameraWindow.current, need: .screenRender)))
+                request: cameraWindow.request(need: .screenRender)))
         #expect(cameraFit.quality == .preview)
         let cameraFull = try image(
             await sample.image(
                 for: photo,
-                request: cameraWindow.request(for: cameraWindow.current, need: .fullResolution)))
+                request: cameraWindow.request(need: .fullResolution)))
         #expect(cameraFull.quality == .raster)
         #expect(cameraFull.source.url.pathExtension == "HIF")
         #expect(sample.cameraDecodeCount == 1)
@@ -90,7 +90,7 @@ struct PhotoDisplayTests {
         await sample.leave(window: cameraWindow.id)
         _ = await sample.image(
             for: photo,
-            request: cameraWindow.request(for: cameraWindow.current, need: .fullResolution))
+            request: cameraWindow.request(need: .fullResolution))
         #expect(sample.cameraDecodeCount == 2)
     }
 
