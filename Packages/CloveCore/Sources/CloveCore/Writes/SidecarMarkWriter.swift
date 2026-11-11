@@ -111,6 +111,7 @@ public actor SidecarMarkWriter {
         // Every exit path before the replacement leaves no staging file behind (G1 Safe writes).
         defer { if !replaced { try? fileSystem.remove(staging) } }
         do {
+            try Task.checkCancellation()
             let before = try fileSystem.attributes(of: destination)
             let packet: Data?
             do {
@@ -129,6 +130,7 @@ public actor SidecarMarkWriter {
                 throw MarkWriteFailure(classifying: error)
             }
 
+            try Task.checkCancellation()
             try fileSystem.writeStaging(edited, to: staging)
 
             // `rename` installs the staging file's inode, so the old sidecar's permissions
@@ -145,6 +147,7 @@ public actor SidecarMarkWriter {
             let now = try fileSystem.attributes(of: destination)
             if before?.stamp != now?.stamp { return .changed }
 
+            try Task.checkCancellation()
             try fileSystem.replace(destination, withItemAt: staging)
             replaced = true
 

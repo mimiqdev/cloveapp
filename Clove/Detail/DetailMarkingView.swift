@@ -229,7 +229,7 @@ struct DetailMarkingView: View {
                                             .map(\.photo)),
                                 groups: groupReview == nil ? browsing.groups : [])
                             if let action = groupReview?.action {
-                                action.disabled(browsing.isMovingRejects)
+                                action.disabled(!browsing.canMark)
                                     .padding(.vertical, 6)
                             }
                             DetailMarkCapsule(
@@ -238,7 +238,7 @@ struct DetailMarkingView: View {
                                 rate: { rate($0) }, label: { choose($0) },
                                 toggleReject: { toggleReject() }
                             )
-                            .disabled(browsing.isMovingRejects)
+                            .disabled(!browsing.canMark)
                             .padding(.horizontal, 16)
                         }
                         .padding(.bottom, 8)
@@ -694,7 +694,8 @@ struct DetailMarkingView: View {
     ///
     /// The preview only begins a marking swipe at fit, and a one-finger drag cannot change the
     /// zoom, so the release is never the zoomed case those rules also guard against.
-    private func applyMarkingSwipe(_ end: DetailMarkingSwipeEnd) {
+    func applyMarkingSwipe(_ end: DetailMarkingSwipeEnd) {
+        guard browsing.canMark else { return }
         switch end {
         case .rating(let travel):
             apply(
@@ -718,7 +719,7 @@ struct DetailMarkingView: View {
     private func apply(_ result: MarkingResult) {
         switch result {
         case .mark(let change, let kind):
-            guard !browsing.isChangingFolder else { return }
+            guard browsing.canMark else { return }
             // Plan navigation from the current order before a mark removes this photo from
             // a live filter. Both calls are synchronous; the mark still shows in this input turn.
             actions.marked(kind, photo)
@@ -734,7 +735,11 @@ struct DetailMarkingView: View {
     }
 
     /// C13's rules for this screen's settings.
-    private var rules: MarkingInputRules { MarkingInputRules(settings: settings) }
+    private var rules: MarkingInputRules {
+        var inputSettings = settings
+        inputSettings.gesturesEnabled = settings.gesturesEnabled && browsing.canMark
+        return MarkingInputRules(settings: inputSettings)
+    }
 
     // MARK: - Geometry
 
