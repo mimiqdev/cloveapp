@@ -85,7 +85,7 @@ public actor MarkUndoHistory {
         marksBefore: PhotoMarks,
         photoToReturnTo: PhotoIdentity? = nil
     ) -> MarkUndoEntryID? {
-        guard !status.requested.isEmpty, !status.state.isSuperseded else { return nil }
+        guard !status.requested.isEmpty else { return nil }
         let recorded = MarkUndoPhoto(
             photo: status.identity, marksBefore: marksBefore, change: status.requested)
         guard !recorded.changedFields.isEmpty else { return nil }
@@ -118,7 +118,7 @@ public actor MarkUndoHistory {
         var photos: [MarkUndoPhoto] = []
         var seen: Set<PhotoIdentity> = []
         for outcome in batch.outcomes {
-            guard !outcome.requested.isEmpty, !outcome.state.isSuperseded,
+            guard !outcome.requested.isEmpty,
                 seen.insert(outcome.identity).inserted
             else { continue }
             let recorded = MarkUndoPhoto(
@@ -301,16 +301,13 @@ public actor MarkUndoHistory {
         defer { isRestoring = false }
 
         let entry: MarkUndoEntry
-        let removedAt: Int
         switch step {
         case .undo:
             guard let last = undoStack.popLast() else { return nil }
             entry = last
-            removedAt = undoStack.count
         case .redo:
             guard let last = redoStack.popLast() else { return nil }
             entry = last
-            removedAt = redoStack.count
         }
         let recordedBefore = recordings
         let closesBefore = closes
@@ -367,8 +364,6 @@ public actor MarkUndoHistory {
         let dropped = updateStacks(
             entry: entry,
             step: step,
-            removedAt: removedAt,
-            outcomes: outcomes,
             reachedTarget: reachedTarget,
             recordedNew: recordings - recordedBefore,
             closed: closes != closesBefore)
@@ -394,31 +389,18 @@ public actor MarkUndoHistory {
     private func updateStacks(
         entry: MarkUndoEntry,
         step: Step,
-        removedAt: Int,
-        outcomes: [MarkUndoPhotoOutcome],
         reachedTarget: Bool,
         recordedNew: Int,
         closed: Bool
     ) -> Bool {
         // The folder is closed, so nothing can be undone or redone in this session any more.
         guard !closed else { return false }
-        let needsRetry = outcomes.contains { $0.status?.state.isUnfinished == true }
         switch step {
         case .undo:
-            if needsRetry {
-                undoStack = inserting(entry, into: undoStack, at: removedAt)
-                return false
-            }
             guard reachedTarget else { return true }
             if recordedNew == 0 { redoStack = appending(entry, to: redoStack) }
             return false
         case .redo:
-            if needsRetry {
-                if recordedNew == 0 {
-                    redoStack = inserting(entry, into: redoStack, at: removedAt)
-                }
-                return false
-            }
             guard reachedTarget else { return true }
             // The redone action belongs below anything recorded after it was taken.
             undoStack = inserting(

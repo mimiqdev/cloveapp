@@ -92,7 +92,6 @@ final class MoveRejectsFlow: Identifiable {
         switch refusal {
         case .disabled: .disabled
         case .readOnlyLocation: .readOnly
-        case .undone: .failed("This move was undone.")
         }
     }
 }

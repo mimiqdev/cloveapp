@@ -90,10 +90,6 @@ final class FolderLibrarySession: FolderLibrary {
     /// The open folder's photos, with their scanned sets (PRD P0-01, P0-08).
     private var store = FolderPhotos()
 
-    /// The latest save state per photo, kept in step with C4's ordered stream (PRD P0-08).
-    private var changes = PhotoChangeStates()
-    private var isDisconnected = false
-
     /// The session holding the open folder's scope, ended when another folder opens.
     private var openSession: FolderAccessSession?
 
@@ -125,13 +121,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// The detail view's source for the open folder, bound to that folder's session and pipeline.
     private var detailSource: (any DetailImageSource)?
 
-    /// The task keeping this library's save states in step with C4 (PRD P0-08).
-    private var writeStatusTask: Task<Void, Never>?
-
-    /// C6's mover for the open folder, with the batches a retry of failed sets needs (P0-10).
-    ///
-    /// It is replaced with every folder, because another folder's identities, settings and open
-    /// session cannot be retried through this one.
+    /// The mover and its undo records belong to this open folder.
     private var rejectMover: RejectMover?
 
     /// The photos a confirmed move took out of the folder (PRD P0-10).
@@ -159,7 +149,6 @@ final class FolderLibrarySession: FolderLibrary {
     private var entryProgress: FolderProgress?
     private var openingProgress: FolderProgress?
     private var confirmedProgressChanges: [PhotoIdentity: FolderProgress.ConfirmedChange] = [:]
-    private var changedPhotos: Set<PhotoIdentity> = []
 
     /// The last queued open transition, so two opens can never install out of order.
     private var openTransition: Task<Void, Never>?
@@ -183,21 +172,6 @@ final class FolderLibrarySession: FolderLibrary {
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         updates = stream
         updatesContinuation = continuation
-        observeWriteStates()
-    }
-
-    private func observeWriteStates() {
-        writeStatusTask?.cancel()
-        // The observer holds the queue and the stream, never the library: a closed scene must be
-        // able to release the library and, with it, the folder's scope.
-        writeStatusTask = Task { [weak self, stores] in
-            guard let queue = try? await stores.value.writes else { return }
-            let states = await queue.stateUpdates()
-            for await status in states {
-                guard !Task.isCancelled, let self else { return }
-                self.record(status)
-            }
-        }
     }
 
     /// The folder's photos with their marks, in scan order (PRD P0-03).
@@ -227,9 +201,6 @@ final class FolderLibrarySession: FolderLibrary {
     /// The source detail reads while no folder is open: nothing to show.
     private static let emptyDetailImages = EmptyDetailImages()
 
-    /// The latest change to one photo with its save state (PRD P0-08).
-    func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes.latest(for: photo) }
-
     /// The open this library installed last, which changes on every install and close
     /// (PRD P0-02).
     var openGeneration: Int { scanGeneration }
@@ -239,20 +210,13 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Waits until C4 has finished every admitted write (PRD Failure and recovery).
     ///
-    /// The leaving question's "Wait for writes" uses this; a failed change is finished for this
-    /// purpose and is retried explicitly instead of holding the folder open.
+    /// Moving files and releasing folder access wait for admitted writes.
     func drainWrites() async {
         guard case .success(let stores) = await resolvedStores() else { return }
         await stores.writes.drain()
     }
 
     func discardPendingChanges() async {
-        isDisconnected = true
-        changes = PhotoChangeStates()
-        writeStatusTask?.cancel()
-        writeStatusTask = nil
-        openScan?.cancel()
-        scanTask?.cancel()
         guard case .success(let stores) = await resolvedStores() else { return }
         await stores.writes.discardChanges(in: folder)
     }
@@ -265,10 +229,7 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Closes the open folder and releases its scope (PRD P0-08, PRD P0-02).
     ///
-    /// PRD Failure and recovery's "Leave anyway" closes the folder without reporting the
-    /// unconfirmed changes as saved: they keep their failed or unfinished state in C4, and the
-    /// next open reads the actual XMP and Clove-stored marks. The library drops the folder's
-    /// photos, groups and save states and answers with ``noFolder`` until another open.
+    /// The next open reads the files again. Closing drops this folder's photos and groups.
     ///
     /// The close takes the same turn as an open, so a close queued before an open never tears
     /// down the folder that open installed. The departure itself does not wait for this: the
@@ -289,7 +250,6 @@ final class FolderLibrarySession: FolderLibrary {
         await endOpenFolder()
         folder = Self.noFolder
         store = FolderPhotos()
-        changes = PhotoChangeStates()
         publishedGroups = []
         hasPublishedGroups = false
         thumbnailSource = nil
@@ -303,15 +263,12 @@ final class FolderLibrarySession: FolderLibrary {
     /// C13 resolves the action per photo, so items can name different changes: a rating clears
     /// Reject on the rejected photos only. The library groups the items by change and admits each
     /// group through C4's batch write inside the session that holds the folder's scope, then
-    /// reports one result in the caller's order under one handle a retry can use (PRD P0-09). A
+    /// reports one result in the caller's order. A
     /// photo the folder no longer holds is refused and published on ``updates``, so the bar
     /// counts it as a failure and the photo keeps the marks it had (PRD P0-08).
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         let change = items.first?.change ?? MarkChange()
-        guard !Task.isCancelled else {
-            return MarkBatchResult(id: MarkBatchID(), change: change, outcomes: [])
-        }
-        guard !isDisconnected, let session = openSession, !items.isEmpty else {
+        guard let session = openSession, !items.isEmpty else {
             return Self.refusedBatch(
                 items, change: change, reason: .locationUnavailable,
                 message: "The open folder no longer holds these photos.")
@@ -328,7 +285,6 @@ final class FolderLibrarySession: FolderLibrary {
                 let status = Self.refused(
                     item.change, for: item.photo, reason: .locationUnavailable,
                     message: "The open folder no longer holds this photo.")
-                publish(.change(status))
                 refused.append(status)
                 continue
             }
@@ -341,7 +297,6 @@ final class FolderLibrarySession: FolderLibrary {
         }
         var outcomes = refused
         for (change, sets) in byChange {
-            guard !isDisconnected, !Task.isCancelled else { break }
             let admitted: MarkBatchResult? = try? await session.withAdmittedWork {
                 await stores.writes.apply(change, to: sets)
             }
@@ -351,23 +306,35 @@ final class FolderLibrarySession: FolderLibrary {
                     let status = Self.refused(
                         change, for: item.photo, reason: .locationUnavailable,
                         message: "The folder closed before the batch could be written.")
-                    publish(.change(status))
                     outcomes.append(status)
                 }
                 continue
             }
             outcomes.append(contentsOf: result.outcomes)
-            if let loss = result.outcomes.first(where: {
-                $0.state.failure?.reason == .locationUnavailable
-            }) {
-                record(loss)
-                break
-            }
         }
         outcomes.sort { (order[$0.identity] ?? .max) < (order[$1.identity] ?? .max) }
         // Fold confirmations before returning; the status observer may still be catching up.
         for status in outcomes { record(status) }
         return MarkBatchResult(id: MarkBatchID(), change: change, outcomes: outcomes)
+    }
+
+    /// A failed write leaves no desired state behind: read the files under this folder's scope.
+    func rereadMarks(for photos: [PhotoIdentity]) async {
+        guard let session = openSession,
+            case .success(let stores) = await resolvedStores()
+        else { return }
+        let sets = photos.compactMap { store.scannedSet(for: $0) }
+        let codec = codec
+        guard
+            let marks = try? await session.withAdmittedWork({
+                let stored = try await stores.writes.storedMarks(for: session.folder.id)
+                return await Task.detached {
+                    Self.readMarks(for: sets, storedMarks: stored, codec: codec)
+                }.value
+            })
+        else { return }
+        for (photo, marks) in marks { store.setMarks(marks, for: photo) }
+        publish(.reads(times: [:], marks: marks))
     }
 
     // MARK: - Move rejects
@@ -395,7 +362,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// The whole move is admitted work, so ending the folder waits for it before releasing the
     /// scope (G1 folder access). Moved sets leave the folder's photos and grouping runs again over
     /// the remaining ones, the same way it does after a scan finishes; failed and skipped sets
-    /// stay in place, still rejected, so a retry addresses only the failures.
+    /// stay in place, still rejected.
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
         guard let mover = rejectMover, let session = openSession else {
             throw FolderSessionError.ended
@@ -404,33 +371,6 @@ final class FolderLibrarySession: FolderLibrary {
         let result = try await session.withAdmittedWork {
             try await mover.move(plan)
         }
-        guard generation == scanGeneration, openSession === session else { return result }
-        let moved = result.movedIdentities
-        guard !moved.isEmpty else { return result }
-        movedRejectIdentities.formUnion(moved)
-        for photo in store.photos where moved.contains(photo.id) {
-            movedPhotoRecords[photo.id] = photo
-        }
-        store.remove(moved)
-        publish(.photos([]))
-        await startGrouping(generation: scanGeneration)
-        return result
-    }
-
-    /// Retries only the sets an earlier run could not move (PRD P0-10).
-    ///
-    /// The retry is admitted like the first run and drops whatever it moves, so a retry's moved
-    /// sets leave the grid as the first run's did. A folder that closed, or a run this session
-    /// never started, cannot be retried and answers nil.
-    func retryFailedRejects(
-        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
-    ) async throws -> RejectMoveResult? {
-        guard let mover = rejectMover, let session = openSession else { return nil }
-        let generation = scanGeneration
-        let retried = try await session.withAdmittedWork {
-            try await mover.retryFailed(in: batch, excluding: identities)
-        }
-        guard let result = retried else { return nil }
         guard generation == scanGeneration, openSession === session else { return result }
         let moved = result.movedIdentities
         guard !moved.isEmpty else { return result }
@@ -462,18 +402,7 @@ final class FolderLibrarySession: FolderLibrary {
             }
             movedRejectIdentities.remove(restored.identity)
         }
-        if case .success(let stores) = await resolvedStores() {
-            for restored in result.restored {
-                if let status = await stores.writes.latestChange(for: restored.identity) {
-                    record(status)
-                    if status.state.isConfirmed,
-                        let edit = edits.first(where: { $0.photo == restored.identity })
-                    {
-                        store.setMarks(edit.after, for: edit.photo)
-                    }
-                }
-            }
-        }
+        await rereadMarks(for: result.restored.map(\.identity))
         publish(.photos([]))
         await startGrouping(generation: scanGeneration)
         return result
@@ -696,7 +625,6 @@ final class FolderLibrarySession: FolderLibrary {
         lastViewedPhoto = entryProgress?.lastViewedPhoto
         openingProgress = entryProgress
         confirmedProgressChanges = [:]
-        changedPhotos = []
         guard case .success(let stores) = await resolvedStores() else {
             // Without the app-private stores the folder can be neither scanned nor written, so
             // its grant is released instead of being held by a folder nothing can use.
@@ -707,11 +635,8 @@ final class FolderLibrarySession: FolderLibrary {
         scanGeneration += 1
         let generation = scanGeneration
         folder = session.folder.id
-        isDisconnected = false
-        observeWriteStates()
         openSession = session
         store = FolderPhotos()
-        changes = PhotoChangeStates()
 
         movedRejectIdentities = []
         movedPhotoRecords = [:]
@@ -796,23 +721,8 @@ final class FolderLibrarySession: FolderLibrary {
         }
         if case .success(let stores) = await resolvedStores() {
             await stores.writes.drain()
-            // The queue can finish before its stream reaches the UI. Read its final confirmed
-            // states for changed photos before taking the final snapshot (PRD P0-08).
-            for photo in changedPhotos {
-                if let status = await stores.writes.latestChange(for: photo),
-                    status.state.isConfirmed
-                {
-                    applyConfirmedProgressChange(status)
-                }
-            }
             await recordEntryProgress(lastViewed: lastViewedPhoto)
             completedScanStatus = nil
-            // PRD Failure and recovery: a folder that closes takes its unconfirmed changes with
-            // it, so the next open reads the actual XMP and no later leaving question counts
-            // marks the user abandoned.
-            if folder != Self.noFolder {
-                await stores.writes.forgetUnfinishedChanges(in: folder)
-            }
         }
         guard let session = openSession else { return }
         openSession = nil
@@ -881,7 +791,7 @@ final class FolderLibrarySession: FolderLibrary {
         storedMarks: [PhotoIdentity: CloveStoredMarks],
         generation: Int
     ) -> [ScannedPhotoSet] {
-        guard generation == scanGeneration, !isDisconnected else { return [] }
+        guard generation == scanGeneration else { return [] }
         let items = items.filter { item in
             guard case .photo(let set) = item else { return true }
             return !movedRejectIdentities.contains(set.id)
@@ -899,7 +809,7 @@ final class FolderLibrarySession: FolderLibrary {
         sets: [ScannedPhotoSet],
         generation: Int
     ) {
-        guard generation == scanGeneration, !isDisconnected else { return }
+        guard generation == scanGeneration else { return }
         let timeZone = TimeZone.current
         var times: [PhotoIdentity: PhotoTimeState] = [:]
         for read in reads {
@@ -934,7 +844,7 @@ final class FolderLibrarySession: FolderLibrary {
         stores: Stores,
         generation: Int
     ) async {
-        guard generation == scanGeneration, !isDisconnected else { return }
+        guard generation == scanGeneration else { return }
         let recorded = FolderScanSummary(
             photoCount: summary.logicalPhotoCount,
             status: summary.status == .complete ? .complete : .partial)
@@ -1001,8 +911,18 @@ final class FolderLibrarySession: FolderLibrary {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
         for set in sets {
             var packet: XMPMarks?
-            if set.photoSet.primary.format == .raw, let url = set.sidecar.resolvedURL,
-                let data = try? Data(contentsOf: url)
+            let sidecar: URL?
+            switch set.sidecar {
+            case .resolved(let url): sidecar = url
+            case .absent:
+                switch set.photoSet.markPersistence.rating {
+                case .xmpSidecar(let url): sidecar = url
+                case .cloveStorage: sidecar = nil
+                }
+            case .ambiguous: sidecar = nil
+            }
+            if set.photoSet.primary.format == .raw, let sidecar,
+                let data = try? Data(contentsOf: sidecar)
             {
                 packet = try? codec.read(data)
             }
@@ -1240,13 +1160,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// carries the folder's identity and the open so a reader that had already suspended cannot
     /// apply it to a newer folder or to a later open of the same folder either.
     private func locationLost(_ loss: FolderLocationLoss, folder: FolderIdentity, generation: Int) {
-        guard generation == scanGeneration, !isDisconnected else { return }
-        isDisconnected = true
-        changes = PhotoChangeStates()
-        writeStatusTask?.cancel()
-        writeStatusTask = nil
-        openScan?.cancel()
-        scanTask?.cancel()
+        guard generation == scanGeneration else { return }
         publish(.locationLost(folder: folder, loss: loss, generation: generation))
         Task { [stores] in
             guard let access = try? await stores.value.access else { return }
@@ -1258,26 +1172,22 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Records one change's state from C4's ordered stream (PRD P0-08).
     ///
-    /// Only a status the merge accepts may change the photo's marks: a refused status belongs to
-    /// an older change a newer one replaced, and painting its fields would show an older rating
-    /// again. The same rule keeps ``latestChange(for:)`` equal to the queue's newest change.
+    /// The ordered caller returns completed writes, so their changes apply in the same order.
     private func record(_ status: MarkChangeStatus) {
-        guard status.identity.folderID == folder, !isDisconnected else { return }
+        guard status.identity.folderID == folder else { return }
         if status.state.failure?.reason == .locationUnavailable {
             locationLost(
                 FolderLocationLoss(reason: .externalVolumeDisconnected, date: Date()),
                 folder: folder, generation: scanGeneration)
             return
         }
-        changedPhotos.insert(status.identity)
-        if changes.insert(status), status.state.isConfirmed {
+        if status.state.isConfirmed {
             applyConfirmedProgressChange(status)
             if let photo = store.photo(for: status.identity) {
                 publish(.reads(times: [:], marks: [status.identity: photo.marks]))
                 scheduleEntryProgress()
             }
         }
-        publish(.change(status))
     }
 
     /// Tracks net changes against the session's first confirmed marks, independent of debounce flushes.
@@ -1380,7 +1290,6 @@ final class FolderLibrarySession: FolderLibrary {
         // session releases the scope itself when it is deallocated.
         openScan?.cancel()
         scanTask?.cancel()
-        writeStatusTask?.cancel()
         if let grouping {
             // Closing drains a preview read in flight, which cannot happen here, so it runs in
             // its own task; the grouping keeps the session alive until that read ends, and the

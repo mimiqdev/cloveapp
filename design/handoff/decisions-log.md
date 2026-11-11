@@ -4,7 +4,13 @@ Figma: https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Nativ
 
 Working rule: the PRD is a guide, not the source of truth. Design decisions here can override it.
 
-Detail never shows a loading label; the grid thumbnail stands in until the preview arrives (owner, 2026-11-12).
+## Detail never shows a loading label (owner decision, 2026-11-12)
+
+The grid thumbnail stands in until the detail preview arrives.
+
+## Files are the truth; no save status (owner decision, 2026-11-11)
+
+This supersedes the save glyphs and save-failure behavior below. Photos, XMP sidecars and Clove's standalone JPEG/HIF mark store are the truth. Show a tap immediately and write in action order. On a connected failure, say "Couldn't save the mark." once, re-read the photo and show its file's marks. Keep only pending marks, with no retained failure, retry, save subtitle or leave prompt. Disconnect drops queued work and pending marks; marking stays off until Reopen reads the files. Do not cancel an operation already touching a file. Move Rejects runs behind writes and uses the marks on disk, reports failures without a retry, and keeps Undo.
 
 ## Drive disconnected drops unsaved marks (owner decision, 2026-11-11)
 

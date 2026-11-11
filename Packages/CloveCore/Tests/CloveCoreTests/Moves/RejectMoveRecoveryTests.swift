@@ -9,8 +9,8 @@ import Testing
 /// remove only what the confirmed move makes durable (G1 decision 5).
 @Suite("Reject move recovery", .timeLimit(.minutes(1)))
 struct RejectMoveRecoveryTests {
-    /// A partial failure reports PRD P0-10's counts, and a retry sends only the failed set.
-    @Test func retriesOnlyTheFailedSets() async throws {
+    /// A partial failure reports the moved count and leaves failed files in place.
+    @Test func reportsPartialMoveFailureAndTheFilesOnDisk() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
         let sets = try (0..<3).map { index in
@@ -35,46 +35,6 @@ struct RejectMoveRecoveryTests {
         #expect(fixture.folder.exists("_Rejected/DCIM/2/IMG_0002.ARW"))
         #expect(fixture.folder.fileCount() == before)
 
-        fixture.fileSystem.stopFailing(.move)
-        let retried = try await fixture.mover.retryFailed(in: result.id)
-        let retry = try #require(retried)
-        #expect(retry.outcomes.map(\.identity) == [sets[1].id])
-        #expect(retry.movedCount == 1)
-        #expect(retry.failedCount == 0)
-        #expect(fixture.folder.exists("_Rejected/DCIM/1/IMG_0001.ARW"))
-        #expect(fixture.folder.fileCount() == before)
-        // The earlier run's handle is spent, so a second retry cannot resend moved sets.
-        #expect(try await fixture.mover.retryFailed(in: result.id) == nil)
-    }
-
-    /// A retry can exclude a failed set whose Reject was cleared, and never moves it (P0-10).
-    @Test func retryExcludingASetLeavesItsFilesAlone() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let sets = try (0..<2).map { index in
-            try makeMoveSet(
-                root: fixture.folder.url, relativePath: "DCIM/\(index)", stem: "IMG_000\(index)",
-                formats: [.raw], sidecarName: "IMG_000\(index).xmp")
-        }
-        for set in sets { try writeMoveSet(set, in: fixture.folder) }
-        let plan = try await fixture.plan(sets)
-        fixture.fileSystem.fail(
-            .move, where: { $0.path(percentEncoded: false).contains("/_Rejected/") },
-            with: POSIXError(.EIO))
-        let result = try await fixture.move(plan)
-        #expect(result.failedCount == 2)
-        #expect(fixture.folder.exists("DCIM/0/IMG_0000.ARW"))
-        #expect(fixture.folder.exists("DCIM/1/IMG_0001.ARW"))
-
-        fixture.fileSystem.stopFailing(.move)
-        let retried = try await fixture.mover.retryFailed(
-            in: result.id, excluding: [sets[0].id])
-        let retry = try #require(retried)
-        #expect(retry.outcomes.map(\.identity) == [sets[1].id])
-        #expect(retry.movedCount == 1)
-        #expect(fixture.folder.exists("DCIM/0/IMG_0000.ARW"))
-        #expect(!fixture.folder.exists("_Rejected/DCIM/0/IMG_0000.ARW"))
-        #expect(fixture.folder.exists("_Rejected/DCIM/1/IMG_0001.ARW"))
     }
 
     /// The stored Reject is removed only after a confirmed move (G1 decision 5).

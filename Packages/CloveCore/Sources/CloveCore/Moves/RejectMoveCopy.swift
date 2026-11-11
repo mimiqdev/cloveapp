@@ -146,8 +146,6 @@ public struct RejectMoveToast: Hashable, Sendable {
     public let failureMessage: String?
     /// The skipped sets, or nil when none was (P0-10).
     public let skippedMessage: String?
-    /// The failed sets whose Reject was cleared before the retry, or nil (P0-10).
-    public let noLongerRejectedMessage: String?
     /// Whether the toast offers Details (design handoff, P0-10).
     public let showsDetails: Bool
 
@@ -156,8 +154,7 @@ public struct RejectMoveToast: Hashable, Sendable {
         message = "Moved \(result.movedCount) to \(rejectsFolderName.rawValue)"
         failureMessage =
             result.unmovedCount == 0 ? nil : "\(result.unmovedCount) couldn't be moved"
-        skippedMessage = Self.skipped(result.otherSkippedCount)
-        noLongerRejectedMessage = Self.noLongerRejected(result.noLongerRejectedCount)
+        skippedMessage = Self.skipped(result.skippedCount)
         showsDetails = result.unmovedCount > 0
     }
 
@@ -167,12 +164,6 @@ public struct RejectMoveToast: Hashable, Sendable {
         return count == 1 ? "1 photo was skipped." : "\(count) photos were skipped."
     }
 
-    /// The "no longer rejected" sentence, shared with the details sheet (PRD P0-10).
-    static func noLongerRejected(_ count: Int) -> String? {
-        guard count > 0 else { return nil }
-        return count == 1
-            ? "1 photo is no longer rejected." : "\(count) photos are no longer rejected."
-    }
 }
 
 /// The details sheet behind a partial Move rejects toast (design handoff, PRD P0-10).
@@ -206,10 +197,6 @@ public struct RejectMoveDetails: Hashable, Sendable {
     public let rows: [Row]
     /// The skipped sets, or nil when none was (PRD P0-10).
     public let skippedMessage: String?
-    /// The failed sets whose Reject was cleared before the retry, or nil (P0-10).
-    public let noLongerRejectedMessage: String?
-    /// Whether Try again can resend anything (PRD P0-10).
-    public let canRetry: Bool
 
     /// Builds the details sheet from one run's result (design handoff, PRD P0-10).
     public init(result: RejectMoveResult) {
@@ -230,10 +217,7 @@ public struct RejectMoveDetails: Hashable, Sendable {
                     reason: set.failure.reason.userMessage)
             })
         self.rows = rows
-        skippedMessage = RejectMoveToast.skipped(result.otherSkippedCount)
-        noLongerRejectedMessage = RejectMoveToast.noLongerRejected(
-            result.noLongerRejectedCount)
-        canRetry = result.failedCount > 0
+        skippedMessage = RejectMoveToast.skipped(result.skippedCount)
     }
 
     /// The primary name plus the companion kinds the set carries (design handoff).
