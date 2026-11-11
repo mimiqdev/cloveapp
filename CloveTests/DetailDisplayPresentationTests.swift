@@ -187,6 +187,147 @@ struct DetailDisplayPresentationTests {
         #expect(source.sample.rawRenderCount == 2)
     }
 
+    @Test func rapidNavigationAndRatingUseTheNewPhoto() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let store = SettingsStore.sample
+        store.update { $0.autoAdvance.destination = .stay }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        browsing.openPhoto(photos[2].id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == photos[2].id }
+        let preview = try #require(findPreview(in: window))
+        try sendSwipe(to: preview, travel: CGPoint(x: -180, y: 0))
+        #expect(browsing.state.currentPhoto == photos[3].id)
+        try await Task.sleep(for: .milliseconds(100))
+        try sendSwipe(to: preview, travel: CGPoint(x: -180, y: 0))
+        #expect(browsing.state.currentPhoto == photos[4].id)
+        try await Task.sleep(for: .milliseconds(100))
+        try sendSwipe(to: preview, travel: CGPoint(x: 0, y: -130))
+        #expect(browsing.shownMarks(for: photos[4].id).rating != .unrated)
+        #expect(browsing.shownMarks(for: photos[3].id) == photos[3].marks)
+    }
+
+    @Test func navigationStartedAfterRatingCancelsAutoAdvanceAndMovesExactlyOnePhoto() async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let store = SettingsStore.sample
+        store.update {
+            $0.autoAdvance.destination = .nextPhoto
+            $0.autoAdvance.triggers.rating = true
+        }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        browsing.openPhoto(photos[2].id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == photos[2].id }
+        let preview = try #require(findPreview(in: window))
+        try sendSwipe(to: preview, travel: CGPoint(x: 0, y: -130))
+        #expect(browsing.shownMarks(for: photos[2].id).rating != .unrated)
+        try await Task.sleep(for: .milliseconds(100))
+        let pan = DetailTestPan()
+        pan.travel = CGPoint(x: -15, y: 0)
+        try #require(preview.gestureRecognizerShouldBegin(pan))
+        preview.handleMarkingPan(pan)
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(browsing.state.currentPhoto == photos[2].id)
+        pan.travel = CGPoint(x: -180, y: 0)
+        pan.sampleState = .ended
+        preview.handleMarkingPan(pan)
+        #expect(browsing.state.currentPhoto == photos[3].id)
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(browsing.state.currentPhoto == photos[3].id)
+    }
+
+    @Test func zoomBeginningCancelsAnInProgressNavigationPan() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.hasNext = true
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let pan = try #require(
+            preview.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        var navigations = 0
+        preview.onEdgeTap = { _ in navigations += 1 }
+        // No physical touches exist here: feed travel separately, but cancel the real recognizer.
+        pan.delegate = nil
+        pan.setValue(UIGestureRecognizer.State.began.rawValue, forKey: "state")
+        try #require(pan.state == .began)
+        pan.delegate = preview
+        let sample = DetailTestPan()
+        sample.travel = CGPoint(x: -15, y: 0)
+        try #require(preview.gestureRecognizerShouldBegin(sample))
+        preview.handleMarkingPan(sample)
+        sample.travel = CGPoint(x: -180, y: 0)
+        sample.sampleState = .changed
+        preview.handleMarkingPan(sample)
+        #expect(scroll.transform.tx == -180)
+        preview.scrollViewWillBeginZooming(scroll, with: scroll.subviews.first)
+        #expect(pan.state == .cancelled || pan.state == .failed)
+        // Without physical touches UIKit does not dispatch the terminal action; deliver it here.
+        preview.handleMarkingPan(pan)
+        #expect(scroll.transform == .identity)
+        #expect(pan.isEnabled)
+        #expect(navigations == 0)
+    }
+
+    @Test func navigationOffsetResetsOnlyAfterReplacementPixelsAreInstalled() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.hasNext = true
+        let old = try testPixels(gray: 0)
+        let replacement = try testPixels(gray: 1)
+        preview.setImage(old)
+        try sendSwipe(to: preview, travel: CGPoint(x: -180, y: 0))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let image = try #require(scroll.subviews.first as? UIImageView)
+        #expect(scroll.transform.tx == -180)
+        #expect(image.image?.cgImage === old)
+        preview.setImage(replacement)
+        #expect(scroll.transform == .identity)
+        #expect(image.image?.cgImage === replacement)
+    }
+
+    private func testPixels(gray: CGFloat) throws -> CGImage {
+        let context = try #require(
+            CGContext(
+                data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(gray: gray, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        return try #require(context.makeImage())
+    }
+
+    private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
+        let pan = DetailTestPan()
+        pan.travel = CGPoint(x: travel.x == 0 ? 0 : -15, y: travel.y == 0 ? 0 : -15)
+        try #require(preview.gestureRecognizerShouldBegin(pan))
+        preview.handleMarkingPan(pan)
+        pan.sampleState = .changed
+        pan.travel = travel
+        preview.handleMarkingPan(pan)
+        pan.sampleState = .ended
+        preview.handleMarkingPan(pan)
+    }
+
     private func waitFor(_ condition: () -> Bool) async throws {
         for _ in 0..<250 {
             if condition() { return }
@@ -202,4 +343,18 @@ struct DetailDisplayPresentationTests {
         }
         return nil
     }
+}
+
+@MainActor
+private final class DetailTestPan: UIPanGestureRecognizer {
+    var travel: CGPoint = .zero
+    var sampleState: UIGestureRecognizer.State = .began
+
+    override var state: UIGestureRecognizer.State {
+        get { sampleState }
+        set { sampleState = newValue }
+    }
+
+    override func translation(in view: UIView?) -> CGPoint { travel }
+    override func velocity(in view: UIView?) -> CGPoint { .zero }
 }
