@@ -373,6 +373,9 @@ public actor DetailPipeline {
             }
         }
 
+        if request.raw == nil, request.jpeg != nil, !request.wantsNativeResolution {
+            return shown.map { verified(.available($0)) } ?? missing(failures)
+        }
         if let jpeg = request.jpeg, request.wantsNativeResolution {
             let key = DetailCacheKey(
                 source: jpeg, locationIdentity: request.locationIdentity,
