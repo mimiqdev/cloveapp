@@ -170,7 +170,7 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let file = await store.fileURL(for: identity.folderID)
     let json = """
         {"version":1,"folderID":"\(identity.folderID.rawValue)","photos":\
-        [{"relativeFolderPath":"","stem":"mmq05184","isRejected":false,"rating":9}]}
+        [{"relativeFolderPath":"","stem":"mmq05184","rating":9}]}
         """
     try Data(json.utf8).write(to: file)
 
@@ -183,36 +183,6 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
             return
         }
     }
-}
-
-@Test func anOldFileWithARejectFieldStillDecodesAndDropsTheReject() async throws {
-    let folder = try WriteTestFolder()
-    defer { folder.remove() }
-    let store = makeStore(folder, WriteFileSystemDouble())
-    let identity = try makeIdentity()
-    let rejectedIdentity = PhotoIdentity(
-        folderID: identity.folderID, relativeFolderPath: "DCIM", stem: "mmq05185")
-    try FileManager.default.createDirectory(
-        at: folder.file("store"), withIntermediateDirectories: true)
-    let file = await store.fileURL(for: identity.folderID)
-    // The old shape stored Reject in its own field; no migration runs, so it is ignored. The
-    // new shape stores Reject as the rating −1.
-    let json = """
-        {"version":1,"folderID":"\(identity.folderID.rawValue)","photos":[
-        {"relativeFolderPath":"DCIM","stem":"mmq05184","isRejected":true},
-        {"relativeFolderPath":"DCIM","stem":"mmq05185","isRejected":false,"rating":-1}]}
-        """
-    try Data(json.utf8).write(to: file)
-
-    let old = try await store.marks(for: identity)
-    let new = try await store.marks(for: rejectedIdentity)
-
-    // The old reject is dropped, as the owner decided, and the file still decodes.
-    #expect(old?.rating == nil)
-    #expect(old?.isRejected == false)
-    // A rating of −1 in the new shape is the stored Reject.
-    #expect(new?.rating == .rejected)
-    #expect(new?.isRejected == true)
 }
 
 @Test func aWriteFailureKeepsThePreviousFileAndLeavesNoStaging() async throws {
