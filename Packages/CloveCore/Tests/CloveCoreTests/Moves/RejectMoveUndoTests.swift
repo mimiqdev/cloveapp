@@ -67,7 +67,10 @@ struct RejectMoveUndoTests {
             let restored = try #require(result.restored.first { $0.identity == set.id })
             #expect(restored.keptInConfirmation == false)
             #expect(restored.isRejectStored)
-            #expect(restored.files.count == set.photoSet.fileURLs.count)
+            // The undo moves exactly what the move moved, including a sidecar C4 created
+            // after the scan.
+            let movedFiles = moveResult.moved.first { $0.identity == set.id }?.files.count
+            #expect(restored.files.count == movedFiles)
             #expect(restored.set == set)
         }
     }
@@ -117,6 +120,39 @@ struct RejectMoveUndoTests {
         for (path, bytes) in keptBytes {
             #expect(fixture.folder.contents(of: path) == bytes)
         }
+    }
+
+    /// A sidecar C4 created after the scan moves with the set, because it carries the reject.
+    @Test func movesAndRestoresASidecarCreatedAfterTheScan() async throws {
+        let fixture = try MoveFixture()
+        defer { fixture.cleanup() }
+        let set = try makeMoveSet(
+            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001", formats: [.raw])
+        try writeMoveSet(set, in: fixture.folder)
+        let sidecarPath = "DCIM/IMG_0001.xmp"
+        #expect(!fixture.folder.exists(sidecarPath))
+
+        // Rejecting writes the sidecar, so the scanned set no longer describes the folder.
+        let status = await fixture.queue.apply(.rating(.rejected), to: set)
+        #expect(status.state == .savedInSidecar)
+        #expect(fixture.folder.exists(sidecarPath))
+
+        let plan = try await fixture.plan([set])
+        let entry = try #require(plan.readyEntries.first)
+        #expect(entry.files.contains { $0.role == .sidecar })
+
+        let moveResult = try await fixture.move(plan)
+        #expect(moveResult.movedCount == 1)
+        #expect(!fixture.folder.exists(sidecarPath))
+        #expect(fixture.folder.exists("_Rejected/\(sidecarPath)"))
+
+        let undoResult = try await fixture.mover.undo(
+            undoStep(for: moveResult, returningTo: set.id))
+        #expect(undoResult.restoredCount == 1)
+        #expect(fixture.folder.exists(sidecarPath))
+        #expect(
+            try sidecarRating(at: fixture.folder.url.appendingPathComponent(sidecarPath))
+                == .rated(.rejected))
     }
 
     /// A kept RAW set is written rating 0 to its sidecar on Move, and undo writes −1 again.
