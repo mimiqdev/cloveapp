@@ -161,26 +161,6 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
-    func testAppearanceChoicePersistsAcrossLaunches() {
-        let app = XCUIApplication()
-        app.launch()
-        XCTAssertTrue(element(app, "clove.root").waitForExistence(timeout: 15))
-        element(app, "clove.nav.settings").tap()
-        chooseTheme("nord", app)
-        app.terminate()
-        app.launch()
-        XCTAssertTrue(element(app, "clove.root").waitForExistence(timeout: 15))
-        element(app, "clove.nav.settings").tap()
-        XCTAssertTrue(element(app, "clove.settings.appearance.theme.nord").isSelected)
-        // Restore Match system so subsequent tests use the simulator's appearance.
-        let toggle = element(app, "clove.settings.appearance.matchSystem")
-        if toggle.value as? String != "1" {
-            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        }
-        XCTAssertTrue(waitForValue("1", toggle))
-    }
-
-    @MainActor
     func testDesignGalleryShowsSharedControls() {
         let app = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
         XCTAssertTrue(element(app, "clove.design.gallery").waitForExistence(timeout: 10))
@@ -338,19 +318,6 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
-    private func chooseTheme(_ theme: String, _ app: XCUIApplication) {
-        let matchSystem = element(app, "clove.settings.appearance.matchSystem")
-        if matchSystem.value as? String == "1" {
-            matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-            XCTAssertTrue(waitForValue("0", matchSystem))
-        }
-        let tile = element(app, "clove.settings.appearance.theme.\(theme)")
-        XCTAssertTrue(tile.waitForExistence(timeout: 5))
-        tile.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tile))
-    }
-
-    @MainActor
     private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
@@ -358,11 +325,6 @@ final class CloveUITests: XCTestCase {
     @MainActor
     private func waitForLabel(_ label: String, _ target: XCUIElement) -> Bool {
         wait(NSPredicate(format: "label == %@", label), target)
-    }
-
-    @MainActor
-    private func waitForValue(_ value: String, _ target: XCUIElement) -> Bool {
-        wait(NSPredicate(format: "value == %@", value), target)
     }
 
     @MainActor

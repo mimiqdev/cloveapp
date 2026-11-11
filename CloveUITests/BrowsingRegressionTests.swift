@@ -2,6 +2,169 @@ import XCTest
 
 /// Restores the original browsing safety net, adapted only to the designed controls and glyphs.
 extension CloveUITests {
+    /// The Appearance setting keeps a chosen theme across a relaunch (V1, tokens.md).
+    ///
+    /// This launch uses the app's own settings storage rather than the sample library, because
+    /// the check is that the next launch reads what this one stored. The test starts from Match
+    /// system on and leaves it on, so the other tests see the usual appearance.
+    @MainActor @objc
+    func testAppearanceChoicePersistsAcrossLaunches() {
+        addTeardownBlock { @MainActor in
+            Self.restoreAppearance()
+        }
+
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The Clove root view did not appear")
+        openSettings(in: app)
+        chooseAdvanceDestination("Next unmarked photo", in: app)
+        setAutoAdvanceEnabled(false, in: app)
+        _ = scrollToSettingsControl(
+            "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
+        setAppearanceMatchSystem(in: app, on: true)
+        attachScreenshot(named: "settings-appearance-light")
+        setAppearanceMatchSystem(in: app, on: false)
+
+        let nord = app.buttons["clove.settings.appearance.theme.nord"]
+        XCTAssertTrue(nord.waitForExistence(timeout: 10), "The theme picker had no Nord tile")
+        nord.tap()
+        XCTAssertTrue(
+            waitForSelection(of: nord, timeout: 5), "Nord did not become the chosen theme")
+        attachScreenshot(named: "settings-appearance-nord")
+
+        app.terminate()
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The relaunched Clove did not appear")
+        openSettings(in: app)
+        let storedMatchSystem = app.switches["clove.settings.appearance.matchSystem"]
+        XCTAssertTrue(
+            waitForValue("0", of: storedMatchSystem, timeout: 10),
+            "The relaunch lost Match system")
+        XCTAssertTrue(
+            waitForSelection(
+                of: app.buttons["clove.settings.appearance.theme.nord"], timeout: 10),
+            "The relaunch lost the chosen theme")
+
+        setAutoAdvanceEnabled(true, in: app)
+        let destination = scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app)
+        XCTAssertTrue(
+            destination.label.contains("Next unmarked photo")
+                || String(describing: destination.value).contains("Next unmarked photo"),
+            "Disabling and relaunching lost the remembered auto-advance destination")
+        chooseAdvanceDestination("Next photo", in: app)
+        _ = scrollToSettingsControl(
+            "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
+
+        // Matching the system again in a light simulator brings the Light theme back: the theme
+        // follows the device, not the dark color scheme the app had set for Nord.
+        setAppearanceMatchSystem(in: app, on: true)
+        XCTAssertTrue(
+            waitForSelection(of: app.buttons["clove.settings.appearance.theme.light"], timeout: 5),
+            "Matching a light system did not bring the Light theme back")
+    }
+
+    @MainActor
+    private func chooseAdvanceDestination(_ name: String, in app: XCUIApplication) {
+        scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app).tap()
+        app.buttons[name].firstMatch.tap()
+    }
+
+    @MainActor
+    private func setAutoAdvanceEnabled(_ enabled: Bool, in app: XCUIApplication) {
+        let toggle = scrollToSettingsControl(
+            "clove.settings.autoAdvanceEnabled", in: app, scrollsUp: false)
+        if switchValue(toggle) != (enabled ? "1" : "0") {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(waitForValue(enabled ? "1" : "0", of: toggle, timeout: 5))
+    }
+
+    /// Puts the app back on Match system light/dark and the Light theme after the appearance test,
+    /// even when it failed, so the other tests never run in a theme it left behind.
+    ///
+    /// It is best effort: a missing element ends it instead of failing the run again.
+    @MainActor
+    private static func restoreAppearance() {
+        let app = XCUIApplication()
+        app.launch()
+        guard app.descendants(matching: .any)["clove.root"].waitForExistence(timeout: 30) else {
+            return
+        }
+        let settings = app.descendants(matching: .any)["clove.nav.settings"]
+        guard settings.waitForExistence(timeout: 10) else { return }
+        settings.tap()
+        let toggle = app.switches["clove.settings.appearance.matchSystem"]
+        guard toggle.waitForExistence(timeout: 10) else { return }
+
+        // Matching off first, so choosing Light applies instead of being ignored.
+        if toggle.value as? String == "1" {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+            waitForSwitch(toggle, value: "0", timeout: 5)
+        }
+        let light = app.buttons["clove.settings.appearance.theme.light"]
+        if light.waitForExistence(timeout: 5) {
+            light.tap()
+        }
+        if toggle.value as? String == "0" {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+            waitForSwitch(toggle, value: "1", timeout: 5)
+        }
+    }
+
+    /// Waits until a switch reports a value, with a bounded poll.
+    @MainActor
+    private static func waitForSwitch(
+        _ toggle: XCUIElement, value: String, timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if toggle.value as? String == value { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
+
+    /// Turns Match system light/dark on or off, and checks that the switch followed.
+    ///
+    /// A SwiftUI row toggle flips only on its switch, which sits at the trailing edge; a tap in
+    /// the middle of the row lands on the label.
+    @MainActor
+    private func setAppearanceMatchSystem(in app: XCUIApplication, on: Bool) {
+        let toggle = app.switches["clove.settings.appearance.matchSystem"]
+        XCTAssertTrue(
+            toggle.waitForExistence(timeout: 10), "Settings had no Match system switch")
+        for _ in 0..<2 {
+            if switchValue(toggle) == (on ? "1" : "0") { return }
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertEqual(
+            switchValue(toggle), on ? "1" : "0",
+            "Match system did not turn \(on ? "on" : "off")")
+    }
+
+    /// Waits until an element reports that it is selected, with a bounded timeout.
+    @MainActor
+    private func waitForSelection(of element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isSelected == true"), object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    /// The opt-in design captures use the same switch handling as the restored appearance test.
+    @MainActor
+    func chooseTheme(_ theme: String, _ app: XCUIApplication) {
+        setAppearanceMatchSystem(in: app, on: false)
+        let tile = element(in: app, "clove.settings.appearance.theme.\(theme)")
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        tile.tap()
+        XCTAssertTrue(waitForSelection(of: tile, timeout: 5))
+    }
+
     @MainActor @objc
     func testBrowsingFlowFromEntryToSettings() {
         let app = XCUIApplication()
