@@ -39,6 +39,20 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
+    func testMixedBatchCanClearRatingsWithoutAnIntermediateMark() {
+        let app = launchSample()
+        openLibrary(app)
+        let rated = element(app, "clove.grid.photo.mmq02678")
+        XCTAssertTrue(rated.waitForExistence(timeout: 5))
+        rated.press(forDuration: 0.6)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        element(app, "clove.grid.batch").press(forDuration: 0.6)
+        app.buttons["Clear rating"].tap()
+        XCTAssertTrue(wait(NSPredicate(format: "NOT (label CONTAINS %@)", "stars"), rated))
+        XCTAssertTrue(rated.label.contains("Red"))
+    }
+
+    @MainActor
     func testDetailInfoLabelsZoomAndMarking() {
         let app = launchSample()
         openLibrary(app)
@@ -48,6 +62,9 @@ final class CloveUITests: XCTestCase {
         info.tap()
         XCTAssertTrue(app.staticTexts["Sample camera · 0123"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["24–70 mm"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", ":05.42")).firstMatch
+                .exists)
         element(app, "clove.detail.info.done").tap()
         element(app, "clove.detail.capsule.label").tap()
         element(app, "clove.detail.labels.green").tap()
@@ -182,9 +199,14 @@ final class CloveUITests: XCTestCase {
             let app = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
             XCTAssertTrue(element(app, "clove.design.gallery").waitForExistence(timeout: 10))
             capture("gallery-ipad-centred")
+            app.swipeUp()
+            capture("gallery-ipad-lower")
             return
         }
-        for theme in ["light", "dark", "nord"] {
+        let themes =
+            ProcessInfo.processInfo.environment["CLOVE_CAPTURE_THEMES"]?
+            .split(separator: ",").map(String.init) ?? ["light", "dark", "nord"]
+        for theme in themes {
             let app = launchSample()
             openLibrary(app)
             element(app, "clove.grid.more").tap()
@@ -263,6 +285,30 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureInformationAndEmptyOpeningWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_DESIGN"] == "1")
+        let app = launchSample()
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        element(app, "clove.detail.info").tap()
+        XCTAssertTrue(app.staticTexts["Sample camera · 0123"].waitForExistence(timeout: 5))
+        capture("detail-info-compact")
+        element(app, "clove.detail.info.done").tap()
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(
+            element(app, "clove.settings.appearance.theme.light").waitForExistence(timeout: 5))
+        capture("theme-tiles")
+        app.terminate()
+        let opening = launchSample(["CLOVE_TEST_LIBRARY_OPENING": "empty"])
+        openLibrary(opening)
+        XCTAssertTrue(opening.collectionViews.firstMatch.exists)
+        XCTAssertFalse(element(opening, "clove.grid.moveRejects").exists)
+        capture("grid-opening-before-first-photo")
+    }
+
+    @MainActor
     private func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }
@@ -294,10 +340,15 @@ final class CloveUITests: XCTestCase {
 
     @MainActor
     private func chooseTheme(_ theme: String, _ app: XCUIApplication) {
+        let matchSystem = element(app, "clove.settings.appearance.matchSystem")
+        if matchSystem.value as? String == "1" {
+            matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            XCTAssertTrue(waitForValue("0", matchSystem))
+        }
         let tile = element(app, "clove.settings.appearance.theme.\(theme)")
         XCTAssertTrue(tile.waitForExistence(timeout: 5))
         tile.tap()
-        XCTAssertTrue(tile.isSelected)
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tile))
     }
 
     @MainActor

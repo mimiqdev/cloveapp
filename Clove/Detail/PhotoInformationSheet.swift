@@ -22,12 +22,11 @@ struct PhotoInformationSheet: View {
                         if !information.relativeFolder.isEmpty {
                             row("Folder", information.relativeFolder)
                         }
-                        if !information.companions.isEmpty {
-                            row("Companions", information.companions.joined(separator: " · "))
-                        }
                         if let size = sizeText(information.image) { row("Size", size) }
-                        row("Marks", MarkSummary.text(for: browsing.cullingMarks(for: photo)))
-                        row("Storage", information.usesSidecar ? "XMP sidecar" : "Clove only")
+                        row(
+                            "Marks",
+                            MarkSummary.text(for: browsing.cullingMarks(for: photo)) + " · "
+                                + (information.usesSidecar ? "XMP sidecar" : "Clove only"))
                         HStack {
                             Text("Status")
                             Spacer()
@@ -39,12 +38,24 @@ struct PhotoInformationSheet: View {
                     .listRowBackground(theme.tokens.card.color)
                 }
             }
+            .environment(\.defaultMinListRowHeight, 36)
+            .listSectionSpacing(12)
             .scrollContentBackground(.hidden)
             .foregroundStyle(Color.clove.text.primary)
             .background(Color.clove.surface.sheet)
             .navigationTitle(photo.fileName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text(photo.fileName).font(.headline).lineLimit(1)
+                        if let information, !information.companions.isEmpty {
+                            Text("+ " + information.companions.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(Color.clove.text.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .foregroundStyle(Color.clove.accent)
@@ -88,6 +99,7 @@ struct PhotoInformationSheet: View {
                 .trailing)
         }
         .font(.subheadline)
+        .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
     }
 
     private func takenText(_ image: ImageInformation) -> String? {
@@ -97,8 +109,12 @@ struct PhotoInformationSheet: View {
         formatter.timeStyle = .medium
         // EXIF's wall time is a zone-free surrogate, not a UTC instant to shift into local time.
         formatter.timeZone = .gmt
-        let precision = image.subseconds.map { ".\($0)" } ?? ""
-        return formatter.string(from: date) + precision
+        if let precision = image.subseconds {
+            // Place the EXIF digits next to seconds, before a locale's AM/PM suffix.
+            formatter.dateFormat = formatter.dateFormat.replacingOccurrences(
+                of: "ss", with: "ss'.\(precision)'")
+        }
+        return formatter.string(from: date)
     }
 
     private func exposureText(_ image: ImageInformation) -> String? {

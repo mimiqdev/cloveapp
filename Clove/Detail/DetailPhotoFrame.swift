@@ -26,6 +26,7 @@ struct DetailPhotoFrame: View {
     /// The frame's side in points; the filmstrip uses one size and a sidebar grid another.
     var side: CGFloat = 56
     var height: CGFloat?
+    var showsMarks = true
     @Environment(\.cloveTheme) private var theme
 
     @State private var thumbnail: CGImage?
@@ -34,7 +35,9 @@ struct DetailPhotoFrame: View {
         pixels
             .frame(width: side, height: height ?? side)
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(alignment: .bottomLeading) { marks }
+            .overlay(alignment: .bottomLeading) {
+                if showsMarks { marks }
+            }
             // PRD In-group culling: rejected photos are dimmed, so a cull decision reads at a
             // glance in the strip (PRD In-group culling, comparison and elimination).
             .opacity(photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)

@@ -55,7 +55,7 @@ struct DetailFilmstrip: View {
                             } label: {
                                 DetailPhotoFrame(
                                     photo: photo, isCurrent: false, thumbnails: thumbnails,
-                                    side: 54, height: 60
+                                    side: 54, height: 60, showsMarks: false
                                 )
                                 .padding(.top, 4)
                                 .background {

@@ -153,6 +153,11 @@ private struct GridTile: View {
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: isCover ? 5 : 0))
                     .opacity(item.photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)
+                    .overlay {
+                        if item.group != nil && !isCover {
+                            Rectangle().strokeBorder(Color.clove.group, lineWidth: 2)
+                        }
+                    }
                     .overlay(alignment: .bottomLeading) { rating }
                     .overlay(alignment: .topTrailing) { label }
                     .overlay(alignment: .topLeading) { cornerMarkers }
@@ -200,9 +205,9 @@ private struct GridTile: View {
             }
             .foregroundStyle(Color.clove.text.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.clove.surface.card)
+            .background(Color.clove.surface.sheet)
         } else {
-            Rectangle().fill(Color.clove.surface.card)
+            Rectangle().fill(Color.clove.surface.sheet)
         }
     }
 

@@ -94,6 +94,13 @@ struct GridCollectionView: UIViewRepresentable {
             sizeClass: context.environment.horizontalSizeClass,
             theme: context.environment.cloveTheme, failedPhotos: failedPhotos,
             isSelectingEmpty: isSelectingEmpty)
+        for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
+            ofKind: UICollectionView.elementKindSectionFooter)
+        {
+            let columns = context.environment.horizontalSizeClass == .regular ? 5 : 3
+            footer.configure(
+                count: placeholderCount, columns: columns, theme: context.environment.cloveTheme)
+        }
     }
 
     /// Three columns at compact width, five at regular width, from a square-ish cell (PRD Grid).
@@ -200,6 +207,10 @@ extension GridCollectionView {
             ) { view, indexPath, id in
                 view.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: id)
             }
+            // Even an empty grid needs its section so the opening footer can be displayed.
+            var initialSnapshot = NSDiffableDataSourceSnapshot<Int, GridCellItem.ID>()
+            initialSnapshot.appendSections([0])
+            dataSource?.apply(initialSnapshot, animatingDifferences: false)
             collectionView.register(
                 GridPlaceholderFooter.self,
                 forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter,

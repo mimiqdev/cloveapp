@@ -15,7 +15,7 @@ final class GridPlaceholderFooter: UICollectionReusableView {
                 spacing: 1.5
             ) {
                 ForEach(0..<count, id: \.self) { _ in
-                    Rectangle().fill(Color.clove.surface.card).aspectRatio(1, contentMode: .fit)
+                    Rectangle().fill(Color.clove.surface.sheet).aspectRatio(1, contentMode: .fit)
                 }
             }
             .environment(\.cloveTheme, theme)

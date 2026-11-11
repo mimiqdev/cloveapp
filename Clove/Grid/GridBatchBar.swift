@@ -33,6 +33,8 @@ struct GridBatchBar: View {
             }
         }
         .contextMenu {
+            Button("Clear rating") { apply(.rating(.unrated)) }
+                .accessibilityIdentifier("clove.grid.batch.clearRating")
             Button("Select all") { browsing.selectAllVisible(cells) }
                 .accessibilityIdentifier("clove.grid.batch.selectAll")
         }

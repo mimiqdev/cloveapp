@@ -662,7 +662,7 @@ final class TestLibrary: FolderLibrary {
         guard stored.contains(where: { $0.id == photo }) else { return nil }
         return PhotoInformation(
             image: ImageInformation(
-                captureWallTime: Date(timeIntervalSince1970: 1_799_152_325.42),
+                captureWallTime: Date(timeIntervalSince1970: 1_793_975_525.42),
                 subseconds: "42", camera: "Sample camera", bodySerial: "0123",
                 lens: "24–70 mm", exposureSeconds: 1.0 / 250, aperture: 2.8, iso: 400,
                 focalLengthMillimetres: 35, fileSizeBytes: 45_100_000,
@@ -677,9 +677,12 @@ final class TestLibrary: FolderLibrary {
     /// remain fully opened and saved. Values are read only when the test library is selected.
     private func installPresentationSamples(environment: [String: String]) {
         if let opening = environment["CLOVE_TEST_LIBRARY_OPENING"] {
-            if opening == "reading" {
+            if opening == "reading" || opening == "empty" {
                 updateContinuation.yield(.scanStarted)
-                for index in stored.indices where index >= 12 { stored[index].time = .pending }
+                let firstPending = opening == "empty" ? 0 : 12
+                for index in stored.indices where index >= firstPending {
+                    stored[index].time = .pending
+                }
                 updateContinuation.yield(.photos(stored))
             } else if opening == "grouping" {
                 updateContinuation.yield(.groupingActivity(true))
