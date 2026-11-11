@@ -145,19 +145,28 @@ struct RAWDisplayLoopTests {
     }
 
     @Test func swipeCancellationStopsQueuedRenders() async throws {
-        let (previews, continuation) = AsyncStream<Void>.makeStream()
+        let (previews, previewContinuation) = AsyncStream<Void>.makeStream()
+        let (renders, renderContinuation) = AsyncStream<Void>.makeStream()
         let release = DispatchSemaphore(value: 0)
         let measuring = StubMeasuring(
-            renderRelease: release, previewEntered: continuation)
-        defer { continuation.finish() }
+            renderEntered: renderContinuation, renderRelease: release,
+            previewEntered: previewContinuation)
+        defer {
+            previewContinuation.finish()
+            renderContinuation.finish()
+        }
         let task = Task {
             try await RAWDisplaySwipes.run(
                 plan: swipePlan(photos: 4, dwell: 0), measuring: measuring)
         }
-        var iterator = previews.makeAsyncIterator()
+        // Cancel only once the first render holds the decoder and every later
+        // photo has queued its render behind it.
+        var previewIterator = previews.makeAsyncIterator()
         for _ in 0..<4 {
-            await iterator.next()
+            await previewIterator.next()
         }
+        var renderIterator = renders.makeAsyncIterator()
+        await renderIterator.next()
         task.cancel()
         release.signal()
         await #expect(throws: CancellationError.self) { try await task.value }
