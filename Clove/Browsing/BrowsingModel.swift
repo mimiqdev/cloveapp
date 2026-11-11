@@ -1184,9 +1184,7 @@ final class BrowsingModel {
     /// Takes the library's current photos and groups.
     ///
     /// Scan batches, metadata reads and confirmed writes all refresh through this path, so the
-    /// screens keep reading the model while the library changes underneath it. Save states are
-    /// deliberately not copied from the library here: they arrive only on the ordered update
-    /// stream, so a snapshot can never paint an older transition over a newer one.
+    /// screens keep reading the model while the library changes underneath it.
     private func refresh() {
         if shownGeneration != library.openGeneration {
             shownGeneration = library.openGeneration
