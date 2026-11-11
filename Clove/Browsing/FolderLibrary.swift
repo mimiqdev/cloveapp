@@ -182,6 +182,9 @@ protocol FolderLibrary: AnyObject {
     /// change is finished for this purpose and stays for an explicit retry.
     func drainWrites() async
 
+    /// A disconnected folder drops queued writes and all unsaved status.
+    func discardPendingChanges() async
+
     /// Checks the open folder's location now, as a return to the foreground asks (PRD P0-02).
     ///
     /// G1 folder access watches with presenters plus a 500 ms foreground poll; a scene that comes
@@ -316,6 +319,8 @@ extension FolderLibrary {
     var openGeneration: Int { 0 }
 
     func drainWrites() async {}
+
+    func discardPendingChanges() async {}
 
     func checkFolderLocationNow() async {}
 

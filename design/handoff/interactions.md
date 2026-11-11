@@ -99,7 +99,7 @@ Photo only ──Back──▶ Grid
 
 ## Errors
 
-- **Drive disconnected**: marks can't save. Show the banner, dim the grid, and keep marks in memory. **Reopen** retries when the drive is back.
+- **Drive disconnected**: stop the queue and drop unsaved marks and their status. Show the banner, dim the grid, and show the photos' last-read marks. Marking is off until **Reopen**. **Reopen** reads the XMP sidecars fresh; no unsaved marks are carried over.
 - **Lost access** (the security-scoped bookmark is stale): view only from the cache. **Open** re-runs the folder picker.
 - **Leaving with unsaved marks**: on Back or app switch, if a write is pending, show the alert. "Wait" stays; "Leave anyway" drops the pending writes.
 - **Save failed** on one photo: the subtitle shows Retry. Marks stay set in the UI and are retried on the next change as well.

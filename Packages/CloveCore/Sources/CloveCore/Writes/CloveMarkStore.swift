@@ -182,12 +182,14 @@ public actor CloveMarkStore {
         } catch {
             throw CloveMarkStoreError.corruptStorage(url, reason: "\(error)")
         }
+        try Task.checkCancellation()
         try fileSystem.createDirectory(directory)
         let staging = directory.appendingPathComponent(".clove-marks-\(UUID().uuidString)")
         var replaced = false
         defer { if !replaced { try? fileSystem.remove(staging) } }
         try fileSystem.writeStaging(data, to: staging)
         try fileSystem.synchronize(staging)
+        try Task.checkCancellation()
         try fileSystem.replace(url, withItemAt: staging)
         replaced = true
         guard let readBack = try fileSystem.read(url),
