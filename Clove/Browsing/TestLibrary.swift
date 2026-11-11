@@ -42,14 +42,6 @@ final class TestLibrary: FolderLibrary {
         ProcessInfo.processInfo.environment[keepToastVariable] == "1"
     }
 
-    /// The launch environment value that makes sample photos fail their first write (PRD P0-09).
-    ///
-    /// Its value is a stem suffix: a photo whose stem ends with it reports a failed change once
-    /// and keeps the marks it had, and the next write saves it. The UI test therefore forces a
-    /// partial batch failure without files, sees the PRD's "Saved N photos. M photos couldn't be
-    /// saved." copy, and sees a retry of only the failed photo succeed.
-    static let forcedFailureVariable = "CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX"
-
     /// The launch environment value that makes the first write to named photos fail (PRD P0-08).
     ///
     /// Its value is a comma-separated list of stem suffixes. A photo whose stem ends with one of
@@ -90,7 +82,6 @@ final class TestLibrary: FolderLibrary {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         let library = sample(
-            failingStemSuffix: environment[forcedFailureVariable],
             failingMoveStemSuffix: environment[forcedMoveFailureVariable],
             readOnly: environment[readOnlyVariable] == "1",
             failingStems: stems,
@@ -200,9 +191,6 @@ final class TestLibrary: FolderLibrary {
     /// The sample's finishing-action records, so a group it finishes counts as complete like the
     /// real session's (PRD In-group culling, group completion; PRD P0-12).
 
-    /// The stem suffix whose photos fail their first write, or nil when none does (PRD P0-09).
-    private let failingStemSuffix: String?
-
     /// The stem suffixes whose photos fail their first write (PRD P0-08).
     private let failingStems: [String]
 
@@ -248,7 +236,6 @@ final class TestLibrary: FolderLibrary {
         stored = []
         groups = []
         allGroups = []
-        failingStemSuffix = nil
         failingMoveStemSuffix = nil
         readOnly = false
         failingStems = []
@@ -264,7 +251,6 @@ final class TestLibrary: FolderLibrary {
     init(
         photos: [GridPhoto],
         groups: [BrowsingGroup],
-        failingStemSuffix: String? = nil,
         failingMoveStemSuffix: String? = nil,
         readOnly: Bool = false,
         detailImages: (any DetailImageSource)? = nil,
@@ -277,7 +263,6 @@ final class TestLibrary: FolderLibrary {
         stored = photos
         self.groups = groups
         allGroups = groups
-        self.failingStemSuffix = failingStemSuffix
         self.failingMoveStemSuffix = failingMoveStemSuffix
         self.readOnly = readOnly
         self.failingStems = failingStems.map { $0.lowercased() }
@@ -709,9 +694,7 @@ final class TestLibrary: FolderLibrary {
     /// Whether this photo's first write should fail, and records that it did (PRD P0-08, P0-09).
     private func shouldFailFirstWrite(to photo: PhotoIdentity) -> Bool {
         guard !alreadyFailed.contains(photo) else { return false }
-        let suffix = failingStemSuffix.map { photo.stem.hasSuffix($0) } ?? false
-        let listed = failingStems.contains { photo.stem.hasSuffix($0) }
-        guard suffix || listed else { return false }
+        guard failingStems.contains(where: { photo.stem.hasSuffix($0) }) else { return false }
         alreadyFailed.insert(photo)
         return true
     }
@@ -750,7 +733,6 @@ final class TestLibrary: FolderLibrary {
     /// The forced values keep the UI tests from needing files; the move failures and read-only
     /// switch cover PRD P0-10, while the write failures, loss and drain cover PRD P0-08 and P0-02.
     static func sample(
-        failingStemSuffix: String? = nil,
         failingMoveStemSuffix: String? = nil,
         readOnly: Bool = false,
         failingStems: [String] = [],
@@ -773,7 +755,6 @@ final class TestLibrary: FolderLibrary {
         }
         return TestLibrary(
             photos: photos, groups: sampleGroups,
-            failingStemSuffix: failingStemSuffix,
             failingMoveStemSuffix: failingMoveStemSuffix, readOnly: readOnly,
             detailImages: sampleDetailImages, failingStems: failingStems,
             failureReason: failureReason, locationLoss: locationLoss,
