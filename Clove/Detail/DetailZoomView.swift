@@ -295,8 +295,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// A quality change from an embedded preview to a native render is the same call, so the
     /// view keeps whatever scale and offset the user had, and the render only sharpens the
     /// picture (G1 "Preview, detail (I2)"). The screen issues a command only when the photo
-    /// changes, a group keeps a zoom, or a 100% taken from a preview whose header could not be
-    /// read finds the render's own size.
+    /// changes, a group keeps a zoom, or a 100% taken from a preview whose size was not known finds
+    /// the render's own size.
     ///
     /// A preview and its render share the photo's aspect, so the image's drawn rect does not
     /// move. A camera that crops its embedded preview can give it another aspect; that rect then

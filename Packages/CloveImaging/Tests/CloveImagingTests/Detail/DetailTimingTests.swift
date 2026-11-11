@@ -91,6 +91,45 @@ struct DetailTimingTests {
                 + " raw_render_target_ms=2000")
     }
 
+    /// What the native 100% read costs on macOS, once per photo (PRD P0-04; G1 "Preview, detail
+    /// (I2)"; #111).
+    ///
+    /// The first preview of a RAW pays this read instead of an ImageIO header read, so the numbers
+    /// sit next to the header's for comparison. Nothing asserts on them.
+    @Test func nativeSizeReadTimings() throws {
+        let names = try FileManager.default.contentsOfDirectory(atPath: DetailFixtures.formats.path)
+            .sorted()
+            .filter { Self.rawExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
+        var headerWorst = 0.0
+        var decoderWorst = 0.0
+        for name in names {
+            let source = try detailSource(DetailFixtures.file(name))
+            var headerSamples: [Double] = []
+            var decoderSamples: [Double] = []
+            for _ in 0..<Self.samples {
+                let headerStart = ContinuousClock.now
+                _ = DetailNativeSize.header(source)
+                headerSamples.append(elapsedMilliseconds(since: headerStart))
+                let decoderStart = ContinuousClock.now
+                _ = DetailNativeSize.raw(source)
+                decoderSamples.append(elapsedMilliseconds(since: decoderStart))
+            }
+            let header = Timings(milliseconds: headerSamples)
+            let decoder = Timings(milliseconds: decoderSamples)
+            headerWorst = max(headerWorst, header.maximum)
+            decoderWorst = max(decoderWorst, decoder.maximum)
+            print(
+                "DETAIL native-size file=\(name) n=\(Self.samples)"
+                    + " header_median_ms=\(format(header.median))"
+                    + " decoder_median_ms=\(format(decoder.median))"
+                    + " decoder_max_ms=\(format(decoder.maximum))")
+        }
+        print(
+            "DETAIL native-size summary files=\(names.count)"
+                + " header_worst_max_ms=\(format(headerWorst))"
+                + " decoder_worst_max_ms=\(format(decoderWorst))")
+    }
+
     private func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Double {
         let value = start.duration(to: .now).components
         return Double(value.seconds) * 1000 + Double(value.attoseconds) / 1e15
