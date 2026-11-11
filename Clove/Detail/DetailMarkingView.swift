@@ -585,12 +585,12 @@ struct DetailMarkingView: View {
         apply(rules.result(forLabel: label, marks: photo.marks))
     }
 
-    /// Toggles Reject, which PRD Marking rules keeps independent of the rating.
+    /// Toggles Reject, which is the rating −1 (PRD Marking rules).
     private func toggleReject() {
         // The HUD's Reject is a toggle, while the `↓` key only turns Reject on, so the toggle
         // builds its own change and reports the same mark kind for auto-advance (PRD Marking
-        // rules, PRD Auto-advance).
-        apply(.mark(MarkChange(reject: !photo.marks.isRejected), .reject))
+        // rules, PRD Auto-advance). Turning Reject off leaves the photo unrated.
+        apply(.mark(MarkChange(rating: photo.marks.isRejected ? .unrated : .rejected), .reject))
     }
 
     /// Resolves one finished marking swipe through C13's gesture rules (PRD P0-06).

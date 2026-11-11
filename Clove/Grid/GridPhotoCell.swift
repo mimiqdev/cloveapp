@@ -267,8 +267,8 @@ final class GridPhotoCell: UICollectionViewCell {
         rejectBadge.isHidden = isCover || !marks.isRejected
         companionBadge.isHidden = isCover || currentCompanions.badgeText == nil
         companionBadge.setText(currentCompanions.badgeText)
-        ratingBadge.isHidden = isCover || marks.rating == .unrated
-        ratingBadge.setText(marks.rating == .unrated ? nil : "\(marks.rating.rawValue)")
+        ratingBadge.isHidden = isCover || marks.rating <= .unrated
+        ratingBadge.setText(marks.rating <= .unrated ? nil : "\(marks.rating.rawValue)")
         let dotColour = Self.colour(for: marks.label)
         colourDot.isHidden = isCover || dotColour == nil
         colourDot.backgroundColor = dotColour
@@ -407,7 +407,7 @@ final class GridPhotoCell: UICollectionViewCell {
         for photo: GridPhoto, companions: GridCompanions, unavailable: Bool, selected: Bool
     ) -> String {
         var parts = [photo.fileName]
-        if photo.marks.rating != .unrated {
+        if photo.marks.rating > .unrated {
             parts.append("\(photo.marks.rating.rawValue) stars")
         }
         if let colour = photo.marks.label.colour {

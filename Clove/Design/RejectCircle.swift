@@ -10,7 +10,7 @@ struct RejectCircle: View {
     /// The theme in effect, for the glyph colour that is not a token (tokens.md).
     @Environment(\.cloveTheme) private var theme
 
-    /// Whether the photo is rejected (G1 decision 5: Clove-only state).
+    /// Whether the photo is rejected (PRD P0-05: the rating −1).
     let isRejected: Bool
 
     /// The size components.md measures on the device.

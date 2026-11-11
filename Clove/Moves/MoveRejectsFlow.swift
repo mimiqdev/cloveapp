@@ -94,8 +94,8 @@ final class MoveRejectsFlow: Identifiable {
     /// Clears the kept photos' Reject, then moves the rest (design handoff, PRD P0-10).
     ///
     /// The keeps are staged until this call: every kept photo first goes through C4's existing
-    /// mark path as a Reject-off change, leaving rating and label untouched, and every kept photo
-    /// is left out of the plan even when that clear fails. The plan's remaining sets then move
+    /// mark path and gets the rating 0, which clears Reject and leaves the label untouched. Every
+    /// kept photo is left out of the plan even when that clear fails. The plan's remaining sets then move
     /// through C6. A completed run is recorded on the model for the toast and C14's undo; the
     /// return value tells the sheet whether it can dismiss.
     func move(_ plan: RejectMovePlan) async -> Bool {
@@ -115,7 +115,7 @@ final class MoveRejectsFlow: Identifiable {
         var clearing = RejectMoveKeepClearing()
         for identity in kept {
             guard context.isCurrent(browsing) else { return true }
-            let status = await browsing.apply(.reject(false), to: identity)
+            let status = await browsing.apply(.rating(.unrated), to: identity)
             clearing.record(
                 status, for: identity,
                 files: plan.readyEntries.first { $0.identity == identity }?.files ?? [])
@@ -162,7 +162,7 @@ final class MoveRejectsFlow: Identifiable {
     private func restore(_ identities: [PhotoIdentity], context: FolderContext) async {
         for identity in identities {
             guard context.isCurrent(browsing) else { return }
-            _ = await browsing.apply(.reject(true), to: identity)
+            _ = await browsing.apply(.rating(.rejected), to: identity)
         }
     }
 
