@@ -1,9 +1,18 @@
 import SwiftUI
 
-/// The finishing pill above detail's expanded filmstrip group (`group.rejectRest`).
+/// The pill action in its own row above detail's filmstrip
+/// (`design/handoff/components.md`, Pill action).
+///
+/// It is a glass capsule with one line of semibold text: "Reject N unmarked" in `reject`
+/// (copy.md `group.rejectRest`). The detail view decides when it appears (PRD In-group culling).
 struct PillAction: View {
+    /// What the button says (`design/handoff/copy.md`).
     let title: String
+
+    /// The identifier the screen's UI test uses.
     var identifier = "clove.pillAction"
+
+    /// What the tap does.
     let action: () -> Void
 
     var body: some View {

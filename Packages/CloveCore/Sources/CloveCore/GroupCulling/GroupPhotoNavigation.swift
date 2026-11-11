@@ -1,19 +1,33 @@
-/// Auto-advance within a group and then into the following photos in grid order.
+/// Moving through one group's photos, in the group's member order (PRD In-group culling;
+/// PRD P0-12).
+///
+/// Navigation is a pure question: which visible member comes next? Every call takes the marks
+/// read now, so a caller never navigates by a stale copy, and nothing here writes a mark.
+/// The next unmarked search wraps once and returns nil when no other visible member is unmarked.
+/// A photo that is not a member has no place in the order, so its next unmarked answer is nil.
+/// Once no unmarked member remains, auto-advance follows the next visible grid cell.
 public struct GroupPhotoNavigation: Hashable, Sendable {
+    /// The group whose member order navigation follows (PRD Similar groups step 1).
     public let group: SimilarGroup
 
+    /// Builds navigation for one published group.
     public init(group: SimilarGroup) {
         self.group = group
     }
 
-    /// The next unmarked member, wrapping once and excluding the photo just marked.
+    /// The next visible unmarked member, wrapping once and excluding the photo just marked.
+    ///
+    /// This is the photo detail shows after a mark is written (PRD In-group culling,
+    /// comparison and elimination; PRD P0-12): rated, labelled and rejected members are skipped,
+    /// the search continues from the start after the last member, and nil means no other visible
+    /// member is unmarked. The current photo is never its own answer, because advancing must move.
     public func nextUndecidedPhoto(
         after photo: PhotoIdentity,
-        marks: [PhotoIdentity: PhotoMarks]
+        marks: [PhotoIdentity: PhotoMarks], visiblePhotos: Set<PhotoIdentity>
     ) -> PhotoIdentity? {
         guard let index = group.members.firstIndex(of: photo) else { return nil }
         return (group.members.dropFirst(index + 1) + group.members.prefix(index)).first {
-            (marks[$0] ?? PhotoMarks()).isUnmarked
+            visiblePhotos.contains($0) && (marks[$0] ?? PhotoMarks()).isUnmarked
         }
     }
 
@@ -23,7 +37,7 @@ public struct GroupPhotoNavigation: Hashable, Sendable {
         orderedPhotos: [GridPhoto], groups: [BrowsingGroup], visiblePhotos: Set<PhotoIdentity>
     ) -> GroupAdvance {
         let next =
-            nextUndecidedPhoto(after: photo, marks: marks)
+            nextUndecidedPhoto(after: photo, marks: marks, visiblePhotos: visiblePhotos)
             ?? photoAfterGroup(
                 orderedPhotos: orderedPhotos, groups: groups, visiblePhotos: visiblePhotos)
         return next.map(GroupAdvance.nextUndecidedPhoto) ?? .complete

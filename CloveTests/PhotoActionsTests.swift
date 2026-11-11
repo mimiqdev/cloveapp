@@ -42,9 +42,6 @@ struct PhotoActionsTests {
     @Test func finishingUndoRestoresAllUnmarkedPhotosAndReturnsAfterAnAdvance() async {
         let (model, library, plan) = labelledGroupScenario()
         model.runGroupFinishing(plan)
-        model.recordAutoAdvance(
-            AutoAdvancePlan(
-                target: .nextPhoto(library.identity("next")), markedPhoto: plan.currentPhoto))
         model.openPhoto(library.identity("next"))
         model.undoLastMark()
         #expect(model.currentPhoto?.id == library.identity("b"))
@@ -52,9 +49,30 @@ struct PhotoActionsTests {
             model.groupPhotos.filter { $0.marks.isUnmarked }.map(\.id)
                 == ["b", "c", "d"].map { library.identity($0) })
         #expect(model.shownMarks(for: library.identity("a")).label.colour == .green)
-        #expect(model.lastMarkEdits.isEmpty)
+        #expect(!model.canUndoMark)
         await model.drainActions()
         #expect(library.photos.filter { $0.marks.isRejected }.isEmpty)
+    }
+
+    @Test func detailUndoRecordsTheActionAndABatchClearsTheWholeStep() async {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = library.identity("a")
+        model.openPhoto(photo)
+        model.apply(.label(ColourLabel(colour: .blue)), to: photo)
+        #expect(model.canUndoMark)
+        model.openPhoto(library.identity("b"))
+        model.undoLastMark()
+        #expect(model.currentPhoto?.id == photo)
+        #expect(model.shownMarks(for: photo).label.isClear)
+        #expect(!model.canUndoMark)
+        model.apply(.rating(.rejected), to: photo)
+        #expect(model.canUndoMark)
+        model.toggleSelection(photo)
+        model.applyBatch(.rating(.unrated), settings: AppSettings())
+        #expect(!model.canUndoMark)
+        await model.drainActions()
     }
 
     @Test func aTapShowsImmediatelyAndTwoQuickMarksWriteInOrder() async throws {

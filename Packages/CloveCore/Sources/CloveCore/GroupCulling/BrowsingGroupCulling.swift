@@ -8,6 +8,11 @@
 /// how far refinement has gone and whether a join used the fallback similarity. Browsing publishes
 /// neither, and no culling rule may depend on them.
 extension BrowsingGroup {
+    /// The members the current grid filter shows, retaining the published group identity.
+    public func visible(in photos: Set<PhotoIdentity>) -> BrowsingGroup {
+        BrowsingGroup(id: id, members: members.filter { photos.contains($0) })
+    }
+
     /// The group as C10's culling rules read it (PRD In-group culling).
     ///
     /// The refinement marker is the time-only stage, which is the state grouping's first

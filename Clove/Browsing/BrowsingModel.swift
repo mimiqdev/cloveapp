@@ -108,8 +108,8 @@ final class BrowsingModel {
     private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
     private var keptEditsByMove: [RejectMoveBatchID: [DesiredMarkEdit]] = [:]
 
-    /// Snapshots are taken synchronously from desired marks, ready for the next undo task.
-    private(set) var lastMarkEdits: [DesiredMarkEdit] = []
+    /// The latest detail action's return photo and before/after snapshots form one undo step.
+    private var markUndo: (photo: PhotoIdentity, edits: [DesiredMarkEdit])?
     private(set) var lastMoveUndo: Result<RejectMoveUndoResult, any Error>?
 
     static let saveFailureToastMessage = "Couldn't save the mark."
@@ -387,7 +387,6 @@ final class BrowsingModel {
         let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
             request($0.change, for: $0.photo)
         }
-        lastMarkEdits = edits
         submit(.finishing(plan, edits))
     }
 
@@ -493,8 +492,6 @@ final class BrowsingModel {
         let plan = BatchMarkPlan(action: action, photos: batchTargets, settings: settings)
         guard !plan.items.isEmpty else { return }
         let edits = plan.items.map { request($0.change, for: $0.photo) }
-        lastMarkEdits = edits
-        lastAutoAdvance = nil
         submit(.batch(edits))
     }
 
@@ -546,8 +543,6 @@ final class BrowsingModel {
             return
         }
         let edits = kept.map { request(.rating(.unrated), for: $0) }
-        lastMarkEdits = edits
-        lastAutoAdvance = nil
         submit(.keep(edits))
         let id = submit(.move(plan, kept: edits))
         moveCompletions[id] = completion
@@ -596,8 +591,6 @@ final class BrowsingModel {
             else { return nil }
             return request(change, for: kept.set.id)
         }
-        lastMarkEdits = edits
-        lastAutoAdvance = nil
         submit(.moveUndo(entry, edits))
     }
 
@@ -621,17 +614,15 @@ final class BrowsingModel {
     func apply(_ change: MarkChange, to photo: PhotoIdentity) {
         guard canMark, !change.isEmpty else { return }
         let edit = request(change, for: photo)
-        lastMarkEdits = [edit]
-        if state.route != .detail { lastAutoAdvance = nil }
         submit(.mark(edit))
     }
 
-    var canUndoMark: Bool { canMark && lastAutoAdvance != nil && !lastMarkEdits.isEmpty }
+    var canUndoMark: Bool { canMark && markUndo != nil }
 
     /// Restore the latest detail action together, including a whole Reject unmarked action.
     func undoLastMark() {
-        guard canUndoMark, let photo = lastAutoAdvance?.markedPhoto else { return }
-        let edits = lastMarkEdits.compactMap { edit -> DesiredMarkEdit? in
+        guard canUndoMark, let undo = markUndo else { return }
+        let edits = undo.edits.compactMap { edit -> DesiredMarkEdit? in
             guard
                 let change = DesiredMarkRestore.change(
                     photo: edit.photo, current: shownMarks(for: edit.photo), expected: edit.after,
@@ -639,10 +630,8 @@ final class BrowsingModel {
             else { return nil }
             return request(change, for: edit.photo)
         }
-        lastMarkEdits = []
-        lastAutoAdvance = nil
         submit(.batch(edits))
-        openPhoto(photo)
+        openPhoto(undo.photo)
     }
 
     // MARK: - Ordered actions
@@ -660,8 +649,22 @@ final class BrowsingModel {
             for: photo, confirmed: confirmedPhotos[index].marks)
     }
 
+    /// Only detail marks and finishing actions create a marking undo step. Other actions and
+    /// ending the folder's session clear the whole value, so no separate navigation record lingers.
+    private func recordUndo(for action: PhotoAction?) {
+        switch action {
+        case .mark(let edit)? where state.route == .detail:
+            markUndo = (edit.photo, [edit])
+        case .finishing(let plan, let edits)? where state.route == .detail && !edits.isEmpty:
+            markUndo = (plan.currentPhoto, edits)
+        default:
+            markUndo = nil
+        }
+    }
+
     @discardableResult
     private func submit(_ action: PhotoAction) -> UInt64 {
+        recordUndo(for: action)
         let id = actionPipeline.submit(action)
         if actionConsumer == nil {
             actionConsumer = Task { [weak self] in
@@ -836,8 +839,7 @@ final class BrowsingModel {
         guard folderLocationLoss == nil else { return }
         folderLocationLoss = loss
         let dropped = actionPipeline.removePending()
-        lastMarkEdits = []
-        lastAutoAdvance = nil
+        recordUndo(for: nil)
         desiredMarks.removeAll()
         storedPhotos = confirmedPhotos
         dismissSaveFailureToast()
@@ -925,28 +927,11 @@ final class BrowsingModel {
         storedPhotos = []
         photoIndices = [:]
         desiredMarks.removeAll()
-        lastMarkEdits = []
-        lastAutoAdvance = nil
+        recordUndo(for: nil)
         dismissSaveFailureToast()
         groups = []
         thumbnails = library.thumbnails
         detailImages = library.detailImages
-    }
-
-    /// The auto-advance the last mark made in the detail view resolved to, with the photo it
-    /// marked (PRD Auto-advance).
-    ///
-    /// U8 reads ``lastAutoAdvance``'s `markedPhoto` after an undo to return to the photo whose
-    /// mark was undone (PRD Undo row: undoing after auto-advance returns to the photo whose mark
-    /// was undone). Every detail mark records its plan, including the one that stays, so the
-    /// record always names the latest mark rather than the latest move. A batch mark from the grid
-    /// has no detail view to advance, so it records nothing.
-    private(set) var lastAutoAdvance: AutoAdvancePlan?
-
-    /// Records the advance one written mark started, so undo can return to the marked photo
-    /// (PRD Undo row).
-    func recordAutoAdvance(_ plan: AutoAdvancePlan) {
-        lastAutoAdvance = plan
     }
 
     /// Restores this scene's saved state through CloveCore's validation (PRD P0-14).
@@ -1109,8 +1094,7 @@ final class BrowsingModel {
         if shownGeneration != library.openGeneration {
             shownGeneration = library.openGeneration
             desiredMarks.removeAll()
-            lastMarkEdits = []
-            lastAutoAdvance = nil
+            recordUndo(for: nil)
             dismissSaveFailureToast()
         }
         confirmedPhotos = library.photos
@@ -1127,8 +1111,9 @@ final class BrowsingModel {
 
     /// Drops scene state that names a photo the folder no longer holds (PRD P0-10, P0-14).
     ///
-    /// A move removes photos, so selection and detail must not point at one. A missing detail
-    /// photo returns to the grid, using the same fallback as restore.
+    /// A confirmed move removes photos, so the selection and current photo must not point at
+    /// one. The scan only adds photos, so this changes nothing during a normal scan; a detail
+    /// route whose photo is gone returns to the grid, the same fallback a restore uses.
     private func reconcileRemovedPhotos() {
         let present = Set(photoIndices.keys)
         if !state.selection.isSubset(of: present) {

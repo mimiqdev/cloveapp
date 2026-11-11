@@ -305,7 +305,7 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
-    func testFinishingPillSurvivesLabelUnderUnmarkedFilter() {
+    func testFinishingPillRequiresAKeepInTheVisibleGroup() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
         openLibrary(app)
         element(app, "clove.grid.filter").tap()
@@ -314,15 +314,7 @@ final class CloveUITests: XCTestCase {
         element(app, "clove.detail.capsule.label").tap()
         element(app, "clove.detail.labels.green").tap()
         XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
-        let pill = element(app, "clove.detail.rejectUnmarked")
-        XCTAssertTrue(pill.waitForExistence(timeout: 5))
-        XCTAssertTrue(pill.isHittable)
-        XCTAssertEqual(pill.label, "Reject 2 unmarked")
-        pill.tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
-        element(app, "clove.detail.undo").tap()
-        XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
-        XCTAssertEqual(pill.label, "Reject 2 unmarked")
+        XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
     }
 
     @MainActor

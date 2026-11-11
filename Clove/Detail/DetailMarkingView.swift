@@ -2,7 +2,11 @@ import CloveCore
 import CloveImaging
 import SwiftUI
 
-/// The screen supplies grid-order navigation, marking and group finishing actions.
+/// What the marking view asks its screen to do beyond drawing it (PRD P0-04, P0-06; PRD P0-12).
+///
+/// The view owns the pixels, the zoom and the marking inputs; the screen owns the grid's order
+/// and filter, the marking actions and the auto-advance (PRD P0-03; PRD In-group culling).
+/// These calls form that boundary.
 @MainActor
 struct DetailMarkingActions {
     /// Applies one resolved mark change to the photo it belongs to (PRD P0-08).
@@ -21,14 +25,18 @@ struct DetailMarkingActions {
 
     /// Filmstrip navigation keeps the screen's existing auto-advance cancellation.
     var openPhoto: (PhotoIdentity) -> Void = { _ in }
+    /// Submits the visible group's finishing action and starts its auto-advance.
     var finishGroup: (GroupFinishingPlan) -> Void = { _ in }
 }
 
 /// One photo's preview and marking controls: the HUD, the zoomable preview with its edge taps
 /// and marking swipes, and the states that must not look like a loaded image (PRD P0-04, P0-06).
 ///
-/// Every marking input resolves through ``MarkingInputRules`` and the ordered write pipeline.
-/// Navigating within the same group preserves zoom and position; leaving follows Settings.
+/// Every input — the swipe gesture, the HUD's rating bar, a label and the Reject toggle —
+/// resolves through C13's ``MarkingInputRules`` and then asks the screen to write it and start
+/// its auto-advance (PRD In-group culling, P0-06, PRD Auto-advance). The screen supplies the order
+/// an edge tap moves through using ``DetailMarkingActions``. Navigating within the same group
+/// preserves zoom and position; leaving follows the detail setting.
 ///
 /// The selected display mode controls fit and zoom together. A held screen RAW
 /// appears immediately; otherwise the camera preview fills the screen-render wait.
@@ -38,7 +46,10 @@ struct DetailMarkingActions {
 /// The edge zones are ``DetailEdgeZone``'s: the outer 18% of the preview's width on each side
 /// navigates, with single taps only, so a tap there never waits for a double tap. The middle
 /// keeps the double-tap action (PRD Detail and marking).
-/// The current group's finishing pill sits above its expanded filmstrip frames.
+///
+/// Folder access problems appear in the header's indicator and banner (PRD P0-08). A change
+/// that did not confirm brings the shared failure toast, and the files supply the marks again.
+/// The current group's finishing pill sits centred in its own row above the filmstrip.
 struct DetailMarkingView: View {
     /// The scene's browsing state and ordered marking actions
     /// (PRD P0-08).
@@ -224,7 +235,8 @@ struct DetailMarkingView: View {
     private var finishingAction: PillAction? {
         guard browsing.canMark, let group = browsing.currentGroup else { return nil }
         let plan = GroupFinishingPlan(
-            group: group, action: .rejectUnmarked, currentPhoto: photo.id,
+            group: group.visible(in: Set(order.map(\.id))),
+            action: .rejectUnmarked, currentPhoto: photo.id,
             marks: Dictionary(uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) }))
         guard plan.availability.isAvailable, !plan.isEmpty else { return nil }
         return PillAction(
