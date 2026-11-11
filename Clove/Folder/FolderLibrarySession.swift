@@ -1147,7 +1147,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// Builds the open folder's detail source over I2's pipeline bound to its session
     /// (PRD P0-04, G1 "Preview, detail (I2)").
     ///
-    /// G1 keeps the detail cache in memory (32 MiB plus one native render), so the pipeline needs
+    /// G1 keeps detail images in memory (64 MiB compressed plus one native render), so the pipeline needs
     /// no directory, unlike the grid's disk cache. Its reads are admitted through the folder's
     /// C11 session, so ending the folder waits for a read before releasing the scope.
     private func makeDetailSource(for session: FolderAccessSession) -> any DetailImageSource {

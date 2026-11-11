@@ -4,6 +4,8 @@ Figma: https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Nativ
 
 Working rule: the PRD is a guide, not the source of truth. Design decisions here can override it.
 
+Detail never shows a loading label; the grid thumbnail stands in until the preview arrives (owner, 2026-11-12).
+
 ## Drive disconnected drops unsaved marks (owner decision, 2026-11-11)
 
 When the drive disconnects, stop the action and write queues and drop the folder's pending and failed marks and their status. Show the photos' last-read marks and the existing disconnected banner. Marking stays off until Reopen. Reopen reads the XMP sidecars fresh; no unfinished edits, retries or conflict state carry across the open. The XMP and photo are the source of truth.

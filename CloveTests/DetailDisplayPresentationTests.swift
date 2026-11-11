@@ -16,6 +16,7 @@ private final class ObservedDetailImages: DetailImageSource {
     private(set) var deliveries: [(PhotoIdentity, DetailPixelRequest.Need, DetailQuality)] = []
     private(set) var prefetched: [DetailPhotoWindow] = []
     var prefetchEnabled = true
+    var heldPhoto: PhotoIdentity?
 
     func prepare(_ window: DetailPhotoWindow) async {
         windows.append(window)
@@ -24,6 +25,9 @@ private final class ObservedDetailImages: DetailImageSource {
 
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
         requests.append((photo, request))
+        if photo == heldPhoto {
+            do { try await Task.sleep(for: .seconds(5)) } catch { return .deferred }
+        }
         let outcome = await sample.image(for: photo, request: request)
         if case .image(let image) = outcome {
             delivered.append(image.quality)
@@ -44,6 +48,50 @@ private final class ObservedDetailImages: DetailImageSource {
 @Suite(.serialized)
 @MainActor
 struct DetailDisplayPresentationTests {
+    @Test func uncachedPhotoShowsItsGridThumbnailWhileDetailIsPending() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        source.prefetchEnabled = false
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let first = browsing.photos[2]
+        let next = browsing.photos[3]
+        source.heldPhoto = next.id
+        guard
+            case .image(let thumbnail) = await browsing.thumbnails.thumbnail(
+                for: next.id, priority: .visible)
+        else { throw CocoaError(.fileReadUnknown) }
+        browsing.openPhoto(first.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source)
+                .environment(SettingsStore.sample))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == first.id }
+        browsing.openPhoto(next.id)
+        try await waitFor { source.requests.contains { $0.0 == next.id } }
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let image = try #require(scroll.subviews.first as? UIImageView)
+        try await waitFor { image.image?.cgImage === thumbnail }
+        #expect(!source.deliveries.contains { $0.0 == next.id })
+        #expect(preview.accessibilityLabel == next.fileName)
+        func hasLoadingCue(_ view: UIView) -> Bool {
+            if view is UIActivityIndicatorView { return true }
+            if let text = (view as? UILabel)?.text, text.localizedCaseInsensitiveContains("loading")
+            {
+                return true
+            }
+            return view.subviews.contains(where: hasLoadingCue)
+        }
+        #expect(!hasLoadingCue(window))
+    }
+
     @Test func rawSwapOrderRefreshAndCameraZoomThroughTheSharedView() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
