@@ -170,18 +170,19 @@ a concurrent measurement; the concurrency-2 row assumes perfect division.
 
 - Detailed RAW variants: first **12** RAWs.
 - Camera HEIF variants and their colour comparison: first **6** RAW + HEIF pairs.
-  The supervisor's 2026-11-11 scope note allows 6 pairs instead of 12 when the HIF
-  variants would push the run over about ten minutes; this probe takes that option
-  and says so here. The full-HIF decode is the slowest step.
+  The supervisor's 2026-11-11 scope update for this task (a coordinator instruction,
+  not issue text) allows 6 pairs instead of 12 when the HIF variants would push the
+  run over about ten minutes; this probe takes that option and says so here. The
+  full-HIF decode is the slowest step.
 - Colour: **every** detailed RAW (up to 12) for the reduced-variant comparisons.
 - Swipes: first **20** photos, three dwells.
 - Cache: **6** files.
 - Sustained: 300 renders or 5 minutes, on its own button.
 - Every loop checks cancellation between steps and is bounded by the counts above.
-  File discovery uses the preview probe's enumerator: it reads paths (skipping
-  hidden files and `_Rejected`), sorts them, then samples the first N. Those counts
-  bound every image decode and every retained bitmap; discovery itself does not
-  decode or retain image pixels.
+  File discovery has the preview probe's rules — it skips hidden files and
+  `_Rejected`, keeps RAW and camera HEIF paths, checks cancellation during the
+  walk, and sorts — then samples the first N. Those counts bound every image decode
+  and every retained bitmap; discovery itself reads paths only.
 
 ### Memory
 
@@ -213,7 +214,7 @@ the warm renders, and the baseline grows across this serial run, so read the
 Every row succeeded. The requested long edge arrived within 2 px on this fixture.
 On this host `scaleFactor` saved about **7.5 ms** at screen size and **12.4 ms**
 (draft off) or **14.0 ms** (draft on) at grid size against the native reused-context
-render; against the fresh-context native render the saving was about **20–25 ms**.
+render; against the fresh-context native render the saving was about **20–27 ms**.
 Draft mode did not separate from non-draft at either size. The first cold
 fresh-context native render paid about **181 ms** over its warm median. Those are
 Mac numbers from a loaded host and must not be read as iPhone ratios.

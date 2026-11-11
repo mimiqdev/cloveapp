@@ -132,25 +132,57 @@ struct RAWDisplayLoopTests {
             })
     }
 
-    @Test func swipeCancellationDrainsAnInFlightRender() async throws {
-        let measuring = StubMeasuring(renderDelay: 0.15)
-        let plan = RAWDisplaySwipePlan(
-            photos: [
+    private func swipePlan(photos: Int) -> RAWDisplaySwipePlan {
+        RAWDisplaySwipePlan(
+            photos: (0..<photos).map {
                 RAWDisplaySwipePhoto(
-                    raw: URL(fileURLWithPath: "/fixture/photo.ARW"),
-                    preview: URL(fileURLWithPath: "/fixture/photo.HIF"))
-            ],
+                    raw: URL(fileURLWithPath: "/fixture/photo-\($0).ARW"),
+                    preview: URL(fileURLWithPath: "/fixture/photo-\($0).HIF"))
+            },
             screenVariant: RAWDisplayVariant(
                 name: "screen", scale: .longEdge(1_200), draft: false, context: .reused,
                 role: .screen),
             dwellMilliseconds: [0])
+    }
+
+    @Test func swipeCancellationDuringTheLastRenderDrainsIt() async throws {
+        let (entered, continuation) = AsyncStream<Void>.makeStream()
+        let release = DispatchSemaphore(value: 0)
+        let measuring = StubMeasuring(renderEntered: continuation, renderRelease: release)
+        defer { continuation.finish() }
         let task = Task {
-            try await RAWDisplaySwipes.run(plan: plan, measuring: measuring)
+            try await RAWDisplaySwipes.run(plan: swipePlan(photos: 1), measuring: measuring)
         }
-        try await Task.sleep(for: .milliseconds(50))
+        var iterator = entered.makeAsyncIterator()
+        await iterator.next()
         task.cancel()
+        release.signal()
         await #expect(throws: CancellationError.self) { try await task.value }
-        // The one in-flight render drained and no new render was admitted.
+        // The in-flight render drained and no new render was admitted.
+        #expect(measuring.count("raw-render") == 1)
+        #expect(measuring.count("render-drained") == 1)
+    }
+
+    @Test func swipeCancellationDuringSupersedeDrainAdmitsNoNewRender() async throws {
+        let (previews, previewContinuation) = AsyncStream<Void>.makeStream()
+        let entry = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let measuring = StubMeasuring(
+            renderRelease: release, previewEntered: previewContinuation,
+            renderEntrySignal: entry, previewWaitsForRender: true)
+        defer { previewContinuation.finish() }
+        let task = Task {
+            try await RAWDisplaySwipes.run(plan: swipePlan(photos: 2), measuring: measuring)
+        }
+        var previewIterator = previews.makeAsyncIterator()
+        // The first preview is photo 1; the second is photo 2, which is followed by the
+        // supersede drain of photo 1's still-blocked render.
+        await previewIterator.next()
+        await previewIterator.next()
+        task.cancel()
+        release.signal()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        // The drain finished, then cancellation stopped the walk before a second render.
         #expect(measuring.count("raw-render") == 1)
         #expect(measuring.count("render-drained") == 1)
     }
@@ -205,6 +237,21 @@ struct RAWDisplayLoopTests {
         }
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(measuring.count("raw-image") == 0)
+    }
+
+    @Test func discoveryStopsOnCancellation() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "clove-rawdisplay-discovery-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for name in ["photo-1.ARW", "photo-1.HIF", "photo-2.ARW"] {
+            try Data([1]).write(to: folder.appendingPathComponent(name))
+        }
+        let task = Task {
+            _ = withUnsafeCurrentTask { $0?.cancel() }
+            return try RAWDisplayFiles.pairs(in: folder)
+        }
+        await #expect(throws: CancellationError.self) { try await task.value }
     }
 
     @Test func cacheLoopStopsOnCancellation() async throws {

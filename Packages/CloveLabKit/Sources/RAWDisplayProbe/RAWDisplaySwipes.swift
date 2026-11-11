@@ -190,6 +190,9 @@ public enum RAWDisplaySwipes {
                                     ]))
                         }
                     }
+                    // Cancelling while the superseded render drained must not buy
+                    // another full decode.
+                    try Task.checkCancellation()
                     // The best screen-size variant, one at a time, as production would.
                     let variant = plan.screenVariant
                     let raw = photo.raw

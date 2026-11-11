@@ -13,10 +13,33 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
     private let renderDelay: Double
     /// When set, a render returns a timing with this error instead of pixels.
     private let renderError: String?
+    /// When set, every render announces that it entered and then blocks until the
+    /// tester releases the gate, so cancellation meets work that is truly in flight.
+    private let renderEntered: AsyncStream<Void>.Continuation?
+    private let renderRelease: DispatchSemaphore?
+    /// When set, every embedded-preview request announces itself, so a test can time
+    /// a cancellation to a specific photo without sleeping.
+    private let previewEntered: AsyncStream<Void>.Continuation?
+    /// Signalled when a render enters; later preview requests wait for it when
+    /// `previewWaitsForRender` is set, so a test knows the first render is in flight.
+    private let renderEntrySignal: DispatchSemaphore?
+    private let previewWaitsForRender: Bool
 
-    init(renderDelay: Double = 0, renderError: String? = nil) {
+    init(
+        renderDelay: Double = 0, renderError: String? = nil,
+        renderEntered: AsyncStream<Void>.Continuation? = nil,
+        renderRelease: DispatchSemaphore? = nil,
+        previewEntered: AsyncStream<Void>.Continuation? = nil,
+        renderEntrySignal: DispatchSemaphore? = nil,
+        previewWaitsForRender: Bool = false
+    ) {
         self.renderDelay = max(0, renderDelay)
         self.renderError = renderError
+        self.renderEntered = renderEntered
+        self.renderRelease = renderRelease
+        self.previewEntered = previewEntered
+        self.renderEntrySignal = renderEntrySignal
+        self.previewWaitsForRender = previewWaitsForRender
     }
 
     func count(_ name: String) -> Int {
@@ -28,7 +51,12 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
     }
 
     private func finishRender() throws {
-        if renderDelay > 0 {
+        renderEntered?.yield()
+        renderEntrySignal?.signal()
+        if let renderRelease {
+            // Bounded so a broken implementation cannot hang the suite.
+            _ = renderRelease.wait(timeout: .now() + 5)
+        } else if renderDelay > 0 {
             Thread.sleep(forTimeInterval: renderDelay)
         }
         increment("render-drained")
@@ -93,7 +121,14 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
 
     func embeddedPreview(url: URL, maxPixel: Int) throws -> EmbeddedPreviewTiming {
         try Task.checkCancellation()
+        previewEntered?.yield()
         increment("embedded-preview")
+        if previewWaitsForRender,
+            lock.withLock({ counts["embedded-preview", default: 0] }) > 1
+        {
+            // Bounded; the second photo's preview waits until the first render entered.
+            _ = renderEntrySignal?.wait(timeout: .now() + 5)
+        }
         return EmbeddedPreviewTiming(milliseconds: 0.05, width: 400, height: 267)
     }
 
