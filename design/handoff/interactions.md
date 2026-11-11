@@ -16,9 +16,8 @@ Entry ──tap hero card──▶ Grid (scrolled to last photo) ──▶ Detai
   │                       │
   └─Open folder─▶ picker ─┘ (opening: reading ▶ grouping, grid usable throughout)
 
-Grid ─tap photo─▶ Detail          Grid ─tap stack─▶ Group review
-Detail / Group review ─Back─▶ Grid (scroll position kept)
-Group review ─Continue →─▶ next item in grid order (group ▶ group review, photo ▶ detail; after last ▶ grid)
+Grid ─tap photo or stack─▶ Detail (current group expanded in filmstrip)
+Detail ─Back─▶ Grid (scroll position kept)
 Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Details)
 ```
 
@@ -26,7 +25,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 | Where | Gesture | Result |
 |---|---|---|
-| Grid | Tap a tile | Opens detail (or group review for a stack). |
+| Grid | Tap a tile | Opens detail; a stack starts at its first unmarked member, or its first member if all are marked. |
 | Grid | Long press **(proposed)** | A context menu: Reject, Rate, Label, Select. |
 | Grid | Filter button | Opens the filter menu. Picking an item applies it at once, and the button fills with `accent`. |
 | Grid | "…" ▶ Select | Select mode: tap tiles to toggle, then use the capsule to mark all of them. Done exits. |
@@ -36,18 +35,18 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 | Detail | Tap the capsule's reject, stars or label | Sets the mark directly. Tapping the current star value clears it. The label opens the picker, and picking closes it. |
 | Detail | Single tap on the photo | Hides or shows the chrome (capsule, filmstrip, top bar buttons). |
 | Detail | Double-tap or pinch | 100% zoom at the tapped point. The chrome hides. Double-tap again to fit. |
-| Detail | Tap a filmstrip thumbnail | Jumps to that photo. Tapping a collapsed group jumps to its first photo, and the group expands in place in the filmstrip. Detail never opens group review; the grid's group stack does. |
+| Detail | Tap a filmstrip thumbnail | Jumps to that photo. Tapping a collapsed group jumps to its first photo, and the group expands in place in the filmstrip. A grid stack opens the same detail view on the first unmarked member, or the first member if all are marked. |
 | Detail | ⓘ | Opens the Info sheet (medium detent). |
 | Any | **Auto-advance** (Settings; default and timing **(proposed)**) | After a mark is set in detail, move to the next photo after a short beat (about 250 ms). The swipe-up star bar commits and then advances. |
 | Hardware keyboard **(proposed)** | 0–5, X, 6–9, arrows, Z | Rating, reject, labels red to blue (purple has no key), next/previous, undo. No hints are shown on screen. |
 
-## Group review
+## Groups in detail
 
-- It opens on the first undecided photo of the group, and the marking gestures are the same as in detail.
-- Zoom and pan are synced across the group, so swiping keeps the same crop.
-- "Reject 6 unmarked" shows once any photo in the group is rated or labeled. It rejects only photos with no rating, no label and no reject. It is one undo step.
-- When nothing is undecided, the pill becomes "Continue →".
-- "…" ▶ "Undecided only" hides the decided photos from the filmstrip.
+- A stack opens detail on the first unmarked photo, or the first photo when all are marked. Its filmstrip group expands in place; the filename, Info and marking controls stay the same.
+- Zoom and pan stay synced between photos of the same group. Leaving the group follows the detail keep-zoom setting.
+- "Reject 6 unmarked" sits above the filmstrip, attached to the expanded group, once it has both a rated or labeled photo and an unmarked photo. It rejects only photos with no rating, label or Reject. Undo restores the whole action and returns to the photo shown when it was tapped.
+- The pill hides when nothing remains to reject, when marking is off, and with the chrome. Nothing replaces it. It stays clear of the mark capsule and swipe star bar.
+- With auto-advance on, a triggering mark moves to the next unmarked member, wrapping once. Once the group has no unmarked members, including after the pill, it moves to the first photo after the group in grid order. At the end it stays.
 
 ## Move Rejects
 

@@ -16,7 +16,7 @@ All floating controls use one glass material:
 |---|---|---|
 | **Glass icon button** | Top bar (Info, Undo, Filter, "…") | 44 × 44 circle, 20 pt symbol in `text/primary`. iPad 40 × 40. Duo dock 36 × 36. **Filter active** state: filled with `accent`, white glyph. |
 | **Move Rejects button** | iPhone grid bottom right; iPad top bar next to "…"; Duo dock bottom capsule; half fold next to "…" | 48 × 48 glass circle on iPhone, `tray.and.arrow.down` at 22 pt. Shown only when rejects exist and the folder is not opening. No count. Always opens the confirm sheet. |
-| **Mark capsule** | iPhone detail, group review, select mode, half fold | 358 × 56, radius 28, horizontal, gap 12, padding 16, glass. Children: Reject circle (36), Rating 1–5 (five stars, gap 6, about 159 wide), Label circle (36). Floats above the home indicator. |
+| **Mark capsule** | iPhone detail, select mode, half fold | 358 × 56, radius 28, horizontal, gap 12, padding 16, glass. Children: Reject circle (36), Rating 1–5 (five stars, gap 6, about 159 wide), Label circle (36). Floats above the home indicator. |
 | **Reject circle** | Capsule, iPad rail, Duo dock | Off: a 36 pt circle with a 1.5 pt `reject` outline and a `reject` ✕ (14 pt). On: filled `reject` with a white ✕. Icon only. iPad 40, Duo 32. |
 | **Stars** | Capsule | Filled stars in `rating/on`, empty in `rating/off`. Tapping the current value clears it. |
 | **Label circle** | Capsule, Duo dock | A 36 pt circle filled with the current label color, or an empty outlined circle for none. Tapping opens the label picker. |
@@ -43,7 +43,7 @@ All floating controls use one glass material:
 |---|---|
 | **Photo stage** | The photo is aspect fit on `bg/stage`. It is never tinted. Double-tap zooms to 100%. |
 | **Nav title and subtitle** | The filename (or folder name), with a subtitle built from counts and companion segments joined by " · ". Only folder access problems add an indicator: Not connected or View only. |
-| **Filmstrip** | Thumbnails 54 × 60 with a gap of 8. Follows grid order. **Other groups** are collapsed to one stacked thumbnail with a count badge (radius 8, `group`). The **current group** is expanded in place on a rounded rectangle (radius 9, padding 3, gap 3) of `group` at **25% layer opacity**, with no outline. The **current frame** has a 1.5–2 pt ring in `text/primary` (radius 5). Rejected thumbnails are dimmed. |
+| **Filmstrip** | Thumbnails 54 × 60 with a gap of 8. Follows grid order. **Other groups** are collapsed to one stacked thumbnail with a count badge (radius 8, `group`). The **current group** is expanded in place on a rounded rectangle (radius 9, padding 3, gap 3) of `group` at **25% layer opacity**, with no outline. The **current frame** has a 1.5–2 pt ring in `text/primary` (radius 5). Rejected thumbnails are dimmed. The Reject N unmarked pill sits above the strip, attached to the expanded group, with space clear of the capsule and swipe star bar. |
 | **100% chip** | A small glass pill reading "100%", fading out after about 1 s. |
 | **Info sheet** | System sheet at the medium detent, with grouped list sections Capture and File. |
 
@@ -55,7 +55,7 @@ All floating controls use one glass material:
 | **Toast** | A glass pill, 358 × 55, radius 26, padding 18/8, gap 12. Text on the left (with an optional second line in `reject`) and a button on the right (Undo or Details, a 72 × 38 capsule in `accent`). Sits above the capsule or the Move Rejects button. Auto-hides after about 6 s; Undo stays available in the top bar. |
 | **Banner** (errors) | A glass card pinned under the toolbar, with the message, then one button (Reopen or Open). The grid behind it is dimmed. |
 | **Alert** | A system alert. The destructive option is red, and the safe option is bold. |
-| **Pill action** (group review) | A glass capsule above the mark capsule or filmstrip: "Reject 6 unmarked" (text in `reject`) or "Continue →" (text in `accent`). |
+| **Pill action** (detail) | A glass capsule above the filmstrip, attached to its expanded group: "Reject 6 unmarked" (text in `reject`). Requires both a rated or labeled member and an unmarked member. Hides with chrome, when marking is off, or when no unmarked photos remain; nothing replaces it. |
 | **Move Rejects sheet** | A small detent. A fanned stack of 3–4 reject thumbnails (tap to expand into a 4-column quick grid), the title, a one-line explanation, and a full-width **Move** button in `accent`. |
 | **Couldn't move sheet** | A list sheet with rows of a thumbnail, file name and reason (in `reject`), then **Done** and **Try again**. |
 

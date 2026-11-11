@@ -54,7 +54,7 @@ Devices:
 
 **Default**
 - The top bar has Back, the folder title, the subtitle "1,284 photos · ● Saved", then the **Filter** and **"…"** icon buttons. There is no filter bar, status row or bottom toolbar.
-- A **group** of similar shots is one stacked tile with a count badge in `group`. Tapping it opens group review. A single photo opens detail.
+- A **group** of similar shots is one stacked tile with a count badge in `group`. Tapping it opens detail on the first unmarked member, or the first member if all are marked, with the filmstrip group expanded. A single photo opens detail.
 - A **rejected** photo is dimmed (`opacity/rejected`) with no ✕ badge. The rating badge and label dot stay. The RAW+JPEG badge is only in Info.
 - **Move Rejects** is a 48 pt round glass icon button (a tray with a down arrow) at the bottom right. It has no count and shows only when rejects exist. It always opens the confirm sheet first.
 
@@ -106,7 +106,9 @@ Devices:
 
 In every filmstrip, rejected thumbnails are dimmed and have no badge.
 
-## 04 Group review
+## 04 Groups in detail (old frames out of date)
+
+The frames below predate the owner decision of 2026-11-12 and are out of date. Group culling now uses the detail screen with its group expanded in place.
 
 | State | Node |
 |---|---|
@@ -115,13 +117,12 @@ In every filmstrip, rejected thumbnails are dimmed and have no badge.
 | [iPad](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2931) · [png](screens/04-group-ipad.png) | 214:2931 |
 | [Duo expanded](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-3214) · [png](screens/04-group-duo-expanded.png) | 214:3214 |
 
-- Marking works the same way as in detail: the capsule, the swipe-up star bar, and Undo in the top bar. The "…" menu holds "Undecided only" and the group options.
-- The header is "Group · 12 photos" with the subtitle "6 undecided · ● Saved".
-- The filmstrip is the progress indicator: rejected thumbnails are dimmed and rated ones show stars. There is no progress bar.
-- Zoom is always synced across the group, with no toggle.
-- **One finishing action**: the pill "Reject 6 unmarked" appears above the capsule once any photo is rated or labeled. It never touches rated or labeled photos.
-- When every photo is decided, the pill becomes **"Continue →"**, which goes to the next item in grid order (a group opens group review, a single photo opens detail). After the last item it returns to the grid where you left off.
-- On iPad and Duo the screen is built from that device's photo-only layout. The filmstrip shows only this group, and the pill sits above the strip.
+- A grid stack opens detail at its first unmarked member, or its first member when all are marked. The ordinary detail header and controls remain.
+- The current group expands in the grid-order filmstrip; rejected thumbnails are dimmed and rated ones show stars.
+- Zoom and pan stay synced within the group. Leaving it follows the detail setting.
+- **Reject N unmarked** is a pill above the strip, attached to the expanded group. It requires a rated or labeled member and at least one unmarked member, and never touches existing marks. Undo restores the action together and returns to the photo shown at submission.
+- The pill hides with chrome or when marking is off, and disappears when nothing remains to reject. It stays clear of the capsule and swipe star bar.
+- Auto-advance visits unmarked members, then the first photo after the group in grid order. No group sidebar remains; iPad and Duo detail layouts are separate work.
 
 ## 05 Move Rejects
 
