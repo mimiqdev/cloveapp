@@ -757,8 +757,14 @@ final class FolderLibrarySession: FolderLibrary {
                         // I4 reads the primary file of each set off the main actor; a RAW set's
                         // capture time comes from the RAW (G1 decision 1, I4).
                         let reads = await metadata.read(urls: sets.map { $0.photoSet.primary.url })
-                        let marks = try Self.readMarks(
-                            for: sets, storedMarks: storedMarks, codec: codec)
+                        var marks: [PhotoIdentity: PhotoMarks] = [:]
+                        for set in sets {
+                            if let read = try? Self.readMarks(
+                                for: [set], storedMarks: storedMarks, codec: codec)
+                            {
+                                marks.merge(read) { _, new in new }
+                            }
+                        }
                         await self.applyReads(
                             reads, marks: marks, sets: sets, generation: generation)
                     }
@@ -830,6 +836,7 @@ final class FolderLibrarySession: FolderLibrary {
             store.setMarks(marks, for: id)
         }
         publish(.reads(times: times, marks: marks))
+        if marks.count < sets.count { publish(.markReadFailed) }
     }
 
     /// Records the finished scan's count for Recents and publishes its outcome (PRD P0-02).

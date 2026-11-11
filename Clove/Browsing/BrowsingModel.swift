@@ -836,7 +836,6 @@ final class BrowsingModel {
             lastMoveUndo = .success(result)
         } catch {
             finishPendingMarks(edits)
-            try? await library.rereadMarks(for: edits.map(\.photo))
             refresh()
             showSaveFailureToast()
             lastMoveUndo = .failure(error)
@@ -1109,6 +1108,8 @@ final class BrowsingModel {
         case .photos, .reads:
             refresh()
             resolvePendingRestore(scanFinished: false)
+        case .markReadFailed:
+            showSaveFailureToast()
         case .scanFinished:
             finishedScanFor = library.folder
             refresh()

@@ -18,6 +18,9 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// batch keeps a reader from re-reading every photo once per file.
     case reads(times: [PhotoIdentity: PhotoTimeState], marks: [PhotoIdentity: PhotoMarks])
 
+    /// A sidecar could not be read. Its marks were left out of the read publication.
+    case markReadFailed
+
     /// The folder's scan finished with the count and completeness Recents shows (PRD P0-01,
     /// P0-02). A scan that could not read everything finishes as `.partial`.
     case scanFinished(FolderScanSummary)

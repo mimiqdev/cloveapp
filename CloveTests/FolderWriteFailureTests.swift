@@ -94,7 +94,7 @@ struct FolderWriteFailureTests {
         await library.closeFolder()
     }
 
-    @Test func anUnreadableSidecarAfterAFailedWriteDoesNotPublishEmptyMarks() async throws {
+    @Test func unreadableSidecarsPreserveKnownMarksAndDoNotHidePhotos() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let photos = root.appendingPathComponent("photos")
         try FileManager.default.createDirectory(at: photos, withIntermediateDirectories: true)
@@ -124,6 +124,17 @@ struct FolderWriteFailureTests {
         try FileManager.default.removeItem(at: sidecar)
         try await library.rereadMarks(for: [photo])
         try await waitUntil { model.shownMarks(for: photo) == PhotoMarks() }
+        model.dismissSaveFailureToast()
+        try FileManager.default.createDirectory(at: sidecar, withIntermediateDirectories: false)
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("other.ARW"))
+        try XMPCodec().write(.rating(three), into: nil).write(
+            to: photos.appendingPathComponent("other.xmp"))
+        await model.reopenOpenFolder()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 2 }
+        let other = try #require(model.photos.first { $0.id.stem == "other" }?.id)
+        #expect(model.shownMarks(for: other).rating == three)
+        #expect(model.isSaveFailureToastVisible)
+        #expect(model.saveFailureToastBurst == 2)
         await library.closeFolder()
     }
 
