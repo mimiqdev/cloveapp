@@ -2,6 +2,7 @@ import CloveCore
 import SwiftUI
 
 /// Group review owns its order and finishing action; detail owns the shared marking controls.
+/// Finishing submits one entry to BrowsingModel's ordered action pipeline.
 struct GroupScreen: View {
     let browsing: BrowsingModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass

@@ -164,13 +164,18 @@ struct MoveRejectsSheet: View {
 /// The full-width action shared by the confirmation and failure-details sheets.
 struct MoveSheetButtonStyle: ButtonStyle {
     var secondary = false
+    @Environment(\.cloveTheme) private var theme
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
-            .foregroundStyle(secondary ? Color.clove.accent : Color.clove.bg.canvas)
+            .foregroundStyle(secondary ? Color.clove.accent : primaryForeground)
             .frame(maxWidth: .infinity, minHeight: 50)
             .background(secondary ? Color.clove.surface.card : Color.clove.accent, in: Capsule())
             .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+
+    private var primaryForeground: CloveColour {
+        theme.appearance == .dark ? Color.clove.text.primary : Color.clove.bg.canvas
     }
 }
 
