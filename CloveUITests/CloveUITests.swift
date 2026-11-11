@@ -30,12 +30,67 @@ final class CloveUITests: XCTestCase {
         let status = element(app, "clove.grid.saveState")
         XCTAssertTrue(waitForLabel("Save failed. Double-tap to retry.", status))
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02682").label.contains("3 stars"))
-        XCTAssertFalse(failed.label.contains("3 stars"))
+        XCTAssertTrue(failed.label.contains("3 stars"))
         status.tap()
         XCTAssertTrue(waitForLabel("Saved", status))
         XCTAssertTrue(failed.label.contains("3 stars"))
         element(app, "clove.grid.batch.done").tap()
         XCTAssertFalse(element(app, "clove.grid.batch").exists)
+    }
+
+    @MainActor
+    func testFailedSingleMarkStaysVisibleAndGlyphRetriesIt() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEMS": "2680"])
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        label.tap()
+        element(app, "clove.detail.labels.red").tap()
+        let status = element(app, "clove.detail.saveState")
+        XCTAssertTrue(waitForLabel("Save failed. Double-tap to retry.", status))
+        XCTAssertEqual(label.label, "Label, Red")
+        status.tap()
+        XCTAssertTrue(waitForLabel("Saved", status))
+        XCTAssertEqual(label.label, "Label, Red")
+    }
+
+    @MainActor
+    func testDriveLossDuringWriteKeepsTheRequestedMark() {
+        let app = launchSample([
+            "CLOVE_TEST_LIBRARY_DISCONNECT_ON_WRITE": "1",
+            "CLOVE_TEST_LIBRARY_WRITE_DELAY_MS": "500",
+        ])
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        label.tap()
+        element(app, "clove.detail.labels.red").tap()
+        XCTAssertTrue(waitForLabel("Not connected", element(app, "clove.detail.saveState")))
+        XCTAssertEqual(label.label, "Label, Red")
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").label.contains("Red"))
+    }
+
+    @MainActor
+    func testShownMarkTimingWhileWriteIsHeldPending() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_WRITE_DELAY_MS": "5000"])
+        defer { app.terminate() }
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        label.tap()
+        let start = ContinuousClock.now
+        element(app, "clove.detail.labels.red").tap()
+        XCTAssertTrue(waitForLabel("Label, Red", label))
+        let elapsed = start.duration(to: .now)
+        print(
+            "Tap to shown mark, test library with a 5000 ms pending write (informational, includes XCTest input and observation): \(elapsed)"
+        )
+        XCTAssertTrue(waitForLabel("Saving", element(app, "clove.detail.saveState")))
+        XCTAssertEqual(label.label, "Label, Red")
     }
 
     @MainActor

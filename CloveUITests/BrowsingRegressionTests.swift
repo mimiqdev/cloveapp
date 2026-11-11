@@ -847,12 +847,11 @@ extension CloveUITests {
             evaluatedWith: failure)
         wait(for: [reported], timeout: 10)
         XCTAssertEqual(failure.label, copy, "The partial-failure copy changed")
-        // The report exists only after the batch finished, so this checks the final state: the
-        // photo that failed keeps the marks it had (PRD P0-09, P0-08).
+        // Failure leaves the user's requested marks visible and unsaved until retry confirms.
         let failed = element(in: app, "clove.grid.photo.mmq02680")
-        XCTAssertFalse(
-            failed.label.contains("stars"),
-            "The grid showed a mark the batch did not save: \(failed.label)")
+        XCTAssertTrue(
+            failed.label.contains("2 stars"),
+            "The failed photo lost its desired mark: \(failed.label)")
 
         failure.tap()
         let confirmed = expectation(
