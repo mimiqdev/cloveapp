@@ -8,12 +8,12 @@ public struct DesiredMarkEdit: Hashable, Sendable {
 
 /// Only marks awaiting a write live here. The files supply everything else.
 public struct DesiredPhotoMarks: Sendable {
-    private var pending: [PhotoIdentity: DesiredMarkEdit] = [:]
+    private var pending: [PhotoIdentity: PhotoMarks] = [:]
 
     public init() {}
 
     public func shown(for photo: PhotoIdentity, confirmed: PhotoMarks) -> PhotoMarks {
-        pending[photo]?.after ?? confirmed
+        pending[photo] ?? confirmed
     }
 
     @discardableResult
@@ -23,14 +23,12 @@ public struct DesiredPhotoMarks: Sendable {
         let before = shown(for: photo, confirmed: confirmed)
         let edit = DesiredMarkEdit(
             photo: photo, before: before, after: before.applying(change), change: change)
-        pending[photo] = edit
+        pending[photo] = edit.after
         return edit
     }
 
-    /// Actions finish in order, whether their writes succeed or fail.
-    public mutating func finish(_ edit: DesiredMarkEdit) {
-        if pending[edit.photo] == edit { pending[edit.photo] = nil }
-    }
+    /// The owner clears a photo after its last queued marking action finishes.
+    public mutating func finish(for photo: PhotoIdentity) { pending[photo] = nil }
 
     public func hasPending(for photo: PhotoIdentity) -> Bool { pending[photo] != nil }
 

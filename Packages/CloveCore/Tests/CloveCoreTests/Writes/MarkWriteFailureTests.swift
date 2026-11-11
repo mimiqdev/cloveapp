@@ -110,18 +110,3 @@ import Testing
     #expect(MarkChangeState.savedInSidecar.isSaved)
     #expect(MarkChangeState.savedInCloveOnly.isSaved)
 }
-
-@Test func aChangeMergesNewerFieldsWithoutDroppingOlderOnes() throws {
-    let blue = ColourLabel(colour: .blue)
-    let older = MarkChange(rating: try #require(Rating(rawValue: 3)), label: blue)
-    let newer = MarkChange(label: ColourLabel(colour: .red))
-
-    let merged = older.merged(with: newer)
-
-    #expect(merged.rating == older.rating)
-    #expect(merged.label == ColourLabel(colour: .red))
-    #expect(merged.covers(newer))
-    // The newer change replaced the label, so the older request is superseded (rule 8).
-    #expect(merged.covers(older) == false)
-    #expect(older.merged(with: MarkChange(rating: .unrated)).covers(older) == false)
-}

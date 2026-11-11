@@ -16,7 +16,7 @@ struct OrderedMarkMoveTests {
             .rating(.unrated), to: set.id, confirmed: PhotoMarks(rating: .rejected))
         fixture.markFileSystem.failWrites { _ in CocoaError(.fileWriteNoPermission) }
         let failed = await fixture.queue.apply(clear.change, to: set)
-        desired.finish(clear)
+        desired.finish(for: clear.photo)
         #expect(failed.state.failure != nil)
         #expect(
             desired.shown(for: set.id, confirmed: PhotoMarks(rating: .rejected)).rating == .rejected
@@ -27,7 +27,7 @@ struct OrderedMarkMoveTests {
         fixture.markFileSystem.failWrites { _ in nil }
         let confirmed = await fixture.queue.apply(newer.change, to: set)
         #expect(confirmed.state.isConfirmed)
-        desired.finish(newer)
+        desired.finish(for: newer.photo)
         let bytes = try Data(
             contentsOf: set.photoSet.primary.url.deletingPathExtension().appendingPathExtension(
                 "xmp"))

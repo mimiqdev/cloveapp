@@ -24,6 +24,18 @@ public struct PhotoActionPipeline: Sendable {
 
     public var isEmpty: Bool { active == nil && pending.isEmpty }
 
+    public func hasPendingMark(for photo: PhotoIdentity) -> Bool {
+        pending.contains { entry in
+            switch entry.action {
+            case .mark(let edit): edit.photo == photo
+            case .batch(let edits), .keep(let edits), .finishing(_, let edits),
+                .moveUndo(_, let edits):
+                edits.contains { $0.photo == photo }
+            case .move: false
+            }
+        }
+    }
+
     @discardableResult
     public mutating func submit(_ action: PhotoAction) -> UInt64 {
         nextID += 1

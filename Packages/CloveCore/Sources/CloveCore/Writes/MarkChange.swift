@@ -31,30 +31,9 @@ public struct MarkChange: Hashable, Sendable {
     /// Whether the request names no field at all; an empty change writes nothing.
     public var isEmpty: Bool { rating == nil && label == nil }
 
-    /// The cumulative request used when two changes to one photo join one write.
-    ///
-    /// PRD How marks reach disk, rule 8, keeps a failed request until it is confirmed. The newer
-    /// change wins per field and the older request's other field stays, so nothing the user asked
-    /// for is dropped.
-    func merged(with newer: MarkChange) -> MarkChange {
-        MarkChange(rating: newer.rating ?? rating, label: newer.label ?? label)
-    }
-
-    /// Whether every field `other` asked for still appears unchanged in this request.
-    ///
-    /// A waiting request whose field a newer change overwrote is superseded rather than
-    /// saved (PRD How marks reach disk, rule 8).
-    func covers(_ other: MarkChange) -> Bool {
-        (rating == other.rating || other.rating == nil)
-            && (label == other.label || other.label == nil)
-    }
 }
 
-/// A stable handle for one admitted change, used by retry, batches and state queries.
-///
-/// PRD P0-08 requires per-change save state and a retry that applies to exactly that change,
-/// and P0-09 requires a batch to retry only its failed items. The identifier is created when
-/// the queue admits the request and stays valid for the rest of the session.
+/// Identifies one returned write result.
 public struct MarkChangeID: Hashable, Sendable, CustomStringConvertible {
     /// The underlying identifier; two queues never share a value by construction.
     public let rawValue: UUID
@@ -68,9 +47,7 @@ public struct MarkChangeID: Hashable, Sendable, CustomStringConvertible {
 
 /// A partial change to the marks Clove keeps in its own storage.
 ///
-/// G1 decision 6 stores new marks on a standalone JPEG/HIF there with the "Saved in Clove
-/// only" status, Reject included. A field left `nil` keeps its stored value so a rating change
-/// never clears a label.
+/// Standalone JPEG/HIF marks live here. A nil field keeps its stored value.
 public struct CloveMarkChange: Hashable, Sendable {
     /// The requested stored rating, or `nil` to keep the stored value (G1 decision 6).
     public var rating: Rating?

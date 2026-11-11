@@ -911,8 +911,14 @@ final class FolderLibrarySession: FolderLibrary {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
         for set in sets {
             var packet: XMPMarks?
-            if set.photoSet.primary.format == .raw, let url = set.sidecar.resolvedURL,
-                let data = try? Data(contentsOf: url)
+            let sidecar: URL?
+            switch set.sidecar {
+            case .resolved(let url): sidecar = url
+            case .absent: sidecar = set.photoSet.sidecarURL
+            case .ambiguous: sidecar = nil
+            }
+            if set.photoSet.primary.format == .raw, let sidecar,
+                let data = try? Data(contentsOf: sidecar)
             {
                 packet = try? codec.read(data)
             }

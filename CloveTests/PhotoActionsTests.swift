@@ -71,6 +71,29 @@ struct PhotoActionsTests {
         #expect(model.shownMarks(for: photo) == library.photos.first?.marks)
     }
 
+    @Test func repeatedEqualEditsKeepTheNewestMarkWhileItsWriteWaits() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = library.identity("a")
+        let three = try #require(Rating(rawValue: 3))
+        library.heldPhoto = photo
+        model.apply(.rating(three), to: photo)
+        try await waitUntil { library.writing == photo }
+        model.apply(.rating(.unrated), to: photo)
+        model.apply(.rating(three), to: photo)
+        library.heldWriteNumber = 3
+        library.heldPhoto = nil
+        try await waitUntil { library.writes.count == 2 }
+        #expect(library.photos.first?.marks.rating == .unrated)
+        #expect(model.shownMarks(for: photo).rating == three)
+        library.heldWriteNumber = nil
+        await model.drainActions()
+        #expect(model.shownMarks(for: photo).rating == three)
+        #expect(
+            library.writes.map(\.change) == [.rating(three), .rating(.unrated), .rating(three)])
+    }
+
     @Test func aFailedWriteRereadsTheFileAndDoesNotCarryItsFieldsForward() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
@@ -215,10 +238,12 @@ struct PhotoActionsTests {
         try await waitUntil { library.writing == a }
         let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
         model.runRejectMove(preview, kept: []) { _ in }
+        model.apply(.rating(.rejected), to: a)
         model.apply(.label(ColourLabel(colour: .blue)), to: b)
         library.heldPhoto = nil
         await model.drainActions()
         #expect(library.moves == [[library.identity("c")]])
+        #expect(model.shownMarks(for: a).isRejected)
         #expect(model.shownMarks(for: b).label.colour == .blue)
     }
 
@@ -303,6 +328,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
     var openGeneration = 0
     var closeCount = 0
     var heldPhoto: PhotoIdentity?
+    var heldWriteNumber: Int?
     var writing: PhotoIdentity?
     var failNext: Set<PhotoIdentity> = []
     var rereadValues: [PhotoIdentity: PhotoMarks] = [:]
@@ -338,7 +364,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
         for item in items {
             writing = item.photo
             for _ in 0..<1000 {
-                if heldPhoto != item.photo { break }
+                if heldPhoto != item.photo && heldWriteNumber != writes.count + 1 { break }
                 try? await Task.sleep(for: .milliseconds(5))
             }
             writes.append(item)

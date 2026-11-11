@@ -14,16 +14,15 @@ struct DesiredPhotoMarksTests {
         #expect(desired.shown(for: photo, confirmed: PhotoMarks()).rating == three)
         let second = desired.apply(.rating(.unrated), to: photo, confirmed: PhotoMarks())
         #expect(second.before.rating == three)
-        desired.finish(first)
         #expect(desired.shown(for: photo, confirmed: first.after).rating == .unrated)
-        desired.finish(second)
+        desired.finish(for: second.photo)
         #expect(!desired.hasPending(for: photo))
     }
 
     @Test func finishingAWriteDropsItsPendingMarkRegardlessOfItsResult() {
         var desired = DesiredPhotoMarks()
         let edit = desired.apply(.rating(.rejected), to: photo, confirmed: PhotoMarks())
-        desired.finish(edit)
+        desired.finish(for: edit.photo)
         #expect(desired.shown(for: photo, confirmed: PhotoMarks()) == PhotoMarks())
         let later = desired.apply(
             .label(ColourLabel(colour: .blue)), to: photo, confirmed: PhotoMarks())
@@ -59,10 +58,12 @@ struct DesiredPhotoMarksTests {
         #expect(queue.beginNext()?.id == mark)
         #expect(queue.beginNext() == nil)
         queue.finish(mark)
+        #expect(queue.hasPendingMark(for: photo))
         #expect(queue.beginNext()?.id == move)
         queue.finish(move)
         #expect(queue.beginNext()?.id == later)
         queue.finish(later)
+        #expect(!queue.hasPendingMark(for: photo))
         #expect(queue.isEmpty)
     }
 }

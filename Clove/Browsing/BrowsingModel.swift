@@ -831,16 +831,22 @@ final class BrowsingModel {
         do {
             let result = try await library.undoRejectMove(
                 entry, currentMarks: current, restoring: edits)
-            for edit in edits { desiredMarks.finish(edit) }
+            finishPendingMarks(edits)
             refresh()
             if result.restored.contains(where: { !$0.isRejectStored }) { showSaveFailureToast() }
             lastMoveUndo = .success(result)
         } catch {
-            for edit in edits { desiredMarks.finish(edit) }
+            finishPendingMarks(edits)
             await library.rereadMarks(for: edits.map(\.photo))
             refresh()
             showSaveFailureToast()
             lastMoveUndo = .failure(error)
+        }
+    }
+
+    private func finishPendingMarks(_ edits: [DesiredMarkEdit]) {
+        for edit in edits where !actionPipeline.hasPendingMark(for: edit.photo) {
+            desiredMarks.finish(for: edit.photo)
         }
     }
 
@@ -858,7 +864,7 @@ final class BrowsingModel {
         }
         let failed = result.outcomes.filter { $0.state.failure != nil }.map(\.identity)
         if !failed.isEmpty { await library.rereadMarks(for: failed) }
-        for edit in edits { desiredMarks.finish(edit) }
+        finishPendingMarks(edits)
         refresh()
         if !failed.isEmpty { showSaveFailureToast() }
         return result
