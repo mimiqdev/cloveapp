@@ -13,7 +13,23 @@ let probeModules = [
     "GroupingProbe",
     "ScanProbe",
     "FoldStateProbe",
+    "RAWDisplayProbe",
 ]
+
+/// Extra target dependencies for probes that reuse another probe's measurement code.
+let extraDependencies: [String: [String]] = [
+    "RAWDisplayProbe": ["PreviewProbe"]
+]
+
+let probeTargets: [Target] = probeModules.map { module in
+    let extras = (extraDependencies[module] ?? []).map { Target.Dependency.target(name: $0) }
+    return .target(name: module, dependencies: [.target(name: "LabSupport")] + extras)
+}
+
+let probeTestTargets: [Target] = probeModules.map { module in
+    let extras = (extraDependencies[module] ?? []).map { Target.Dependency.target(name: $0) }
+    return .testTarget(name: "\(module)Tests", dependencies: [.target(name: module)] + extras)
+}
 
 let package = Package(
     name: "CloveLabKit",
@@ -27,11 +43,5 @@ let package = Package(
     targets: [
         .target(name: "LabSupport"),
         .testTarget(name: "LabSupportTests", dependencies: ["LabSupport"]),
-    ]
-        + probeModules.map { module in
-            .target(name: module, dependencies: ["LabSupport"])
-        }
-        + probeModules.map { module in
-            .testTarget(name: "\(module)Tests", dependencies: [.target(name: module)])
-        }
+    ] + probeTargets + probeTestTargets
 )
