@@ -43,10 +43,7 @@ struct DetailSwipeFeedbackBadge: View {
                     rating: feedback.rating ?? .unrated, enabledRatings: enabledRatings,
                     isReject: feedback.isReject
                 )
-                .position(
-                    x: max(proxy.size.width - 36, 20),
-                    y: max(0, proxy.size.height - bottomInset) / 2
-                )
+                .position(Self.position(in: proxy.size, bottomInset: bottomInset))
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("clove.detail.swipeFeedback")
@@ -54,6 +51,10 @@ struct DetailSwipeFeedbackBadge: View {
                     feedback.isReject ? "Reject" : "\(feedback.rating?.starCount ?? 0) stars")
             }
         }
+    }
+
+    static func position(in size: CGSize, bottomInset: CGFloat) -> CGPoint {
+        CGPoint(x: max(size.width - 36, 20), y: max(0, size.height - bottomInset) / 2)
     }
 }
 
