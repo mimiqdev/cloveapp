@@ -96,7 +96,9 @@ extension CloveUITests {
         guard app.descendants(matching: .any)["clove.root"].waitForExistence(timeout: 30) else {
             return
         }
-        let settings = app.descendants(matching: .any)["clove.nav.settings"]
+        // The glass toolbar and Entry both expose this identifier.
+        let settings = app.descendants(matching: .any).matching(identifier: "clove.nav.settings")
+            .firstMatch
         guard settings.waitForExistence(timeout: 10) else { return }
         settings.tap()
         let toggle = app.switches["clove.settings.appearance.matchSystem"]
