@@ -46,6 +46,9 @@ struct DetailSwipeIndicatorTests {
                     .frame(width: size.width, height: size.height)
                     .environment(\.cloveTheme, .light))
             renderer.scale = 1
+            // On a CI runner's virtual GPU the first render can time out while the
+            // render pipelines build, and comes back empty; measure a warm render.
+            _ = renderer.cgImage
             let image = try #require(renderer.cgImage)
             frames.append(try visibleBounds(image))
             drag.sampleState = .cancelled
