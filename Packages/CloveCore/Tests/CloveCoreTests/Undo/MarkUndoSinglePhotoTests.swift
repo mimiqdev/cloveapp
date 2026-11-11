@@ -27,9 +27,7 @@ struct MarkUndoSinglePhotoTests {
         let undoResult = try #require(await undoStep(fixture))
         #expect(undoResult.actionName == "Rating")
         #expect(undoResult.photoToReturnTo == set.id)
-        #expect(undoResult.savedCount == 1)
         #expect(undoResult.failedCount == 0)
-        #expect(undoResult.partialFailureSummary == nil)
         #expect(undoResult.outcomes.count == 1)
         #expect(undoResult.outcomes[0].isWritten)
         #expect(undoResult.outcomes[0].status?.state == .savedInSidecar)
@@ -40,8 +38,7 @@ struct MarkUndoSinglePhotoTests {
         #expect(await fixture.history.canUndo == false)
         #expect(await fixture.history.canRedo)
 
-        let redoResult = try #require(await undoRedoStep(fixture))
-        #expect(redoResult.savedCount == 1)
+        _ = try #require(await undoRedoStep(fixture))
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(5)))
         #expect(await fixture.history.canUndo)
         #expect(await fixture.history.canRedo == false)
@@ -59,14 +56,12 @@ struct MarkUndoSinglePhotoTests {
         #expect(await fixture.history.nextUndoActionName == "Label")
 
         let undoResult = try #require(await undoStep(fixture))
-        #expect(undoResult.savedCount == 1)
         #expect(undoResult.outcomes[0].leftAlone.isEmpty)
         #expect(
             try undoSidecarMarks(at: fixture.sidecar())
                 == XMPMarks(rating: .rated(undoRating(4)), label: .clear))
 
-        let redoResult = try #require(await undoRedoStep(fixture))
-        #expect(redoResult.savedCount == 1)
+        _ = try #require(await undoRedoStep(fixture))
         #expect(
             try undoSidecarMarks(at: fixture.sidecar())
                 == XMPMarks(rating: .rated(undoRating(4)), label: undoGreen))
@@ -85,13 +80,11 @@ struct MarkUndoSinglePhotoTests {
         #expect(await fixture.history.nextUndoActionName == "Reject")
 
         let undoResult = try #require(await undoStep(fixture))
-        #expect(undoResult.savedCount == 1)
         #expect(undoResult.outcomes[0].status?.state == .savedInSidecar)
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
         #expect(try await fixture.queue.storedMarks(for: set.id) == nil)
 
-        let redoResult = try #require(await undoRedoStep(fixture))
-        #expect(redoResult.savedCount == 1)
+        _ = try #require(await undoRedoStep(fixture))
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.rejected))
     }
 
@@ -116,13 +109,11 @@ struct MarkUndoSinglePhotoTests {
         #expect(try await fixture.queue.storedMarks(for: set.id) == nil)
 
         let undoResult = try #require(await undoStep(fixture))
-        #expect(undoResult.savedCount == 1)
         #expect(undoResult.outcomes[0].isWritten)
         // PRD P0-05: undo restores the Reject rating the change replaced.
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(.rejected))
 
-        let redoResult = try #require(await undoRedoStep(fixture))
-        #expect(redoResult.savedCount == 1)
+        _ = try #require(await undoRedoStep(fixture))
         #expect(try undoSidecarMarks(at: fixture.sidecar()).rating == .rated(undoRating(3)))
         #expect(try await fixture.queue.storedMarks(for: set.id) == nil)
     }

@@ -16,6 +16,28 @@ private final class ObservedDetailImages: DetailImageSource {
     private(set) var deliveries: [(PhotoIdentity, DetailPixelRequest.Need, DetailQuality)] = []
     private(set) var prefetched: [DetailPhotoWindow] = []
     var prefetchEnabled = true
+    var heldPhoto: PhotoIdentity?
+    var heldPlaceholder: PhotoIdentity?
+    var releasesPlaceholder = false
+    private(set) var placeholderRequests: [PhotoIdentity] = []
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        placeholderRequests.append(photo)
+        if photo == heldPlaceholder {
+            for _ in 0..<250 {
+                guard !Task.isCancelled else { return nil }
+                if releasesPlaceholder { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        if case .image(let pixels) = await gridThumbnails.thumbnail(for: photo, priority: .visible)
+        {
+            return pixels
+        }
+        return nil
+    }
 
     func prepare(_ window: DetailPhotoWindow) async {
         windows.append(window)
@@ -24,6 +46,9 @@ private final class ObservedDetailImages: DetailImageSource {
 
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
         requests.append((photo, request))
+        if photo == heldPhoto {
+            do { try await Task.sleep(for: .seconds(5)) } catch { return .deferred }
+        }
         let outcome = await sample.image(for: photo, request: request)
         if case .image(let image) = outcome {
             delivered.append(image.quality)
@@ -44,6 +69,86 @@ private final class ObservedDetailImages: DetailImageSource {
 @Suite(.serialized)
 @MainActor
 struct DetailDisplayPresentationTests {
+    @Test func productionPlaceholderReadsTheGridCacheWithoutRequestingGridWork() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pixels = try testPixels(gray: 0.4)
+        let file = directory.appendingPathComponent("photo.JPG")
+        let data = try #require(UIImage(cgImage: pixels).jpegData(compressionQuality: 0.9))
+        try data.write(to: file)
+        let set = try PhotoSet(
+            folderID: FolderIdentity(rawValue: "placeholder"), relativeFolderPath: "", jpegURL: file
+        )
+        let cache = try ThumbnailCache(directory: directory.appendingPathComponent("cache"))
+        let request = ThumbnailRequest(
+            source: file, revision: try ThumbnailRevision.read(from: file),
+            locationIdentity: set.id.folderID.rawValue)
+        try cache.store(.available(Thumbnail(image: pixels, route: .always)), for: request)
+        let grid = RefusedPlaceholderThumbnails()
+        let pipeline = DetailPipeline()
+        let source = PipelineDetailImages(pipeline: pipeline, thumbnails: cache, set: { _ in set })
+        let placeholder = await source.placeholder(for: set.id, gridThumbnails: grid)
+        #expect(placeholder === pixels)
+        #expect(grid.requests == 0)
+        await pipeline.close()
+    }
+
+    @Test func uncachedPhotoShowsItsGridThumbnailWhileDetailIsPending() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        source.prefetchEnabled = false
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let first = browsing.photos[2]
+        let next = browsing.photos[3]
+        source.heldPhoto = next.id
+        source.heldPlaceholder = next.id
+        guard
+            case .image(let thumbnail) = await browsing.thumbnails.thumbnail(
+                for: next.id, priority: .visible)
+        else { throw CocoaError(.fileReadUnknown) }
+        browsing.openPhoto(first.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source)
+                .environment(SettingsStore.sample))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == first.id }
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let image = try #require(scroll.subviews.first as? UIImageView)
+        try #require(image.image?.cgImage != nil)
+        browsing.openPhoto(next.id)
+        try await waitFor { source.placeholderRequests.contains(next.id) }
+        try await waitFor { image.image == nil }
+        #expect(!source.releasesPlaceholder)
+        #expect(!source.requests.contains { $0.0 == next.id })
+        source.releasesPlaceholder = true
+        try await waitFor { source.requests.contains { $0.0 == next.id } }
+        try await waitFor { image.image?.cgImage === thumbnail }
+        #expect(!source.deliveries.contains { $0.0 == next.id })
+        #expect(!(preview.accessibilityValue ?? "").localizedCaseInsensitiveContains("loading"))
+        func hasLoadingCue(_ view: UIView) -> Bool {
+            if view is UIActivityIndicatorView { return true }
+            if (view.accessibilityValue ?? "").localizedCaseInsensitiveContains("loading") {
+                return true
+            }
+            if let text = (view as? UILabel)?.text, text.localizedCaseInsensitiveContains("loading")
+            {
+                return true
+            }
+            return view.subviews.contains(where: hasLoadingCue)
+        }
+        #expect(!hasLoadingCue(window))
+    }
+
     @Test func rawSwapOrderRefreshAndCameraZoomThroughTheSharedView() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
@@ -343,6 +448,18 @@ struct DetailDisplayPresentationTests {
         }
         return nil
     }
+}
+
+@MainActor
+private final class RefusedPlaceholderThumbnails: GridThumbnailSource {
+    private(set) var requests = 0
+    func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority) async
+        -> GridThumbnailOutcome
+    {
+        requests += 1
+        return .deferred
+    }
+    func companions(for photo: PhotoIdentity) -> GridCompanions { GridCompanions() }
 }
 
 @MainActor

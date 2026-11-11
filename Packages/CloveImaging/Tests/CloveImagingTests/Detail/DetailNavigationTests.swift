@@ -9,19 +9,69 @@ import Testing
 /// The only wait is bounded, even if the test fails before releasing it.
 private final class DelayedDetailSizeReader: DetailNativeSizeReading, Sendable {
     private let started = Mutex(false)
+    private let enabled: Mutex<Bool>
+    init(enabled: Bool = true) { self.enabled = Mutex(enabled) }
+    func pause() { enabled.withLock { $0 = true } }
     private let release = DispatchSemaphore(value: 0)
     var hasStarted: Bool { started.withLock { $0 } }
     func resume() { release.signal() }
 
     func nativeSize(of reference: DetailSource, isRAW: Bool) -> CGSize? {
-        started.withLock { $0 = true }
-        _ = release.wait(timeout: .now() + 5)
+        if enabled.withLock({ $0 }) {
+            started.withLock { $0 = true }
+            _ = release.wait(timeout: .now() + 5)
+        }
         return CGSize(width: 2768, height: 1848)
     }
 }
 
 @Suite(.serialized, .enabled(if: DetailFixtures.hasFormats))
 struct DetailNavigationTests {
+    @Test(arguments: [false, true])
+    func cacheProbeRespectsSupersessionAndMemoryRelease(releaseImages: Bool) async throws {
+        let sizes = DelayedDetailSizeReader(enabled: false)
+        defer { sizes.resume() }
+        let cache = DetailCache()
+        let pipeline = DetailPipeline(cache: cache, reader: DetailRenderer(), sizes: sizes)
+        let camera = DetailRequest(
+            raw: try detailSource(DetailFixtures.file("sony-ilce-7s.ARW")),
+            heif: try detailSource(DetailFixtures.file("sony-ilce-7s.HEIC")),
+            displayPixels: 1800, wantsNativeResolution: true,
+            locationIdentity: "probe", mode: .cameraPreviewFirst)
+        _ = try await pipeline.preview(for: camera)
+        _ = try await pipeline.image(for: camera)
+        sizes.pause()
+        let consumer = UUID()
+        let older = Task { try await pipeline.preview(for: camera, consumer: consumer) }
+        defer { older.cancel() }
+        try await eventually { sizes.hasStarted }
+        if releaseImages {
+            await pipeline.releaseCachedImages()
+        } else {
+            let newer = try availableDetail(
+                try await pipeline.image(for: camera, consumer: consumer))
+            #expect(newer.quality == .raster)
+        }
+        sizes.resume()
+        await expectCancelled(older)
+        if releaseImages { #expect(cache.imageCount == 0 && !cache.holdsNativeImage) }
+        await pipeline.close()
+    }
+
+    @Test func failedNativeRenderKeepsTheCachedScreenRaw() async throws {
+        let gate = DetailReadGate()
+        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let request = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true)
+        let screen = try availableDetail(try await pipeline.screen(for: request))
+        await gate.configure(behaviour: .fail, holdNative: false, holdPreview: false)
+        let fallback = try availableDetail(try await pipeline.image(for: request))
+        #expect(fallback.quality == .screenRAW)
+        #expect(fallback.width == screen.width && fallback.height == screen.height)
+        #expect(fallback.source == screen.source)
+        #expect(fallback.fullResolutionSize == screen.fullResolutionSize)
+        #expect(fallback.limitation == .rawRenderFailed)
+    }
+
     @Test func oldArrivalCannotReplaceNewWindowOrCancelItsRender() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
@@ -31,12 +81,12 @@ struct DetailNavigationTests {
         let second = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), location: "new")
         await pipeline.beginNavigation(1)
         await pipeline.beginNavigation(2)
-        await pipeline.navigate(to: second, neighbours: [], generation: 2)
+        await pipeline.navigate(to: second, generation: 2)
         let current = Task { try await pipeline.screen(for: second) }
         defer { Task { await gate.release() } }
         try await eventually { await gate.nativePaths.count == 1 }
         await pipeline.beginNavigation(1)
-        await pipeline.navigate(to: first, neighbours: [], generation: 1)
+        await pipeline.navigate(to: first, generation: 1)
         try await letEntriesFinish(gate, natives: 1)
         let image = try availableDetail(try await current.value)
         #expect(image.quality == .screenRAW)

@@ -39,7 +39,6 @@ struct RejectMoverTests {
         #expect(result.failedCount == 0)
         #expect(result.outcomes.map(\.identity) == sets.map(\.id))
         #expect(Set(result.movedIdentities) == Set(sets.map(\.id)))
-        #expect(result.partialFailureSummary == nil)
         for set in sets {
             for url in set.photoSet.fileURLs {
                 let source = relativePath(of: url, in: fixture.folder)

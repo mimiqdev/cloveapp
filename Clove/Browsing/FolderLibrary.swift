@@ -18,6 +18,9 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// batch keeps a reader from re-reading every photo once per file.
     case reads(times: [PhotoIdentity: PhotoTimeState], marks: [PhotoIdentity: PhotoMarks])
 
+    /// A sidecar could not be read. Its marks were left out of the read publication.
+    case markReadFailed
+
     /// The folder's scan finished with the count and completeness Recents shows (PRD P0-01,
     /// P0-02). A scan that could not read everything finishes as `.partial`.
     case scanFinished(FolderScanSummary)
@@ -29,8 +32,7 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// The open folder's location was reported gone while it was open (PRD P0-02, P0-08).
     ///
     /// C11's watch reports one loss and stops. The folder stays open so the user can reopen it,
-    /// and PRD Failure and recovery requires the disconnected-drive or missing-location copy
-    /// instead of **Writing…** or **Saved** for the folder's unfinished changes. The update names
+    /// and the folder shows the disconnected-drive or missing-location copy. The update names
     /// the folder it belongs to and the open it came from, because a buffered loss can reach a
     /// reader after another folder opened — or after the same folder opened again — and no view
     /// may explain one open's loss over another open's photos.
@@ -105,7 +107,7 @@ protocol FolderLibrary: AnyObject {
     /// The one stream of updates this library publishes while it is open (PRD P0-03, P0-08).
     ///
     /// It carries the scan's batches, the metadata reads that finish each photo's time, the mark
-    /// reads and confirmed writes, the finished scan and every write-status transition, in the
+    /// reads and completed writes, and the finished scan, in the
     /// order they happen. ``BrowsingModel`` reads it on the main actor; the library keeps no
     /// second consumer.
     var updates: AsyncStream<FolderLibraryUpdate> { get }
@@ -115,10 +117,9 @@ protocol FolderLibrary: AnyObject {
     ///
     /// One call is one batch for one action: C4's `apply(_:to sets:)` admits every photo before
     /// awaiting any result. The returned ``MarkBatchResult`` reports each photo's outcome;
-    /// the action pipeline selects current failed desired entries for retries. Items can
-    /// name different changes because C13 resolves the action per photo, and the library applies
-    /// them together. Each photo's save state still arrives through ``updates``, like a
-    /// single-photo change; a photo the folder no longer holds is reported as failed instead of
+    /// caller rereads failed photos from disk. Items can name different changes because C13
+    /// resolves the action per photo, and the library applies them together. Confirmed marks
+    /// arrive through ``updates``; a photo the folder no longer holds is reported as failed instead of
     /// being written somewhere else. The result's ``MarkBatchResult/change`` names the first
     /// item's change, because a mixed batch has no single one, while its outcomes and counts
     /// cover every item.
@@ -155,8 +156,8 @@ protocol FolderLibrary: AnyObject {
         restoring edits: [DesiredMarkEdit]
     ) async throws -> RejectMoveUndoResult
 
-    /// Reads the marks from the files again after a failed write.
-    func rereadMarks(for photos: [PhotoIdentity]) async
+    /// Reads marks again after a failed write. An unreadable sidecar throws without changing marks.
+    func rereadMarks(for photos: [PhotoIdentity]) async throws
 
     /// Waits until every admitted write finishes before moving files or releasing folder access.
     func drainWrites() async
@@ -297,7 +298,7 @@ extension FolderLibrary {
     /// with no writes has nothing unfinished (PRD P0-02, P0-08).
     var openGeneration: Int { 0 }
 
-    func rereadMarks(for photos: [PhotoIdentity]) async {}
+    func rereadMarks(for photos: [PhotoIdentity]) async throws {}
 
     func drainWrites() async {}
 

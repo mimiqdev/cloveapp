@@ -23,19 +23,16 @@ struct MarkUndoGroupFinishingTests {
         let result = GroupFinishingResult.applied(plan, statuses: statuses)
         let entry = await fixture.history.recordGroupFinishing(result.undo)
         #expect(entry != nil)
-        #expect(result.savedCount == 2)
         #expect(await fixture.history.undoCount == 1)
         #expect(await fixture.history.nextUndoActionName == "Reject unmarked")
 
         let undo = try #require(await undoStep(fixture))
-        #expect(undo.savedCount == 2)
         #expect(undo.photoToReturnTo == photos[1])
         #expect(try undoSidecarMarks(at: fixture.sidecar(0)).rating == .rated(rating))
         for index in 1...2 {
             #expect(try undoSidecarMarks(at: fixture.sidecar(index)).rating == .rated(.unrated))
         }
-        let redo = try #require(await undoRedoStep(fixture))
-        #expect(redo.savedCount == 2)
+        _ = try #require(await undoRedoStep(fixture))
         for index in 1...2 {
             #expect(try undoSidecarMarks(at: fixture.sidecar(index)).rating == .rated(.rejected))
         }

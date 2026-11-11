@@ -4,9 +4,8 @@ import Foundation
 
 /// The in-memory library the UI test and previews browse (PRD P0-08, P0-13).
 ///
-/// It stands in for folder access, the scan, the order and the atomic C4 write until U2 and U3
-/// replace the ``FolderLibrary`` seam. It holds one fake folder with a few dozen photos, some
-/// marks, two groups and the save state of each change it receives, and writes nothing anywhere.
+/// It holds one fake folder with a few dozen photos, marks and two groups. Writes update only
+/// these in-memory photos and return the same completed results as the real library.
 ///
 /// The sample is selected with the launch environment value ``launchVariable``; without it the
 /// app browses an empty library and entry says no folder is open. Launch values can also force a
@@ -21,7 +20,7 @@ final class TestLibrary: FolderLibrary {
     /// The launch environment value that makes one sample set fail its first move (PRD P0-10).
     ///
     /// Its value is a stem suffix: a rejected photo whose stem ends with it reports a failed move
-    /// once, stays in the grid and keeps its Reject, and the next retry moves it. The UI smoke
+    /// once, stays in the grid and keeps its Reject, and a later move can move it. The UI smoke
     /// test therefore forces a partial Move rejects failure without files.
     static let forcedMoveFailureVariable = "CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX"
 
@@ -60,8 +59,7 @@ final class TestLibrary: FolderLibrary {
     /// The launch environment value that slows the sample's write drain, in milliseconds
     /// (PRD P0-08).
     ///
-    /// A UI test can then see the leaving question's waiting state instead of a drain that
-    /// finishes within one frame.
+    /// A UI test can then check that leaving shows Entry before admitted writes finish.
     static let drainDelayVariable = "CLOVE_TEST_LIBRARY_DRAIN_DELAY_MS"
 
     /// The launch environment value that makes the sample report its folder's location gone
@@ -187,20 +185,16 @@ final class TestLibrary: FolderLibrary {
     private let updateContinuation: AsyncStream<FolderLibraryUpdate>.Continuation
     private var stored: [GridPhoto]
 
-    /// The stem suffix U4's launch value names, whose photos fail their first write (PRD P0-09).
-    /// The sample's finishing-action records, so a group it finishes counts as complete like the
-    /// real session's (PRD In-group culling, group completion; PRD P0-12).
-
     /// The stem suffixes whose photos fail their first write (PRD P0-08).
     private let failingStems: [String]
 
     /// The reason a forced failure reports, so a test can show any PRD row (PRD P0-08).
     private let failureReason: MarkWriteFailureReason
 
-    /// The photos whose forced failure already happened, so a retry saves them (PRD P0-08, P0-09).
+    /// Photos whose forced failure already happened, so later writes can succeed.
     private var alreadyFailed: Set<PhotoIdentity> = []
 
-    /// The photos whose forced move failure already happened, so a retry moves them (P0-10).
+    /// Photos whose forced move failure already happened, so later moves can succeed.
     private var alreadyFailedMoves: Set<PhotoIdentity> = []
 
     /// The stem suffix whose rejected photos fail their first move, or nil when none does
@@ -214,7 +208,7 @@ final class TestLibrary: FolderLibrary {
 
     /// The progress stream the move sheet reads while a sample move runs (PRD P0-10).
     ///
-    /// Each run gets its own stream, so a retry never reads the earlier run's finished step.
+    /// Each run gets its own stream, so a later run never reads the earlier run's finished step.
     private var rejectMoveContinuation: AsyncStream<RejectMoveProgress>.Continuation?
 
     /// How long the sample's write drain takes, so a UI test can see the waiting state
@@ -290,8 +284,7 @@ final class TestLibrary: FolderLibrary {
     ///
     /// Each photo is written on its own, the way C4's batch admits each set: a photo the launch
     /// forced to fail keeps its marks and reports a failure, while the others take the change.
-    /// Per-photo states go through the same stream as a single change, and the batch's handle
-    /// retries only the photos that did not save.
+    /// Successful changes publish their marks; the returned batch reports every outcome.
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         let ids = items.map { _ in MarkChangeID() }
         if writeDelay > .zero { try? await Task.sleep(for: writeDelay) }
@@ -379,7 +372,7 @@ final class TestLibrary: FolderLibrary {
     /// Moves the sample's rejected photos and reports their outcomes (PRD P0-10).
     ///
     /// A photo whose stem matches the forced move failure stays in place once, with its Reject,
-    /// so the sheet shows PRD "Partial move failure" and its retry. Every other ready set leaves
+    /// so the toast reports the failure and offers Details. Every other ready set leaves
     /// the sample's photos and groups through the same update stream the real library publishes.
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
         try checkMoveRejects(plan.configuration)
@@ -442,7 +435,7 @@ final class TestLibrary: FolderLibrary {
 
     /// The sample's progress steps for one run (PRD P0-10).
     ///
-    /// A fresh stream per call keeps a retry from ending on the previous run's finished step.
+    /// A fresh stream per call keeps a later move from ending on the previous run's finished step.
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
         let (stream, continuation) = AsyncStream.makeStream(of: RejectMoveProgress.self)
         rejectMoveContinuation = continuation

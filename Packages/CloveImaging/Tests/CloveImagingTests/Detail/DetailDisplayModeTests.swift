@@ -7,13 +7,13 @@ import Testing
 @Suite(.serialized, .enabled(if: DetailFixtures.hasFormats))
 struct DetailDisplayModeTests {
     private func request(
-        position: Int = 0, mode: DetailDisplayMode = .rawFirst,
+        mode: DetailDisplayMode = .rawFirst,
         camera: DetailSource? = nil, location: String = "display-tests"
     ) throws -> DetailRequest {
         DetailRequest(
             raw: try detailSource(DetailFixtures.file("sony-ilce-7s.ARW")),
             heif: camera, displayPixels: 1800, wantsNativeResolution: false,
-            locationIdentity: location, mode: mode, screenPixels: 1800, position: position)
+            locationIdentity: location, mode: mode, screenPixels: 1800)
     }
 
     @Test func scaledRawLongEdgeAndHeldReturn() async throws {
@@ -22,42 +22,48 @@ struct DetailDisplayModeTests {
         let cache = DetailCache()
         let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let first = try request()
-        let next = try request(position: 1, location: "next")
-        await pipeline.navigate(to: first, neighbours: [next])
+        let next = try request(location: "next")
+        await pipeline.navigate(to: first)
         let preview = try availableDetail(try await pipeline.preview(for: first))
         #expect(preview.quality == .preview)
         let rendered = try availableDetail(try await pipeline.screen(for: first))
         #expect(rendered.quality == .screenRAW)
         #expect(abs(rendered.longEdge - 1800) <= 2)
         #expect(rendered.fullResolutionSize == CGSize(width: 2768, height: 1848))
-        await pipeline.navigate(to: next, neighbours: [first])
-        _ = try await pipeline.screen(for: next, priority: .prefetch)
-        await pipeline.navigate(to: first, neighbours: [next])
+        await pipeline.navigate(to: next)
+        _ = try await pipeline.prefetchScreen(for: next)
+        await pipeline.navigate(to: first)
         let returning = try availableDetail(try await pipeline.preview(for: first))
         #expect(returning.quality == .screenRAW)
-        #expect(returning.image === rendered.image)
+        #expect(returning.width == rendered.width && returning.height == rendered.height)
+        #expect(returning.source == rendered.source)
         #expect(await gate.nativePaths.count == 2)
-        #expect(cache.screenCount == 2)
+        #expect(cache.screen(for: first) != nil && cache.screen(for: next) != nil)
     }
 
-    @Test func heldRenderLimitEvictsFarthestAndWindowDropsDistantPhotos() async throws {
+    @Test(arguments: [false, true])
+    func revisitAfterTenOtherPhotosUsesCompressedPixels(screen: Bool) async throws {
+        let gate = DetailReadGate()
         let cache = DetailCache()
-        let pixels = try makeDetailImage(width: 64, height: 48)
-        let requests = try (0..<5).map { try request(position: $0, location: "photo-\($0)") }
-        for request in requests {
-            let image = DetailImage(
-                image: pixels, source: request.raw!, quality: .screenRAW, hasRAW: true)
-            cache.storeScreen(image, for: request)
-            #expect(cache.screenCount <= 3)
+        let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
+        let first = try request()
+        for index in 0...10 {
+            let photo =
+                index == 0 ? first : try request(location: "photo-\(index)")
+            await pipeline.navigate(to: photo)
+            if screen {
+                _ = try await pipeline.screen(for: photo)
+            } else {
+                _ = try await pipeline.preview(for: photo)
+            }
         }
-        #expect(cache.screen(for: requests[0]) != nil)
-        #expect(cache.screen(for: requests[1]) != nil)
-        #expect(cache.screen(for: requests[2]) != nil)
-        #expect(cache.screen(for: requests[3]) == nil)
-        #expect(cache.screen(for: requests[4]) == nil)
-        cache.navigate(to: requests[2], neighbours: [requests[1], requests[3]])
-        #expect(cache.screen(for: requests[0]) == nil)
-        #expect(cache.screenCount == 2)
+        let entries = await gate.totalEntries
+        await pipeline.navigate(to: first)
+        let returning = try availableDetail(try await pipeline.preview(for: first))
+        #expect(returning.quality == (screen ? .screenRAW : .preview))
+        if screen { _ = try await pipeline.screen(for: first) }
+        #expect(await gate.totalEntries == entries)
+        #expect(cache.compressedCost < 64 * 1024 * 1024)
     }
 
     @Test func leavingDropsQueuedScreenAndDrainedPixels() async throws {
@@ -66,20 +72,19 @@ struct DetailDisplayModeTests {
         let cache = DetailCache()
         let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let first = try request()
-        let second = try request(position: 1, location: "next")
+        let second = try request(location: "next")
         let active = Task { try await pipeline.screen(for: first) }
         defer { Task { await gate.release() } }
         try await eventually { await gate.nativePaths.count == 1 }
-        let queued = Task { try await pipeline.screen(for: second, priority: .prefetch) }
+        let queued = Task { try await pipeline.prefetchScreen(for: second) }
         try await eventually { await pipeline.queuedCount == 1 }
-        let departed = try request(position: 2, location: "departed")
-        await pipeline.navigate(to: departed, neighbours: [])
+        await pipeline.leavePhoto(generation: 1)
         await expectCancelled(queued)
         await expectCancelled(active)
         try await letEntriesFinish(gate, natives: 1)
         try await eventually { await pipeline.activeCount == 0 }
         #expect(await gate.nativePaths.count == 1)
-        #expect(cache.screenCount == 0)
+        #expect(cache.screen(for: first) == nil)
     }
 
     @Test func arrivalReusesRunningOneAheadEvenWhenItsCallerCancels() async throws {
@@ -88,22 +93,22 @@ struct DetailDisplayModeTests {
         let cache = DetailCache()
         let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let first = try request()
-        let next = try request(position: 1, location: "next")
+        let next = try request(location: "next")
         await pipeline.beginNavigation(1)
-        await pipeline.navigate(to: first, neighbours: [next], generation: 1)
-        let ahead = Task { try await pipeline.screen(for: next, priority: .prefetch) }
+        await pipeline.navigate(to: first, generation: 1)
+        let ahead = Task { try await pipeline.prefetchScreen(for: next) }
         defer { Task { await gate.release() } }
         try await eventually { await gate.nativePaths.count == 1 }
         ahead.cancel()
         await pipeline.beginNavigation(2)
-        await pipeline.navigate(to: next, neighbours: [first], generation: 2)
+        await pipeline.navigate(to: next, generation: 2)
         let visible = Task { try await pipeline.screen(for: next) }
         try await eventually { await pipeline.queuedCount == 1 }
         try await letEntriesFinish(gate, natives: 1)
         await expectCancelled(ahead)
         let shown = try availableDetail(try await visible.value)
         #expect(shown.quality == .screenRAW)
-        #expect(cache.screen(for: next)?.image === shown.image)
+        #expect(cache.screen(for: next)?.source == shown.source)
         #expect(await gate.nativePaths.count == 1)
         #expect(await gate.maximumNativeEntries == 1)
     }
@@ -114,7 +119,7 @@ struct DetailDisplayModeTests {
         let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let heic = try detailSource(DetailFixtures.file("sony-ilce-7s.HEIC"))
         let camera = try request(mode: .cameraPreviewFirst, camera: heic)
-        await pipeline.navigate(to: camera, neighbours: [])
+        await pipeline.navigate(to: camera)
         _ = try await pipeline.preview(for: camera)
         _ = try await pipeline.screen(for: camera)
         let full = try availableDetail(try await pipeline.image(for: camera))
@@ -123,10 +128,10 @@ struct DetailDisplayModeTests {
         #expect(full.width == 2768 && full.height == 1848)
         #expect(await gate.nativePaths.isEmpty)
         #expect(cache.holdsNativeImage)
-        #expect(cache.previewCount > 0)
+        #expect(cache.imageCount > 0)
         let next = try request(
-            position: 1, mode: .cameraPreviewFirst, camera: heic, location: "next")
-        await pipeline.navigate(to: next, neighbours: [])
+            mode: .cameraPreviewFirst, camera: heic, location: "next")
+        await pipeline.navigate(to: next)
         #expect(!cache.holdsNativeImage)
     }
 

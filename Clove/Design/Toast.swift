@@ -18,6 +18,10 @@ struct Toast: View {
     /// for a toast with no action.
     var actionTitle: String?
 
+    /// An optional second action, such as Details beside Undo.
+    var secondaryActionTitle: String?
+    var onSecondaryAction: (() -> Void)?
+
     /// The identifier the screen's UI test uses.
     var identifier = "clove.toast"
 
@@ -37,16 +41,12 @@ struct Toast: View {
                 }
             }
             Spacer(minLength: 8)
+            if let secondaryActionTitle, let onSecondaryAction {
+                action(
+                    secondaryActionTitle, identifier: "secondaryAction", perform: onSecondaryAction)
+            }
             if let actionTitle, let onAction {
-                Button(action: onAction) {
-                    Text(actionTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.clove.accent)
-                        .frame(minWidth: 72, minHeight: 38)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("\(identifier).action")
+                action(actionTitle, identifier: "action", perform: onAction)
             }
         }
         .padding(.horizontal, 18)
@@ -55,6 +55,20 @@ struct Toast: View {
         .cloveGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
+    }
+
+    private func action(_ title: String, identifier suffix: String, perform: @escaping () -> Void)
+        -> some View
+    {
+        Button(action: perform) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.clove.accent)
+                .frame(minWidth: 72, minHeight: 38)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("\(identifier).\(suffix)")
     }
 }
 

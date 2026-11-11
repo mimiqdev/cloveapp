@@ -87,8 +87,7 @@ struct MarkUndoHistoryTests {
         let photos = fixture.photoSets.map(\.id)
         // Two entries: a rating on A alone, then a label batch over A, B and C.
         await fixture.record(.rating(undoRating(3)), on: photos[0])
-        let batch = try #require(await fixture.recordBatch(.label(undoGreen), on: photos))
-        #expect(batch.confirmedCount == 3)
+        _ = try #require(await fixture.recordBatch(.label(undoGreen), on: photos))
         #expect(await fixture.history.undoCount == 2)
 
         // C6 confirmed moving A to _Rejected.

@@ -27,7 +27,7 @@ private struct NativeHeldProbe: DetailReading {
     }
 }
 
-/// G1 "Scheduling and cache": a 32 MiB detail budget and at most one native RAW image.
+/// Compressed detail images share a budget; one native image is held separately.
 @Suite(.serialized)
 struct DetailCacheTests {
     private func image(_ source: URL, width: Int, height: Int) throws -> DetailImage {
@@ -43,46 +43,54 @@ struct DetailCacheTests {
         DetailCacheKey(source: source, locationIdentity: "folder", purpose: purpose)
     }
 
-    @Test func defaultBudgetIsThirtyTwoMebibytes() {
-        #expect(DetailCache.Configuration().previewBytes == 32 * 1024 * 1024)
+    @Test func defaultBudgetIsSixtyFourMebibytes() {
+        #expect(DetailCache.Configuration().compressedBytes == 64 * 1024 * 1024)
     }
 
     @Test func budgetEvictsTheLeastRecentlyUsedPreview() throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
         let file = try directory.image(name: "bytes.JPG")
-        let cache = directory.cache(megabytes: 2)
+        let sample = try image(file, width: 512, height: 512)
+        let compressed = try #require(DetailCompressedImage(sample))
+        var configuration = DetailCache.Configuration()
+        configuration.compressedBytes = compressed.data.count * 2
+        let cache = DetailCache(configuration: configuration)
         let source = try detailSource(file)
         let keys = (0..<3).map { index in
             DetailCacheKey(
                 source: source, locationIdentity: "folder-\(index)", purpose: .embeddedPreview)
         }
-        // Each bitmap is exactly 1 MiB of row bytes, so two fit the 2 MiB budget.
-        func store(_ index: Int) throws {
-            cache.storePreview(try image(file, width: 512, height: 512), for: keys[index])
-            #expect(cache.previewCost <= 2 * 1024 * 1024)
+        // Only two JPEGs fit, even though their decoded bitmaps exceed the budget.
+        #expect(sample.decodedBytes > configuration.compressedBytes)
+        func store(_ index: Int) {
+            cache.store(compressed, for: keys[index])
+            #expect(cache.compressedCost <= configuration.compressedBytes)
         }
-        try store(0)
-        try store(1)
-        #expect(cache.preview(for: keys[0]) != nil)
+        store(0)
+        store(1)
+        #expect(cache.image(for: keys[0]) != nil)
         // The touch above leaves the middle entry as the least recently used one.
-        try store(2)
-        #expect(cache.previewCount == 2)
-        #expect(cache.preview(for: keys[0]) != nil)
-        #expect(cache.preview(for: keys[1]) == nil)
-        #expect(cache.preview(for: keys[2]) != nil)
+        store(2)
+        #expect(cache.imageCount == 2)
+        #expect(cache.compressedCost == configuration.compressedBytes)
+        #expect(cache.image(for: keys[0]) != nil)
+        #expect(cache.image(for: keys[1]) == nil)
+        #expect(cache.image(for: keys[2]) != nil)
     }
 
     @Test func imageLargerThanTheBudgetIsNotCached() throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
         let file = try directory.image(name: "big.JPG")
-        let cache = directory.cache(megabytes: 1)
+        let cache = directory.cache(megabytes: 0)
         let source = try detailSource(file)
-        cache.storePreview(try image(file, width: 1024, height: 512), for: key(source))
-        #expect(cache.previewCount == 0)
-        #expect(cache.previewCost == 0)
-        #expect(cache.preview(for: key(source)) == nil)
+        cache.store(
+            try #require(DetailCompressedImage(image(file, width: 1024, height: 512))),
+            for: key(source))
+        #expect(cache.imageCount == 0)
+        #expect(cache.compressedCost == 0)
+        #expect(cache.image(for: key(source)) == nil)
     }
 
     @Test func atMostOneNativeImageIsHeld() throws {
@@ -101,7 +109,7 @@ struct DetailCacheTests {
         #expect(cache.native(for: key(source, purpose: .nativeRAW)) == nil)
         #expect(cache.native(for: key(source, purpose: .displayRaster(1200))) != nil)
         // The native slot is outside the preview budget.
-        #expect(cache.previewCount == 0)
+        #expect(cache.imageCount == 0)
         cache.releaseNative()
         #expect(cache.holdsNativeImage == false)
     }
@@ -112,14 +120,16 @@ struct DetailCacheTests {
         let file = try directory.image(name: "bytes.JPG")
         let cache = directory.cache()
         let source = try detailSource(file)
-        cache.storePreview(try image(file, width: 64, height: 48), for: key(source))
+        cache.store(
+            try #require(DetailCompressedImage(image(file, width: 64, height: 48))),
+            for: key(source))
         cache.storeNative(
             try image(file, width: 64, height: 48), for: key(source, purpose: .nativeRAW))
-        #expect(cache.previewCount == 1 && cache.holdsNativeImage)
+        #expect(cache.imageCount == 1 && cache.holdsNativeImage)
         // The memory-warning release drops both tiers (G1 "Scheduling and cache").
         cache.releaseAll()
-        #expect(cache.previewCount == 0)
-        #expect(cache.previewCost == 0)
+        #expect(cache.imageCount == 0)
+        #expect(cache.compressedCost == 0)
         #expect(cache.holdsNativeImage == false)
     }
 
@@ -165,21 +175,23 @@ struct DetailCacheTests {
         let file = try directory.image(name: "bytes.JPG")
         let cache = directory.cache()
         let source = try detailSource(file)
-        cache.storePreview(try image(file, width: 64, height: 48), for: key(source))
+        cache.store(
+            try #require(DetailCompressedImage(image(file, width: 64, height: 48))),
+            for: key(source))
         // A different mount at the same path is a different source.
         #expect(
-            cache.preview(
+            cache.image(
                 for: DetailCacheKey(
                     source: source, locationIdentity: "other-folder", purpose: .embeddedPreview))
                 == nil)
         // A different display size is a different raster.
-        #expect(cache.preview(for: key(source, purpose: .displayRaster(1200))) == nil)
+        #expect(cache.image(for: key(source, purpose: .displayRaster(1200))) == nil)
         // A rewritten file is a different revision.
         let newer = DetailSource(
             url: source.url,
             revision: ThumbnailRevision(size: 2, modificationTime: source.revision.modificationTime)
         )
-        #expect(cache.preview(for: key(newer)) == nil)
+        #expect(cache.image(for: key(newer)) == nil)
     }
 
     @Test(.enabled(if: DetailFixtures.hasFormats))
@@ -198,6 +210,6 @@ struct DetailCacheTests {
         #expect(cache.holdsNativeImage)
         await pipeline.releaseCachedImages()
         #expect(cache.holdsNativeImage == false)
-        #expect(cache.previewCount == 0)
+        #expect(cache.imageCount == 0)
     }
 }

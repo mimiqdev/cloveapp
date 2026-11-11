@@ -101,12 +101,3 @@ import Testing
     #expect(failure.reason == .ambiguousSidecar)
     #expect(failure.message.contains("MMQ05184.ARW.xmp"))
 }
-
-@Test func statesNeverReportAnUnconfirmedChangeAsSaved() {
-    #expect(
-        MarkChangeState.failed(
-            MarkWriteFailure(reason: .conflict, message: "changed twice")
-        ).isSaved == false)
-    #expect(MarkChangeState.savedInSidecar.isSaved)
-    #expect(MarkChangeState.savedInCloveOnly.isSaved)
-}

@@ -10,18 +10,15 @@ struct MoveRejectsToast: View {
     var body: some View {
         let copy = RejectMoveToast(
             result: completed.result, rejectsFolderName: completed.rejectsFolderName)
-        VStack(spacing: 4) {
-            if copy.showsDetails {
-                Button("Details", action: showDetails)
-                    .accessibilityIdentifier("clove.moves.toast.details")
-            }
-            Toast(
-                message: copy.message,
-                detail: [copy.failureMessage, copy.skippedMessage].compactMap { $0 }
-                    .joined(separator: " ").nilIfEmpty,
-                actionTitle: "Undo", identifier: "clove.moves.toast",
-                onAction: { browsing.undoRejectMove(completed) })
-        }
+        Toast(
+            message: copy.message,
+            detail: [copy.failureMessage, copy.skippedMessage].compactMap { $0 }
+                .joined(separator: " ").nilIfEmpty,
+            actionTitle: completed.canUndo ? "Undo" : nil,
+            secondaryActionTitle: copy.showsDetails ? "Details" : nil,
+            onSecondaryAction: showDetails,
+            identifier: "clove.moves.toast",
+            onAction: { browsing.undoRejectMove(completed) })
     }
 }
 
