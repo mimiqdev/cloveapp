@@ -736,14 +736,6 @@ final class TestLibrary: FolderLibrary {
         await groupCompletion.recordFinishingAction(on: group)
     }
 
-    func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) async -> GroupViewCompletion {
-        return await groupCompletion.viewCompletion(
-            after: groupID, in: groups, behaviour: behaviour, marks: marks)
-    }
-
     /// Turns the sample's groups on or off through the same call the settings screen makes
     /// (PRD P0-11).
     ///

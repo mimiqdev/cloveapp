@@ -16,12 +16,11 @@ import CloveCore
             "moveRejectsEnabled",
             "similarGroupsEnabled",
             "gridGroupDisplay",
-            "groupCompletion",
             "appearance",
         ])
     #expect(propertyLabels(of: AutoAdvance()) == ["destination", "triggers"])
     #expect(propertyLabels(of: AutoAdvanceTriggers()) == ["rating", "reject", "colourLabel"])
-    #expect(propertyLabels(of: KeepZoom()) == ["inGroups", "inDetail"])
+    #expect(propertyLabels(of: KeepZoom()) == ["inDetail"])
 }
 
 @Test func removedSettingsAreNeitherStoredNorRead() {

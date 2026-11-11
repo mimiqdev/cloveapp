@@ -8,25 +8,13 @@ extension GroupFinishingPlan {
     ) -> [GroupFinishingChange] {
         guard availability.isAvailable else { return [] }
         var allowed: [GroupFinishingChange] = []
-        if action == .keepThis {
-            // The current photo is derived from the marks read now, not from the planned list: a
-            // photo the plan had nothing to change can be unrated or rejected by the time the
-            // action runs, and then it still has to be kept (PRD In-group culling).
-            let marks = currentMarks(currentPhoto)
-            let keeping = GroupFinishingPlan.keepChange(for: marks, keepRating: keepRating)
-            if !keeping.isEmpty {
-                allowed.append(
-                    GroupFinishingChange(
-                        photo: currentPhoto, kind: .keep, marksBefore: marks, change: keeping))
-            }
-        }
-        for change in changes where change.kind == .reject {
+        for change in changes {
             let marks = currentMarks(change.photo)
             // A photo that gained a rating, label or Reject since the plan is never rejected.
             guard marks.isUnmarked else { continue }
             allowed.append(
                 GroupFinishingChange(
-                    photo: change.photo, kind: .reject, marksBefore: marks,
+                    photo: change.photo, marksBefore: marks,
                     change: change.change))
         }
         return allowed

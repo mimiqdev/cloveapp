@@ -5,8 +5,7 @@
 ///
 /// - **By its marks**: every member is rated or rejected. This is derived from the marks read
 ///   now, so it needs no record and a label alone does not complete a group.
-/// - **By a finishing action**: the user ran Keep this, reject the rest or Keep rated, reject
-///   the rest on the group in this session. The record stands even when some writes failed,
+/// - **By a finishing action**: the user ran Reject unmarked on the group in this session. The record stands even when some writes failed,
 ///   because the action ran and the failures stay visible through C4's state (PRD P0-12;
 ///   PRD Failure and recovery). Undoing the action clears the record (PRD P0-12).
 ///
@@ -85,23 +84,4 @@ public actor GroupCompletionTracker {
         return groups.groups[..<index].reversed().first { !isComplete($0, marks: marks) }
     }
 
-    /// Where the group view goes after `groupID` completes, following C12's setting
-    /// (PRD In-group culling, group completion).
-    ///
-    /// ``GroupCompletionBehaviour/nextGroup`` returns the next incomplete group and
-    /// ``GroupCompletionBehaviour/stay`` returns `nil`, so the view keeps the completed group
-    /// (PRD In-group culling; PRD Gesture-related settings).
-    public func groupAfterCompletion(
-        of groupID: GroupID,
-        in groups: SimilarGroups,
-        behaviour: GroupCompletionBehaviour,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) -> SimilarGroup? {
-        switch behaviour {
-        case .stay:
-            return nil
-        case .nextGroup:
-            return nextIncompleteGroup(after: groupID, in: groups, marks: marks)
-        }
-    }
 }

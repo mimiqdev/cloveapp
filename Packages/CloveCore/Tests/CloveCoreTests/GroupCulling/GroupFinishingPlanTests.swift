@@ -1,250 +1,57 @@
-import Foundation
+import CloveCore
 import Testing
 
-@testable import CloveCore
-
-/// PRD In-group culling, finishing actions, and PRD P0-12: the plan each action produces.
-@Suite("Group finishing plans")
+@Suite("Reject unmarked planning")
 struct GroupFinishingPlanTests {
-    @Test func keepThisGivesAnUnratedPhotoTheLowestEnabledRating() throws {
-        let current = groupCullingPhoto("current")
-        let other = groupCullingPhoto("other")
-        let group = groupCullingGroup("keep", members: [current, other])
-        let plan = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: current,
-            marks: [
-                current: PhotoMarks(label: ColourLabel(colour: .blue)),
-                other: PhotoMarks(rating: groupCullingRating(3)),
-            ],
-            enabledRatings: groupCullingTwoAndFour)
+    private let photos = ["a", "b", "c", "d"].map { groupCullingPhoto($0) }
 
-        #expect(plan.availability == .available)
-        #expect(plan.groupID == group.id)
-        #expect(plan.action == .keepThis)
-        #expect(plan.currentPhoto == current)
-        #expect(plan.keepRating == groupCullingRating(2))
-
-        let kept = try #require(plan.keptPhoto)
-        // PRD In-group culling, finishing actions: the lowest enabled level, not the default 1.
-        #expect(kept.change == MarkChange(rating: groupCullingRating(2)))
-        #expect(kept.marksBefore == PhotoMarks(label: ColourLabel(colour: .blue)))
-        #expect(plan.rejects.isEmpty)
-    }
-
-    @Test func keepThisLeavesARatedPhotoUnchanged() {
-        let current = groupCullingPhoto("current")
-        let other = groupCullingPhoto("other")
-        let group = groupCullingGroup("rated", members: [current, other])
-        let plan = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: current,
-            marks: [
-                current: PhotoMarks(rating: groupCullingRating(4)),
-                other: PhotoMarks(),
-            ],
-            enabledRatings: groupCullingTwoAndFour)
-
-        // PRD In-group culling: an existing rating is left alone, and the other unmarked
-        // photo is rejected.
-        #expect(plan.keptPhoto == nil)
-        #expect(plan.rejects.map(\.photo) == [other])
-        #expect(plan.rejects.first?.change == MarkChange(rating: .rejected))
-    }
-
-    @Test func keepThisReplacesRejectWithTheLowestEnabledRating() throws {
-        let current = groupCullingPhoto("current")
-        let other = groupCullingPhoto("other")
-        let group = groupCullingGroup("rejected", members: [current, other])
-
-        let plan = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: current,
-            marks: [
-                current: PhotoMarks(rating: .rejected),
-                other: PhotoMarks(rating: .rejected),
-            ],
-            enabledRatings: groupCullingTwoAndFour)
-        let kept = try #require(plan.keptPhoto)
-        // "Keep" means keep, so the current photo gets a rating and stops being rejected
-        // (PRD In-group culling).
-        #expect(kept.marksBefore == PhotoMarks(rating: .rejected))
-        #expect(kept.change == MarkChange(rating: groupCullingRating(2)))
-        // A rejected member is marked, so the finishing action does not plan it again.
-        #expect(plan.rejects.isEmpty)
-    }
-
-    @Test func keepThisWithNothingToChangeIsEmpty() {
-        let current = groupCullingPhoto("current")
-        let other = groupCullingPhoto("other")
-        let group = groupCullingGroup("nothing", members: [current, other])
-        let plan = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: current,
-            marks: [
-                current: PhotoMarks(rating: groupCullingRating(5)),
-                other: PhotoMarks(label: ColourLabel(colour: .red)),
-            ],
-            enabledRatings: groupCullingTwoAndFour)
-
-        #expect(plan.availability == .available)
-        #expect(plan.isEmpty)
-        #expect(plan.keptPhoto == nil)
-        #expect(plan.rejects.isEmpty)
-    }
-
-    @Test func keepRatedIsUnavailableWithoutARatedPhoto() {
-        let members = ["a", "b", "c", "d"].map { groupCullingPhoto($0) }
-        let group = groupCullingGroup("unrated", members: members)
-        let marks = groupCullingMarks([
-            (members[0], PhotoMarks()),
-            (members[1], PhotoMarks(label: ColourLabel(colour: .green))),
-            (members[2], PhotoMarks(rating: .rejected)),
-            (members[3], PhotoMarks()),
-        ])
-
-        let plan = GroupFinishingPlan(
-            group: group,
-            action: .keepRated,
-            currentPhoto: members[0],
-            marks: marks,
-            enabledRatings: groupCullingTwoAndFour)
-
-        // PRD In-group culling: unavailable when no photo in the group is rated.
-        #expect(plan.availability == .noRatedPhoto)
-        #expect(!plan.availability.isAvailable)
-        #expect(plan.isEmpty)
-    }
-
-    @Test func keepRatedRejectsOnlyUnmarkedPhotos() {
-        let members = ["rated", "labelled", "rejected", "undecided"].map {
-            groupCullingPhoto($0)
+    @Test func requiresARatingOrLabelRatherThanOnlyRejects() {
+        let group = groupCullingGroup("availability", members: photos)
+        for marks: [PhotoIdentity: PhotoMarks] in [[:], [photos[0]: PhotoMarks(rating: .rejected)]]
+        {
+            let plan = GroupFinishingPlan(
+                group: group, action: .rejectUnmarked, currentPhoto: photos[0], marks: marks)
+            #expect(plan.availability == .noRatedOrLabelledPhoto)
+            #expect(plan.changes.isEmpty)
         }
-        let group = groupCullingGroup("rated-kept", members: members)
-        let marks = groupCullingMarks([
-            (members[0], PhotoMarks(rating: groupCullingRating(5))),
-            (members[1], PhotoMarks(label: ColourLabel(colour: .yellow))),
-            (members[2], PhotoMarks(rating: .rejected)),
-            (members[3], PhotoMarks()),
-        ])
-
-        let plan = GroupFinishingPlan(
-            group: group,
-            action: .keepRated,
-            currentPhoto: members[3],
-            marks: marks,
-            enabledRatings: groupCullingTwoAndFour)
-
-        #expect(plan.availability == .available)
-        #expect(plan.keptPhoto == nil)
-        // Keep rated acts on the whole group, so an unmarked current photo is rejected too.
-        #expect(plan.rejects.map(\.photo) == [members[3]])
-        #expect(plan.rejects.allSatisfy { $0.marksBefore.isUnmarked })
+        for kept in [
+            PhotoMarks(rating: groupCullingRating(1)),
+            PhotoMarks(label: ColourLabel(colour: .blue)),
+        ] {
+            let plan = GroupFinishingPlan(
+                group: group, action: .rejectUnmarked, currentPhoto: photos[1],
+                marks: [photos[0]: kept])
+            #expect(plan.availability.isAvailable)
+            #expect(plan.rejects.map(\.photo) == Array(photos.dropFirst()))
+        }
     }
 
-    @Test func neitherActionRejectsRatedOrLabelledPhotosInALargeGroup() {
-        let members = (0..<24).map { groupCullingPhoto(String(format: "photo-%02d", $0)) }
-        let group = groupCullingGroup("large", members: members)
-        var entries: [(PhotoIdentity, PhotoMarks)] = []
-        for index in 0..<6 {
-            entries.append((members[index], PhotoMarks(rating: groupCullingRating(2))))
-        }
-        for index in 6..<12 {
-            entries.append(
-                (members[index], PhotoMarks(label: ColourLabel(colour: .purple))))
-        }
-        for index in 12..<16 {
-            entries.append((members[index], PhotoMarks(rating: .rejected)))
-        }
-        let unmarked = Array(members[16...])
-        let marks = groupCullingMarks(entries)
-
-        let keepThis = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: members[0],
-            marks: marks,
-            enabledRatings: groupCullingTwoAndFour)
-        let keepRated = GroupFinishingPlan(
-            group: group,
-            action: .keepRated,
-            currentPhoto: members[0],
-            marks: marks,
-            enabledRatings: groupCullingTwoAndFour)
-
-        // PRD P0-12: in a group of 20 or more, neither action rejects a rated or labelled
-        // photo, and the unmarked photos are exactly what is rejected.
-        #expect(keepThis.rejects.map(\.photo) == unmarked)
-        #expect(keepRated.rejects.map(\.photo) == unmarked)
-        #expect(keepThis.rejects.allSatisfy { $0.change == MarkChange(rating: .rejected) })
-        #expect(keepRated.rejects.allSatisfy { $0.change == MarkChange(rating: .rejected) })
-        #expect(
-            keepThis.changes.allSatisfy { change in
-                group.members.contains(change.photo)
-            })
-        #expect(
-            keepRated.changes.allSatisfy { change in
-                group.members.contains(change.photo)
-            })
-    }
-
-    @Test func keepThisIsUnavailableWhenTheCurrentPhotoIsOutsideTheGroup() {
-        let first = groupCullingPhoto("first")
-        let second = groupCullingPhoto("second")
-        let outsider = groupCullingPhoto("outsider")
-        let group = groupCullingGroup("outside", members: [first, second])
-        let plan = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: outsider,
-            marks: [first: PhotoMarks(), second: PhotoMarks(), outsider: PhotoMarks()],
-            enabledRatings: groupCullingTwoAndFour)
-
-        // PRD P0-12: keeping nothing and rejecting the whole group is not Keep this, which can
-        // happen after C9 refinement moves the viewed photo (PRD P0-11).
-        #expect(plan.availability == .currentPhotoNotInGroup)
-        #expect(!plan.availability.isAvailable)
-        #expect(plan.isEmpty)
-        #expect(plan.keptPhoto == nil)
-        #expect(plan.rejects.isEmpty)
-    }
-
-    @Test func plansNeverIncludePhotosOutsideTheGroup() {
-        let first = groupCullingPhoto("first")
-        let second = groupCullingPhoto("second")
-        let outsider = groupCullingPhoto("outsider")
-        let group = groupCullingGroup("bounded", members: [first, second])
+    @Test func preservesRatedLabelledAndRejectedPhotosAndOtherGroups() {
+        let group = groupCullingGroup("protected", members: photos)
+        let outside = groupCullingPhoto("outside")
         let marks = [
-            first: PhotoMarks(rating: groupCullingRating(1)),
-            second: PhotoMarks(),
-            outsider: PhotoMarks(),
+            photos[0]: PhotoMarks(rating: groupCullingRating(5)),
+            photos[1]: PhotoMarks(label: ColourLabel(colour: .red)),
+            photos[2]: PhotoMarks(rating: .rejected),
+            outside: PhotoMarks(),
         ]
+        let plan = GroupFinishingPlan(
+            group: group, action: .rejectUnmarked, currentPhoto: photos[0], marks: marks)
+        #expect(plan.changes.map(\.photo) == [photos[3]])
+        #expect(plan.changes.first?.change == .rating(.rejected))
+        #expect(plan.changes.first?.marksBefore == PhotoMarks())
+    }
 
-        // The current photo is a member, so Keep this plans inside the group only.
-        let keepThis = GroupFinishingPlan(
-            group: group,
-            action: .keepThis,
-            currentPhoto: first,
-            marks: marks,
-            enabledRatings: groupCullingTwoAndFour)
-        // Keep rated has no keep change, so an outside current photo does not make it
-        // unavailable; it still plans only members.
-        let keepRated = GroupFinishingPlan(
-            group: group,
-            action: .keepRated,
-            currentPhoto: outsider,
-            marks: marks,
-            enabledRatings: groupCullingTwoAndFour)
-
-        #expect(keepThis.changes.map(\.photo) == [second])
-        #expect(keepRated.changes.map(\.photo) == [second])
-        for change in keepThis.changes + keepRated.changes {
-            #expect(group.members.contains(change.photo))
-            #expect(change.photo != outsider)
-        }
+    @Test func submissionProtectsPhotosMarkedSincePlanning() {
+        let group = groupCullingGroup("recheck", members: photos)
+        let marks = [photos[0]: PhotoMarks(rating: groupCullingRating(3))]
+        let plan = GroupFinishingPlan(
+            group: group, action: .rejectUnmarked, currentPhoto: photos[0], marks: marks)
+        let now = [
+            photos[1]: PhotoMarks(rating: groupCullingRating(2)),
+            photos[2]: PhotoMarks(label: ColourLabel(colour: .green)),
+            photos[3]: PhotoMarks(rating: .rejected),
+        ]
+        #expect(plan.changesAllowed { now[$0] ?? marks[$0] ?? PhotoMarks() }.isEmpty)
     }
 }

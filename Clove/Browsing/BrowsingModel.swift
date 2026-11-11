@@ -405,9 +405,12 @@ final class BrowsingModel {
         state.route = .detail
     }
 
-    /// Opens a group's view on its first member (PRD In-group culling).
+    /// Opens on the first undecided member, falling back to the first photo of a done group.
     func openGroup(_ group: BrowsingGroup) {
-        guard let first = group.members.first else { return }
+        guard
+            let first = group.members.first(where: { shownMarks(for: $0).isUndecided })
+                ?? group.members.first
+        else { return }
         state.groupPosition = BrowsingGroupPosition(group: group.id, photo: first)
         state.currentPhoto = first
         library.setEntryResumePhoto(first)
@@ -459,7 +462,7 @@ final class BrowsingModel {
 
     /// Counts the finishing actions and retries this scene has run (PRD P0-12).
     ///
-    /// Two finishing actions can produce equal results — Keep rated on a group that is already
+    /// Two finishing actions can produce equal results — Reject unmarked on a group that is already
     /// fully decided changes nothing — so the group view needs an identity for the event itself,
     /// not only for the value it produced.
     private(set) var groupFinishingRuns = 0
@@ -514,33 +517,17 @@ final class BrowsingModel {
         dismissedGroupFailure = lastGroupFinishing
     }
 
-    /// Moves the group view on when its group is complete, following C12's setting
-    /// (PRD In-group culling, group completion; PRD P0-12).
-    ///
-    /// A complete group either stays (the setting says stay) or opens the next group in grid
-    /// order that is not complete, skipping completed ones. With no incomplete group left, the
-    /// view returns to the grid. The answer comes from the folder session's completion record,
-    /// which the ordered finishing action writes and the marks complete, so the view never derives a
-    /// second rule (``GroupViewCompletion``).
-    ///
-    /// The group, the route and the task are re-checked after the query: leaving the group view,
-    /// opening another group or a finishing failure that arrives meanwhile each cancel the move,
-    /// and none of them may be overridden by the answer to a question asked before it.
-    func advanceFromCompletedGroup(_ behaviour: GroupCompletionBehaviour) async {
-        guard state.route == .group, let position = state.groupPosition else { return }
-        let completion = await library.groupCompletion(
-            for: position.group, behaviour: behaviour,
-            marks: Dictionary(uniqueKeysWithValues: storedPhotos.map { ($0.id, $0.marks) }))
-        let failure = groupFinishingFailure
-        guard !Task.isCancelled, state.route == .group,
-            state.groupPosition?.group == position.group,
-            failure?.plan.groupID != position.group
+    /// Continue is explicit and follows the filtered grid, including completed groups and singles.
+    func continueFromGroup() {
+        guard state.route == .group, let group = currentGroup,
+            GroupUndecidedCount(groupPhotos.map(\.marks)).undecided == 0
         else { return }
-        switch completion {
-        case .inProgress, .stay:
-            break
-        case .nextGroup(let group):
-            openGroup(group)
+        switch GroupContinueDestination.next(
+            after: group.id, orderedPhotos: allPlacedPhotos, groups: groups,
+            visiblePhotos: Set(photos.map(\.id)))
+        {
+        case .group(let next): openGroup(next)
+        case .photo(let next): openPhoto(next)
         case .grid:
             state.groupPosition = nil
             state.route = .grid

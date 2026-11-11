@@ -49,7 +49,6 @@ import CloveCore
             { $0.autoAdvance.triggers.colourLabel = defaults.autoAdvance.triggers.colourLabel }
         ),
         ("detail.doubleTap", invalid, { $0.doubleTap = defaults.doubleTap }),
-        ("zoom.keepInGroups", invalid, { $0.keepZoom.inGroups = defaults.keepZoom.inGroups }),
         ("zoom.keepInDetail", invalid, { $0.keepZoom.inDetail = defaults.keepZoom.inDetail }),
         (
             "labels.extended", invalid,
@@ -65,7 +64,6 @@ import CloveCore
             { $0.similarGroupsEnabled = defaults.similarGroupsEnabled }
         ),
         ("grid.groupDisplay", invalid, { $0.gridGroupDisplay = defaults.gridGroupDisplay }),
-        ("groups.completion", invalid, { $0.groupCompletion = defaults.groupCompletion }),
         (
             "appearance.matchSystem", invalid,
             { $0.appearance.matchesSystemAppearance = defaults.appearance.matchesSystemAppearance }
@@ -114,7 +112,7 @@ import CloveCore
     let storage = InMemorySettingsStorage()
     var older = AppSettings()
     older.gesturesEnabled = false
-    older.keepZoom = KeepZoom(inGroups: false, inDetail: true)
+    older.keepZoom = KeepZoom(inDetail: true)
     SettingsPersistence(storage: storage).save(older)
     // What the previous version wrote: every key it knew, and none of the Appearance keys.
     storage.setString(nil, forKey: "appearance.matchSystem")

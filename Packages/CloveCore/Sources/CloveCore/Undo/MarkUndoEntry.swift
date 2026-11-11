@@ -79,7 +79,7 @@ public enum MarkUndoEntryKind: Hashable, Sendable {
     case single
     /// One change applied to the photos of a multi-select batch (PRD P0-09).
     case batch
-    /// Keep this, reject the rest or Keep rated, reject the rest (PRD P0-12).
+    /// Reject unmarked in one group.
     case groupFinishing
 }
 
@@ -102,8 +102,7 @@ public struct MarkUndoGroupFinishing: Hashable, Sendable {
     /// A short action name for the undo menu title; the final copy belongs to U8.
     public var actionName: String {
         switch action {
-        case .keepThis: "Keep this, reject the rest"
-        case .keepRated: "Keep rated, reject the rest"
+        case .rejectUnmarked: "Reject unmarked"
         }
     }
 }

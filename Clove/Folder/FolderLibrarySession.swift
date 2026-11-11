@@ -475,14 +475,6 @@ final class FolderLibrarySession: FolderLibrary {
         await groupCompletionTracker.recordFinishingAction(on: group)
     }
 
-    func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) async -> GroupViewCompletion {
-        return await groupCompletionTracker.viewCompletion(
-            after: groupID, in: publishedGroups, behaviour: behaviour, marks: marks)
-    }
-
     // MARK: - Entry
 
     /// Remembers navigation immediately; preview work never holds a departure (handoff Entry).

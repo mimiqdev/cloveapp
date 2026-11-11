@@ -45,7 +45,7 @@ struct GroupCompletionTests {
         #expect(!(await tracker.hasFinishingAction(on: group.id)))
     }
 
-    @Test func theNextGroupSkipsCompletedGroupsAndStayReturnsNone() async {
+    @Test func explicitIncompleteGroupQueriesSkipCompletedGroups() async {
         let tracker = GroupCompletionTracker()
         let first = groupCullingGroup("first", members: [groupCullingPhoto("a")])
         let second = groupCullingGroup(
@@ -65,15 +65,6 @@ struct GroupCompletionTests {
         #expect(
             await tracker.nextIncompleteGroup(after: first.id, in: groups, marks: marks)
                 == fourth)
-        #expect(
-            await tracker.groupAfterCompletion(
-                of: first.id, in: groups, behaviour: .nextGroup, marks: marks)
-                == fourth)
-        // PRD In-group culling: staying keeps the completed group, so there is nowhere to go.
-        #expect(
-            await tracker.groupAfterCompletion(
-                of: first.id, in: groups, behaviour: .stay, marks: marks)
-                == nil)
         #expect(
             await tracker.previousIncompleteGroup(before: fourth.id, in: groups, marks: marks)
                 == first)

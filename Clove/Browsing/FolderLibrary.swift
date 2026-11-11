@@ -202,17 +202,8 @@ protocol FolderLibrary: AnyObject {
     /// it showed the folder.
     var openGeneration: Int { get }
 
-    /// Whether the group is complete, and where the group view goes next, following C12's
-    /// setting (PRD In-group culling, group completion; PRD P0-12).
-    ///
-    /// The library owns the folder's completion records, so the view never derives a second
-    /// rule; a folder that ended answers ``GroupViewCompletion/inProgress``.
+    /// Records the explicit finishing action for the folder's undo history.
     func recordGroupFinishing(_ group: GroupID) async
-
-    func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) async -> GroupViewCompletion
 
     /// The scanned set behind one photo, for writes, thumbnails and the grouping follow-up
     /// (PRD P0-08, P0-11).
@@ -335,13 +326,6 @@ extension FolderLibrary {
     func closeFolder() async {}
 
     func recordGroupFinishing(_ group: GroupID) async {}
-
-    func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) async -> GroupViewCompletion {
-        .inProgress
-    }
 
     /// A library with no batch write reports every photo as failed instead of claiming a save
     /// (PRD P0-09, P0-08).

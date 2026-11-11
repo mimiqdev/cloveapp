@@ -24,10 +24,7 @@ struct DetailZoomPolicy: Hashable {
 
     /// The zoom a group view keeps while navigating its group; on by default (PRD In-group
     /// culling, synchronized zoom).
-    static func group(_ settings: AppSettings) -> DetailZoomPolicy {
-        DetailZoomPolicy(
-            keepsScale: settings.keepZoom.inGroups, keepsPosition: settings.keepZoom.inGroups)
-    }
+    static let group = DetailZoomPolicy(keepsScale: true, keepsPosition: true)
 }
 
 /// What the marking view asks its screen to do beyond drawing it (PRD P0-04, P0-06; PRD P0-12).

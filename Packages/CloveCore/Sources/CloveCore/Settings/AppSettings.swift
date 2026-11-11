@@ -16,30 +16,15 @@ public enum GridGroupDisplay: String, CaseIterable, Hashable, Sendable {
     case collapsed
 }
 
-/// Where the group view goes once a group is complete (PRD In-group culling).
-public enum GroupCompletionBehaviour: String, CaseIterable, Hashable, Sendable {
-    /// Move to the next group, skipping completed groups; the launch default (PRD In-group
-    /// culling).
-    case nextGroup
-
-    /// Keep showing the completed group.
-    case stay
-}
-
 /// Whether navigation keeps the current zoom level and position (PRD Gesture-related settings
 /// and In-group culling).
 public struct KeepZoom: Hashable, Sendable {
-    /// Keep zoom in a group view while navigating the group; on by default (PRD In-group
-    /// culling).
-    public var inGroups: Bool
     /// Keep zoom in regular detail while navigating photos; off by default (PRD Gesture-related
     /// settings).
     public var inDetail: Bool
 
-    /// Creates the two values; groups keep zoom, regular detail does not (PRD Gesture-related
-    /// settings and In-group culling).
-    public init(inGroups: Bool = true, inDetail: Bool = false) {
-        self.inGroups = inGroups
+    /// Regular detail starts at fit unless the person enables retained zoom.
+    public init(inDetail: Bool = false) {
         self.inDetail = inDetail
     }
 }
@@ -70,8 +55,7 @@ public struct AppSettings: Hashable, Sendable {
     /// Double-tap behavior in detail (PRD Gesture-related settings); zoom by default.
     public var doubleTap: DoubleTapBehaviour
 
-    /// Whether navigation keeps zoom (PRD Gesture-related settings and In-group culling); on
-    /// in groups, off in regular detail.
+    /// Whether regular detail keeps its zoom level while navigating. Groups always sync zoom.
     public var keepZoom: KeepZoom
 
     /// Whether Orange and Pink join the five default labels (PRD Marking rules); off by default.
@@ -92,10 +76,6 @@ public struct AppSettings: Hashable, Sendable {
     /// How groups appear in the grid (PRD Grid, similar-group display); expanded by default.
     public var gridGroupDisplay: GridGroupDisplay
 
-    /// Where the group view goes when a group is complete (PRD In-group culling); next group by
-    /// default.
-    public var groupCompletion: GroupCompletionBehaviour
-
     /// Whether the system appearance picks the theme, and the chosen theme otherwise
     /// (`design/handoff/tokens/tokens.md`); matching the system, with Light chosen, by default.
     public var appearance: AppearanceChoice
@@ -112,7 +92,6 @@ public struct AppSettings: Hashable, Sendable {
         moveRejectsEnabled: Bool = true,
         similarGroupsEnabled: Bool = true,
         gridGroupDisplay: GridGroupDisplay = .expanded,
-        groupCompletion: GroupCompletionBehaviour = .nextGroup,
         appearance: AppearanceChoice = AppearanceChoice()
     ) {
         self.gesturesEnabled = gesturesEnabled
@@ -125,7 +104,6 @@ public struct AppSettings: Hashable, Sendable {
         self.moveRejectsEnabled = moveRejectsEnabled
         self.similarGroupsEnabled = similarGroupsEnabled
         self.gridGroupDisplay = gridGroupDisplay
-        self.groupCompletion = groupCompletion
         self.appearance = appearance
     }
 
