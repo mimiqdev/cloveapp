@@ -12,12 +12,9 @@ struct DetailSwipeIndicatorTests {
         let container = DetailZoomContainerView(frame: CGRect(origin: .zero, size: size))
         let feedback = DetailSwipeFeedback()
         container.feedback = feedback
-        let recognizer = try #require(
-            container.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         var frames: [CGRect] = []
         for startHeight in [CGFloat(250), 450] {
-            recognizer.setTranslation(CGPoint(x: 0, y: -15), in: container)
-            #expect(container.gestureRecognizerShouldBegin(recognizer))
+            #expect(container.beginSwipe(translation: CGPoint(x: 0, y: -15)))
             let drag = IndicatorTestPan(startHeight: startHeight)
             container.perform(NSSelectorFromString("handleMarkingPan:"), with: drag)
             drag.sampleState = .changed

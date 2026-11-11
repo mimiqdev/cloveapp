@@ -431,10 +431,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 == .centre
         }
         guard recognizer === markingPan else { return true }
+        return beginSwipe(translation: markingPan.translation(in: self))
+    }
+
+    /// Takes the recognizer's starting sample once; subsequent travel keeps this direction.
+    func beginSwipe(translation: CGPoint) -> Bool {
         guard !isSettlingNavigation, scrollView.zoomScale <= DetailFitScale.tolerance else {
             return false
         }
-        let translation = markingPan.translation(in: self)
         isNavigating =
             NavigationSwipeRules.axis(
                 horizontal: Double(translation.x), vertical: Double(translation.y)) == .horizontal
