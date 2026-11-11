@@ -53,8 +53,7 @@ enum BrowsingFixtures {
             filter: .ratedAtLeast(threeStars),
             order: .fileName,
             selection: [alpha, gamma],
-            groupPosition: BrowsingGroupPosition(group: burst, photo: beta),
-            route: .group)
+            route: .detail)
     }
 
     /// A permission failure, as C11 reports one (PRD P0-02).

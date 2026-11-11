@@ -20,38 +20,6 @@ struct GroupPhotoNavigationTests {
         ])
     }
 
-    @Test func nextAndPreviousFollowMemberOrderWithoutWrapping() {
-        let navigation = GroupPhotoNavigation(group: group)
-
-        #expect(navigation.nextPhoto(after: members[0], marks: marks) == members[1])
-        #expect(navigation.nextPhoto(after: members[2], marks: marks) == members[3])
-        #expect(navigation.nextPhoto(after: members[3], marks: marks) == nil)
-        #expect(navigation.previousPhoto(before: members[3], marks: marks) == members[2])
-        #expect(navigation.previousPhoto(before: members[1], marks: marks) == members[0])
-        #expect(navigation.previousPhoto(before: members[0], marks: marks) == nil)
-    }
-
-    @Test func undecidedOnlySkipsRatingsLabelsAndRejects() {
-        let navigation = GroupPhotoNavigation(group: group, undecidedOnly: true)
-
-        #expect(navigation.nextPhoto(after: members[0], marks: marks) == nil)
-        #expect(navigation.previousPhoto(before: members[3], marks: marks) == members[0])
-        #expect(navigation.nextPhoto(after: members[1], marks: marks) == nil)
-    }
-
-    @Test func undecidedOnlyStopsAtTheEndsInsteadOfWrapping() {
-        let navigation = GroupPhotoNavigation(group: group, undecidedOnly: true)
-        let onlyFirstUndecided = groupCullingMarks([
-            (members[0], PhotoMarks()),
-            (members[1], PhotoMarks(rating: groupCullingRating(2))),
-            (members[2], PhotoMarks(rating: .rejected)),
-            (members[3], PhotoMarks(rating: groupCullingRating(5))),
-        ])
-
-        #expect(navigation.nextPhoto(after: members[3], marks: onlyFirstUndecided) == nil)
-        #expect(navigation.previousPhoto(before: members[0], marks: onlyFirstUndecided) == nil)
-    }
-
     @Test func nextUndecidedWrapsToTheStartOfTheGroup() {
         let navigation = GroupPhotoNavigation(group: group)
 
@@ -86,12 +54,47 @@ struct GroupPhotoNavigationTests {
                 != members[1])
     }
 
+    @Test func advanceVisitsUnmarkedMembersThenTheNextGridCellIncludingAfterFinishing() {
+        let outside = groupCullingPhoto("outside")
+        let ordered = [members[0], outside, members[1], members[2], members[3]].map {
+            GridPhoto(id: $0, fileName: $0.stem, time: .pending)
+        }
+        let groups = [BrowsingGroup(id: group.id, members: members)]
+        let visible = Set(ordered.map(\.id))
+        let navigation = GroupPhotoNavigation(group: group)
+        let next = navigation.advance(
+            after: members[3], marks: marks, orderedPhotos: ordered,
+            groups: groups, visiblePhotos: visible)
+        #expect(next == .nextUndecidedPhoto(members[0]))
+        let rules = MarkingInputRules(settings: AppSettings())
+        #expect(
+            rules.autoAdvancePlan(after: .reject, from: members[3], photos: ordered, group: next)
+                .target == .groupUndecidedPhoto(members[0]))
+
+        var completed = marks
+        completed[members[0]] = PhotoMarks(rating: .rejected)
+        #expect(
+            navigation.advance(
+                after: members[0], marks: completed, orderedPhotos: ordered,
+                groups: groups, visiblePhotos: visible) == .nextUndecidedPhoto(outside))
+        let plan = GroupFinishingPlan(
+            group: group, action: .rejectUnmarked, currentPhoto: members[0], marks: marks)
+        for change in plan.changes {
+            completed[change.photo] = change.marksBefore.applying(change.change)
+        }
+        #expect(
+            navigation.advance(
+                after: members[0], marks: completed, orderedPhotos: ordered,
+                groups: groups, visiblePhotos: [outside]) == .nextUndecidedPhoto(outside))
+        #expect(
+            navigation.photoAfterGroup(orderedPhotos: ordered, groups: groups, visiblePhotos: [])
+                == nil)
+    }
+
     @Test func aPhotoOutsideTheGroupHasNoNeighbours() {
-        let navigation = GroupPhotoNavigation(group: group, undecidedOnly: true)
+        let navigation = GroupPhotoNavigation(group: group)
         let outsider = groupCullingPhoto("outsider")
 
-        #expect(navigation.nextPhoto(after: outsider, marks: marks) == nil)
-        #expect(navigation.previousPhoto(before: outsider, marks: marks) == nil)
         #expect(navigation.nextUndecidedPhoto(after: outsider, marks: marks) == nil)
     }
 }

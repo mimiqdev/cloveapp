@@ -2,33 +2,7 @@ import CloveCore
 import CloveImaging
 import SwiftUI
 
-/// How a preview's zoom behaves when the screen shows another photo (PRD P0-04; PRD In-group
-/// culling, synchronized zoom).
-///
-/// Group review always keeps scale and position for comparing the same crop. Regular detail
-/// optionally keeps the zoom level, without sharing position between unrelated photos.
-struct DetailZoomPolicy: Hashable {
-    /// Whether the next photo keeps the zoom level (PRD Gesture-related settings).
-    var keepsScale: Bool
-
-    /// Whether the next photo keeps the position in unit image coordinates (PRD In-group
-    /// culling, synchronized zoom).
-    var keepsPosition: Bool
-
-    /// The zoom a regular detail view keeps while navigating (C12's setting).
-    static func detail(_ settings: AppSettings) -> DetailZoomPolicy {
-        DetailZoomPolicy(keepsScale: settings.keepZoom.inDetail, keepsPosition: false)
-    }
-
-    /// Group zoom and pan are always synced, as specified by the handoff.
-    static let group = DetailZoomPolicy(keepsScale: true, keepsPosition: true)
-}
-
-/// What the marking view asks its screen to do beyond drawing it (PRD P0-04, P0-06; PRD P0-12).
-///
-/// The view owns the pixels, the zoom and the marking inputs; the screen owns the order the
-/// photos are in, which is the grid's order and filter in detail and the group's member order in
-/// the group view (PRD P0-03; PRD In-group culling). These three calls are that boundary.
+/// The screen supplies grid-order navigation, marking and group finishing actions.
 @MainActor
 struct DetailMarkingActions {
     /// Applies one resolved mark change to the photo it belongs to (PRD P0-08).
@@ -47,17 +21,14 @@ struct DetailMarkingActions {
 
     /// Filmstrip navigation keeps the screen's existing auto-advance cancellation.
     var openPhoto: (PhotoIdentity) -> Void = { _ in }
+    var finishGroup: (GroupFinishingPlan) -> Void = { _ in }
 }
 
 /// One photo's preview and marking controls: the HUD, the zoomable preview with its edge taps
 /// and marking swipes, and the states that must not look like a loaded image (PRD P0-04, P0-06).
 ///
-/// The detail screen and the group view draw this same view, so a mark's path is one path: every
-/// input — the swipe gesture, the HUD's rating bar, a label and the Reject toggle — resolves
-/// through C13's ``MarkingInputRules`` and then asks the screen to write it and to start its
-/// auto-advance (PRD In-group culling, P0-06, PRD Auto-advance). The screen supplies the order an
-/// edge tap moves through, and the zoom the next photo opens with, through
-/// ``DetailMarkingActions`` and ``DetailZoomPolicy``.
+/// Every marking input resolves through ``MarkingInputRules`` and the ordered write pipeline.
+/// Navigating within the same group preserves zoom and position; leaving follows Settings.
 ///
 /// The selected display mode controls fit and zoom together. A held screen RAW
 /// appears immediately; otherwise the camera preview fills the screen-render wait.
@@ -67,14 +38,7 @@ struct DetailMarkingActions {
 /// The edge zones are ``DetailEdgeZone``'s: the outer 18% of the preview's width on each side
 /// navigates, with single taps only, so a tap there never waits for a double tap. The middle
 /// keeps the double-tap action (PRD Detail and marking).
-///
-/// The folder's save state and the current photo's failure belong to this same block (PRD P0-08):
-/// the folder's one indicator sits under the HUD, and a change that did not confirm brings the
-/// shared failure toast. Both screens therefore report a
-/// save state in one place, and the group view's photos are marked and recovered exactly like a
-/// single photo's.
-///
-/// Detail and group review share the same presentation; the group supplies its own header and pill.
+/// The current group's finishing pill sits above its expanded filmstrip frames.
 struct DetailMarkingView: View {
     /// The scene's browsing state and ordered marking actions
     /// (PRD P0-08).
@@ -91,9 +55,6 @@ struct DetailMarkingView: View {
     let images: any DetailImageSource
     var displayMode: PhotoDisplayMode = .rawFirst
 
-    /// What the next photo keeps of this one's zoom (PRD P0-04; PRD In-group culling).
-    let zoomPolicy: DetailZoomPolicy
-
     /// The photos this screen can step through, in its own order, so the neighbours' previews
     /// are prefetched (G1 "Scheduling and cache").
     let order: [GridPhoto]
@@ -101,18 +62,14 @@ struct DetailMarkingView: View {
     /// Where an edge tap and a mark go, in the screen's own order (PRD P0-04; PRD P0-12).
     let actions: DetailMarkingActions
 
-    /// C5's undo through the one model call U8 adds; the button stays disabled until then.
-    var undo: () -> Void = {}
-
-    /// Group review supplies only its header, filter choice and finishing pill.
-    var groupReview: GroupReviewChrome?
-
     @Environment(\.displayScale) private var displayScale
     @Environment(\.cloveTheme) private var theme
     @State private var hidesChrome = false
     @State private var windowID = UUID()
     @State private var currentWindow: DetailPhotoWindow?
     @State private var previousPosition: Int?
+    @State private var previousPhoto: PhotoIdentity?
+    @State private var keepsPosition = false
     @State private var isLoadingFit = false
     @State private var showsInformation = false
     @State private var showsZoomChip = false
@@ -189,18 +146,13 @@ struct DetailMarkingView: View {
     private var detailLayout: some View {
         VStack(spacing: 0) {
             BrowsingHeader(
-                title: groupReview.map { "Group · \($0.group.members.count.formatted()) photos" }
-                    ?? photo.fileName,
-                titleIdentifier: groupReview == nil ? "clove.detail.fileName" : "clove.group.title",
+                title: photo.fileName,
+                titleIdentifier: "clove.detail.fileName",
                 back: { browsing.back() }
             ) {
                 HStack(spacing: 0) {
-                    Text(
-                        groupReview.map { "\($0.undecided.formatted()) undecided" }
-                            ?? detailSubtitle
-                    )
-                    .accessibilityIdentifier(
-                        groupReview == nil ? "clove.detail.zoom" : "clove.group.undecided")
+                    Text(detailSubtitle)
+                        .accessibilityIdentifier("clove.detail.zoom")
                     if scale <= DetailFitScale.tolerance {
                         SaveStatusIndicator(
                             browsing: browsing, identifierPrefix: "clove.detail.saveState")
@@ -208,18 +160,16 @@ struct DetailMarkingView: View {
                 }
             } tools: {
                 if chromeIsVisible {
-                    if let groupReview {
-                        groupMenu(groupReview)
-                    } else {
-                        GlassIconButton(
-                            label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
-                        ) { showsInformation = true }
-                    }
+                    GlassIconButton(
+                        label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
+                    ) { showsInformation = true }
                     GlassIconButton(
                         label: "Undo", symbol: "arrow.uturn.backward",
                         identifier: "clove.detail.undo",
-                        action: undo
-                    ).disabled(true)
+                        action: {
+                            actions.markingSwipeBegan(); browsing.undoLastMark()
+                        }
+                    ).disabled(!browsing.canUndoMark)
                 }
             }
             FolderSaveBanner(
@@ -231,11 +181,7 @@ struct DetailMarkingView: View {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
                                 open: actions.openPhoto,
-                                groups: groupReview == nil ? browsing.groups : [])
-                            if let action = groupReview?.action {
-                                action.disabled(!browsing.canMark)
-                                    .padding(.vertical, 6)
-                            }
+                                groups: browsing.groups, finishingAction: finishingAction)
                             DetailMarkCapsule(
                                 marks: displayMarks, settings: settings,
                                 previewRating: swipeFeedback.rating,
@@ -276,21 +222,16 @@ struct DetailMarkingView: View {
         }
     }
 
-    private func groupMenu(_ chrome: GroupReviewChrome) -> some View {
-        Menu {
-            Toggle("Undecided only", isOn: chrome.undecidedOnly)
-                .accessibilityIdentifier("clove.group.undecidedOnly")
-            Button("Find similar shots again") { Task { await browsing.runGroupingAgain() } }
-                .accessibilityIdentifier("clove.group.runAgain")
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.title3)
-                .foregroundStyle(Color.clove.text.primary)
-                .frame(width: 44, height: 44)
-                .cloveGlass(in: Circle())
-        }
-        .accessibilityLabel("More")
-        .accessibilityIdentifier("clove.group.more")
+    private var finishingAction: PillAction? {
+        guard browsing.canMark, let group = browsing.currentGroup else { return nil }
+        let plan = GroupFinishingPlan(
+            group: group, action: .rejectUnmarked, currentPhoto: photo.id,
+            marks: Dictionary(uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) }))
+        guard plan.availability.isAvailable, !plan.isEmpty else { return nil }
+        return PillAction(
+            title: "Reject \(plan.rejects.count.formatted()) unmarked",
+            identifier: "clove.detail.rejectUnmarked"
+        ) { actions.finishGroup(plan) }
     }
 
     private var detailSubtitle: String {
@@ -392,8 +333,7 @@ struct DetailMarkingView: View {
 
     /// Asks for the photo's preview and keeps the zoom the screen's policy keeps (PRD P0-04).
     ///
-    /// A group view reads the position the previous photo was on before the pixels are replaced,
-    /// so the new photo opens on the same spot (PRD In-group culling, synchronized zoom). A
+    /// Between members of one group, the new photo opens at the previous photo's crop. A
     /// deferred answer is retried a bounded number of times because the pipeline may have been
     /// busy with the photo that was on screen a moment ago; a refused or unreadable file is final
     /// and shown as its own state. The neighbours' previews are prefetched after the photo's own
@@ -401,7 +341,16 @@ struct DetailMarkingView: View {
     private func loadPreview(for photo: GridPhoto) async {
         upgradeTask?.cancel()
         isLoadingFit = true
-        if !zoomPolicy.keepsScale {
+        keepsPosition =
+            previousPhoto.map { previous in
+                browsing.groups.contains {
+                    $0.members.contains(previous) && $0.members.contains(photo.id)
+                }
+            } ?? false
+        previousPhoto = photo.id
+        let keepsScale = keepsPosition || settings.keepZoom.inDetail
+        if !keepsPosition { keptZoom = nil }
+        if !keepsScale {
             keptZoom = nil
             keptScale = nil
             keptNativeScale = nil
@@ -412,13 +361,13 @@ struct DetailMarkingView: View {
             let snapshot = probe.container?.zoomSnapshot
             keptScale = snapshot?.scale
             keptNativeScale = snapshot != nil ? nativeFullResolutionScale(for: shown) : nil
-            keptZoom = zoomPolicy.keepsPosition ? snapshot : nil
+            keptZoom = keepsPosition ? snapshot : nil
             // A view at fit keeps no zoom, so nothing carries into the next photo. That includes a
             // 100% that is still waiting for the render's size: it belongs to the photo that was
             // tapped, not to the one an edge tap moves to (#111).
             if snapshot == nil { zoomMode = .fit }
         }
-        if !zoomPolicy.keepsScale {
+        if !keepsScale {
             zoomMode = .fit
             setZoom(.fit)
         }
@@ -513,7 +462,7 @@ struct DetailMarkingView: View {
             // A group's retained zoom may need more pixels than the preview holds (G1 "Preview,
             // detail (I2)"); a regular detail view keeps its level without starting a render, as
             // before.
-            if zoomPolicy.keepsPosition && !isLoadingFit { upgradeIfNeeded() }
+            if keepsPosition && !isLoadingFit { upgradeIfNeeded() }
         } else if case .fullResolution(let chosen, let targetSize) = zoomMode, viewSize.width > 0 {
             if let pixels = image.fullResolutionPixels {
                 if let target = DetailZoom.retargetedFullResolutionScale(
@@ -598,7 +547,7 @@ struct DetailMarkingView: View {
             show(image)
         }
         isLoadingFit = false
-        if zoomPolicy.keepsPosition { upgradeIfNeeded() }
+        if keepsPosition { upgradeIfNeeded() }
         guard let shown, shown.limitation == nil else { return }
         let renderAhead =
             shown.quality == .screenRAW || shown.quality == .nativeRAW || !shown.hasRAW
@@ -722,19 +671,8 @@ struct DetailMarkingView: View {
 
     // MARK: - Navigation
 
-    /// The same neighbours edge taps use, including a decided current photo hidden by the
-    /// group's Undecided only filter.
+    /// The neighbours edge taps use in grid order.
     var navigationAvailability: (previous: Bool, next: Bool) {
-        if let groupReview {
-            let navigation = GroupPhotoNavigation(
-                group: groupReview.group, undecidedOnly: groupReview.undecidedOnly.wrappedValue)
-            let marks = Dictionary(
-                uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) })
-            return (
-                navigation.previousPhoto(before: photo.id, marks: marks) != nil,
-                navigation.nextPhoto(after: photo.id, marks: marks) != nil
-            )
-        }
         guard let index = order.firstIndex(where: { $0.id == photo.id }) else {
             return (false, false)
         }

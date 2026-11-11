@@ -5,7 +5,7 @@ import SwiftUI
 /// (PRD P0-13, P0-14, G1 fold-state row).
 ///
 /// Compact width shows one screen at a time behind a back button; regular width shows the grid
-/// beside the detail or the group view. Both read the same ``BrowsingModel``, so a fold, an
+/// beside detail. Both read the same ``BrowsingModel``, so a fold, an
 /// unfold or a resize changes only which layout draws the state (G1 fold-state row). The choice
 /// reads the width class the view is handed, never a device name or model.
 struct BrowseShell: View {
@@ -23,7 +23,7 @@ struct BrowseShell: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if !usesSplitLayout, [.detail, .group].contains(browsing.state.route),
+            if !usesSplitLayout, browsing.state.route == .detail,
                 browsing.isSaveFailureToastVisible
             {
                 Toast(
@@ -50,7 +50,7 @@ struct BrowseShell: View {
         }
     }
 
-    /// Regular width: the grid with the detail or the group view (PRD iPad and Duo inner screen).
+    /// Regular width: the grid with detail (PRD iPad and Duo inner screen).
     ///
     /// Entry and settings keep one column, because they have no second pane to fill.
     private var splitLayout: some View {
@@ -72,14 +72,12 @@ struct BrowseShell: View {
         }
     }
 
-    /// The wide layout's second pane: the detail, the group view, or what a tap opens.
+    /// The wide layout's second pane: detail, or what a tap opens.
     @ViewBuilder
     private var detailColumn: some View {
         switch browsing.state.route {
         case .detail:
             DetailScreen(browsing: browsing)
-        case .group:
-            GroupScreen(browsing: browsing)
         default:
             ContentUnavailableView(
                 "No photo", systemImage: "photo", description: Text("Choose a photo in the grid."))
@@ -96,8 +94,6 @@ struct BrowseShell: View {
             GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
         case .detail:
             DetailScreen(browsing: browsing)
-        case .group:
-            GroupScreen(browsing: browsing)
         case .settings:
             SettingsScreen()
         }
@@ -112,8 +108,6 @@ struct BrowseShell: View {
             "Photos"
         case .detail:
             browsing.currentPhoto?.fileName ?? "Photo"
-        case .group:
-            "Group"
         case .settings:
             "Settings"
         }
@@ -132,12 +126,10 @@ extension View {
     func browsingChrome(title: String, browsing: BrowsingModel) -> some View {
         self
             .navigationTitle(
-                browsing.state.route == .grid || browsing.state.route == .detail
-                    || browsing.state.route == .group ? "" : title
+                browsing.state.route == .grid || browsing.state.route == .detail ? "" : title
             )
             .toolbar(
                 browsing.state.route == .grid || browsing.state.route == .detail
-                    || browsing.state.route == .group
                     ? .hidden : .visible,
                 for: .navigationBar
             )

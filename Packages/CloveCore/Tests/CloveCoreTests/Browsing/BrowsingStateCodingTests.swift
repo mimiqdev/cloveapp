@@ -36,6 +36,11 @@ import CloveCore
         #expect(BrowsingState.decoded(from: data) == .entry)
     }
 
+    @Test func aRemovedGroupRouteIsDroppedWithoutMigration() throws {
+        let data = try rewritten(BrowsingFixtures.saved, setting: "route", to: "group")
+        #expect(BrowsingState.decoded(from: data) == .entry)
+    }
+
     @Test func unknownSpellingStartsAtEntry() throws {
         let data = try rewritten(BrowsingFixtures.saved, setting: "route", to: "filmstrip")
         #expect(BrowsingState.decoded(from: data) == .entry)

@@ -287,7 +287,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// The zoom the view shows, or nil at fit (PRD In-group culling, synchronized zoom).
     ///
-    /// The group view reads this before it shows another photo of the group, so the next photo
+    /// Detail reads this before it shows another photo of the group, so the next photo
     /// opens on the same spot at the same zoom (PRD In-group culling, comparison and elimination).
     /// A view at fit has no position to keep and answers nil.
     var zoomSnapshot: DetailZoomSnapshot? {

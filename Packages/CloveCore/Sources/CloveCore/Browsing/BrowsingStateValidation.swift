@@ -26,14 +26,12 @@ extension BrowsingState {
     ///
     /// A folder that cannot be opened falls back to entry and keeps the reason (PRD P0-02). A
     /// destination that shows photos needs the folder those photos belong to, so a saved grid,
-    /// detail or group view for another folder starts at entry: applying a saved photo to a folder
+    /// or detail for another folder starts at entry: applying a saved photo to a folder
     /// that does not hold it would show the wrong set. Entry and settings show no photo, so they
     /// restore as saved, without the folder identity when it is not the open one.
     ///
     /// A photo that no longer exists is dropped, so a detail route on it falls back to the grid;
-    /// the multi-selection drops missing photos (PRD P0-09); the group-view position keeps the
-    /// saved group while it still holds the saved photo, else moves to the group holding that
-    /// photo, else drops, so a group route on it falls back to the grid (PRD P0-11, P0-12).
+    /// the multi-selection drops missing photos (PRD P0-09).
     ///
     /// The function is pure: it reads no file and changes no folder.
     public func restored(from folder: FolderAvailability) -> RestoredBrowsing {
@@ -56,16 +54,13 @@ extension BrowsingState {
             state.currentPhoto = nil
         }
         state.selection.formIntersection(contents.photos)
-        state.groupPosition = state.groupPosition.flatMap(contents.position(for:))
 
         switch state.route {
         case .entry, .grid, .settings:
             break
         case .detail where state.currentPhoto == nil:
             state.route = .grid
-        case .group where state.groupPosition == nil:
-            state.route = .grid
-        case .detail, .group:
+        case .detail:
             break
         }
         return state

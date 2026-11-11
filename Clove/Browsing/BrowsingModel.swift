@@ -6,7 +6,7 @@ import UIKit
 /// The browsing state every screen reads and changes (PRD P0-13, P0-14).
 ///
 /// The state belongs to this model, never to a view's `@State`, so the compact stack and the
-/// split layout show the same folder, photo, filter, selection and group place when a fold, an
+/// split layout show the same folder, photo, filter and selection when a fold, an
 /// unfold or a resize changes the layout (PRD P0-14, G1 fold-state row). The model also keeps the
 /// state in the shape CloveCore can validate and store, so a launch restores what it can and falls
 /// back to entry for the rest.
@@ -38,22 +38,10 @@ final class BrowsingModel {
     /// The groups the open folder publishes, in grid order (PRD P0-11).
     private(set) var groups: [BrowsingGroup]
 
-    /// The folder whose grouping has published a result (PRD P0-11).
-    ///
-    /// A saved group view names a group key, and grouping publishes keys only after the scan, so
-    /// the pending restore waits for that first publication instead of dropping the place on
-    /// every launch (PRD P0-14). The folder key keeps the answer with the folder that produced
-    /// it, so a reopen that the scan answered before this scene caught up is not lost.
-    private var groupsPublishedFor: FolderIdentity?
-
     /// The folder whose scan reported itself finished (PRD P0-01).
     ///
-    /// The pending restore reads it when groups arrive, because the two can land in either order
-    /// and the decision has to see the same scan state both times.
+    /// Restore reads this when reopening catches up with an already finished scan.
     private var finishedScanFor: FolderIdentity?
-
-    /// Whether the open folder's grouping has published, even with no groups (PRD P0-11).
-    private var groupsPublished: Bool { groupsPublishedFor == library.folder }
 
     /// Whether the open folder's scan reported itself finished (PRD P0-01).
     private var hasFinishedScan: Bool { finishedScanFor == library.folder }
@@ -223,28 +211,16 @@ final class BrowsingModel {
 
     /// The open group's photos with their marks, in the group's member order (PRD P0-12).
     var groupPhotos: [GridPhoto] {
-        guard let position = state.groupPosition,
-            let group = groups.first(where: { $0.id == position.group })
-        else { return [] }
+        guard let group = currentGroup else { return [] }
         return group.members.compactMap { photo in
             photoIndices[photo].map { storedPhotos[$0] }
         }
     }
 
-    /// The group the group view shows, from grouping's published groups (PRD P0-11, P0-12).
-    ///
-    /// The view keeps only the group's key and the photo it is on in ``state``, so a fold or a
-    /// relaunch reads the group back from the folder's publication rather than from a copy
-    /// (PRD P0-14).
+    /// The current photo's group, derived from the folder's published membership.
     var currentGroup: BrowsingGroup? {
-        guard let position = state.groupPosition else { return nil }
-        return groups.first { $0.id == position.group }
-    }
-
-    /// The photo the group view shows, with its current marks (PRD P0-12).
-    var groupPhoto: GridPhoto? {
-        guard let id = state.groupPosition?.photo else { return nil }
-        return groupPhotos.first { $0.id == id }
+        guard let photo = state.currentPhoto else { return nil }
+        return groups.first { $0.members.contains(photo) }
     }
 
     /// Loads an Entry preview from app-private storage only (handoff Entry).
@@ -386,22 +362,6 @@ final class BrowsingModel {
         state.route = .detail
     }
 
-    /// The group's visible grid cover when it opened, retained if marking hides the whole group.
-    private var groupEntryCover: PhotoIdentity?
-
-    /// Opens on the first undecided member, falling back to the first photo of a done group.
-    func openGroup(_ group: BrowsingGroup) {
-        guard
-            let first = group.members.first(where: { shownMarks(for: $0).isUndecided })
-                ?? group.members.first
-        else { return }
-        groupEntryCover = photos.first(where: { group.members.contains($0.id) })?.id
-        state.groupPosition = BrowsingGroupPosition(group: group.id, photo: first)
-        state.currentPhoto = first
-        library.setEntryResumePhoto(first)
-        state.route = .group
-    }
-
     /// Runs similar groups again for the open folder, without the group cache (PRD P0-11).
     ///
     /// Run again is the grid's own action (PRD Similar groups rules), so the model passes it to
@@ -419,18 +379,7 @@ final class BrowsingModel {
         await library.setSimilarGroupsEnabled(enabled)
     }
 
-    /// Moves the open group view to another member (PRD P0-12).
-    func showGroupPhoto(_ photo: PhotoIdentity) {
-        guard let position = state.groupPosition else { return }
-        state.groupPosition = BrowsingGroupPosition(group: position.group, photo: photo)
-        state.currentPhoto = photo
-        library.setEntryResumePhoto(photo)
-    }
-
     // MARK: - In-group culling
-
-    /// Prevent a second tap on Reject unmarked from activating the replacement Continue pill.
-    private var groupContinueDelay: (group: GroupID, until: ContinuousClock.Instant)?
 
     /// Snapshots the allowed changes from shown marks and submits one finishing action.
     func runGroupFinishing(_ plan: GroupFinishingPlan) {
@@ -438,31 +387,8 @@ final class BrowsingModel {
         let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
             request($0.change, for: $0.photo)
         }
-        groupContinueDelay = (plan.groupID, ContinuousClock().now.advanced(by: .milliseconds(500)))
         lastMarkEdits = edits
         submit(.finishing(plan, edits))
-    }
-
-    /// Continue is explicit and follows the filtered grid, including completed groups and singles.
-    func continueFromGroup() {
-        guard state.route == .group, let group = currentGroup,
-            GroupUndecidedCount(groupPhotos.map(\.marks)).isCompleteByMarks
-        else { return }
-        if let delay = groupContinueDelay, delay.group == group.id,
-            ContinuousClock().now < delay.until
-        {
-            return
-        }
-        switch GroupContinueDestination.next(
-            after: group.id, orderedPhotos: allPlacedPhotos, groups: groups,
-            visiblePhotos: Set(photos.map(\.id)), entryCover: groupEntryCover)
-        {
-        case .group(let next): openGroup(next)
-        case .photo(let next): openPhoto(next)
-        case .grid:
-            state.groupPosition = nil
-            state.route = .grid
-        }
     }
 
     private var settingsReturnRoute: BrowserRoute = .entry
@@ -475,7 +401,7 @@ final class BrowsingModel {
 
     /// Returns to the screen the current one came from (PRD P0-13).
     ///
-    /// The grid's parent is entry, and detail and the group view return to the grid. Settings
+    /// The grid's parent is entry, and detail returns to the grid. Settings
     /// keeps the folder it was opened over, so closing them returns to the grid when a folder is
     /// open and to entry when none is. Going back from the grid leaves immediately.
     func back() {
@@ -486,7 +412,7 @@ final class BrowsingModel {
             leaveFolder()
         case .settings:
             state.route = settingsReturnRoute
-        case .detail, .group:
+        case .detail:
             state.route = state.folder == nil ? .entry : .grid
         }
     }
@@ -568,6 +494,7 @@ final class BrowsingModel {
         guard !plan.items.isEmpty else { return }
         let edits = plan.items.map { request($0.change, for: $0.photo) }
         lastMarkEdits = edits
+        lastAutoAdvance = nil
         submit(.batch(edits))
     }
 
@@ -620,6 +547,7 @@ final class BrowsingModel {
         }
         let edits = kept.map { request(.rating(.unrated), for: $0) }
         lastMarkEdits = edits
+        lastAutoAdvance = nil
         submit(.keep(edits))
         let id = submit(.move(plan, kept: edits))
         moveCompletions[id] = completion
@@ -669,6 +597,7 @@ final class BrowsingModel {
             return request(change, for: kept.set.id)
         }
         lastMarkEdits = edits
+        lastAutoAdvance = nil
         submit(.moveUndo(entry, edits))
     }
 
@@ -693,7 +622,27 @@ final class BrowsingModel {
         guard canMark, !change.isEmpty else { return }
         let edit = request(change, for: photo)
         lastMarkEdits = [edit]
+        if state.route != .detail { lastAutoAdvance = nil }
         submit(.mark(edit))
+    }
+
+    var canUndoMark: Bool { canMark && lastAutoAdvance != nil && !lastMarkEdits.isEmpty }
+
+    /// Restore the latest detail action together, including a whole Reject unmarked action.
+    func undoLastMark() {
+        guard canUndoMark, let photo = lastAutoAdvance?.markedPhoto else { return }
+        let edits = lastMarkEdits.compactMap { edit -> DesiredMarkEdit? in
+            guard
+                let change = DesiredMarkRestore.change(
+                    photo: edit.photo, current: shownMarks(for: edit.photo), expected: edit.after,
+                    target: edit.before, fields: edit.change)
+            else { return nil }
+            return request(change, for: edit.photo)
+        }
+        lastMarkEdits = []
+        lastAutoAdvance = nil
+        submit(.batch(edits))
+        openPhoto(photo)
     }
 
     // MARK: - Ordered actions
@@ -887,6 +836,8 @@ final class BrowsingModel {
         guard folderLocationLoss == nil else { return }
         folderLocationLoss = loss
         let dropped = actionPipeline.removePending()
+        lastMarkEdits = []
+        lastAutoAdvance = nil
         desiredMarks.removeAll()
         storedPhotos = confirmedPhotos
         dismissSaveFailureToast()
@@ -960,10 +911,8 @@ final class BrowsingModel {
         state.folder = nil
         state.currentPhoto = nil
         state.selection = []
-        state.groupPosition = nil
         state.route = .entry
         folderLocationLoss = nil
-        groupsPublishedFor = nil
         finishedScanFor = nil
         isFindingSimilarShots = false
         labelFilter = nil
@@ -976,6 +925,8 @@ final class BrowsingModel {
         storedPhotos = []
         photoIndices = [:]
         desiredMarks.removeAll()
+        lastMarkEdits = []
+        lastAutoAdvance = nil
         dismissSaveFailureToast()
         groups = []
         thumbnails = library.thumbnails
@@ -1002,7 +953,7 @@ final class BrowsingModel {
     ///
     /// A saved scene that shows photos reopens its folder through C11 and shows that folder's
     /// grid at once, because a large RAW folder's metadata read must not hold the launch on entry.
-    /// The saved photo, filter, order, selection and group place stay pending and are validated by
+    /// The saved photo, filter, order and selection stay pending and are validated by
     /// ``PendingBrowsingRestore``: they apply as soon as the folder holds every photo they name,
     /// at the latest when the scan finishes, and only while the scene still shows what the reopen
     /// produced. The user navigating, opening another folder or reopening a Recents item first
@@ -1052,8 +1003,7 @@ final class BrowsingModel {
             if saved.showsPhotos {
                 showOpenFolder()
                 pendingRestore = PendingBrowsingRestore(saved: saved, shown: state)
-                // The scan and grouping can answer before this scene catches up, so the decision
-                // reads their current state rather than assuming neither has happened.
+                // The scan can finish before this scene catches up.
                 resolvePendingRestore(scanFinished: hasFinishedScan)
             } else {
                 thumbnails = library.thumbnails
@@ -1076,8 +1026,7 @@ final class BrowsingModel {
     private func resolvePendingRestore(scanFinished: Bool) {
         guard let pending = pendingRestore else { return }
         switch pending.decision(
-            current: state, contents: library.contents, scanFinished: scanFinished,
-            groupsPublished: groupsPublished)
+            current: state, contents: library.contents, scanFinished: scanFinished)
         {
         case .apply(let restored):
             pendingRestore = nil
@@ -1103,7 +1052,6 @@ final class BrowsingModel {
             // A reopen of the same folder starts a new scan, so the old finished marker cannot
             // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
             finishedScanFor = nil
-            groupsPublishedFor = nil
             refresh()
         case .photos, .reads:
             refresh()
@@ -1125,29 +1073,6 @@ final class BrowsingModel {
             }
         case .groups(let groups):
             self.groups = groups
-            groupsPublishedFor = library.folder
-            keepGroupViewOnItsPhoto()
-            // A saved group view waited for this publication (PRD P0-11, P0-14).
-            resolvePendingRestore(scanFinished: hasFinishedScan)
-        }
-    }
-
-    /// Keeps the open group view on its photo when grouping refines or reruns (PRD P0-11, P0-14).
-    ///
-    /// A split can move the viewed photo to another group or out of every group, and grouping
-    /// never re-keys a group to prevent it (C9's ancestry keeps only the surviving group's key).
-    /// The saved-scene validation already defines the fallback, so the live view uses the same
-    /// one: the group still holding the photo, otherwise the group that holds it now, otherwise
-    /// no group place and the grid.
-    private func keepGroupViewOnItsPhoto() {
-        guard let position = state.groupPosition else { return }
-        if let moved = library.contents.position(for: position) {
-            state.groupPosition = moved
-            return
-        }
-        state.groupPosition = nil
-        if state.route == .group {
-            state.route = .grid
         }
     }
 
@@ -1162,15 +1087,10 @@ final class BrowsingModel {
         clearRecentFailureForOpenFolder()
         state.currentPhoto = nil
         state.selection = []
-        state.groupPosition = nil
         state.route = .grid
         // The previous folder's completed move cannot be undone through this folder's session.
         lastRejectMove = nil
         isRejectMoveToastVisible = false
-        // Finishing results, the grid anchor and the tap guard belong to the folder that closed.
-        groupEntryCover = nil
-        groupContinueDelay = nil
-
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
@@ -1189,6 +1109,8 @@ final class BrowsingModel {
         if shownGeneration != library.openGeneration {
             shownGeneration = library.openGeneration
             desiredMarks.removeAll()
+            lastMarkEdits = []
+            lastAutoAdvance = nil
             dismissSaveFailureToast()
         }
         confirmedPhotos = library.photos
@@ -1205,10 +1127,8 @@ final class BrowsingModel {
 
     /// Drops scene state that names a photo the folder no longer holds (PRD P0-10, P0-14).
     ///
-    /// A confirmed move removes photos, so the selection, the current photo and the group place
-    /// must not point at one. The scan only adds photos, so this changes nothing during a normal
-    /// scan; a detail or group route whose photo is gone returns to the grid, the same fallback a
-    /// restore uses. Grouping's own update then keeps a surviving group's place.
+    /// A move removes photos, so selection and detail must not point at one. A missing detail
+    /// photo returns to the grid, using the same fallback as restore.
     private func reconcileRemovedPhotos() {
         let present = Set(photoIndices.keys)
         if !state.selection.isSubset(of: present) {
@@ -1217,10 +1137,6 @@ final class BrowsingModel {
         if let current = state.currentPhoto, !present.contains(current) {
             state.currentPhoto = nil
             if state.route == .detail { state.route = .grid }
-        }
-        if let position = state.groupPosition, !present.contains(position.photo) {
-            state.groupPosition = nil
-            if state.route == .group { state.route = .grid }
         }
     }
 }

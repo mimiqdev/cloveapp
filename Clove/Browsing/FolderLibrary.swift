@@ -40,9 +40,7 @@ enum FolderLibraryUpdate: Hashable, Sendable {
 
     /// Grouping published the folder's groups (PRD P0-11).
     ///
-    /// The folder's first publication always arrives, even with no groups and with similar groups
-    /// turned off, so a saved group view knows the wait is over (PRD P0-14); later publications
-    /// carry a refinement or a Run again and only arrive when they changed something.
+    /// Later publications carry a refinement or Run again when membership changes.
     case groups([BrowsingGroup])
 
     /// The visual grouping pass is running or finished, including cached and cancelled runs.
@@ -70,9 +68,7 @@ protocol FolderLibrary: AnyObject {
 
     /// The groups grouping published for the folder, empty when grouping is off (PRD P0-11).
     ///
-    /// They arrive on ``updates`` as ``FolderLibraryUpdate/groups(_:)``; the first publication
-    /// always lands, even when it is empty, so a saved group view knows the wait is over
-    /// (PRD P0-14).
+    /// Membership changes arrive on ``updates`` as ``FolderLibraryUpdate/groups(_:)``.
     var groups: [BrowsingGroup] { get }
 
     /// Runs similar groups again for the open folder without the group cache (PRD P0-11).

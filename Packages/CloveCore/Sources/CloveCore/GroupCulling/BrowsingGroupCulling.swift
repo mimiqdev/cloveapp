@@ -1,9 +1,9 @@
 /// In-group culling over the group the browsing screens hold (PRD In-group culling; PRD P0-12).
 ///
-/// Grouping publishes its result in two shapes. The grid, the group view and restore validation
+/// Grouping publishes its result in two shapes. The grid and detail
 /// read ``BrowsingGroup``: a stable key and the member order (PRD P0-11, P0-14). C10's culling
 /// rules take ``SimilarGroup``, the grouping result, and read the same two facts from it. The
-/// conversion below keeps one group view reading the value it already holds instead of building a
+/// conversion below keeps detail reading the value it already holds instead of building a
 /// second copy of the grouping result, and it fills the two fields in-group culling never reads:
 /// how far refinement has gone and whether a join used the fallback similarity. Browsing publishes
 /// neither, and no culling rule may depend on them.
@@ -20,12 +20,9 @@ extension BrowsingGroup {
 }
 
 extension GroupPhotoNavigation {
-    /// Builds the navigation for one published group (PRD In-group culling; PRD P0-12).
-    ///
-    /// Undecided only, the next and previous rules and the next undecided photo are C10's; this
-    /// only supplies the group the browsing screens hold.
-    public init(group: BrowsingGroup, undecidedOnly: Bool = false) {
-        self.init(group: group.cullingGroup, undecidedOnly: undecidedOnly)
+    /// Builds navigation for one published group.
+    public init(group: BrowsingGroup) {
+        self.init(group: group.cullingGroup)
     }
 }
 

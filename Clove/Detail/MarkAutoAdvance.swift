@@ -4,8 +4,7 @@ import CloveCore
 ///
 /// PRD Auto-advance waits about 0.3 seconds after marking so the user sees the mark take effect,
 /// then moves. Where to go, and which photo was marked, come from C13's ``AutoAdvancePlan``; this
-/// type owns only the wait and its cancellation, which are the same for the regular detail view
-/// and for the group view U9 adds.
+/// type owns only the wait and its cancellation.
 ///
 /// A new mark, a navigation and leaving the view all cancel the pending move, so a photo the user
 /// has already left is never replaced by an advance that was still waiting.

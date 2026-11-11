@@ -2,14 +2,14 @@ import CloveCore
 import SwiftUI
 
 /// Grid-order filmstrip. The current group expands on a quiet tint; other groups stay stacked.
-/// Tapping a stack jumps to the group's first photo, so the group expands in place; detail never
-/// leaves for group review from here.
+/// Tapping a stack jumps to the group's first photo; the group expands in place.
 struct DetailFilmstrip: View {
     let photos: [GridPhoto]
     let current: PhotoIdentity?
     let thumbnails: any GridThumbnailSource
     let open: (PhotoIdentity) -> Void
     var groups: [BrowsingGroup] = []
+    var finishingAction: PillAction?
 
     private struct Entry: Identifiable {
         let id: PhotoIdentity
@@ -39,7 +39,7 @@ struct DetailFilmstrip: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 8) {
+                LazyHStack(alignment: .bottom, spacing: 8) {
                     ForEach(entries) { entry in
                         if entry.expands {
                             HStack(spacing: 3) {
@@ -50,6 +50,7 @@ struct DetailFilmstrip: View {
                                 RoundedRectangle(cornerRadius: 9)
                                     .fill(Color.clove.group).opacity(0.25)
                             }
+                            .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
                         } else if let group = entry.group, let photo = entry.photos.first {
                             Button {
                                 open(photo.id)
@@ -74,15 +75,16 @@ struct DetailFilmstrip: View {
                         }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
+                .padding(.horizontal, finishingAction == nil ? 10 : 80)
+                .padding(.top, finishingAction == nil ? 3 : 49)
+                .padding(.bottom, 3)
             }
             .onChange(of: current, initial: true) { _, photo in
                 guard let photo else { return }
                 withAnimation { proxy.scrollTo(photo, anchor: .center) }
             }
         }
-        .frame(height: 70)
+        .frame(height: finishingAction == nil ? 70 : 116)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.filmstrip")
     }
@@ -97,6 +99,11 @@ struct DetailFilmstrip: View {
             )
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .top) {
+            if photo.id == current, let finishingAction {
+                finishingAction.fixedSize().offset(y: -46)
+            }
+        }
         .id(photo.id)
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
     }

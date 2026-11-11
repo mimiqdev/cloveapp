@@ -322,6 +322,10 @@ struct GridScreen: View {
 
     private func openGroup(_ id: GroupID) {
         guard let group = browsing.groups.first(where: { $0.id == id }) else { return }
-        browsing.openGroup(group)
+        if let first = group.members.first(where: { browsing.shownMarks(for: $0).isUnmarked })
+            ?? group.members.first
+        {
+            browsing.openPhoto(first)
+        }
     }
 }

@@ -478,8 +478,7 @@ extension CloveUITests {
         XCTAssertTrue(stack.waitForExistence(timeout: 5), "The filmstrip did not stack the group")
         stack.tap()
         waitForFileName("MMQ02678.ARW", in: app)
-        XCTAssertFalse(
-            element(in: app, "clove.group").exists, "The filmstrip stack opened group review")
+        XCTAssertTrue(element(in: app, "clove.detail").exists)
         let member = element(in: app, "clove.detail.filmstrip.mmq02679")
         XCTAssertTrue(
             member.waitForExistence(timeout: 5), "The group did not expand in the filmstrip")
@@ -534,20 +533,18 @@ extension CloveUITests {
         XCTAssertTrue(group.isHittable, "The group's count tag was not tappable")
         group.tap()
         XCTAssertTrue(
-            element(in: app, "clove.group").waitForExistence(timeout: 10),
-            "The group view did not appear"
+            element(in: app, "clove.detail").waitForExistence(timeout: 10),
+            "Detail did not appear"
         )
     }
 
     @MainActor
     private func cullTheGroup(in app: XCUIApplication) {
-        // The group opens at its first undecided photo, with detail's capsule.
-        XCTAssertEqual(groupHeader(in: app).label, "1 undecided")
+        waitForFileName("MMQ02681.ARW", in: app)
+        XCTAssertTrue(element(in: app, "clove.detail.filmstrip.expandedGroup").exists)
         let capsule = element(in: app, "clove.detail.capsule")
         XCTAssertTrue(waitForValue("Unmarked", of: capsule, timeout: 5))
         element(in: app, "clove.detail.capsule.stars.3").tap()
-        XCTAssertTrue(element(in: app, "clove.group.continue").waitForExistence(timeout: 5))
-        element(in: app, "clove.group.continue").tap()
         waitForFileName("MMQ02680.ARW", in: app)
         back(in: app)
 
@@ -558,14 +555,10 @@ extension CloveUITests {
         }
         nextGroup.tap()
         element(in: app, "clove.detail.capsule.stars.4").tap()
-        XCTAssertEqual(groupHeader(in: app).label, "2 undecided")
-        XCTAssertTrue(waitForValue("Unmarked", of: capsule, timeout: 5))
+        waitForFileName("MMQ02697.ARW", in: app)
         element(in: app, "clove.detail.capsule.stars.3").tap()
-        XCTAssertEqual(groupHeader(in: app).label, "1 undecided")
-        XCTAssertTrue(waitForValue("Unmarked", of: capsule, timeout: 5))
-        element(in: app, "clove.group.rejectUnmarked").tap()
-        XCTAssertTrue(element(in: app, "clove.group.continue").waitForExistence(timeout: 5))
-        element(in: app, "clove.group.continue").tap()
+        waitForFileName("MMQ02698.ARW", in: app)
+        element(in: app, "clove.detail.rejectUnmarked").tap()
         waitForFileName("MMQ02699.ARW", in: app)
         back(in: app)
         checkTheFinishingRejects(in: app)
@@ -592,11 +585,6 @@ extension CloveUITests {
             "The finishing action rejected a rated and labelled photo")
 
         selectMenuItem(in: app, "clove.grid.filter", item: "clove.grid.filter.all")
-    }
-
-    @MainActor
-    private func groupHeader(in app: XCUIApplication) -> XCUIElement {
-        element(in: app, "clove.group.undecided")
     }
 
     @MainActor

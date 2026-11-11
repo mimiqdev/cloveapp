@@ -17,38 +17,44 @@ struct PhotoActionsTests {
         let model = BrowsingModel(library: library)
         model.openFolder()
         model.apply(.label(ColourLabel(colour: .green)), to: library.identity("a"))
-        model.openGroup(group)
+        model.openPhoto(library.identity("b"))
         let plan = GroupFinishingPlan(
             group: group, action: .rejectUnmarked, currentPhoto: library.identity("b"),
             marks: Dictionary(uniqueKeysWithValues: model.groupPhotos.map { ($0.id, $0.marks) }))
         return (model, library, plan)
     }
 
-    @Test func aLabelledOnlyKeepFinishesAndContinuesToTheNextGridItem() async throws {
+    @Test func aLabelledOnlyKeepFinishesInDetail() async {
         let (model, library, plan) = labelledGroupScenario()
-        #expect(model.groupPhoto?.id == library.identity("b"))
+        #expect(model.currentPhoto?.id == library.identity("b"))
         model.runGroupFinishing(plan)
-        #expect(GroupUndecidedCount(model.groupPhotos.map(\.marks)).isCompleteByMarks)
+        #expect(model.groupPhotos.allSatisfy { !$0.marks.isUnmarked })
         #expect(
             model.shownMarks(for: library.identity("a"))
                 == PhotoMarks(label: ColourLabel(colour: .green)))
-        try await Task.sleep(for: .milliseconds(550))
-        model.continueFromGroup()
         #expect(model.state.route == .detail)
-        #expect(model.state.currentPhoto == library.identity("next"))
+        #expect(model.state.currentPhoto == library.identity("b"))
         await model.drainActions()
         #expect(
             library.photos.first { $0.id == library.identity("a") }?.marks.label.colour == .green)
     }
 
-    @Test func aContinueTapImmediatelyAfterRejectUnmarkedStaysInTheGroup() async {
-        let (model, _, plan) = labelledGroupScenario()
+    @Test func finishingUndoRestoresAllUnmarkedPhotosAndReturnsAfterAnAdvance() async {
+        let (model, library, plan) = labelledGroupScenario()
         model.runGroupFinishing(plan)
-        #expect(GroupUndecidedCount(model.groupPhotos.map(\.marks)).isCompleteByMarks)
-        model.continueFromGroup()
-        #expect(model.state.route == .group)
-        #expect(model.state.groupPosition?.group == plan.groupID)
+        model.recordAutoAdvance(
+            AutoAdvancePlan(
+                target: .nextPhoto(library.identity("next")), markedPhoto: plan.currentPhoto))
+        model.openPhoto(library.identity("next"))
+        model.undoLastMark()
+        #expect(model.currentPhoto?.id == library.identity("b"))
+        #expect(
+            model.groupPhotos.filter { $0.marks.isUnmarked }.map(\.id)
+                == ["b", "c", "d"].map { library.identity($0) })
+        #expect(model.shownMarks(for: library.identity("a")).label.colour == .green)
+        #expect(model.lastMarkEdits.isEmpty)
         await model.drainActions()
+        #expect(library.photos.filter { $0.marks.isRejected }.isEmpty)
     }
 
     @Test func aTapShowsImmediatelyAndTwoQuickMarksWriteInOrder() async throws {
@@ -369,7 +375,7 @@ struct PhotoActionsTests {
     ) -> DetailMarkingView {
         DetailMarkingView(
             browsing: model, photo: photo, settings: AppSettings(), images: model.detailImages,
-            zoomPolicy: .detail(AppSettings()), order: model.photos,
+            order: model.photos,
             actions: DetailMarkingActions(
                 apply: { change, photo in model.apply(change, to: photo.id) },
                 marked: { _, _ in advanced() }, step: { _ in }, markingSwipeBegan: {}))
