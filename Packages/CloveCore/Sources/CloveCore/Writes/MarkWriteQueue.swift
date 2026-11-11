@@ -2,21 +2,23 @@ import Foundation
 
 /// The write queue: admits mark changes, routes each to its storage, and reports save state.
 ///
-/// G1's Safe writes row and decisions 5 and 6 split a change between two storages: ratings and
-/// labels on a RAW set go to the resolved `.xmp` sidecar, while Reject and new marks on a
-/// standalone JPEG/HIF go to Clove's own storage. PRD How marks reach disk, rule 7, requires
-/// each change to be confirmed in the storage it uses, and PRD P0-08 forbids showing any
-/// unconfirmed change as saved. The queue is the one place that decides a change's
-/// destination, performs it, and keeps the per-change state:
+/// G1's Safe writes row and decisions 2 and 6 route a change by mark: ratings (Reject included)
+/// and labels on a RAW set go to the resolved `.xmp` sidecar, while the same marks on a
+/// standalone JPEG/HIF go to Clove's own storage. A RAW set therefore has one storage for all
+/// its marks, and Reject no longer has a route of its own (decision record
+/// `reject-as-rating.md`). PRD How marks reach disk, rule 7, requires each change to be
+/// confirmed in the storage it uses, and PRD P0-08 forbids showing any unconfirmed change as
+/// saved. The queue is the one place that decides a change's destination, performs it, and
+/// keeps the per-change state:
 ///
 /// - **Admission.** A request becomes a ``MarkChangeStatus`` and is written immediately.
 ///   Requests for one photo that arrive while an earlier write is still running merge into
 ///   the next write of the latest requested marks (coalescing), and each request still ends
 ///   with a final state. A request that changes a field another waiting request asked for
 ///   supersedes it (PRD How marks reach disk, rule 8).
-/// - **Confirmation.** A rating or label change is saved only when the sidecar reads back
-///   with the requested marks (PRD P0-08); a Reject or standalone mark only when Clove
-///   storage reads back. A failure keeps the requested marks for retry (PRD disk rule 8).
+/// - **Confirmation.** A RAW set's rating or label change is saved only when the sidecar reads
+///   back with the requested marks (PRD P0-08); a standalone mark only when Clove storage reads
+///   back. A failure keeps the requested marks for retry (PRD disk rule 8).
 /// - **Batches.** One change applied to many photo sets reports per-photo results and the
 ///   confirmed and failed counts P0-09 needs, and retries only the failed items.
 ///
@@ -27,7 +29,7 @@ import Foundation
 public actor MarkWriteQueue {
     /// The sidecar writer shared by every change (G1 Safe writes serialization).
     private let writer: SidecarMarkWriter
-    /// Clove's own storage for Reject and standalone marks (G1 decisions 5–6).
+    /// Clove's own storage for standalone marks (G1 decision 6).
     private let store: CloveMarkStore
 
     /// Every change's latest state, by handle (PRD P0-08).
@@ -70,7 +72,7 @@ public actor MarkWriteQueue {
     /// Creates the queue with Clove storage rooted at `storeDirectory`.
     ///
     /// The sidecar writer and the store share the same file seam, so one injected failure
-    /// covers both storages (G1 Safe writes; G1 decisions 5–6).
+    /// covers both storages (G1 Safe writes; G1 decision 6).
     public init(
         storeDirectory: URL,
         fileSystem: any MarkWriteFileSystem = FoundationMarkWriteFileSystem(),
@@ -84,10 +86,9 @@ public actor MarkWriteQueue {
 
     /// Applies one change to one photo set and returns its final state.
     ///
-    /// The destination comes from C1's ``MarkPersistence``: ratings and labels on a RAW set go
-    /// to its sidecar (G1 decision 2), Reject always goes to Clove storage (G1 decision 5),
-    /// and a standalone JPEG/HIF keeps new marks in Clove (G1 decision 6). A set whose C2
-    /// sidecar state is ambiguous is refused for the XMP part with
+    /// The destination comes from C1's ``MarkPersistence``: ratings (Reject included) and
+    /// labels on a RAW set go to its sidecar (G1 decision 2), and a standalone JPEG/HIF keeps
+    /// them in Clove (G1 decision 6). A set whose C2 sidecar state is ambiguous is refused with
     /// ``MarkWriteFailureReason/ambiguousSidecar`` and no second packet is created.
     ///
     /// The call returns only after the change reaches a final state, so a caller that renders
@@ -95,7 +96,7 @@ public actor MarkWriteQueue {
     /// returns a failure instead of claiming success.
     ///
     /// - Parameters:
-    ///   - change: The rating, label and/or Reject request (PRD P0-07, P0-09).
+    ///   - change: The rating and/or label request (PRD P0-07, P0-09).
     ///   - set: The scanned photo set, with C1's set and C2's sidecar state.
     /// - Returns: The change's final status, with the requested marks kept on failure.
     @discardableResult
@@ -320,28 +321,28 @@ public actor MarkWriteQueue {
 
     /// The marks Clove stores for every photo of a folder, for opening it.
     ///
-    /// PRD How marks reach disk, rule 1, reads Reject and standalone marks when the folder
-    /// opens. A damaged file throws ``CloveMarkStoreError/corruptStorage(_:reason:)`` and is
-    /// never overwritten silently (G1 decisions 5–6).
+    /// PRD How marks reach disk, rule 1, reads standalone marks when the folder opens. A damaged
+    /// file throws ``CloveMarkStoreError/corruptStorage(_:reason:)`` and is never overwritten
+    /// silently (G1 decision 6).
     public func storedMarks(for folderID: FolderIdentity) async throws
         -> [PhotoIdentity: CloveStoredMarks]
     {
         try await store.marks(for: folderID)
     }
 
-    /// The marks Clove stores for one photo, or `nil` when it stores none (G1 decisions 5–6).
+    /// The marks Clove stores for one photo, or `nil` when it stores none (G1 decision 6).
     public func storedMarks(for identity: PhotoIdentity) async throws -> CloveStoredMarks? {
         try await store.marks(for: identity)
     }
 
-    /// Drops a photo's Reject after C6 confirms its move to the rejects folder.
+    /// Drops a photo's stored Reject after C6 confirms its move to the rejects folder.
     ///
-    /// G1 decision 5 makes the move the durable Reject result, so the stored Reject is
-    /// removed only once C6 reports the confirmed move. The removal is confirmed by read-back;
-    /// a photo that is not rejected returns `false` without writing.
+    /// The move is the durable Reject result, so the stored rating −1 is cleared only once C6
+    /// reports the confirmed move. The removal is confirmed by read-back; a photo that is not
+    /// stored as rejected returns `false` without writing.
     @discardableResult
-    public func removeReject(for identity: PhotoIdentity) async throws -> Bool {
-        try await store.removeReject(for: identity)
+    public func clearReject(for identity: PhotoIdentity) async throws -> Bool {
+        try await store.clearReject(for: identity)
     }
 
     // MARK: - Admission and merging
@@ -469,12 +470,12 @@ public actor MarkWriteQueue {
 
     // MARK: - Destinations
 
-    /// Performs one cumulative request against the two storages.
+    /// Performs one cumulative request against the storage its marks use.
     ///
-    /// G1 decisions 2, 5 and 6 route each field: rating and label to the sidecar for a RAW
-    /// set, Reject always to Clove storage, and a standalone JPEG/HIF's new marks to Clove.
-    /// Both parts are attempted before a failure is reported, so a stored Reject survives an
-    /// XMP refusal and a retry repeats only what is still unconfirmed.
+    /// G1 decisions 2 and 6 route a RAW set's rating (Reject included) and label to its sidecar
+    /// and a standalone JPEG/HIF's to Clove storage, so one photo never needs two writes for one
+    /// mark. A failure is reported after both parts were attempted, and a retry repeats only what
+    /// is still unconfirmed.
     private func perform(_ change: MarkChange, for set: ScannedPhotoSet) async -> MarkWriteFailure?
     {
         let persistence = set.photoSet.markPersistence
@@ -507,10 +508,6 @@ public actor MarkWriteQueue {
                 usesCloveStorage = true
             }
         }
-        if let reject = change.reject {
-            stored.reject = reject
-            usesCloveStorage = true
-        }
 
         if usesSidecar, let proposedSidecar {
             // C2's resolved packet wins over C1's proposed name, so an existing `.XMP`
@@ -540,20 +537,17 @@ public actor MarkWriteQueue {
 
     /// The state one request shows once its write has a result.
     ///
-    /// PRD P0-08 names the storage: XMP read-back is **Saved**, a standalone mark confirmed in
-    /// Clove is **Saved in Clove only**, and a Reject that is merely stored is not Saved
-    /// (G1 decisions 5–6). A request that changes both a sidecar mark and Reject reports the
-    /// sidecar state, because the reject was confirmed in the same confirmed write.
+    /// PRD P0-08 names the storage: XMP read-back is **Saved**, and a standalone mark confirmed
+    /// in Clove is **Saved in Clove only**. Reject is a rating, so it reports the state its own
+    /// storage gave it (decision record `reject-as-rating.md`).
     private func state(
         for request: MarkChange,
         persistence: MarkPersistence,
         failure: MarkWriteFailure?
     ) -> MarkChangeState {
         if let failure { return .failed(failure) }
-        let destination: MarkDestination? =
-            request.rating != nil
-            ? persistence.rating : (request.label != nil ? persistence.label : nil)
-        guard let destination else { return .storedInClove }
+        let destination: MarkDestination =
+            request.rating != nil ? persistence.rating : persistence.label
         switch destination {
         case .xmpSidecar: return .savedInSidecar
         case .cloveStorage: return .savedInCloveOnly

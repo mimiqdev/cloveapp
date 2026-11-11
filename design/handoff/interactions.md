@@ -4,7 +4,7 @@ Items tagged **(proposed)** were not reviewed in the design. They are sensible d
 
 ## Core model
 
-- A **mark** is a rating (0–5), a reject flag, and a label (none or one of 5 colors). Marks are written to the photo's XMP sidecar, in the folder where the photos live. Nothing is imported or copied.
+- A **mark** is a rating and a label (none or one of 5 colors). The rating can be −1, which is Reject, so a photo is never rated and rejected at once: rejecting replaces the stars, and undoing restores them. Marks are written to the photo's XMP sidecar, in the folder where the photos live; a standalone JPEG/HIF keeps its rating and label in Clove. Nothing is imported or copied.
 - Every mark change saves right away. The subtitle shows the state: "● Saved", "● Save failed · Retry", "Not connected" or "View only".
 - **Undo** (top bar, or the Duo dock) reverts the last mark change, a "Reject N unmarked", or a Move Rejects. It is a stack and works across photos.
 - **Reject never deletes.** Rejected photos stay in place, dimmed, until the person runs Move Rejects, which moves them to `_Rejected/` inside the same folder.
@@ -53,7 +53,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 1. Tap Move Rejects. The confirm sheet always opens; nothing moves on the first tap.
 2. Optionally, tap the fanned stack to see the rejects in a quick grid, and tap a photo to keep it. The button count updates. A keep is only staged here: nothing is written yet, and tapping again un-keeps.
-3. Tap Move. The kept photos have their reject flag cleared (written to XMP; rating and label are untouched), then the rest of the files (RAW, JPEG and XMP together) move to `_Rejected/` (the name is configurable in Settings). Swiping the sheet down instead discards the keeps, and every photo stays rejected.
+3. Tap Move. The kept photos have their reject cleared by setting the rating to 0 (written to XMP; the label is untouched), then the rest of the files (RAW, JPEG and XMP together) move to `_Rejected/` (the name is configurable in Settings). Swiping the sheet down instead discards the keeps, and every photo stays rejected.
 4. A toast offers Undo, which moves the files back and re-rejects the kept photos, as one step. On a partial failure the toast offers Details, which lists the failures with Try again. Photos that failed stay rejected in place.
 
 ## iPad

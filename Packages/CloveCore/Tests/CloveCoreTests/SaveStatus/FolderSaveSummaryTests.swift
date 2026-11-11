@@ -34,19 +34,13 @@ struct FolderSaveSummaryTests {
         #expect(summary.hasUnfinished)
     }
 
-    /// G1 decisions 5 and 6 keep the Confirmed kinds apart: a Clove-only mark is not Saved, and a
-    /// stored Reject is never folded into All saved.
+    /// G1 decision 6 keeps the confirmed kinds apart: a Clove-only mark is not Saved and is never
+    /// folded into All saved.
     @Test func cloveStorageKeepsItsOwnWords() {
         #expect(FolderSaveSummary(states: [.savedInCloveOnly]).text == "1 saved in Clove only")
         #expect(
             FolderSaveSummary(states: [.savedInCloveOnly, .savedInCloveOnly]).text
                 == "2 saved in Clove only")
-        #expect(FolderSaveSummary(states: [.storedInClove]).text == "1 stored in Clove")
-        #expect(
-            FolderSaveSummary(states: [.storedInClove, .storedInClove]).text == "2 stored in Clove")
-        #expect(
-            FolderSaveSummary(states: [.savedInSidecar, .storedInClove]).text
-                == "1 saved, 1 stored in Clove")
         #expect(
             FolderSaveSummary(states: [.savedInSidecar, .savedInCloveOnly]).text
                 == "1 saved, 1 saved in Clove only")
@@ -66,7 +60,7 @@ struct FolderSaveSummaryTests {
     @Test func leavingAsksOnlyWithUnfinishedChanges() {
         #expect(LeaveFolderConfirmation(states: []).shouldAsk == false)
         #expect(LeaveFolderConfirmation(states: [.savedInSidecar]).shouldAsk == false)
-        #expect(LeaveFolderConfirmation(states: [.storedInClove]).shouldAsk == false)
+        #expect(LeaveFolderConfirmation(states: [.savedInCloveOnly]).shouldAsk == false)
         #expect(
             LeaveFolderConfirmation(states: [.superseded(by: MarkChangeID())]).shouldAsk == false)
         #expect(LeaveFolderConfirmation(states: [.savedInSidecar]).question == nil)

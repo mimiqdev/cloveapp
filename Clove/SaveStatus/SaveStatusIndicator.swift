@@ -111,11 +111,10 @@ struct SaveStatusIndicator: View {
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(Color.clove.status.failed)
-        case .disconnected, .viewOnly, .stored:
+        case .disconnected, .viewOnly:
             Image(
                 systemName: renderedState == .disconnected
-                    ? "externaldrive.badge.xmark"
-                    : renderedState == .viewOnly ? "lock.fill" : "internaldrive"
+                    ? "externaldrive.badge.xmark" : "lock.fill"
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
@@ -129,7 +128,6 @@ struct SaveStatusIndicator: View {
             switch browsing.latestChange(for: photo)?.state {
             case .pending, .writing: return .saving
             case .failed: return .failed
-            case .storedInClove: return .stored
             case .savedInCloveOnly: return .cloveOnly
             default: return .saved
             }
@@ -138,14 +136,13 @@ struct SaveStatusIndicator: View {
         if summary.failed > 0 { return .failed }
         if summary.writing > 0 { return .saving }
         if summary.savedInCloveOnly > 0 { return .cloveOnly }
-        if summary.storedInClove > 0 { return .stored }
         return .saved
     }
 
 }
 
 private enum SaveGlyphState: Hashable {
-    case saved, saving, failed, disconnected, viewOnly, stored, cloveOnly
+    case saved, saving, failed, disconnected, viewOnly, cloveOnly
 
     var label: String {
         switch self {
@@ -154,7 +151,6 @@ private enum SaveGlyphState: Hashable {
         case .failed: "Save failed. Double-tap to retry."
         case .disconnected: "Not connected"
         case .viewOnly: "View only"
-        case .stored: "Stored in Clove"
         case .cloveOnly: "Saved in Clove only"
         }
     }

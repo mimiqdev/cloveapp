@@ -1,14 +1,14 @@
 import Foundation
 
-/// One XMP property Clove owns: the star rating or the colour label.
+/// One XMP property Clove owns: the rating or the colour label.
 ///
 /// PRD P0-07 limits XMP interoperability to ratings and colour labels, so there is
-/// deliberately no Clove namespace and no Reject property (G1 decision 5). A property is
-/// identified by its namespace URI and local name, never by a prefix, so `photo:Rating`
-/// and `xmp:Rating` are the same field when both prefixes name the XMP namespace
-/// (PRD How marks reach disk, rule 4).
+/// deliberately no Clove namespace and no separate Reject field: Reject is the standard rating
+/// −1 (decision record `reject-as-rating.md`). A property is identified by its namespace URI and
+/// local name, never by a prefix, so `photo:Rating` and `xmp:Rating` are the same field when both
+/// prefixes name the XMP namespace (PRD How marks reach disk, rule 4).
 public enum XMPProperty: String, CaseIterable, Hashable, Sendable {
-    /// `xmp:Rating`, PRD P0-05's five-star scale, which also carries external values.
+    /// `xmp:Rating`, PRD P0-05's five-star scale, which carries −1 for Reject and external values.
     case rating
     /// `xmp:Label`, the fixed English colour names from PRD Marking rules.
     case label
@@ -28,14 +28,14 @@ public enum XMPProperty: String, CaseIterable, Hashable, Sendable {
 
 /// A rating exactly as a packet holds it.
 ///
-/// PRD P0-05 bounds Clove's own ratings to 0–5. Other software can leave an out-of-range
-/// integer such as −1 in `xmp:Rating`. PRD P0-07 and G1 decision 5 keep that value as an
-/// external mark: it is never clamped and never treated as Reject, and a write that does
+/// PRD P0-05 bounds Clove's own ratings to −1…5, where −1 is Reject. Other software can leave
+/// another out-of-range integer such as `6` or `-2` in `xmp:Rating`. PRD P0-07 keeps such a
+/// value as an external mark: it is never clamped, it reads as unrated, and a write that does
 /// not change the rating leaves its bytes alone.
 public enum XMPRating: Hashable, Sendable {
-    /// A rating inside PRD P0-05's 0–5 range; zero is unrated.
+    /// A rating inside PRD P0-05's −1…5 range; −1 is Reject and zero is unrated.
     case rated(Rating)
-    /// An integer outside 0–5, kept verbatim, for example −1 written by another app.
+    /// An integer outside −1…5, kept verbatim, for example `6` or `-2` from another app.
     case external(Int)
 
     /// The reading of a packet with no `xmp:Rating` property (PRD P0-05).
@@ -65,10 +65,11 @@ public enum XMPRating: Hashable, Sendable {
 
 /// Ratings and colour labels read from one XMP packet.
 ///
-/// Reject is absent by design: it lives in Clove's own storage and is never XMP
-/// (G1 decision 5). An unknown label keeps its exact external text (PRD disk rule 9).
+/// Reject needs no field of its own: it is the rating −1 written by the same `xmp:Rating`
+/// property (decision record `reject-as-rating.md`). An unknown label keeps its exact external
+/// text (PRD disk rule 9).
 public struct XMPMarks: Hashable, Sendable {
-    /// The 0–5 rating, or an external value kept verbatim (PRD P0-07).
+    /// The −1…5 rating, Reject included, or an external value kept verbatim (PRD P0-07).
     public var rating: XMPRating
     /// The label's exact external text; empty means no label (PRD disk rules 9–10).
     public var label: ColourLabel

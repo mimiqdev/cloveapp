@@ -49,7 +49,7 @@ struct StarRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled && level != rating)
-        .accessibilityLabel("\(level.rawValue) stars")
+        .accessibilityLabel("\(level.starCount ?? 0) stars")
         .accessibilityAddTraits(level == rating ? .isSelected : [])
         .accessibilityIdentifier("\(identifier).\(level.rawValue)")
     }

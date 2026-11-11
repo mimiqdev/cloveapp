@@ -78,6 +78,9 @@ private func rating(_ value: Int) throws -> Rating {
     #expect(EnabledRatings([Rating]()) == nil)
     #expect(EnabledRatings([Rating.unrated]) == nil)
     #expect(EnabledRatings([Rating.unrated, three]) == nil)
+    // Reject is not a star level, so the ladder can never produce it.
+    #expect(EnabledRatings([Rating.rejected]) == nil)
+    #expect(EnabledRatings([Rating.rejected, three]) == nil)
 
     // Turning off the last remaining level is refused; the set keeps its one step.
     #expect(single.with(three, enabled: false) == single)
@@ -95,6 +98,7 @@ private func rating(_ value: Int) throws -> Rating {
     let enabled = try #require(EnabledRatings([one, three, five]))
 
     #expect(enabled.canApply(.unrated))
+    #expect(!enabled.canApply(.rejected))
     #expect(enabled.canApply(one))
     #expect(enabled.canApply(three))
     #expect(enabled.canApply(five))
@@ -119,6 +123,7 @@ private func rating(_ value: Int) throws -> Rating {
 
     let all = EnabledRatings.all
     #expect(all.next(after: .unrated) == one)
+    #expect(all.next(after: .rejected) == one)
     #expect(all.next(after: one) == two)
     #expect(all.next(after: four) == five)
     #expect(all.next(after: five) == nil)

@@ -18,9 +18,9 @@ public enum SaveStatus {
     ///
     /// **Saved** appears only for ``MarkChangeState/savedInSidecar`` and **Saved in Clove only**
     /// only for ``MarkChangeState/savedInCloveOnly`` (PRD How marks reach disk, rules 6–7). A
-    /// Clove-stored Reject is confirmed but is not saved, so it reads **Stored in Clove**
-    /// (G1 decision 5). A failed change reads **Not saved**; the copy for why is ``situation(for
-    /// folderLoss:)``, shown beside the Retry the PRD asks for.
+    /// Reject is a rating, so a RAW set's Reject reads **Saved** once its sidecar confirms it. A
+    /// failed change reads **Not saved**; the copy for why is ``situation(for:folderLoss:)``,
+    /// shown beside the Retry the PRD asks for.
     ///
     /// `folderLost` marks a folder whose location was reported gone: a change that is still
     /// waiting or writing can no longer reach its storage, so it reads **Not saved** instead of
@@ -36,8 +36,6 @@ public enum SaveStatus {
             "Saved"
         case .savedInCloveOnly:
             "Saved in Clove only"
-        case .storedInClove:
-            "Stored in Clove"
         case .failed:
             "Not saved"
         case .superseded:
@@ -47,16 +45,15 @@ public enum SaveStatus {
 
     /// The situation one photo's latest change explains, or nil when it has nothing to explain.
     ///
-    /// A saved or stored change is not a failure, and a superseded change was replaced by a newer
-    /// one the user asked for, so neither has copy (PRD How marks reach disk, rule 8). A failed
-    /// change is explained by its reason, and a change still waiting when the folder's location
-    /// is gone is explained by that loss, because the PRD does not allow it to keep reading
-    /// **Writing…**.
+    /// A saved change is not a failure, and a superseded change was replaced by a newer one the
+    /// user asked for, so neither has copy (PRD How marks reach disk, rule 8). A failed change is
+    /// explained by its reason, and a change still waiting when the folder's location is gone is
+    /// explained by that loss, because the PRD does not allow it to keep reading **Writing…**.
     public static func situation(
         for state: MarkChangeState?, folderLoss: FolderLocationLoss?
     ) -> SaveSituation? {
         switch state {
-        case nil, .savedInSidecar, .savedInCloveOnly, .storedInClove, .superseded:
+        case nil, .savedInSidecar, .savedInCloveOnly, .superseded:
             nil
         case .pending, .writing:
             folderLoss.map { situation(for: $0) }

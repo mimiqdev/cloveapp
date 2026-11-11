@@ -3,10 +3,10 @@ import Foundation
 /// The save state of one requested change, named after the storage that confirmed it.
 ///
 /// PRD P0-08 requires the state to reflect the storage used: "Saved" belongs to XMP writes
-/// that read back, "Saved in Clove only" to standalone JPEG/HIF marks confirmed in Clove, and
-/// a Reject that is merely stored is neither of those until the move confirms (G1 decisions
-/// 5–6). The cases are deliberately separate so a UI cannot show Clove-stored Reject or an
-/// unconfirmed write as **Saved**.
+/// that read back, and "Saved in Clove only" to standalone JPEG/HIF marks confirmed in Clove.
+/// Reject is a rating, so it reports the state of the storage its rating uses and never has a
+/// third kind of save state. The cases stay separate so a UI cannot show an unconfirmed write as
+/// **Saved**.
 public enum MarkChangeState: Hashable, Sendable {
     /// The request is admitted and waiting for its write (PRD P0-08's "Writing…" period).
     case pending
@@ -17,9 +17,6 @@ public enum MarkChangeState: Hashable, Sendable {
     /// A standalone JPEG/HIF mark was confirmed in Clove storage: PRD P0-08's
     /// **Saved in Clove only** (G1 decision 6).
     case savedInCloveOnly
-    /// Reject was confirmed in Clove storage (G1 decision 5). This is not **Saved**: that
-    /// word belongs to XMP writes and to a confirmed move, so U7 shows it as stored only.
-    case storedInClove
     /// The change is not confirmed; the requested marks stay for a retry (PRD disk rule 8).
     case failed(MarkWriteFailure)
     /// A newer change to the same photo replaced this one; retrying it does nothing
@@ -30,7 +27,7 @@ public enum MarkChangeState: Hashable, Sendable {
     public var isFinished: Bool {
         switch self {
         case .pending, .writing: false
-        case .savedInSidecar, .savedInCloveOnly, .storedInClove, .failed, .superseded: true
+        case .savedInSidecar, .savedInCloveOnly, .failed, .superseded: true
         }
     }
 
@@ -55,19 +52,16 @@ public enum MarkChangeState: Hashable, Sendable {
     }
 
     /// Whether the change reached its storage and was confirmed there (PRD P0-08).
-    ///
-    /// This includes Reject stored in Clove, which is confirmed but is not **Saved**.
     public var isConfirmed: Bool {
         switch self {
-        case .savedInSidecar, .savedInCloveOnly, .storedInClove: true
+        case .savedInSidecar, .savedInCloveOnly: true
         default: false
         }
     }
 
     /// Whether the state may be shown as **Saved** or **Saved in Clove only** (PRD P0-08).
     ///
-    /// A Clove-stored Reject is confirmed but is not Saved, and a failed or superseded change
-    /// never appears saved.
+    /// A failed or superseded change never appears saved.
     public var isSaved: Bool {
         switch self {
         case .savedInSidecar, .savedInCloveOnly: true
@@ -181,8 +175,8 @@ public struct MarkBatchResult: Hashable, Sendable {
     /// A ready-to-show partial-batch summary, or `nil` for a fully confirmed batch.
     ///
     /// The wording follows the PRD's proposed "Saved N photos. M photos couldn't be saved."
-    /// copy; the exact strings stay U7's decision. The count uses ``savedCount`` so a batch of
-    /// Rejects, which is confirmed in Clove but never "Saved", reports no saved photos.
+    /// copy; the exact strings stay U7's decision. The count uses ``savedCount``, which includes
+    /// a batch of standalone marks confirmed in Clove.
     public var partialFailureSummary: String? {
         guard failedCount > 0 else { return nil }
         return "Saved \(savedCount) photos. \(failedCount) photos couldn't be saved."

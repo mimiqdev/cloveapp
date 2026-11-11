@@ -84,8 +84,8 @@ struct RejectMoveRecoveryTests {
         let set = try makeMoveSet(
             root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001", formats: [.jpeg])
         try writeMoveSet(set, in: fixture.folder)
-        let change = await fixture.queue.apply(.reject(true), to: set)
-        #expect(change.state == .storedInClove)
+        let change = await fixture.queue.apply(.rating(.rejected), to: set)
+        #expect(change.state == .savedInCloveOnly)
 
         let result = try await fixture.move(try await fixture.plan([set]))
 
@@ -103,7 +103,7 @@ struct RejectMoveRecoveryTests {
         let set = try makeMoveSet(
             root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001", formats: [.jpeg])
         try writeMoveSet(set, in: fixture.folder)
-        _ = await fixture.queue.apply(.reject(true), to: set)
+        _ = await fixture.queue.apply(.rating(.rejected), to: set)
         fixture.markFileSystem.failWrites { url in
             url.path(percentEncoded: false).contains("/store/") ? POSIXError(.EIO) : nil
         }

@@ -65,9 +65,8 @@ The counts and companion text remain visible. V4's error banners retain their wo
 | a11y.save.disconnected | Not connected |
 | a11y.save.viewOnly | View only |
 | a11y.save.cloveOnly | Saved in Clove only |
-| a11y.save.stored | Stored in Clove |
 
-The last two labels retain G1's distinction between confirmed app storage and an XMP write.
+The Saved in Clove only label retains G1 decision 6's distinction between confirmed app storage and an XMP write.
 
 ## Group review
 | Key | String |

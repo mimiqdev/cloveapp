@@ -190,7 +190,8 @@ struct VerticalStarBar: View {
 
     /// The rating the bar reports to VoiceOver (copy.md `a11y.rating`).
     private var accessibilityValue: String {
-        rating == .unrated ? "Unrated" : "\(rating.rawValue) stars"
+        guard let stars = rating.starCount else { return "Unrated" }
+        return stars == 1 ? "1 star" : "\(stars) stars"
     }
 
     /// The star a drag at `y` points at: the stars fill from the bottom (components.md).

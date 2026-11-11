@@ -65,12 +65,12 @@ public struct RejectMoveUndoRestoredPhoto: Hashable, Sendable, Identifiable {
     public let keptInConfirmation: Bool
     /// C4's failure when the stored Reject could not be written again, or `nil` when it was.
     ///
-    /// G1 decision 5 keeps a stale Clove record as a diagnostic, and PRD P0-08 keeps an
-    /// unconfirmed change from counting as saved. The files are back either way, so this never
-    /// turns a confirmed move back into a failure (PRD P0-10's Undo rule).
+    /// PRD P0-08 keeps a stale record as a diagnostic and keeps an unconfirmed change from
+    /// counting as saved. The files are back either way, so this never turns a confirmed move
+    /// back into a failure (PRD P0-10's Undo rule).
     public let rejectStoreFailure: RejectMoveFailure?
 
-    /// Whether Clove stores Reject for the photo again (G1 decision 5).
+    /// Whether Reject is written for the photo again (PRD P0-10's Undo rule).
     public var isRejectStored: Bool { rejectStoreFailure == nil }
 
     /// The photo's id for a SwiftUI list (PRD P0-10).
@@ -337,7 +337,7 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
     /// The wording follows the PRD's proposed "Partial Move rejects failure" sentence with the
     /// undo's verb; the exact strings stay U8's decision. A photo whose files came back while
     /// its Reject could not be stored is not counted as unrestored, because its files are where
-    /// they belong and the stale mark is a diagnostic (G1 decision 5).
+    /// they belong and the stale mark is a diagnostic (PRD P0-08).
     public var partialFailureSummary: String? {
         guard unrestoredCount > 0 else { return nil }
         return "Restored \(restoredCount) photos. \(unrestoredCount) photos couldn't be restored."

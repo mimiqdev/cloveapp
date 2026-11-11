@@ -314,12 +314,11 @@ final class TestLibrary: FolderLibrary {
 
     /// Applies only the fields the change names and reports the state C4 would (PRD P0-08).
     ///
-    /// Every sample photo is a RAW set, whose rating and label belong to its sidecar, so a change
-    /// that names either reports ``MarkChangeState/savedInSidecar``. A Reject-only change reports
-    /// ``MarkChangeState/storedInClove``, which is confirmed but never shown as Saved (G1
-    /// decision 5). ``MarkChangeState/savedInCloveOnly`` would belong to a standalone JPEG/HIF
-    /// (G1 decision 6); the sample has none. A newer change replaces the photo's status the way the
-    /// queue supersedes an older request, and a photo with nothing requested has no status at all.
+    /// Every sample photo is a RAW set, whose rating (Reject included) and label belong to its
+    /// sidecar, so a change reports ``MarkChangeState/savedInSidecar``.
+    /// ``MarkChangeState/savedInCloveOnly`` would belong to a standalone JPEG/HIF (G1 decision 6);
+    /// the sample has none. A newer change replaces the photo's status the way the queue
+    /// supersedes an older request, and a photo with nothing requested has no status at all.
     /// Nothing is written anywhere.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus {
         perform(change, for: photo)
@@ -390,11 +389,9 @@ final class TestLibrary: FolderLibrary {
         var marks = stored[index].marks
         if let rating = change.rating { marks.rating = rating }
         if let label = change.label { marks.label = label }
-        if let reject = change.reject { marks.isRejected = reject }
         stored[index].marks = marks
 
-        let state: MarkChangeState =
-            change.rating == nil && change.label == nil ? .storedInClove : .savedInSidecar
+        let state: MarkChangeState = .savedInSidecar
         let status = MarkChangeStatus(
             id: MarkChangeID(), identity: photo, requested: change, state: state)
         changes[photo] = status
@@ -892,9 +889,9 @@ final class TestLibrary: FolderLibrary {
     private static let sampleMarks: [PhotoMarks] = {
         var marks = Array(repeating: PhotoMarks(), count: 36)
         marks[0] = PhotoMarks(rating: stars(5), label: ColourLabel(colour: .red))
-        marks[1] = PhotoMarks(rating: stars(3), isRejected: true)
+        marks[1] = PhotoMarks(rating: .rejected)
         marks[4] = PhotoMarks(label: ColourLabel(colour: .green))
-        marks[7] = PhotoMarks(isRejected: true)
+        marks[7] = PhotoMarks(rating: .rejected)
         marks[21] = PhotoMarks(rating: stars(2), label: ColourLabel(colour: .purple))
         return marks
     }()

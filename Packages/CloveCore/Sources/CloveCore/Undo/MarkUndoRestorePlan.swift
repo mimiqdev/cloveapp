@@ -1,15 +1,13 @@
 /// The value one mark field carries, so undo can compare and replace fields one at a time.
 ///
-/// PRD P0-05 keeps rating, label and Reject separate, and G1 decision 5 keeps Reject out of
-/// XMP. A single value type lets the field check compare "what the change set", "what was there
-/// before" and "what is there now" without mixing the three marks.
+/// PRD P0-05 keeps the rating and the label separate, and Reject is the rating value −1 (decision
+/// record `reject-as-rating.md`). A single value type lets the field check compare "what the
+/// change set", "what was there before" and "what is there now" without mixing the two marks.
 enum MarkFieldValue: Hashable, Sendable {
-    /// A 0–5 rating (PRD P0-05).
+    /// A −1…5 rating, Reject included (PRD P0-05).
     case rating(Rating)
     /// A colour label, including external text Clove preserves (PRD P0-05).
     case label(ColourLabel)
-    /// Clove's internal Reject state (G1 decision 5).
-    case reject(Bool)
 }
 
 /// Field-level helpers shared by recording and restoring (PRD P0-05; DEV-PLAN C5).
@@ -26,7 +24,6 @@ enum MarkUndoFields {
         switch field {
         case .rating: change.rating.map(MarkFieldValue.rating)
         case .label: change.label.map(MarkFieldValue.label)
-        case .reject: change.reject.map(MarkFieldValue.reject)
         }
     }
 
@@ -35,7 +32,6 @@ enum MarkUndoFields {
         switch field {
         case .rating: .rating(marks.rating)
         case .label: .label(marks.label)
-        case .reject: .reject(marks.isRejected)
         }
     }
 
@@ -49,7 +45,6 @@ enum MarkUndoFields {
             switch values[field] {
             case .rating(let rating)?: change.rating = rating
             case .label(let label)?: change.label = label
-            case .reject(let reject)?: change.reject = reject
             case nil: continue
             }
         }
@@ -108,7 +103,7 @@ struct MarkUndoRestorePlan: Hashable, Sendable {
     ///
     /// `values` supplies, for one field, the value this step expects to find before replacing it
     /// and the value it writes. Only fields the recorded change altered are considered, so a
-    /// rating undo never touches a label or Reject it did not set (PRD P0-05).
+    /// rating undo never touches a label it did not set (PRD P0-05).
     private static func plan(
         _ recorded: MarkUndoPhoto,
         current: PhotoMarks,

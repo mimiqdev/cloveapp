@@ -119,13 +119,13 @@ import CloveCore
                 == .mark(MarkChange(rating: three), .rating))
     }
 
-    @Test func downArrowRejectsAndKeepsTheRating() throws {
+    @Test func downArrowRejectsAndReplacesTheRating() throws {
         let rules = MarkingInputRules()
         let marks = try MarkingFixtures.marks(stars: 4, label: .green)
 
         #expect(
             rules.result(for: .reject, marks: marks)
-                == .mark(MarkChange(reject: true), .reject))
+                == .mark(MarkChange(rating: .rejected), .reject))
     }
 
     @Test func downArrowOnARejectedPhotoDoesNothing() throws {
@@ -144,19 +144,19 @@ import CloveCore
         #expect(rules.result(for: .undo, marks: PhotoMarks()) == .undo)
     }
 
-    @Test func aPositiveKeyboardRatingAlsoClearsReject() throws {
+    @Test func aPositiveKeyboardRatingReplacesReject() throws {
         let rules = MarkingInputRules()
-        let marks = try MarkingFixtures.marks(stars: 2, rejected: true)
+        let marks = try MarkingFixtures.marks(rejected: true)
         let three = try MarkingFixtures.stars(3)
 
         #expect(
             rules.result(for: .rating(three), marks: marks)
-                == .mark(MarkChange(rating: three, reject: false), .rating))
+                == .mark(MarkChange(rating: three), .rating))
     }
 
-    @Test func theZeroKeyLeavesRejectAlone() throws {
+    @Test func theZeroKeyReplacesRejectWithUnrated() throws {
         let rules = MarkingInputRules()
-        let marks = try MarkingFixtures.marks(stars: 2, rejected: true)
+        let marks = try MarkingFixtures.marks(rejected: true)
 
         #expect(
             rules.result(for: .rating(.unrated), marks: marks)

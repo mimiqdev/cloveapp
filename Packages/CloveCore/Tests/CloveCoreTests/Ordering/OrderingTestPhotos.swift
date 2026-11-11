@@ -43,11 +43,14 @@ func photo(
 }
 
 /// Builds marks from the tests' 0–5 stars and a clear label by default.
+///
+/// Reject is the rating −1, so `rejected` replaces `stars`; a photo is never rated and rejected
+/// at once.
 func marks(stars: Int = 0, label: ColourLabel = .clear, rejected: Bool = false) -> PhotoMarks {
-    guard let rating = Rating(rawValue: stars) else {
+    guard let rating = rejected ? Rating.rejected : Rating(rawValue: stars) else {
         preconditionFailure("ordering tests only use 0–5 stars")
     }
-    return PhotoMarks(rating: rating, label: label, isRejected: rejected)
+    return PhotoMarks(rating: rating, label: label)
 }
 
 /// A reproducible random source, so a failing permutation replays from its seed.

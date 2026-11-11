@@ -301,12 +301,12 @@ struct RejectMoveCopyTests {
         var clearing = RejectMoveKeepClearing()
         clearing.record(
             MarkChangeStatus(
-                id: MarkChangeID(), identity: first, requested: .reject(false),
-                state: .storedInClove),
+                id: MarkChangeID(), identity: first, requested: .rating(.unrated),
+                state: .savedInSidecar),
             for: first, files: plan.readyEntries[0].files)
         clearing.record(
             MarkChangeStatus(
-                id: MarkChangeID(), identity: second, requested: .reject(false),
+                id: MarkChangeID(), identity: second, requested: .rating(.unrated),
                 state: .failed(MarkWriteFailure(reason: .unknown, message: "failed"))),
             for: second, files: plan.readyEntries[1].files)
 

@@ -59,7 +59,7 @@ struct DetailSwipeFeedbackBadge: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("clove.detail.swipeFeedback")
                 .accessibilityLabel(
-                    feedback.isReject ? "Reject" : "\(feedback.rating?.rawValue ?? 0) stars")
+                    feedback.isReject ? "Reject" : "\(feedback.rating?.starCount ?? 0) stars")
             }
         }
     }

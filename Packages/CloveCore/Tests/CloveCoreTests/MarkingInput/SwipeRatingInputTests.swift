@@ -84,14 +84,14 @@ import CloveCore
                 == .mark(MarkChange(rating: three), .rating))
     }
 
-    @Test func swipingUpOnARejectedPhotoAlsoClearsReject() throws {
+    @Test func swipingUpOnARejectedPhotoReplacesReject() throws {
         let rules = MarkingInputRules()
-        let marks = try MarkingFixtures.marks(stars: 2, rejected: true)
+        let marks = try MarkingFixtures.marks(rejected: true)
         let three = try MarkingFixtures.stars(3)
 
         #expect(
             rules.result(forSwipeUpTravel: 160, marks: marks, isZoomed: false)
-                == .mark(MarkChange(rating: three, reject: false), .rating))
+                == .mark(MarkChange(rating: three), .rating))
     }
 
     @Test func aSwipeNeverClearsARating() throws {

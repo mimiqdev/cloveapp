@@ -34,7 +34,7 @@ struct DetailMarkingHUD: View {
     /// Applies one colour-label choice through C13's label rule (PRD Marking rules).
     let label: (ColourLabel) -> Void
 
-    /// Toggles Reject independently of the rating (PRD Marking rules).
+    /// Toggles Reject, the rating −1 (PRD Marking rules; `docs/decisions/reject-as-rating.md`).
     let toggleReject: () -> Void
 
     /// C5's undo through the one model call U8 adds; the button stays disabled until then.
@@ -87,7 +87,7 @@ struct DetailMarkingHUD: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(rating.rawValue) stars")
+                .accessibilityLabel("\(rating.starCount ?? 0) stars")
                 .accessibilityIdentifier("clove.detail.rate.\(rating.rawValue)")
             }
             Spacer(minLength: 8)

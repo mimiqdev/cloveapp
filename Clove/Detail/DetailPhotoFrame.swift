@@ -69,8 +69,8 @@ struct DetailPhotoFrame: View {
     /// The rating and Reject the photo carries, over its thumbnail (PRD In-group culling, layout).
     @ViewBuilder private var marks: some View {
         HStack(spacing: 3) {
-            if photo.marks.rating != .unrated {
-                Label("\(photo.marks.rating.rawValue)", systemImage: "star.fill")
+            if let stars = photo.marks.rating.starCount {
+                Label("\(stars)", systemImage: "star.fill")
                     .labelStyle(.titleAndIcon)
                     .font(.caption2)
                     .foregroundStyle(Color.clove.rating.on)

@@ -16,19 +16,17 @@ struct SaveStatusTests {
     }
 
     /// PRD P0-08's saved words: Saved only for a sidecar read-back, Saved in Clove only for
-    /// Clove storage, and a Clove-stored Reject never reads as either (G1 decisions 5–6).
+    /// Clove storage (G1 decision 6).
     @Test func savedWordsFollowTheStorageThatConfirmedThem() {
         #expect(SaveStatus.text(for: .savedInSidecar) == "Saved")
         #expect(SaveStatus.text(for: .savedInCloveOnly) == "Saved in Clove only")
-        #expect(SaveStatus.text(for: .storedInClove) == "Stored in Clove")
-        #expect(SaveStatus.text(for: .storedInClove) != "Saved")
-        #expect(!SaveStatus.text(for: .storedInClove).hasPrefix("Saved"))
+        #expect(SaveStatus.text(for: nil) == "No change yet")
     }
 
     /// Every state has a line, and only the confirmed sidecar and Clove marks say saved.
     @Test func everyStateHasItsOwnLine() {
         let states: [MarkChangeState?] = [
-            nil, .pending, .writing, .savedInSidecar, .savedInCloveOnly, .storedInClove,
+            nil, .pending, .writing, .savedInSidecar, .savedInCloveOnly,
             failure(.unknown), .superseded(by: MarkChangeID()),
         ]
         var produced: Set<String> = []
@@ -105,7 +103,6 @@ struct SaveStatusTests {
         #expect(SaveStatus.situation(for: nil, folderLoss: nil) == nil)
         #expect(SaveStatus.situation(for: .savedInSidecar, folderLoss: nil) == nil)
         #expect(SaveStatus.situation(for: .savedInCloveOnly, folderLoss: nil) == nil)
-        #expect(SaveStatus.situation(for: .storedInClove, folderLoss: nil) == nil)
         #expect(
             SaveStatus.situation(
                 for: .superseded(by: MarkChangeID()), folderLoss: driveLoss) == nil)

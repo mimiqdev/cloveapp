@@ -212,10 +212,10 @@ private struct GridTile: View {
     }
 
     @ViewBuilder private var rating: some View {
-        if !isCover, item.photo.marks.rating.rawValue > 0 {
+        if !isCover, let stars = item.photo.marks.rating.starCount {
             HStack(spacing: 1) {
                 Image(systemName: "star.fill").foregroundStyle(Color.clove.rating.on)
-                Text(item.photo.marks.rating.rawValue.formatted()).foregroundStyle(
+                Text(stars.formatted()).foregroundStyle(
                     Color.clove.text.primary)
             }
             .font(.system(size: 9, weight: .semibold))
@@ -276,8 +276,8 @@ private struct GridTile: View {
                 + (hasFailed ? ", Save failed" : "")
         }
         var parts = [item.photo.fileName]
-        if item.photo.marks.rating.rawValue > 0 {
-            parts.append("\(item.photo.marks.rating.rawValue) stars")
+        if let stars = item.photo.marks.rating.starCount {
+            parts.append("\(stars) stars")
         }
         if let colour = item.photo.marks.label.colour {
             parts.append(colour.rawValue)

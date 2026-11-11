@@ -1,23 +1,24 @@
 import Foundation
 
 /// Where a mark is saved; callers route writes by destination rather than a sidecar Boolean.
-/// G1 decisions 2, 5 and 6 apply at launch; a later embedded-JPEG destination can extend this type.
+/// G1 decisions 2 and 6 apply at launch; a later embedded-JPEG destination can extend this type.
 public enum MarkDestination: Hashable, Sendable {
-    /// Ratings and labels for RAW sets only (G1 decision 2).
+    /// Ratings, Reject and labels for RAW sets only (G1 decision 2).
     case xmpSidecar(URL)
-    /// Reject for every set, and new standalone JPEG/HIF marks (G1 decisions 5–6).
+    /// Ratings, Reject and labels for a standalone JPEG/HIF (G1 decision 6).
     case cloveStorage
 }
 
 /// Pure persistence policy shared by metadata, writes and reject moves (G1 decisions 2, 5–6).
 /// Standalone embedded ratings/labels are read-only input, never a launch write destination.
+///
+/// Reject is the rating value −1, so it takes the rating's destination and never has a route
+/// of its own (decision record `reject-as-rating.md`).
 public struct MarkPersistence: Hashable, Sendable {
-    /// Where a new rating is saved (G1 decisions 2 and 6).
+    /// Where a new rating, Reject included, is saved (G1 decisions 2 and 6).
     public let rating: MarkDestination
     /// Where a new label is saved (G1 decisions 2 and 6).
     public let label: MarkDestination
-    /// Always Clove storage; Reject is never XMP (G1 decision 5).
-    public let reject: MarkDestination
 
     /// Routes RAW marks to a resolved sidecar, or models a new extension-replacing destination.
     /// Existing spelling is reused when supplied; discovery remains the caller's job.
@@ -33,6 +34,5 @@ public struct MarkPersistence: Hashable, Sendable {
         }
         self.rating = metadata
         self.label = metadata
-        self.reject = .cloveStorage
     }
 }

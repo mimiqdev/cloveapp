@@ -19,10 +19,9 @@ public struct GroupFinishingOutcome: Hashable, Sendable {
 /// ("Partial batch failure": "Saved N photos. M photos couldn't be saved."), and the undo
 /// record carries the marks from before the action (DEV-PLAN C5).
 ///
-/// A finishing action's rejects are stored in Clove instead of XMP (G1 decision 5), so a
-/// confirmed reject counts as saved here: the user's action completed even though PRD P0-08
-/// keeps the word **Saved** for XMP writes. ``failedCount`` counts only changes that still need
-/// a retry (PRD P0-09).
+/// A finishing action's rejects are the rating −1, written to each set's own storage (G1
+/// decisions 2 and 6), so a confirmed reject counts as saved here the way any other rating does.
+/// ``failedCount`` counts only changes that still need a retry (PRD P0-09).
 public struct GroupFinishingResult: Hashable, Sendable {
     /// The plan that ran (PRD In-group culling, finishing actions).
     public let plan: GroupFinishingPlan
@@ -60,8 +59,7 @@ public struct GroupFinishingResult: Hashable, Sendable {
         self.undo = undo
     }
 
-    /// Photos whose change reached its storage and read back, including stored rejects
-    /// (PRD P0-08; G1 decision 5).
+    /// Photos whose change reached its storage and read back, rejects included (PRD P0-08).
     public var savedCount: Int { outcomes.filter { $0.status.state.isConfirmed }.count }
 
     /// Photos whose change still needs a retry (PRD P0-09).

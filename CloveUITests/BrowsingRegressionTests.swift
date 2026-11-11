@@ -339,12 +339,17 @@ extension CloveUITests {
         let swiped = element(in: app, "clove.grid.photo.mmq02679")
         XCTAssertTrue(swiped.exists, "The grid did not show the swiped photo")
         XCTAssertTrue(
-            swiped.label.contains("2 stars"),
-            "The grid did not show the rating the swipe wrote: \(swiped.label)"
-        )
-        XCTAssertTrue(
             swiped.label.contains("Rejected"),
             "The grid did not show the Reject the swipe wrote: \(swiped.label)"
+        )
+        // Reject is rating −1, so swipe down replaced the swipe up's stars.
+        XCTAssertFalse(
+            swiped.label.contains("2 stars"),
+            "A rejected photo kept its stars: \(swiped.label)"
+        )
+        XCTAssertFalse(
+            swiped.label.contains("-1"),
+            "A rejected photo read its rating: \(swiped.label)"
         )
     }
 

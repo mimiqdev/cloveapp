@@ -158,7 +158,7 @@ struct DesignGalleryScreen: View {
                     rating: threeStars, label: .blue, isRejected: false,
                     identifier: "clove.mark.capsule", onRate: noRate, onReject: {}, onLabel: {})
                 MarkCapsule(
-                    rating: threeStars, label: .red, isRejected: true,
+                    rating: .rejected, label: .red, isRejected: true,
                     identifier: "clove.design.gallery.capsule.rejected",
                     onRate: noRate, onReject: {}, onLabel: {})
                 MarkCapsule(

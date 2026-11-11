@@ -9,7 +9,7 @@ import Testing
             confirmedMarks: [
                 PhotoMarks(), PhotoMarks(rating: Rating(rawValue: 4)!),
                 PhotoMarks(label: ColourLabel(colour: .green)),
-                PhotoMarks(rating: Rating(rawValue: 3)!, isRejected: true),
+                PhotoMarks(rating: .rejected),
             ], isComplete: true)
         #expect(summary.total == 4)
         #expect(summary.marked == 2)
@@ -41,7 +41,7 @@ import Testing
                     PhotoIdentity(
                         folderID: folder, relativeFolderPath: "", stem: "REJECT_\(index)"),
                     FolderProgress.ConfirmedChange(
-                        before: PhotoMarks(isRejected: true), after: PhotoMarks())
+                        before: PhotoMarks(rating: .rejected), after: PhotoMarks())
                 )
             })
         let partial = FolderProgress.snapshot(
@@ -66,8 +66,8 @@ import Testing
             lastViewedPhoto: photo, previewPhotos: [])
         #expect(unchanged.finished)
         let clear = FolderProgress.ConfirmedChange(
-            before: PhotoMarks(isRejected: true), after: PhotoMarks())
-        let restored = clear.updating(to: PhotoMarks(isRejected: true))
+            before: PhotoMarks(rating: .rejected), after: PhotoMarks())
+        let restored = clear.updating(to: PhotoMarks(rating: .rejected))
         let partial = FolderProgress.snapshot(
             confirmedMarks: [], scanIsComplete: false, previous: previous,
             lastViewedPhoto: photo, previewPhotos: [], confirmedChanges: [photo: restored])
@@ -88,7 +88,7 @@ import Testing
             stem: "IMG_001")
         let baseline = FolderProgress(marked: 0, rejected: 1, total: 2)
         let change = FolderProgress.ConfirmedChange(
-            before: PhotoMarks(isRejected: true), after: PhotoMarks()
+            before: PhotoMarks(rating: .rejected), after: PhotoMarks()
         )
         .updating(to: PhotoMarks(rating: Rating(rawValue: 4)!))
         for _ in 0..<3 {
@@ -102,7 +102,7 @@ import Testing
         }
         let notDoneBefore = FolderProgress(marked: 0, rejected: 0, total: 1)
         let decided = FolderProgress.ConfirmedChange(
-            before: PhotoMarks(), after: PhotoMarks(isRejected: true))
+            before: PhotoMarks(), after: PhotoMarks(rating: .rejected))
         let partial = FolderProgress.snapshot(
             confirmedMarks: [], scanIsComplete: false, previous: notDoneBefore,
             lastViewedPhoto: photo, previewPhotos: [], confirmedChanges: [photo: decided])
@@ -118,7 +118,7 @@ import Testing
         #expect(unknown.left == 0)
         #expect(!unknown.finished)
         let complete = FolderProgress.snapshot(
-            confirmedMarks: [PhotoMarks(), PhotoMarks(isRejected: true)], scanIsComplete: true,
+            confirmedMarks: [PhotoMarks(), PhotoMarks(rating: .rejected)], scanIsComplete: true,
             previous: unknown, lastViewedPhoto: nil, previewPhotos: [])
         #expect(complete.total == 2)
         #expect(complete.rejected == 1)

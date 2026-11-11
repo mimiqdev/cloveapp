@@ -6,9 +6,9 @@ import Foundation
 /// "Keeping before the move" adds the photos the confirmation kept, which never moved and only
 /// need their Reject back.
 struct RejectMoveUndoJob: Sendable {
-    /// C1's stable identity, which Clove's stored Reject is keyed by (G1 decision 5).
+    /// C1's stable identity, which the photo's storage keys its marks by (G1 decisions 2 and 6).
     let identity: PhotoIdentity
-    /// C1's set as the scan built it, so C4 stores Reject for the same photo (G1 decision 5).
+    /// C1's set as the scan built it, so C4 writes Reject for the same photo (G1 decision 6).
     let set: ScannedPhotoSet
     /// Every file with its original path and its rejects-folder path (PRD P0-10).
     ///
@@ -97,7 +97,7 @@ struct RejectMoveUndoRetry: Sendable {
 struct RejectMoveUndoRunner: Sendable {
     /// The seam the move used, shared so one injected failure covers both directions.
     private let fileSystem: any RejectMoveFileSystem
-    /// C4's queue, the only writer of Clove's stored Reject (G1 decision 5).
+    /// C4's queue, the only writer of a stored mark (G1 decisions 2 and 6).
     private let markQueue: MarkWriteQueue
 
     /// Creates the runner over the mover's seam and queue (PRD P0-10).
@@ -339,16 +339,16 @@ struct RejectMoveUndoRunner: Sendable {
         }
     }
 
-    /// Stores Reject again and reports the photo as restored (PRD P0-10's Undo rule).
+    /// Writes Reject again and reports the photo as restored (PRD P0-10's Undo rule).
     ///
-    /// G1 decision 5 keeps Reject in Clove and PRD P0-08 confirms it in the storage that holds
-    /// it, so the mark goes through C4's queue like every other mark. A mark that could not be
-    /// stored stays a diagnostic: the files are back, so the photo is restored and the stale
-    /// record is reported for a retry of the mark.
+    /// Reject is the rating −1, so undoing a move writes it through C4's queue like every other
+    /// mark, into the storage the photo uses: the sidecar for a RAW set and Clove for a
+    /// standalone JPEG/HIF. A mark that could not be stored stays a diagnostic: the files are
+    /// back, so the photo is restored and the stale record is reported for a retry of the mark.
     private func restored(_ job: RejectMoveUndoJob, files: [RejectMoveFilePlan]) async
         -> RejectMoveUndoOutcome
     {
-        let status = await markQueue.apply(.reject(true), to: job.set)
+        let status = await markQueue.apply(.rating(.rejected), to: job.set)
         return .restored(
             RejectMoveUndoRestoredPhoto(
                 identity: job.identity, set: job.set, files: files,

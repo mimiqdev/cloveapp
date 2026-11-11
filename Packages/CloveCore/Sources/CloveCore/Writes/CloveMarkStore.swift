@@ -3,11 +3,10 @@ import Foundation
 
 /// Why Clove's own mark storage could not be read or written.
 ///
-/// G1 decision 5 keeps unmoved Rejects in app storage, and G1 decision 6 keeps standalone
-/// JPEG/HIF marks there, so a damaged file must be reported rather than silently replaced:
-/// the stored Reject is the only copy until the move, and PRD How marks reach disk, rule 7,
-/// forbids reporting an unconfirmed change as saved. The location stays injectable through
-/// ``CloveMarkStore``'s initializer so tests use a temporary folder.
+/// G1 decision 6 keeps new standalone JPEG/HIF marks there, Reject included, so a damaged file
+/// must be reported rather than silently replaced: the stored marks are the only copy, and PRD
+/// How marks reach disk, rule 7, forbids reporting an unconfirmed change as saved. The location
+/// stays injectable through ``CloveMarkStore``'s initializer so tests use a temporary folder.
 public enum CloveMarkStoreError: Error, Hashable, Sendable, CustomStringConvertible {
     /// The stored file is not a valid Clove mark file, or names a different folder.
     /// The store refuses to overwrite it and reports the path and reason.
@@ -28,12 +27,12 @@ public enum CloveMarkStoreError: Error, Hashable, Sendable, CustomStringConverti
 
 /// Clove's own mark storage: one atomic JSON file per folder identity.
 ///
-/// G1 decisions 5 and 6 keep Reject and new standalone JPEG/HIF marks in Clove rather than
-/// in XMP or in the image. PRD P0-08 shows them as "Saved in Clove only" only after the
-/// stored copy is confirmed, and PRD How marks reach disk, rule 1, reads that storage when a
-/// folder opens. Each folder identity gets one file at `marks-v1-<hash>.json` below the
-/// injected directory, written through the same staged replacement and read-back the sidecar
-/// write uses; the production directory is app-private Application Support.
+/// G1 decision 6 keeps new standalone JPEG/HIF marks in Clove rather than in XMP or in the
+/// image, Reject included as the rating −1. PRD P0-08 shows them as "Saved in Clove only"
+/// only after the stored copy is confirmed, and PRD How marks reach disk, rule 1, reads that
+/// storage when a folder opens. Each folder identity gets one file at `marks-v1-<hash>.json`
+/// below the injected directory, written through the same staged replacement and read-back the
+/// sidecar write uses; the production directory is app-private Application Support.
 ///
 /// The store is an actor because the write queue and the open path can read and write the
 /// same folder's file, and its actor isolation is the only lock it needs.
@@ -56,7 +55,7 @@ public actor CloveMarkStore {
 
     /// The production location: an app-private folder below Application Support.
     ///
-    /// G1 decision 5 accepts that unmoved Rejects do not survive a reinstall or move to
+    /// G1 decision 6 accepts that standalone marks do not survive a reinstall or move to
     /// another device. One file per folder identity keeps a corrupt file from taking the
     /// other folders' marks with it, and the folder name keeps Clove's storage separate from
     /// C11's Recents.
@@ -72,8 +71,8 @@ public actor CloveMarkStore {
 
     /// The stored marks for every photo of an opened folder (PRD How marks reach disk, rule 1).
     ///
-    /// G1 decision 5 keys Rejects by folder identity and file, and this read gives the open
-    /// path the whole folder in one step. A missing file is an empty result, not an error; a
+    /// G1 decision 6 keys standalone marks by folder identity and file, and this read gives the
+    /// open path the whole folder in one step. A missing file is an empty result, not an error; a
     /// damaged file throws ``CloveMarkStoreError/corruptStorage(_:reason:)`` so the caller can
     /// report it instead of showing photos as unmarked.
     public func marks(for folderID: FolderIdentity) throws -> [PhotoIdentity: CloveStoredMarks] {
@@ -90,19 +89,19 @@ public actor CloveMarkStore {
 
     /// The stored marks for one photo, or `nil` when Clove stores nothing for it.
     ///
-    /// Used to read a single Reject or a standalone JPEG/HIF mark after an open (G1
-    /// decisions 5–6); a damaged file is reported as in ``marks(for:)``.
+    /// Used to read a standalone JPEG/HIF mark after an open (G1 decision 6); a damaged file is
+    /// reported as in ``marks(for:)``.
     public func marks(for identity: PhotoIdentity) throws -> CloveStoredMarks? {
         try load(folderID: identity.folderID).photo(for: identity)?.marks
     }
 
     /// Confirms a partial change into Clove storage and reads the file back.
     ///
-    /// G1 decisions 5 and 6 send Reject and standalone marks here, and PRD P0-08 permits
+    /// G1 decision 6 sends standalone marks here, Reject included, and PRD P0-08 permits
     /// "Saved in Clove only" only after this returns: the file is staged, synchronized,
     /// renamed into place, then decoded again and compared. A failed or unconfirmed write
     /// throws and leaves the previous file untouched; a damaged file throws instead of being
-    /// overwritten (G1 decision 5).
+    /// overwritten.
     public func apply(_ change: CloveMarkChange, to identity: PhotoIdentity) throws {
         guard !change.isEmpty else { return }
         var storage = try load(folderID: identity.folderID)
@@ -110,24 +109,24 @@ public actor CloveMarkStore {
         // PRD P0-05 reads zero as unrated, so clearing a stored rating removes the value.
         if let rating = change.rating { marks.rating = rating == .unrated ? nil : rating }
         if let label = change.label { marks.label = label.isClear ? nil : label }
-        if let reject = change.reject { marks.isRejected = reject }
         storage.set(marks, for: identity)
         try save(storage, folderID: identity.folderID)
     }
 
-    /// Removes a photo's Reject after C6 confirms the move to `_Rejected`.
+    /// Drops a stored Reject after C6 confirms the move to `_Rejected`.
     ///
-    /// G1 decision 5 makes the move the durable Reject result, so the stored Reject is
-    /// dropped only after C6 reports the confirmed move. The photo's other stored marks stay.
-    /// A photo with nothing stored is a no-op, and the removal is confirmed by read-back.
-    /// - Returns: `true` when a Reject was removed and confirmed, `false` when none was stored.
+    /// The move is the durable Reject result, so the stored rating −1 is cleared only after C6
+    /// reports the confirmed move; the photo's stored label stays. Undo of the move writes the
+    /// Reject again through C4. A photo that is not stored as rejected is a no-op, and the
+    /// removal is confirmed by read-back.
+    /// - Returns: `true` when a stored Reject was cleared and confirmed, `false` otherwise.
     @discardableResult
-    public func removeReject(for identity: PhotoIdentity) throws -> Bool {
+    public func clearReject(for identity: PhotoIdentity) throws -> Bool {
         var storage = try load(folderID: identity.folderID)
         guard var marks = storage.photo(for: identity)?.marks, marks.isRejected else {
             return false
         }
-        marks.isRejected = false
+        marks.rating = nil
         storage.set(marks, for: identity)
         try save(storage, folderID: identity.folderID)
         return true
@@ -137,7 +136,7 @@ public actor CloveMarkStore {
     ///
     /// A folder identity is an opaque bookmark-derived key (C1's `FolderIdentity`) that can
     /// contain any character, so the file name is a SHA-256 digest rather than the raw value.
-    /// One file per identity keeps G1 decision 5's per-folder storage independent.
+    /// One file per identity keeps G1 decision 6's per-folder storage independent.
     func fileURL(for folderID: FolderIdentity) -> URL {
         let digest = SHA256.hash(data: Data(folderID.rawValue.utf8))
         let name = digest.map { String(format: "%02x", $0) }.joined()
@@ -226,7 +225,7 @@ struct CloveMarkStorageFile: Codable, Hashable, Sendable {
         }
     }
 
-    /// Whether every stored rating is inside PRD P0-05's 0–5 range.
+    /// Whether every stored rating is inside the −1…5 range that PRD P0-05 defines.
     var hasValidRatings: Bool {
         photos.allSatisfy { photo in
             photo.rating.map { Rating(rawValue: $0) != nil } ?? true
@@ -240,14 +239,16 @@ struct CloveMarkStorageFile: Codable, Hashable, Sendable {
 }
 
 /// One photo's stored marks in the JSON file.
+///
+/// An older TestFlight build stored Reject in its own `isRejected` field. That field is no
+/// longer written or read: the decoder ignores an unknown key, so an old file still opens and
+/// its rejects are dropped, as the owner decided (no migration).
 struct CloveStoredPhoto: Codable, Hashable, Sendable {
     /// The containing directory relative to the opened folder, empty at its root.
     var relativeFolderPath: String
     /// The case-folded stem C1 uses as the photo's key.
     var stem: String
-    /// Whether the photo is rejected and not yet moved (G1 decision 5).
-    var isRejected: Bool
-    /// A stored rating for a standalone JPEG/HIF (G1 decision 6), absent when none is stored.
+    /// A stored rating, −1 for Reject, absent when none is stored (G1 decision 6).
     var rating: Int?
     /// Stored label text, absent when no label is stored (G1 decision 6).
     var label: String?
@@ -256,7 +257,6 @@ struct CloveStoredPhoto: Codable, Hashable, Sendable {
     init(identity: PhotoIdentity, marks: CloveStoredMarks) {
         self.relativeFolderPath = identity.relativeFolderPath
         self.stem = identity.stem
-        self.isRejected = marks.isRejected
         self.rating = marks.rating?.rawValue
         self.label = marks.label?.rawValue
     }
@@ -271,7 +271,6 @@ struct CloveStoredPhoto: Codable, Hashable, Sendable {
     var marks: CloveStoredMarks {
         CloveStoredMarks(
             rating: rating.flatMap { Rating(rawValue: $0) },
-            label: label.map { ColourLabel(rawValue: $0) },
-            isRejected: isRejected)
+            label: label.map { ColourLabel(rawValue: $0) })
     }
 }

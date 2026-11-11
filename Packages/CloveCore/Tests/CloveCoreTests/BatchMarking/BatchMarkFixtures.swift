@@ -23,6 +23,9 @@ enum BatchMarkFixtures {
     }
 
     /// One shown photo with the marks a batch reads; its time keeps it in the ordered list.
+    ///
+    /// Reject is the rating −1, so `rejected` replaces `count`; a photo is never rated and
+    /// rejected at once.
     static func gridPhoto(
         _ stem: String, stars count: Int = 0, label: ColourLabel = .clear,
         rejected: Bool = false
@@ -34,7 +37,7 @@ enum BatchMarkFixtures {
                 PhotoTime(
                     captureTime: Date(timeIntervalSince1970: 1_760_000_000),
                     hasUTCOffset: true)),
-            marks: PhotoMarks(rating: stars(count), label: label, isRejected: rejected))
+            marks: PhotoMarks(rating: rejected ? .rejected : stars(count), label: label))
     }
 
     /// The group key the collapsed cover stands for.

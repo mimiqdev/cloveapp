@@ -11,7 +11,7 @@
 ///   PRD Failure and recovery). Undoing the action clears the record (PRD P0-12).
 ///
 /// The finishing-action records live in memory, one tracker per opened folder, keyed by
-/// ``GroupID``. They do not persist across launches: Reject itself does (G1 decision 5), and
+/// ``GroupID``. They do not persist across launches: Reject itself does, in XMP (G1 decision 2), and
 /// completion follows the marks again when the folder reopens. When groups refine and their
 /// IDs change, completion follows the photos: a group whose members are all rated or rejected
 /// is complete by definition, and a finishing-action record carries over to the group with the

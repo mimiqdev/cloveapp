@@ -8,7 +8,7 @@ enum MarkSummary {
     /// The rating, colour label and Reject a photo carries, or `Unmarked` when it has none.
     static func text(for marks: PhotoMarks) -> String {
         var parts: [String] = []
-        if marks.rating != .unrated { parts.append("\(marks.rating.rawValue) stars") }
+        if let stars = marks.rating.starCount { parts.append("\(stars) stars") }
         if let colour = marks.label.colour {
             parts.append(colour.rawValue)
         } else if !marks.label.isClear {

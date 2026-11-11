@@ -119,26 +119,52 @@ private let green = ColourLabel(colour: .green)
     #expect(try xmpCodec.read(output).rating == .rated(.unrated))
 }
 
-@Test func keepsExternalRatingWhenOnlyTheLabelChanges() throws {
-    let original = try Data(
-        contentsOf: XMPTestFixtures.repositoryRoot.appendingPathComponent(
-            "fixtures/xmp/rating-minus-one.xmp"))
+@Test(arguments: [6, -2])
+func keepsAnotherOutOfRangeRatingWhenOnlyTheLabelChanges(value: Int) throws {
+    let original = xmpDescriptionPacket(attributes: "xmp:Rating=\"\(value)\"")
     let output = try xmpCodec.write(XMPEdit(label: .set(green)), into: original)
     let text = String(decoding: output, as: UTF8.self)
 
-    // The external value is neither clamped nor mapped to Reject (PRD P0-07).
-    #expect(text.contains("xmp:Rating=\"-1\""))
+    // Any value outside −1…5 keeps its bytes and reads as unrated (PRD P0-07).
+    #expect(text.contains("xmp:Rating=\"\(value)\""))
+
     let before = try xmpCodec.read(original)
-    #expect(before.rating == .external(-1))
+    #expect(before.rating == .external(value))
     let after = try xmpCodec.read(output)
-    #expect(after.rating == .external(-1))
+    #expect(after.rating == .external(value))
     #expect(after.label == green)
     #expect(
         try XMPPreservation.outsideOwnedMarks(original) == XMPPreservation.outsideOwnedMarks(output)
     )
 }
 
-@Test func replacesAnExternalRatingWhenTheUserSetsOne() throws {
+@Test func keepsRejectWhenOnlyTheLabelChanges() throws {
+    let original = try Data(
+        contentsOf: XMPTestFixtures.repositoryRoot.appendingPathComponent(
+            "fixtures/xmp/rating-minus-one.xmp"))
+    let output = try xmpCodec.write(XMPEdit(label: .set(green)), into: original)
+    let text = String(decoding: output, as: UTF8.self)
+
+    // −1 is Reject, and a label-only write keeps its exact bytes (PRD P0-07).
+    #expect(text.contains("xmp:Rating=\"-1\""))
+    let before = try xmpCodec.read(original)
+    #expect(before.rating == .rated(.rejected))
+    let after = try xmpCodec.read(output)
+    #expect(after.rating == .rated(.rejected))
+    #expect(after.label == green)
+    #expect(
+        try XMPPreservation.outsideOwnedMarks(original) == XMPPreservation.outsideOwnedMarks(output)
+    )
+}
+
+@Test func writesRatingMinusOneForReject() throws {
+    let original = xmpDescriptionPacket(attributes: "xmp:Rating=\"4\"")
+    let output = try xmpCodec.write(XMPEdit(rating: .set(.rejected)), into: original)
+    #expect(String(decoding: output, as: UTF8.self).contains("xmp:Rating=\"-1\""))
+    #expect(try xmpCodec.read(output).rating == .rated(.rejected))
+}
+
+@Test func replacingRejectWithStarsWritesThem() throws {
     let original = xmpDescriptionPacket(attributes: "xmp:Rating=\"-1\"")
     let output = try xmpCodec.write(
         XMPEdit(rating: .set(try #require(Rating(rawValue: 2)))), into: original)
@@ -291,7 +317,7 @@ func roundTripKeepsEveryUnrelatedByte(fixture: String) throws {
     "capture-one.xmp", "lightroom-full.xmp", "photo-mechanic.xmp", "custom-namespace-nested.xmp",
     "empty-description.xmp", "rating-minus-one.xmp",
 ])
-func neverWritesACloveNamespaceRejectOrRatingMinusOne(fixture: String) throws {
+func neverWritesACloveNamespaceOrAnUnrequestedField(fixture: String) throws {
     let original = try Data(
         contentsOf: XMPTestFixtures.repositoryRoot.appendingPathComponent("fixtures/xmp/\(fixture)")
     )
@@ -355,7 +381,7 @@ func neverWritesACloveNamespaceRejectOrRatingMinusOne(fixture: String) throws {
     )
 }
 
-@Test func createdPacketsNeverCarryACloveNamespaceRejectOrRatingMinusOne() throws {
+@Test func createdPacketsNeverCarryACloveNamespaceOrAnUnrequestedField() throws {
     let edits: [XMPEdit] = [
         XMPEdit(rating: .set(try #require(Rating(rawValue: 3))), label: .set(green)),
         XMPEdit(rating: .set(.unrated)),

@@ -814,7 +814,7 @@ final class BrowsingModel {
         var clearing = RejectMoveKeepClearing()
         for set in selection.clearFailures {
             guard state.folder == folder, openGeneration == generation else { return nil }
-            let status = await library.apply(.reject(false), to: set.identity)
+            let status = await library.apply(.rating(.unrated), to: set.identity)
             clearing.record(status, for: set.identity, files: set.files)
         }
         guard state.folder == folder, openGeneration == generation else { return nil }
@@ -888,8 +888,8 @@ final class BrowsingModel {
     /// What the marking HUD's save-state line says for one photo (PRD P0-08).
     ///
     /// PRD P0-08 shows **Saved** only for a confirmed sidecar write and **Saved in Clove only**
-    /// only for confirmed Clove storage; a Clove-stored Reject reads **Stored in Clove** because
-    /// G1 decision 5 keeps the word Saved for XMP writes and a confirmed move.
+    /// only for confirmed Clove storage; Reject is a rating, so it reports the state of the
+    /// storage its photo uses.
     func saveText(for photo: PhotoIdentity) -> String {
         SaveStatus.text(
             for: latestChange(for: photo)?.state, folderLost: folderLocationLoss != nil)

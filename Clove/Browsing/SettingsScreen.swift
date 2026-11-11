@@ -224,6 +224,7 @@ struct SettingsScreen: View {
     }
 
     private func ratingName(_ rating: Rating) -> String {
-        rating.rawValue == 1 ? "1 star" : "\(rating.rawValue) stars"
+        let stars = rating.starCount ?? 0
+        return stars == 1 ? "1 star" : "\(stars) stars"
     }
 }

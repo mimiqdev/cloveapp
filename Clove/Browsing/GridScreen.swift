@@ -295,7 +295,7 @@ struct GridScreen: View {
         case .all: return "\(count) photos"
         case .unmarked: return "Unmarked · \(count)"
         case .rejected: return "Rejected · \(count)"
-        case .ratedAtLeast(let rating): return "Rating ≥ \(rating.rawValue) · \(count)"
+        case .ratedAtLeast(let rating): return "Rating ≥ \(rating.starCount ?? 0) · \(count)"
         }
     }
 

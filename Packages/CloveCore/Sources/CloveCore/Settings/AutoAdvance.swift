@@ -3,7 +3,7 @@ public enum MarkKind: String, CaseIterable, Hashable, Sendable {
     /// A star rating (PRD Marking rules).
     case rating
 
-    /// Clove's internal Reject toggle (PRD Marking rules and G1 decision 5).
+    /// Reject, the rating −1 (PRD Marking rules).
     case reject
 
     /// A colour label (PRD Marking rules).
