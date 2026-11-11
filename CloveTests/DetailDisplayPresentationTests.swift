@@ -168,26 +168,37 @@ struct DetailDisplayPresentationTests {
         }
         try await waitFor { source.prefetched.last?.current.photo == photo.id }
         let preview = try #require(findPreview(in: window))
-        let before = try centrePixels(of: preview, in: window)
+        let frame = preview.convert(preview.bounds, to: window)
+        let centre = CGRect(x: frame.midX - 20, y: frame.midY - 20, width: 40, height: 40)
+        let corner = CGRect(x: frame.maxX - 25, y: frame.minY + 13, width: 12, height: 12)
+        let before = try displayedPixels(in: centre, window: window)
+        let unmarkedCorner = try displayedPixels(in: corner, window: window)
         browsing.apply(.rating(.rejected), to: photo.id)
-        try await waitFor { preview.accessibilityLabel?.contains("Rejected") == true }
-        #expect(try centrePixels(of: preview, in: window) == before)
+        try await waitFor {
+            guard let pixels = try? displayedPixels(in: corner, window: window) else {
+                return false
+            }
+            return pixels != unmarkedCorner
+        }
+        #expect(try displayedPixels(in: centre, window: window) == before)
         browsing.apply(.rating(.unrated), to: photo.id)
-        try await waitFor { preview.accessibilityLabel == photo.fileName }
-        #expect(try centrePixels(of: preview, in: window) == before)
+        try await waitFor {
+            (try? displayedPixels(in: corner, window: window)) == unmarkedCorner
+        }
+        #expect(try displayedPixels(in: centre, window: window) == before)
     }
 
     /// Compare displayed photo pixels, including opacity applied by any SwiftUI ancestor.
-    private func centrePixels(of preview: UIView, in window: UIWindow) throws -> Data {
-        let centre = preview.convert(
-            CGPoint(x: preview.bounds.midX, y: preview.bounds.midY), to: window)
+    private func displayedPixels(in region: CGRect, window: UIWindow) throws -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40), format: format)
+        var didDraw = false
+        let image = UIGraphicsImageRenderer(size: region.size, format: format)
             .image { context in
-                context.cgContext.translateBy(x: 20 - centre.x, y: 20 - centre.y)
-                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                context.cgContext.translateBy(x: -region.minX, y: -region.minY)
+                didDraw = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
             }
+        try #require(didDraw)
         return try #require(image.pngData())
     }
 
