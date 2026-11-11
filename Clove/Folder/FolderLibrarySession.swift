@@ -914,7 +914,11 @@ final class FolderLibrarySession: FolderLibrary {
             let sidecar: URL?
             switch set.sidecar {
             case .resolved(let url): sidecar = url
-            case .absent: sidecar = set.photoSet.sidecarURL
+            case .absent:
+                switch set.photoSet.markPersistence.rating {
+                case .xmpSidecar(let url): sidecar = url
+                case .cloveStorage: sidecar = nil
+                }
             case .ambiguous: sidecar = nil
             }
             if set.photoSet.primary.format == .raw, let sidecar,
