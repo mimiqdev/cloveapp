@@ -7,11 +7,11 @@ scaling, draft mode, a reused `CIContext`, colour agreement, contention, sustain
 load and caching change that cost? The answer informs the owner's new setting with
 two modes, RAW first and camera preview first, and its default.
 
-This is **part 1 of [#122](https://github.com/mimiqdev/cloveapp/issues/122)**: the
-probe, the Clove Lab screen and this report. The owner's device run fills the
-device tables in part 2, which sets out both modes' costs. **This report makes no
-product recommendation and states no device number.** It also changes no product
-code: `Clove`, `CloveCore` and `CloveImaging` are untouched.
+Part 1 of [#122](https://github.com/mimiqdev/cloveapp/issues/122) added the probe
+and Clove Lab screen. Part 2, delivered with
+[#132](https://github.com/mimiqdev/cloveapp/issues/132), records the iPhone device
+summaries below and the decided product policy. The private reports were read in
+place by a script outside the checkout. Only aggregate measurements are published.
 
 Owner decision behind the task (2026-11-11): RAW is the truth when it is present,
 and neither mode may mix sources by zoom level or history. The camera-preview mode
@@ -376,85 +376,120 @@ from selection). Total 806.5 ms; individual renders 71.3–79.8 ms; thermal stat
 `nominal` at start and end, no transitions; no battery reading on macOS. This only shows that the second button's code path runs. Heat,
 thermal transitions and battery drain need the device.
 
-### Device: pending the owner's run
+### Device: iPhone results
 
-Nothing below is measured yet. Each row is filled from the two S8 JSON reports on
-issue [#122](https://github.com/mimiqdev/cloveapp/issues/122), on the A1 II ARW+HIF
-pairs, iPhone 17 Pro Max and iPad Pro. Every render row in the JSON carries its
-source orientation tag; the tables omit that column for width. The run keeps the
-screen awake through `UIApplication.shared.isIdleTimerDisabled` while it is active.
+Measured on iPhone 17 Pro Max with local A1 II ARW+HIF pairs. The display suite
+covered 12 RAWs, six full-HIF pairs, three warm repeats per file, and a 2670 px
+screen edge. RAW warm statistics aggregate 36 renders per variant, camera
+statistics 18. Cold is one observation per variant after startup. All render
+variants succeeded. Times end at materialized CPU pixels, not presentation.
+Peak RSS is the median of warm absolute process samples, including earlier work.
+
+The iPad run is **Not run** for every table below. No iPhone result is an iPad
+measurement. The run keeps the screen awake through
+`UIApplication.shared.isIdleTimerDisabled`.
 
 | Status | RAW variant | Cold ms | Warm median / p90 ms | Output | Decoded MiB | Peak RSS MiB |
 | --- | --- | --- | --- | --- | --- | --- |
-| Pending | a native, fresh context | Pending | Pending | Pending | Pending | Pending |
-| Pending | b native, reused context | Pending | Pending | Pending | Pending | Pending |
-| Pending | c screen `scaleFactor` | Pending | Pending | Pending | Pending | Pending |
-| Pending | d screen draft | Pending | Pending | Pending | Pending | Pending |
-| Pending | e grid `scaleFactor` | Pending | Pending | Pending | Pending | Pending |
-| Pending | e grid draft | Pending | Pending | Pending | Pending | Pending |
+| Measured | a native, fresh context | 530.8 | 521.9 / 683.3 | 5760×8640 | 189.84 | 615.8 |
+| Measured | b native, reused context | 491.3 | 503.5 / 754.8 | 5760×8640 | 189.84 | 627.2 |
+| Measured | c screen `scaleFactor` | 281.0 | 287.7 / 370.7 | 1780×2670 | 18.13 | 528.8 |
+| Measured | d screen draft | 270.4 | 287.1 / 351.0 | 1780×2670 | 18.13 | 528.4 |
+| Measured | e grid `scaleFactor` | 259.6 | 266.2 / 297.8 | 267×400 | 0.41 | 315.2 |
+| Measured | e grid draft | 252.8 | 263.3 / 298.5 | 267×400 | 0.41 | 315.0 |
 
 | Status | Camera HEIF variant | Cold ms | Warm median / p90 ms | Output | Decoded MiB | Peak RSS MiB |
 | --- | --- | --- | --- | --- | --- | --- |
-| Pending | f full decode (100% source) | Pending | Pending | Pending | Pending | Pending |
-| Pending | g subsample factor 2 | Pending | Pending | Pending | Pending | Pending |
-| Pending | g screen thumbnail, always | Pending | Pending | Pending | Pending | Pending |
+| Measured | f full decode (100% source) | 97.7 | 106.6 / 118.7 | 5760×8640 | 189.84 | 795.5 |
+| Measured | g subsample factor 2 | 68.7 | 63.9 / 70.1 | 2880×4320 | 47.46 | 507.5 |
+| Measured | g screen thumbnail, always | 122.4 | 64.0 / 66.1 | 1780×2670 | 18.13 | 481.8 |
 
 | Status | Colour comparison | Mean ΔE00 | p95 | Max | Compared pixels |
 | --- | --- | --- | --- | --- | --- |
-| Pending | c screen vs native | Pending | Pending | Pending | Pending |
-| Pending | d screen draft vs native | Pending | Pending | Pending | Pending |
-| Pending | e grid vs native | Pending | Pending | Pending | Pending |
-| Pending | e grid draft vs native | Pending | Pending | Pending | Pending |
-| Pending | HIF embedded preview vs RAW native | Pending | Pending | Pending | Pending |
-| Pending | full HIF decode vs HIF preview | Pending | Pending | Pending | Pending |
+| Measured | c screen vs native | 0.83 | 2.53 | 17.51 | 1780×2670 |
+| Measured | d screen draft vs native | 0.83 | 2.53 | 17.51 | 1780×2670 |
+| Measured | e grid vs native | 2.00 | 7.19 | 31.36 | 267×400 |
+| Measured | e grid draft vs native | 2.00 | 7.19 | 31.36 | 267×400 |
+| Measured | HIF embedded preview vs RAW native | 9.04 | 17.53 | 31.50 | 1080×1616 |
+| Measured | full HIF decode vs HIF preview | 1.27 | 3.84 | 16.21 | 1080×1616 |
+
+Colour columns are medians of per-file mean, p95 and maximum, across 12 RAWs
+or six full-HIF pairs. The maximum column is a median of maxima, not a global
+maximum. Resampling contributes to these differences. The screen and native RAW
+colours agree much more closely than the camera preview and RAW; full HIF versus
+its preview is close but not zero. Draft and non-draft results agree.
 
 | Status | Dwell | Preview ms, render running / idle | Render ready ms | Arrival → ready ms | Started / ready / wasted / failed |
 | --- | --- | --- | --- | --- | --- |
-| Pending | 0 ms | Pending | Pending | Pending | Pending |
-| Pending | 300 ms | Pending | Pending | Pending | Pending |
-| Pending | 800 ms | Pending | Pending | Pending | Pending |
+| Measured | 0 ms | 8.23 / 10.19 | — | — | 12 / 0 / 12 / 0 |
+| Measured | 300 ms | 8.26 / 7.49 | 278.7 | 288.4 | 12 / 6 / 6 / 0 |
+| Measured | 800 ms | Not observed / 18.52 | 331.7 | 363.1 | 12 / 12 / 0 / 0 |
+
+Each walk used the 12 available photos, below the 20-photo cap. Preview medians
+cover running/idle counts of 11/1, 5/7 and 0/12 respectively. These small groups
+cannot establish a contention penalty. Half the renders missed a 300 ms dwell;
+all finished within 800 ms. Fast travel needs queued cancellation and stale-result
+discard.
 
 | Status | Sustained load | Value |
 | --- | --- | --- |
-| Pending | Renders completed / duration | Pending |
-| Pending | Thermal transitions with elapsed seconds | Pending |
-| Pending | Battery start → end, charging state | Pending |
-| Pending | Screen-size cache: HEIC encode / bytes / decode | Pending |
-| Pending | Screen-size cache: JPEG encode / bytes / decode | Pending |
-| Pending | Six decoded screen renders held: bytes / RSS | Pending |
-| Pending | Grid per-photo and 2000-photo projection, concurrency 1 / 2 | Pending |
-| Pending | Suite duration (5-minute estimate check) | Pending |
+| Measured | Renders completed / duration | 300 / 86.6 s; median 285.6 ms, range 265.0–316.7 ms |
+| Measured | Thermal transitions with elapsed seconds | nominal → fair at 41.9 s; fair at end |
+| Measured | Battery start → end, charging state | 80% → 80%, unplugged |
+| Measured | Screen-size cache: HEIC encode / bytes / decode | 48.7 ms / 699,352 B / 30.0 ms medians, six files |
+| Measured | Screen-size cache: JPEG encode / bytes / decode | 22.7 ms / 1,092,680 B / 11.1 ms medians, six files |
+| Measured | Six decoded screen renders held: bytes / RSS | 114,062,400 B (108.8 MiB) bitmaps; 166.5 MiB RSS growth; 1129.8 MiB absolute; 1245.6 MiB sampled peak |
+| Measured | Grid per-photo and 2000-photo projection, concurrency 1 / 2 | 263.3 ms; 526.5 s / 263.3 s, arithmetic only |
+| Measured | Suite duration (5-minute estimate check) | 199.5 s, about 3.3 minutes |
 
-## Open questions
+The sustained run stopped at its **300-render bound after about 87 seconds**, not
+five minutes. The battery read showed no change over that interval at its coarse
+resolution. It does not establish five-minute thermal behaviour or battery drain.
+Holding six images cost about 27.7 MiB RSS per image, compared with 18.13 MiB of
+bitmap bytes each. RSS includes decoder/framework state and cannot define a safe
+process ceiling.
 
-- Does the iPhone honour `scaleFactor` and draft mode by the same margin the Mac
-  shows? The Mac's 11–19 ms saving against an 85 ms reused-native render is not a
-  device ratio; the device table decides whether a screen-size RAW render is
-  materially cheaper than a native one.
-- Does draft mode change colour or detail visibly? This probe measures colour
-  difference only, and on the Mac fixture draft and non-draft were identical;
-  visual quality needs the owner's eye on the device.
-- How does a RAW render affect the next photo's preview in practice? The Mac walk
-  had one photo and never contended; the 20-photo device walk is what measures
-  preview latency while a render is running and how many renders finish inside the
-  dwell.
-- Is the full HIF decode a usable 100% source at 8640×5760? S2 measured about 1.8 s
-  and 1.3 GB peak through `CIRAWFilter` on the previous build; this probe repeats
-  it through ImageIO on the device build. A 100% source that is correct but slow
-  may still be acceptable as a cold-path image, but the memory ceiling under
-  repeated navigation is unmeasured.
-- Is the full HIF decode's colour equal to the embedded preview's on the owner's
-  camera? The Mac fixture has no embedded preview; the device comparison is the
-  first real measurement of that claim.
-- What does the grid cost in a real concurrent pipeline? The projection here is
-  arithmetic from one 400 px render at a time. Concurrency 2 and four workers need
-  the same treatment S2 gave embedded thumbnails before a grid decision exists.
-- How long does the whole display suite take on the device, and does the sustained
-  step change thermal state within five minutes? The `run-duration` and
-  `thermal-change` rows answer both for the owner's folder.
-- Does an iPad screen long edge change the colour and time results materially? The
-  probe accepts the screen edge from the app, so the same build answers it; no iPad
-  run exists yet.
+### Decided display policy
+
+The owner's decision in #132 is **RAW first by default**, with **Camera preview
+first** as the other consistent mode. Neither mode changes colour sources because
+of zoom level or navigation history. The camera preview fills the wait for RAW.
+
+RAW first pays about 288 ms for a new screen-size render, compared with about
+503 ms for native RAW. It keeps at most three screen renders for the current photo
+and neighbours, and renders one ahead in the direction of travel after the current
+render is shown. Native RAW is requested only beyond the screen render or for
+100%. The render lane remains single, draft stays off, and no disk cache is added.
+
+Camera preview first keeps the cheap embedded fit route. Its camera 100% route
+uses full ImageIO HIF decoding, about 107 ms and 795 MiB median sampled peak RSS,
+or full JPEG. This is a different route from S2's 1.8 s CIRAWFilter HIF control.
+Only one full decode is held, released on leaving the photo. A RAW set without a
+usable camera full image uses RAW first for that whole photo. JPEG-only and
+HIF-only behaviour is unchanged. The grid stays on embedded previews.
+
+The supervisor's pure device-default rule chooses Camera preview first below
+6 GiB physical memory or when the median of the first five successful screen RAW
+renders exceeds 700 ms. Until five samples exist, speed does not decide. The
+measurement is stored once, never re-measured, and a crossing applies from the
+next photo. An explicit Settings choice wins. Reset clears that choice and returns
+to the device default; the UI offers only RAW and Camera preview.
+
+## Remaining questions
+
+- Does the brief camera-to-RAW colour shift bother the owner during normal
+  navigation? The colour metric measures a difference, not preference. Visual
+  focus detail and the screen-to-native replacement still need the owner's eye.
+- Does repeated navigation with one full HIF decode stay within a safe device
+  memory ceiling? The suite completed, but sampled process peaks do not establish
+  pressure recovery or a launch memory budget.
+- What does RAW grid generation cost in a concurrent pipeline? The 8.8-minute
+  serial estimate for 2000 photos is arithmetic. Concurrent work remains unmeasured
+  and the grid is outside #132.
+- What happens after five minutes of sustained load? This run ended at the count
+  bound after 87 seconds, with fair thermal state and an unchanged battery read.
+- Does iPad screen size change colour, latency or memory materially? All iPad
+  measurements remain Not run.
 
 ## Device checklist
 
