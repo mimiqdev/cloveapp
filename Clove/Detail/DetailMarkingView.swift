@@ -133,10 +133,6 @@ struct DetailMarkingView: View {
     /// The scale the last command asked for, so a user pinch is told apart from that command.
     @State private var commandedScale: CGFloat = 1
 
-    /// Whether this photo's 100% was asked for on this photo, so a header-less preview may find
-    /// its render's size once (PRD P0-04; G1 "Preview, detail (I2)").
-    @State private var didRequestFullResolution = false
-
     /// The zoom the preview should apply, or nil to leave the user's pinch alone.
     @State private var command: DetailZoomCommand?
 
@@ -225,7 +221,7 @@ struct DetailMarkingView: View {
     private var previewArea: some View {
         DetailZoomView(
             image: shown?.image,
-            fullResolutionPixels: shown?.fullResolutionSize,
+            fullResolutionPixels: shown?.fullResolutionPixels,
             command: command,
             doubleTapZoomEnabled: settings.doubleTap == .zoom,
             rules: rules,
@@ -310,10 +306,12 @@ struct DetailMarkingView: View {
             // photo that finally loads (PRD In-group culling, synchronized zoom).
             let snapshot = probe.container?.zoomSnapshot
             keptScale = snapshot?.scale
-            keptNativeScale =
-                snapshot != nil && shown.fullResolutionSize != nil
-                ? nativeFullResolutionScale(for: shown) : nil
+            keptNativeScale = snapshot != nil ? nativeFullResolutionScale(for: shown) : nil
             keptZoom = zoomPolicy.keepsPosition ? snapshot : nil
+            // A view at fit keeps no zoom, so nothing carries into the next photo. That includes a
+            // 100% that is still waiting for the render's size: it belongs to the photo that was
+            // tapped, not to the one an edge tap moves to (#111).
+            if snapshot == nil { zoomMode = .fit }
         }
         if !zoomPolicy.keepsScale {
             zoomMode = .fit
@@ -323,7 +321,6 @@ struct DetailMarkingView: View {
         phase = .loading
         limitation = nil
         previewOnly = false
-        didRequestFullResolution = false
         await images.cancelPrefetch()
         // The first layout gives the view its size; a preview requested from a zero-sized view
         // would ask a JPEG only for a one-pixel raster.
@@ -365,11 +362,15 @@ struct DetailMarkingView: View {
     /// 100% and a pinched fraction of native stays that fraction (PRD In-group culling,
     /// synchronized zoom; PRD P0-12). A group also keeps the position, and asks for the pixels
     /// its retained zoom needs, as before; a regular detail view keeps the level only and starts
-    /// no render of its own. A header that could not be read leaves the preview's 100% at its own
-    /// pixels; the render's own size then supplies that target once, which is the behaviour
-    /// before the native size was known.
+    /// no render of its own.
+    ///
+    /// A 100% zoom is recomputed once when pixels land with a size other than the one it was
+    /// computed with: a RAW render is the photo's own pixels, so it corrects a preview-sized or
+    /// missing size at the same image point, and a size that was right leaves the zoom alone
+    /// (PRD P0-04; G1 "Preview, detail (I2)"). If the render that would have brought the size
+    /// failed, the arriving preview carries the last pixels this photo will give, so the zoom
+    /// falls back to the inspection scale instead of staying at fit (#111).
     private func show(_ image: DetailImage) {
-        let previous = shown
         shown = image
         limitation = image.limitation
         phase = .shown
@@ -384,20 +385,38 @@ struct DetailMarkingView: View {
             self.keptZoom = nil
             let opening = openingScale(
                 keptScale, previousNativeScale: previousNativeScale, for: image)
+            if case .fullResolution(let chosen, _) = zoomMode {
+                // The opening scale was converted to this photo's 100%, so a later render corrects
+                // against this photo's size rather than the previous one's.
+                zoomMode = .fullResolution(anchor: chosen, size: image.fullResolutionPixels)
+            }
             setZoom(.scale(opening, anchor: anchor.unitPoint))
             // A group's retained zoom may need more pixels than the preview holds (G1 "Preview,
             // detail (I2)"); a regular detail view keeps its level without starting a render, as
             // before.
             if zoomPolicy.keepsPosition { upgradeIfNeeded() }
-        } else if case .fullResolution = zoomMode, didRequestFullResolution, let previous,
-            previous.fullResolutionSize == nil, image.fullResolutionSize != nil,
-            viewSize.width > 0
-        {
-            // A render is native by definition, so its size is the 100% the preview could not
-            // report; the unit image point the user chose stays under the viewport as it retargets.
-            let anchor = probe.container?.zoomSnapshot?.anchor ?? .centre
-            let target = nativeFullResolutionScale(for: image)
-            setZoom(.scale(target, anchor: anchor.unitPoint))
+        } else if case .fullResolution(let chosen, let targetSize) = zoomMode, viewSize.width > 0 {
+            if let pixels = image.fullResolutionPixels {
+                if let target = DetailZoom.retargetedFullResolutionScale(
+                    from: targetSize, to: pixels, viewSize: viewSize, screenScale: displayScale)
+                {
+                    // The render is native by definition, so its size is the 100% a preview could
+                    // not report; the unit image point under the viewport stays where the user put
+                    // it.
+                    zoomMode = .fullResolution(anchor: chosen, size: pixels)
+                    let anchor = probe.container?.zoomSnapshot?.anchor ?? chosen
+                    setZoom(.scale(target, anchor: anchor.unitPoint))
+                }
+            } else if previewOnly,
+                let target = DetailZoom.fullResolutionTarget(
+                    nativePixels: nil, shownPixels: pixelSize(image), viewSize: viewSize,
+                    screenScale: displayScale, previewIsAll: true)
+            {
+                // The render that was going to supply the size failed, so the preview is all this
+                // photo will give: the tap still inspects it rather than leaving the view at fit
+                // (#111).
+                setZoom(.scale(target, anchor: chosen.unitPoint))
+            }
         }
     }
 
@@ -410,20 +429,22 @@ struct DetailMarkingView: View {
     private func openingScale(
         _ keptScale: CGFloat, previousNativeScale: CGFloat?, for image: DetailImage
     ) -> CGFloat {
-        guard viewSize.width > 0, image.fullResolutionSize != nil else { return keptScale }
-        let nativeScale = nativeFullResolutionScale(for: image)
+        guard viewSize.width > 0, let nativeScale = nativeFullResolutionScale(for: image)
+        else { return keptScale }
         if case .fullResolution = zoomMode { return nativeScale }
         guard let previousNativeScale else { return keptScale }
         return DetailZoom.convertedScale(
             keptScale, fromNativeScale: previousNativeScale, toNativeScale: nativeScale)
     }
 
-    /// The scroll-view scale at which this photo shows one native image pixel per screen pixel
-    /// (PRD P0-04; G1 "Preview, detail (I2)").
-    private func nativeFullResolutionScale(for image: DetailImage) -> CGFloat {
-        DetailZoom.fullResolutionScale(
-            nativePixels: image.fullResolutionPixels, shownPixels: image.fullResolutionPixels,
-            viewSize: viewSize, screenScale: displayScale)
+    /// The scroll-view scale at which this photo shows one native image pixel per screen pixel,
+    /// or nil while its 100% is a RAW's and that size is unknown (PRD P0-04; G1 "Preview,
+    /// detail (I2)").
+    private func nativeFullResolutionScale(for image: DetailImage) -> CGFloat? {
+        guard let pixels = image.fullResolutionPixels else { return nil }
+        return DetailZoom.fullResolutionTarget(
+            nativePixels: pixels, shownPixels: pixels, viewSize: viewSize,
+            screenScale: displayScale)
     }
 
     /// The neighbours' previews, so the next edge tap starts from a cache hit.
@@ -469,27 +490,37 @@ struct DetailMarkingView: View {
 
     /// The double-tap action: 100% around the tapped point, or back to fit (PRD P0-04).
     ///
-    /// The target is the photo's native 100%, computed from the header size that arrived with the
-    /// first preview, so the embedded preview is drawn enlarged and the RAW render later replaces
-    /// it at the same scale: one zoom, not two (G1 "Preview, detail (I2)"). An image with no
-    /// larger size known, such as a HIF that is never fully decoded, keeps the shown bitmap's own
-    /// 100%.
+    /// The target is the photo's native 100%, computed from the size that arrived with the first
+    /// preview, so the embedded preview is drawn enlarged and the RAW render later replaces it at
+    /// the same scale: one zoom, not two (G1 "Preview, detail (I2)"). An image with no larger size
+    /// known, such as a HIF that is never fully decoded, keeps the shown bitmap's own 100%.
+    ///
+    /// A RAW whose size is still unknown has no target, and its preview's pixels are not 100%: the
+    /// view stays where it is, starts the native render, and zooms when that render's own size
+    /// arrives (#111). A waiting cue would be a UI addition, so the smaller change is to leave the
+    /// picture still until the pixels land. Once the render has failed there is nothing left to
+    /// wait for, so the tap inspects the preview at ``DetailZoom/inspectionScale`` instead of
+    /// doing nothing for good.
     private func doubleTap(at anchor: UnitPoint) {
         guard settings.doubleTap == .zoom else { return }
+        let chosen = DetailZoomAnchor(x: anchor.x, y: anchor.y)
         guard scale <= DetailFitScale.tolerance else {
             zoomMode = .fit
-            didRequestFullResolution = false
             setZoom(.fit)
             return
         }
         guard let shown else { return }
-        let target = DetailZoom.fullResolutionScale(
+        zoomMode = .fullResolution(anchor: chosen, size: shown.fullResolutionPixels)
+        if let target = DetailZoom.fullResolutionTarget(
             nativePixels: shown.fullResolutionPixels, shownPixels: pixelSize(shown),
-            viewSize: viewSize, screenScale: displayScale)
-        zoomMode = .fullResolution(anchor: DetailZoomAnchor(x: anchor.x, y: anchor.y))
-        didRequestFullResolution = true
-        setZoom(.scale(target, anchor: anchor))
+            viewSize: viewSize, screenScale: displayScale, previewIsAll: previewOnly)
+        {
+            setZoom(.scale(target, anchor: anchor))
+        }
         upgradeTask?.cancel()
+        // A photo whose render failed has no better pixels to ask for: the tap above already
+        // inspected the preview (PRD P0-04).
+        guard !previewOnly else { return }
         upgradeTask = Task { await upgrade(need: .fullResolution) }
     }
 
@@ -672,9 +703,9 @@ struct DetailMarkingView: View {
     /// synchronized zoom).
     private var zoomName: String {
         if scale <= DetailFitScale.tolerance { return "Fit" }
-        if let shown, viewSize.width > 0,
+        if let shown, viewSize.width > 0, let pixels = shown.fullResolutionPixels,
             DetailZoom.isFullResolution(
-                scale: scale, nativePixels: shown.fullResolutionPixels, viewSize: viewSize,
+                scale: scale, nativePixels: pixels, viewSize: viewSize,
                 screenScale: displayScale)
         {
             return "100%"
@@ -720,8 +751,9 @@ private enum DetailMarkingPreviewPhase {
 private enum DetailMarkingZoomMode: Equatable {
     /// The whole image at the fit scale.
     case fit
-    /// 100%, centred on the image point the user tapped.
-    case fullResolution(anchor: DetailZoomAnchor)
+    /// 100%, centred on the image point the user tapped, computed from this photo's size or from
+    /// none while its RAW's is unknown (PRD P0-04; G1 "Preview, detail (I2)").
+    case fullResolution(anchor: DetailZoomAnchor, size: CGSize?)
     /// A scale the user pinched.
     case manual
 }

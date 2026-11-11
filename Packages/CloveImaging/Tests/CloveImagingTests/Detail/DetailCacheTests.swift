@@ -30,7 +30,7 @@ struct DetailCacheTests {
         DetailImage(
             image: try makeDetailImage(width: width, height: height),
             source: try detailSource(source),
-            quality: .preview)
+            quality: .preview, hasRAW: false)
     }
 
     private func key(_ source: DetailSource, purpose: DetailCachePurpose = .embeddedPreview)
@@ -89,7 +89,8 @@ struct DetailCacheTests {
         let source = try detailSource(file)
         let first = try image(file, width: 64, height: 48)
         let second = DetailImage(
-            image: try makeDetailImage(width: 32, height: 32), source: source, quality: .nativeRAW)
+            image: try makeDetailImage(width: 32, height: 32), source: source, quality: .nativeRAW,
+            hasRAW: true)
         cache.storeNative(first, for: key(source, purpose: .nativeRAW))
         cache.storeNative(second, for: key(source, purpose: .displayRaster(1200)))
         #expect(cache.holdsNativeImage)
@@ -118,40 +119,40 @@ struct DetailCacheTests {
         #expect(cache.holdsNativeImage == false)
     }
 
-    @Test func aHeaderSizeIsKeptPerSourceRevision() throws {
+    @Test func aNativeSizeIsKeptPerSourceRevision() throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
         let file = try directory.image(name: "bytes.JPG")
         let cache = directory.cache()
         let source = try detailSource(file)
-        #expect(cache.headerSize(for: source) == nil)
+        #expect(cache.nativeSize(for: source) == nil)
 
-        cache.store(headerSize: .known(CGSize(width: 8640, height: 5760)), for: source)
+        cache.store(nativeSize: .known(CGSize(width: 8640, height: 5760)), for: source)
 
-        // PRD P0-04: the header size is paid for once per photo and answers the native 100%.
-        #expect(cache.headerSize(for: source) == .known(CGSize(width: 8640, height: 5760)))
+        // PRD P0-04: the size is paid for once per photo and answers the native 100%.
+        #expect(cache.nativeSize(for: source) == .known(CGSize(width: 8640, height: 5760)))
         // A rewritten file is a different revision, so it never inherits the old size.
         let newer = DetailSource(
             url: source.url,
             revision: ThumbnailRevision(size: 2, modificationTime: source.revision.modificationTime)
         )
-        #expect(cache.headerSize(for: newer) == nil)
+        #expect(cache.nativeSize(for: newer) == nil)
         // A memory warning drops every cached value, so the map stays bounded.
         cache.releaseAll()
-        #expect(cache.headerSize(for: source) == nil)
+        #expect(cache.nativeSize(for: source) == nil)
     }
 
-    @Test func anUnreadableHeaderIsCachedAsUnknown() throws {
+    @Test func anUnknownSizeIsCachedPerSource() throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
         let file = try directory.image(name: "bytes.JPG")
         let cache = directory.cache()
         let source = try detailSource(file)
 
-        cache.store(headerSize: .unreadable, for: source)
+        cache.store(nativeSize: .unknown, for: source)
 
-        // A file that cannot supply a header is not opened again on every request.
-        #expect(cache.headerSize(for: source) == .unreadable)
+        // A size that cannot be read is not read again on every request.
+        #expect(cache.nativeSize(for: source) == .unknown)
     }
 
     @Test func identityCoversLocationRevisionAndRoute() throws {

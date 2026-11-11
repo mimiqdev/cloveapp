@@ -282,4 +282,85 @@ struct DetailZoomTests {
             DetailZoom.isFullResolution(
                 scale: target / 2, nativePixels: smaller, viewSize: view, screenScale: 3))
     }
+
+    /// A RAW's 100% is its sensor pixels, so a double tap while that size is unknown has no
+    /// target: the preview's own 100% is never it. Once the render lands, the render's size is the
+    /// target (PRD P0-04; G1 "Preview, detail (I2)"; #111).
+    @Test func aRAWWithUnknownSizeNeverDoubleTapsToThePreviews100Percent() {
+        let preview = CGSize(width: 1616, height: 1080)
+        let render = CGSize(width: 8640, height: 5760)
+        let view = CGSize(width: 393, height: 852)
+        let previewTarget = DetailZoom.fullResolutionScale(
+            imagePixels: preview, viewSize: view, screenScale: 3)
+        let renderTarget = DetailZoom.fullResolutionScale(
+            nativePixels: render, shownPixels: render, viewSize: view, screenScale: 3)
+
+        // Unknown: no target at all, so the view cannot zoom to the preview's pixels.
+        #expect(
+            DetailZoom.fullResolutionTarget(
+                nativePixels: nil, shownPixels: preview, viewSize: view, screenScale: 3) == nil)
+
+        // The render's own size is the target, and it is not the preview's 100%.
+        if let target = DetailZoom.fullResolutionTarget(
+            nativePixels: render, shownPixels: preview, viewSize: view, screenScale: 3)
+        {
+            #expect(abs(target - renderTarget) < 0.0001)
+            #expect(abs(target - previewTarget) > 0.0001)
+        } else {
+            Issue.record("The render's size gave no 100% target")
+        }
+    }
+
+    /// A photo whose RAW render failed has no 100% size to wait for any more, so a double tap
+    /// inspects the preview rather than doing nothing for good (PRD P0-04; G1 "Preview, detail
+    /// (I2)"; #111).
+    @Test func aPhotoWhoseRenderFailedStillDoubleTapsToInspection() {
+        let preview = CGSize(width: 1616, height: 1080)
+        let view = CGSize(width: 393, height: 852)
+        let previewTarget = DetailZoom.fullResolutionScale(
+            imagePixels: preview, viewSize: view, screenScale: 3)
+
+        // While a render can still bring the size, the tap has no target yet.
+        #expect(
+            DetailZoom.fullResolutionTarget(
+                nativePixels: nil, shownPixels: preview, viewSize: view, screenScale: 3,
+                previewIsAll: false) == nil)
+
+        // The render failed: the preview is all this photo will give, so the tap inspects it.
+        #expect(
+            DetailZoom.fullResolutionTarget(
+                nativePixels: nil, shownPixels: preview, viewSize: view, screenScale: 3,
+                previewIsAll: true) == DetailZoom.inspectionScale)
+        // That fallback is an inspection zoom, never the preview's own 100%.
+        #expect(DetailZoom.inspectionScale != previewTarget)
+    }
+
+    /// A 100% zoom computed from a wrong size is corrected once when the render lands, and a zoom
+    /// computed from the right size is left alone (PRD P0-04; G1 "Preview, detail (I2)"; #111).
+    @Test func aWrongSizeIsCorrectedOnceWhenTheRenderLands() {
+        let view = CGSize(width: 393, height: 852)
+        let preview = CGSize(width: 1616, height: 1080)
+        let render = CGSize(width: 8640, height: 5760)
+        let renderTarget = DetailZoom.fullResolutionScale(
+            nativePixels: render, shownPixels: render, viewSize: view, screenScale: 3)
+        let previewTarget = DetailZoom.fullResolutionScale(
+            imagePixels: preview, viewSize: view, screenScale: 3)
+
+        // The size the zoom was computed with is the render's own: no second zoom.
+        #expect(
+            DetailZoom.retargetedFullResolutionScale(
+                from: render, to: render, viewSize: view, screenScale: 3) == nil)
+
+        // A wrong size — the preview's, or none at all — is corrected to the render's 100%.
+        for wrong in [preview, nil] as [CGSize?] {
+            if let corrected = DetailZoom.retargetedFullResolutionScale(
+                from: wrong, to: render, viewSize: view, screenScale: 3)
+            {
+                #expect(abs(corrected - renderTarget) < 0.0001)
+                #expect(abs(corrected - previewTarget) > 0.0001)
+            } else {
+                Issue.record("The render's size did not correct the zoom")
+            }
+        }
+    }
 }
