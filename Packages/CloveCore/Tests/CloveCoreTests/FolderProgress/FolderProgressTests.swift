@@ -28,23 +28,86 @@ import Testing
         #expect(bounded.rejected == 3)
     }
 
-    @Test func incompleteRescanKeepsFinishedCountsAndUpdatesResumeOnly() {
+    @Test func incompleteRescanKeepsTotalsAndAppliesConfirmedRejectClears() {
         let folder = FolderIdentity(rawValue: "progress-folder")
         let oldPhoto = PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "IMG_001")
         let viewed = PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "IMG_002")
         let previous = FolderProgress(
             marked: 90, rejected: 10, total: 100, lastViewedPhoto: oldPhoto,
             previewPhotos: [oldPhoto])
+        let cleared = Dictionary(
+            uniqueKeysWithValues: (0..<10).map { index in
+                (
+                    PhotoIdentity(
+                        folderID: folder, relativeFolderPath: "", stem: "REJECT_\(index)"),
+                    FolderProgress.ConfirmedChange(
+                        before: PhotoMarks(isRejected: true), after: PhotoMarks())
+                )
+            })
         let partial = FolderProgress.snapshot(
             confirmedMarks: Array(repeating: PhotoMarks(), count: 20), scanIsComplete: false,
-            previous: previous, lastViewedPhoto: viewed, previewPhotos: [viewed])
+            previous: previous, lastViewedPhoto: viewed, previewPhotos: [viewed],
+            confirmedChanges: cleared)
         #expect(partial.marked == 90)
-        #expect(partial.rejected == 10)
+        #expect(partial.rejected == 0)
         #expect(partial.total == 100)
-        #expect(partial.left == 0)
-        #expect(partial.finished)
+        #expect(partial.left == 10)
+        #expect(!partial.finished)
         #expect(partial.lastViewedPhoto == viewed)
         #expect(partial.previewPhotos == [oldPhoto])
+    }
+
+    @Test func partialScanPreservesDoneOnlyWhenNothingBecameUnmarked() throws {
+        let folder = FolderIdentity(rawValue: "progress-folder")
+        let photo = PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "IMG_001")
+        let previous = FolderProgress(marked: 0, rejected: 1, total: 1)
+        let unchanged = FolderProgress.snapshot(
+            confirmedMarks: [], scanIsComplete: false, previous: previous,
+            lastViewedPhoto: photo, previewPhotos: [])
+        #expect(unchanged.finished)
+        let clear = FolderProgress.ConfirmedChange(
+            before: PhotoMarks(isRejected: true), after: PhotoMarks())
+        let restored = clear.updating(to: PhotoMarks(isRejected: true))
+        let partial = FolderProgress.snapshot(
+            confirmedMarks: [], scanIsComplete: false, previous: previous,
+            lastViewedPhoto: photo, previewPhotos: [], confirmedChanges: [photo: restored])
+        #expect(partial.total == 1)
+        #expect(partial.rejected == 1)
+        #expect(partial.left == 0)
+        #expect(!partial.finished)
+        let decoded = try JSONDecoder().decode(
+            FolderProgress.self, from: JSONEncoder().encode(partial))
+        #expect(!decoded.finished)
+        let old = #"{"marked":1,"rejected":0,"total":1,"isComplete":true,"previewPhotos":[]}"#
+        #expect(try JSONDecoder().decode(FolderProgress.self, from: Data(old.utf8)).finished)
+    }
+
+    @Test func partialChangesUseOneOriginalBaselineAcrossRepeatedFlushes() {
+        let photo = PhotoIdentity(
+            folderID: FolderIdentity(rawValue: "progress-folder"), relativeFolderPath: "",
+            stem: "IMG_001")
+        let baseline = FolderProgress(marked: 0, rejected: 1, total: 2)
+        let change = FolderProgress.ConfirmedChange(
+            before: PhotoMarks(isRejected: true), after: PhotoMarks()
+        )
+        .updating(to: PhotoMarks(rating: Rating(rawValue: 4)!))
+        for _ in 0..<3 {
+            let result = FolderProgress.snapshot(
+                confirmedMarks: [], scanIsComplete: false, previous: baseline,
+                lastViewedPhoto: photo, previewPhotos: [], confirmedChanges: [photo: change])
+            #expect(result.marked == 1)
+            #expect(result.rejected == 0)
+            #expect(result.total == 2)
+            #expect(result.left == 1)
+        }
+        let notDoneBefore = FolderProgress(marked: 0, rejected: 0, total: 1)
+        let decided = FolderProgress.ConfirmedChange(
+            before: PhotoMarks(), after: PhotoMarks(isRejected: true))
+        let partial = FolderProgress.snapshot(
+            confirmedMarks: [], scanIsComplete: false, previous: notDoneBefore,
+            lastViewedPhoto: photo, previewPhotos: [], confirmedChanges: [photo: decided])
+        #expect(partial.left == 0)
+        #expect(!partial.finished)
     }
 
     @Test func unreadMarksNeverCreateLeftCountsBeforeFirstCompleteScan() {

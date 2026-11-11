@@ -9,8 +9,10 @@ public struct FolderProgress: Codable, Hashable, Sendable {
     public let rejected: Int
     /// Logical photos in the folder, never files (PRD P0-02).
     public let total: Int
-    /// Whether the scan covered the whole folder; a partial scan cannot claim Done.
+    /// Whether the totals originated in a complete scan. Partial scans retain those totals
+    /// while applying this session's confirmed changes (handoff Entry; PRD P0-08).
     public let isComplete: Bool
+    private let allowsFinished: Bool
     /// The last viewed photo, independent of its mark or save state (handoff Entry).
     public let lastViewedPhoto: PhotoIdentity?
     /// Up to three identities used for the folder's cached thumbnail strip (handoff Entry).
@@ -19,8 +21,10 @@ public struct FolderProgress: Codable, Hashable, Sendable {
     /// Stores bounded, mutually exclusive counts (handoff Entry; PRD P0-02).
     public init(
         marked: Int, rejected: Int, total: Int, isComplete: Bool = true,
-        lastViewedPhoto: PhotoIdentity? = nil, previewPhotos: [PhotoIdentity] = []
+        lastViewedPhoto: PhotoIdentity? = nil, previewPhotos: [PhotoIdentity] = [],
+        allowsFinished: Bool? = nil
     ) {
+        self.allowsFinished = allowsFinished ?? isComplete
         self.total = max(0, total)
         self.rejected = min(max(0, rejected), self.total)
         self.marked = min(max(0, marked), self.total - self.rejected)
@@ -43,22 +47,60 @@ public struct FolderProgress: Codable, Hashable, Sendable {
             lastViewedPhoto: lastViewedPhoto, previewPhotos: previewPhotos)
     }
 
-    /// Keeps the last complete counts during a rescan; unread XMP is never counted as unmarked
-    /// (handoff Entry; PRD P0-02, P0-08). With no prior summary, counts stay unknown until complete.
+    /// One photo's first and latest confirmed marks in the current session (PRD P0-08).
+    public struct ConfirmedChange: Hashable, Sendable {
+        public let before: PhotoMarks
+        public let after: PhotoMarks
+        /// A partial rescan cannot reassert Done after a decided photo became unmarked.
+        public let becameUnmarked: Bool
+
+        public init(before: PhotoMarks, after: PhotoMarks, becameUnmarked: Bool = false) {
+            self.before = before
+            self.after = after
+            self.becameUnmarked = becameUnmarked || (Self.decided(before) && !Self.decided(after))
+        }
+
+        /// Retains the original baseline and any intervening clear when the same photo changes again.
+        public func updating(to marks: PhotoMarks) -> ConfirmedChange {
+            ConfirmedChange(
+                before: before, after: marks,
+                becameUnmarked: becameUnmarked || (Self.decided(after) && !Self.decided(marks)))
+        }
+
+        private static func decided(_ marks: PhotoMarks) -> Bool {
+            marks.isRejected || marks.rating != .unrated || !marks.label.isClear
+        }
+    }
+
+    /// Keeps previous totals on a partial scan and applies net confirmed changes once per photo.
+    /// Unread XMP never contributes new left counts (handoff Entry; PRD P0-02, P0-08).
     public static func snapshot(
         confirmedMarks: [PhotoMarks], scanIsComplete: Bool, previous: FolderProgress?,
-        lastViewedPhoto: PhotoIdentity?, previewPhotos: [PhotoIdentity]
+        lastViewedPhoto: PhotoIdentity?, previewPhotos: [PhotoIdentity],
+        confirmedChanges: [PhotoIdentity: ConfirmedChange] = [:]
     ) -> FolderProgress {
         if scanIsComplete {
             return FolderProgress(
                 confirmedMarks: confirmedMarks, isComplete: true,
                 lastViewedPhoto: lastViewedPhoto, previewPhotos: previewPhotos)
         }
+        var marked = previous?.marked ?? 0
+        var rejected = previous?.rejected ?? 0
+        for change in confirmedChanges.values {
+            marked += Self.marked(change.after) - Self.marked(change.before)
+            rejected += (change.after.isRejected ? 1 : 0) - (change.before.isRejected ? 1 : 0)
+        }
         return FolderProgress(
-            marked: previous?.marked ?? 0, rejected: previous?.rejected ?? 0,
+            marked: marked, rejected: rejected,
             total: previous?.total ?? 0, isComplete: previous?.isComplete ?? false,
             lastViewedPhoto: lastViewedPhoto ?? previous?.lastViewedPhoto,
-            previewPhotos: previous?.previewPhotos ?? previewPhotos)
+            previewPhotos: previous?.previewPhotos ?? previewPhotos,
+            allowsFinished: previous?.finished == true
+                && !confirmedChanges.values.contains(where: \.becameUnmarked))
+    }
+
+    private static func marked(_ marks: PhotoMarks) -> Int {
+        !marks.isRejected && (marks.rating != .unrated || !marks.label.isClear) ? 1 : 0
     }
 
     /// Reads bounded counts and optional resume information (handoff Entry; PRD P0-02).
@@ -67,7 +109,8 @@ public struct FolderProgress: Codable, Hashable, Sendable {
         self.init(
             marked: form.marked, rejected: form.rejected, total: form.total,
             isComplete: form.isComplete, lastViewedPhoto: form.lastViewedPhoto?.photo,
-            previewPhotos: (form.previewPhotos ?? []).map(\.photo))
+            previewPhotos: (form.previewPhotos ?? []).map(\.photo),
+            allowsFinished: form.allowsFinished)
     }
 
     /// Persists identities as folder, relative path and stem, never a permission (G1 access).
@@ -75,7 +118,7 @@ public struct FolderProgress: Codable, Hashable, Sendable {
         try Form(
             marked: marked, rejected: rejected, total: total, isComplete: isComplete,
             lastViewedPhoto: lastViewedPhoto.map(StoredPhoto.init),
-            previewPhotos: previewPhotos.map(StoredPhoto.init)
+            previewPhotos: previewPhotos.map(StoredPhoto.init), allowsFinished: allowsFinished
         ).encode(to: encoder)
     }
 
@@ -86,6 +129,7 @@ public struct FolderProgress: Codable, Hashable, Sendable {
         var isComplete: Bool
         var lastViewedPhoto: StoredPhoto?
         var previewPhotos: [StoredPhoto]?
+        var allowsFinished: Bool?
     }
 
     private struct StoredPhoto: Codable {
@@ -107,6 +151,7 @@ public struct FolderProgress: Codable, Hashable, Sendable {
 
     /// Photos still undecided, never negative (handoff Entry).
     public var left: Int { max(0, total - marked - rejected) }
-    /// A fully read, nonempty folder with every photo decided (handoff Entry, Done).
-    public var finished: Bool { isComplete && total > 0 && left == 0 }
+    /// Done follows a complete scan, or preserves an existing Done state during a partial scan
+    /// only if no confirmed edit became unmarked (handoff Entry).
+    public var finished: Bool { isComplete && allowsFinished && total > 0 && left == 0 }
 }
