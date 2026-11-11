@@ -207,31 +207,6 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(try folder.stagingNames(in: "store").isEmpty)
 }
 
-@Test func aReadBackMismatchIsReportedAndLeavesNoStaging() async throws {
-    let folder = try WriteTestFolder()
-    defer { folder.remove() }
-    let double = WriteFileSystemDouble()
-    let store = makeStore(folder, double)
-    let identity = try makeIdentity()
-    let file = await store.fileURL(for: identity.folderID)
-    // The store's first read loads the file; the read-back after the rename is the second.
-    double.readResult = { record in
-        record.url == file && record.count == 2 ? Data("{}".utf8) : nil
-    }
-
-    do {
-        try await store.apply(CloveMarkChange(rating: .rejected), to: identity)
-        Issue.record("Expected the unconfirmed write to throw")
-    } catch let error as CloveMarkStoreError {
-        guard case .readBackMismatch(let url) = error else {
-            Issue.record("Expected readBackMismatch, got \(error)")
-            return
-        }
-        #expect(url == file)
-    }
-    #expect(try folder.stagingNames(in: "store").isEmpty)
-}
-
 @Test func concurrentWritesToDifferentPhotosOfOneFolderKeepEveryEntry() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }

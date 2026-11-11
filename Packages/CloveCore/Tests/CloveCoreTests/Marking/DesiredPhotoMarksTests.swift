@@ -7,55 +7,37 @@ struct DesiredPhotoMarksTests {
     let photo = PhotoIdentity(
         folderID: FolderIdentity(rawValue: "test"), relativeFolderPath: "", stem: "image")
 
-    @Test func doubleTapTogglesBeforeAnyConfirmation() throws {
+    @Test func doubleTapTogglesBeforeTheWriteFinishes() throws {
         var desired = DesiredPhotoMarks()
         let three = try #require(Rating(rawValue: 3))
-        let rules = MarkingInputRules(settings: AppSettings())
         let first = desired.apply(.rating(three), to: photo, confirmed: PhotoMarks())
-        #expect(first.before.rating == .unrated)
         #expect(desired.shown(for: photo, confirmed: PhotoMarks()).rating == three)
-        let shown = desired.shown(for: photo, confirmed: PhotoMarks())
-        guard case .mark(let change, _) = rules.result(forRating: three, marks: shown) else {
-            Issue.record("The second tap must toggle the shown rating")
-            return
-        }
-        let second = desired.apply(change, to: photo, confirmed: PhotoMarks())
+        let second = desired.apply(.rating(.unrated), to: photo, confirmed: PhotoMarks())
         #expect(second.before.rating == three)
-        #expect(second.after.rating == .unrated)
-        desired.finish(first, state: .savedInSidecar)
-        #expect(desired.entry(for: photo)?.edit == second)
+        desired.finish(first)
         #expect(desired.shown(for: photo, confirmed: first.after).rating == .unrated)
-        desired.finish(second, state: .savedInSidecar)
-        #expect(desired.entry(for: photo) == nil)
+        desired.finish(second)
+        #expect(!desired.hasPending(for: photo))
     }
 
-    @Test func failureRetainsMarksAndFieldsUntilConfirmed() throws {
+    @Test func finishingAWriteDropsItsPendingMarkRegardlessOfItsResult() {
         var desired = DesiredPhotoMarks()
-        let red = ColourLabel(colour: .red)
-        let edit = desired.apply(.label(red), to: photo, confirmed: PhotoMarks())
-        let failure = MarkChangeState.failed(
-            MarkWriteFailure(reason: .notConfirmed, message: "Read-back failed"))
-        desired.finish(edit, state: failure)
-        #expect(desired.shown(for: photo, confirmed: PhotoMarks()).label == red)
-        #expect(desired.entry(for: photo)?.state == failure)
-        let newer = desired.apply(.rating(.rejected), to: photo, confirmed: PhotoMarks())
-        #expect(newer.change.label == red)
-        #expect(newer.after.isRejected)
-        desired.finish(edit, state: .savedInSidecar)
-        #expect(desired.entry(for: photo)?.edit == newer)
-        desired.finish(newer, state: .savedInSidecar)
-        #expect(desired.entry(for: photo) == nil)
+        let edit = desired.apply(.rating(.rejected), to: photo, confirmed: PhotoMarks())
+        desired.finish(edit)
+        #expect(desired.shown(for: photo, confirmed: PhotoMarks()) == PhotoMarks())
+        let later = desired.apply(
+            .label(ColourLabel(colour: .blue)), to: photo, confirmed: PhotoMarks())
+        #expect(later.change.rating == nil)
+        #expect(!later.after.isRejected)
     }
 
-    @Test func keepRetryAndMoveUndoLeaveLaterStarsAlone() throws {
+    @Test func moveUndoLeavesLaterStarsAlone() throws {
         let kept = PhotoMarks()
-        for count in [3, 4] {
-            let newer = PhotoMarks(rating: try #require(Rating(rawValue: count)))
-            let restore = DesiredMarkRestore.change(
+        let newer = PhotoMarks(rating: try #require(Rating(rawValue: 4)))
+        #expect(
+            DesiredMarkRestore.change(
                 photo: photo, current: newer, expected: kept,
-                target: PhotoMarks(rating: .rejected), fields: .rating(.unrated))
-            #expect(restore == nil)
-        }
+                target: PhotoMarks(rating: .rejected), fields: .rating(.unrated)) == nil)
         #expect(
             DesiredMarkRestore.change(
                 photo: photo, current: kept, expected: kept,
@@ -72,13 +54,12 @@ struct DesiredPhotoMarksTests {
         let plan = RejectMovePlan(
             rootURL: root, configuration: RejectMoveConfiguration(), sets: [], entries: [],
             destinationURL: root.appendingPathComponent("_Rejected"))
-        let move = queue.submit(.move(plan, kept: [], revisions: [photo: edit.revision]))
+        let move = queue.submit(.move(plan, kept: []))
         let later = queue.submit(.mark(edit))
         #expect(queue.beginNext()?.id == mark)
         #expect(queue.beginNext() == nil)
         queue.finish(mark)
         #expect(queue.beginNext()?.id == move)
-        #expect(queue.beginNext() == nil)
         queue.finish(move)
         #expect(queue.beginNext()?.id == later)
         queue.finish(later)

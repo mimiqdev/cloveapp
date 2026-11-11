@@ -258,19 +258,12 @@ public enum RejectMoveRefusal: Error, Hashable, Sendable, CustomStringConvertibl
     case disabled
     /// The opened location reports itself read-only (PRD Failure and recovery).
     case readOnlyLocation(RejectMoveFailure)
-    /// The run was undone, so none of its sets may move into the rejects folder again.
-    ///
-    /// PRD P0-10's Undo rule undoes a completed move once: after the files came back, a retry
-    /// that moved more of that run would leave photos under the rejects folder with no undo
-    /// step left to restore them.
-    case undone(RejectMoveBatchID)
 
     /// A developer-facing explanation; product copy belongs to the result UI.
     public var description: String {
         switch self {
         case .disabled: "Move rejects is turned off."
         case .readOnlyLocation(let failure): failure.description
-        case .undone(let batch): "The move \(batch) was undone, so it can't be retried."
         }
     }
 }

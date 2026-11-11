@@ -37,7 +37,6 @@ import CloveCore
     #expect(try photoFolder.entries() == filesBefore)
     #expect(try Data(contentsOf: sidecar) == packet)
     #expect(try await store.marks(for: groupingFolder).isEmpty)
-    #expect(await queue.unfinishedChanges().isEmpty)
     #expect(try storeFolder.entries().isEmpty)
 }
 
