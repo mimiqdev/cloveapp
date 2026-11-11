@@ -84,9 +84,10 @@ trap cleanup EXIT
 
 # The UI test runner intermittently fails to attach before the assertion runs.
 # Those failures are infrastructure, not test results, so retry them on a fresh
-# simulator; assertion failures are reported immediately.
+# simulator. Only a run in which no test case started counts: once one has run,
+# any failure is reported, so a retry can never hide an assertion failure.
 is_runner_failure() {
-    grep -q \
+    ! grep -qF "Test Case '-[" "$log" && grep -q \
         -e "failed to initialize for UI testing" \
         -e "Timed out waiting for AX loaded notification" \
         -e "operation never finished bootstrapping" \

@@ -15,9 +15,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels its older run. Each push to main has its
+# own group and is never cancelled, so every main commit gets a verdict. A manual
+# run with pr=N stays out of that pull request's group.
 concurrency:
-  group: verify-${{ github.event.pull_request.number || inputs.pr || github.ref }}
-  cancel-in-progress: true
+  group: verify-${{ github.event_name == 'push' && format('main-{0}', github.sha) || format('{0}-{1}', github.event_name, github.event.pull_request.number || inputs.pr || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # An explicit bash shell adds -o pipefail, so `| tee` never hides a failure.
 defaults:
@@ -28,6 +31,7 @@ env:
   # The pull request's head, never refs/pull/N/merge; each job merges the latest main into it.
   HEAD_REF: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha || github.sha }}
 
+# These jobs re-list the steps of `mise run verify` in mise.toml; change both together.
 jobs:
   scripts:
     name: Python script tests
