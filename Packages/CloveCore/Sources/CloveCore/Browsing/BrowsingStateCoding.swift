@@ -145,12 +145,16 @@ private struct EncodedFilter: Codable {
 
     var filter: PhotoFilter? {
         switch kind {
-        case "all": .all
-        case "unmarked": .unmarked
-        case "rejected": .rejected
+        case "all": return .all
+        case "unmarked": return .unmarked
+        case "rejected": return .rejected
         case "ratedAtLeast":
-            minimum.flatMap(Rating.init(rawValue:)).map(PhotoFilter.ratedAtLeast)
-        default: nil
+            // Reject is −1 and unrated is 0, so neither can be a star minimum (PRD P0-03).
+            guard let minimum, minimum > Rating.unrated.rawValue,
+                let rating = Rating(rawValue: minimum)
+            else { return nil }
+            return .ratedAtLeast(rating)
+        default: return nil
         }
     }
 }
