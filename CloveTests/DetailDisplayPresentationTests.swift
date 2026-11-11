@@ -48,6 +48,32 @@ private final class ObservedDetailImages: DetailImageSource {
 @Suite(.serialized)
 @MainActor
 struct DetailDisplayPresentationTests {
+    @Test func productionPlaceholderReadsTheGridCacheWithoutRequestingGridWork() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pixels = try testPixels(gray: 0.4)
+        let file = directory.appendingPathComponent("photo.JPG")
+        let data = try #require(UIImage(cgImage: pixels).jpegData(compressionQuality: 0.9))
+        try data.write(to: file)
+        let set = try PhotoSet(
+            folderID: FolderIdentity(rawValue: "placeholder"), relativeFolderPath: "", jpegURL: file
+        )
+        let cache = try ThumbnailCache(directory: directory.appendingPathComponent("cache"))
+        let request = ThumbnailRequest(
+            source: file, revision: try ThumbnailRevision.read(from: file),
+            locationIdentity: set.id.folderID.rawValue)
+        try cache.store(.available(Thumbnail(image: pixels, route: .always)), for: request)
+        let grid = RefusedPlaceholderThumbnails()
+        let pipeline = DetailPipeline()
+        let source = PipelineDetailImages(pipeline: pipeline, thumbnails: cache, set: { _ in set })
+        let placeholder = await source.placeholder(for: set.id, gridThumbnails: grid)
+        #expect(placeholder === pixels)
+        #expect(grid.requests == 0)
+        await pipeline.close()
+    }
+
     @Test func uncachedPhotoShowsItsGridThumbnailWhileDetailIsPending() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
@@ -81,8 +107,12 @@ struct DetailDisplayPresentationTests {
         try await waitFor { image.image?.cgImage === thumbnail }
         #expect(!source.deliveries.contains { $0.0 == next.id })
         #expect(preview.accessibilityLabel == next.fileName)
+        #expect(!(preview.accessibilityValue ?? "").localizedCaseInsensitiveContains("loading"))
         func hasLoadingCue(_ view: UIView) -> Bool {
             if view is UIActivityIndicatorView { return true }
+            if (view.accessibilityValue ?? "").localizedCaseInsensitiveContains("loading") {
+                return true
+            }
             if let text = (view as? UILabel)?.text, text.localizedCaseInsensitiveContains("loading")
             {
                 return true
@@ -391,6 +421,18 @@ struct DetailDisplayPresentationTests {
         }
         return nil
     }
+}
+
+@MainActor
+private final class RefusedPlaceholderThumbnails: GridThumbnailSource {
+    private(set) var requests = 0
+    func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority) async
+        -> GridThumbnailOutcome
+    {
+        requests += 1
+        return .deferred
+    }
+    func companions(for photo: PhotoIdentity) -> GridCompanions { GridCompanions() }
 }
 
 @MainActor

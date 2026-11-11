@@ -101,6 +101,7 @@ public actor DetailPipeline {
         if let generation, generation != navigationGeneration { return }
         cache.navigate(to: current)
         for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
+        latest = latest.filter { jobs[$0.value] != nil }
     }
 
     /// The app reserves arrival ownership before any file-system work. An older
@@ -109,6 +110,7 @@ public actor DetailPipeline {
         guard !closed, generation > navigationGeneration else { return }
         navigationGeneration = generation
         for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
+        latest = latest.filter { jobs[$0.value] != nil }
     }
 
     /// Immediate fit pixels: held screen RAW in RAW mode, otherwise the camera preview.
@@ -162,6 +164,7 @@ public actor DetailPipeline {
 
     public func releaseCachedImages() {
         for job in Array(jobs.values) { cancel(job.id) }
+        latest.removeAll()
         cache.releaseAll()
     }
 
@@ -183,10 +186,12 @@ public actor DetailPipeline {
     ) async throws -> DetailResult {
         let id = UUID()
         let cancellation = DetailCancellation()
+        defer { if latest[consumer] == id { latest[consumer] = nil } }
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             guard !closed else { throw DetailPipelineError.closed }
             if let old = latest[consumer] { cancel(old, preservingRunningScreen: true) }
+            latest[consumer] = id
             let cache = cache
             let sizes = sizes
             let hit = await Task.detached(priority: .userInitiated) {
@@ -194,9 +199,9 @@ public actor DetailPipeline {
             }.value
             try Task.checkCancellation()
             guard !closed else { throw DetailPipelineError.closed }
+            guard latest[consumer] == id else { throw CancellationError() }
             if let hit { return hit }
             return try await withCheckedThrowingContinuation { continuation in
-                if let old = latest[consumer] { cancel(old, preservingRunningScreen: true) }
                 if queue.count >= queueLimit {
                     if priority == .visible,
                         let victim = queue.last(where: { jobs[$0]?.priority == .prefetch })
@@ -334,10 +339,16 @@ public actor DetailPipeline {
             if best == nil { best = image }
         }
         guard let best else { return nil }
-        let size =
-            camera.map { sizes.nativeSize(of: $0, isRAW: false) }
-            ?? fullResolutionSize(
-                for: request, previewLongEdge: best.longEdge, cache: cache, sizes: sizes)
+        let size: CGSize?
+        if let camera {
+            size = sizes.nativeSize(of: camera, isRAW: false)
+        } else if let reference = request.raw ?? request.jpeg,
+            case .known(let known) = cache.nativeSize(for: reference)
+        {
+            size = known
+        } else {
+            size = nil
+        }
         let shown = best.withFullResolution(size, hasRAW: request.raw != nil)
         if effort == .best, request.jpeg == nil {
             return verified(.available(shown.limited(by: .noHigherResolution)))
@@ -358,9 +369,9 @@ public actor DetailPipeline {
             return verified(.available(held))
         }
 
-        var best: DetailImage?
+        var best: DetailImage? = usesRAW ? cache.screen(for: request) : nil
         var failures: [DetailFailure] = []
-        for step in DetailPreviewPlan.steps(for: request) {
+        for step in best == nil ? DetailPreviewPlan.steps(for: request) : [] {
             guard isCurrent(step.source) else { return .unavailable(.sourceChanged) }
             let key = DetailCacheKey(
                 source: step.source, locationIdentity: request.locationIdentity,
@@ -373,7 +384,9 @@ public actor DetailPipeline {
                     let candidate = DetailImage(
                         image: pixels, source: step.source,
                         quality: step.quality, hasRAW: false)
-                    job.cancellation.storeIfActive { cache.store(candidate, for: key) }
+                    if let compressed = DetailCompressedImage(candidate) {
+                        job.cancellation.storeIfActive { cache.store(compressed, for: key) }
+                    }
                     image = candidate
                 case .cannotOpen: failures.append(.cannotOpen)
                 case .noUsablePreview: failures.append(.noUsablePreview)
@@ -501,8 +514,11 @@ public actor DetailPipeline {
         let rendered = DetailImage(
             image: pixels, source: raw, quality: .screenRAW,
             hasRAW: true, fullResolutionSize: fullSize)
+        let compressed = DetailCompressedImage(rendered)
         return publish(rendered, job: job) {
-            cache.storeScreen(rendered, for: job.request)
+            if let compressed, let key = DetailCache.screenKey(job.request) {
+                cache.store(compressed, for: key)
+            }
         }
     }
 

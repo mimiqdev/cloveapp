@@ -64,7 +64,7 @@ struct DetailCacheTests {
         // Only two JPEGs fit, even though their decoded bitmaps exceed the budget.
         #expect(sample.decodedBytes > configuration.compressedBytes)
         func store(_ index: Int) {
-            cache.store(sample, for: keys[index])
+            cache.store(compressed, for: keys[index])
             #expect(cache.compressedCost <= configuration.compressedBytes)
         }
         store(0)
@@ -85,7 +85,9 @@ struct DetailCacheTests {
         let file = try directory.image(name: "big.JPG")
         let cache = directory.cache(megabytes: 0)
         let source = try detailSource(file)
-        cache.store(try image(file, width: 1024, height: 512), for: key(source))
+        cache.store(
+            try #require(DetailCompressedImage(image(file, width: 1024, height: 512))),
+            for: key(source))
         #expect(cache.imageCount == 0)
         #expect(cache.compressedCost == 0)
         #expect(cache.image(for: key(source)) == nil)
@@ -118,7 +120,9 @@ struct DetailCacheTests {
         let file = try directory.image(name: "bytes.JPG")
         let cache = directory.cache()
         let source = try detailSource(file)
-        cache.store(try image(file, width: 64, height: 48), for: key(source))
+        cache.store(
+            try #require(DetailCompressedImage(image(file, width: 64, height: 48))),
+            for: key(source))
         cache.storeNative(
             try image(file, width: 64, height: 48), for: key(source, purpose: .nativeRAW))
         #expect(cache.imageCount == 1 && cache.holdsNativeImage)
@@ -171,7 +175,9 @@ struct DetailCacheTests {
         let file = try directory.image(name: "bytes.JPG")
         let cache = directory.cache()
         let source = try detailSource(file)
-        cache.store(try image(file, width: 64, height: 48), for: key(source))
+        cache.store(
+            try #require(DetailCompressedImage(image(file, width: 64, height: 48))),
+            for: key(source))
         // A different mount at the same path is a different source.
         #expect(
             cache.image(

@@ -1,5 +1,6 @@
 import CloveCore
 import CloveImaging
+import CoreGraphics
 import Foundation
 
 /// The folder supplies session admission, so its security scope outlives every
@@ -16,6 +17,7 @@ extension DetailWorkAdmission {
 @MainActor
 final class PipelineDetailImages: DetailImageSource {
     private let pipeline: DetailPipeline
+    private let thumbnails: ThumbnailCache?
     private let set: @MainActor (PhotoIdentity) -> PhotoSet?
     private let admitted: DetailWorkAdmission
     private let consumer = UUID()
@@ -24,12 +26,40 @@ final class PipelineDetailImages: DetailImageSource {
 
     init(
         pipeline: DetailPipeline,
+        thumbnails: ThumbnailCache? = nil,
         set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
         admitted: DetailWorkAdmission = .direct
     ) {
         self.pipeline = pipeline
+        self.thumbnails = thumbnails
         self.set = set
         self.admitted = admitted
+    }
+
+    /// Reads the shared grid cache directly, without entering the grid work queue.
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        guard let thumbnails, let sources = sources(for: photo) else { return nil }
+        let outcome = await admitted.image {
+            guard
+                let request = sources.request(
+                    for: DetailPixelRequest(displayPixels: 400, need: .preview)),
+                let source = request.raw ?? request.jpeg ?? request.heif
+            else { return .deferred }
+            let key = ThumbnailRequest(
+                source: source.url, revision: source.revision, targetPixels: 400,
+                locationIdentity: request.locationIdentity)
+            guard case .available(let thumbnail) = thumbnails.result(for: key) else {
+                return .deferred
+            }
+            return .image(
+                DetailImage(
+                    image: thumbnail.image, source: source, quality: .preview,
+                    hasRAW: request.raw != nil))
+        }
+        if case .image(let image) = outcome { return image.image }
+        return nil
     }
 
     func prepare(_ window: DetailPhotoWindow) async {

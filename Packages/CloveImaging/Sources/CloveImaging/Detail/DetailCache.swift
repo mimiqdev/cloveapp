@@ -126,11 +126,6 @@ public final class DetailCache: Sendable {
         return image(for: key)
     }
 
-    func storeScreen(_ image: DetailImage, for request: DetailRequest) {
-        guard let key = Self.screenKey(request) else { return }
-        store(image, for: key)
-    }
-
     func cameraFailed(_ source: DetailSource) -> Bool {
         state.withLock { $0.cameraFailures.contains(source) }
     }
@@ -156,9 +151,8 @@ public final class DetailCache: Sendable {
         return compressed?.decoded()
     }
 
-    /// Encodes once on the producing worker, then evicts by compressed byte cost.
-    func store(_ image: DetailImage, for key: DetailCacheKey) {
-        guard let compressed = DetailCompressedImage(image) else { return }
+    /// Inserts encoded bytes under the caller's cancellation guard, without doing pixel work.
+    func store(_ compressed: DetailCompressedImage, for key: DetailCacheKey) {
         state.withLock { state in
             state.compressedCost -= state.images.removeValue(forKey: key)?.image.data.count ?? 0
             guard compressed.data.count <= configuration.compressedBytes else { return }

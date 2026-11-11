@@ -727,7 +727,7 @@ final class FolderLibrarySession: FolderLibrary {
             rejectsFolderName: rejectsFolderName().rawValue)
         let caches = await Self.makeCaches()
         thumbnailSource = makeThumbnailSource(for: session, caches: caches)
-        detailSource = makeDetailSource(for: session)
+        detailSource = makeDetailSource(for: session, thumbnails: caches?.thumbnails)
         // The loss is reported for the folder this open installed, never for a later one.
         let monitor = makeLocationMonitor(for: session, mediaType: opened.recent.mediaType)
         locationMonitor = monitor
@@ -1150,12 +1150,14 @@ final class FolderLibrarySession: FolderLibrary {
     /// G1 keeps detail images in memory (64 MiB compressed plus one native render), so the pipeline needs
     /// no directory, unlike the grid's disk cache. Its reads are admitted through the folder's
     /// C11 session, so ending the folder waits for a read before releasing the scope.
-    private func makeDetailSource(for session: FolderAccessSession) -> any DetailImageSource {
+    private func makeDetailSource(
+        for session: FolderAccessSession, thumbnails: ThumbnailCache?
+    ) -> any DetailImageSource {
         let pipeline = DetailPipeline()
         detailPipeline = pipeline
         let folder = session.folder.id
         return PipelineDetailImages(
-            pipeline: pipeline,
+            pipeline: pipeline, thumbnails: thumbnails,
             set: { [weak self] photo in self?.store.scannedSet(for: photo)?.photoSet },
             admitted: DetailWorkAdmission(
                 image: { [weak self] work in

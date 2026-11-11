@@ -333,6 +333,7 @@ struct DetailMarkingView: View {
             probe: probe
         )
         .accessibilityLabel(photo.fileName)
+        .accessibilityValue(shown == nil ? "" : zoomName)
         .opacity(
             displayMarks.isRejected ? theme.tokens.rejectedOpacity : 1
         )
@@ -427,16 +428,13 @@ struct DetailMarkingView: View {
             zoomMode = .fit
             setZoom(.fit)
         }
+        let thumbnail = await images.placeholder(
+            for: photo.id, gridThumbnails: browsing.thumbnails)
+        guard !Task.isCancelled else { return }
         shown = nil
-        phase = .placeholder(nil)
+        phase = .placeholder(thumbnail)
         limitation = nil
         previewOnly = false
-        if case .image(let pixels) = await browsing.thumbnails.thumbnail(
-            for: photo.id, priority: .visible)
-        {
-            guard !Task.isCancelled else { return }
-            phase = .placeholder(pixels)
-        }
         // Wait for the display, not just layout: the first render must use the
         // same physical screen edge as later photos and their held-render keys.
         for _ in 0..<120 {
