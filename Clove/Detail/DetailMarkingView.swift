@@ -333,7 +333,7 @@ struct DetailMarkingView: View {
             probe: probe
         )
         .accessibilityLabel(photo.fileName)
-        .accessibilityValue(shown == nil ? "" : zoomName)
+        .accessibilityValue(shown == nil ? "" : "Loaded")
         .opacity(
             displayMarks.isRejected ? theme.tokens.rejectedOpacity : 1
         )
