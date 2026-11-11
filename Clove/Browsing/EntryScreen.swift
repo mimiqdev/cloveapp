@@ -95,7 +95,7 @@ struct EntryScreen: View {
 
     private func heroCard(_ recent: RecentFolder) -> some View {
         Button {
-            if needsReconnect(recent) {
+            if needsReconnect(recent) || browsing.recentFailure(for: recent.id) != nil {
                 isPickingFolder = true
             } else {
                 Task { await browsing.resume(recent) }
@@ -185,7 +185,7 @@ struct EntryScreen: View {
     private func recentRow(_ recent: RecentFolder) -> some View {
         let reconnect = needsReconnect(recent)
         return Button {
-            if reconnect {
+            if reconnect || browsing.recentFailure(for: recent.id) != nil {
                 isPickingFolder = true
             } else {
                 Task { await browsing.reopen(recent) }

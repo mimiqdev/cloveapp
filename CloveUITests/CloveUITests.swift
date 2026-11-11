@@ -365,6 +365,10 @@ final class CloveUITests: XCTestCase {
             element(in: app, "clove.root").waitForExistence(timeout: 30),
             "The Clove root view did not appear")
         openSettings(in: app)
+        chooseAdvanceDestination("Next unmarked photo", in: app)
+        setAutoAdvanceEnabled(false, in: app)
+        _ = scrollToSettingsControl(
+            "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
         setAppearanceMatchSystem(in: app, on: true)
         attachScreenshot(named: "settings-appearance-light")
         setAppearanceMatchSystem(in: app, on: false)
@@ -392,12 +396,38 @@ final class CloveUITests: XCTestCase {
                 of: app.buttons["clove.settings.appearance.theme.nord"], timeout: 10),
             "The relaunch lost the chosen theme")
 
+        setAutoAdvanceEnabled(true, in: app)
+        let destination = scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app)
+        XCTAssertTrue(
+            destination.label.contains("Next unmarked photo")
+                || String(describing: destination.value).contains("Next unmarked photo"),
+            "Disabling and relaunching lost the remembered auto-advance destination")
+        chooseAdvanceDestination("Next photo", in: app)
+        _ = scrollToSettingsControl(
+            "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
+
         // Matching the system again in a light simulator brings the Light theme back: the theme
         // follows the device, not the dark color scheme the app had set for Nord.
         setAppearanceMatchSystem(in: app, on: true)
         XCTAssertTrue(
             waitForSelection(of: app.buttons["clove.settings.appearance.theme.light"], timeout: 5),
             "Matching a light system did not bring the Light theme back")
+    }
+
+    @MainActor
+    private func chooseAdvanceDestination(_ name: String, in app: XCUIApplication) {
+        scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app).tap()
+        app.buttons[name].firstMatch.tap()
+    }
+
+    @MainActor
+    private func setAutoAdvanceEnabled(_ enabled: Bool, in app: XCUIApplication) {
+        let toggle = scrollToSettingsControl(
+            "clove.settings.autoAdvanceEnabled", in: app, scrollsUp: false)
+        if switchValue(toggle) != (enabled ? "1" : "0") {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(waitForValue(enabled ? "1" : "0", of: toggle, timeout: 5))
     }
 
     /// Puts the app back on Match system light/dark and the Light theme after the appearance test,
@@ -1070,12 +1100,12 @@ final class CloveUITests: XCTestCase {
     /// fails the check instead of hanging the run.
     @MainActor
     private func scrollToSettingsControl(
-        _ identifier: String, in app: XCUIApplication, swipes: Int = 6
+        _ identifier: String, in app: XCUIApplication, swipes: Int = 6, scrollsUp: Bool = true
     ) -> XCUIElement {
         let control = element(in: app, identifier)
         for _ in 0..<swipes {
             if control.exists && control.isHittable { return control }
-            app.swipeUp()
+            if scrollsUp { app.swipeUp() } else { app.swipeDown() }
         }
         return control
     }

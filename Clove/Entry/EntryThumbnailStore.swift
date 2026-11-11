@@ -1,13 +1,21 @@
 import CloveCore
+import CloveImaging
 import CryptoKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Four small cached previews per recent folder (handoff Entry; G1 preview strategy).
-/// Entry reads only this app-private cache, never a bookmark or the original folder.
+/// Small app-private Entry previews, keyed by photo identity and the source revision (handoff Entry).
+/// Entry reads this cache without resolving a bookmark or reading the original folder.
 actor EntryThumbnailStore {
     static let shared = EntryThumbnailStore()
+
+    struct SourceRevision: Codable, Hashable, Sendable {
+        let sourceName: String
+        let file: ThumbnailRevision
+    }
+
+    private var retainedNames: [FolderIdentity: Set<String>] = [:]
 
     private func directory(for folder: FolderIdentity) -> URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
@@ -25,16 +33,28 @@ actor EntryThumbnailStore {
     }
 
     func image(for photo: PhotoIdentity) -> CGImage? {
-        guard let url = file(for: photo),
-            let source = CGImageSourceCreateWithURL(url as CFURL, nil)
-        else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        guard let url = file(for: photo) else { return nil }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else {
+            try? FileManager.default.removeItem(at: url.appendingPathExtension("json"))
+            return nil
+        }
+        return image
     }
 
-    func store(_ image: CGImage, for photo: PhotoIdentity, keeping photos: [PhotoIdentity]) {
-        guard let url = file(for: photo), let directory = directory(for: photo.folderID) else {
-            return
-        }
+    func contains(_ photo: PhotoIdentity, revision: SourceRevision) -> Bool {
+        guard let url = file(for: photo), FileManager.default.fileExists(atPath: url.path),
+            let data = try? Data(contentsOf: url.appendingPathExtension("json")),
+            let saved = try? JSONDecoder().decode(SourceRevision.self, from: data)
+        else { return false }
+        return saved == revision
+    }
+
+    func store(_ image: CGImage, for photo: PhotoIdentity, revision: SourceRevision) {
+        guard !contains(photo, revision: revision), let url = file(for: photo),
+            let directory = directory(for: photo.folderID)
+        else { return }
         do {
             try FileManager.default.createDirectory(
                 at: directory, withIntermediateDirectories: true)
@@ -48,14 +68,32 @@ actor EntryThumbnailStore {
                 [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
             guard CGImageDestinationFinalize(destination) else { return }
             try (data as Data).write(to: url, options: .atomic)
-            let keep = Set(photos.compactMap { file(for: $0)?.lastPathComponent })
+            try JSONEncoder().encode(revision).write(
+                to: url.appendingPathExtension("json"), options: .atomic)
+        } catch {
+            // A cache failure remains a placeholder, never a mark-save failure.
+        }
+    }
+
+    /// Prunes once when the retained identities change, preserving names from the progress record
+    /// even when a partial scan has not rediscovered their source files.
+    func retain(_ photos: [PhotoIdentity], in folder: FolderIdentity) {
+        guard let directory = directory(for: folder) else { return }
+        let keep = Set(
+            photos.filter { $0.folderID == folder }.compactMap { file(for: $0) }
+                .flatMap {
+                    [$0.lastPathComponent, $0.appendingPathExtension("json").lastPathComponent]
+                })
+        guard retainedNames[folder] != keep else { return }
+        do {
             for old in try FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil)
             where !keep.contains(old.lastPathComponent) {
                 try? FileManager.default.removeItem(at: old)
             }
+            retainedNames[folder] = keep
         } catch {
-            // A cache miss is a placeholder; it never blocks opening or reports a save failure.
+            // There may be no previews yet.
         }
     }
 }

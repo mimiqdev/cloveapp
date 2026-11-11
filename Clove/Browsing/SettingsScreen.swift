@@ -7,7 +7,6 @@ struct SettingsScreen: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
     @State private var rejectsFolderNameDraft = ""
-    @State private var lastAdvanceDestination: AutoAdvanceDestination = .nextPhoto
 
     private static let ratingLevels = (1...5).compactMap { Rating(rawValue: $0) }
 
@@ -29,13 +28,9 @@ struct SettingsScreen: View {
         .accessibilityIdentifier("clove.settings")
         .onAppear {
             rejectsFolderNameDraft = store.settings.rejectsFolderName.rawValue
-            rememberAdvanceDestination(store.settings.autoAdvance.destination)
         }
         .onChange(of: store.settings.rejectsFolderName) { _, name in
             rejectsFolderNameDraft = name.rawValue
-        }
-        .onChange(of: store.settings.autoAdvance.destination) { _, destination in
-            rememberAdvanceDestination(destination)
         }
     }
 
@@ -66,12 +61,7 @@ struct SettingsScreen: View {
                 "Auto-advance after marking",
                 isOn: Binding(
                     get: { store.settings.autoAdvance.destination != .stay },
-                    set: { enabled in
-                        rememberAdvanceDestination(store.settings.autoAdvance.destination)
-                        store.update {
-                            $0.autoAdvance.destination = enabled ? lastAdvanceDestination : .stay
-                        }
-                    })
+                    set: { store.setAutoAdvanceEnabled($0) })
             )
             .tint(theme.tokens.saved.color)
             .accessibilityIdentifier("clove.settings.autoAdvanceEnabled")
@@ -199,10 +189,6 @@ struct SettingsScreen: View {
         Text(title).font(.caption).foregroundStyle(Color.clove.text.secondary)
             .textCase(.uppercase)
             .accessibilityIdentifier("clove.settings.section.\(identifier)")
-    }
-
-    private func rememberAdvanceDestination(_ destination: AutoAdvanceDestination) {
-        if destination != .stay { lastAdvanceDestination = destination }
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {

@@ -273,6 +273,9 @@ protocol FolderLibrary: AnyObject {
     /// Remembers the last viewed photo with confirmed progress (handoff Entry).
     func recordEntryProgress(lastViewed: PhotoIdentity?) async
 
+    /// Flushes progress and the latest hero preview before leaving or backgrounding (handoff Entry).
+    func flushEntryState(lastViewed: PhotoIdentity?) async
+
     /// Cached previews for Entry; no folder access is performed here (handoff Entry).
     func entryThumbnail(for photo: PhotoIdentity) async -> GridThumbnailOutcome
 
@@ -323,6 +326,10 @@ extension FolderLibrary {
     func setEntryResumePhoto(_ photo: PhotoIdentity) {}
 
     func recordEntryProgress(lastViewed: PhotoIdentity?) async {}
+
+    func flushEntryState(lastViewed: PhotoIdentity?) async {
+        await recordEntryProgress(lastViewed: lastViewed)
+    }
 
     func entryThumbnail(for photo: PhotoIdentity) async -> GridThumbnailOutcome {
         guard let image = await EntryThumbnailStore.shared.image(for: photo) else {

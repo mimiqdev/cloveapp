@@ -185,7 +185,7 @@ struct SaveFailureBanner: View {
 /// repeating the whole folder. Retry resends one photo's latest failed change, and Retry all
 /// makes the same call for each, so a row never claims a save C4 has not confirmed.
 ///
-/// Design placeholder: a system list, sheet and buttons stand in for the design's list.
+/// Uses a system list and sheet for the retry details outside the designed error banner.
 struct UnsavedChangesView: View {
     /// The scene's browsing state and the retry calls this list makes.
     let browsing: BrowsingModel

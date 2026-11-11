@@ -7,6 +7,11 @@ struct EntryPhoto: View {
     let browsing: BrowsingModel
     @State private var image: CGImage?
 
+    private struct Request: Hashable {
+        let photo: PhotoIdentity?
+        let generation: Int
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -25,7 +30,7 @@ struct EntryPhoto: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .clipped()
-        .task(id: photo) {
+        .task(id: Request(photo: photo, generation: browsing.entryPreviewGeneration)) {
             image = nil
             guard let photo else { return }
             if case .image(let loaded) = await browsing.entryThumbnail(for: photo),
