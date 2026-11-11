@@ -702,6 +702,15 @@ final class TestLibrary: FolderLibrary {
     /// Held presentation states for screenshots and short UI tests. Normal sample launches
     /// remain fully opened and saved. Values are read only when the test library is selected.
     private func installPresentationSamples(environment: [String: String]) {
+        if let state = environment["CLOVE_TEST_LIBRARY_GROUP_STATE"],
+            let group = groups.first, state == "unmarked" || state == "done"
+        {
+            for index in stored.indices where group.members.contains(stored[index].id) {
+                stored[index].marks =
+                    state == "done"
+                    ? PhotoMarks(rating: index == 0 ? Self.stars(3) : .rejected) : PhotoMarks()
+            }
+        }
         if let opening = environment["CLOVE_TEST_LIBRARY_OPENING"] {
             if opening == "reading" || opening == "empty" {
                 updateContinuation.yield(.scanStarted)

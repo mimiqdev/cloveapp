@@ -537,67 +537,33 @@ extension CloveUITests {
 
     @MainActor
     private func cullTheGroup(in app: XCUIApplication) {
-        checkGroupHeader(in: app)
-        rateWithinTheGroup(in: app)
-        finishTheFirstGroup(in: app)
-        rateInTheNextGroup(in: app)
-        finishTheLastGroup(in: app)
+        // The group opens at its first undecided photo, with detail's capsule.
+        XCTAssertEqual(groupHeader(in: app).label, "1 undecided")
+        XCTAssertTrue(element(in: app, "clove.detail.filmstrip.mmq02681").isSelected)
+        element(in: app, "clove.detail.capsule.stars.3").tap()
+        XCTAssertTrue(element(in: app, "clove.group.continue").waitForExistence(timeout: 5))
+        element(in: app, "clove.group.continue").tap()
+        waitForFileName("MMQ02680.ARW", in: app)
+        back(in: app)
+
+        let nextGroup = element(in: app, "clove.grid.group.burst-2696")
+        for _ in 0..<4 {
+            if nextGroup.exists && nextGroup.isHittable { break }
+            app.swipeUp()
+        }
+        nextGroup.tap()
+        element(in: app, "clove.detail.capsule.stars.4").tap()
+        let second = element(in: app, "clove.detail.filmstrip.mmq02697")
+        XCTAssertTrue(waitForSelection(of: second, timeout: 5))
+        element(in: app, "clove.detail.capsule.stars.3").tap()
+        let last = element(in: app, "clove.detail.filmstrip.mmq02698")
+        XCTAssertTrue(waitForSelection(of: last, timeout: 5))
+        element(in: app, "clove.group.rejectUnmarked").tap()
+        XCTAssertTrue(element(in: app, "clove.group.continue").waitForExistence(timeout: 5))
+        element(in: app, "clove.group.continue").tap()
+        waitForFileName("MMQ02699.ARW", in: app)
+        back(in: app)
         checkTheFinishingRejects(in: app)
-    }
-
-    @MainActor
-    private func checkGroupHeader(in app: XCUIApplication) {
-        waitForFileName("MMQ02678.ARW", in: app)
-        XCTAssertEqual(
-            groupHeader(in: app).label, "Undecided 1 / 3 total",
-            "The group view lost C10's undecided count")
-    }
-
-    @MainActor
-    private func rateWithinTheGroup(in app: XCUIApplication) {
-        let threeStars = element(in: app, "clove.detail.rate.3")
-        XCTAssertTrue(
-            threeStars.waitForExistence(timeout: 10), "The group view had no rating bar")
-        threeStars.tap()
-
-        // The group's only undecided photo is its third member; the two decided ones are skipped.
-        waitForFileName("MMQ02681.ARW", in: app)
-    }
-
-    @MainActor
-    private func finishTheFirstGroup(in app: XCUIApplication) {
-        let keepThis = element(in: app, "clove.group.keepThis")
-        XCTAssertTrue(
-            keepThis.waitForExistence(timeout: 10), "The group view had no finishing actions")
-        XCTAssertTrue(keepThis.isHittable, "Keep this, reject the rest was not tappable")
-        keepThis.tap()
-
-        // Nothing is left undecided in this group, so the next incomplete group opens on its
-        // first member instead of staying on the completed one.
-        waitForFileName("MMQ02696.ARW", in: app)
-        let undecided = expectation(
-            for: NSPredicate(format: "label == %@", "Undecided 3 / 3 total"),
-            evaluatedWith: groupHeader(in: app))
-        wait(for: [undecided], timeout: 10)
-    }
-
-    @MainActor
-    private func rateInTheNextGroup(in app: XCUIApplication) {
-        let fourStars = element(in: app, "clove.detail.rate.4")
-        XCTAssertTrue(
-            fourStars.waitForExistence(timeout: 10), "The group view had no rating bar")
-        fourStars.tap()
-        waitForFileName("MMQ02697.ARW", in: app)
-    }
-
-    @MainActor
-    private func finishTheLastGroup(in app: XCUIApplication) {
-        let keepThis = element(in: app, "clove.group.keepThis")
-        XCTAssertTrue(keepThis.waitForExistence(timeout: 10), "The group view had no finish action")
-        keepThis.tap()
-        XCTAssertTrue(
-            element(in: app, "clove.grid").waitForExistence(timeout: 10),
-            "The completed last group did not return to the grid")
     }
 
     @MainActor
@@ -607,7 +573,7 @@ extension CloveUITests {
         let rejected = element(in: app, "clove.grid.photo.mmq02698")
         XCTAssertTrue(
             rejected.waitForExistence(timeout: 10),
-            "Keep this, reject the rest left the unmarked photo unrejected")
+            "Reject unmarked left the unmarked photo unrejected")
         XCTAssertTrue(
             rejected.label.contains("Rejected"), "The unmarked photo lost its Reject")
         XCTAssertFalse(
@@ -931,6 +897,7 @@ extension CloveUITests {
 
         // Keep the photo that moves successfully, so the forced failure still exercises the
         // partial toast and Details while the other photo stays behind.
+        element(in: app, "clove.moves.expand").tap()
         element(in: app, "clove.moves.keep.mmq02681").tap()
         let partial = element(in: app, "clove.moves.partial")
         XCTAssertTrue(partial.waitForExistence(timeout: 10), "Keeping a photo changed no count")
@@ -941,34 +908,31 @@ extension CloveUITests {
 
         element(in: app, "clove.moves.confirm").tap()
 
-        let toast = element(in: app, "clove.moves.toast")
+        let toast = app.staticTexts["Moved 0 to _Rejected"]
         XCTAssertTrue(toast.waitForExistence(timeout: 10), "The move did not show its toast")
         let partialToast = expectation(
             for: NSPredicate(format: "label == %@", "Moved 0 to _Rejected"),
             evaluatedWith: toast)
         wait(for: [partialToast], timeout: 10)
-        let failure = element(in: app, "clove.moves.toast.failure")
+        let failure = app.staticTexts["1 couldn't be moved"]
         XCTAssertEqual(
             failure.label, "1 couldn't be moved", "The partial toast changed its counts")
 
         // Details opens before the other grid queries, so a long test run never races the toast.
-        element(in: app, "clove.moves.details").tap()
+        element(in: app, "clove.moves.toast.action").tap()
         let detailsTitle = element(in: app, "clove.moves.details.subtitle")
         XCTAssertTrue(
             detailsTitle.waitForExistence(timeout: 10), "Details did not open its sheet")
         XCTAssertEqual(
             detailsTitle.label,
-            "They stay rejected in Clove. Nothing was deleted.",
+            "They stay rejected in place. Nothing was deleted.",
             "The details subtitle changed")
         XCTAssertTrue(
             element(in: app, "clove.moves.details.row.mmq02689").exists,
             "Details did not list the photo that could not move")
 
         element(in: app, "clove.moves.details.retry").tap()
-        let retried = expectation(
-            for: NSPredicate(format: "label == %@", "Moved 1 to _Rejected"),
-            evaluatedWith: toast)
-        wait(for: [retried], timeout: 10)
+        XCTAssertTrue(app.staticTexts["Moved 1 to _Rejected"].waitForExistence(timeout: 10))
 
         let kept = element(in: app, "clove.grid.photo.mmq02681")
         XCTAssertTrue(kept.exists, "The retry moved the kept photo")

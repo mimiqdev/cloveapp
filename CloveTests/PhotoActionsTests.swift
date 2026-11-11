@@ -6,6 +6,18 @@ import Testing
 
 @MainActor
 struct PhotoActionsTests {
+    private func finishingPlan(
+        group: BrowsingGroup, model: BrowsingModel, library: ControlledPhotoLibrary
+    ) -> GroupFinishingPlan {
+        let protected = library.identity("c")
+        model.apply(.label(ColourLabel(colour: .blue)), to: protected)
+        return GroupFinishingPlan(
+            group: BrowsingGroup(id: group.id, members: group.members + [protected]),
+            action: .rejectUnmarked, currentPhoto: group.members[0],
+            marks: Dictionary(uniqueKeysWithValues: model.allPlacedPhotos.map { ($0.id, $0.marks) })
+        )
+    }
+
     @Test func queuedMoveCannotConsumeALaterReject() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
@@ -131,9 +143,7 @@ struct PhotoActionsTests {
         let b = library.identity("b")
         let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
         model.openGroup(group)
-        model.runGroupFinishing(
-            GroupFinishingPlan(
-                group: group, action: .keepThis, currentPhoto: a, marks: [:], enabledRatings: .all))
+        model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
         await model.drainActions()
         let finished = try #require(model.lastGroupFinishing)
         let runs = model.groupFinishingRuns
@@ -160,9 +170,7 @@ struct PhotoActionsTests {
         let c = library.identity("c")
         let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
         library.failNext.insert(a)
-        model.runGroupFinishing(
-            GroupFinishingPlan(
-                group: group, action: .keepThis, currentPhoto: a, marks: [:], enabledRatings: .all))
+        model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
         await model.drainActions()
         let finished = try #require(model.lastGroupFinishing)
         let runs = model.groupFinishingRuns
@@ -277,8 +285,7 @@ struct PhotoActionsTests {
         let b = library.identity("b")
         library.failNext.insert(a)
         let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
-        let plan = GroupFinishingPlan(
-            group: group, action: .keepThis, currentPhoto: a, marks: [:], enabledRatings: .all)
+        let plan = finishingPlan(group: group, model: model, library: library)
         model.runGroupFinishing(plan)
         await model.drainActions()
         #expect(model.groupFinishingFailure?.failedCount == 1)
@@ -300,9 +307,7 @@ struct PhotoActionsTests {
         let a = library.identity("a")
         let b = library.identity("b")
         let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
-        model.runGroupFinishing(
-            GroupFinishingPlan(
-                group: group, action: .keepThis, currentPhoto: a, marks: [:], enabledRatings: .all))
+        model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
         await model.drainActions()
         try await waitUntil { model.latestChange(for: a)?.state == .pending }
         #expect(model.lastGroupFinishing?.savedCount == 2)
