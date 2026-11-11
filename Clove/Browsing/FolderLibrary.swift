@@ -213,7 +213,8 @@ protocol FolderLibrary: AnyObject {
     func recordGroupFinishing(_ group: GroupID) async
 
     func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour
+        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
+        marks: [PhotoIdentity: PhotoMarks]
     ) async -> GroupViewCompletion
 
     /// The scanned set behind one photo, for writes, thumbnails and the grouping follow-up
@@ -341,7 +342,8 @@ extension FolderLibrary {
     func recordGroupFinishing(_ group: GroupID) async {}
 
     func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour
+        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
+        marks: [PhotoIdentity: PhotoMarks]
     ) async -> GroupViewCompletion {
         .inProgress
     }

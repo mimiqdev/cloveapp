@@ -98,6 +98,9 @@ final class TestLibrary: FolderLibrary {
             locationLoss: locationLoss(named: environment[locationLossVariable]),
             drainDelay: Duration.milliseconds(
                 Int(environment[drainDelayVariable] ?? "") ?? 0))
+        library.writeDelay = .milliseconds(
+            min(10_000, max(0, Int(environment["CLOVE_TEST_LIBRARY_WRITE_DELAY_MS"] ?? "") ?? 0)))
+        library.disconnectsOnWrite = environment["CLOVE_TEST_LIBRARY_DISCONNECT_ON_WRITE"] == "1"
         library.installPresentationSamples(environment: environment)
         return library
     }
@@ -233,6 +236,8 @@ final class TestLibrary: FolderLibrary {
     /// How long the sample's write drain takes, so a UI test can see the waiting state
     /// (PRD P0-08).
     private let drainDelay: Duration
+    private var writeDelay: Duration = .zero
+    private var disconnectsOnWrite = false
     private let sampleLocationLoss: FolderLocationLoss.Reason?
 
     /// The open this sample library installed last, which ``closeFolder()`` changes (PRD P0-02).
@@ -315,7 +320,18 @@ final class TestLibrary: FolderLibrary {
     /// Per-photo states go through the same stream as a single change, and the batch's handle
     /// retries only the photos that did not save.
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
-        let outcomes = items.map { perform($0.change, for: $0.photo) }
+        let ids = items.map { _ in MarkChangeID() }
+        for (item, id) in zip(items, ids) {
+            let pending = MarkChangeStatus(
+                id: id, identity: item.photo, requested: item.change, state: .pending)
+            changes[item.photo] = pending
+            updateContinuation.yield(.change(pending))
+        }
+        if writeDelay > .zero { try? await Task.sleep(for: writeDelay) }
+        if disconnectsOnWrite { reportLocationLoss(.externalVolumeDisconnected) }
+        let outcomes = zip(items, ids).map { item, id in
+            perform(item.change, for: item.photo, id: id)
+        }
         let batch = MarkBatchID()
         return MarkBatchResult(
             id: batch, change: items.first?.change ?? MarkChange(), outcomes: outcomes)
@@ -327,11 +343,13 @@ final class TestLibrary: FolderLibrary {
     /// and a photo with nothing requested has no status at all. A forced failure leaves the
     /// photo's marks untouched, keeps the requested change for a retry, and happens only once per
     /// photo, so a retry shows what retrying does (PRD P0-08, P0-09). Nothing is written anywhere.
-    private func perform(_ change: MarkChange, for photo: PhotoIdentity) -> MarkChangeStatus {
+    private func perform(
+        _ change: MarkChange, for photo: PhotoIdentity, id: MarkChangeID
+    ) -> MarkChangeStatus {
         guard !change.isEmpty else {
             // C4's queue refuses a request that names no marks and records nothing.
             return MarkChangeStatus(
-                id: MarkChangeID(), identity: photo, requested: change,
+                id: id, identity: photo, requested: change,
                 state: .failed(
                     MarkWriteFailure(
                         reason: .unknown,
@@ -339,20 +357,21 @@ final class TestLibrary: FolderLibrary {
         }
         guard let index = stored.firstIndex(where: { $0.id == photo }) else {
             return MarkChangeStatus(
-                id: MarkChangeID(), identity: photo, requested: change,
+                id: id, identity: photo, requested: change,
                 state: .failed(
                     MarkWriteFailure(
                         reason: .locationUnavailable,
                         message: "The sample library does not hold this photo.")))
         }
-        if shouldFailFirstWrite(to: photo) {
+        if disconnectsOnWrite || shouldFailFirstWrite(to: photo) {
             // PRD How marks reach disk, rule 8: the requested marks stay for a retry and are not
             // painted onto the photo, so nothing unconfirmed appears as saved.
             let status = MarkChangeStatus(
-                id: MarkChangeID(), identity: photo, requested: change,
+                id: id, identity: photo, requested: change,
                 state: .failed(
                     MarkWriteFailure(
-                        reason: forcedFailureReason(for: photo),
+                        reason: disconnectsOnWrite
+                            ? .locationUnavailable : forcedFailureReason(for: photo),
                         message: "The sample library's forced failure.")))
             changes[photo] = status
             updateContinuation.yield(.change(status))
@@ -365,7 +384,7 @@ final class TestLibrary: FolderLibrary {
 
         let state: MarkChangeState = .savedInSidecar
         let status = MarkChangeStatus(
-            id: MarkChangeID(), identity: photo, requested: change, state: state)
+            id: id, identity: photo, requested: change, state: state)
         changes[photo] = status
         // The sample publishes through the same stream as the real library, so every verify
         // exercises the model's update path (PRD P0-08, P0-13).
@@ -665,10 +684,9 @@ final class TestLibrary: FolderLibrary {
     }
 
     func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour
+        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
+        marks: [PhotoIdentity: PhotoMarks]
     ) async -> GroupViewCompletion {
-        var marks: [PhotoIdentity: PhotoMarks] = [:]
-        for photo in stored { marks[photo.id] = photo.marks }
         return await groupCompletion.viewCompletion(
             after: groupID, in: groups, behaviour: behaviour, marks: marks)
     }

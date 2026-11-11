@@ -447,10 +447,9 @@ final class FolderLibrarySession: FolderLibrary {
     }
 
     func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour
+        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
+        marks: [PhotoIdentity: PhotoMarks]
     ) async -> GroupViewCompletion {
-        var marks: [PhotoIdentity: PhotoMarks] = [:]
-        for photo in store.photos { marks[photo.id] = photo.marks }
         return await groupCompletionTracker.viewCompletion(
             after: groupID, in: publishedGroups, behaviour: behaviour, marks: marks)
     }

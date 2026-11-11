@@ -18,9 +18,6 @@ struct SaveStatusIndicator: View {
     var showsOnlyProblems = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// A fresh indicator has no history; it must not invent a Saved glyph during the delay.
-    @State private var previousGlyph: SaveGlyphState?
-    @State private var previousPhoto: PhotoIdentity?
     @State private var revealedSaving: SavingDelayKey?
     @State private var pulse = false
 
@@ -37,8 +34,7 @@ struct SaveStatusIndicator: View {
     private var renderedState: SaveGlyphState? {
         guard state == .saving else { return state }
         if revealedSaving == delayKey { return .saving }
-        // Ignore another photo's history before the photo-change task has a chance to reset it.
-        return previousPhoto == photo ? previousGlyph : nil
+        return nil
     }
 
     private var hidesUnneededGlyph: Bool {
@@ -75,17 +71,10 @@ struct SaveStatusIndicator: View {
         .frame(height: 24)
         .task(id: delayKey) {
             withAnimation(nil) {
-                if previousPhoto != photo {
-                    previousGlyph = nil
-                    previousPhoto = photo
-                }
                 revealedSaving = nil
                 pulse = false
             }
-            guard state == .saving else {
-                previousGlyph = state
-                return
-            }
+            guard state == .saving else { return }
             let key = delayKey
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }

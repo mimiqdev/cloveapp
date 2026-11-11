@@ -127,6 +127,8 @@ final class BrowsingModel {
     private var actionPipeline = PhotoActionPipeline()
     private var actionConsumer: Task<Void, Never>?
     private var finishingActions = 0
+    private var batchContexts: [UInt64: Int] = [:]
+    private var shownGeneration: Int
     private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
     private var keepResults: [PhotoIdentity: MarkChangeStatus] = [:]
     private var keptEditsByMove: [RejectMoveBatchID: [DesiredMarkEdit]] = [:]
@@ -172,6 +174,7 @@ final class BrowsingModel {
     /// Creates the model over one library, starting at entry unless a state is passed in.
     init(library: any FolderLibrary, state: BrowsingState = .entry) {
         self.library = library
+        self.shownGeneration = library.openGeneration
         self.state = state
         self.groups = library.groups
         self.recents = library.recents
@@ -509,7 +512,8 @@ final class BrowsingModel {
     func advanceFromCompletedGroup(_ behaviour: GroupCompletionBehaviour) async {
         guard state.route == .group, let position = state.groupPosition else { return }
         let completion = await library.groupCompletion(
-            for: position.group, behaviour: behaviour)
+            for: position.group, behaviour: behaviour,
+            marks: Dictionary(uniqueKeysWithValues: storedPhotos.map { ($0.id, $0.marks) }))
         let failure = groupFinishingFailure
         guard !Task.isCancelled, state.route == .group,
             state.groupPosition?.group == position.group,
@@ -670,7 +674,8 @@ final class BrowsingModel {
         guard !plan.items.isEmpty else { return }
         let edits = plan.items.map { request($0.change, for: $0.photo) }
         lastMarkEdits = edits
-        submit(.batch(edits))
+        let id = submit(.batch(edits))
+        batchContexts[id] = selectionClearances
     }
 
     /// Retries only the photos the last batch could not save (PRD P0-09).
@@ -856,7 +861,7 @@ final class BrowsingModel {
             case .mark(let edit):
                 _ = await persist([edit])
             case .batch(let edits):
-                let clearances = selectionClearances
+                let clearances = batchContexts.removeValue(forKey: entry.id)
                 let result = await persist(edits)
                 lastBatch = BatchMarkApplication(
                     result: result,
@@ -1441,6 +1446,12 @@ final class BrowsingModel {
     /// deliberately not copied from the library here: they arrive only on the ordered update
     /// stream, so a snapshot can never paint an older transition over a newer one.
     private func refresh() {
+        if shownGeneration != library.openGeneration {
+            shownGeneration = library.openGeneration
+            desiredMarks = DesiredPhotoMarks()
+            desiredStatusIDs = [:]
+            changes = PhotoChangeStates()
+        }
         confirmedPhotos = library.photos
         groups = library.groups
         reconcileRemovedPhotos()
