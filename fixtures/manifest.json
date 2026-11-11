@@ -118,7 +118,7 @@
       "license": "CC BY-SA 4.0",
       "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
       "attribution": "Dmitry A. Mottl (User:Dmottl), Wikimedia Commons, CC BY-SA 4.0",
-      "notes": "Camera JPEG straight from a Canon EOS 6D: 5472x3648 (native sensor size), EXIF Make and Model present, no Software tag, so it was not re-encoded by an editor. raw.pixls.us hosts no JPEG, so this one comes from Wikimedia Commons."
+      "notes": "JPEG converted from a Canon EOS 6D CR2 in Adobe Camera Raw: 5472x3648 (native sensor size), EXIF Make and Model present. Its XMP records the CR2-to-JPEG conversion (xmpMM:History, crs:AlreadyApplied, ExifTool 10.27), so it is not out-of-camera; it is the other-app XMP preservation case. raw.pixls.us hosts no JPEG, so this one comes from Wikimedia Commons."
     }
   ]
 }
