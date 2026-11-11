@@ -99,8 +99,12 @@ final class TestLibrary: FolderLibrary {
                 Int(environment[drainDelayVariable] ?? "") ?? 0))
     }
 
-    /// The sample folder's durable key, spelled so a saved scene never looks like a real folder.
-    static let sampleFolderKey = FolderIdentity(rawValue: "clove.test-library")
+    /// A fixed synthetic Recents UUID so sample scenes and photo identities share one folder.
+    static let sampleFolderKey = FolderIdentity(rawValue: sampleRecentID(1).uuidString)
+
+    private static func sampleRecentID(_ suffix: UInt8) -> UUID {
+        UUID(uuid: (0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, suffix))
+    }
 
     /// The empty library's key: nothing is open, so a scene saved by the sample never applies
     /// here (PRD P0-14).
@@ -127,6 +131,46 @@ final class TestLibrary: FolderLibrary {
     }
 
     let folder: FolderIdentity
+
+    /// Made-up Recents exercise the resume, Done and Reconnect layouts (handoff Entry).
+    var recents: [RecentFolder] {
+        guard folder == Self.sampleFolderKey else { return [] }
+        let date = Date().addingTimeInterval(-86_400)
+        return [
+            RecentFolder(
+                id: Self.sampleRecentID(1), bookmark: Data(),
+                pathSummary: "/Shoots/Coastal light", volumeName: "Field Drive",
+                mediaType: .externalDrive,
+                photoCount: stored.count, scanStatus: .complete, lastOpened: date,
+                progress: FolderProgress(
+                    confirmedMarks: stored.map(\.marks), isComplete: true,
+                    lastViewedPhoto: stored.first?.id,
+                    previewPhotos: Array(stored.prefix(3).map(\.id)))),
+            RecentFolder(
+                id: Self.sampleRecentID(2), bookmark: Data(),
+                pathSummary: "/Documents/Studio", mediaType: .internalVolume, photoCount: 96,
+                scanStatus: .complete, lastOpened: date.addingTimeInterval(-86_400),
+                progress: FolderProgress(
+                    marked: 80, rejected: 16, total: 96,
+                    previewPhotos: Array(stored.suffix(3).map(\.id)))),
+            RecentFolder(
+                id: Self.sampleRecentID(3), bookmark: Data(),
+                pathSummary: "/Shoots/Backup card", volumeName: "Travel Card",
+                mediaType: .externalDrive,
+                lastOpened: date.addingTimeInterval(-172_800), needsReconnect: true),
+        ]
+    }
+
+    func entryThumbnail(for photo: PhotoIdentity) async -> GridThumbnailOutcome {
+        await thumbnails.thumbnail(for: photo, priority: .visible)
+    }
+
+    func reopen(_ recent: RecentFolder) async -> FolderAccessFailure? {
+        guard recent.identity == folder else { return .unknownRecent(recent.id) }
+        for change in changes.values { updateContinuation.yield(.change(change)) }
+        if let sampleLocationLoss { reportLocationLoss(sampleLocationLoss) }
+        return nil
+    }
 
     /// The groups the sample publishes; turning similar groups off publishes none (PRD P0-11).
     private(set) var groups: [BrowsingGroup]
@@ -190,6 +234,7 @@ final class TestLibrary: FolderLibrary {
     /// How long the sample's write drain takes, so a UI test can see the waiting state
     /// (PRD P0-08).
     private let drainDelay: Duration
+    private let sampleLocationLoss: FolderLocationLoss.Reason?
 
     /// The open this sample library installed last, which ``closeFolder()`` changes (PRD P0-02).
     private(set) var openGeneration = 0
@@ -210,6 +255,7 @@ final class TestLibrary: FolderLibrary {
         failingStems = []
         failureReason = .notConfirmed
         drainDelay = .zero
+        sampleLocationLoss = nil
         thumbnails = SampleGridThumbnails()
         detailImages = EmptyDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
@@ -242,6 +288,7 @@ final class TestLibrary: FolderLibrary {
         self.failingStems = failingStems.map { $0.lowercased() }
         self.failureReason = failureReason
         self.drainDelay = drainDelay
+        self.sampleLocationLoss = locationLoss
         thumbnails = TestLibrary.sampleThumbnails
         self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)

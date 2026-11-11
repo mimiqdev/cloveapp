@@ -11,6 +11,12 @@ import CloveCore
 /// read have no row in that table, so they keep their own exact explanation rather than borrowing
 /// one that would place the blame on the wrong thing.
 enum FolderFailureExplanation {
+    /// Only a missing location calls for Reconnect; other failures keep their explanation.
+    static func needsReconnect(_ failure: FolderAccessFailure) -> Bool {
+        if case .locationUnavailable = failure { return true }
+        return false
+    }
+
     /// The explanation for one access failure (PRD P0-02).
     static func text(for failure: FolderAccessFailure) -> String {
         if let situation = SaveStatus.situation(for: failure) { return situation.message }

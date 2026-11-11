@@ -23,6 +23,11 @@ import Observation
 final class SettingsStore {
     /// C12's persistence over the storage this launch uses.
     private let persistence: SettingsPersistence
+    private let rememberedAdvanceStorage: any SettingsStorage
+    private static let rememberedAdvanceKey = "autoAdvance.lastEnabledDestination"
+
+    /// The last enabled destination, persisted so an off/on toggle survives an app relaunch.
+    private(set) var rememberedAdvanceDestination: AutoAdvanceDestination
 
     /// The current settings every screen reads.
     ///
@@ -37,10 +42,19 @@ final class SettingsStore {
     /// Loads the stored settings, defaulting each field C12 does not have a value for.
     init(
         persistence: SettingsPersistence = SettingsPersistence(
-            storage: UserDefaultsSettingsStorage())
+            storage: UserDefaultsSettingsStorage()),
+        rememberedAdvanceStorage: any SettingsStorage = UserDefaultsSettingsStorage()
     ) {
         self.persistence = persistence
-        self.settings = persistence.load()
+        self.rememberedAdvanceStorage = rememberedAdvanceStorage
+        let loaded = persistence.load()
+        self.settings = loaded
+        let remembered = rememberedAdvanceStorage.string(forKey: Self.rememberedAdvanceKey)
+            .flatMap(AutoAdvanceDestination.init(rawValue:))
+        self.rememberedAdvanceDestination =
+            loaded.autoAdvance.destination != .stay
+            ? loaded.autoAdvance.destination
+            : (remembered == .nextUnmarkedPhoto ? .nextUnmarkedPhoto : .nextPhoto)
         self.saveFailureMessage = nil
     }
 
@@ -60,7 +74,9 @@ final class SettingsStore {
 
     /// A store that keeps its settings in memory, for the sample library and the previews.
     static var sample: SettingsStore {
-        SettingsStore(persistence: SettingsPersistence(storage: SampleSettingsStorage()))
+        let storage = SampleSettingsStorage()
+        return SettingsStore(
+            persistence: SettingsPersistence(storage: storage), rememberedAdvanceStorage: storage)
     }
 
     /// Applies one change to a copy of the current settings and stores it.
@@ -72,13 +88,26 @@ final class SettingsStore {
         var next = settings
         change(&next)
         guard next != settings else { return }
+        if next.autoAdvance.destination != .stay {
+            rememberedAdvanceDestination = next.autoAdvance.destination
+        }
+        rememberedAdvanceStorage.setString(
+            rememberedAdvanceDestination.rawValue, forKey: Self.rememberedAdvanceKey)
+        let rememberedSaved =
+            rememberedAdvanceStorage.string(forKey: Self.rememberedAdvanceKey)
+            == rememberedAdvanceDestination.rawValue
         settings = next
-        if persistence.saveVerified(next) {
+        if persistence.saveVerified(next) && rememberedSaved {
             saveFailureMessage = nil
         } else {
             saveFailureMessage =
                 "This change couldn't be saved. It applies now, but Clove will forget it when it quits."
         }
+    }
+
+    /// Pauses auto-advance without replacing the user's last enabled destination.
+    func setAutoAdvanceEnabled(_ enabled: Bool) {
+        update { $0.autoAdvance.destination = enabled ? rememberedAdvanceDestination : .stay }
     }
 
     /// Restores every launch default C12 ships with and stores them.
