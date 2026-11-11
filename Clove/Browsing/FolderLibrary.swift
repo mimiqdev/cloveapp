@@ -45,6 +45,9 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// turned off, so a saved group view knows the wait is over (PRD P0-14); later publications
     /// carry a refinement or a Run again and only arrive when they changed something.
     case groups([BrowsingGroup])
+
+    /// The visual grouping pass is running or finished, including cached and cancelled runs.
+    case groupingActivity(Bool)
 }
 
 /// What the browsing screens read and change, behind one seam (PRD P0-08, P0-13, P0-14).
@@ -255,6 +258,9 @@ protocol FolderLibrary: AnyObject {
     /// photo.
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet?
 
+    /// Reads Info on demand through the folder's admitted work, never during its scan.
+    func information(for photo: PhotoIdentity) async -> PhotoInformation?
+
     /// Every remembered folder, most recently opened first (PRD P0-02).
     ///
     /// The list is a value the entry screen reads; ``reloadRecents()`` refreshes it from C11's
@@ -350,6 +356,8 @@ extension FolderLibrary {
     }
 
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? { nil }
+
+    func information(for photo: PhotoIdentity) async -> PhotoInformation? { nil }
 
     /// A library that installed nothing answers a generation a reader compares with zero, and one
     /// with no writes has nothing unfinished (PRD P0-02, P0-08).

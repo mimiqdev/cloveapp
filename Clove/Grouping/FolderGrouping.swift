@@ -38,6 +38,8 @@ final class FolderGrouping {
     private let sets: @MainActor (PhotoIdentity) -> PhotoSet?
     /// Where each published result goes: the library turns it into its stream update (P0-11).
     private let publish: @MainActor ([BrowsingGroup]) -> Void
+    /// Presentation only: whether the visual pass still has work (handoff Opening).
+    private let analysisChanged: @MainActor (Bool) -> Void
 
     /// The folder's photos as grouping receives them, replaced by Run again (PRD P0-11).
     private var inputs: [GroupingPhoto] = []
@@ -77,12 +79,14 @@ final class FolderGrouping {
         featureCache: ImageFeatureCache,
         previewCache: ThumbnailCache,
         sets: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
-        publish: @escaping @MainActor ([BrowsingGroup]) -> Void
+        publish: @escaping @MainActor ([BrowsingGroup]) -> Void,
+        analysisChanged: @escaping @MainActor (Bool) -> Void = { _ in }
     ) {
         self.folder = folder
         self.session = session
         self.sets = sets
         self.publish = publish
+        self.analysisChanged = analysisChanged
         // I3's record is the opaque feature both kinds answer with; C9 decides what a distance
         // means, so this only names the kind and never compares it with a threshold.
         let similarity = PhotoFeatureSimilarity<ImageFeatures> { left, right in
@@ -191,11 +195,11 @@ final class FolderGrouping {
         guard !isClosed else { return }
         // The grouper's own result, read here rather than waited for, so the caller's next step
         // runs after the first publication instead of racing it (PRD P0-14).
-        let groups = await grouping.current.browsingGroups
+        let result = await grouping.current
         guard !isClosed else { return }
-        adopt(groups)
+        adopt(result.browsingGroups)
         startUpdates()
-        startAnalysis()
+        startAnalysis(needsAnalysis: result.analysis != .analyzed)
     }
 
     /// Watches the grouper's later results, so a refinement reaches the grid (PRD P0-11).
@@ -222,13 +226,21 @@ final class FolderGrouping {
     }
 
     /// Starts the folder's feature and refinement pass (PRD Similar groups step 3).
-    private func startAnalysis() {
+    private func startAnalysis(needsAnalysis: Bool) {
         analysisTask?.cancel()
         analysisTask = nil
-        guard enabled, !isClosed else { return }
+        guard enabled, !isClosed else {
+            analysisChanged(false)
+            return
+        }
+        analysisChanged(needsAnalysis)
         let candidates = GroupingFeatureCandidates.photos(in: inputs)
         analysisTask = Task { [weak self] in
-            await self?.analyse(candidates)
+            guard let self else { return }
+            // The previous task is awaited before a new run. Cancellation therefore finishes
+            // its own presentation before the replacement can report that it is running.
+            defer { self.analysisChanged(false) }
+            await self.analyse(candidates)
         }
     }
 

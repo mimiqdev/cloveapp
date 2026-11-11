@@ -59,7 +59,37 @@ final class BrowsingModel {
 
     /// Whether the open folder is still opening, so the grid hides actions the handoff hides
     /// until the scan finishes (design handoff, PRD P0-01).
-    var isFolderOpening: Bool { !hasFinishedScan }
+    var isFolderOpening: Bool { !hasFinishedScan || isFindingSimilarShots }
+
+    /// Display-only activity forwarded by the folder's visual grouping pass.
+    private(set) var isFindingSimilarShots = false
+
+    /// Progress from discovered photos, including photos still waiting for metadata.
+    var readingProgress: (read: Int, total: Int)? {
+        guard !hasFinishedScan else { return nil }
+        return (storedPhotos.filter { !$0.time.isPending }.count, storedPhotos.count)
+    }
+
+    /// The opened folder's display name, without its device path.
+    var folderTitle: String {
+        recents.first(where: { $0.identity == state.folder }).map {
+            RecentFolderSummary.name(for: $0)
+        }
+            ?? "Photos"
+    }
+
+    /// Label filtering is a presentation filter over the same ordered photos.
+    var labelFilter: LabelColour?
+
+    /// All placed photos, used for the filter menu's counts.
+    var allPlacedPhotos: [GridPhoto] {
+        PhotoOrdering(photos: storedPhotos).photos(order: state.order, matching: .all)
+    }
+
+    /// One admitted Info read, requested only when the sheet opens.
+    func information(for photo: PhotoIdentity) async -> PhotoInformation? {
+        await library.information(for: photo)
+    }
 
     /// The library's current open generation, which changes when the same folder is reopened
     /// (PRD P0-02). A move that finishes across a change must not record against the new open.
@@ -141,7 +171,10 @@ final class BrowsingModel {
     /// The photos the grid shows: this state's order and filter, applied to the folder's photos
     /// (PRD P0-03). Filtering never reorders, and neither choice changes a stored photo.
     var photos: [GridPhoto] {
-        PhotoOrdering(photos: storedPhotos).photos(order: state.order, matching: state.filter)
+        let ordered = PhotoOrdering(photos: storedPhotos).photos(
+            order: state.order, matching: state.filter)
+        guard let labelFilter else { return ordered }
+        return ordered.filter { $0.marks.label.colour == labelFilter }
     }
 
     /// Whether the open folder holds photos to browse (PRD P0-01).
@@ -513,7 +546,14 @@ final class BrowsingModel {
 
     /// Changes the grid filter without touching the order or the current photo (PRD P0-03).
     func setFilter(_ filter: PhotoFilter) {
+        labelFilter = nil
         state.filter = filter
+    }
+
+    /// Applies a label-only display filter in grid order (handoff Filter menu).
+    func setLabelFilter(_ label: LabelColour) {
+        state.filter = .all
+        labelFilter = label
     }
 
     /// Changes the grid order without touching the filter or the current photo (PRD P0-03).
@@ -1002,6 +1042,8 @@ final class BrowsingModel {
         changes = PhotoChangeStates()
         groupsPublishedFor = nil
         finishedScanFor = nil
+        isFindingSimilarShots = false
+        labelFilter = nil
         pendingRestore = nil
         hasLeftFolder = true
         // The closed folder's completed move cannot be undone through its ended session.
@@ -1127,7 +1169,10 @@ final class BrowsingModel {
         // (PRD P0-08's Leave anyway).
         guard !hasLeftFolder else { return }
         switch update {
+        case .groupingActivity(let isRunning):
+            isFindingSimilarShots = isRunning
         case .scanStarted:
+            isFindingSimilarShots = false
             // A reopen of the same folder starts a new scan, so the old finished marker cannot
             // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
             finishedScanFor = nil

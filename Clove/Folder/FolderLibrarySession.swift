@@ -1251,6 +1251,10 @@ final class FolderLibrarySession: FolderLibrary {
                 // A replaced folder publishes nothing: the open that owns this grouping is gone.
                 guard let self, generation == self.scanGeneration else { return }
                 self.publishGroups(groups)
+            },
+            analysisChanged: { [weak self] isRunning in
+                guard let self, generation == self.scanGeneration else { return }
+                self.publish(.groupingActivity(isRunning))
             })
     }
 
@@ -1309,6 +1313,25 @@ final class FolderLibrarySession: FolderLibrary {
         } catch {
             return .unavailable
         }
+    }
+
+    /// Info reads hold the same security scope as previews and run off the main actor (G1).
+    /// A result from a replaced open is discarded even if its folder identity is unchanged.
+    func information(for photo: PhotoIdentity) async -> PhotoInformation? {
+        guard let session = openSession, photo.folderID == folder,
+            let set = store.scannedSet(for: photo)?.photoSet
+        else { return nil }
+        let generation = scanGeneration
+        let result = try? await session.withAdmittedWork {
+            ImageInformationReader().read(url: set.primary.url)
+        }
+        guard generation == scanGeneration, !Task.isCancelled else { return nil }
+        return PhotoInformation(
+            image: result, relativeFolder: photo.relativeFolderPath,
+            companions: [set.jpegCompanion, set.heifCompanion].compactMap {
+                $0?.url.lastPathComponent
+            },
+            usesSidecar: set.primary.format == .raw)
     }
 
     // MARK: - Detail pixels
