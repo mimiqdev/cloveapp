@@ -60,12 +60,12 @@ covered rather than the biggest files:
 | `panasonic-dmc-gh4-rw2` | RW2 | Panasonic DMC-GH4 | 19.6 MB | 4:3 aspect, 1920×1440 embedded preview. |
 | `pentax-k-5-ii-s-dng` | DNG | Pentax K-5 II s | 18.5 MB | A **camera-generated** DNG (DNG 1.1, not Adobe DNG Converter), full-size embedded preview. |
 | `apple-iphone-12-pro-proraw-dng` | DNG (ProRAW) | Apple iPhone 12 Pro | 29.2 MB | Apple ProRAW: DNG 1.4, 12-bit LinearRaw in lossy JPEG, plus an Apple semantic segmentation matte. |
-| `canon-eos-6d-jpeg` | JPEG | Canon EOS 6D | 4.4 MB | A camera JPEG at native sensor size, EXIF intact, no Software tag, so not re-encoded. |
+| `canon-eos-6d-jpeg` | JPEG | Canon EOS 6D | 4.4 MB | A JPEG converted from a Canon CR2 in Adobe Camera Raw, at native sensor size with EXIF intact. Its XMP records the conversion (`xmpMM:History`, `crs:` settings, ExifTool 10.27), so it is not out-of-camera. It is the other-app XMP preservation case. |
 
 Total: 162.9 MB, well under the 1 GB budget. The per-file `notes` in
 `fixtures/manifest.json` record the embedded-preview sizes, which S2 needs.
 
-`raw.pixls.us` hosts no JPEG, so the one camera JPEG comes from Wikimedia
+`raw.pixls.us` hosts no JPEG, so the one JPEG comes from Wikimedia
 Commons. Everything else is from `raw.pixls.us`, which records the license and
 SHA-256 for each file.
 
@@ -91,7 +91,7 @@ Source pages:
 
 - `raw.pixls.us` repository: <https://raw.pixls.us/>. Each entry also records
   `sourceEntry`, the row it was taken from (make / model / mode / size / date).
-- The camera JPEG: <https://commons.wikimedia.org/wiki/File:Teriberka.jpg>.
+- The JPEG: <https://commons.wikimedia.org/wiki/File:Teriberka.jpg>.
 
 ## Generated files
 
