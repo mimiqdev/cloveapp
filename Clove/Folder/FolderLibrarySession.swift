@@ -681,18 +681,18 @@ final class FolderLibrarySession: FolderLibrary {
     private func endOpenFolder() async {
         entryPreviewTask?.cancel()
         entryPreviewTask = nil
-        await cacheEntryPreviews(generation: scanGeneration, immediate: true)
         progressDebounceTask?.cancel()
         progressDebounceTask = nil
         scanGeneration += 1
-        if let monitor = locationMonitor {
-            locationMonitor = nil
-            await monitor.stop()
-        }
         openScan?.cancel()
         openScan = nil
         scanTask?.cancel()
         scanTask = nil
+        if let monitor = locationMonitor {
+            locationMonitor = nil
+            await monitor.stop()
+        }
+        await cacheEntryPreviews(generation: scanGeneration, immediate: true)
         thumbnailSource = nil
         rejectMover = nil
         movedRejectIdentities = []

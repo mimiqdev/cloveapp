@@ -51,20 +51,17 @@ public struct FolderProgress: Codable, Hashable, Sendable {
     public struct ConfirmedChange: Hashable, Sendable {
         public let before: PhotoMarks
         public let after: PhotoMarks
-        /// A partial rescan cannot reassert Done after a decided photo became unmarked.
-        public let becameUnmarked: Bool
+        /// A partial rescan cannot reassert Done while a decided photo is now unmarked.
+        public var becameUnmarked: Bool { Self.decided(before) && !Self.decided(after) }
 
-        public init(before: PhotoMarks, after: PhotoMarks, becameUnmarked: Bool = false) {
+        public init(before: PhotoMarks, after: PhotoMarks) {
             self.before = before
             self.after = after
-            self.becameUnmarked = becameUnmarked || (Self.decided(before) && !Self.decided(after))
         }
 
-        /// Retains the original baseline and any intervening clear when the same photo changes again.
+        /// Keeps the session's baseline and takes the latest confirmed marks.
         public func updating(to marks: PhotoMarks) -> ConfirmedChange {
-            ConfirmedChange(
-                before: before, after: marks,
-                becameUnmarked: becameUnmarked || (Self.decided(after) && !Self.decided(marks)))
+            ConfirmedChange(before: before, after: marks)
         }
 
         private static func decided(_ marks: PhotoMarks) -> Bool {
