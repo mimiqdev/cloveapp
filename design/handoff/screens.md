@@ -98,7 +98,9 @@ Devices:
 - Capture: time with subseconds, camera and serial, lens, exposure.
 - File: folder, size, RAW+JPEG pairing, marks and where they are stored (XMP), and save status.
 
-**Rejected**: the capsule's reject circle is filled, the stars and label go neutral, and the photo dims. The subtitle is "1 / 11 · Rejected · ● Saved".
+**Rejected**: the capsule's reject circle is filled and the stars and label go neutral. The photo stays at full brightness. A 22 pt `xmark` in a filled `reject` circle sits in the stage's top-trailing corner, inset 8 pt inside the safe area. It stays fixed during zoom and pan and remains visible with the chrome hidden. It ignores taps; VoiceOver includes "Rejected" in the photo's label and skips the decorative glyph. Rejected has no subtitle word.
+
+The `03-detail-rejected` frame is out of date on the photo dimming and missing corner glyph. Follow this behavior specification.
 
 **Save failed**: the subtitle is "1 / 11 · ● Save failed · Retry", in `status/failed`, and Retry is tappable. The marks stay as set.
 

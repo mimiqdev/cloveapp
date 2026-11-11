@@ -63,7 +63,6 @@ struct DetailMarkingView: View {
     let actions: DetailMarkingActions
 
     @Environment(\.displayScale) private var displayScale
-    @Environment(\.cloveTheme) private var theme
     @State private var hidesChrome = false
     @State private var windowID = UUID()
     @State private var currentWindow: DetailPhotoWindow?
@@ -267,11 +266,10 @@ struct DetailMarkingView: View {
             hasNext: navigationAvailability.next,
             probe: probe
         )
-        .accessibilityLabel(photo.fileName)
-        .accessibilityValue(shown == nil ? "" : "Loaded")
-        .opacity(
-            displayMarks.isRejected ? theme.tokens.rejectedOpacity : 1
+        .accessibilityLabel(
+            displayMarks.isRejected ? "\(photo.fileName), Rejected" : photo.fileName
         )
+        .accessibilityValue(shown == nil ? "" : "Loaded")
         .overlay {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
@@ -285,6 +283,19 @@ struct DetailMarkingView: View {
         }
         .overlay { previewState }
         .overlay(alignment: .topLeading) { limitationNote }
+        .overlay(alignment: .topTrailing) {
+            if displayMarks.isRejected {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(Color.clove.reject, in: Circle())
+                    .padding(8)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("clove.detail.rejectGlyph")
+                    .accessibilityHidden(true)
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clove.bg.stage)
     }

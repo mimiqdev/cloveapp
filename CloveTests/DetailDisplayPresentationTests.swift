@@ -149,6 +149,59 @@ struct DetailDisplayPresentationTests {
         #expect(!hasLoadingCue(window))
     }
 
+    @Test func rejectedDetailKeepsTheRenderedPhotoAtFullBrightness() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photo = browsing.photos[2]
+        browsing.openPhoto(photo.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source)
+                .environment(SettingsStore.sample))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == photo.id }
+        let preview = try #require(findPreview(in: window))
+        let frame = preview.convert(preview.bounds, to: window)
+        let centre = CGRect(x: frame.midX - 20, y: frame.midY - 20, width: 40, height: 40)
+        let corner = CGRect(x: frame.maxX - 25, y: frame.minY + 13, width: 12, height: 12)
+        let before = try displayedPixels(in: centre, window: window)
+        let unmarkedCorner = try displayedPixels(in: corner, window: window)
+        browsing.apply(.rating(.rejected), to: photo.id)
+        try await waitFor {
+            guard let pixels = try? displayedPixels(in: corner, window: window) else {
+                return false
+            }
+            return pixels != unmarkedCorner
+        }
+        #expect(try displayedPixels(in: centre, window: window) == before)
+        browsing.apply(.rating(.unrated), to: photo.id)
+        try await waitFor {
+            (try? displayedPixels(in: corner, window: window)) == unmarkedCorner
+        }
+        #expect(try displayedPixels(in: centre, window: window) == before)
+    }
+
+    /// Compare displayed photo pixels, including opacity applied by any SwiftUI ancestor.
+    private func displayedPixels(in region: CGRect, window: UIWindow) throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        var didDraw = false
+        let image = UIGraphicsImageRenderer(size: region.size, format: format)
+            .image { context in
+                context.cgContext.translateBy(x: -region.minX, y: -region.minY)
+                didDraw = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+        try #require(didDraw)
+        return try #require(image.pngData())
+    }
+
     @Test func rawSwapOrderRefreshAndCameraZoomThroughTheSharedView() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()

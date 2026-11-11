@@ -7,7 +7,7 @@ Items tagged **(proposed)** were not reviewed in the design. They are sensible d
 - A **mark** is a rating and a label (none or one of 5 colors). The rating can be −1, which is Reject, so a photo is never rated and rejected at once: rejecting replaces the stars, and undoing restores them. Marks are written to the photo's XMP sidecar, in the folder where the photos live; a standalone JPEG/HIF keeps its rating and label in Clove. Nothing is imported or copied.
 - Every mark appears at once and saves in user action order. A pending mark is shown until its write finishes; otherwise the files supply the marks. There is no save status. Only folder access problems appear in the subtitle: "Not connected" or "View only".
 - **Undo** (top bar, or the Duo dock) reverts the last mark change, a "Reject N unmarked", or a Move Rejects. It is a stack and works across photos.
-- **Reject never deletes.** Rejected photos stay in place, dimmed, until the person runs Move Rejects, which moves them to `_Rejected/` inside the same folder.
+- **Reject never deletes.** Rejected photos stay in place (dimmed in the grid and filmstrip; full brightness with a corner glyph in detail) until the person runs Move Rejects, which moves them to `_Rejected/` inside the same folder.
 
 ## App flow
 
