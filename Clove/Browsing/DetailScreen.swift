@@ -74,6 +74,7 @@ struct DetailScreen: View {
             photo: photo,
             settings: settings,
             images: images,
+            displayMode: store.photoDisplayMode,
             zoomPolicy: .detail(settings),
             order: browsing.photos,
             actions: actions)

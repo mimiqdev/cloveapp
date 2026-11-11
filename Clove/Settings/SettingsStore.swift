@@ -25,6 +25,13 @@ final class SettingsStore {
     private let persistence: SettingsPersistence
     private let rememberedAdvanceStorage: any SettingsStorage
     private static let rememberedAdvanceKey = "autoAdvance.lastEnabledDestination"
+    private let physicalMemory: UInt64
+
+    /// Reset clears the explicit choice and returns to the memory-only default.
+    var photoDisplayMode: PhotoDisplayMode {
+        PhotoDisplayDefault.mode(
+            physicalMemory: physicalMemory, choice: settings.photoDisplayMode)
+    }
 
     /// The last enabled destination, persisted so an off/on toggle survives an app relaunch.
     private(set) var rememberedAdvanceDestination: AutoAdvanceDestination
@@ -43,10 +50,12 @@ final class SettingsStore {
     init(
         persistence: SettingsPersistence = SettingsPersistence(
             storage: UserDefaultsSettingsStorage()),
-        rememberedAdvanceStorage: any SettingsStorage = UserDefaultsSettingsStorage()
+        rememberedAdvanceStorage: any SettingsStorage = UserDefaultsSettingsStorage(),
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) {
         self.persistence = persistence
         self.rememberedAdvanceStorage = rememberedAdvanceStorage
+        self.physicalMemory = physicalMemory
         let loaded = persistence.load()
         self.settings = loaded
         let remembered = rememberedAdvanceStorage.string(forKey: Self.rememberedAdvanceKey)

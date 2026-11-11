@@ -1,77 +1,52 @@
 import Foundation
 
-/// The largest pixel edge a detail request and decode may use (PRD P0-04; G1 "Preview, detail
-/// (I2)").
-///
-/// One value keeps the request clamp, the cache key's range and the decode cap from drifting
-/// apart. A request above it would ask for a bitmap no decode can produce, and the view would
-/// keep asking for pixels that cannot arrive (G1 "Scheduling and cache").
+/// Shared bound for requests, cache keys and raster decodes.
 public enum DetailPixelLimit {
-    /// The largest long edge, in device pixels, a detail request may carry or a decode may
-    /// produce.
     public static let maximumEdge = 32_768
 }
 
-/// One image file of a photo set: where it lives and which revision of its bytes the
-/// caller expects.
-///
-/// PRD P0-04 needs the photo's own pixels, and G1 "Scheduling and cache" requires a source
-/// identity plus revision in every cache entry, so no result can come from another photo or
-/// from a file rewritten after the request was built. This is the same source identity idea
-/// I1 uses for the grid, without a dependency on the grid pipeline.
+/// One file and its expected revision. Location identity on the request separately
+/// distinguishes media mounted at the same path.
 public struct DetailSource: Hashable, Sendable {
-    /// The file's location. Detail only ever reads folders, never writes them (PRD P0-01).
     public let url: URL
-    /// The size and modification time the caller saw when it built the request.
     public let revision: ThumbnailRevision
 
-    /// Standardises the URL so equivalent spellings share one identity and one cache entry.
     public init(url: URL, revision: ThumbnailRevision) {
         self.url = url.standardizedFileURL
         self.revision = revision
     }
 
-    /// Reads the current revision, bypassing cached URL resource values (as I1 does).
     public static func read(_ url: URL) throws -> DetailSource {
         DetailSource(url: url, revision: try ThumbnailRevision.read(from: url))
     }
 }
 
-/// Everything the detail pipeline needs about one photo (PRD P0-04).
-///
-/// `CloveImaging` does not depend on `CloveCore`, so a request carries file URLs and
-/// revisions rather than domain types. The integration maps a C1 `PhotoSet` like this:
-///
-/// - `raw` — `set.primary` when its format is RAW, otherwise nil.
-/// - `jpeg` — `set.jpegCompanion`, which is present only when RAW is primary.
-/// - `heif` — `set.heifCompanion`; for a HIF-only set, the HIF primary itself.
-/// - `displayPixels` — the detail view's current on-screen long edge in pixels, multiplied
-///   by the current zoom scale (PRD P0-04 pinch zoom and 100%).
-/// - `wantsNativeResolution` — true only for the explicit double-tap to 100% (PRD P0-04),
-///   never for plain fit-view navigation.
-/// - `locationIdentity` — the opened folder's stable identity, so the same path on another
-///   card is a different source (G1 "Scheduling and cache").
-///
-/// A stale request is harmless: every read re-checks the revision and reports
-/// ``DetailFailure/sourceChanged`` rather than showing pixels from a rewritten file.
-public struct DetailRequest: Hashable, Sendable {
-    /// The RAW file, the source of truth for native focus inspection (G1 decision 1).
-    public let raw: DetailSource?
-    /// The JPEG reference or primary, decoded as a raster only (never a RAW render).
-    public let jpeg: DetailSource?
-    /// The HIF/HEIF reference or primary; only its embedded preview is ever shown.
-    public let heif: DetailSource?
-    /// Long-edge pixels the view can show right now, including the zoom scale (PRD P0-04).
-    public let displayPixels: Int
-    /// The explicit double-tap to 100% (PRD P0-04), which may render native sensor pixels.
-    public let wantsNativeResolution: Bool
-    /// Stable folder/bookmark identity; distinguishes media mounted at the same path.
-    public let locationIdentity: String
+/// Imaging has no dependency on the app's domain model or settings storage.
+public enum DetailDisplayMode: Hashable, Sendable {
+    case rawFirst
+    case cameraPreviewFirst
+}
 
-    /// Requires at least one file and a plausible display size; a set always has a primary.
+/// The app maps a photo set's RAW primary and camera companions to these roles.
+/// JPEG-only and HIF-only photos retain their existing raster/embedded routes.
+public struct DetailRequest: Hashable, Sendable {
+    public let raw: DetailSource?
+    public let jpeg: DetailSource?
+    public let heif: DetailSource?
+    /// The image's on-screen long edge in pixels, including zoom.
+    public let displayPixels: Int
+    public let wantsNativeResolution: Bool
+    public let locationIdentity: String
+    public let mode: DetailDisplayMode
+    /// Fixed screen edge, independent of zoom, for decode-time RAW scaling.
+    public let screenPixels: Int
+    /// Position in the visible order, for distance-based held-render eviction.
+    public let position: Int
+
     public init(
         raw: DetailSource? = nil, jpeg: DetailSource? = nil, heif: DetailSource? = nil,
-        displayPixels: Int, wantsNativeResolution: Bool = false, locationIdentity: String
+        displayPixels: Int, wantsNativeResolution: Bool = false, locationIdentity: String,
+        mode: DetailDisplayMode = .rawFirst, screenPixels: Int? = nil, position: Int = 0
     ) {
         precondition(raw != nil || jpeg != nil || heif != nil, "A detail request needs a file")
         precondition((1...DetailPixelLimit.maximumEdge).contains(displayPixels))
@@ -81,5 +56,8 @@ public struct DetailRequest: Hashable, Sendable {
         self.displayPixels = displayPixels
         self.wantsNativeResolution = wantsNativeResolution
         self.locationIdentity = locationIdentity
+        self.mode = mode
+        self.screenPixels = min(max(screenPixels ?? displayPixels, 1), DetailPixelLimit.maximumEdge)
+        self.position = position
     }
 }

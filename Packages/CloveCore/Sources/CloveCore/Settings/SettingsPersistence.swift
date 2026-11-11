@@ -10,6 +10,7 @@ enum SettingsKey: String, CaseIterable {
     case autoAdvanceRating = "autoAdvance.trigger.rating"
     case autoAdvanceReject = "autoAdvance.trigger.reject"
     case autoAdvanceColourLabel = "autoAdvance.trigger.colourLabel"
+    case photoDisplayMode = "detail.photoDisplayMode"
     case doubleTap = "detail.doubleTap"
     case keepZoomInDetail = "zoom.keepInDetail"
     case extendedColourLabels = "labels.extended"
@@ -67,7 +68,8 @@ public struct SettingsPersistence: Sendable {
                 matchesSystemAppearance: boolean(.appearanceMatchesSystem)
                     ?? defaults.appearance.matchesSystemAppearance,
                 theme: rawValue(.appearanceTheme) ?? defaults.appearance.theme
-            )
+            ),
+            photoDisplayMode: rawValue(.photoDisplayMode)
         )
     }
 
@@ -88,6 +90,8 @@ public struct SettingsPersistence: Sendable {
         setText(settings.gridGroupDisplay.rawValue, .gridGroupDisplay)
         setBoolean(settings.appearance.matchesSystemAppearance, .appearanceMatchesSystem)
         setText(settings.appearance.theme.rawValue, .appearanceTheme)
+        storage.setString(
+            settings.photoDisplayMode?.rawValue, forKey: SettingsKey.photoDisplayMode.rawValue)
     }
 
     /// Writes every key, then reads them back and reports whether storage kept the settings.

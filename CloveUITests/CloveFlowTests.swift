@@ -222,6 +222,31 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testCameraDisplayChoiceAndDetailZoom() {
+        let app = launchSample()
+        openLibrary(app)
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        let display = element(app, "clove.settings.photoDisplayMode")
+        for _ in 0..<6 {
+            if display.exists && display.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(display.isHittable)
+        display.tap()
+        app.buttons["Camera preview"].tap()
+        XCTAssertTrue(
+            String(describing: display.value).contains("Camera preview")
+                || display.label.contains("Camera preview"))
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+        XCTAssertTrue(waitForLabel("3 / 36 · 100%", element(app, "clove.detail.zoom")))
+    }
+
+    @MainActor
     func testSavingAndDisconnectedGlyphs() {
         let saving = launchSample(["CLOVE_TEST_LIBRARY_SAVE_STATE": "saving"])
         openLibrary(saving)

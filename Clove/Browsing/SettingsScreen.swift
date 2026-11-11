@@ -131,6 +131,19 @@ struct SettingsScreen: View {
     /// The supervisor's default placement pending the owner; these existing settings use system rows.
     private var otherSettingsSection: some View {
         Section {
+            Picker(
+                "Show photos as",
+                selection: Binding(
+                    get: { store.photoDisplayMode },
+                    set: { mode in store.update { $0.photoDisplayMode = mode } }
+                )
+            ) {
+                Text("RAW").tag(PhotoDisplayMode.rawFirst)
+                Text("Camera preview").tag(PhotoDisplayMode.cameraPreviewFirst)
+            }
+            .accessibilityLabel("Show photos as")
+            .accessibilityValue(store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview")
+            .accessibilityIdentifier("clove.settings.photoDisplayMode")
             Toggle("Marking gestures", isOn: binding(\.gesturesEnabled))
                 .accessibilityIdentifier("clove.settings.gesturesEnabled")
             Picker("After marking", selection: binding(\.autoAdvance.destination)) {
@@ -164,6 +177,11 @@ struct SettingsScreen: View {
                 .accessibilityIdentifier("clove.settings.reset")
         } header: {
             sectionHeader("Gestures, zoom, navigation and color labels", identifier: "other")
+        } footer: {
+            Text(
+                "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter."
+            )
+            .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
     }

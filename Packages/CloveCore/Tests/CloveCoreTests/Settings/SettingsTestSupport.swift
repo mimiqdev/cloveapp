@@ -73,6 +73,7 @@ func nonDefaultSettings() throws -> AppSettings {
         moveRejectsEnabled: false,
         similarGroupsEnabled: false,
         gridGroupDisplay: .collapsed,
-        appearance: AppearanceChoice(matchesSystemAppearance: false, theme: .nord)
+        appearance: AppearanceChoice(matchesSystemAppearance: false, theme: .nord),
+        photoDisplayMode: .cameraPreviewFirst
     )
 }

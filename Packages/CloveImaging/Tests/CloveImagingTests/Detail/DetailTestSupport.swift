@@ -166,6 +166,8 @@ actor DetailReadGate {
 
     private(set) var nativePaths: [String] = []
     private(set) var previewPaths: [String] = []
+    private(set) var fullRasterPaths: [String] = []
+    func recordFullRaster(_ source: DetailSource) { fullRasterPaths.append(source.url.path) }
     private(set) var maximumNativeEntries = 0
     private(set) var maximumPreviewEntries = 0
     /// Whether a native image was still held when a render was entered, in entry order.
@@ -264,6 +266,7 @@ struct DetailPreviewSubstitution: Sendable {
 struct GatedDetailReader: DetailReading {
     let gate: DetailReadGate
     var substitutions: [DetailPreviewSubstitution] = []
+    var failedRasterFiles: Set<String> = []
     let delegate = DetailRenderer()
 
     func read(_ step: DetailPreviewStep, displayPixels: Int) async -> DetailReadOutcome {
@@ -289,7 +292,22 @@ struct GatedDetailReader: DetailReading {
     }
 
     func fullRaster(_ source: DetailSource) async -> DetailReadOutcome {
-        await delegate.fullRaster(source)
+        await gate.recordFullRaster(source)
+        if failedRasterFiles.contains(source.url.lastPathComponent) { return .noUsablePreview }
+        return await delegate.fullRaster(source)
+    }
+
+    func screenRAW(_ source: DetailSource, longEdge: Int) async -> CGImage? {
+        await gate.beginNative(source)
+        let pixels: CGImage?
+        switch await gate.behaviour {
+        case .synthetic:
+            pixels = try? makeDetailImage(width: longEdge, height: max(1, longEdge * 2 / 3))
+        case .real: pixels = await delegate.screenRAW(source, longEdge: longEdge)
+        case .fail: pixels = nil
+        }
+        await gate.endNative()
+        return pixels
     }
 
     func nativeRAW(_ source: DetailSource) async -> CGImage? {
