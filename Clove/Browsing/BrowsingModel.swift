@@ -796,6 +796,7 @@ final class BrowsingModel {
         let confirmed = confirmedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks()
         let edit = desiredMarks.apply(change, to: photo, confirmed: confirmed)
         desiredStatusIDs[photo] = MarkChangeID()
+        previousFailedPhotos.remove(photo)
         return edit
     }
 
@@ -950,8 +951,15 @@ final class BrowsingModel {
                 if let edit = keptByPhoto[failed.identity] {
                     excluded.insert(failed.identity)
                     if DesiredMarkRestore.retry(edit, current: shownMarks(for: edit.photo)) != nil {
-                        desiredMarks.retry(edit)
-                        retryEdits.append(edit)
+                        // Glyph recovery may already have confirmed this clear. Retry only a
+                        // current failure, using its current revision rather than the move's old edit.
+                        if let current = desiredMarks.entry(for: edit.photo),
+                            current.state.failure != nil
+                        {
+                            desiredMarks.retry(current.edit)
+                            previousFailedPhotos.remove(current.edit.photo)
+                            retryEdits.append(current.edit)
+                        }
                     } else {
                         changed.append(changedSince(failed.identity))
                     }
@@ -1065,7 +1073,7 @@ final class BrowsingModel {
             isSaveFailureToastVisible = false
             return
         }
-        guard statuses.contains(where: { $0.state.failure != nil }),
+        guard statuses.contains(where: { $0.state.failure != nil && failed.contains($0.identity) }),
             wasEmpty || !isSaveFailureToastVisible
         else { return }
         saveFailureToastBurst += 1
@@ -1131,6 +1139,7 @@ final class BrowsingModel {
                 return nil
             }
             desiredMarks.retry(entry.edit)
+            previousFailedPhotos.remove(photo.id)
             return entry.edit
         }
         guard !edits.isEmpty else { return }

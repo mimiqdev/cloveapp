@@ -742,8 +742,10 @@ struct DetailMarkingView: View {
     private func apply(_ result: MarkingResult) {
         switch result {
         case .mark(let change, let kind):
-            actions.apply(change, photo)
+            // Plan navigation from the current order before a mark removes this photo from
+            // a live filter. Both calls are synchronous; the mark still shows in this input turn.
             actions.marked(kind, photo)
+            actions.apply(change, photo)
         case .previousPhoto:
             actions.step(-1)
         case .nextPhoto:

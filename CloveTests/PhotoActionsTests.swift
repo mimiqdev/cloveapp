@@ -175,6 +175,53 @@ struct PhotoActionsTests {
         #expect(library.writtenMarks[a]?.label.colour == .red)
     }
 
+    @Test func moveDetailsDoesNotRepeatAClearAlreadyRecoveredByTheGlyph() async throws {
+        let library = ControlledPhotoLibrary(rejected: ["a", "c"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let kept = library.identity("a")
+        library.failNext.insert(kept)
+        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        model.runRejectMove(preview, kept: [kept]) { _ in }
+        await model.drainActions()
+        let completed = try #require(model.lastRejectMove)
+        model.retryAllUnfinishedChanges()
+        await model.drainActions()
+        try await waitUntil { model.latestChange(for: kept)?.state.isConfirmed == true }
+        let writes = library.events.count
+        library.failNext.insert(kept)
+        model.retryRejectMove(completed) { _ in }
+        await model.drainActions()
+        #expect(library.events.count == writes)
+        #expect(library.failNext.contains(kept))
+        #expect(model.lastRejectMove?.result.failedCount == 0)
+        #expect(model.latestChange(for: kept)?.state.isConfirmed == true)
+        #expect(!model.isSaveFailureToastVisible)
+    }
+
+    @Test func moveDetailsRetriesTheCurrentFailedRevision() async throws {
+        let library = ControlledPhotoLibrary(rejected: ["a", "c"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let kept = library.identity("a")
+        library.failNext.insert(kept)
+        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        model.runRejectMove(preview, kept: [kept]) { _ in }
+        await model.drainActions()
+        let completed = try #require(model.lastRejectMove)
+        model.apply(.rating(try #require(Rating(rawValue: 4))), to: kept)
+        await model.drainActions()
+        library.failNext.insert(kept)
+        model.apply(.rating(.unrated), to: kept)
+        await model.drainActions()
+        #expect(model.latestChange(for: kept)?.state.failure != nil)
+        model.retryRejectMove(completed) { _ in }
+        await model.drainActions()
+        try await waitUntil { model.latestChange(for: kept)?.state.isConfirmed == true }
+        #expect(model.shownMarks(for: kept).rating == .unrated)
+        #expect(model.lastRejectMove?.result.failedCount == 0)
+    }
+
     @Test func saveFailuresShareOneToastUntilItHidesAndRetryResendsAll() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
@@ -214,6 +261,22 @@ struct PhotoActionsTests {
         try await waitUntil { model.unsavedChanges.isEmpty }
         #expect(library.events.count == writes + 3)
         #expect(!model.isSaveFailureToastVisible)
+    }
+
+    @Test func failureAfterTheFailedCountReturnsToZeroStartsANewBurst() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = library.identity("a")
+        library.failNext.insert(photo)
+        model.apply(.label(ColourLabel(colour: .red)), to: photo)
+        await model.drainActions()
+        #expect(model.saveFailureToastBurst == 1)
+        library.failNext.insert(photo)
+        model.apply(.label(ColourLabel(colour: .blue)), to: photo)
+        await model.drainActions()
+        #expect(model.saveFailureToastBurst == 2)
+        #expect(model.isSaveFailureToastVisible)
     }
 
     @Test func saveToastIsSuppressedForLostAccessAndDriveLoss() async throws {

@@ -100,6 +100,19 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
+    func testMarkingStillAdvancesWhenTheUnmarkedFilterRemovesThePhoto() {
+        let app = launchSample()
+        openLibrary(app)
+        element(app, "clove.grid.filter").tap()
+        element(app, "clove.grid.filter.unmarked").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let rating = element(app, "clove.detail.capsule.stars.3")
+        XCTAssertTrue(rating.waitForExistence(timeout: 5))
+        rating.tap()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+    }
+
+    @MainActor
     func testShownMarkTimingWhileWriteIsHeldPending() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_WRITE_DELAY_MS": "5000"])
         defer { app.terminate() }
