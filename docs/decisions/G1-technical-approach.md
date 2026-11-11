@@ -1,6 +1,6 @@
 # G1: Technical approach
 
-Status: **approved by the product owner, 2026-11-09.** The matching PRD and plan edits land in the same PR.
+Status: **approved by the product owner, 2026-11-09.** Decision 5 was revised on 2026-11-11 to make Reject the rating −1; [the reject-as-rating record](reject-as-rating.md) supersedes it. The matching PRD and plan edits land in the same PR.
 
 G1 closes M1. Per [the development plan](../DEV-PLAN.md), it fixes the XMP approach, the preview strategy, the performance targets and the Duo approach. Where a result makes a PRD item infeasible, it revises that item. Sources:
 
@@ -44,13 +44,13 @@ All device numbers come from **one iPhone 17 Pro Max with local storage**. No SD
    - When the serial is missing, as on the A1 II, grouping falls back to the model.
    - Two bodies of the same model shooting the same scene at the same moment is not a supported case.
    - No extra work, UI or setting goes into this.
-5. **Reject is Clove-internal.**
-   - Reject exists for one job: marking photos so they can be moved to the rejects folder in a batch (`_Rejected` by default).
-   - It isn't metadata for other apps, so it is **never written to XMP**. There's no Clove namespace, no "Also write Rating −1" setting and no saved prior rating.
-   - Reject state lives in Clove's app storage, keyed by folder identity and file, until the move.
-   - The move itself is the durable result. A photo set moves as one unit: the RAW, its companions and its `.xmp`. The scan skips `_Rejected`.
-   - Rejects that haven't been moved don't carry over to a reinstall or another device. That's accepted.
-   - XMP holds only ratings and colour labels.
+5. **Reject is the rating −1.** *(Revised 2026-11-11. The original decision kept Reject out of XMP; [the reject-as-rating record](reject-as-rating.md) supersedes it.)*
+   - A photo's rating and Reject are one value: −1 is Rejected, 0 is unrated, and 1–5 are stars. The colour label stays independent.
+   - Rejecting replaces the stars, and clearing Reject leaves the photo unrated. Undo restores the stars a Reject replaced.
+   - Reject takes the rating's destination and never has a route of its own. A RAW set writes `xmp:Rating="-1"` to its sidecar (decision 2); a standalone JPEG/HIF keeps −1 in Clove storage (decision 6). There's no separate Reject field, no Clove namespace and no "Also write Rating −1" setting.
+   - Reading −1 from a sidecar means Rejected. Other out-of-range values, such as `6` or `-2`, read as unrated and keep their bytes.
+   - The move to `_Rejected` is still the durable Reject result. A moved set carries its `.xmp` with −1; undo of the move writes −1 again.
+   - Other apps' handling of Reject is not a v1 goal, and there are no workarounds for Lightroom, Capture One or others.
 
 ## 3. Recommended by the spikes, accepted
 
@@ -102,17 +102,17 @@ Engineering targets to evaluate, not launch promises. They are checked again whe
 - **Grid order.** Capture time, falling back to file creation time and then modification time. Fallback photos aren't grouped.
 - **Rule 6 (standalone files).** Standalone JPEG/HIF get no sidecar. Clove reads their embedded marks and keeps new marks in Clove (decision 6). In-file JPEG writing is a later feature. Standalone DNG remains RAW and uses a sidecar.
 - **Grouping.** Separate by model, plus serial when present. Two same-model bodies at the same moment is not supported. Starting values: 2 s gap and Vision distance 0.5.
-- **Reject (P0-05, rule 5, Move rejects).** Reject is stored in Clove, not in XMP. Remove the Clove XMP field and the "Also write Rating −1" setting. Rejects persist through the move to `_Rejected`. P0-07 interoperability covers ratings and colour labels only.
-- **Save status (P0-08).** "Saved" refers to XMP writes, meaning ratings and labels, and to the outcome of the reject move.
-- **Open risks section.** The question "How do Bridge and Lightroom treat `Rating = -1`?" no longer matters. The question "Can iOS write metadata without re-encoding?" is now answered: yes for JPEG via packet splice; no for HIF/HEIC through ImageIO, which drops data; no for DNG, which has no writer. The starting thresholds question is also answered.
+- **Reject (P0-05, rule 5, Move rejects).** Reject is the rating value −1, written to the standard `xmp:Rating` field for a RAW set and kept in Clove for a standalone JPEG/HIF. Rejecting replaces the stars, and clearing Reject leaves the photo unrated. There is no Clove XMP field and no "Also write Rating −1" setting. A moved set carries its sidecar with −1, and undo writes −1 again. P0-07 interoperability covers the rating, Reject included, and colour labels.
+- **Save status (P0-08).** "Saved" refers to XMP writes, meaning ratings (Reject included) and labels, and to the outcome of the reject move. A standalone mark confirmed in Clove is "Saved in Clove only". The third, Clove-stored Reject state is gone.
+- **Open risks section.** The question "How do Bridge and Lightroom treat `Rating = -1`?" no longer blocks the design; v1 writes −1 in the standard field and adds no workarounds for other apps. The question "Can iOS write metadata without re-encoding?" is now answered: yes for JPEG via packet splice; no for HIF/HEIC through ImageIO, which drops data; no for DNG, which has no writer. The starting thresholds question is also answered.
 
 ## 6. Plan edits that follow ([`docs/DEV-PLAN.md`](../DEV-PLAN.md))
 
-- **C1.** A photo item is a primary file plus optional JPEG and/or HIF companions and an optional sidecar. Reject, and marks on standalone JPEG/HIF, are Clove-stored state rather than XMP.
+- **C1.** A photo item is a primary file plus optional JPEG and/or HIF companions and an optional sidecar. Ratings (Reject included as −1) and labels go to the sidecar for a RAW set and to Clove for a standalone JPEG/HIF, so Reject has no separate route.
 - **C2.** Pairing follows decision 1. It takes over S6's handoff list, including sidecar discovery during the walk.
-- **C3.** Ratings and labels only. No Clove namespace and no Rating −1 handling.
-- **C4.** Two kinds of save state: XMP writes, confirmed by read-back, and Clove-stored marks.
-- **C6.** The move plan covers every file of a photo set: RAW, JPEG, HIF and `.xmp`.
+- **C3.** Ratings (Reject included as −1) and labels only. No Clove namespace and no separate Reject field.
+- **C4.** One write path per storage: XMP writes confirmed by read-back, and standalone Clove marks confirmed by read-back. A reject's save state is the state of the storage its rating uses.
+- **C6.** The move plan covers every file of a photo set: RAW, JPEG, HIF and `.xmp`. A moved RAW set carries its sidecar with −1; a standalone JPEG/HIF's stored −1 is cleared after the confirmed move, and undo writes −1 again.
 - **C7.** Moved out of M2 into a later milestone: in-file JPEG writes.
 - **C8.** Capture time, then file creation time, then modification time.
 - **C9.** Separate by model, plus serial when present.
