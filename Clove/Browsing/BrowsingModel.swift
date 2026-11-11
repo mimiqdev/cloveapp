@@ -12,7 +12,7 @@ import UIKit
 /// back to entry for the rest.
 ///
 /// The model is the only reader of the library's ``FolderLibrary/updates`` stream: entry's
-/// Recents, the grid's photos and the save state all come from here, so no screen polls a
+/// Recents, the grid's photos and their marks all come from here, so no screen polls a
 /// library or a write queue.
 @MainActor
 @Observable
@@ -136,13 +136,12 @@ final class BrowsingModel {
 
     /// The open folder's location loss, as C11's watch reported it (PRD P0-02, P0-08).
     ///
-    /// A loss explains the folder with the PRD's disconnected-drive or missing-location copy and
-    /// keeps its unfinished changes from reading **Writing…** or **Saved**. It is cleared when
-    /// another folder opens.
+    /// A loss explains the folder with the disconnected-drive or missing-location copy and
+    /// stops new marking actions. It is cleared when another folder opens.
     private(set) var folderLocationLoss: FolderLocationLoss?
 
     /// Whether this scene left its folder and is ignoring that folder's updates until a real open
-    /// shows another one (PRD P0-08's Leave anyway).
+    /// shows another one.
     ///
     /// The library keeps the departed folder's photos until its session drains, so without this
     /// a confirmed write could refresh them back onto entry and bring Continue browsing with it.
@@ -837,7 +836,7 @@ final class BrowsingModel {
             lastMoveUndo = .success(result)
         } catch {
             finishPendingMarks(edits)
-            await library.rereadMarks(for: edits.map(\.photo))
+            try? await library.rereadMarks(for: edits.map(\.photo))
             refresh()
             showSaveFailureToast()
             lastMoveUndo = .failure(error)
@@ -863,7 +862,7 @@ final class BrowsingModel {
             return result
         }
         let failed = result.outcomes.filter { $0.state.failure != nil }.map(\.identity)
-        if !failed.isEmpty { await library.rereadMarks(for: failed) }
+        if !failed.isEmpty { try? await library.rereadMarks(for: failed) }
         finishPendingMarks(edits)
         refresh()
         if !failed.isEmpty { showSaveFailureToast() }
@@ -888,13 +887,13 @@ final class BrowsingModel {
     private func discardDisconnectedChanges(_ loss: FolderLocationLoss) async {
         guard folderLocationLoss == nil else { return }
         folderLocationLoss = loss
-        actionPipeline.removePending()
+        let dropped = actionPipeline.removePending()
         desiredMarks.removeAll()
         storedPhotos = confirmedPhotos
         dismissSaveFailureToast()
-        let completions = moveCompletions.values
-        moveCompletions = [:]
-        for completion in completions { completion(.failure(RejectMoveRefusal.disabled)) }
+        for entry in dropped {
+            moveCompletions.removeValue(forKey: entry.id)?(.failure(RejectMoveRefusal.disabled))
+        }
         await library.discardPendingChanges()
     }
 
@@ -955,10 +954,9 @@ final class BrowsingModel {
 
     /// Shows entry and drops the closed folder's state at once (PRD Failure and recovery).
     ///
-    /// The library ends the folder's session and its write queue keeps the unconfirmed changes,
-    /// so nothing is reported as saved afterwards; the next open reads the actual XMP and
-    /// Clove-stored marks. The filter and order survive, because they describe the grid rather
-    /// than the folder that closed.
+    /// The library ends the folder's session after admitted actions finish. The next open reads
+    /// the actual XMP and Clove-stored marks. The filter and order survive, because they describe
+    /// the grid rather than the folder that closed.
     private func showEntryAfterLeaving() {
         state.folder = nil
         state.currentPhoto = nil
@@ -1117,8 +1115,6 @@ final class BrowsingModel {
             resolvePendingRestore(scanFinished: true)
             await reloadRecents()
         case .locationLost(let folder, let loss, let generation):
-            // PRD Failure and recovery forbids keeping Writing… or Saved for the folder's
-            // unfinished changes after a loss; the indicator supplies the copy (PRD P0-02).
             // A buffered loss can arrive after another folder opened, or after the same folder
             // opened again, so it only applies to the folder and the open this scene shows.
             guard folder == library.folder, generation == library.openGeneration else { return }
@@ -1249,4 +1245,6 @@ struct CompletedRejectMove: Sendable, Identifiable {
 
     /// The run's id, so the grid can key the toast on it (PRD P0-10).
     var id: RejectMoveBatchID { result.id }
+
+    var canUndo: Bool { !keptIdentities.isEmpty || !result.movedIdentities.isEmpty }
 }

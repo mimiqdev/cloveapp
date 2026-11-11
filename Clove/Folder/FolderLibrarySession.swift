@@ -319,20 +319,18 @@ final class FolderLibrarySession: FolderLibrary {
     }
 
     /// A failed write leaves no desired state behind: read the files under this folder's scope.
-    func rereadMarks(for photos: [PhotoIdentity]) async {
+    func rereadMarks(for photos: [PhotoIdentity]) async throws {
         guard let session = openSession,
             case .success(let stores) = await resolvedStores()
         else { return }
         let sets = photos.compactMap { store.scannedSet(for: $0) }
         let codec = codec
-        guard
-            let marks = try? await session.withAdmittedWork({
-                let stored = try await stores.writes.storedMarks(for: session.folder.id)
-                return await Task.detached {
-                    Self.readMarks(for: sets, storedMarks: stored, codec: codec)
-                }.value
-            })
-        else { return }
+        let marks = try await session.withAdmittedWork {
+            let stored = try await stores.writes.storedMarks(for: session.folder.id)
+            return try await Task.detached {
+                try Self.readMarks(for: sets, storedMarks: stored, codec: codec)
+            }.value
+        }
         for (photo, marks) in marks { store.setMarks(marks, for: photo) }
         publish(.reads(times: [:], marks: marks))
     }
@@ -402,7 +400,7 @@ final class FolderLibrarySession: FolderLibrary {
             }
             movedRejectIdentities.remove(restored.identity)
         }
-        await rereadMarks(for: result.restored.map(\.identity))
+        try await rereadMarks(for: result.restored.map(\.identity))
         publish(.photos([]))
         await startGrouping(generation: scanGeneration)
         return result
@@ -759,7 +757,7 @@ final class FolderLibrarySession: FolderLibrary {
                         // I4 reads the primary file of each set off the main actor; a RAW set's
                         // capture time comes from the RAW (G1 decision 1, I4).
                         let reads = await metadata.read(urls: sets.map { $0.photoSet.primary.url })
-                        let marks = Self.readMarks(
+                        let marks = try Self.readMarks(
                             for: sets, storedMarks: storedMarks, codec: codec)
                         await self.applyReads(
                             reads, marks: marks, sets: sets, generation: generation)
@@ -907,7 +905,7 @@ final class FolderLibrarySession: FolderLibrary {
         for sets: [ScannedPhotoSet],
         storedMarks: [PhotoIdentity: CloveStoredMarks],
         codec: XMPCodec
-    ) -> [PhotoIdentity: PhotoMarks] {
+    ) throws -> [PhotoIdentity: PhotoMarks] {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
         for set in sets {
             var packet: XMPMarks?
@@ -921,10 +919,13 @@ final class FolderLibrarySession: FolderLibrary {
                 }
             case .ambiguous: sidecar = nil
             }
-            if set.photoSet.primary.format == .raw, let sidecar,
-                let data = try? Data(contentsOf: sidecar)
-            {
-                packet = try? codec.read(data)
+            if set.photoSet.primary.format == .raw, let sidecar {
+                do {
+                    let data = try Data(contentsOf: sidecar)
+                    packet = try? codec.read(data)
+                } catch CocoaError.fileReadNoSuchFile {
+                    // A missing sidecar has no marks; other read failures must not erase them.
+                }
             }
             marks[set.id] = PhotoMarks(
                 stored: storedMarks[set.id], xmp: packet,

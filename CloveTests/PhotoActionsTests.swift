@@ -227,6 +227,61 @@ struct PhotoActionsTests {
         #expect(model.canMark)
     }
 
+    @Test(arguments: [false, true])
+    func disconnectLeavesARunningMoveToCompleteOnItsOwn(fails: Bool) async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        library.holdsMove = true
+        library.failsMove = fails
+        var results: [Result<RejectMoveResult, any Error>] = []
+        model.runRejectMove(plan, kept: []) { results.append($0) }
+        try await waitUntil { library.isRunningMove }
+        defer { library.holdsMove = false }
+        library.reportDriveLoss()
+        try await waitUntil { model.folderLocationLoss != nil }
+        #expect(results.isEmpty)
+        library.holdsMove = false
+        await model.drainActions()
+        #expect(results.count == 1)
+        if fails {
+            if case .failure(let error) = results.first {
+                #expect(error is PhotoActionMoveFailure)
+            } else {
+                Issue.record("The running move must report its own error")
+            }
+        } else {
+            #expect(try results.first?.get().movedIdentities == [library.identity("c")])
+        }
+    }
+
+    @Test func disconnectFailsAQueuedMoveWithoutRunningIt() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = library.identity("a")
+        library.heldPhoto = photo
+        model.apply(.rating(.rejected), to: photo)
+        try await waitUntil { library.writing == photo }
+        defer { library.heldPhoto = nil }
+        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        var results: [Result<RejectMoveResult, any Error>] = []
+        model.runRejectMove(plan, kept: []) { results.append($0) }
+        library.reportDriveLoss()
+        try await waitUntil { !results.isEmpty }
+        #expect(results.count == 1)
+        if case .failure(let error) = results.first {
+            #expect(error as? RejectMoveRefusal == .disabled)
+        } else {
+            Issue.record("The dropped move must fail")
+        }
+        library.heldPhoto = nil
+        await model.drainActions()
+        #expect(library.moves.isEmpty)
+        #expect(results.count == 1)
+    }
+
     @Test func queuedMoveCannotConsumeALaterRejectOrMoveAPhotoWithALaterEdit() async throws {
         let library = ControlledPhotoLibrary(rejected: ["b", "c"])
         let model = BrowsingModel(library: library)
@@ -330,6 +385,7 @@ struct PhotoActionsTests {
 }
 
 private struct PhotoActionWaitFailure: Error {}
+private struct PhotoActionMoveFailure: Error {}
 
 @MainActor
 private final class ControlledPhotoLibrary: FolderLibrary {
@@ -350,6 +406,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
     var writes: [BatchMarkItem] = []
     var moves: [[PhotoIdentity]] = []
     var holdsMove = false
+    var failsMove = false
     var isRunningMove = false
     var holdsReopen = false
     var isReopening = false
@@ -442,6 +499,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
             if !holdsMove { break }
             try await Task.sleep(for: .milliseconds(5))
         }
+        if failsMove { throw PhotoActionMoveFailure() }
         let ids = plan.readyEntries.map(\.identity)
         moves.append(ids)
         photos.removeAll { ids.contains($0.id) }
