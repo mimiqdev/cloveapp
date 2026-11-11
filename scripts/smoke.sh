@@ -65,6 +65,13 @@ is_runner_failure() {
         "$log"
 }
 
+test_targets=(-only-testing:CloveTests -only-testing:CloveUITests "$@")
+for argument in "$@"; do
+    case "$argument" in
+        -only-testing:*) test_targets=("$@"); break ;;
+    esac
+done
+
 max_attempts="${CLOVE_SMOKE_ATTEMPTS:-4}"
 attempt=1
 while [ "$attempt" -le "$max_attempts" ]; do
@@ -80,10 +87,9 @@ while [ "$attempt" -le "$max_attempts" ]; do
     xcodebuild test \
         -project Clove.xcodeproj \
         -scheme Clove \
-        -only-testing:CloveTests \
-        -only-testing:CloveUITests \
+        "${test_targets[@]}" \
         -destination "id=$udid" \
-        -derivedDataPath .build/DerivedData.noindex "$@" 2>&1 | tee "$log"
+        -derivedDataPath .build/DerivedData.noindex 2>&1 | tee "$log"
     code=$?
     set -e
 

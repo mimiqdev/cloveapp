@@ -480,7 +480,12 @@ final class BrowsingModel {
         guard let result = lastGroupFinishing, result != dismissedGroupFailure else { return nil }
         let statuses = Dictionary(
             uniqueKeysWithValues: result.outcomes.map { outcome in
-                (outcome.photo, latestChange(for: outcome.photo) ?? outcome.status)
+                // A confirmed result stays final even while its UI stream catches up.
+                // Only unfinished outcomes follow a newer marking action or retry.
+                let status =
+                    outcome.status.state.isConfirmed
+                    ? outcome.status : latestChange(for: outcome.photo) ?? outcome.status
+                return (outcome.photo, status)
             })
         let current = GroupFinishingResult.applied(
             result.plan, changes: result.outcomes.map(\.change), statuses: statuses,

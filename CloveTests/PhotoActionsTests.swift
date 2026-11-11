@@ -146,6 +146,23 @@ struct PhotoActionsTests {
         #expect(library.events.count == writes)
     }
 
+    @Test func confirmedFinishingDoesNotRegressWhileItsStatusStreamIsPending() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.withholdsFinalStatuses = true
+        let a = library.identity("a")
+        let b = library.identity("b")
+        let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
+        model.runGroupFinishing(
+            GroupFinishingPlan(
+                group: group, action: .keepThis, currentPhoto: a, marks: [:], enabledRatings: .all))
+        await model.drainActions()
+        try await waitUntil { model.latestChange(for: a)?.state == .pending }
+        #expect(model.lastGroupFinishing?.savedCount == 2)
+        #expect(model.groupFinishingFailure == nil)
+    }
+
     @Test func moveUndoFoldsTheCompleteConfirmedDesiredMarks() async throws {
         let library = ControlledPhotoLibrary(rejected: ["a", "c"])
         let model = BrowsingModel(library: library)
@@ -336,6 +353,7 @@ private final class ControlledPhotoLibrary: FolderLibrary {
     var writing: PhotoIdentity?
     var failNext: Set<PhotoIdentity> = []
     var failureReason: MarkWriteFailureReason = .notConfirmed
+    var withholdsFinalStatuses = false
     var events: [String] = []
     var moves: [[PhotoIdentity]] = []
     var writtenMarks: [PhotoIdentity: PhotoMarks] = [:]
@@ -364,6 +382,11 @@ private final class ControlledPhotoLibrary: FolderLibrary {
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         var outcomes: [MarkChangeStatus] = []
         for item in items {
+            let id = MarkChangeID()
+            continuation.yield(
+                .change(
+                    MarkChangeStatus(
+                        id: id, identity: item.photo, requested: item.change, state: .pending)))
             writing = item.photo
             for _ in 0..<200 {
                 if heldPhoto != item.photo { break }
@@ -387,10 +410,10 @@ private final class ControlledPhotoLibrary: FolderLibrary {
                 photos[index].marks = photos[index].marks.applying(item.change)
             }
             let status = MarkChangeStatus(
-                id: MarkChangeID(), identity: item.photo, requested: item.change, state: state)
+                id: id, identity: item.photo, requested: item.change, state: state)
             statuses[item.photo] = status
             outcomes.append(status)
-            continuation.yield(.change(status))
+            if !withholdsFinalStatuses { continuation.yield(.change(status)) }
         }
         writing = nil
         continuation.yield(.photos(photos))
