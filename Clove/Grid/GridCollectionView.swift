@@ -401,7 +401,9 @@ extension GridCollectionView {
             if let cover = item.group, cover.isCover,
                 let group = groups.first(where: { $0.id == cover.id })
             {
-                return group.members.contains { failedPhotos.contains($0) }
+                return group.members.contains {
+                    shownPhotos.contains($0) && failedPhotos.contains($0)
+                }
             }
             return failedPhotos.contains(item.photo.id)
         }

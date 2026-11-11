@@ -34,11 +34,11 @@ struct DetailPhotoFrame: View {
         pixels
             .frame(width: side, height: height ?? side)
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay { border }
             .overlay(alignment: .bottomLeading) { marks }
             // PRD In-group culling: rejected photos are dimmed, so a cull decision reads at a
             // glance in the strip (PRD In-group culling, comparison and elimination).
             .opacity(photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)
+            .overlay { border }
             .task(id: photo.id) {
                 guard thumbnail == nil else { return }
                 if case .image(let pixels) = await thumbnails.thumbnail(

@@ -36,7 +36,7 @@ struct GridScreen: View {
         GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
             groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
-            display: .collapsed
+            display: store.settings.gridGroupDisplay
         ).cells
     }
 

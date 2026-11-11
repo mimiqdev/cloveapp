@@ -69,9 +69,13 @@ struct DetailScreen: View {
     /// The marking controls and the preview, then the filmstrip, in the order PRD Detail and
     /// marking fixes.
     private func content(for photo: GridPhoto) -> some View {
-        DetailMarkingView(
+        // The capsule and its existing input rules must read the same marks after a pending
+        // or failed change. This display copy leaves the library's confirmed record untouched.
+        var displayedPhoto = photo
+        displayedPhoto.marks = browsing.cullingMarks(for: photo)
+        return DetailMarkingView(
             browsing: browsing,
-            photo: photo,
+            photo: displayedPhoto,
             settings: settings,
             saveState: browsing.saveText(for: photo.id),
             images: images,
@@ -87,7 +91,8 @@ struct DetailScreen: View {
             apply: { change, photo in await browsing.apply(change, to: photo.id) },
             marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
             step: { offset in showPhoto(offset: offset) },
-            markingSwipeBegan: { autoAdvance.cancel() })
+            markingSwipeBegan: { autoAdvance.cancel() },
+            openPhoto: { openPhoto($0) })
     }
 
     // MARK: - Navigation

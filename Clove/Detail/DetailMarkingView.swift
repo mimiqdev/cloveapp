@@ -50,6 +50,9 @@ struct DetailMarkingActions {
 
     /// A marking swipe began: drop whatever the last mark was about to do (PRD Auto-advance).
     let markingSwipeBegan: () -> Void
+
+    /// Filmstrip navigation keeps the screen's existing auto-advance cancellation.
+    var openPhoto: (PhotoIdentity) -> Void = { _ in }
 }
 
 /// One photo's preview and marking controls: the HUD, the zoomable preview with its edge taps
@@ -210,6 +213,8 @@ struct DetailMarkingView: View {
             SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.detail.saveStatus")
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
+            FolderSaveBanner(
+                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             if let situation = failureSituation {
                 SaveFailureBanner(
                     situation: situation, identifierPrefix: "clove.detail.saveFailure",
@@ -262,8 +267,11 @@ struct DetailMarkingView: View {
                         VStack(spacing: 8) {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                                open: { browsing.openPhoto($0) }, groups: browsing.groups,
-                                openGroup: { browsing.openGroup($0) })
+                                open: actions.openPhoto, groups: browsing.groups,
+                                openGroup: {
+                                    actions.markingSwipeBegan()
+                                    browsing.openGroup($0)
+                                })
                             DetailMarkCapsule(
                                 marks: displayMarks, settings: settings,
                                 previewRating: swipeFeedback.rating,

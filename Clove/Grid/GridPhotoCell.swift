@@ -13,6 +13,8 @@ final class GridPhotoCell: UICollectionViewCell {
     private var showsSelection = false
     private var theme = CloveTheme.light
     private var hasFailed = false
+    private var isSelecting = false
+    private var onOpenGroup: (GroupID) -> Void = { _ in }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -34,6 +36,8 @@ final class GridPhotoCell: UICollectionViewCell {
         showsSelection = isSelected
         self.theme = theme
         self.hasFailed = hasFailed
+        self.isSelecting = isSelecting
+        self.onOpenGroup = onOpenGroup
         if changesPhoto {
             thumbnail = nil
             isUnavailable = false
@@ -72,7 +76,8 @@ final class GridPhotoCell: UICollectionViewCell {
         guard let item = currentItem else { return }
         let tile = GridTile(
             item: item, thumbnail: thumbnail, companions: currentCompanions,
-            isUnavailable: isUnavailable, isSelected: showsSelection, hasFailed: hasFailed)
+            isUnavailable: isUnavailable, isSelected: showsSelection, hasFailed: hasFailed,
+            isSelecting: isSelecting, openGroup: onOpenGroup)
         let theme = theme
         contentConfiguration = UIHostingConfiguration {
             tile.environment(\.cloveTheme, theme)
@@ -126,6 +131,8 @@ private struct GridTile: View {
     let isUnavailable: Bool
     let isSelected: Bool
     let hasFailed: Bool
+    let isSelecting: Bool
+    let openGroup: (GroupID) -> Void
     @Environment(\.cloveTheme) private var theme
 
     private var isCover: Bool { item.group?.isCover == true }
@@ -159,7 +166,27 @@ private struct GridTile: View {
         .accessibilityIdentifier(
             isCover
                 ? "clove.grid.group.\(item.group?.id.rawValue ?? "")"
-                : "clove.grid.photo.\(item.photo.id.stem)")
+                : "clove.grid.photo.\(item.photo.id.stem)"
+        )
+        .overlay(alignment: .bottomTrailing) {
+            if let group = item.group, !isCover, group.showsCount {
+                Button {
+                    openGroup(group.id)
+                } label: {
+                    Text(group.count.formatted())
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.clove.bg.canvas)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.clove.group, in: Capsule())
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .allowsHitTesting(!isSelecting)
+                .accessibilityHidden(isSelecting)
+                .accessibilityLabel("Open the similar group of \(group.count) photos")
+                .accessibilityIdentifier("clove.grid.group.\(group.id.rawValue)")
+            }
+        }
     }
 
     @ViewBuilder private var image: some View {
@@ -221,7 +248,7 @@ private struct GridTile: View {
 
     private var bottomMarkers: some View {
         HStack(spacing: 3) {
-            if let group = item.group, isCover || group.showsCount {
+            if let group = item.group, isCover {
                 Text(group.count.formatted())
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Color.clove.bg.canvas)
@@ -239,7 +266,10 @@ private struct GridTile: View {
     }
 
     private var accessibilityLabel: String {
-        if isCover { return "Similar group of \(item.group?.count ?? 0) photos" }
+        if isCover {
+            return "Similar group of \(item.group?.count ?? 0) photos"
+                + (hasFailed ? ", Save failed" : "")
+        }
         var parts = [item.photo.fileName]
         if item.photo.marks.rating.rawValue > 0 {
             parts.append("\(item.photo.marks.rating.rawValue) stars")
@@ -254,6 +284,7 @@ private struct GridTile: View {
         if companions.hasHEIF { parts.append("HIF companion") }
         if isUnavailable { parts.append("No preview") }
         if isSelected { parts.append("Selected") }
+        if hasFailed { parts.append("Save failed") }
         return parts.joined(separator: ", ")
     }
 }

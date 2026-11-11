@@ -77,6 +77,22 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
+    func testFailedDetailMarkCanBeCleared() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_SAVE_STATE": "failed"])
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(waitForValue("3 stars", capsule))
+        element(app, "clove.detail.capsule.stars.3").tap()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+        element(app, "clove.detail.preview")
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertTrue(waitForValue("Unmarked", capsule))
+        XCTAssertEqual(element(app, "clove.detail.saveState").label, "Saved")
+    }
+
+    @MainActor
     func testSavingAndDisconnectedGlyphs() {
         let saving = launchSample(["CLOVE_TEST_LIBRARY_SAVE_STATE": "saving"])
         openLibrary(saving)
@@ -87,6 +103,9 @@ final class CloveUITests: XCTestCase {
         XCTAssertEqual(element(disconnected, "clove.grid.saveState").label, "Not connected")
         XCTAssertTrue(disconnected.staticTexts["The drive disconnected."].exists)
         XCTAssertTrue(element(disconnected, "clove.grid.saveState.failure.action").exists)
+        element(disconnected, "clove.grid.group.burst-2678").tap()
+        XCTAssertTrue(element(disconnected, "clove.group").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(disconnected, "clove.detail.saveStatus.failure.action").exists)
     }
 
     /// Group finishing retains its existing path while the surrounding grid changes to stacks.
@@ -171,25 +190,30 @@ final class CloveUITests: XCTestCase {
             element(app, "clove.grid.more").tap()
             app.buttons["Settings"].tap()
             chooseTheme(theme, app)
+            chooseCollapsedGrid(app)
             element(app, "clove.nav.back").tap()
             capture("grid-\(theme)")
             element(app, "clove.grid.filter").tap()
-            capture("grid-filter-\(theme)")
             element(app, "clove.grid.filter.unmarked").tap()
             element(app, "clove.grid.filter").tap()
+            XCTAssertTrue(element(app, "clove.grid.filter.all").waitForExistence(timeout: 5))
+            capture("grid-filter-\(theme)")
             element(app, "clove.grid.filter.all").tap()
             element(app, "clove.grid.more").tap()
+            XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
             capture("grid-more-\(theme)")
-            // Close the system menu by tapping the title outside it.
-            element(app, "clove.grid.title").tap()
+            // The native menu overlaps the title. A tap to its left dismisses it.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.6)).tap()
             let photo = element(app, "clove.grid.photo.mmq02680")
             photo.press(forDuration: 0.6)
+            XCTAssertTrue(element(app, "clove.grid.batch.done").waitForExistence(timeout: 5))
             capture("grid-select-\(theme)")
             element(app, "clove.grid.batch.done").tap()
             photo.tap()
             XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
             capture("detail-\(theme)")
             element(app, "clove.detail.capsule.label").tap()
+            XCTAssertTrue(element(app, "clove.detail.labels.green").waitForExistence(timeout: 5))
             capture("detail-labels-\(theme)")
             element(app, "clove.detail.labels.green").tap()
             element(app, "clove.detail.info").tap()
@@ -206,6 +230,10 @@ final class CloveUITests: XCTestCase {
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
             XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
             capture("detail-rejected-\(theme)")
+            element(app, "clove.nav.back").tap()
+            app.swipeUp()
+            XCTAssertTrue(element(app, "clove.grid.photo.mmq02700").waitForExistence(timeout: 5))
+            capture("grid-no-preview-\(theme)")
             app.terminate()
         }
         for state in ["saving", "failed"] {
@@ -225,6 +253,8 @@ final class CloveUITests: XCTestCase {
             openLibrary(app)
             capture("grid-opening-\(stage)")
             XCTAssertFalse(element(app, "clove.grid.moveRejects").exists)
+            element(app, "clove.grid.photo.mmq02680").tap()
+            XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
             app.terminate()
         }
         let app = launchSample(["CLOVE_TEST_LIBRARY_LOCATION_LOSS": "drive"])
@@ -249,6 +279,17 @@ final class CloveUITests: XCTestCase {
         if open.exists { open.tap() }
         if element(app, "clove.detail").exists { element(app, "clove.nav.back").tap() }
         XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func chooseCollapsedGrid(_ app: XCUIApplication) {
+        let control = element(app, "clove.settings.gridGroupDisplay")
+        for _ in 0..<8 {
+            if control.exists && control.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(control.exists)
+        control.buttons["Collapsed"].tap()
     }
 
     @MainActor
@@ -288,7 +329,7 @@ final class CloveUITests: XCTestCase {
 
     @MainActor
     private func capture(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        let attachment = XCTAttachment(screenshot: XCUIApplication().screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

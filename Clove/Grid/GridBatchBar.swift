@@ -12,7 +12,9 @@ struct GridBatchBar: View {
     var body: some View {
         MarkCapsule(
             rating: isRejected ? .unrated : commonRating,
-            label: isRejected ? nil : commonLabel, isRejected: isRejected,
+            // Batch Reject is main's set-only action. Keep it unselected so it never
+            // advertises a toggle that the existing batch operation cannot perform.
+            label: isRejected ? nil : commonLabel, isRejected: false,
             enabledRatings: store.settings.enabledRatings, identifier: "clove.grid.batch",
             onRate: { apply(.rating($0)) }, onReject: { apply(.reject) },
             onLabel: { showsLabels.toggle() }
