@@ -104,11 +104,14 @@ jobs:
       - name: mise run test-release
         run: mise run test-release 2>&1 | tee .build/ci-logs/test-release.log
       - name: mise run test-core (serial)
+        timeout-minutes: 20
         run: mise run test-core --no-parallel 2>&1 | tee .build/ci-logs/test-core.log
-      - name: mise run test-imaging
-        run: mise run test-imaging 2>&1 | tee .build/ci-logs/test-imaging.log
-      - name: mise run test-lab
-        run: mise run test-lab 2>&1 | tee .build/ci-logs/test-lab.log
+      - name: mise run test-imaging (serial)
+        timeout-minutes: 20
+        run: mise run test-imaging --no-parallel 2>&1 | tee .build/ci-logs/test-imaging.log
+      - name: mise run test-lab (serial)
+        timeout-minutes: 20
+        run: mise run test-lab --no-parallel 2>&1 | tee .build/ci-logs/test-lab.log
       - name: mise run build
         run: mise run build 2>&1 | tee .build/ci-logs/build.log
       - name: mise run smoke
