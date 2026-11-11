@@ -18,7 +18,7 @@ public enum MarkingKey: Hashable, Sendable {
     /// `↑`: raise to the next enabled rating, and do nothing at the top (PRD keyboard table).
     case nextRating
 
-    /// `↓`: Reject, which keeps the existing rating (PRD keyboard table and Marking rules).
+    /// `↓`: Reject, which replaces the rating with −1 (PRD keyboard table and Marking rules).
     case reject
 
     /// `←`: show the previous photo (PRD keyboard table).

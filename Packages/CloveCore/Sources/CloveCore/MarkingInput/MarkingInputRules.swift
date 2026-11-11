@@ -111,6 +111,17 @@ public struct MarkingInputRules: Hashable, Sendable {
 
     // MARK: - Keyboard and controls
 
+    /// The result of the HUD's Reject toggle: on sets −1, off sets 0 (PRD Marking rules).
+    ///
+    /// This is the one Reject input that can clear the mark; the swipe down and the `↓` key only
+    /// turn it on. The label is never touched, and a second toggle in either direction returns
+    /// the photo to the other state.
+    public func result(forRejectToggle marks: PhotoMarks) -> MarkingResult {
+        markResult(
+            MarkChange(rating: marks.isRejected ? .unrated : .rejected), kind: .reject,
+            marks: marks)
+    }
+
     /// The result of one key from the PRD keyboard table.
     ///
     /// `0` clears and `1`–`5` set only enabled levels (PRD keyboard table and Enabled rating

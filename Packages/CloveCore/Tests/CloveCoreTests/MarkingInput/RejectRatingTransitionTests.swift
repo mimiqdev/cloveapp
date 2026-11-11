@@ -1,6 +1,6 @@
 import Testing
 
-import CloveCore
+@testable import CloveCore
 
 /// C13's marking rules with Reject as the rating −1 (PRD P0-05, P0-06; decision record
 /// `reject-as-rating.md`): every input that rejects writes −1, and every input that rates
@@ -42,6 +42,22 @@ struct RejectRatingTransitionTests {
         #expect(
             rules.result(for: .rating(.unrated), marks: rejected)
                 == .mark(MarkChange(rating: .unrated), .rating))
+    }
+
+    /// The HUD's Reject toggle turns on to −1 and off to 0, and never touches the label.
+    @Test func theRejectToggleTurnsOnToMinusOneAndOffToUnrated() throws {
+        let labelled = PhotoMarks(rating: .rejected, label: ColourLabel(colour: .green))
+        for marks in [PhotoMarks(), try threeStars()] {
+            #expect(
+                rules.result(forRejectToggle: marks)
+                    == .mark(MarkChange(rating: .rejected), .reject))
+        }
+        #expect(
+            rules.result(forRejectToggle: labelled)
+                == .mark(MarkChange(rating: .unrated), .reject))
+        // Applying the toggle's change leaves the label alone in both directions.
+        #expect(labelled.applying(MarkChange(rating: .unrated)).label == labelled.label)
+        #expect(PhotoMarks().applying(MarkChange(rating: .rejected)).isRejected)
     }
 
     /// A star rating on a rejected photo replaces −1 with those stars.

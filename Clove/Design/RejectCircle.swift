@@ -19,7 +19,7 @@ struct RejectCircle: View {
     /// The identifier the screen's UI test uses.
     var identifier = "clove.mark.reject"
 
-    /// Toggles Reject independently of the rating (PRD Marking rules).
+    /// Toggles Reject, the rating −1 (PRD Marking rules).
     let onToggle: () -> Void
 
     var body: some View {
