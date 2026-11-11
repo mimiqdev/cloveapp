@@ -44,14 +44,12 @@ let launchSettingKeys = [
     "detail.doubleTap",
     "gestures.enabled",
     "grid.groupDisplay",
-    "groups.completion",
     "groups.similarEnabled",
     "labels.extended",
     "ratings.enabled",
     "rejects.folderName",
     "rejects.moveEnabled",
     "zoom.keepInDetail",
-    "zoom.keepInGroups",
 ]
 
 /// Settings where every field differs from its default, so a round trip exercises every key.
@@ -69,13 +67,12 @@ func nonDefaultSettings() throws -> AppSettings {
             triggers: AutoAdvanceTriggers(rating: false, reject: false, colourLabel: true)
         ),
         doubleTap: .off,
-        keepZoom: KeepZoom(inGroups: false, inDetail: true),
+        keepZoom: KeepZoom(inDetail: true),
         extendedColourLabelsEnabled: true,
         rejectsFolderName: folderName,
         moveRejectsEnabled: false,
         similarGroupsEnabled: false,
         gridGroupDisplay: .collapsed,
-        groupCompletion: .stay,
         appearance: AppearanceChoice(matchesSystemAppearance: false, theme: .nord)
     )
 }

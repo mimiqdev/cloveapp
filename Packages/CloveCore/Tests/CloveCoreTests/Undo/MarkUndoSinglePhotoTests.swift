@@ -30,7 +30,6 @@ struct MarkUndoSinglePhotoTests {
         #expect(undoResult.savedCount == 1)
         #expect(undoResult.failedCount == 0)
         #expect(undoResult.partialFailureSummary == nil)
-        #expect(undoResult.completion == nil)
         #expect(undoResult.outcomes.count == 1)
         #expect(undoResult.outcomes[0].isWritten)
         #expect(undoResult.outcomes[0].status?.state == .savedInSidecar)

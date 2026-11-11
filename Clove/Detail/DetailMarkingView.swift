@@ -5,10 +5,8 @@ import SwiftUI
 /// How a preview's zoom behaves when the screen shows another photo (PRD P0-04; PRD In-group
 /// culling, synchronized zoom).
 ///
-/// PRD Gesture-related settings keeps zoom while navigating on by default in groups and off in
-/// regular detail, and PRD In-group culling adds the position: in a group the next photo opens on
-/// the same spot of the image, so comparing two frames of a burst is one step (PRD P0-12). A
-/// regular detail view keeps the zoom level only, because its photos need no shared position.
+/// Group review always keeps scale and position for comparing the same crop. Regular detail
+/// optionally keeps the zoom level, without sharing position between unrelated photos.
 struct DetailZoomPolicy: Hashable {
     /// Whether the next photo keeps the zoom level (PRD Gesture-related settings).
     var keepsScale: Bool
@@ -22,12 +20,8 @@ struct DetailZoomPolicy: Hashable {
         DetailZoomPolicy(keepsScale: settings.keepZoom.inDetail, keepsPosition: false)
     }
 
-    /// The zoom a group view keeps while navigating its group; on by default (PRD In-group
-    /// culling, synchronized zoom).
-    static func group(_ settings: AppSettings) -> DetailZoomPolicy {
-        DetailZoomPolicy(
-            keepsScale: settings.keepZoom.inGroups, keepsPosition: settings.keepZoom.inGroups)
-    }
+    /// Group zoom and pan are always synced, as specified by the handoff.
+    static let group = DetailZoomPolicy(keepsScale: true, keepsPosition: true)
 }
 
 /// What the marking view asks its screen to do beyond drawing it (PRD P0-04, P0-06; PRD P0-12).
@@ -80,7 +74,7 @@ struct DetailMarkingActions {
 /// save state in one place, and the group view's photos are marked and recovered exactly like a
 /// single photo's.
 ///
-/// Detail presentation follows the handoff; the group screen retains its existing layout.
+/// Detail and group review share the same presentation; the group supplies its own header and pill.
 struct DetailMarkingView: View {
     /// The scene's browsing state, which carries the folder's save state and the retry calls
     /// (PRD P0-08).
@@ -92,9 +86,6 @@ struct DetailMarkingView: View {
     /// C12's current settings: the double-tap behaviour, the enabled ratings and the labels the
     /// HUD offers (PRD Gesture-related settings).
     let settings: AppSettings
-
-    /// The save-state words for this photo, which U7 replaces with its own copy (PRD P0-08).
-    let saveState: String
 
     /// The pixels to show, normally the open folder's source from the browsing model.
     let images: any DetailImageSource
@@ -111,6 +102,9 @@ struct DetailMarkingView: View {
 
     /// C5's undo through the one model call U8 adds; the button stays disabled until then.
     var undo: () -> Void = {}
+
+    /// Group review supplies only its header, filter choice and finishing pill.
+    var groupReview: GroupReviewChrome?
 
     @Environment(\.displayScale) private var displayScale
     @Environment(\.cloveTheme) private var theme
@@ -169,63 +163,13 @@ struct DetailMarkingView: View {
     /// The rating or Reject badge the marking swipe draws near the finger (PRD P0-06).
     @State private var swipeFeedback = DetailSwipeFeedback()
 
-    /// The failed changes whose explanation the user dismissed, so Cancel hides the row without
-    /// pretending the change was saved (PRD Failure and recovery, row 1).
-    @State private var dismissedFailures: Set<MarkChangeID> = []
-
-    /// Whether the system folder picker is presented for a read-only failure's Open action
-    /// (PRD P0-01).
-    @State private var isPickingFolder = false
-
     var body: some View {
-        Group {
-            if browsing.state.route == .detail {
-                detailLayout
-            } else {
-                groupLayout
+        detailLayout
+            .task(id: photo.id) { await loadPreview(for: photo) }
+            .onDisappear {
+                upgradeTask?.cancel()
+                Task { await images.cancelPrefetch() }
             }
-        }
-        .folderPicker(isPresented: $isPickingFolder) { url in
-            await browsing.openPickedFolder(url)
-        }
-        .task(id: photo.id) { await loadPreview(for: photo) }
-        .onDisappear {
-            upgradeTask?.cancel()
-            Task { await images.cancelPrefetch() }
-        }
-    }
-
-    /// Group review is a separate design task; it keeps its current layout and controls.
-    private var groupLayout: some View {
-        VStack(spacing: 0) {
-            DetailMarkingHUD(
-                photo: photo,
-                settings: settings,
-                saveState: saveState,
-                zoomName: zoomName,
-                rate: { rate($0) },
-                label: { choose($0) },
-                toggleReject: { toggleReject() },
-                undo: undo)
-            // The open folder's own save state, then this photo's failure with the PRD's Retry
-            // and Cancel (PRD P0-08). The folder's row carries a location loss; the photo's row
-            // carries one write that did not confirm.
-            SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.detail.saveStatus")
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
-            FolderSaveBanner(
-                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
-            if let situation = failureSituation {
-                SaveFailureBanner(
-                    situation: situation, identifierPrefix: "clove.detail.saveFailure",
-                    perform: perform
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
-            }
-            Divider()
-            previewArea
-        }
     }
 
     private var chromeIsVisible: Bool { !hidesChrome && scale <= DetailFitScale.tolerance }
@@ -235,23 +179,33 @@ struct DetailMarkingView: View {
     private var detailLayout: some View {
         VStack(spacing: 0) {
             BrowsingHeader(
-                title: photo.fileName, titleIdentifier: "clove.detail.fileName",
+                title: groupReview.map { "Group · \($0.group.members.count.formatted()) photos" }
+                    ?? photo.fileName,
+                titleIdentifier: groupReview == nil ? "clove.detail.fileName" : "clove.group.title",
                 back: { browsing.back() }
             ) {
                 HStack(spacing: 0) {
-                    Text(detailSubtitle)
-                        .accessibilityIdentifier("clove.detail.zoom")
+                    Text(
+                        groupReview.map { "\($0.undecided.formatted()) undecided" }
+                            ?? detailSubtitle
+                    )
+                    .accessibilityIdentifier(
+                        groupReview == nil ? "clove.detail.zoom" : "clove.group.undecided")
                     if scale <= DetailFitScale.tolerance {
                         SaveStatusIndicator(
                             browsing: browsing, identifierPrefix: "clove.detail.saveState",
-                            photo: photo.id)
+                            photo: groupReview == nil ? photo.id : nil)
                     }
                 }
             } tools: {
                 if chromeIsVisible {
-                    GlassIconButton(
-                        label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
-                    ) { showsInformation = true }
+                    if let groupReview {
+                        groupMenu(groupReview)
+                    } else {
+                        GlassIconButton(
+                            label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
+                        ) { showsInformation = true }
+                    }
                     GlassIconButton(
                         label: "Undo", symbol: "arrow.uturn.backward",
                         identifier: "clove.detail.undo",
@@ -267,11 +221,21 @@ struct DetailMarkingView: View {
                         VStack(spacing: 8) {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                                open: actions.openPhoto, groups: browsing.groups,
+                                open: actions.openPhoto,
+                                failedPhotos: groupReview == nil
+                                    ? []
+                                    : Set(
+                                        browsing.unsavedChanges.filter { $0.state.failure != nil }
+                                            .map(\.photo)),
+                                groups: groupReview == nil ? browsing.groups : [],
                                 openGroup: {
                                     actions.markingSwipeBegan()
                                     browsing.openGroup($0)
                                 })
+                            if let action = groupReview?.action {
+                                action.disabled(browsing.isMovingRejects)
+                                    .padding(.vertical, 6)
+                            }
                             DetailMarkCapsule(
                                 marks: displayMarks, settings: settings,
                                 previewRating: swipeFeedback.rating,
@@ -307,6 +271,23 @@ struct DetailMarkingView: View {
         }
     }
 
+    private func groupMenu(_ chrome: GroupReviewChrome) -> some View {
+        Menu {
+            Toggle("Undecided only", isOn: chrome.undecidedOnly)
+                .accessibilityIdentifier("clove.group.undecidedOnly")
+            Button("Find similar shots again") { Task { await browsing.runGroupingAgain() } }
+                .accessibilityIdentifier("clove.group.runAgain")
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.title3)
+                .foregroundStyle(Color.clove.text.primary)
+                .frame(width: 44, height: 44)
+                .cloveGlass(in: Circle())
+        }
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("clove.group.more")
+    }
+
     private var detailSubtitle: String {
         var parts: [String] = []
         if let index = order.firstIndex(where: { $0.id == photo.id }) {
@@ -339,8 +320,7 @@ struct DetailMarkingView: View {
             probe: probe
         )
         .opacity(
-            browsing.state.route == .detail && displayMarks.isRejected
-                ? theme.tokens.rejectedOpacity : 1
+            displayMarks.isRejected ? theme.tokens.rejectedOpacity : 1
         )
         .overlay {
             DetailSwipeFeedbackBadge(
@@ -759,38 +739,6 @@ struct DetailMarkingView: View {
 
     /// C13's rules for this screen's settings.
     private var rules: MarkingInputRules { MarkingInputRules(settings: settings) }
-
-    // MARK: - Save state
-
-    /// The situation to explain under the HUD for the current photo, or nil (PRD P0-08).
-    ///
-    /// A folder whose location was reported gone explains itself once, in the folder's row, so
-    /// one photo's own failure row stays out of its way. The row is only for a change that did not
-    /// confirm, and Cancel keeps it dismissed for that change rather than for the photo forever:
-    /// a newer failure has a new identity and asks again (PRD How marks reach disk, rule 8).
-    private var failureSituation: SaveSituation? {
-        guard browsing.folderLocationLoss == nil else { return nil }
-        guard let status = browsing.latestChange(for: photo.id), status.state.failure != nil,
-            !dismissedFailures.contains(status.id)
-        else { return nil }
-        return SaveStatus.situation(for: status.state, folderLoss: nil)
-    }
-
-    /// Performs one action of the PRD's failure row (PRD Failure and recovery).
-    private func perform(_ action: SaveAction) {
-        switch action {
-        case .retry, .freeSpaceAndRetry:
-            browsing.retryAllUnfinishedChanges()
-        case .cancel:
-            if let status = browsing.latestChange(for: photo.id) {
-                dismissedFailures.insert(status.id)
-            }
-        case .reopenFolder:
-            Task { await browsing.reopenOpenFolder() }
-        case .openFolder:
-            isPickingFolder = true
-        }
-    }
 
     // MARK: - Geometry
 

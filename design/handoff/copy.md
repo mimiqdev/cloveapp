@@ -81,10 +81,12 @@ Show one toast per failure burst, above the bottom edge in the Move rejects toas
 | Key | String |
 |---|---|
 | group.title | Group · {n} photos |
-| group.subtitle | {n} undecided · ● Saved |
+| group.subtitle | {n} undecided |
 | group.rejectRest | Reject {n} unmarked |
 | group.continue | Continue → |
 | group.more.undecided | Undecided only |
+
+Follow the group subtitle with the save glyph described above. Keep the count visible; do not add visible status words.
 
 ## Move Rejects
 | Key | String |
@@ -98,7 +100,7 @@ Show one toast per failure burst, above the bottom edge in the Move rejects toas
 | move.toast.failed | {n} couldn't be moved |
 | move.toast.details | Details |
 | move.details.title | {n} photos couldn't be moved |
-| move.details.subtitle | They stay rejected in Clove. Nothing was deleted. |
+| move.details.subtitle | They stay rejected in place. Nothing was deleted. |
 | move.details.done / retry | Done / Try again |
 
 ## Settings

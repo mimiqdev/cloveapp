@@ -138,20 +138,16 @@ extension View {
     func browsingChrome(title: String, browsing: BrowsingModel) -> some View {
         self
             .navigationTitle(
-                browsing.state.route == .grid || browsing.state.route == .detail ? "" : title
+                browsing.state.route == .grid || browsing.state.route == .detail
+                    || browsing.state.route == .group ? "" : title
             )
             .toolbar(
                 browsing.state.route == .grid || browsing.state.route == .detail
+                    || browsing.state.route == .group
                     ? .hidden : .visible,
                 for: .navigationBar
             )
             .toolbar {
-                if browsing.state.route == .group {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Back", systemImage: "chevron.left") { browsing.back() }
-                            .accessibilityIdentifier("clove.nav.back")
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     if browsing.state.route == .settings {
                         Button("Done") { browsing.back() }
@@ -162,9 +158,6 @@ extension View {
                         ) {
                             browsing.showSettings()
                         }
-                    } else if browsing.state.route == .group {
-                        Button("Settings", systemImage: "gearshape") { browsing.showSettings() }
-                            .accessibilityIdentifier("clove.nav.settings")
                     }
                 }
             }

@@ -7,6 +7,7 @@ struct DetailFilmstrip: View {
     let current: PhotoIdentity?
     let thumbnails: any GridThumbnailSource
     let open: (PhotoIdentity) -> Void
+    var failedPhotos: Set<PhotoIdentity> = []
     var groups: [BrowsingGroup] = []
     var openGroup: ((BrowsingGroup) -> Void)?
 
@@ -101,8 +102,15 @@ struct DetailFilmstrip: View {
         } label: {
             DetailPhotoFrame(
                 photo: photo, isCurrent: photo.id == current, thumbnails: thumbnails,
-                side: 54, height: 60)
+                side: 54, height: 60
+            )
+            .overlay(alignment: .topTrailing) {
+                if failedPhotos.contains(photo.id) {
+                    Circle().fill(Color.clove.status.failed).frame(width: 6, height: 6).padding(4)
+                }
+            }
         }
+        .accessibilityHint(failedPhotos.contains(photo.id) ? "Save failed" : "")
         .buttonStyle(.plain)
         .id(photo.id)
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")

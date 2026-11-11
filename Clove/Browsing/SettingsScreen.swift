@@ -150,8 +150,6 @@ struct SettingsScreen: View {
                 Text("Off").tag(DoubleTapBehaviour.off)
             }
             .accessibilityIdentifier("clove.settings.doubleTap")
-            Toggle("Keep zoom in groups", isOn: binding(\.keepZoom.inGroups))
-                .accessibilityIdentifier("clove.settings.keepZoomInGroups")
             Toggle("Keep zoom in detail", isOn: binding(\.keepZoom.inDetail))
                 .accessibilityIdentifier("clove.settings.keepZoomInDetail")
             Toggle("Extended color labels", isOn: binding(\.extendedColourLabelsEnabled))
@@ -162,11 +160,6 @@ struct SettingsScreen: View {
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("clove.settings.gridGroupDisplay")
-            Picker("After a group is complete", selection: binding(\.groupCompletion)) {
-                Text("Next group").tag(GroupCompletionBehaviour.nextGroup)
-                Text("Stay").tag(GroupCompletionBehaviour.stay)
-            }
-            .accessibilityIdentifier("clove.settings.groupCompletion")
             Button("Reset to defaults") { store.resetToDefaults() }
                 .accessibilityIdentifier("clove.settings.reset")
         } header: {

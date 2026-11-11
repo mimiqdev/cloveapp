@@ -93,13 +93,6 @@ final class FolderLibrarySession: FolderLibrary {
     /// The latest save state per photo, kept in step with C4's ordered stream (PRD P0-08).
     private var changes = PhotoChangeStates()
 
-    /// The open folder's finishing-action records, which complete a group even when a write
-    /// failed (PRD In-group culling, group completion; PRD P0-12).
-    ///
-    /// One tracker per opened folder: the records do not persist across launches, so reopening
-    /// the folder follows the marks again (``GroupCompletionTracker``).
-    private var groupCompletionTracker = GroupCompletionTracker()
-
     /// The session holding the open folder's scope, ended when another folder opens.
     private var openSession: FolderAccessSession?
 
@@ -465,24 +458,6 @@ final class FolderLibrarySession: FolderLibrary {
         return await mover.progressUpdates()
     }
 
-    // MARK: - In-group culling
-
-    /// Whether the group is complete, and where the group view goes next (PRD P0-12).
-    ///
-    /// The marks are the folder's marks read now, so a group completed by its marks and one a
-    /// finishing action ran on answer the same question (PRD In-group culling, group completion).
-    func recordGroupFinishing(_ group: GroupID) async {
-        await groupCompletionTracker.recordFinishingAction(on: group)
-    }
-
-    func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) async -> GroupViewCompletion {
-        return await groupCompletionTracker.viewCompletion(
-            after: groupID, in: publishedGroups, behaviour: behaviour, marks: marks)
-    }
-
     // MARK: - Entry
 
     /// Remembers navigation immediately; preview work never holds a departure (handoff Entry).
@@ -708,7 +683,6 @@ final class FolderLibrarySession: FolderLibrary {
         openSession = session
         store = FolderPhotos()
         changes = PhotoChangeStates()
-        groupCompletionTracker = GroupCompletionTracker()
 
         movedRejectIdentities = []
         movedPhotoRecords = [:]

@@ -233,7 +233,7 @@ struct RejectMoveCopyTests {
         let details = RejectMoveDetails(result: makeResult(moved: 1, failed: 1, split: 1))
 
         #expect(details.title == "2 photos couldn't be moved")
-        #expect(details.subtitle == "They stay rejected in Clove. Nothing was deleted.")
+        #expect(details.subtitle == "They stay rejected in place. Nothing was deleted.")
         #expect(details.rows.count == 2)
         #expect(details.rows[0].fileName == "failed_0.CR3 + JPG")
         #expect(details.rows[0].reason == "The location is read-only.")

@@ -13,10 +13,6 @@ public struct EnabledRatings: Hashable, Sendable {
     /// The number of enabled levels, which is also the number of swipe steps.
     public var count: Int { sortedLevels.count }
 
-    /// The lowest enabled level, used when Keep this, reject the rest has to rate the kept photo
-    /// (PRD In-group culling, finishing actions).
-    public var lowest: Rating { sortedLevels[0] }
-
     /// Accepts levels from 1 to 5, sorting and de-duplicating them.
     ///
     /// Returns nil when the input is empty or names a value that is not a star level. Zero means

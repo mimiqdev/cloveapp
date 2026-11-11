@@ -4,7 +4,7 @@ import Foundation
 ///
 /// PRD P0-05's Undo row, PRD P0-12's "both can be undone" and PRD P0-09's multi-select batches
 /// cover three recorded actions: a mark change on one photo, one change applied to a batch, and
-/// one of the two in-group finishing actions. U8 supplies the system `UndoManager`, the toolbar
+/// the in-group finishing action. U8 supplies the system `UndoManager`, the toolbar
 /// button and ⌘Z; this actor is the logic behind them, with no UI or `UndoManager` types.
 ///
 /// - **One instance per opened folder.** The history lives in memory, keeps at most
@@ -32,9 +32,6 @@ public actor MarkUndoHistory {
 
     /// C4's queue, the only path a mark write takes (G1 Safe writes).
     private let queue: MarkWriteQueue
-    /// The session's finishing-action records, which a finishing entry clears and restores
-    /// (PRD P0-12).
-    private let completion: GroupCompletionTracker
     /// The most entries each stack keeps (``defaultDepthLimit`` unless the caller supplies more).
     private let depthLimit: Int
 
@@ -54,16 +51,13 @@ public actor MarkUndoHistory {
 
     /// Creates the history for one opened folder.
     ///
-    /// A folder session passes its own C4 queue and C10 tracker, so the history writes through
-    /// the same queue as marking and clears the same completion records. A non-positive depth
-    /// limit is treated as one entry, so the history always has a deterministic bound.
+    /// A folder session passes its marking queue. A non-positive depth limit is treated as
+    /// one entry, so the history always has a deterministic bound.
     public init(
         queue: MarkWriteQueue,
-        completion: GroupCompletionTracker = GroupCompletionTracker(),
         depthLimit: Int = MarkUndoHistory.defaultDepthLimit
     ) {
         self.queue = queue
-        self.completion = completion
         self.depthLimit = max(1, depthLimit)
     }
 
@@ -98,8 +92,7 @@ public actor MarkUndoHistory {
         return push(
             kind: .single,
             photos: [recorded],
-            photoToReturnTo: photoToReturnTo ?? status.identity,
-            groupFinishing: nil)
+            photoToReturnTo: photoToReturnTo ?? status.identity)
     }
 
     /// Records one multi-select batch after C4 admitted it (PRD P0-09; DEV-PLAN C5).
@@ -139,19 +132,14 @@ public actor MarkUndoHistory {
         return push(
             kind: .batch,
             photos: photos,
-            photoToReturnTo: photoToReturnTo ?? first.photo,
-            groupFinishing: nil)
+            photoToReturnTo: photoToReturnTo ?? first.photo)
     }
 
     /// Records one executed finishing action from C10's undo record (PRD P0-12; DEV-PLAN C5).
     ///
     /// ``GroupFinishingUndo`` already holds each changed photo's marks before the action and the
-    /// change that ran, so the entry restores them like any other batch. Undoing the entry also
-    /// clears the group's finishing-action record through ``GroupCompletionTracker``, and
-    /// redoing restores it, but only while at least one photo is written or already at the
-    /// target value; a step that restored nothing leaves the record alone (PRD P0-12: finishing
-    /// actions can be undone). An action that changed no marks — an empty plan, or every planned
-    /// photo dropped — records nothing, because there is no mark to restore.
+    /// change that ran, so the entry restores them together as one step. An action that changed
+    /// no marks records nothing, because there is no mark to restore.
     ///
     /// - Parameter undo: C10's record of the action that ran.
     /// - Returns: The entry's handle, or `nil` when nothing was recorded.
@@ -173,9 +161,7 @@ public actor MarkUndoHistory {
         return push(
             kind: .groupFinishing,
             photos: photos,
-            photoToReturnTo: returnTo,
-            groupFinishing: MarkUndoGroupFinishing(
-                groupID: undo.groupID, action: undo.action))
+            photoToReturnTo: returnTo)
     }
 
     // MARK: - Undo and redo
@@ -185,9 +171,7 @@ public actor MarkUndoHistory {
     /// The step reads each photo's latest marks from `latestMarks` before writing, so a newer
     /// mark from another app or a later action is kept and reported as not undone (PRD P0-05).
     /// Photos whose restore needs the same change are written together through C4's batch apply
-    /// (PRD P0-09), which is what gives the per-photo results, save states and retry. A
-    /// finishing-action entry also clears its group's completion record when at least one photo
-    /// is written or already at the target value (PRD P0-12).
+    /// (PRD P0-09), which gives per-photo results, save states and retry.
     ///
     /// - Parameters:
     ///   - photoSet: The folder session's current set for a photo, with C2's resolved sidecar
@@ -207,9 +191,7 @@ public actor MarkUndoHistory {
     ///
     /// Redo uses the same per-field check as ``undo(photoSet:latestMarks:)``: it re-applies the
     /// original change only where each field still holds the value undo restored, so a mark
-    /// written after the undo is not overwritten. A finishing-action entry restores its group's
-    /// completion record when at least one photo is written or already at the target value
-    /// (PRD P0-12).
+    /// written after the undo is not overwritten.
     ///
     /// - Parameters:
     ///   - photoSet: The folder session's current set for a photo.
@@ -269,8 +251,7 @@ public actor MarkUndoHistory {
     /// under `_Rejected` and restoring them is the user's job, so undo must never write to the
     /// old path. Pass C6's ``RejectMoveResult/movedIdentities``; every entry loses those photos,
     /// an entry left with no photos is removed, and a moving photo also blocks a step already in
-    /// flight. A finishing-action entry keeps its group record and restores only the photos it
-    /// still has.
+    /// flight. A finishing-action entry restores only the photos it still has.
     public func forgetMovedPhotos(_ photos: [PhotoIdentity]) {
         guard !photos.isEmpty else { return }
         let moved = Set(photos)
@@ -285,15 +266,13 @@ public actor MarkUndoHistory {
     private func push(
         kind: MarkUndoEntryKind,
         photos: [MarkUndoPhoto],
-        photoToReturnTo: PhotoIdentity,
-        groupFinishing: MarkUndoGroupFinishing?
+        photoToReturnTo: PhotoIdentity
     ) -> MarkUndoEntryID {
         let entry = MarkUndoEntry(
             id: MarkUndoEntryID(),
             kind: kind,
             photos: photos,
-            photoToReturnTo: photoToReturnTo,
-            groupFinishing: groupFinishing)
+            photoToReturnTo: photoToReturnTo)
         undoStack = appending(entry, to: undoStack)
         // PRD P0-05: undo is last in, first out, so a new action discards the redo future.
         redoStack.removeAll()
@@ -384,10 +363,7 @@ public actor MarkUndoHistory {
                 leftAlone: plan.leftAlone,
                 alreadyAtTarget: plan.alreadyAtTarget)
         }
-        // PRD P0-12: the finishing-action record changes only when the step actually restored
-        // something, so an action whose marks were all replaced keeps its completion.
         let reachedTarget = outcomes.contains { $0.reachedTarget }
-        let completionUpdate = reachedTarget ? await updateCompletion(for: entry, step: step) : nil
         let dropped = updateStacks(
             entry: entry,
             step: step,
@@ -400,26 +376,7 @@ public actor MarkUndoHistory {
             actionName: entry.actionName,
             photoToReturnTo: entry.photoToReturnTo,
             outcomes: outcomes,
-            completion: completionUpdate,
             droppedFromHistory: dropped)
-    }
-
-    /// Clears (undo) or restores (redo) a finishing action's group record (PRD P0-12).
-    ///
-    /// The caller only calls this when at least one photo reached the target, because a step
-    /// that restored nothing did not undo the action; a failed write stays visible through C4
-    /// instead (PRD P0-12; PRD Failure and recovery).
-    private func updateCompletion(
-        for entry: MarkUndoEntry,
-        step: Step
-    ) async -> MarkUndoCompletionUpdate? {
-        guard let group = entry.groupFinishing else { return nil }
-        switch step {
-        case .undo: await completion.clearFinishingAction(on: group.groupID)
-        case .redo: await completion.recordFinishingAction(on: group.groupID)
-        }
-        return MarkUndoCompletionUpdate(
-            groupID: group.groupID, state: step == .undo ? .cleared : .restored)
     }
 
     /// Puts the entry back, moves it across the two stacks, or drops it; returns whether it was

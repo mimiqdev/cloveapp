@@ -226,21 +226,36 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(element(disconnected, "clove.detail.saveStatus.failure.action").exists)
     }
 
-    /// Group finishing retains its existing path while the surrounding grid changes to stacks.
+    /// One short path covers the explicit group finish and the staged keep/move/undo flow.
     @MainActor
-    func testGroupReviewStillMarksAndFinishes() {
-        let app = launchSample()
+    func testGroupFinishingContinueAndMoveUndo() {
+        let app = launchSample([
+            "CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked",
+            "CLOVE_TEST_LIBRARY_KEEP_TOAST": "1",
+        ])
         openLibrary(app)
         element(app, "clove.grid.group.burst-2678").tap()
-        XCTAssertTrue(element(app, "clove.group").waitForExistence(timeout: 5))
-        element(app, "clove.detail.rate.3").tap()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
-        element(app, "clove.group.keepThis").tap()
-        XCTAssertTrue(waitForLabel("MMQ02696.ARW", element(app, "clove.detail.fileName")))
-        element(app, "clove.detail.rate.4").tap()
-        XCTAssertTrue(waitForLabel("MMQ02697.ARW", element(app, "clove.detail.fileName")))
-        element(app, "clove.group.keepThis").tap()
-        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+        element(app, "clove.detail.capsule.stars.3").tap()
+        element(app, "clove.group.rejectUnmarked").tap()
+        XCTAssertTrue(element(app, "clove.group.continue").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.group").exists)
+        element(app, "clove.group.continue").tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.moveRejects").tap()
+        element(app, "clove.moves.expand").tap()
+        element(app, "clove.moves.keep.mmq02685").tap()
+        XCTAssertTrue(waitForLabel("2 of 3 will move", element(app, "clove.moves.partial")))
+        element(app, "clove.moves.confirm").tap()
+        let undo = element(app, "clove.moves.toast.action")
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertEqual(undo.label, "Undo")
+        let kept = element(app, "clove.grid.photo.mmq02685")
+        XCTAssertFalse(kept.label.contains("Rejected"))
+        undo.tap()
+        let restored = element(app, "clove.grid.photo.mmq02679")
+        XCTAssertTrue(restored.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS 'Rejected'"), kept))
     }
 
     @MainActor
@@ -253,13 +268,15 @@ final class CloveUITests: XCTestCase {
         element(app, "clove.grid.moveRejects").tap()
         XCTAssertTrue(
             waitForLabel("Move 2 rejected photos", element(app, "clove.moves.confirmation")))
+        element(app, "clove.moves.expand").tap()
         element(app, "clove.moves.keep.mmq02679").tap()
         element(app, "clove.moves.confirm").tap()
-        XCTAssertTrue(element(app, "clove.moves.details").waitForExistence(timeout: 5))
-        element(app, "clove.moves.details").tap()
+        XCTAssertTrue(element(app, "clove.moves.toast.action").waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.moves.toast.action").label, "Details")
+        element(app, "clove.moves.toast.action").tap()
         XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").waitForExistence(timeout: 5))
         element(app, "clove.moves.details.retry").tap()
-        XCTAssertTrue(waitForLabel("Moved 1 to _Rejected", element(app, "clove.moves.toast")))
+        XCTAssertTrue(app.staticTexts["Moved 1 to _Rejected"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -270,6 +287,77 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(element(app, "clove.mark.starBar").exists)
         element(app, "clove.design.gallery.theme.nord").tap()
         XCTAssertTrue(element(app, "clove.design.gallery.theme.nord").isSelected)
+    }
+
+    /// Explicit visual comparison only; the everyday smoke run skips this matrix.
+    @MainActor
+    func testCaptureGroupAndMoveReferencesWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_GROUP_MOVES"] == "1")
+        for theme in ["light", "dark", "nord"] {
+            let app = launchSample([
+                "CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked",
+                "CLOVE_TEST_LIBRARY_KEEP_TOAST": "1",
+            ])
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            element(app, "clove.grid.group.burst-2678").tap()
+            element(app, "clove.detail.capsule.stars.3").tap()
+            XCTAssertTrue(waitForLabel("2 undecided", element(app, "clove.group.undecided")))
+            capture("group-progress-\(theme)")
+            let preview = element(app, "clove.detail.preview")
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+            XCTAssertTrue(waitForGone(element(app, "clove.detail.capsule")))
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
+            XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+            capture("group-synced-zoom-\(theme)")
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+            XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
+            element(app, "clove.group.more").tap()
+            app.buttons["Undecided only"].tap()
+            XCTAssertFalse(element(app, "clove.detail.filmstrip.mmq02678").exists)
+            element(app, "clove.group.more").tap()
+            app.buttons["Undecided only"].tap()
+            element(app, "clove.group.rejectUnmarked").tap()
+            XCTAssertTrue(element(app, "clove.group.continue").waitForExistence(timeout: 5))
+            capture("group-done-\(theme)")
+            element(app, "clove.group.continue").tap()
+            element(app, "clove.nav.back").tap()
+            element(app, "clove.grid.moveRejects").tap()
+            XCTAssertTrue(element(app, "clove.moves.expand").waitForExistence(timeout: 5))
+            capture("move-confirm-\(theme)")
+            element(app, "clove.moves.expand").tap()
+            element(app, "clove.moves.keep.mmq02685").tap()
+            XCTAssertTrue(waitForLabel("2 of 3 will move", element(app, "clove.moves.partial")))
+            capture("move-keeps-\(theme)")
+            element(app, "clove.moves.confirm").tap()
+            XCTAssertTrue(element(app, "clove.moves.toast.action").waitForExistence(timeout: 5))
+            capture("move-done-\(theme)")
+            app.terminate()
+
+            let partial = launchSample([
+                "CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX": "5",
+                "CLOVE_TEST_LIBRARY_KEEP_TOAST": "1",
+            ])
+            openLibrary(partial)
+            applyComparisonTheme(theme, partial)
+            element(partial, "clove.grid.moveRejects").tap()
+            element(partial, "clove.moves.confirm").tap()
+            XCTAssertTrue(partial.staticTexts["1 couldn't be moved"].waitForExistence(timeout: 5))
+            capture("move-partial-\(theme)")
+            element(partial, "clove.moves.toast.action").tap()
+            XCTAssertTrue(
+                element(partial, "clove.moves.details.sheet").waitForExistence(timeout: 5))
+            capture("move-details-\(theme)")
+            partial.terminate()
+        }
+    }
+
+    @MainActor
+    private func applyComparisonTheme(_ theme: String, _ app: XCUIApplication) {
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        chooseTheme(theme, app)
+        element(app, "clove.nav.back").tap()
     }
 
     /// Explicit screenshot run only. The normal smoke suite skips this comparison matrix.

@@ -1,10 +1,6 @@
-/// The group view's header count, "Undecided N / M total" (PRD In-group culling, layout).
-///
-/// `undecided` counts members with no rating and no Reject, so a colour label alone is still
-/// undecided (PRD In-group culling, layout). `total` is the group's member count, so the
-/// header always has both numbers even while the marks are changing.
+/// Counts photos still needing a decision. A rating, label or Reject decides a photo.
 public struct GroupUndecidedCount: Hashable, Sendable {
-    /// Members with no rating and no Reject (PRD In-group culling, layout).
+    /// Members with no rating, label or Reject.
     public let undecided: Int
 
     /// Every member of the group, marked or not (PRD In-group culling, layout).
@@ -35,11 +31,7 @@ public struct GroupUndecidedCount: Hashable, Sendable {
         self.init(group.members.map { marks[$0] ?? PhotoMarks() })
     }
 
-    /// Whether every member is rated or rejected, the marks half of group completion
-    /// (PRD In-group culling, group completion).
+    /// Whether every member has a rating, label or Reject.
     public var isCompleteByMarks: Bool { undecided == 0 }
 
-    /// The PRD's header wording; the exact string stays a UI decision (PRD In-group culling,
-    /// layout).
-    public var headerText: String { "Undecided \(undecided) / \(total) total" }
 }

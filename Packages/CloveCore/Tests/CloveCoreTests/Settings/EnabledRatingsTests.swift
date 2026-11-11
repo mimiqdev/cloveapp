@@ -16,7 +16,6 @@ private func rating(_ value: Int) throws -> Rating {
 
     #expect(enabled.levels == [one, two, three, four, five])
     #expect(enabled.count == 5)
-    #expect(enabled.lowest == one)
     for step in 1...5 {
         #expect(enabled.rating(forSwipeStep: step) == (try rating(step)))
     }
@@ -52,7 +51,6 @@ private func rating(_ value: Int) throws -> Rating {
     #expect(enabled.rating(forSwipeStep: 2) == three)
     #expect(enabled.rating(forSwipeStep: 3) == five)
     #expect(enabled.rating(forSwipeStep: 4) == five)
-    #expect(enabled.lowest == one)
     #expect(enabled.canApply(one))
     #expect(!enabled.canApply(try rating(2)))
 }
@@ -64,7 +62,6 @@ private func rating(_ value: Int) throws -> Rating {
     #expect(enabled.count == 1)
     #expect(enabled.rating(forSwipeStep: 1) == three)
     #expect(enabled.rating(forSwipeStep: 2) == three)
-    #expect(enabled.lowest == three)
     #expect(enabled.canApply(three))
     #expect(!enabled.canApply(try rating(1)))
     #expect(!enabled.canApply(try rating(5)))

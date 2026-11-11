@@ -1,9 +1,6 @@
 import CloveCore
 
-/// A one-line summary of a photo's marks for the placeholder screens (PRD P0-05).
-///
-/// Design placeholder: the grid cell overlays and the detail marking bar show marks in place of
-/// this text.
+/// A photo's mark summary for VoiceOver, filmstrip thumbnails and the read-only Info sheet.
 enum MarkSummary {
     /// The rating, colour label and Reject a photo carries, or `Unmarked` when it has none.
     static func text(for marks: PhotoMarks) -> String {

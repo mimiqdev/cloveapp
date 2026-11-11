@@ -11,14 +11,12 @@ enum SettingsKey: String, CaseIterable {
     case autoAdvanceReject = "autoAdvance.trigger.reject"
     case autoAdvanceColourLabel = "autoAdvance.trigger.colourLabel"
     case doubleTap = "detail.doubleTap"
-    case keepZoomInGroups = "zoom.keepInGroups"
     case keepZoomInDetail = "zoom.keepInDetail"
     case extendedColourLabels = "labels.extended"
     case rejectsFolderName = "rejects.folderName"
     case moveRejects = "rejects.moveEnabled"
     case similarGroups = "groups.similarEnabled"
     case gridGroupDisplay = "grid.groupDisplay"
-    case groupCompletion = "groups.completion"
     case appearanceMatchesSystem = "appearance.matchSystem"
     case appearanceTheme = "appearance.theme"
 }
@@ -57,7 +55,6 @@ public struct SettingsPersistence: Sendable {
             ),
             doubleTap: rawValue(.doubleTap) ?? defaults.doubleTap,
             keepZoom: KeepZoom(
-                inGroups: boolean(.keepZoomInGroups) ?? defaults.keepZoom.inGroups,
                 inDetail: boolean(.keepZoomInDetail) ?? defaults.keepZoom.inDetail
             ),
             extendedColourLabelsEnabled: boolean(.extendedColourLabels)
@@ -66,7 +63,6 @@ public struct SettingsPersistence: Sendable {
             moveRejectsEnabled: boolean(.moveRejects) ?? defaults.moveRejectsEnabled,
             similarGroupsEnabled: boolean(.similarGroups) ?? defaults.similarGroupsEnabled,
             gridGroupDisplay: rawValue(.gridGroupDisplay) ?? defaults.gridGroupDisplay,
-            groupCompletion: rawValue(.groupCompletion) ?? defaults.groupCompletion,
             appearance: AppearanceChoice(
                 matchesSystemAppearance: boolean(.appearanceMatchesSystem)
                     ?? defaults.appearance.matchesSystemAppearance,
@@ -84,14 +80,12 @@ public struct SettingsPersistence: Sendable {
         setBoolean(settings.autoAdvance.triggers.reject, .autoAdvanceReject)
         setBoolean(settings.autoAdvance.triggers.colourLabel, .autoAdvanceColourLabel)
         setText(settings.doubleTap.rawValue, .doubleTap)
-        setBoolean(settings.keepZoom.inGroups, .keepZoomInGroups)
         setBoolean(settings.keepZoom.inDetail, .keepZoomInDetail)
         setBoolean(settings.extendedColourLabelsEnabled, .extendedColourLabels)
         setText(settings.rejectsFolderName.rawValue, .rejectsFolderName)
         setBoolean(settings.moveRejectsEnabled, .moveRejects)
         setBoolean(settings.similarGroupsEnabled, .similarGroups)
         setText(settings.gridGroupDisplay.rawValue, .gridGroupDisplay)
-        setText(settings.groupCompletion.rawValue, .groupCompletion)
         setBoolean(settings.appearance.matchesSystemAppearance, .appearanceMatchesSystem)
         setText(settings.appearance.theme.rawValue, .appearanceTheme)
     }

@@ -11,7 +11,6 @@ import CloveCore
     #expect(settings.autoAdvance.triggers.reject)
     #expect(!settings.autoAdvance.triggers.colourLabel)
     #expect(settings.doubleTap == .zoom)
-    #expect(settings.keepZoom.inGroups)
     #expect(!settings.keepZoom.inDetail)
     #expect(!settings.extendedColourLabelsEnabled)
     #expect(settings.rejectsFolderName == .defaultFolderName)
@@ -19,7 +18,6 @@ import CloveCore
     #expect(settings.moveRejectsEnabled)
     #expect(settings.similarGroupsEnabled)
     #expect(settings.gridGroupDisplay == .expanded)
-    #expect(settings.groupCompletion == .nextGroup)
     #expect(settings.appearance == AppearanceChoice())
     #expect(settings.appearance.matchesSystemAppearance)
     #expect(settings.appearance.theme == .light)
@@ -31,7 +29,6 @@ import CloveCore
     #expect(AutoAdvanceDestination.allCases == [.stay, .nextPhoto, .nextUnmarkedPhoto])
     #expect(DoubleTapBehaviour.allCases == [.zoom, .off])
     #expect(GridGroupDisplay.allCases == [.expanded, .collapsed])
-    #expect(GroupCompletionBehaviour.allCases == [.nextGroup, .stay])
     #expect(CloveTheme.allCases.first == .light)
     #expect(ThemeAppearance.allCases == [.light, .dark])
 }

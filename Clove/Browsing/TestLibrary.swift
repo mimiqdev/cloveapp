@@ -201,7 +201,6 @@ final class TestLibrary: FolderLibrary {
     /// The stem suffix U4's launch value names, whose photos fail their first write (PRD P0-09).
     /// The sample's finishing-action records, so a group it finishes counts as complete like the
     /// real session's (PRD In-group culling, group completion; PRD P0-12).
-    private let groupCompletion = GroupCompletionTracker()
 
     /// The stem suffix whose photos fail their first write, or nil when none does (PRD P0-09).
     private let failingStemSuffix: String?
@@ -551,6 +550,11 @@ final class TestLibrary: FolderLibrary {
             destinationURL: destination)
     }
 
+    /// Move undo resolves kept sample photos through the same identity-based seam as production.
+    func scannedSet(for identity: PhotoIdentity) -> ScannedPhotoSet? {
+        stored.first(where: { $0.id == identity }).flatMap { scannedSet(for: $0) }
+    }
+
     /// The sample's in-memory set behind one photo, with its companions and packet (P0-10).
     private func scannedSet(for photo: GridPhoto) -> ScannedPhotoSet? {
         let root = URL(fileURLWithPath: "/clove-test-library", isDirectory: true)
@@ -702,6 +706,17 @@ final class TestLibrary: FolderLibrary {
     /// Held presentation states for screenshots and short UI tests. Normal sample launches
     /// remain fully opened and saved. Values are read only when the test library is selected.
     private func installPresentationSamples(environment: [String: String]) {
+        if let state = environment["CLOVE_TEST_LIBRARY_GROUP_STATE"],
+            let group = groups.first, state == "unmarked" || state == "done"
+        {
+            for index in stored.indices where group.members.contains(stored[index].id) {
+                stored[index].marks =
+                    state == "done"
+                    ? PhotoMarks(
+                        rating: stored[index].id == group.members.first ? Self.stars(3) : .rejected)
+                    : PhotoMarks()
+            }
+        }
         if let opening = environment["CLOVE_TEST_LIBRARY_OPENING"] {
             if opening == "reading" || opening == "empty" {
                 updateContinuation.yield(.scanStarted)
@@ -727,21 +742,6 @@ final class TestLibrary: FolderLibrary {
             id: MarkChangeID(), identity: photo, requested: .rating(Self.stars(3)), state: state)
         changes[photo] = status
         updateContinuation.yield(.change(status))
-    }
-
-    // MARK: - In-group culling
-
-    /// Whether the sample's group is complete, and where the group view goes next (PRD P0-12).
-    func recordGroupFinishing(_ group: GroupID) async {
-        await groupCompletion.recordFinishingAction(on: group)
-    }
-
-    func groupCompletion(
-        for groupID: GroupID, behaviour: GroupCompletionBehaviour,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) async -> GroupViewCompletion {
-        return await groupCompletion.viewCompletion(
-            after: groupID, in: groups, behaviour: behaviour, marks: marks)
     }
 
     /// Turns the sample's groups on or off through the same call the settings screen makes
