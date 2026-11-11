@@ -80,6 +80,9 @@ public struct AppSettings: Hashable, Sendable {
     /// (`design/handoff/tokens/tokens.md`); matching the system, with Light chosen, by default.
     public var appearance: AppearanceChoice
 
+    /// An explicit display choice. Absent means use the measured device default.
+    public var photoDisplayMode: PhotoDisplayMode?
+
     /// Creates every launch setting, defaulting each one to its PRD launch value.
     public init(
         gesturesEnabled: Bool = true,
@@ -92,7 +95,8 @@ public struct AppSettings: Hashable, Sendable {
         moveRejectsEnabled: Bool = true,
         similarGroupsEnabled: Bool = true,
         gridGroupDisplay: GridGroupDisplay = .expanded,
-        appearance: AppearanceChoice = AppearanceChoice()
+        appearance: AppearanceChoice = AppearanceChoice(),
+        photoDisplayMode: PhotoDisplayMode? = nil
     ) {
         self.gesturesEnabled = gesturesEnabled
         self.enabledRatings = enabledRatings
@@ -105,6 +109,7 @@ public struct AppSettings: Hashable, Sendable {
         self.similarGroupsEnabled = similarGroupsEnabled
         self.gridGroupDisplay = gridGroupDisplay
         self.appearance = appearance
+        self.photoDisplayMode = photoDisplayMode
     }
 
     /// The colour labels the marking HUD, menu, and keyboard offer (PRD Marking rules).
