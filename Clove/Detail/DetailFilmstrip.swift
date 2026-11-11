@@ -2,6 +2,8 @@ import CloveCore
 import SwiftUI
 
 /// Grid-order filmstrip. The current group expands on a quiet tint; other groups stay stacked.
+/// Tapping a stack jumps to the group's first photo, so the group expands in place; detail never
+/// leaves for group review from here.
 struct DetailFilmstrip: View {
     let photos: [GridPhoto]
     let current: PhotoIdentity?
@@ -9,7 +11,6 @@ struct DetailFilmstrip: View {
     let open: (PhotoIdentity) -> Void
     var failedPhotos: Set<PhotoIdentity> = []
     var groups: [BrowsingGroup] = []
-    var openGroup: ((BrowsingGroup) -> Void)?
 
     private struct Entry: Identifiable {
         let id: PhotoIdentity
@@ -52,7 +53,7 @@ struct DetailFilmstrip: View {
                             }
                         } else if let group = entry.group, let photo = entry.photos.first {
                             Button {
-                                if let openGroup { openGroup(group) } else { open(photo.id) }
+                                open(photo.id)
                             } label: {
                                 DetailPhotoFrame(
                                     photo: photo, isCurrent: false, thumbnails: thumbnails,

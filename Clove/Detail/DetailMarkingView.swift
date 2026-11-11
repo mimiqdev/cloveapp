@@ -237,11 +237,7 @@ struct DetailMarkingView: View {
                                     : Set(
                                         browsing.unsavedChanges.filter { $0.state.failure != nil }
                                             .map(\.photo)),
-                                groups: groupReview == nil ? browsing.groups : [],
-                                openGroup: {
-                                    actions.markingSwipeBegan()
-                                    browsing.openGroup($0)
-                                })
+                                groups: groupReview == nil ? browsing.groups : [])
                             if let action = groupReview?.action {
                                 action.disabled(browsing.isMovingRejects)
                                     .padding(.vertical, 6)

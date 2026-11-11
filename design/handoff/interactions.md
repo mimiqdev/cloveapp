@@ -36,7 +36,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 | Detail | Tap the capsule's reject, stars or label | Sets the mark directly. Tapping the current star value clears it. The label opens the picker, and picking closes it. |
 | Detail | Single tap on the photo | Hides or shows the chrome (capsule, filmstrip, top bar buttons). |
 | Detail | Double-tap or pinch | 100% zoom at the tapped point. The chrome hides. Double-tap again to fit. |
-| Detail | Tap a filmstrip thumbnail | Jumps to that photo. Tapping a collapsed group opens it in group review. |
+| Detail | Tap a filmstrip thumbnail | Jumps to that photo. Tapping a collapsed group jumps to its first photo, and the group expands in place in the filmstrip. Detail never opens group review; the grid's group stack does. |
 | Detail | ⓘ | Opens the Info sheet (medium detent). |
 | Any | **Auto-advance** (Settings; default and timing **(proposed)**) | After a mark is set in detail, move to the next photo after a short beat (about 250 ms). The swipe-up star bar commits and then advances. |
 | Hardware keyboard **(proposed)** | 0–5, X, 6–9, arrows, Z | Rating, reject, labels red to blue (purple has no key), next/previous, undo. No hints are shown on screen. |
