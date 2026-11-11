@@ -169,8 +169,7 @@ public struct RejectMoveToast: Hashable, Sendable {
 /// The details sheet behind a partial Move rejects toast (design handoff, PRD P0-10).
 ///
 /// The handoff's title and subtitle say that the failed photos stay rejected and nothing was
-/// deleted, and each row names the photo set and the reason. Try again is offered only when C6 has
-/// failed sets it can resend; a split set is reported but never retried (PRD P0-10).
+/// deleted, and each row names the photo set and the reason.
 public struct RejectMoveDetails: Hashable, Sendable {
     /// One failed photo set, with the file name and the plain-text reason (design handoff).
     public struct Row: Hashable, Sendable, Identifiable {

@@ -52,7 +52,6 @@ struct RejectMoveUndoTests {
         #expect(result.failedCount == 0)
         #expect(result.splitCount == 0)
         #expect(result.isComplete)
-        #expect(result.partialFailureSummary == nil)
         #expect(result.restoredIdentities == sets.map(\.id))
         for (path, bytes) in original {
             #expect(fixture.folder.contents(of: path) == bytes)

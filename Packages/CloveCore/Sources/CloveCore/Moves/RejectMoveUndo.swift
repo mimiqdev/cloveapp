@@ -19,11 +19,8 @@ struct RejectMoveUndoJob: Sendable {
     let expectedMarks: PhotoMarks?
 }
 
-/// The completed run one undo step restores, shared by its first attempt and every retry.
-///
-/// PRD P0-10's Undo rule makes a completed move one step, and PRD "Failure and recovery" lets a
-/// retry move more of the same run. Both therefore share one record: the step covers every set
-/// the run moved, and the run can be undone once.
+/// The completed run one undo step restores. The step covers every set the run moved,
+/// and the run can be undone once (PRD P0-10).
 final class RejectMoveUndoRun {
     /// The opened folder, for the whole-request read-only check (PRD "Failure and recovery").
     let rootURL: URL
@@ -54,11 +51,7 @@ final class RejectMoveUndoRun {
         }
     }
 
-    /// Closes the step: it can be neither undone nor retried again (PRD P0-10's Undo rule).
-    ///
-    /// The record stays as a tombstone so a second undo and a later forward retry are refused
-    /// rather than silently touching files again, while the sets it held are dropped so the
-    /// folder session does not keep them in memory.
+    /// Closes the step and releases its sets. The record stays so a second undo is refused.
     func close() {
         isUndone = true
         moved.removeAll()
@@ -98,9 +91,7 @@ struct RejectMoveUndoRunner: Sendable {
         for file in job.files {
             do {
                 guard let size = try fileSystem.fileSize(at: file.destination) else {
-                    // PRD P0-10's Undo rule promises nothing it cannot confirm: a set whose
-                    // rejects-folder copy is gone is not "still entirely under the rejects
-                    // folder", and a retry could not rename a file that is not there.
+                    // A set whose rejects-folder copy is gone is reported as missing.
                     return .missingFiles(
                         RejectMoveUndoMissingFiles(
                             identity: job.identity,
@@ -325,7 +316,7 @@ struct RejectMoveUndoRunner: Sendable {
     /// Reject is the rating −1, so undoing a move writes it through C4's queue like every other
     /// mark, into the storage the photo uses: the sidecar for a RAW set and Clove for a
     /// standalone JPEG/HIF. A mark that could not be stored stays a diagnostic: the files are
-    /// back, so the photo is restored and the stale record is reported for a retry of the mark.
+    /// back, so the photo is restored and the mark failure is reported.
     private func restored(_ job: RejectMoveUndoJob, files: [RejectMoveFilePlan]) async
         -> RejectMoveUndoOutcome
     {
@@ -366,7 +357,7 @@ struct RejectMoveUndoRunner: Sendable {
 /// PRD P0-10's Undo rule and the PRD's Undo row make a completed move one step: every set the
 /// run moved comes back to its original path, and Reject returns on those photos and on the
 /// photos the confirmation kept. The mover keeps each run's moved sets, so the caller holds only
-/// a ``RejectMoveUndoEntry`` and the run can be undone once, even after a retry moved more of it.
+/// a ``RejectMoveUndoEntry`` and the run can be undone once.
 extension RejectMover {
     /// Undoes a completed run as one step (PRD P0-10's Undo rule, PRD's Undo row).
     ///
@@ -378,16 +369,10 @@ extension RejectMover {
     /// back, because they never moved. Folders the move created stay in place: undo deletes
     /// nothing (PRD P0-10).
     ///
-    /// One Move rejects action is one step, however many retries it took: a retry before the
-    /// undo stays under the run's handle and its sets are part of the same step. A retry that
-    /// starts while the undo runs is waited for, never raced. Undo closes the step, so a second
-    /// call is refused, and so is every handle that resolves to it; ``retryFailed(in:)`` refuses
-    /// the run afterwards, because those sets could no longer be restored.
+    /// Undo closes the step before restoring files, so a second call is refused.
     ///
-    /// - Parameter entry: The step, as the move or its retry produced it. Its kept photos join
-    ///   the ones the run already holds.
-    /// - Returns: One outcome per restored photo, with the counts and the failed photos a retry
-    ///   can send again.
+    /// - Parameter entry: The completed move. Its kept photos join the ones the run already holds.
+    /// - Returns: One outcome per requested photo, including failures.
     /// - Throws: A refusal that touched nothing: the run is unknown or already undone, or the
     ///   location reports itself read-only. A refusal also ends the attempt on the progress
     ///   stream, so no reader waits for a photo that will never be restored.
@@ -408,8 +393,7 @@ extension RejectMover {
         }
         run.keep(entry.keptPhotos)
         let jobs = undoJobs(for: run)
-        // PRD P0-10's Undo applies once: the step closes before anything awaits, so a second undo
-        // and a forward retry of this run are both refused from here on.
+        // Close before awaiting so a second undo is refused.
         run.close()
         return await performUndo(
             jobs, rootURL: run.rootURL, batch: entry.batch, currentMarks: currentMarks)
@@ -433,8 +417,7 @@ extension RejectMover {
     /// ``RejectMoveUndoProgress/refused(batch:refusal:)`` so no reader waits for a photo that
     /// will never come. It buffers at most 64 steps and drops its subscription once the stream
     /// ends, so a caller that deallocates the stream leaves nothing behind; a caller that keeps
-    /// an abandoned stream retains that one buffered subscription. A retry of failed photos
-    /// publishes its own sequence under the run's handle.
+    /// an abandoned stream retains that one buffered subscription.
     public func undoProgressUpdates() -> AsyncStream<RejectMoveUndoProgress> {
         let (stream, continuation) = AsyncStream<RejectMoveUndoProgress>.makeStream(
             bufferingPolicy: .bufferingNewest(64))
@@ -463,7 +446,7 @@ extension RejectMover {
                 message: "The volume holding \(name) reports itself read-only."))
     }
 
-    /// Runs every photo's restore and keeps the failures for a retry (PRD P0-10).
+    /// Runs every photo's restore and returns its outcome (PRD P0-10).
     ///
     /// A photo's outcome never stops the step, so one taken path or one failed rename does not
     /// hide the photos that did come back. A run with no photo to restore still returns a result,

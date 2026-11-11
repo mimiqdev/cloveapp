@@ -1,9 +1,6 @@
 import Foundation
 
-/// A stable handle for one Move rejects run, so its failed items can be retried.
-///
-/// PRD P0-10 and "Failure and recovery" keep moved photos moved and retry only the failures,
-/// so the result of a run is addressable after the UI has shown its counts.
+/// A stable handle for one completed Move rejects run and its Undo.
 public struct RejectMoveBatchID: Hashable, Sendable, CustomStringConvertible {
     /// The underlying identifier; a new value per run.
     public let rawValue: UUID
@@ -95,8 +92,7 @@ public struct RejectMoveMovedSet: Hashable, Sendable {
 
 /// One photo set that stayed entirely in place, with its failure (PRD P0-10).
 ///
-/// A failed set attempted no confirmed move: every file is back at its source, which is why a
-/// retry can address the same plan again (PRD P0-10, "Failure and recovery").
+/// Every file is back at its source; the failure retains the reason the set did not move.
 public struct RejectMoveFailedSet: Hashable, Sendable {
     /// C1's stable identity of the set (G1 decision 5).
     public let identity: PhotoIdentity
@@ -183,14 +179,10 @@ public enum RejectMoveOutcome: Hashable, Sendable, Identifiable {
     public var id: PhotoIdentity { identity }
 }
 
-/// What one Move rejects run produced, with PRD P0-10's counts and retry inputs.
-///
-/// PRD P0-10 and "Failure and recovery" ask for "Moved N photos. M photos couldn't be moved.",
-/// keep moved photos moved, and retry only the failed items. The result keeps one outcome per
-/// requested set in the caller's order, and ``movedIdentities`` tells the grid which sets to
-/// drop. A split set is not retried automatically because its files are in two places.
+/// What one Move rejects run produced, with one outcome per requested set in caller order.
+/// ``movedIdentities`` tells the grid which sets to drop; failed and split sets remain in Details.
 public struct RejectMoveResult: Hashable, Sendable {
-    /// The run's handle for ``RejectMover/retryFailed(in:)`` (PRD P0-10).
+    /// The run's handle for Undo.
     public let id: RejectMoveBatchID
     /// One outcome per requested set, in the caller's order (PRD P0-10).
     public let outcomes: [RejectMoveOutcome]
@@ -214,7 +206,7 @@ public struct RejectMoveResult: Hashable, Sendable {
         }
     }
 
-    /// Sets that are entirely back in place and can be retried (PRD P0-10).
+    /// Sets that failed and are entirely back in place.
     public var failed: [RejectMoveFailedSet] {
         outcomes.compactMap { outcome in
             guard case .failed(let set) = outcome else { return nil }
@@ -241,13 +233,13 @@ public struct RejectMoveResult: Hashable, Sendable {
     /// PRD P0-10's "Moved N photos".
     public var movedCount: Int { moved.count }
 
-    /// Sets a retry can send again: failed, never split (PRD P0-10).
+    /// Sets that failed and are entirely back in place.
     public var failedCount: Int { failed.count }
 
-    /// Sets left in both places; a retry never resends these (PRD P0-10).
+    /// Sets left in both places.
     public var splitCount: Int { split.count }
 
-    /// Sets not attempted; PRD "Failure and recovery" retries failed items only.
+    /// Sets not attempted.
     public var skippedCount: Int { skipped.count }
 
     /// PRD P0-10's "M photos couldn't be moved": failed and split sets, never skipped ones.
@@ -256,15 +248,6 @@ public struct RejectMoveResult: Hashable, Sendable {
     /// The identities the grid drops after a confirmed run (PRD P0-10).
     public var movedIdentities: [PhotoIdentity] { moved.map(\.identity) }
 
-    /// PRD P0-10's "Moved N photos. M photos couldn't be moved.", or `nil` when nothing failed.
-    ///
-    /// The wording follows the PRD's proposed "Partial Move rejects failure" copy; the exact
-    /// strings stay U10's decision. A skipped set is not counted as a failed move, so the
-    /// sentence never claims a set failed when the user only has a mark change to resolve.
-    public var partialFailureSummary: String? {
-        guard unmovedCount > 0 else { return nil }
-        return "Moved \(movedCount) photos. \(unmovedCount) photos couldn't be moved."
-    }
 }
 
 /// One observable step of a Move rejects run (PRD P0-10).

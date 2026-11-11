@@ -7,7 +7,6 @@ public enum MarkChangeState: Hashable, Sendable {
     case failed(MarkWriteFailure)
 
     public var isConfirmed: Bool { failure == nil }
-    public var isSaved: Bool { failure == nil }
 
     public var failure: MarkWriteFailure? {
         guard case .failed(let failure) = self else { return nil }
@@ -51,14 +50,7 @@ public struct MarkBatchResult: Hashable, Sendable {
     }
 
     public var confirmed: [MarkChangeStatus] { outcomes.filter { $0.state.isConfirmed } }
-    public var saved: [MarkChangeStatus] { confirmed }
     public var failed: [MarkChangeStatus] { outcomes.filter { $0.state.failure != nil } }
-    public var confirmedCount: Int { confirmed.count }
-    public var savedCount: Int { confirmed.count }
     public var failedCount: Int { failed.count }
 
-    public var partialFailureSummary: String? {
-        guard failedCount > 0 else { return nil }
-        return "Saved \(savedCount) photos. \(failedCount) photos couldn't be saved."
-    }
 }
