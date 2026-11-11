@@ -44,7 +44,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 - A stack opens detail on the first unmarked photo, or the first photo when all are marked. Its filmstrip group expands in place; the filename, Info and marking controls stay the same.
 - Zoom and pan stay synced between photos of the same group. Leaving the group follows the detail keep-zoom setting.
-- "Reject 6 unmarked" sits above the filmstrip, attached to the expanded group, once it has both a rated or labeled photo and an unmarked photo. It rejects only photos with no rating, label or Reject. Undo restores the whole action and returns to the photo shown when it was tapped.
+- "Reject 6 unmarked" sits centred in its own row above the filmstrip, once the visible group has both a rated or labeled photo and an unmarked photo. It rejects only visible photos with no rating, label or Reject. Undo restores the whole action and returns to the photo shown when it was tapped.
 - The pill hides when nothing remains to reject, when marking is off, and with the chrome. Nothing replaces it. It stays clear of the mark capsule and swipe star bar.
 - With auto-advance on, a triggering mark moves to the next unmarked member, wrapping once. Once the group has no unmarked members, including after the pill, it moves to the first photo after the group in grid order. At the end it stays.
 

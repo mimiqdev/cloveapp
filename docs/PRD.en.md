@@ -240,7 +240,7 @@ A burst is culled in the same detail view as any other photo. Its group expands 
 - Moving between members of the same group keeps zoom level and position. Leaving that group follows the detail keep-zoom setting.
 - Rejected thumbnails stay dimmed. Manual navigation follows grid order.
 - With auto-advance on, a triggering mark moves to the next unmarked member, wrapping within the group. When none remains, it moves to the first photo after the group in grid order, including after Reject N unmarked. At the end of the grid it stays.
-- The **Reject N unmarked** pill sits above the filmstrip, attached to the expanded group. It appears only when the group has both a rated or labeled photo and an unmarked photo. It rejects only photos with no rating, label or Reject.
+- The **Reject N unmarked** pill sits centred in its own row above the filmstrip. It appears only when the visible group has both a rated or labeled photo and an unmarked photo. It rejects only visible photos with no rating, label or Reject.
 - The pill hides when marking is off, when nothing is left to reject, and with the chrome. It never replaces itself with another action or overlaps the capsule or swipe star bar.
 - The action follows batch-write failure rules and undoes as one step. Undo returns to the photo shown when the pill was tapped; undo after a single-photo auto-advance returns to the marked photo.
 
@@ -383,8 +383,8 @@ These manual tests determine whether launch meets product requirements. They are
 | P0-11 | Opening a folder with bursts starts grouping automatically: groups appear by time first, then refine, and Run again is available. The photo being viewed does not jump during grouping. Grouping separates by model and serial when present, falling back to model when serial is missing; two same-model bodies shooting the same scene at the same moment are unsupported. Photos with only fallback file times are excluded. Starting values are a gap below 2 seconds and a split above Vision distance 0.5. All XMP is unchanged before and after grouping. Turning similar groups off hides entry points and blue outlines while the main flow still works. |
 | P0-12 | A stack opens detail on its first unmarked photo with its filmstrip group expanded. In a group of 20 or more photos, navigation keeps zoom and position. The pill rejects only unmarked photos and undoes as one step, returning to the photo shown at submission. Auto-advance visits unmarked members, then the first photo after the group in grid order. |
 | P0-13 | Complete the flow on both iPhone and iPad: open folder → grid → mark in detail → cull a group → move rejects → quit and reopen with marks intact. |
-| P0-14 | Open and mark on the Duo cover screen. Unfold and retain the same folder, photo, marks, and group-view position, with grid and detail split by default. Half-folded filters, marking controls, and bottom bar never cross the hinge. |
-| P0-15 | Switching system appearance updates entry, grid, detail, similar groups, the group view, and all Duo postures between light and dark. |
+| P0-14 | Open and mark on the Duo cover screen. Unfold and retain the same folder, photo, marks, and expanded filmstrip group in detail, with grid and detail split by default. Half-folded filters, marking controls, and bottom bar never cross the hinge. |
+| P0-15 | Switching system appearance updates entry, grid, detail with expanded filmstrip groups, similar groups, and all Duo postures between light and dark. |
 
 Additional interoperability acceptance: alternate between Clove and Photo Mechanic or Lightroom on the same RAW folder. Each reads the other's XMP ratings and labels.
 

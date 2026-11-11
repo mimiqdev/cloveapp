@@ -72,7 +72,7 @@ Show one toast per failure burst, above the bottom edge in the Move rejects toas
 |---|---|
 | group.rejectRest | Reject {n} unmarked |
 
-The pill sits above the filmstrip, attached to the expanded group. Hide it with chrome, while marking is off, or when nothing remains to reject. Nothing replaces it.
+The pill sits centred in its own row above the filmstrip. Hide it with chrome, while marking is off, or when nothing remains to reject. Nothing replaces it.
 
 ## Move Rejects
 | Key | String |

@@ -122,7 +122,7 @@ The frames below predate the owner decision of 2026-11-12 and are out of date. G
 - A grid stack opens detail at its first unmarked member, or its first member when all are marked. The ordinary detail header and controls remain.
 - The current group expands in the grid-order filmstrip; rejected thumbnails are dimmed and rated ones show stars.
 - Zoom and pan stay synced within the group. Leaving it follows the detail setting.
-- **Reject N unmarked** is a pill above the strip, attached to the expanded group. It requires a rated or labeled member and at least one unmarked member, and never touches existing marks. Undo restores the action together and returns to the photo shown at submission.
+- **Reject N unmarked** is a pill centred in its own row above the strip. It requires a rated or labeled visible member and at least one unmarked visible member, and never touches existing marks or hidden photos. Undo restores the action together and returns to the photo shown at submission.
 - The pill hides with chrome or when marking is off, and disappears when nothing remains to reject. It stays clear of the capsule and swipe star bar.
 - Auto-advance visits unmarked members, then the first photo after the group in grid order. No group sidebar remains; iPad and Duo detail layouts are separate work.
 
