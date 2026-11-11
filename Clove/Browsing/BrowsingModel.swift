@@ -108,13 +108,9 @@ final class BrowsingModel {
     /// The library's photos with their marks, before this state's order and filter (PRD P0-03).
     private var confirmedPhotos: [GridPhoto]
 
-    private var storedPhotos: [GridPhoto] {
-        confirmedPhotos.map { photo in
-            var shown = photo
-            shown.marks = desiredMarks.shown(for: photo.id, confirmed: photo.marks)
-            return shown
-        }
-    }
+    /// Shown marks are updated at submission and confirmation, rather than mapped on every read.
+    private var storedPhotos: [GridPhoto]
+    private var photoIndices: [PhotoIdentity: Int] = [:]
 
     /// The latest change to each photo, with its save state (PRD P0-08).
     ///
@@ -129,7 +125,6 @@ final class BrowsingModel {
     private var finishingActions = 0
     private var shownGeneration: Int
     private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
-    private var keepResults: [PhotoIdentity: MarkChangeStatus] = [:]
     private var keptEditsByMove: [RejectMoveBatchID: [DesiredMarkEdit]] = [:]
 
     /// Snapshots are taken synchronously from desired marks, ready for the next undo task.
@@ -171,6 +166,11 @@ final class BrowsingModel {
     private var openRequests = 0
     private var folderClose: Task<Void, Never>?
 
+    private var folderReplacements = 0
+
+    /// Refuse new actions while a pick or reopen drains and replaces the folder's generation.
+    var isChangingFolder: Bool { folderReplacements > 0 }
+
     /// The saved scene waiting for its folder to hold the photos it names (PRD P0-14).
     ///
     /// It applies as soon as the scan delivered them, at the latest when the scan finishes, and
@@ -191,14 +191,8 @@ final class BrowsingModel {
         self.detailImages = library.detailImages
         self.recentFailures = [:]
         self.confirmedPhotos = library.photos
+        self.storedPhotos = library.photos
         refresh()
-        for photo in confirmedPhotos {
-            guard let status = library.latestChange(for: photo.id), status.state.isUnfinished else {
-                continue
-            }
-            let edit = request(status.requested, for: photo.id)
-            desiredMarks.finish(edit, state: status.state)
-        }
         updateTask = Task { [weak self, updates = library.updates] in
             for await update in updates {
                 guard let self else { return }
@@ -237,8 +231,8 @@ final class BrowsingModel {
 
     /// The photo the detail route shows, with its current marks (PRD Detail and marking).
     var currentPhoto: GridPhoto? {
-        guard let id = state.currentPhoto else { return nil }
-        return storedPhotos.first { $0.id == id }
+        guard let id = state.currentPhoto, let index = photoIndices[id] else { return nil }
+        return storedPhotos[index]
     }
 
     /// The open group's photos with their marks, in the group's member order (PRD P0-12).
@@ -246,9 +240,9 @@ final class BrowsingModel {
         guard let position = state.groupPosition,
             let group = groups.first(where: { $0.id == position.group })
         else { return [] }
-        var byIdentity: [PhotoIdentity: GridPhoto] = [:]
-        for photo in storedPhotos { byIdentity[photo.id] = photo }
-        return group.members.compactMap { byIdentity[$0] }
+        return group.members.compactMap { photo in
+            photoIndices[photo].map { storedPhotos[$0] }
+        }
     }
 
     /// The group the group view shows, from grouping's published groups (PRD P0-11, P0-12).
@@ -313,6 +307,8 @@ final class BrowsingModel {
 
     /// Opens a folder the user chose, once any leaving question is answered (PRD P0-01).
     private func openPickedFolderNow(_ url: URL) async {
+        folderReplacements += 1
+        defer { folderReplacements -= 1 }
         openRequests += 1
         // An earlier folder's loss and save states do not apply to whatever this open installs.
         // Clearing the loss before the await keeps a loss the new open reports (PRD P0-02).
@@ -372,6 +368,8 @@ final class BrowsingModel {
 
     /// Reopens one remembered folder, once any leaving question is answered (PRD P0-02).
     private func reopenNow(_ recent: RecentFolder) async {
+        folderReplacements += 1
+        defer { folderReplacements -= 1 }
         openRequests += 1
         // The reopen reads the folder again, so the loss the watch reported is no longer current,
         // and a loss the new open reports after the await still applies (PRD P0-02).
@@ -495,7 +493,7 @@ final class BrowsingModel {
 
     /// Snapshots the allowed changes from shown marks and submits one finishing action.
     func runGroupFinishing(_ plan: GroupFinishingPlan) {
-        guard !isMovingRejects, plan.availability.isAvailable else { return }
+        guard !isMovingRejects, !isChangingFolder, plan.availability.isAvailable else { return }
         let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
             request($0.change, for: $0.photo)
         }
@@ -522,7 +520,7 @@ final class BrowsingModel {
     /// A complete group either stays (the setting says stay) or opens the next group in grid
     /// order that is not complete, skipping completed ones. With no incomplete group left, the
     /// view returns to the grid. The answer comes from the folder session's completion record,
-    /// which the finishing executor writes and the marks complete, so the view never derives a
+    /// which the ordered finishing action writes and the marks complete, so the view never derives a
     /// second rule (``GroupViewCompletion``).
     ///
     /// The group, the route and the task are re-checked after the query: leaving the group view,
@@ -604,9 +602,6 @@ final class BrowsingModel {
         }
     }
 
-    /// The latest completed batch and the desired marks each photo had before it.
-    private(set) var lastBatch: BatchMarkApplication?
-
     /// The photos one batch marks: the selection narrowed to the photos the grid shows, in grid
     /// order (PRD P0-09). A photo the filter hides stays selected and is not marked.
     var batchTargets: [GridPhoto] {
@@ -646,7 +641,7 @@ final class BrowsingModel {
         state.selection = batchSelection.selectingAll(cells)
     }
 
-    /// Leaves multi-select, clears the selection and drops the batch's report (PRD P0-09).
+    /// Leaves multi-select and clears the selection (PRD P0-09).
     ///
     /// Failed photos keep their desired marks and unsaved status after selection ends.
     func clearSelection() {
@@ -655,7 +650,7 @@ final class BrowsingModel {
 
     /// Updates the selected photos immediately and queues one batch with their before and after marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings) {
-        guard !isMovingRejects else { return }
+        guard !isMovingRejects, !isChangingFolder else { return }
         let plan = BatchMarkPlan(action: action, photos: batchTargets, settings: settings)
         guard !plan.items.isEmpty else { return }
         let edits = plan.items.map { request($0.change, for: $0.photo) }
@@ -707,6 +702,10 @@ final class BrowsingModel {
         _ plan: RejectMovePlan, kept: [PhotoIdentity],
         completion: @escaping (Result<RejectMoveResult, any Error>) -> Void
     ) {
+        guard !isChangingFolder else {
+            completion(.failure(RejectMoveRefusal.disabled))
+            return
+        }
         guard !isMovingRejects else { return }
         let edits = kept.map { request(.rating(.unrated), for: $0) }
         lastMarkEdits = edits
@@ -734,7 +733,7 @@ final class BrowsingModel {
 
     /// The toolbar stays disabled; the next undo task can submit the recorded move here.
     func submitMoveUndo(_ entry: RejectMoveUndoEntry) {
-        guard !isMovingRejects else { return }
+        guard !isMovingRejects, !isChangingFolder else { return }
         let edits = entry.keptPhotos.compactMap { kept -> DesiredMarkEdit? in
             var target = kept.marksAfter
             target.rating = .rejected
@@ -760,7 +759,7 @@ final class BrowsingModel {
         _ completed: CompletedRejectMove,
         completion: @escaping (Result<RejectMoveResult, any Error>) -> Void
     ) {
-        guard !isMovingRejects, completed.openGeneration == openGeneration,
+        guard !isMovingRejects, !isChangingFolder, completed.openGeneration == openGeneration,
             completed.folder == state.folder
         else {
             completion(.failure(RejectMoveRefusal.disabled))
@@ -783,13 +782,13 @@ final class BrowsingModel {
 
     /// Every screen and marking rule reads desired marks while they await confirmation.
     func shownMarks(for photo: PhotoIdentity) -> PhotoMarks {
-        let confirmed = confirmedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks()
-        return desiredMarks.shown(for: photo, confirmed: confirmed)
+        guard let index = photoIndices[photo] else { return PhotoMarks() }
+        return storedPhotos[index].marks
     }
 
     /// Shows the requested mark and submits its write before returning to the input handler.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) {
-        guard !isMovingRejects, !hasLeftFolder, !change.isEmpty else { return }
+        guard !isMovingRejects, !isChangingFolder, !hasLeftFolder, !change.isEmpty else { return }
         let edit = request(change, for: photo)
         lastMarkEdits = [edit]
         submit(.mark(edit))
@@ -798,11 +797,18 @@ final class BrowsingModel {
     // MARK: - Ordered actions
 
     private func request(_ change: MarkChange, for photo: PhotoIdentity) -> DesiredMarkEdit {
-        let confirmed = confirmedPhotos.first { $0.id == photo }?.marks ?? PhotoMarks()
+        let confirmed = photoIndices[photo].map { confirmedPhotos[$0].marks } ?? PhotoMarks()
         let edit = desiredMarks.apply(change, to: photo, confirmed: confirmed)
         desiredStatusIDs[photo] = MarkChangeID()
         previousFailedPhotos.remove(photo)
+        updateShownPhoto(photo)
         return edit
+    }
+
+    private func updateShownPhoto(_ photo: PhotoIdentity) {
+        guard let index = photoIndices[photo] else { return }
+        storedPhotos[index].marks = desiredMarks.shown(
+            for: photo, confirmed: confirmedPhotos[index].marks)
     }
 
     @discardableResult
@@ -819,16 +825,13 @@ final class BrowsingModel {
     func drainActions() async { await actionConsumer?.value }
 
     private func consumeActions() async {
+        var keptStatuses: [MarkChangeStatus] = []
         while let entry = actionPipeline.beginNext() {
             switch entry.action {
             case .mark(let edit):
                 _ = await persist([edit])
             case .batch(let edits):
-                let result = await persist(edits)
-                lastBatch = BatchMarkApplication(
-                    result: result,
-                    marksBefore: Dictionary(
-                        uniqueKeysWithValues: edits.map { ($0.photo, $0.before) }))
+                _ = await persist(edits)
             case .finishing(let plan, let edits):
                 await library.recordGroupFinishing(plan.groupID)
                 let result = await persist(edits)
@@ -846,20 +849,28 @@ final class BrowsingModel {
                 }
                 let result = await persist(eligible)
                 if let previous = lastGroupFinishing {
-                    var statuses = Dictionary(
-                        uniqueKeysWithValues: previous.outcomes.map {
-                            ($0.photo, $0.status)
-                        })
-                    for status in result.outcomes { statuses[status.identity] = status }
-                    lastGroupFinishing = GroupFinishingResult.applied(
-                        previous.plan, statuses: statuses)
-                    groupFinishingRuns += 1
+                    let unfinished = Set(
+                        previous.outcomes.filter { $0.status.state.isUnfinished }.map(\.photo))
+                    let retried = result.outcomes.filter { unfinished.contains($0.identity) }
+                    if !retried.isEmpty {
+                        var statuses = Dictionary(
+                            uniqueKeysWithValues: previous.outcomes.map {
+                                ($0.photo, $0.status)
+                            })
+                        for status in retried { statuses[status.identity] = status }
+                        lastGroupFinishing = GroupFinishingResult.applied(
+                            previous.plan, changes: previous.outcomes.map(\.change),
+                            statuses: statuses, undo: previous.undo)
+                        groupFinishingRuns += 1
+                    }
                 }
             case .keep(let edits):
-                let result = await persist(edits)
-                for status in result.outcomes { keepResults[status.identity] = status }
+                keptStatuses = await persist(edits).outcomes
             case .move(let preview, let kept, let revisions):
-                await performMove(preview, kept: kept, revisions: revisions, actionID: entry.id)
+                await performMove(
+                    preview, kept: kept, keptStatuses: keptStatuses,
+                    revisions: revisions, actionID: entry.id)
+                keptStatuses = []
             case .retryMove(let previous, let kept):
                 await performMoveRetry(previous, kept: kept, actionID: entry.id)
             case .moveUndo(let move, let edits):
@@ -871,7 +882,7 @@ final class BrowsingModel {
     }
 
     private func performMove(
-        _ preview: RejectMovePlan, kept: [DesiredMarkEdit],
+        _ preview: RejectMovePlan, kept: [DesiredMarkEdit], keptStatuses: [MarkChangeStatus],
         revisions: [PhotoIdentity: UInt64], actionID: UInt64
     ) async {
         isMovingRejects = true
@@ -889,12 +900,13 @@ final class BrowsingModel {
             let plan = try await library.planRejectMove(
                 configuration: preview.configuration, rejected: rejected)
             let moved = try await library.runRejectMove(plan)
-            let clearFailures = kept.compactMap { edit -> RejectMoveOutcome? in
-                guard let failure = keepResults[edit.photo]?.state.failure else { return nil }
+            let clearFailures = keptStatuses.compactMap { status -> RejectMoveOutcome? in
+                guard let failure = status.state.failure else { return nil }
                 return .failed(
                     RejectMoveFailedSet(
-                        identity: edit.photo, failure: RejectMoveFailure(classifying: failure),
-                        files: preview.readyEntries.first { $0.identity == edit.photo }?.files ?? []
+                        identity: status.identity, failure: RejectMoveFailure(classifying: failure),
+                        files: preview.readyEntries.first { $0.identity == status.identity }?.files
+                            ?? []
                     ))
             }
             let difference = RejectMovePlanDifference(
@@ -1020,12 +1032,11 @@ final class BrowsingModel {
                     ?? request(.rating(.rejected), for: restored.identity)
                 let status = library.latestChange(for: restored.identity)
                 if let status {
-                    if status.state.isConfirmed,
-                        let index = confirmedPhotos.firstIndex(where: { $0.id == edit.photo })
-                    {
+                    if status.state.isConfirmed, let index = photoIndices[edit.photo] {
                         confirmedPhotos[index].marks = edit.after
                     }
                     desiredMarks.finish(edit, state: status.state)
+                    updateShownPhoto(edit.photo)
                 }
             }
             reportSaveFailures(
@@ -1052,12 +1063,11 @@ final class BrowsingModel {
             guard let status = result.outcomes.first(where: { $0.identity == edit.photo }) else {
                 continue
             }
-            if status.state.isConfirmed,
-                let index = confirmedPhotos.firstIndex(where: { $0.id == edit.photo })
-            {
+            if status.state.isConfirmed, let index = photoIndices[edit.photo] {
                 confirmedPhotos[index].marks = edit.after
             }
             desiredMarks.finish(edit, state: status.state)
+            updateShownPhoto(edit.photo)
         }
         reportSaveFailures(result.outcomes)
         return result
@@ -1130,21 +1140,25 @@ final class BrowsingModel {
             states: storedPhotos.compactMap { latestChange(for: $0.id)?.state })
     }
 
-    /// Resends one photo's latest failed change through C4 (PRD P0-08).
-    ///
-    /// The retry's transitions arrive on the library's ordered stream like any other change, so a
-    /// retried change shows **Writing…** and then only what its storage confirmed. PRD How marks
-    /// reach disk, rule 8, keeps a superseded change from being retried (the library reads the
-    /// photo's latest change).
+    /// Retries all current failed photos as one ordered action, including single and batch marks.
     func retryAllUnfinishedChanges() {
-        guard !isMovingRejects else { return }
+        retryFailedChanges(in: storedPhotos.map(\.id))
+    }
+
+    /// Retries one unsaved-list row through the same compare-and-set pipeline as Retry all.
+    func retryFailedChange(for photo: PhotoIdentity) {
+        retryFailedChanges(in: [photo])
+    }
+
+    private func retryFailedChanges(in photos: [PhotoIdentity]) {
+        guard !isMovingRejects, !isChangingFolder else { return }
         dismissSaveFailureToast()
-        let edits = storedPhotos.compactMap { photo -> DesiredMarkEdit? in
-            guard let entry = desiredMarks.entry(for: photo.id), entry.state.failure != nil else {
+        let edits = photos.compactMap { photo -> DesiredMarkEdit? in
+            guard let entry = desiredMarks.entry(for: photo), entry.state.failure != nil else {
                 return nil
             }
             desiredMarks.retry(entry.edit)
-            previousFailedPhotos.remove(photo.id)
+            previousFailedPhotos.remove(photo)
             return entry.edit
         }
         guard !edits.isEmpty else { return }
@@ -1274,6 +1288,8 @@ final class BrowsingModel {
         lastRejectMove = nil
         isRejectMoveToastVisible = false
         confirmedPhotos = []
+        storedPhotos = []
+        photoIndices = [:]
         desiredMarks = DesiredPhotoMarks()
         desiredStatusIDs = [:]
         previousFailedPhotos = []
@@ -1480,9 +1496,6 @@ final class BrowsingModel {
         dismissedGroupFailure = nil
         groupFinishingRuns = 0
 
-        // Another folder replaces every selected photo's identity, so the batch's report and
-        // U8's undo snapshot go with the selection.
-        lastBatch = nil
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
@@ -1509,6 +1522,13 @@ final class BrowsingModel {
             changes = PhotoChangeStates()
         }
         confirmedPhotos = library.photos
+        photoIndices = Dictionary(
+            uniqueKeysWithValues: confirmedPhotos.enumerated().map { ($0.element.id, $0.offset) })
+        storedPhotos = confirmedPhotos.map { photo in
+            var shown = photo
+            shown.marks = desiredMarks.shown(for: photo.id, confirmed: photo.marks)
+            return shown
+        }
         groups = library.groups
         reconcileRemovedPhotos()
     }
@@ -1520,7 +1540,7 @@ final class BrowsingModel {
     /// scan; a detail or group route whose photo is gone returns to the grid, the same fallback a
     /// restore uses. Grouping's own update then keeps a surviving group's place.
     private func reconcileRemovedPhotos() {
-        let present = Set(storedPhotos.map(\.id))
+        let present = Set(photoIndices.keys)
         if !state.selection.isSubset(of: present) {
             state.selection.formIntersection(present)
         }
@@ -1533,21 +1553,6 @@ final class BrowsingModel {
             if state.route == .group { state.route = .grid }
         }
     }
-}
-
-/// One batch the multi-select bar applied, with what U8's undo entry needs (PRD P0-09, C5).
-///
-/// The batch is already written when this value exists, so it holds what the action cannot be
-/// re-derived from: C4's per-photo results, including the failed photos a retry resends, and the
-/// marks each targeted photo had just before the batch. U8 passes both to
-/// `MarkUndoHistory.recordBatch(_:marksBefore:)` from the one ``BrowsingModel/applyBatch(_:settings:)``
-/// call, which is what keeps one bar action to one undo entry.
-struct BatchMarkApplication: Sendable {
-    /// C4's per-photo results, with the photos the batch could not save (PRD P0-09).
-    let result: MarkBatchResult
-
-    /// Each targeted photo's marks before the batch, keyed by C1's identity (PRD P0-05).
-    let marksBefore: [PhotoIdentity: PhotoMarks]
 }
 
 /// The latest completed Move rejects run, kept for the toast and C14's undo (PRD P0-10).

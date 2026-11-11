@@ -18,7 +18,7 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
-    func testFailedGlyphRetriesOnlyTheFailedBatchItems() {
+    func testFailureToastRetriesOnlyTheFailedBatchItems() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEM_SUFFIX": "0"])
         openLibrary(app)
         let failed = element(app, "clove.grid.photo.mmq02680")
@@ -31,7 +31,9 @@ final class CloveUITests: XCTestCase {
         XCTAssertTrue(waitForLabel("Save failed. Double-tap to retry.", status))
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02682").label.contains("3 stars"))
         XCTAssertTrue(failed.label.contains("3 stars"))
-        status.tap()
+        let retry = element(app, "clove.save.toast.action")
+        XCTAssertTrue(retry.waitForExistence(timeout: 3))
+        retry.tap()
         XCTAssertTrue(waitForLabel("Saved", status))
         XCTAssertTrue(failed.label.contains("3 stars"))
         element(app, "clove.grid.batch.done").tap()
@@ -52,7 +54,7 @@ final class CloveUITests: XCTestCase {
         XCTAssertEqual(label.label, "Label, Red")
         XCTAssertTrue(element(app, "clove.save.toast").waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Some marks weren't saved."].exists)
-        element(app, "clove.save.toast.action").tap()
+        status.tap()
         XCTAssertTrue(waitForLabel("Saved", status))
         XCTAssertEqual(label.label, "Label, Red")
     }
@@ -123,8 +125,14 @@ final class CloveUITests: XCTestCase {
         label.tap()
         let start = ContinuousClock.now
         element(app, "clove.detail.labels.red").tap()
-        XCTAssertTrue(waitForLabel("Label, Red", label))
+        var shownLabel = label.label
+        for _ in 0..<100 {
+            if shownLabel == "Label, Red" { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            shownLabel = label.label
+        }
         let elapsed = start.duration(to: .now)
+        XCTAssertEqual(shownLabel, "Label, Red")
         print(
             "Tap to shown mark, test library with a 5000 ms pending write (informational, includes XCTest input and observation): \(elapsed)"
         )

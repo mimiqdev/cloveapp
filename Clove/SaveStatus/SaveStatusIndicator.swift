@@ -300,7 +300,7 @@ struct UnsavedChangesView: View {
             }
             Spacer(minLength: 8)
             Button("Retry") {
-                browsing.retryAllUnfinishedChanges()
+                browsing.retryFailedChange(for: change.photo)
             }
             .buttonStyle(.bordered)
             .accessibilityIdentifier("clove.saveState.retry.\(change.photo.stem)")

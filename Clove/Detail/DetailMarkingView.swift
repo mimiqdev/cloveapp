@@ -742,6 +742,7 @@ struct DetailMarkingView: View {
     private func apply(_ result: MarkingResult) {
         switch result {
         case .mark(let change, let kind):
+            guard !browsing.isChangingFolder else { return }
             // Plan navigation from the current order before a mark removes this photo from
             // a live filter. Both calls are synchronous; the mark still shows in this input turn.
             actions.marked(kind, photo)

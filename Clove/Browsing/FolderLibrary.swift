@@ -117,8 +117,8 @@ protocol FolderLibrary: AnyObject {
     /// (PRD P0-09).
     ///
     /// One call is one batch for one action: C4's `apply(_:to sets:)` admits every photo before
-    /// awaiting any result, and the returned ``MarkBatchResult`` keeps the handle
-    /// ``retryFailed(in:)`` needs, so "Retry failed items" repeats no successful write. Items can
+    /// awaiting any result. The returned ``MarkBatchResult`` reports each photo's outcome;
+    /// the action pipeline selects current failed desired entries for retries. Items can
     /// name different changes because C13 resolves the action per photo, and the library applies
     /// them together. Each photo's save state still arrives through ``updates``, like a
     /// single-photo change; a photo the folder no longer holds is reported as failed instead of

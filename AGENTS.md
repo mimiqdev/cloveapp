@@ -12,7 +12,8 @@ Clove/                    Clove app target (SwiftUI, placeholder UI for now)
 CloveLab/                 CloveLab debug app target used for device verification
 CloveLab/Shared/          Harness for the spikes: folder picker, report export, footer
 CloveLab/Probes/<Topic>/  One folder per verification topic
-CloveUITests/             UI smoke test for Clove
+CloveTests/               Hosted app unit tests for the browsing consumer
+CloveUITests/             UI smoke tests for Clove
 Packages/CloveCore/       Domain model, scanning, XMP, writes (local Swift package)
 Packages/CloveImaging/    Previews, RAW decoding, image features (local Swift package)
 Packages/CloveLabKit/     Lab report tooling plus one module per verification topic
@@ -33,7 +34,7 @@ XcodeGen. Every task is listed here.
 | Task | What it does | When to run |
 | --- | --- | --- |
 | `mise run generate` | Runs `scripts/generate-xcodeproj.sh` (`xcodegen generate`) and writes `Clove.xcodeproj`. | After changing `project.yml`, adding sources, or changing packages. |
-| `mise run lint` | `swift format lint --strict` over `Clove`, `CloveLab`, `CloveUITests`, and `Packages`. | Before every commit. |
+| `mise run lint` | `swift format lint --strict` over `Clove`, `CloveLab`, `CloveTests`, `CloveUITests`, and `Packages`. | Before every commit. |
 | `mise run format` | The same swift-format rules, applied in place. | To fix lint findings. |
 | `mise run test-fixtures` | `scripts/test_fixtures.py`: fixture tooling tests, logic only, no network. | After changing anything under `fixtures/` or the fixture scripts. |
 | `mise run test-release` | `scripts/test_release_testflight.py`: TestFlight release script tests, logic only, no network, no signing. | After changing the release script or its config. |
@@ -44,7 +45,7 @@ XcodeGen. Every task is listed here.
 | `mise run test-imaging` | `swift test --package-path Packages/CloveImaging`. | While editing `CloveImaging`; runs on macOS, no simulator. |
 | `mise run test-lab` | `swift test --package-path Packages/CloveLabKit`: the lab harness and probe test targets. Fixture tests skip when a set is missing. | While editing `Packages/CloveLabKit`; runs on macOS, no simulator. |
 | `mise run build` | `xcodebuild build` for the `Clove` and `CloveLab` schemes, iOS Simulator, no signing. | After project, app, or package changes. |
-| `mise run smoke` | Creates a throwaway simulator, runs `CloveUITests` with `xcodebuild test`, deletes the simulator on exit. | After changing UI or the smoke test, and as part of verify. |
+| `mise run smoke` | Creates a throwaway simulator, runs `CloveTests` and `CloveUITests` with `xcodebuild test`, deletes the simulator on exit. | After changing UI or the smoke test, and as part of verify. |
 | `mise run verify` | `generate`, `lint`, `test-fixtures`, `test-release`, `test-core`, `test-imaging`, `test-lab`, `build`, `smoke`, in order, stopping at the first failure. | Before opening or updating a pull request; it is the acceptance gate. |
 
 ## Conventions

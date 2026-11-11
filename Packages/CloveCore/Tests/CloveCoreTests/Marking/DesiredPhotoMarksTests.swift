@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import CloveCore
@@ -67,9 +68,11 @@ struct DesiredPhotoMarksTests {
         let edit = desired.apply(.rating(.rejected), to: photo, confirmed: PhotoMarks())
         var queue = PhotoActionPipeline()
         let mark = queue.submit(.mark(edit))
-        let move = queue.submit(
-            .moveUndo(
-                RejectMoveUndoEntry(batch: RejectMoveBatchID(), photoToReturnTo: photo), []))
+        let root = URL(fileURLWithPath: "/photos")
+        let plan = RejectMovePlan(
+            rootURL: root, configuration: RejectMoveConfiguration(), sets: [], entries: [],
+            destinationURL: root.appendingPathComponent("_Rejected"))
+        let move = queue.submit(.move(plan, kept: [], revisions: [photo: edit.revision]))
         let later = queue.submit(.mark(edit))
         #expect(queue.beginNext()?.id == mark)
         #expect(queue.beginNext() == nil)
