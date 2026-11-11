@@ -72,6 +72,24 @@ XcodeGen. Every task is listed here.
 - `Clove.xcodeproj` and build products are gitignored, so `git status` must stay
   clean after `mise run verify`.
 
+## Keep it simple
+
+- The files are the only truth: the photos, their XMP sidecars, and Clove's own
+  store for standalone JPEG/HIF marks. Clove keeps no status that has to be
+  kept in sync with them. In-memory state is for speed (preview caches, held
+  renders) or for what the person is doing right now (a mark shown before its
+  write finishes), and nothing else.
+- When storage fails, fail plainly: stop, say so once, and read the files
+  again. Never add carry-over, retries, conflict states or persisted pending
+  status.
+- Before you add a state, a branch or a recovery path, ask three questions.
+  Do we need it? Will this case really happen in real use? If we just fail,
+  does the person lose something they would notice? If the answers are no,
+  leave it out.
+- This applies to issues and reviews too. Question the design before fixing
+  edge cases inside it. A bug in machinery nobody needs is fixed by deleting
+  the machinery.
+
 ## Build output and simulators
 
 - Build output goes inside the checkout: `.build/DerivedData.noindex`, passed

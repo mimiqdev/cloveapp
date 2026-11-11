@@ -3,7 +3,7 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// The live feedback one marking swipe shows near the finger (PRD Rating by swipe distance).
+/// The live rating read-out for a marking swipe (PRD Rating by swipe distance).
 ///
 /// The step ladder itself belongs to C13 (``SwipeRatingSession``); this value only carries what
 /// the preview draws while the finger moves, so the screen's other state — the pixels, the zoom,
@@ -18,9 +18,6 @@ final class DetailSwipeFeedback {
 
     /// Whether releasing now would reject (PRD Detail gestures: swipe down past the threshold).
     var isReject = false
-
-    /// Where the finger is, in the preview's own coordinate space.
-    var location: CGPoint = .zero
 
     /// Whether the badge shows at all; back at the start it shows nothing.
     var isShowing: Bool { rating != nil || isReject }
@@ -37,23 +34,18 @@ final class DetailSwipeFeedback {
 struct DetailSwipeFeedbackBadge: View {
     let feedback: DetailSwipeFeedback
     var enabledRatings: EnabledRatings = .all
+    var bottomInset: CGFloat = 0
 
     var body: some View {
         GeometryReader { proxy in
             if feedback.isShowing {
-                Group {
-                    if feedback.isReject {
-                        RejectCircle(isRejected: true, onToggle: {})
-                            .padding(4).cloveGlass(in: Circle())
-                    } else {
-                        VerticalStarBar(
-                            rating: feedback.rating ?? .unrated, enabledRatings: enabledRatings,
-                            onPreview: { _ in }, onCommit: { _ in }, onReject: {})
-                    }
-                }
+                VerticalStarBarDisplay(
+                    rating: feedback.rating ?? .unrated, enabledRatings: enabledRatings,
+                    isReject: feedback.isReject
+                )
                 .position(
-                    x: max(proxy.size.width - 40, 24),
-                    y: min(max(feedback.location.y, 150), max(proxy.size.height - 160, 150))
+                    x: max(proxy.size.width - 36, 20),
+                    y: max(0, proxy.size.height - bottomInset) / 2
                 )
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .ignore)

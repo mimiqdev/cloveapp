@@ -111,6 +111,7 @@ struct DetailMarkingView: View {
     @State private var hidesChrome = false
     @State private var showsInformation = false
     @State private var showsZoomChip = false
+    @State private var controlsHeight: CGFloat = 0
 
     /// The pixels on screen, or nil while the first preview loads (PRD P0-04).
     @State private var shown: DetailImage?
@@ -242,6 +243,11 @@ struct DetailMarkingView: View {
                             .padding(.horizontal, 16)
                         }
                         .padding(.bottom, 8)
+                        .onGeometryChange(for: CGFloat.self) {
+                            $0.size.height
+                        } action: {
+                            controlsHeight = $0
+                        }
                         .transition(.opacity)
                     } else if showsZoomChip && scale > DetailFitScale.tolerance {
                         Text(zoomName)
@@ -312,7 +318,9 @@ struct DetailMarkingView: View {
             onEdgeTap: { navigate($0) },
             onDoubleTap: { doubleTap(at: $0) },
             onMarkingSwipe: { applyMarkingSwipe($0) },
-            onMarkingSwipeBegin: { actions.markingSwipeBegan() },
+            onSwipeBegin: { actions.markingSwipeBegan() },
+            hasPrevious: navigationAvailability.previous,
+            hasNext: navigationAvailability.next,
             probe: probe
         )
         .opacity(
@@ -320,7 +328,8 @@ struct DetailMarkingView: View {
         )
         .overlay {
             DetailSwipeFeedbackBadge(
-                feedback: swipeFeedback, enabledRatings: settings.enabledRatings)
+                feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
+                bottomInset: controlsHeight)
         }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -660,6 +669,25 @@ struct DetailMarkingView: View {
     }
 
     // MARK: - Navigation
+
+    /// The same neighbours edge taps use, including a decided current photo hidden by the
+    /// group's Undecided only filter.
+    var navigationAvailability: (previous: Bool, next: Bool) {
+        if let groupReview {
+            let navigation = GroupPhotoNavigation(
+                group: groupReview.group, undecidedOnly: groupReview.undecidedOnly.wrappedValue)
+            let marks = Dictionary(
+                uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) })
+            return (
+                navigation.previousPhoto(before: photo.id, marks: marks) != nil,
+                navigation.nextPhoto(after: photo.id, marks: marks) != nil
+            )
+        }
+        guard let index = order.firstIndex(where: { $0.id == photo.id }) else {
+            return (false, false)
+        }
+        return (index > 0, index + 1 < order.count)
+    }
 
     /// Shows the previous or next photo in the screen's own order (PRD P0-04).
     private func navigate(_ zone: DetailEdgeZone) {
