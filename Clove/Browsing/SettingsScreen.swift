@@ -142,6 +142,7 @@ struct SettingsScreen: View {
                 Text("Camera preview").tag(PhotoDisplayMode.cameraPreviewFirst)
             }
             .accessibilityLabel("Show photos as")
+            .accessibilityValue(store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview")
             .accessibilityIdentifier("clove.settings.photoDisplayMode")
             Toggle("Marking gestures", isOn: binding(\.gesturesEnabled))
                 .accessibilityIdentifier("clove.settings.gesturesEnabled")
