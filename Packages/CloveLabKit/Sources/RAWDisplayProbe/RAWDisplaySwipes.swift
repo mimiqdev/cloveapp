@@ -102,14 +102,23 @@ public enum RAWDisplaySwipes {
                 for (index, photo) in photos.enumerated() {
                     try Task.checkCancellation()
                     let renderRunning = current.map { $0.finished == nil } ?? false
-                    let preview = try measuring.embeddedPreview(
+                    var preview = try measuring.embeddedPreview(
                         url: photo.preview, maxPixel: plan.previewPixels)
+                    var previewSource = "camera-preview"
+                    // The same fallback the detail pipeline needs: a camera HEIF with no
+                    // usable embedded preview falls back to the RAW's own preview.
+                    if preview.error != nil, photo.preview != photo.raw {
+                        preview = try measuring.embeddedPreview(
+                            url: photo.raw, maxPixel: plan.previewPixels)
+                        previewSource = "raw-fallback"
+                    }
                     measurements.append(
                         LabMeasurement(
                             name: "swipe-preview", value: preview.milliseconds, unit: "ms",
                             tags: [
                                 "dwellMs": String(dwell), "index": String(index),
                                 "renderRunning": String(renderRunning),
+                                "previewSource": previewSource,
                                 "previewError": preview.error ?? "none",
                                 "previewLongEdge": String(max(preview.width, preview.height)),
                             ]))

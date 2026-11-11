@@ -96,6 +96,7 @@ public enum RAWDisplaySuite {
                 + options.swipeDwells.count
                 + min(options.cacheFiles, detailed.count) + 1
         )
+        let runStart = ContinuousClock.now
         var completed = 0
         let step: (String) async -> Void = { message in
             completed += 1
@@ -161,6 +162,10 @@ public enum RAWDisplaySuite {
                 folderPhotos: options.projectedFolderPhotos)
         }
 
+        measurements.append(
+            LabMeasurement(
+                name: "run-duration", value: displayMilliseconds(since: runStart), unit: "ms",
+                tags: ["phase": "display-suite"]))
         await step("Finished")
         return LabReport(
             spike: RAWDisplayProbe.descriptor.id,

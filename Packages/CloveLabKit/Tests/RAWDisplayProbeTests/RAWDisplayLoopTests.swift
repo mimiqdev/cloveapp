@@ -155,6 +155,24 @@ struct RAWDisplayLoopTests {
         #expect(measuring.count("raw-render") == 0)
     }
 
+    @Test func cacheLoopStopsAtItsHeldImageBound() async throws {
+        let measuring = StubMeasuring()
+        let files = (0..<9).map { URL(fileURLWithPath: "/fixture/photo-\($0).ARW") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "clove-rawdisplay-cache-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let measurements = try await RAWDisplayCacheCost.measurements(
+            files: files, folder: URL(fileURLWithPath: "/fixture"),
+            variant: RAWDisplayVariant(
+                name: "screen", scale: .longEdge(1_200), draft: false, context: .reused,
+                role: .screen),
+            measuring: measuring, directory: directory)
+        #expect(measuring.count("raw-image") == 6)
+        #expect(measurements.contains { $0.name == "cache-held-images" && $0.value == 6 })
+        #expect(measurements.filter { $0.name == "cache-encode" }.count == 12)
+    }
+
     @Test func gridProjectionUsesTheBriefFolderSize() {
         let measurements = RAWDisplayGridEstimate.measurements(
             perPhotoMilliseconds: 10, variantName: "grid", folderPhotos: 2_000)

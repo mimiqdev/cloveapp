@@ -95,7 +95,7 @@ graph LR
 
 ## M1 Spikes
 
-All depend on T0.2 and T0.3. S0 built the shared harness; S1–S7 used it and produced reports for the [approved G1 decision](decisions/G1-technical-approach.md). S7's Duo run and the remaining checks stay open; they do not reopen M1.
+All depend on T0.2 and T0.3. S0 built the shared harness; S1–S7 used it and produced reports for the [approved G1 decision](decisions/G1-technical-approach.md). S7's Duo run and the remaining checks stay open; they do not reopen M1. **S8 is a follow-up**, opened after G1 to measure RAW display cost for the owner's two-mode preview setting ([#122](https://github.com/mimiqdev/cloveapp/issues/122)); it does not reopen M1 and its part-1 report makes no recommendation before the device run.
 
 | ID | Question | What to test | Output | Size | Device |
 | --- | --- | --- | --- | --- | --- |
@@ -107,6 +107,7 @@ All depend on T0.2 and T0.3. S0 built the shared harness; S1–S7 used it and pr
 | S5 | Is the data needed for grouping available? | Whether each format exposes subsecond capture time, camera model, and serial number; Vision feature computation speed on embedded previews; trial time-gap and similarity thresholds on burst samples | Initial grouping parameters; fallback when subseconds or serial numbers are missing | M | Yes (speed) |
 | S6 | How long does scanning take? | Recursive scan of about 2,000 files in a folder Files can open; which prefetched file attributes are fastest. Reader measurements are non-blocking follow-ups in [#29](https://github.com/mimiqdev/cloveapp/issues/29), with the CFexpress reader first | Scan strategy; whether to show results while scanning | S | Yes; external media non-blocking |
 | S7 | How does the system expose Duo fold state? | On the Duo, confirm how the hinge position, fold posture, and window size changes are reported; whether the scene survives switching between cover and inner screens | Duo adaptation approach; required minimum SDK | S | Yes |
+| S8 | What does showing a RAW's own colours cost on the iPhone? | RAW render variants at native, screen and grid size with `CIRAWFilter.scaleFactor`, draft on/off and fresh versus reused `CIContext`; full, subsampled and screen-size HIF decodes; colour difference against the native render; 20-photo swipe contention; sustained load and battery; screen-size cache cost ([#122](https://github.com/mimiqdev/cloveapp/issues/122), follow-up after G1) | Render costs, colour agreement and contention evidence for the owner's two-mode preview setting; the device table stays pending part 2 | M | Yes |
 
 **G1 decided; M1 closed**: the product owner approved the [technical approach](decisions/G1-technical-approach.md) on 2026-11-09, including XMP, previews, starting performance targets, Duo, and matching PRD revisions. The [S7 Duo run (#18)](https://github.com/mimiqdev/cloveapp/issues/18) and [remaining checks (#29)](https://github.com/mimiqdev/cloveapp/issues/29) stay open. External-media checks are non-blocking; the S3 desktop-app checks remain required before C3 is called done.
 
