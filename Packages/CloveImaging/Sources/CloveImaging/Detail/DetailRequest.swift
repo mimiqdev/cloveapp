@@ -40,13 +40,11 @@ public struct DetailRequest: Hashable, Sendable {
     public let mode: DetailDisplayMode
     /// Fixed screen edge, independent of zoom, for decode-time RAW scaling.
     public let screenPixels: Int
-    /// Position in the visible order, for distance-based held-render eviction.
-    public let position: Int
 
     public init(
         raw: DetailSource? = nil, jpeg: DetailSource? = nil, heif: DetailSource? = nil,
         displayPixels: Int, wantsNativeResolution: Bool = false, locationIdentity: String,
-        mode: DetailDisplayMode = .rawFirst, screenPixels: Int? = nil, position: Int = 0
+        mode: DetailDisplayMode = .rawFirst, screenPixels: Int? = nil
     ) {
         precondition(raw != nil || jpeg != nil || heif != nil, "A detail request needs a file")
         precondition((1...DetailPixelLimit.maximumEdge).contains(displayPixels))
@@ -58,6 +56,5 @@ public struct DetailRequest: Hashable, Sendable {
         self.locationIdentity = locationIdentity
         self.mode = mode
         self.screenPixels = min(max(screenPixels ?? displayPixels, 1), DetailPixelLimit.maximumEdge)
-        self.position = position
     }
 }

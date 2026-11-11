@@ -1,5 +1,6 @@
 import CloveCore
 import CloveImaging
+import CoreGraphics
 import Foundation
 
 enum DetailImageOutcome: Sendable {
@@ -21,17 +22,15 @@ struct DetailPixelRequest: Hashable, Sendable {
     let need: Need
     let mode: PhotoDisplayMode
     let screenPixels: Int
-    let position: Int
 
     init(
         displayPixels: Int, need: Need, mode: PhotoDisplayMode = .rawFirst,
-        screenPixels: Int? = nil, position: Int = 0
+        screenPixels: Int? = nil
     ) {
         self.displayPixels = min(max(displayPixels, 1), DetailPixelLimit.maximumEdge)
         self.need = need
         self.mode = mode
         self.screenPixels = min(max(screenPixels ?? displayPixels, 1), DetailPixelLimit.maximumEdge)
-        self.position = position
     }
 }
 
@@ -49,12 +48,10 @@ struct DetailPhotoWindow: Hashable, Sendable {
     let mode: PhotoDisplayMode
     let screenPixels: Int
 
-    func request(for photo: DetailNeighbour, need: DetailPixelRequest.Need = .preview)
-        -> DetailPixelRequest
-    {
+    func request(need: DetailPixelRequest.Need = .preview) -> DetailPixelRequest {
         DetailPixelRequest(
             displayPixels: screenPixels, need: need, mode: mode,
-            screenPixels: screenPixels, position: photo.position)
+            screenPixels: screenPixels)
     }
 }
 
@@ -63,6 +60,8 @@ struct DetailPhotoWindow: Hashable, Sendable {
 /// generates its own pixels. Leaving cancels work and releases the full image.
 @MainActor
 protocol DetailImageSource: AnyObject {
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
     func prepare(_ window: DetailPhotoWindow) async
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async
@@ -70,6 +69,15 @@ protocol DetailImageSource: AnyObject {
 }
 
 extension DetailImageSource {
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        if case .image(let pixels) = await gridThumbnails.thumbnail(for: photo, priority: .visible)
+        {
+            return pixels
+        }
+        return nil
+    }
     func prepare(_ window: DetailPhotoWindow) async {}
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {}
     func leave(window: UUID) async {}

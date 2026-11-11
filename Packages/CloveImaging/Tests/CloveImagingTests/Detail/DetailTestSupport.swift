@@ -62,7 +62,7 @@ struct DetailTestDirectory {
 
     func cache(megabytes: Int = 32) -> DetailCache {
         var configuration = DetailCache.Configuration()
-        configuration.previewBytes = megabytes * 1024 * 1024
+        configuration.compressedBytes = megabytes * 1024 * 1024
         return DetailCache(configuration: configuration)
     }
 }
@@ -130,7 +130,7 @@ func eventually(_ condition: () async -> Bool) async throws {
 }
 
 /// Asserts a request was cancelled or superseded rather than delivering pixels.
-func expectCancelled(_ task: Task<DetailResult, any Error>) async {
+func expectCancelled<Value: Sendable>(_ task: Task<Value, any Error>) async {
     do {
         _ = try await task.value
         Issue.record("Cancelled or superseded request delivered a result")

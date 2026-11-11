@@ -44,7 +44,7 @@ private final class DetailCancellation: Sendable {
 /// Detail and group review's shared image scheduler. Embedded previews have their
 /// own bounded lane. Screen RAW, native RAW and full camera decodes share one lane.
 /// Obsolete full-size calls drain without publishing. Running screen renders can
-/// survive caller cancellation; the current window decides whether to hold them.
+/// survive caller cancellation and populate the compressed cache.
 public actor DetailPipeline {
     private enum Lane: Sendable { case preview, render }
     private enum Effort: Sendable { case previewOnly, screen, best }
@@ -56,7 +56,7 @@ public actor DetailPipeline {
         let effort: Effort
         let priority: DetailPriority
         let cancellation: DetailCancellation
-        let continuation: CheckedContinuation<DetailResult, any Error>
+        let continuation: CheckedContinuation<DetailResult?, any Error>
         var lane: Lane { effort == .previewOnly ? .preview : .render }
     }
 
@@ -91,24 +91,17 @@ public actor DetailPipeline {
         self.sizes = sizes
     }
 
-    /// Called before arrival reads. Releases the full image on photo/mode change,
-    /// keeps only this photo's screen render and its two neighbours, and drops old work.
+    /// Called before arrival reads. Releases the full image on photo/mode change
+    /// and cancels queued work. Running screen renders can finish into the cache.
     public func navigate(
-        to current: DetailRequest, neighbours: [DetailRequest],
+        to current: DetailRequest,
         generation: UInt64? = nil
     ) {
         guard !closed, !Task.isCancelled else { return }
         if let generation, generation != navigationGeneration { return }
-        cache.navigate(to: current, neighbours: neighbours)
-        let window = Set(([current] + neighbours.prefix(2)).compactMap(DetailCache.screenKey))
-        for job in Array(jobs.values) {
-            if isRunningScreen(job), let key = DetailCache.screenKey(job.request),
-                window.contains(key)
-            {
-                continue
-            }
-            cancel(job.id)
-        }
+        cache.navigate(to: current)
+        for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
+        latest = latest.filter { jobs[$0.value] != nil }
     }
 
     /// The app reserves arrival ownership before any file-system work. An older
@@ -117,40 +110,59 @@ public actor DetailPipeline {
         guard !closed, generation > navigationGeneration else { return }
         navigationGeneration = generation
         for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
+        latest = latest.filter { jobs[$0.value] != nil }
     }
 
     /// Immediate fit pixels: held screen RAW in RAW mode, otherwise the camera preview.
     /// This method never starts a render.
     public func preview(
-        for request: DetailRequest, consumer: UUID = UUID(),
-        priority: DetailPriority = .visible
+        for request: DetailRequest, consumer: UUID = UUID()
     ) async throws -> DetailResult {
-        try await enqueue(request, consumer: consumer, effort: .previewOnly, priority: priority)
+        guard
+            let result = try await enqueue(
+                request, consumer: consumer, effort: .previewOnly, priority: .visible)
+        else { preconditionFailure("A visible detail request must return a result") }
+        return result
     }
 
     /// The fit upgrade. RAW mode renders at screen size with draft off; camera mode
     /// keeps its preview. A RAW set without a usable full camera source takes RAW mode.
     public func screen(
-        for request: DetailRequest, consumer: UUID = UUID(),
-        priority: DetailPriority = .visible
+        for request: DetailRequest, consumer: UUID = UUID()
     ) async throws -> DetailResult {
-        try await enqueue(request, consumer: consumer, effort: .screen, priority: priority)
+        guard
+            let result = try await enqueue(
+                request, consumer: consumer, effort: .screen, priority: .visible)
+        else { preconditionFailure("A visible detail request must return a result") }
+        return result
     }
 
     /// Zoom beyond the shown pixels, or an explicit 100% request.
     public func image(for request: DetailRequest, consumer: UUID = UUID()) async throws
         -> DetailResult
     {
-        try await enqueue(request, consumer: consumer, effort: .best, priority: .visible)
+        guard
+            let result = try await enqueue(
+                request, consumer: consumer, effort: .best, priority: .visible)
+        else { preconditionFailure("A visible detail request must return a result") }
+        return result
     }
 
     /// Embedded previews only. One-ahead RAW work is explicitly requested through screen().
     public func prefetch(_ requests: [DetailRequest]) async {
         await withTaskGroup(of: Void.self) { group in
             for request in requests.prefix(2) {
-                group.addTask { _ = try? await self.preview(for: request, priority: .prefetch) }
+                group.addTask { try? await self.prefetchPreview(for: request) }
             }
         }
+    }
+
+    public func prefetchPreview(for request: DetailRequest) async throws {
+        _ = try await enqueue(request, consumer: UUID(), effort: .previewOnly, priority: .prefetch)
+    }
+
+    public func prefetchScreen(for request: DetailRequest) async throws {
+        _ = try await enqueue(request, consumer: UUID(), effort: .screen, priority: .prefetch)
     }
 
     public func cancelPrefetch() {
@@ -159,7 +171,7 @@ public actor DetailPipeline {
         }
     }
 
-    /// Leaving the detail stage keeps neighbouring screen renders, but never a
+    /// Leaving the detail stage keeps compressed images, but never a
     /// full camera decode or native RAW allocation.
     public func leavePhoto(generation: UInt64) {
         guard generation > navigationGeneration else { return }
@@ -170,6 +182,7 @@ public actor DetailPipeline {
 
     public func releaseCachedImages() {
         for job in Array(jobs.values) { cancel(job.id) }
+        latest.removeAll()
         cache.releaseAll()
     }
 
@@ -188,14 +201,31 @@ public actor DetailPipeline {
     private func enqueue(
         _ request: DetailRequest, consumer: UUID, effort: Effort,
         priority: DetailPriority
-    ) async throws -> DetailResult {
+    ) async throws -> DetailResult? {
         let id = UUID()
         let cancellation = DetailCancellation()
+        defer { if latest[consumer] == id { latest[consumer] = nil } }
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             guard !closed else { throw DetailPipelineError.closed }
+            if let old = latest[consumer] { cancel(old, preservingRunningScreen: true) }
+            latest[consumer] = id
+            let cache = cache
+            let sizes = sizes
+            let hit = await Task.detached(priority: .userInitiated) {
+                if priority == .prefetch {
+                    return (
+                        Self.hasCached(request, effort: effort, cache: cache), nil as DetailResult?
+                    )
+                }
+                let result = Self.cached(request, effort: effort, cache: cache, sizes: sizes)
+                return (result != nil, result)
+            }.value
+            try Task.checkCancellation()
+            guard !closed else { throw DetailPipelineError.closed }
+            guard latest[consumer] == id else { throw CancellationError() }
+            if hit.0 { return hit.1 }
             return try await withCheckedThrowingContinuation { continuation in
-                if let old = latest[consumer] { cancel(old, preservingRunningScreen: true) }
                 if queue.count >= queueLimit {
                     if priority == .visible,
                         let victim = queue.last(where: { jobs[$0]?.priority == .prefetch })
@@ -265,7 +295,7 @@ public actor DetailPipeline {
         }
     }
 
-    private func complete(_ id: UUID, result: DetailResult) {
+    private func complete(_ id: UUID, result: DetailResult?) {
         active.removeValue(forKey: id)
         if let job = jobs.removeValue(forKey: id) {
             if latest[job.consumer] == id { latest[job.consumer] = nil }
@@ -299,11 +329,89 @@ public actor DetailPipeline {
         return nil
     }
 
+    /// Prefetch touches usable entries without decoding an image it would discard.
+    private nonisolated static func hasCached(
+        _ request: DetailRequest, effort: Effort, cache: DetailCache
+    ) -> Bool {
+        if let raw = request.raw, !isCurrent(raw) { return false }
+        let usesRAW = request.raw != nil && cameraSource(request, cache: cache) == nil
+        if usesRAW {
+            if let key = DetailCache.screenKey(request), cache.contains(key) { return true }
+            if effort == .screen { return false }
+        }
+        for step in DetailPreviewPlan.steps(for: request) {
+            guard isCurrent(step.source) else { return false }
+            let key = DetailCacheKey(
+                source: step.source, locationIdentity: request.locationIdentity,
+                purpose: step.purpose(displayPixels: request.displayPixels))
+            let minimum: Int
+            switch step {
+            case .embedded: minimum = DetailPreviewPlan.minimumUsablePreviewPixels
+            case .displayRaster: minimum = 0
+            }
+            if cache.contains(key, minimumLongEdge: minimum) { return true }
+        }
+        return false
+    }
+
+    /// Cache reads decode on a worker before admission, so hits never wait for a lane.
+    private nonisolated static func cached(
+        _ request: DetailRequest, effort: Effort, cache: DetailCache,
+        sizes: any DetailNativeSizeReading
+    ) -> DetailResult? {
+        if let raw = request.raw, !isCurrent(raw) { return .unavailable(.sourceChanged) }
+        let camera = cameraSource(request, cache: cache)
+        let usesRAW = request.raw != nil && camera == nil
+        if effort == .best {
+            let source =
+                camera ?? request.raw ?? (request.wantsNativeResolution ? request.jpeg : nil)
+            if let source {
+                let key = DetailCacheKey(
+                    source: source, locationIdentity: request.locationIdentity,
+                    purpose: usesRAW ? .nativeRAW : .fullRaster)
+                return cache.native(for: key).map { verified(.available($0)) }
+            }
+        }
+        if usesRAW {
+            if effort == .best { return nil }
+            if let screen = cache.screen(for: request) { return verified(.available(screen)) }
+            if effort == .screen { return nil }
+        }
+        var best: DetailImage?
+        for step in DetailPreviewPlan.steps(for: request) {
+            guard isCurrent(step.source) else { return .unavailable(.sourceChanged) }
+            let key = DetailCacheKey(
+                source: step.source, locationIdentity: request.locationIdentity,
+                purpose: step.purpose(displayPixels: request.displayPixels))
+            guard let image = cache.image(for: key) else { continue }
+            if DetailPreviewPlan.isUsable(image, from: step) { best = image; break }
+        }
+        guard let best else { return nil }
+        let size: CGSize?
+        if let camera {
+            size = sizes.nativeSize(of: camera, isRAW: false)
+        } else if let reference = request.raw ?? request.jpeg,
+            case .known(let known) = cache.nativeSize(for: reference)
+        {
+            size = known
+        } else {
+            size = nil
+        }
+        let shown = best.withFullResolution(size, hasRAW: request.raw != nil)
+        if effort == .best, request.jpeg == nil {
+            return verified(.available(shown.limited(by: .noHigherResolution)))
+        }
+        return verified(.available(shown))
+    }
+
     private nonisolated static func perform(
         _ job: Job, cache: DetailCache,
         reader: any DetailReading, sizes: any DetailNativeSizeReading
-    ) async -> DetailResult {
+    ) async -> DetailResult? {
         let request = job.request
+        if job.priority == .prefetch, hasCached(request, effort: job.effort, cache: cache) {
+            return nil
+        }
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
         if let raw = request.raw, !isCurrent(raw) { return .unavailable(.sourceChanged) }
         var camera = cameraSource(request, cache: cache)
@@ -319,7 +427,7 @@ public actor DetailPipeline {
             let key = DetailCacheKey(
                 source: step.source, locationIdentity: request.locationIdentity,
                 purpose: step.purpose(displayPixels: request.displayPixels))
-            var image = cache.preview(for: key)
+            var image = cache.image(for: key)
             if image == nil {
                 if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
                 switch await reader.read(step, displayPixels: request.displayPixels) {
@@ -327,7 +435,9 @@ public actor DetailPipeline {
                     let candidate = DetailImage(
                         image: pixels, source: step.source,
                         quality: step.quality, hasRAW: false)
-                    cache.storePreview(candidate, for: key)
+                    if let compressed = DetailCompressedImage(candidate) {
+                        job.cancellation.storeIfActive { cache.store(compressed, for: key) }
+                    }
                     image = candidate
                 case .cannotOpen: failures.append(.cannotOpen)
                 case .noUsablePreview: failures.append(.noUsablePreview)
@@ -455,13 +565,16 @@ public actor DetailPipeline {
         let rendered = DetailImage(
             image: pixels, source: raw, quality: .screenRAW,
             hasRAW: true, fullResolutionSize: fullSize)
+        let compressed = DetailCompressedImage(rendered)
         return publish(rendered, job: job) {
-            cache.storeScreen(rendered, for: job.request)
+            if let compressed, let key = DetailCache.screenKey(job.request) {
+                cache.store(compressed, for: key)
+            }
         }
     }
 
     /// Cache insertion and explicit discard share the same lock. Caller cancellation
-    /// can leave a useful running screen render alive for the new window.
+    /// can leave a useful running screen render alive for the compressed cache.
     private nonisolated static func publish(
         _ image: DetailImage, job: Job,
         store: () -> Void

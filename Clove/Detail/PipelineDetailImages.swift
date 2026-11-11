@@ -1,5 +1,6 @@
 import CloveCore
 import CloveImaging
+import CoreGraphics
 import Foundation
 
 /// The folder supplies session admission, so its security scope outlives every
@@ -16,6 +17,7 @@ extension DetailWorkAdmission {
 @MainActor
 final class PipelineDetailImages: DetailImageSource {
     private let pipeline: DetailPipeline
+    private let thumbnails: ThumbnailCache?
     private let set: @MainActor (PhotoIdentity) -> PhotoSet?
     private let admitted: DetailWorkAdmission
     private let consumer = UUID()
@@ -24,12 +26,40 @@ final class PipelineDetailImages: DetailImageSource {
 
     init(
         pipeline: DetailPipeline,
+        thumbnails: ThumbnailCache? = nil,
         set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
         admitted: DetailWorkAdmission = .direct
     ) {
         self.pipeline = pipeline
+        self.thumbnails = thumbnails
         self.set = set
         self.admitted = admitted
+    }
+
+    /// Reads the shared grid cache directly, without entering the grid work queue.
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        guard let thumbnails, let sources = sources(for: photo) else { return nil }
+        let outcome = await admitted.image {
+            guard
+                let request = sources.request(
+                    for: DetailPixelRequest(displayPixels: 400, need: .preview)),
+                let source = request.raw ?? request.jpeg ?? request.heif
+            else { return .deferred }
+            let key = ThumbnailRequest(
+                source: source.url, revision: source.revision, targetPixels: 400,
+                locationIdentity: request.locationIdentity)
+            guard case .available(let thumbnail) = thumbnails.result(for: key) else {
+                return .deferred
+            }
+            return .image(
+                DetailImage(
+                    image: thumbnail.image, source: source, quality: .preview,
+                    hasRAW: request.raw != nil))
+        }
+        if case .image(let image) = outcome { return image.image }
+        return nil
     }
 
     func prepare(_ window: DetailPhotoWindow) async {
@@ -40,16 +70,11 @@ final class PipelineDetailImages: DetailImageSource {
         guard !Task.isCancelled, activeWindow == window, generation == navigationGeneration,
             let current = sources(for: window.current.photo)
         else { return }
-        let neighbours = window.neighbours.compactMap { neighbour in
-            sources(for: neighbour.photo).map { ($0, window.request(for: neighbour)) }
-        }
         _ = await admitted.image { [pipeline] in
             guard !Task.isCancelled,
-                let request = current.request(for: window.request(for: window.current))
+                let request = current.request(for: window.request())
             else { return .deferred }
-            let adjacent = neighbours.compactMap { $0.0.request(for: $0.1) }
-            guard !Task.isCancelled else { return .deferred }
-            await pipeline.navigate(to: request, neighbours: adjacent, generation: generation)
+            await pipeline.navigate(to: request, generation: generation)
             return .deferred
         }
     }
@@ -84,7 +109,7 @@ final class PipelineDetailImages: DetailImageSource {
         guard activeWindow == window else { return }
         let neighbours = window.neighbours.compactMap { neighbour -> (DetailRequest, Bool)? in
             guard let sources = sources(for: neighbour.photo),
-                let request = sources.request(for: window.request(for: neighbour))
+                let request = sources.request(for: window.request())
             else { return nil }
             let ahead = neighbour.position == window.current.position + window.direction
             return (request, ahead)
@@ -95,7 +120,7 @@ final class PipelineDetailImages: DetailImageSource {
             guard renderAhead, !Task.isCancelled, let ahead = neighbours.first(where: \.1)?.0 else {
                 return
             }
-            _ = try? await pipeline.screen(for: ahead, priority: .prefetch)
+            try? await pipeline.prefetchScreen(for: ahead)
         }
     }
 
@@ -144,6 +169,6 @@ private struct PhotoSources: Sendable {
             wantsNativeResolution: request.need == .fullResolution,
             locationIdentity: locationIdentity,
             mode: request.mode == .rawFirst ? .rawFirst : .cameraPreviewFirst,
-            screenPixels: request.screenPixels, position: request.position)
+            screenPixels: request.screenPixels)
     }
 }

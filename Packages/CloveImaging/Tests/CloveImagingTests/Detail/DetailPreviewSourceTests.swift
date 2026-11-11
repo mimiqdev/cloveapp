@@ -206,6 +206,33 @@ struct DetailPreviewSourceTests {
         #expect(await gate.previewPaths == [raw.standardizedFileURL.path])
     }
 
+    @Test(arguments: [false, true])
+    func cachedTinyPreviewStillReadsTheUsableFallback(prefetch: Bool) async throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let raw = try detailSource(DetailFixtures.file("sony-ilce-7s.ARW"))
+        let jpeg = try detailSource(
+            directory.image(name: "fallback.JPG", width: 3000, height: 2000))
+        let cache = DetailCache()
+        let tiny = DetailImage(
+            image: try makeDetailImage(width: 640, height: 427), source: raw,
+            quality: .preview, hasRAW: false)
+        cache.store(
+            try #require(DetailCompressedImage(tiny)),
+            for: DetailCacheKey(source: raw, locationIdentity: "tiny", purpose: .embeddedPreview))
+        let gate = DetailReadGate()
+        let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
+        let request = DetailRequest(
+            raw: raw, jpeg: jpeg, displayPixels: 1200, locationIdentity: "tiny")
+        if prefetch { try await pipeline.prefetchPreview(for: request) }
+        let image = try availableDetail(try await pipeline.preview(for: request))
+        #expect(image.source == jpeg)
+        #expect(image.quality == .raster)
+        #expect(image.width == 1200)
+        #expect(await gate.previewPaths == [jpeg.url.path])
+        await pipeline.close()
+    }
+
     @Test func tinyRawPreviewFallsBackToTheJpeg() async throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }
@@ -290,10 +317,10 @@ struct DetailPreviewSourceTests {
         let pipeline = pipeline(cache)
         let request = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"))
         _ = try availableDetail(try await pipeline.preview(for: request))
-        #expect(cache.previewCount >= 1)
+        #expect(cache.imageCount >= 1)
         let start = ContinuousClock.now
         _ = try availableDetail(try await pipeline.preview(for: request))
         #expect(ContinuousClock.now - start < .milliseconds(200))
-        #expect(cache.previewCount == 1)
+        #expect(cache.imageCount == 1)
     }
 }

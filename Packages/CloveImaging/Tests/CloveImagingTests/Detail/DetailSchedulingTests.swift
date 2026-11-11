@@ -110,8 +110,7 @@ struct DetailSchedulingTests {
         }
         try await eventually { await gate.previewPaths.count == 1 }
         let neighbour = Task {
-            try await pipeline.preview(
-                for: try previewRequest("nikon-d500.NEF", index: 2), priority: .prefetch)
+            try await pipeline.prefetchPreview(for: try previewRequest("nikon-d500.NEF", index: 2))
         }
         try await eventually { await pipeline.queuedCount == 1 }
         let visible = Task {
@@ -161,18 +160,17 @@ struct DetailSchedulingTests {
         }
         try await eventually { await gate.previewPaths.count == 1 }
         let neighbour = Task {
-            try await pipeline.preview(
-                for: try previewRequest("nikon-d500.NEF", index: 2), priority: .prefetch)
+            try await pipeline.prefetchPreview(for: try previewRequest("nikon-d500.NEF", index: 2))
         }
         try await eventually { await pipeline.queuedCount == 1 }
         let displaced = Task {
-            try await pipeline.preview(
-                for: try previewRequest("fujifilm-x-s10.RAF", index: 3), priority: .prefetch)
+            try await pipeline.prefetchPreview(
+                for: try previewRequest("fujifilm-x-s10.RAF", index: 3))
         }
         try await eventually { await pipeline.queuedCount == 2 }
         do {
-            _ = try await pipeline.preview(
-                for: try previewRequest("canon-eos-r6.CR3", index: 4), priority: .prefetch)
+            _ = try await pipeline.prefetchPreview(
+                for: try previewRequest("canon-eos-r6.CR3", index: 4))
             Issue.record("A full queue accepted more prefetch")
         } catch DetailPipelineError.queueFull {}
         let visible = Task {
@@ -210,8 +208,7 @@ struct DetailSchedulingTests {
         }
         try await eventually { await gate.previewPaths.count == 1 }
         let neighbour = Task {
-            try await pipeline.preview(
-                for: try previewRequest("nikon-d500.NEF", index: 2), priority: .prefetch)
+            try await pipeline.prefetchPreview(for: try previewRequest("nikon-d500.NEF", index: 2))
         }
         try await eventually { await pipeline.queuedCount == 1 }
         await pipeline.cancelPrefetch()

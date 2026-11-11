@@ -118,11 +118,11 @@ struct DetailMarkingView: View {
     @State private var showsZoomChip = false
     @State private var controlsHeight: CGFloat = 0
 
-    /// The pixels on screen, or nil while the first preview loads (PRD P0-04).
+    /// Detail pixels on screen; the grid thumbnail stands in until these arrive.
     @State private var shown: DetailImage?
 
     /// The first-preview state, so a failure is a visible state and not a blank image.
-    @State private var phase: DetailMarkingPreviewPhase = .loading
+    @State private var phase: DetailMarkingPreviewPhase = .placeholder(nil)
 
     /// The shortfall the shown pixels carry, if any (G1 "Preview, detail (I2)").
     @State private var limitation: DetailLimitation?
@@ -311,7 +311,7 @@ struct DetailMarkingView: View {
     /// The zoomable preview and the states that must not look like a loaded image.
     private var previewArea: some View {
         DetailZoomView(
-            image: shown?.image,
+            image: shown?.image ?? placeholder,
             fullResolutionPixels: shown?.fullResolutionPixels,
             command: command,
             doubleTapZoomEnabled: settings.doubleTap == .zoom,
@@ -326,6 +326,8 @@ struct DetailMarkingView: View {
             hasNext: navigationAvailability.next,
             probe: probe
         )
+        .accessibilityLabel(photo.fileName)
+        .accessibilityValue(shown == nil ? "" : "Loaded")
         .opacity(
             displayMarks.isRejected ? theme.tokens.rejectedOpacity : 1
         )
@@ -346,15 +348,17 @@ struct DetailMarkingView: View {
         .background(Color.clove.bg.stage)
     }
 
-    /// The loading, unavailable or failed state while no pixels are on screen (PRD Scan scope).
+    private var placeholder: CGImage? {
+        if case .placeholder(let pixels) = phase { return pixels }
+        return nil
+    }
+
+    /// Loading shows pixels alone; unavailable and failed answers keep their explicit copy.
     @ViewBuilder private var previewState: some View {
         if shown == nil {
             switch phase {
-            case .loading:
-                ProgressView("Loading preview…")
-                    .tint(theme.tokens.primaryText.color)
-                    .foregroundStyle(Color.clove.text.primary)
-                    .accessibilityIdentifier("clove.detail.loading")
+            case .placeholder:
+                EmptyView()
             case .unavailable(let failure):
                 Text(unavailableText(failure))
                     .foregroundStyle(.secondary)
@@ -419,9 +423,13 @@ struct DetailMarkingView: View {
             setZoom(.fit)
         }
         shown = nil
-        phase = .loading
+        phase = .placeholder(nil)
         limitation = nil
         previewOnly = false
+        let thumbnail = await images.placeholder(
+            for: photo.id, gridThumbnails: browsing.thumbnails)
+        guard !Task.isCancelled else { return }
+        phase = .placeholder(thumbnail)
         // Wait for the display, not just layout: the first render must use the
         // same physical screen edge as later photos and their held-render keys.
         for _ in 0..<120 {
@@ -437,7 +445,7 @@ struct DetailMarkingView: View {
         currentWindow = window
         previousPosition = window.current.position
         await images.prepare(window)
-        let request = window.request(for: window.current)
+        let request = window.request()
         var attempts = 0
         while true {
             let outcome = await images.image(for: photo.id, request: request)
@@ -584,7 +592,7 @@ struct DetailMarkingView: View {
     private func renderFitAndPrefetch(_ window: DetailPhotoWindow) async {
         let outcome = await images.image(
             for: window.current.photo,
-            request: window.request(for: window.current, need: .screenRender))
+            request: window.request(need: .screenRender))
         guard !Task.isCancelled else { return }
         if case .image(let image) = outcome, shown?.isBestAvailable != true {
             show(image)
@@ -687,7 +695,7 @@ struct DetailMarkingView: View {
         guard let window = currentWindow else { return }
         let request = DetailPixelRequest(
             displayPixels: requestPixels(scale: scale), need: need,
-            mode: window.mode, screenPixels: window.screenPixels, position: window.current.position)
+            mode: window.mode, screenPixels: window.screenPixels)
         let outcome = await images.image(for: photo.id, request: request)
         guard !Task.isCancelled else { return }
         switch outcome {
@@ -888,7 +896,7 @@ private struct DetailDisplayOrder: Hashable {
 
 /// The first preview's state, so loading, failure and success never look alike (PRD P0-04).
 private enum DetailMarkingPreviewPhase {
-    case loading
+    case placeholder(CGImage?)
     case shown
     case unavailable(DetailFailure)
     case deferred

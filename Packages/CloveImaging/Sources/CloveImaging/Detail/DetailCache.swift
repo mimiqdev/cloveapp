@@ -34,22 +34,17 @@ struct DetailCacheKey: Hashable, Sendable {
     private let purpose: DetailCachePurpose
 }
 
-/// Decoded detail images, held in memory only (G1 "Scheduling and cache").
-///
-/// Preview and display-size bitmaps share a 32 MiB cost budget, counted in decoded row
-/// bytes as S2 measured them. One native RAW image is held separately, outside that budget,
-/// because a single 50 MP render is 189.84 MiB on the owner's camera. The mutex protects
-/// bookkeeping only: decoding, file IO and eviction never run under it.
+/// Detail previews and screen renders share a compressed JPEG LRU in memory.
+/// One native render is held separately. Encoding and decoding run outside the mutex.
 public final class DetailCache: Sendable {
     public struct Configuration: Sendable {
-        /// G1 "Scheduling and cache": 32 MiB for detail images, about four 6.66 MiB bitmaps.
-        public var previewBytes = 32 * 1024 * 1024
+        /// Compressed bytes shared by previews and RAW screen renders, encoded as JPEG 0.9.
+        public var compressedBytes = 64 * 1024 * 1024
         public init() {}
     }
 
     private struct Entry {
-        let image: DetailImage
-        let cost: Int
+        let image: DetailCompressedImage
         let access: UInt64
     }
 
@@ -64,13 +59,10 @@ public final class DetailCache: Sendable {
     }
 
     private struct State {
-        var previews: [DetailCacheKey: Entry] = [:]
-        var previewCost = 0
+        var images: [DetailCacheKey: Entry] = [:]
+        var compressedCost = 0
         var native: (key: DetailCacheKey, image: DetailImage)?
         var nativeSizes: [DetailSource: NativeSize] = [:]
-        var screens: [DetailCacheKey: (image: DetailImage, position: Int)] = [:]
-        var currentPosition = 0
-        var screenWindow: Set<DetailCacheKey>?
         var currentPhoto: DetailCacheKey?
         var cameraFailures: Set<DetailSource> = []
         var tick: UInt64 = 0
@@ -80,7 +72,7 @@ public final class DetailCache: Sendable {
     private let configuration: Configuration
 
     public init(configuration: Configuration = Configuration()) {
-        precondition(configuration.previewBytes >= 0)
+        precondition(configuration.compressedBytes >= 0)
         self.configuration = configuration
         self.state = Mutex(State())
     }
@@ -94,25 +86,20 @@ public final class DetailCache: Sendable {
     /// in use (PRD P0-04).
     public func releaseAll() {
         state.withLock { state in
-            state.previews.removeAll()
-            state.previewCost = 0
+            state.images.removeAll()
+            state.compressedCost = 0
             state.native = nil
             state.nativeSizes.removeAll()
-            state.screens.removeAll()
+            state.cameraFailures.removeAll()
         }
     }
 
-    /// Retains only the current photo and its immediate neighbours. Changing photo
-    /// releases the sole full decode before the next one can be allocated.
-    func navigate(to request: DetailRequest, neighbours: [DetailRequest]) {
+    /// Changing photo releases the sole full decode before the next allocation.
+    func navigate(to request: DetailRequest) {
         state.withLock { state in
             let photo = Self.fullKey(request)
             if state.currentPhoto != photo { state.native = nil }
             state.currentPhoto = photo
-            state.currentPosition = request.position
-            let window = Set(([request] + neighbours.prefix(2)).compactMap(Self.screenKey))
-            state.screenWindow = window
-            state.screens = state.screens.filter { window.contains($0.key) }
         }
     }
 
@@ -136,26 +123,8 @@ public final class DetailCache: Sendable {
 
     func screen(for request: DetailRequest) -> DetailImage? {
         guard let key = Self.screenKey(request) else { return nil }
-        return state.withLock { $0.screens[key]?.image }
+        return image(for: key)
     }
-
-    func storeScreen(_ image: DetailImage, for request: DetailRequest) {
-        guard let key = Self.screenKey(request) else { return }
-        state.withLock { state in
-            if let window = state.screenWindow, !window.contains(key) { return }
-            state.screens[key] = (image, request.position)
-            while state.screens.count > 3,
-                let farthest = state.screens.max(by: {
-                    abs($0.value.position - state.currentPosition)
-                        < abs($1.value.position - state.currentPosition)
-                })?.key
-            {
-                state.screens[farthest] = nil
-            }
-        }
-    }
-
-    var screenCount: Int { state.withLock { $0.screens.count } }
 
     func cameraFailed(_ source: DetailSource) -> Bool {
         state.withLock { $0.cameraFailures.contains(source) }
@@ -172,29 +141,38 @@ public final class DetailCache: Sendable {
         state.withLock { $0.native = nil }
     }
 
-    func preview(for key: DetailCacheKey) -> DetailImage? {
-        state.withLock { state in
-            guard var entry = state.previews[key] else { return nil }
+    func image(for key: DetailCacheKey) -> DetailImage? {
+        compressed(for: key)?.decoded()
+    }
+
+    /// A prefetch needs only presence and usability, never decoded pixels.
+    func contains(_ key: DetailCacheKey, minimumLongEdge: Int = 0) -> Bool {
+        guard let image = compressed(for: key) else { return false }
+        return image.longEdge >= minimumLongEdge
+    }
+
+    private func compressed(for key: DetailCacheKey) -> DetailCompressedImage? {
+        state.withLock { state -> DetailCompressedImage? in
+            guard let entry = state.images[key] else { return nil }
             state.tick &+= 1
-            entry = Entry(image: entry.image, cost: entry.cost, access: state.tick)
-            state.previews[key] = entry
+            state.images[key] = Entry(image: entry.image, access: state.tick)
             return entry.image
         }
     }
 
-    /// Stores preview or display-size pixels, evicting the least recently used entries.
-    /// An image larger than the whole budget is simply not cached.
-    func storePreview(_ image: DetailImage, for key: DetailCacheKey) {
+    /// Inserts encoded bytes under the caller's cancellation guard, without doing pixel work.
+    func store(_ compressed: DetailCompressedImage, for key: DetailCacheKey) {
         state.withLock { state in
-            state.previewCost -= state.previews.removeValue(forKey: key)?.cost ?? 0
-            guard image.decodedBytes <= configuration.previewBytes else { return }
+            state.compressedCost -= state.images.removeValue(forKey: key)?.image.data.count ?? 0
+            guard compressed.data.count <= configuration.compressedBytes else { return }
             state.tick &+= 1
-            state.previews[key] = Entry(image: image, cost: image.decodedBytes, access: state.tick)
-            state.previewCost += image.decodedBytes
-            while state.previewCost > configuration.previewBytes,
-                let oldest = state.previews.min(by: { $0.value.access < $1.value.access })?.key
+            state.images[key] = Entry(image: compressed, access: state.tick)
+            state.compressedCost += compressed.data.count
+            while state.compressedCost > configuration.compressedBytes,
+                let oldest = state.images.min(by: { $0.value.access < $1.value.access })?.key
             {
-                state.previewCost -= state.previews.removeValue(forKey: oldest)?.cost ?? 0
+                state.compressedCost -=
+                    state.images.removeValue(forKey: oldest)?.image.data.count ?? 0
             }
         }
     }
@@ -223,8 +201,8 @@ public final class DetailCache: Sendable {
         state.withLock { $0.nativeSizes[source] = nativeSize }
     }
 
-    /// Bytes currently held by preview and display-size entries, for budget tests.
-    var previewCost: Int { state.withLock { $0.previewCost } }
-    var previewCount: Int { state.withLock { $0.previews.count } }
+    /// Compressed bytes and entries currently held, for budget tests.
+    var compressedCost: Int { state.withLock { $0.compressedCost } }
+    var imageCount: Int { state.withLock { $0.images.count } }
     var holdsNativeImage: Bool { state.withLock { $0.native != nil } }
 }

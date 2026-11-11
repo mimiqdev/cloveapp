@@ -126,6 +126,10 @@ final class CloveUITests: XCTestCase {
         let info = element(app, "clove.detail.info")
         XCTAssertTrue(info.waitForExistence(timeout: 5))
         let navigationPreview = element(app, "clove.detail.preview")
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", navigationPreview))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), navigationPreview))
+        XCTAssertFalse(
+            String(describing: navigationPreview.value).localizedCaseInsensitiveContains("loading"))
         let navigationStart = ContinuousClock.now
         navigationPreview.swipeLeft()
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
