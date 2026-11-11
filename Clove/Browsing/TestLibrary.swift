@@ -328,9 +328,31 @@ final class TestLibrary: FolderLibrary {
             updateContinuation.yield(.change(pending))
         }
         if writeDelay > .zero { try? await Task.sleep(for: writeDelay) }
-        if disconnectsOnWrite { reportLocationLoss(.externalVolumeDisconnected) }
-        let outcomes = zip(items, ids).map { item, id in
-            perform(item.change, for: item.photo, id: id)
+        guard !Task.isCancelled else {
+            return MarkBatchResult(id: MarkBatchID(), change: MarkChange(), outcomes: [])
+        }
+        if disconnectsOnWrite {
+            changes = [:]
+            reportLocationLoss(.externalVolumeDisconnected)
+            return MarkBatchResult(
+                id: MarkBatchID(), change: items.first?.change ?? MarkChange(),
+                outcomes: zip(items, ids).map { item, id in
+                    MarkChangeStatus(
+                        id: id, identity: item.photo, requested: item.change,
+                        state: .failed(
+                            MarkWriteFailure(
+                                reason: .locationUnavailable, message: "The drive disconnected.")))
+                })
+        }
+        var outcomes: [MarkChangeStatus] = []
+        for (item, id) in zip(items, ids) {
+            let status = perform(item.change, for: item.photo, id: id)
+            outcomes.append(status)
+            if status.state.failure?.reason == .locationUnavailable {
+                changes = [:]
+                reportLocationLoss(.externalVolumeDisconnected)
+                break
+            }
         }
         let batch = MarkBatchID()
         return MarkBatchResult(
@@ -363,15 +385,14 @@ final class TestLibrary: FolderLibrary {
                         reason: .locationUnavailable,
                         message: "The sample library does not hold this photo.")))
         }
-        if disconnectsOnWrite || shouldFailFirstWrite(to: photo) {
+        if shouldFailFirstWrite(to: photo) {
             // Keep confirmed storage unchanged. BrowsingModel retains the desired marks and
             // shows Failed until a later write confirms them.
             let status = MarkChangeStatus(
                 id: id, identity: photo, requested: change,
                 state: .failed(
                     MarkWriteFailure(
-                        reason: disconnectsOnWrite
-                            ? .locationUnavailable : forcedFailureReason(for: photo),
+                        reason: forcedFailureReason(for: photo),
                         message: "The sample library's forced failure.")))
             changes[photo] = status
             updateContinuation.yield(.change(status))
@@ -668,6 +689,10 @@ final class TestLibrary: FolderLibrary {
             .locationLost(
                 folder: folder, loss: FolderLocationLoss(reason: reason, date: Date()),
                 generation: openGeneration))
+    }
+
+    func discardPendingChanges() async {
+        changes = [:]
     }
 
     /// Waits for the sample's writes; a launch can make this take long enough to see

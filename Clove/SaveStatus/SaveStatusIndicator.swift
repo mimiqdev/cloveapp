@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A wordless save glyph in the navigation subtitle (owner decision, 2026-11-11).
 ///
-/// The write state remains owned by CloveCore. Failed glyphs retry the failed change or batch.
+/// The write state remains owned by CloveCore. Failed glyphs retry every failed photo.
 /// A long press opens the existing unsaved list. Folder recovery keeps its separate glass banner.
 struct SaveStatusIndicator: View {
     /// The scene's browsing state and the operations this indicator performs on it.

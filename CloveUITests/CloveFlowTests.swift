@@ -62,7 +62,7 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testDriveLossDuringWriteKeepsTheRequestedMark() {
+    func testDriveLossDropsTheRequestedMarkAndDisablesMarking() {
         let app = launchSample([
             "CLOVE_TEST_LIBRARY_DISCONNECT_ON_WRITE": "1",
             "CLOVE_TEST_LIBRARY_WRITE_DELAY_MS": "500",
@@ -75,9 +75,10 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.detail.labels.red").tap()
         XCTAssertTrue(waitForLabel("Not connected", element(app, "clove.detail.saveState")))
         XCTAssertFalse(element(app, "clove.save.toast").exists)
-        XCTAssertEqual(label.label, "Label, Red")
+        XCTAssertEqual(label.label, "Label")
+        XCTAssertFalse(label.isEnabled)
         element(app, "clove.nav.back").tap()
-        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").label.contains("Red"))
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02680").label.contains("Red"))
     }
 
     @MainActor

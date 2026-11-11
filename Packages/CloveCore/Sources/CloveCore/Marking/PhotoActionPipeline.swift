@@ -39,6 +39,11 @@ public struct PhotoActionPipeline: Sendable {
         return active
     }
 
+    /// Disconnection drops queued actions. The canceled consumer still finishes its active entry.
+    public mutating func removePending() {
+        pending.removeAll()
+    }
+
     public mutating func finish(_ id: UInt64) {
         precondition(active?.id == id, "Only the active action can finish")
         active = nil
