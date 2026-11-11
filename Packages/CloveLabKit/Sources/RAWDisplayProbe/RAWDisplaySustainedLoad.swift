@@ -34,8 +34,9 @@ public enum RAWDisplaySustainedLoad {
     ) async throws -> [LabMeasurement] {
         let start = ContinuousClock.now
         var measurements: [LabMeasurement] = []
+        // No file name: the report identifies it by its run-local label in the context.
         let baseTags: [String: String] = [
-            "variant": plan.variant.name, "file": plan.file.lastPathComponent,
+            "variant": plan.variant.name,
             "scaleMethod": plan.variant.scaleMethod,
             "requestedLongEdge": String(plan.variant.requestedLongEdge),
             "bounds": "\(plan.maximumRenders) renders or \(Int(plan.maximumSeconds)) s",
