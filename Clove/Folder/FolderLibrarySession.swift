@@ -400,7 +400,8 @@ final class FolderLibrarySession: FolderLibrary {
             }
             movedRejectIdentities.remove(restored.identity)
         }
-        try await rereadMarks(for: result.restored.map(\.identity))
+        // The files are already back, so a failed reread must not turn the Undo into a failure.
+        try? await rereadMarks(for: result.restored.map(\.identity))
         publish(.photos([]))
         await startGrouping(generation: scanGeneration)
         return result
