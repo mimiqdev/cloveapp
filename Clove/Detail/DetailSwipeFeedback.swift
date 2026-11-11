@@ -34,7 +34,8 @@ final class DetailSwipeFeedback {
 struct DetailSwipeFeedbackBadge: View {
     let feedback: DetailSwipeFeedback
     var enabledRatings: EnabledRatings = .all
-    var bottomInset: CGFloat = 0
+    let controlsHeight: CGFloat
+    let chromeIsVisible: Bool
 
     var body: some View {
         GeometryReader { proxy in
@@ -44,8 +45,9 @@ struct DetailSwipeFeedbackBadge: View {
                     isReject: feedback.isReject
                 )
                 .position(
-                    x: max(proxy.size.width - 36, 20),
-                    y: max(0, proxy.size.height - bottomInset) / 2
+                    Self.position(
+                        in: proxy.size, controlsHeight: controlsHeight,
+                        chromeIsVisible: chromeIsVisible)
                 )
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .ignore)
@@ -54,6 +56,13 @@ struct DetailSwipeFeedbackBadge: View {
                     feedback.isReject ? "Reject" : "\(feedback.rating?.starCount ?? 0) stars")
             }
         }
+    }
+
+    static func position(in size: CGSize, controlsHeight: CGFloat, chromeIsVisible: Bool) -> CGPoint
+    {
+        CGPoint(
+            x: max(size.width - 36, 20),
+            y: max(0, size.height - (chromeIsVisible ? controlsHeight : 0)) / 2)
     }
 }
 
