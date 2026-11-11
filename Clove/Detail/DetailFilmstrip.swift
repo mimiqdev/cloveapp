@@ -59,6 +59,7 @@ struct DetailFilmstrip: View {
                                 RoundedRectangle(cornerRadius: 9)
                                     .fill(Color.clove.group).opacity(0.25)
                             }
+                            .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
                         } else if let group = entry.group, let photo = entry.photos.first {
                             Button {
