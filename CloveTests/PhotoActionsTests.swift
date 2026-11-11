@@ -252,6 +252,10 @@ struct PhotoActionsTests {
         #expect(model.saveSummary.failed == 1)
         model.retryAllUnfinishedChanges()
         await model.drainActions()
+        // The displayed status stream drains independently of the action consumer.
+        try await waitUntil {
+            model.saveSummary.failed == 0 && model.latestChange(for: a)?.state.isConfirmed == true
+        }
         #expect(model.saveSummary.failed == 0)
         #expect(model.latestChange(for: a)?.state.isConfirmed == true)
         #expect(model.lastGroupFinishing?.failedCount == 0)
