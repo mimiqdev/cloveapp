@@ -319,8 +319,8 @@ struct DetailMarkingView: View {
             onDoubleTap: { doubleTap(at: $0) },
             onMarkingSwipe: { applyMarkingSwipe($0) },
             onSwipeBegin: { actions.markingSwipeBegan() },
-            hasPrevious: navigationIndex.map { $0 > 0 } ?? false,
-            hasNext: navigationIndex.map { $0 + 1 < order.count } ?? false,
+            hasPrevious: navigationAvailability.previous,
+            hasNext: navigationAvailability.next,
             probe: probe
         )
         .opacity(
@@ -670,7 +670,24 @@ struct DetailMarkingView: View {
 
     // MARK: - Navigation
 
-    private var navigationIndex: Int? { order.firstIndex { $0.id == photo.id } }
+    /// The same neighbours edge taps use, including a decided current photo hidden by the
+    /// group's Undecided only filter.
+    var navigationAvailability: (previous: Bool, next: Bool) {
+        if let groupReview {
+            let navigation = GroupPhotoNavigation(
+                group: groupReview.group, undecidedOnly: groupReview.undecidedOnly.wrappedValue)
+            let marks = Dictionary(
+                uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) })
+            return (
+                navigation.previousPhoto(before: photo.id, marks: marks) != nil,
+                navigation.nextPhoto(after: photo.id, marks: marks) != nil
+            )
+        }
+        guard let index = order.firstIndex(where: { $0.id == photo.id }) else {
+            return (false, false)
+        }
+        return (index > 0, index + 1 < order.count)
+    }
 
     /// Shows the previous or next photo in the screen's own order (PRD P0-04).
     private func navigate(_ zone: DetailEdgeZone) {
