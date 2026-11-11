@@ -1,17 +1,39 @@
 #!/usr/bin/env bash
-# Run the Clove UI smoke test on a simulator created only for this run.
+# Run a Clove simulator test suite on a simulator created only for this run.
+#
+# Usage: scripts/smoke.sh [smoke|flows] [xcodebuild arguments]
+#   smoke (default)  the app unit tests (CloveTests) and the one smoke UI test (CloveSmokeTests)
+#   flows            the long UI flow tests (CloveFlowTests)
+#
+# It runs `xcodebuild test-without-building` against the build that
+# `mise run build-tests` left in .build/DerivedData.noindex, so the app is
+# compiled once however many suites run. `mise run smoke` and `mise run ui-flows`
+# build first.
 #
 # Environment overrides:
 #   CLOVE_SIM_TAG          device name suffix (default: branch name + PID)
 #   CLOVE_SIM_DEVICE_TYPE  simulator device type (default: iPhone 17 Pro)
 #   CLOVE_SIM_RUNTIME      simulator runtime (default: newest installed iOS)
 #   CLOVE_SMOKE_ATTEMPTS   attempts on UI-test-runner bootstrap failure (default: 4)
-# Additional arguments pass to xcodebuild, e.g. -skip-testing:CloveUITests for app unit tests.
+# Additional arguments pass to xcodebuild; any -only-testing: argument replaces
+# the suite's own selection, e.g. -only-testing:CloveUITests/CloveFlowTests/testDesignGalleryShowsSharedControls.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+suite="smoke"
+case "${1:-}" in
+    smoke | flows)
+        suite="$1"
+        shift
+        ;;
+esac
+
 if [ ! -d Clove.xcodeproj ]; then
     echo "error: Clove.xcodeproj is missing; run 'mise run generate' first" >&2
+    exit 1
+fi
+if ! compgen -G ".build/DerivedData.noindex/Build/Products/Clove_*.xctestrun" >/dev/null; then
+    echo "error: no Clove test build in .build/DerivedData.noindex; run 'mise run build-tests' first" >&2
     exit 1
 fi
 
@@ -65,7 +87,11 @@ is_runner_failure() {
         "$log"
 }
 
-test_targets=(-only-testing:CloveTests -only-testing:CloveUITests "$@")
+case "$suite" in
+    smoke) test_targets=(-only-testing:CloveTests -only-testing:CloveUITests/CloveSmokeTests) ;;
+    flows) test_targets=(-only-testing:CloveUITests/CloveFlowTests) ;;
+esac
+test_targets+=("$@")
 for argument in "$@"; do
     case "$argument" in
         -only-testing:*) test_targets=("$@"); break ;;
@@ -75,8 +101,8 @@ done
 max_attempts="${CLOVE_SMOKE_ATTEMPTS:-4}"
 attempt=1
 while [ "$attempt" -le "$max_attempts" ]; do
-    echo "Creating simulator 'Clove smoke $tag' ($device_type, $runtime), attempt $attempt"
-    udid=$(xcrun simctl create "Clove smoke $tag" "$device_type" "$runtime")
+    echo "Creating simulator 'Clove $suite $tag' ($device_type, $runtime), attempt $attempt"
+    udid=$(xcrun simctl create "Clove $suite $tag" "$device_type" "$runtime")
 
     # Let the simulator and its accessibility service finish starting; launching
     # the UI test runner too early fails on some runtimes.
@@ -84,7 +110,7 @@ while [ "$attempt" -le "$max_attempts" ]; do
 
     : >"$log"
     set +e
-    xcodebuild test \
+    xcodebuild test-without-building \
         -project Clove.xcodeproj \
         -scheme Clove \
         "${test_targets[@]}" \

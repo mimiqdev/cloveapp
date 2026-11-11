@@ -13,7 +13,7 @@ CloveLab/                 CloveLab debug app target used for device verification
 CloveLab/Shared/          Harness for the spikes: folder picker, report export, footer
 CloveLab/Probes/<Topic>/  One folder per verification topic
 CloveTests/               Hosted app unit tests for the browsing consumer
-CloveUITests/             UI smoke tests for Clove
+CloveUITests/             Clove UI tests: CloveSmokeTests (smoke) and CloveFlowTests (flows)
 Packages/CloveCore/       Domain model, scanning, XMP, writes (local Swift package)
 Packages/CloveImaging/    Previews, RAW decoding, image features (local Swift package)
 Packages/CloveLabKit/     Lab report tooling plus one module per verification topic
@@ -21,7 +21,9 @@ Config/Shared.xcconfig    Shared build settings; includes Local.xcconfig if pres
 Config/Local.xcconfig     Local development team, gitignored, never committed
 Config/TestFlight.local.json  Local signing config for the release script, gitignored
 design/handoff/           MVP design handoff: screens, theme tokens, components, interactions, copy (start with README.md)
-scripts/                  Project generation, simulator smoke test, fixture and release tooling
+scripts/                  Project generation, simulator test runner, fixture and release tooling
+scripts/ci/               Helpers for the GitHub Actions workflow (merge main, runner facts, mise)
+.github/workflows/        verify.yml, the CI gate
 project.yml               XcodeGen definition; Clove.xcodeproj is generated, not committed
 mise.toml / mise.lock     Pinned tools and project tasks
 ```
@@ -44,9 +46,54 @@ XcodeGen. Every task is listed here.
 | `mise run test-core` | `swift test --package-path Packages/CloveCore`. | While editing `CloveCore`; runs on macOS, no simulator. |
 | `mise run test-imaging` | `swift test --package-path Packages/CloveImaging`. | While editing `CloveImaging`; runs on macOS, no simulator. |
 | `mise run test-lab` | `swift test --package-path Packages/CloveLabKit`: the lab harness and probe test targets. Fixture tests skip when a set is missing. | While editing `Packages/CloveLabKit`; runs on macOS, no simulator. |
-| `mise run build` | `xcodebuild build` for the `Clove` and `CloveLab` schemes, iOS Simulator, no signing. | After project, app, or package changes. |
-| `mise run smoke` | Creates a throwaway simulator, runs `CloveTests` and `CloveUITests` with `xcodebuild test`, deletes the simulator on exit. | After changing UI or the smoke test, and as part of verify. |
-| `mise run verify` | `generate`, `lint`, `test-fixtures`, `test-release`, `test-core`, `test-imaging`, `test-lab`, `build`, `smoke`, in order, stopping at the first failure. | Before opening or updating a pull request; it is the acceptance gate. |
+| `mise run build-tests` | `xcodebuild build-for-testing` for the `Clove` scheme: the app plus `CloveTests` and `CloveUITests`, iOS Simulator, no signing. | Run for you by `smoke` and `ui-flows`; on its own after app changes. |
+| `mise run build-lab` | `xcodebuild build` for the `CloveLab` scheme, iOS Simulator, no signing. | After changing `CloveLab/` or a package the lab links. |
+| `mise run build` | `build-tests`, then `build-lab`. | To build both apps without testing. |
+| `mise run smoke` | `build-tests`, then `scripts/smoke.sh smoke`: a throwaway simulator runs `CloveTests` and the one smoke UI test (`CloveSmokeTests`) with `xcodebuild test-without-building`, and is deleted on exit. | After UI changes; part of `check`. |
+| `mise run ui-flows` | `build-tests`, then `scripts/smoke.sh flows`: the long UI flow tests (`CloveFlowTests`) on their own throwaway simulator. | After changing a flow or a flow test. |
+| `mise run check` | `generate`, `lint`, `test-core`, `test-imaging`, `smoke` (which builds Clove for testing once), in order, stopping at the first failure. | While working and on every fix round. About 3 minutes warm. |
+| `mise run verify` | Everything `check` runs, plus `test-fixtures`, `test-release`, `test-lab`, `build-lab`, and the UI flows on the same build. The Clove app is compiled once. | The full local gate, when you want all of CI's coverage on a Mac. |
+
+### When to run what
+
+- While working, and on every fix round: `mise run check`.
+- A change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab`
+  (and `mise run build-lab` for app code).
+- A change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`;
+  a change to the release script or its config adds `mise run test-release`.
+- A change to a UI flow, or to a flow test, adds `mise run ui-flows`.
+- The full gate runs in CI on every push to a pull request. Run `mise run verify`
+  locally only when you need the whole gate on the Mac.
+
+## Continuous integration
+
+- `.github/workflows/verify.yml` runs on every pull request against `main`, on
+  every push to `main`, and by hand (`workflow_dispatch`, with an optional pull
+  request number). It checks out the pull request's head, merges the latest
+  `main` into it with `scripts/ci/merge-main.sh`, and prints the head, main and
+  merge SHAs. It never tests `refs/pull/N/merge`.
+- Jobs: the Python script tests on `ubuntu-latest`; lint, the package tests and
+  the CloveLab build on one standard `xcode-27` runner; the Clove test build,
+  the smoke test and the UI flows on another. Both macOS jobs select Xcode 27.2
+  and start with `scripts/ci/runner-facts.sh`, which fails if Xcode 27.2 or an
+  iOS 27 simulator runtime is missing.
+- The fixture downloads are cached on the hash of `fixtures/manifest.json`.
+  `mise run fixtures-sets` builds every set before the package tests, so the
+  fixture tests run instead of skipping.
+- The package tests run with `--no-parallel` in CI. In parallel on the 3-core
+  runner, tests that block on semaphores starve the cooperative thread pool:
+  some CloveCore tests time out and CloveImaging hangs. Locally they run in
+  parallel as before.
+- The check to require is **`verify`**: the last job, which passes only when
+  every other job passed.
+- No secrets, no signing, read-only `contents` permission, `pull_request` only.
+  On failure the logs and `.xcresult` bundles are uploaded for 7 days; they hold
+  only build and test output.
+- A pull request is ready when CI is green on its latest push. To re-check a
+  pull request against today's `main`, run the workflow by hand with its number:
+  `gh workflow run verify.yml -f pr=<number>`.
+- Only GitHub's own actions are used. Any other action needs a decision record
+  in `docs/decisions/` and a full commit SHA pin.
 
 ## Conventions
 
@@ -78,13 +125,16 @@ XcodeGen. Every task is listed here.
   with `-derivedDataPath`. The `.noindex` suffix keeps Spotlight from indexing
   build products. Do not use the default DerivedData location or `/tmp`.
 - Never reuse or boot an existing simulator for automation. `scripts/smoke.sh`
-  creates its own `Clove smoke <tag>` device, tags it with `CLOVE_SIM_TAG` or the
+  creates its own `Clove <suite> <tag>` device (`smoke` or `flows`), tags it with `CLOVE_SIM_TAG` or the
   branch name plus PID, and always deletes it with `trap` — including on failure.
   `CLOVE_SIM_DEVICE_TYPE` and `CLOVE_SIM_RUNTIME` override the defaults
   (iPhone 17 Pro on the newest installed iOS runtime). If the UI test runner
   fails to attach before any test runs (an XCTest/simulator bootstrap failure),
   the script retries on a fresh simulator; `CLOVE_SMOKE_ATTEMPTS` changes the
   attempt count (default 4). Real assertion failures fail immediately.
+- `scripts/smoke.sh` runs `xcodebuild test-without-building` on the build that
+  `mise run build-tests` left in `.build/DerivedData.noindex`, so the smoke and
+  flow suites share one compile of the app.
 
 ## Secrets and signing
 
@@ -94,8 +144,8 @@ XcodeGen. Every task is listed here.
   in by the optional `#include? "Local.xcconfig"` in `Config/Shared.xcconfig`.
   Create it from `Config/Local.xcconfig.example`. Never write a team ID into a
   tracked file.
-- Builds and simulator tests need no signing setup. `mise run build` passes
-  `CODE_SIGNING_ALLOWED=NO`.
+- Builds and simulator tests need no signing setup. `mise run build-tests` and
+  `mise run build-lab` pass `CODE_SIGNING_ALLOWED=NO`.
 
 ## TestFlight
 

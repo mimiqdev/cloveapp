@@ -15,68 +15,52 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: verify-${{ github.event.pull_request.number || inputs.pr || github.ref }}
+  cancel-in-progress: true
+
 # An explicit bash shell adds -o pipefail, so `| tee` never hides a failure.
 defaults:
   run:
     shell: bash
 
-concurrency:
-  group: verify-${{ github.event.pull_request.number || inputs.pr || github.ref }}
-  cancel-in-progress: true
+env:
+  # The pull request's head, never refs/pull/N/merge; each job merges the latest main into it.
+  HEAD_REF: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha || github.sha }}
 
 jobs:
-  prepare:
-    name: Resolve the tested commits
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      head: ${{ steps.merge.outputs.head }}
-      main: ${{ steps.merge.outputs.main }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Merge the latest main
-        id: merge
-        run: scripts/ci/merge-main.sh
-
   scripts:
     name: Python script tests
-    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare.outputs.head }}
+          ref: ${{ env.HEAD_REF }}
           fetch-depth: 0
           persist-credentials: false
       - name: Merge main
-        run: scripts/ci/merge-main.sh "${{ needs.prepare.outputs.main }}"
-      # The same commands as `mise run test-fixtures` and `mise run test-release`;
-      # they are logic only and need no Apple tools.
+        run: scripts/ci/merge-main.sh
+      # The commands behind `mise run test-fixtures` and `mise run test-release`.
       - name: Fixture tooling tests
         run: /usr/bin/python3 scripts/test_fixtures.py
       - name: Release script tests
         run: /usr/bin/python3 scripts/test_release_testflight.py
 
-  full:
-    name: Full verify
-    needs: prepare
+  packages:
+    name: Lint, package tests and CloveLab build
     runs-on: xcode-27
-    timeout-minutes: 90
+    timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare.outputs.head }}
+          ref: ${{ env.HEAD_REF }}
           fetch-depth: 0
           persist-credentials: false
       - name: Merge main
-        run: scripts/ci/merge-main.sh "${{ needs.prepare.outputs.main }}"
+        run: scripts/ci/merge-main.sh
       - name: Runner facts
         run: scripts/ci/runner-facts.sh
       - name: Install mise and XcodeGen
@@ -90,40 +74,69 @@ jobs:
         with:
           path: ${{ runner.temp }}/clove-fixtures/files
           key: clove-fixtures-${{ hashFiles('fixtures/manifest.json') }}
-      - name: Fetch fixtures and build the sets
+      - name: mise run fixtures-sets
         run: mise run fixtures-sets 2>&1 | tee .build/ci-logs/fixtures-sets.log
-      # Today's `mise run verify`, one task per step for the timings. The CloveCore
-      # tests run serially here: in parallel, tests that block on semaphores starve
-      # the runner's 3-thread cooperative pool.
-      - name: mise run generate
-        run: mise run generate 2>&1 | tee .build/ci-logs/generate.log
       - name: mise run lint
         run: mise run lint 2>&1 | tee .build/ci-logs/lint.log
-      - name: mise run test-fixtures
-        run: mise run test-fixtures 2>&1 | tee .build/ci-logs/test-fixtures.log
-      - name: mise run test-release
-        run: mise run test-release 2>&1 | tee .build/ci-logs/test-release.log
-      - name: mise run test-core (serial)
-        timeout-minutes: 20
+      # The package tests run serially: in parallel on this 3-core runner, tests that
+      # block on semaphores starve the cooperative thread pool (see AGENTS.md).
+      - name: mise run test-core
+        timeout-minutes: 15
         run: mise run test-core --no-parallel 2>&1 | tee .build/ci-logs/test-core.log
-      - name: mise run test-imaging (serial)
-        timeout-minutes: 20
+      - name: mise run test-imaging
+        timeout-minutes: 15
         run: mise run test-imaging --no-parallel 2>&1 | tee .build/ci-logs/test-imaging.log
-      - name: mise run test-lab (serial)
-        timeout-minutes: 20
+      - name: mise run test-lab
+        timeout-minutes: 15
         run: mise run test-lab --no-parallel 2>&1 | tee .build/ci-logs/test-lab.log
-      - name: mise run build
-        run: mise run build 2>&1 | tee .build/ci-logs/build.log
-      - name: mise run smoke
-        run: mise run smoke 2>&1 | tee .build/ci-logs/smoke.log
-      - name: Test case times
-        if: always()
-        run: grep -h -E "^Test [Cc]ase .*(passed|failed|skipped)" .build/ci-logs/smoke.log || true
+      - name: mise run generate
+        run: mise run generate 2>&1 | tee .build/ci-logs/generate.log
+      - name: mise run build-lab
+        run: mise run build-lab 2>&1 | tee .build/ci-logs/build-lab.log
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .build/ci-logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  app:
+    name: Clove build, smoke test and UI flows
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      CLOVE_SIM_TAG: ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.HEAD_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge main
+        run: scripts/ci/merge-main.sh
+      - name: Runner facts
+        run: scripts/ci/runner-facts.sh
+      - name: Install mise and XcodeGen
+        run: scripts/ci/install-mise.sh
+      - name: mise run generate
+        run: |
+          mkdir -p .build/ci-logs
+          mise run generate 2>&1 | tee .build/ci-logs/generate.log
+      - name: mise run build-tests
+        run: mise run build-tests 2>&1 | tee .build/ci-logs/build-tests.log
+      # Both suites run test-without-building on the build above.
+      - name: Smoke test
+        run: scripts/smoke.sh smoke 2>&1 | tee .build/ci-logs/smoke.log
+      - name: UI flows
+        run: scripts/smoke.sh flows 2>&1 | tee .build/ci-logs/ui-flows.log
       - name: Upload logs and test results
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: verify-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          name: app-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .build/ci-logs/
             .build/DerivedData.noindex/Logs/Test/*.xcresult
@@ -132,7 +145,7 @@ jobs:
 
   verify:
     name: verify
-    needs: [prepare, scripts, full]
+    needs: [scripts, packages, app]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -144,8 +157,8 @@ jobs:
           echo "$RESULTS" | python3 -c '
           import json, sys
           needs = json.load(sys.stdin)
-          failed = [name for name, job in needs.items() if job["result"] != "success"]
           for name, job in needs.items():
               print(name + ": " + job["result"])
-          sys.exit(f"Not passed: {failed}" if failed else 0)
+          failed = [name for name, job in needs.items() if job["result"] != "success"]
+          sys.exit("Not passed: " + ", ".join(failed) if failed else 0)
           '

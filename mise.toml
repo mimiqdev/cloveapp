@@ -49,16 +49,22 @@ description = "Rebuild the standard fixture sets from the shared cache"
 depends = ["fixtures-fetch"]
 run = "/usr/bin/python3 scripts/make-fixture-sets"
 
-[tasks.build]
-description = "Build Clove and CloveLab for the iOS Simulator"
+[tasks.build-tests]
+description = "Build Clove and its test bundles for the iOS Simulator once (build-for-testing)"
 run = """
 set -eu
-xcodebuild build \
+xcodebuild build-for-testing \
     -project Clove.xcodeproj \
     -scheme Clove \
     -destination 'generic/platform=iOS Simulator' \
     -derivedDataPath .build/DerivedData.noindex \
     CODE_SIGNING_ALLOWED=NO
+"""
+
+[tasks.build-lab]
+description = "Build CloveLab for the iOS Simulator"
+run = """
+set -eu
 xcodebuild build \
     -project Clove.xcodeproj \
     -scheme CloveLab \
@@ -67,12 +73,37 @@ xcodebuild build \
     CODE_SIGNING_ALLOWED=NO
 """
 
+[tasks.build]
+description = "Build Clove (with its test bundles) and CloveLab for the iOS Simulator"
+run = """
+set -eu
+mise run build-tests
+mise run build-lab
+"""
+
 [tasks.smoke]
-description = "Run the Clove UI smoke test on a throwaway simulator"
-run = "./scripts/smoke.sh"
+description = "Build Clove for testing, then run the app unit tests and the smoke UI test on a throwaway simulator"
+depends = ["build-tests"]
+run = "./scripts/smoke.sh smoke"
+
+[tasks.ui-flows]
+description = "Build Clove for testing, then run the UI flow tests on a throwaway simulator"
+depends = ["build-tests"]
+run = "./scripts/smoke.sh flows"
+
+[tasks.check]
+description = "Quick local check for every fix round: generate, lint, the core and imaging tests, build Clove for testing, the smoke test"
+run = """
+set -eu
+mise run generate
+mise run lint
+mise run test-core
+mise run test-imaging
+mise run smoke
+"""
 
 [tasks.verify]
-description = "Generate, lint, run the fixture and release tests and the package test suites, build both apps, run the smoke test"
+description = "The full gate: everything check runs, plus the fixture, release and lab tests, the CloveLab build and the UI flow tests"
 run = """
 set -eu
 mise run generate
@@ -82,6 +113,8 @@ mise run test-release
 mise run test-core
 mise run test-imaging
 mise run test-lab
-mise run build
+mise run build-lab
 mise run smoke
+# The smoke task has built Clove for testing; run the flows on that build.
+./scripts/smoke.sh flows
 """

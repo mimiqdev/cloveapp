@@ -17,7 +17,7 @@ fi
 
 bin_dir="${RUNNER_TEMP:?RUNNER_TEMP is not set; this script is for CI runners}/mise-bin"
 mkdir -p "$bin_dir"
-curl --fail --silent --show-error --location --retry 3 \
+curl --fail --silent --show-error --location \
     --output "$bin_dir/mise" \
     "https://github.com/jdx/mise/releases/download/v$version/mise-v$version-macos-arm64"
 echo "$sha256  $bin_dir/mise" | shasum -a 256 --check --status || {

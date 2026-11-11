@@ -1,7 +1,7 @@
 import XCTest
 
 /// Restores the original browsing safety net, adapted only to the designed controls and glyphs.
-extension CloveUITests {
+extension CloveFlowTests {
     /// The Appearance setting keeps a chosen theme across a relaunch (V1, tokens.md).
     ///
     /// This launch uses the app's own settings storage rather than the sample library, because
