@@ -6,10 +6,10 @@
 /// similar-group display instead of the collection view inventing a second one.
 ///
 /// Expanded display keeps every photo and marks each cell that belongs to a group with the
-/// group's key, count and outline (PRD Grid, expanded). Collapsed display keeps one cover per
+/// group's key and count (handoff components.md). Collapsed display keeps one cover per
 /// group, keyed by the group, and leaves ungrouped photos as their own cells (PRD Grid,
 /// collapsed). With grouping off, no cell carries a group mark, because PRD Grid hides the
-/// outlines and PRD P0-11 allows grouping to be turned off.
+/// badges and PRD P0-11 allows grouping to be turned off.
 public struct GridDisplay: Sendable {
     /// The grid's cells in the photos' order (PRD P0-03).
     public let cells: [GridCellItem]
@@ -19,12 +19,12 @@ public struct GridDisplay: Sendable {
     /// - Parameters:
     ///   - photos: The shown photos, in grid order; a photo that is not here never gets a cell.
     ///   - groups: The groups grouping published, empty when it published none (PRD P0-11).
-    ///   - groupsEnabled: C12's Similar groups setting; off hides the outlines and covers
+    ///   - groupsEnabled: Similar groups setting; off hides the badges and covers
     ///     (PRD Grid, P0-11).
     ///   - display: C12's grid group display; expanded is the launch default (PRD Grid).
     ///
     /// A photo that two groups name, which grouping does not publish, is marked with the first
-    /// group in `groups` order so a cell never draws two outlines.
+    /// group in `groups` order so a cell never belongs to two groups.
     public init(
         photos: [GridPhoto],
         groups: [BrowsingGroup],
@@ -38,7 +38,9 @@ public struct GridDisplay: Sendable {
         case (true, .collapsed):
             self.cells = Self.collapsedCells(photos: photos, marks: marked)
         case (false, _):
-            self.cells = photos.map { GridCellItem(id: .photo($0.id), photo: $0) }
+            self.cells = photos.map {
+                GridCellItem(id: .photo($0.id), photo: $0, isDimmed: $0.marks.isRejected)
+            }
         }
     }
 }
@@ -66,7 +68,8 @@ extension GridDisplay {
         var counted: Set<GroupID> = []
         return photos.map { photo in
             guard let group = marks[photo.id] else {
-                return GridCellItem(id: .photo(photo.id), photo: photo)
+                return GridCellItem(
+                    id: .photo(photo.id), photo: photo, isDimmed: photo.marks.isRejected)
             }
             let showsCount = counted.insert(group.id).inserted
             return GridCellItem(
@@ -74,7 +77,8 @@ extension GridDisplay {
                 photo: photo,
                 group: GridCellItem.GroupMark(
                     id: group.id, count: group.members.count, showsCount: showsCount,
-                    isCover: false))
+                    isCover: false),
+                isDimmed: photo.marks.isRejected)
         }
     }
 
@@ -85,21 +89,32 @@ extension GridDisplay {
     private static func collapsedCells(
         photos: [GridPhoto], marks: [PhotoIdentity: BrowsingGroup]
     ) -> [GridCellItem] {
+        var shownByGroup: [GroupID: [GridPhoto]] = [:]
+        for photo in photos {
+            if let group = marks[photo.id] {
+                shownByGroup[group.id, default: []].append(photo)
+            }
+        }
         var covered: Set<GroupID> = []
         var cells: [GridCellItem] = []
         for photo in photos {
             guard let group = marks[photo.id] else {
-                cells.append(GridCellItem(id: .photo(photo.id), photo: photo))
+                cells.append(
+                    GridCellItem(
+                        id: .photo(photo.id), photo: photo, isDimmed: photo.marks.isRejected))
                 continue
             }
             guard covered.insert(group.id).inserted else { continue }
+            let shown = shownByGroup[group.id] ?? [photo]
+            let cover = shown.first { !$0.marks.isRejected } ?? photo
             cells.append(
                 GridCellItem(
                     id: .group(group.id),
-                    photo: photo,
+                    photo: cover,
                     group: GridCellItem.GroupMark(
                         id: group.id, count: group.members.count, showsCount: true,
-                        isCover: true)))
+                        isCover: true),
+                    isDimmed: shown.allSatisfy { $0.marks.isRejected }))
         }
         return cells
     }
