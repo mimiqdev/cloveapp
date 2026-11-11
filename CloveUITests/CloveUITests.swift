@@ -185,24 +185,32 @@ final class CloveUITests: XCTestCase {
             let preview = element(app, "clove.detail.preview")
             XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
             let unmarkedCorner = try rejectGlyphPixels(in: preview)
+            let glyph = element(app, "clove.detail.rejectGlyph")
+            XCTAssertFalse(glyph.exists)
             element(app, "clove.detail.capsule.reject").tap()
             XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
             XCTAssertTrue(waitForLabel("MMQ02680.ARW, Rejected", preview))
             let rejectedCorner = try rejectGlyphPixels(in: preview)
             XCTAssertNotEqual(rejectedCorner, unmarkedCorner)
-            // A decorative glyph must not become another VoiceOver element.
-            XCTAssertFalse(element(app, "clove.detail.rejectGlyph").exists)
+            XCTAssertTrue(glyph.exists)
+            let glyphFrame = glyph.frame
             capture("detail-rejected-\(theme)-chrome-shown")
             let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
             centre.tap()
             XCTAssertTrue(waitForGone(element(app, "clove.detail.capsule")))
+            XCTAssertTrue(glyph.exists)
+            XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
             capture("detail-rejected-\(theme)-chrome-hidden")
             centre.doubleTap()
             XCTAssertTrue(waitForLabel("3 / 36 · 100%", element(app, "clove.detail.zoom")))
+            XCTAssertTrue(glyph.exists)
+            XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
             preview.swipeLeft()
+            XCTAssertTrue(glyph.exists)
+            XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
             centre.doubleTap()
             centre.tap()
@@ -211,13 +219,13 @@ final class CloveUITests: XCTestCase {
             XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
             XCTAssertTrue(waitForLabel("MMQ02680.ARW", preview))
+            XCTAssertFalse(glyph.exists)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), unmarkedCorner)
             app.terminate()
         }
     }
 
     /// Sample the opaque centre of the 22 pt glyph, inset 8 pt in the stage.
-    /// Its accessibility identifier is intentionally absent from the VoiceOver tree.
     @MainActor
     private func rejectGlyphPixels(in preview: XCUIElement) throws -> Data {
         let screenshot = XCUIScreen.main.screenshot().image
