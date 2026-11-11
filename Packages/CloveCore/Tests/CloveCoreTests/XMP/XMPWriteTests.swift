@@ -119,6 +119,25 @@ private let green = ColourLabel(colour: .green)
     #expect(try xmpCodec.read(output).rating == .rated(.unrated))
 }
 
+@Test(arguments: [6, -2])
+func keepsAnotherOutOfRangeRatingWhenOnlyTheLabelChanges(value: Int) throws {
+    let original = xmpDescriptionPacket(attributes: "xmp:Rating=\"\(value)\"")
+    let output = try xmpCodec.write(XMPEdit(label: .set(green)), into: original)
+    let text = String(decoding: output, as: UTF8.self)
+
+    // Any value outside −1…5 keeps its bytes and reads as unrated (PRD P0-07).
+    #expect(text.contains("xmp:Rating=\"\(value)\""))
+
+    let before = try xmpCodec.read(original)
+    #expect(before.rating == .external(value))
+    let after = try xmpCodec.read(output)
+    #expect(after.rating == .external(value))
+    #expect(after.label == green)
+    #expect(
+        try XMPPreservation.outsideOwnedMarks(original) == XMPPreservation.outsideOwnedMarks(output)
+    )
+}
+
 @Test func keepsRejectWhenOnlyTheLabelChanges() throws {
     let original = try Data(
         contentsOf: XMPTestFixtures.repositoryRoot.appendingPathComponent(
@@ -298,7 +317,7 @@ func roundTripKeepsEveryUnrelatedByte(fixture: String) throws {
     "capture-one.xmp", "lightroom-full.xmp", "photo-mechanic.xmp", "custom-namespace-nested.xmp",
     "empty-description.xmp", "rating-minus-one.xmp",
 ])
-func neverWritesACloveNamespaceRejectOrRatingMinusOne(fixture: String) throws {
+func neverWritesACloveNamespaceOrAnUnrequestedField(fixture: String) throws {
     let original = try Data(
         contentsOf: XMPTestFixtures.repositoryRoot.appendingPathComponent("fixtures/xmp/\(fixture)")
     )
@@ -362,7 +381,7 @@ func neverWritesACloveNamespaceRejectOrRatingMinusOne(fixture: String) throws {
     )
 }
 
-@Test func createdPacketsNeverCarryACloveNamespaceRejectOrRatingMinusOne() throws {
+@Test func createdPacketsNeverCarryACloveNamespaceOrAnUnrequestedField() throws {
     let edits: [XMPEdit] = [
         XMPEdit(rating: .set(try #require(Rating(rawValue: 3))), label: .set(green)),
         XMPEdit(rating: .set(.unrated)),

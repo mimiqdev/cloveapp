@@ -77,7 +77,7 @@ struct PhotoMarksCompositionTests {
         #expect(marks.isRejected)
     }
 
-    @Test func anotherOutOfRangeRatingReadsAsUnratedAndStaysOnDisk() throws {
+    @Test func anotherOutOfRangeRatingReadsAsUnrated() throws {
         // Only −1 is Reject; every other out-of-range value has no place in Clove's marks.
         let external = PhotoMarks(
             xmp: XMPMarks(rating: XMPRating(6)), persistence: try rawPersistence())
