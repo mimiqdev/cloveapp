@@ -12,8 +12,7 @@ import SwiftUI
 /// A frame that fails to draw is a state, not a blank picture presented as loaded (PRD Scan
 /// scope): the placeholder keeps the empty frame rather than claiming an image.
 ///
-/// Design placeholder: system stars, the Reject symbol and a system selection border stand in for
-/// the visual design's overlays.
+/// Rejected thumbnails dim without a reject badge; the current frame keeps its thin ring.
 struct DetailPhotoFrame: View {
     /// The photo the frame draws (PRD P0-05).
     let photo: GridPhoto
@@ -26,18 +25,23 @@ struct DetailPhotoFrame: View {
 
     /// The frame's side in points; the filmstrip uses one size and a sidebar grid another.
     var side: CGFloat = 56
+    var height: CGFloat?
+    var showsMarks = true
+    @Environment(\.cloveTheme) private var theme
 
     @State private var thumbnail: CGImage?
 
     var body: some View {
         pixels
-            .frame(width: side, height: side)
+            .frame(width: side, height: height ?? side)
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay { border }
-            .overlay(alignment: .bottomLeading) { marks }
+            .overlay(alignment: .bottomLeading) {
+                if showsMarks { marks }
+            }
             // PRD In-group culling: rejected photos are dimmed, so a cull decision reads at a
             // glance in the strip (PRD In-group culling, comparison and elimination).
-            .opacity(photo.marks.isRejected ? 0.45 : 1)
+            .opacity(photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)
+            .overlay { border }
             .task(id: photo.id) {
                 guard thumbnail == nil else { return }
                 if case .image(let pixels) = await thumbnails.thumbnail(
@@ -58,7 +62,7 @@ struct DetailPhotoFrame: View {
                 .resizable()
                 .scaledToFill()
         } else {
-            Color.secondary.opacity(0.2)
+            Rectangle().fill(Color.clove.surface.card)
         }
     }
 
@@ -69,16 +73,10 @@ struct DetailPhotoFrame: View {
                 Label("\(stars)", systemImage: "star.fill")
                     .labelStyle(.titleAndIcon)
                     .font(.caption2)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.clove.rating.on)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
-                    .background(.black.opacity(0.55), in: Capsule())
-            }
-            if photo.marks.isRejected {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .background(.black.opacity(0.55), in: Circle())
+                    .background(Color.clove.surface.glass, in: Capsule())
             }
         }
         .padding(3)
@@ -87,6 +85,6 @@ struct DetailPhotoFrame: View {
     /// The border that says which photo is on screen (PRD P0-04).
     private var border: some View {
         RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(isCurrent ? Color.accentColor : .clear, lineWidth: 2.5)
+            .strokeBorder(Color.clove.text.primary, lineWidth: isCurrent ? 2 : 0)
     }
 }

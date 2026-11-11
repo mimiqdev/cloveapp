@@ -1,4 +1,5 @@
 import CloveCore
+import CloveImaging
 import Foundation
 
 /// The in-memory library the UI test and previews browse (PRD P0-08, P0-13).
@@ -88,7 +89,7 @@ final class TestLibrary: FolderLibrary {
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        return sample(
+        let library = sample(
             failingStemSuffix: environment[forcedFailureVariable],
             failingMoveStemSuffix: environment[forcedMoveFailureVariable],
             readOnly: environment[readOnlyVariable] == "1",
@@ -97,6 +98,8 @@ final class TestLibrary: FolderLibrary {
             locationLoss: locationLoss(named: environment[locationLossVariable]),
             drainDelay: Duration.milliseconds(
                 Int(environment[drainDelayVariable] ?? "") ?? 0))
+        library.installPresentationSamples(environment: environment)
+        return library
     }
 
     /// A fixed synthetic Recents UUID so sample scenes and photo identities share one folder.
@@ -649,6 +652,52 @@ final class TestLibrary: FolderLibrary {
         batches = [:]
         openGeneration += 1
         updateContinuation.yield(.photos([]))
+    }
+
+    /// Deterministic Info without a file or device path (handoff Detail).
+    func information(for photo: PhotoIdentity) async -> PhotoInformation? {
+        guard stored.contains(where: { $0.id == photo }) else { return nil }
+        return PhotoInformation(
+            image: ImageInformation(
+                captureWallTime: Date(timeIntervalSince1970: 1_793_975_525.42),
+                subseconds: "42", camera: "Sample camera", bodySerial: "0123",
+                lens: "24–70 mm", exposureSeconds: 1.0 / 250, aperture: 2.8, iso: 400,
+                focalLengthMillimetres: 35, fileSizeBytes: 45_100_000,
+                pixelWidth: 8192, pixelHeight: 5464),
+            relativeFolder: photo.relativeFolderPath,
+            companions: Self.sampleCompanions[photo].map {
+                [$0.hasJPEG ? "JPG" : nil, $0.hasHEIF ? "HIF" : nil].compactMap { $0 }
+            } ?? [], usesSidecar: true)
+    }
+
+    /// Held presentation states for screenshots and short UI tests. Normal sample launches
+    /// remain fully opened and saved. Values are read only when the test library is selected.
+    private func installPresentationSamples(environment: [String: String]) {
+        if let opening = environment["CLOVE_TEST_LIBRARY_OPENING"] {
+            if opening == "reading" || opening == "empty" {
+                updateContinuation.yield(.scanStarted)
+                let firstPending = opening == "empty" ? 0 : 12
+                for index in stored.indices where index >= firstPending {
+                    stored[index].time = .pending
+                }
+                updateContinuation.yield(.photos(stored))
+            } else if opening == "grouping" {
+                updateContinuation.yield(.groupingActivity(true))
+            }
+        }
+        let photo = Self.samplePhoto(2680)
+        let state: MarkChangeState
+        switch environment["CLOVE_TEST_LIBRARY_SAVE_STATE"] {
+        case "saving": state = .writing
+        case "failed":
+            state = .failed(
+                MarkWriteFailure(reason: .notConfirmed, message: "Sample write did not confirm."))
+        default: return
+        }
+        let status = MarkChangeStatus(
+            id: MarkChangeID(), identity: photo, requested: .rating(Self.stars(3)), state: state)
+        changes[photo] = status
+        updateContinuation.yield(.change(status))
     }
 
     // MARK: - In-group culling

@@ -18,7 +18,7 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 ## Grid
 | Key | String |
 |---|---|
-| grid.subtitle | {n} photos · ● Saved |
+| grid.subtitle | {n} photos |
 | grid.subtitle.filtered | {filter} · {n} |
 | grid.subtitle.reading | {read} of {total} |
 | grid.subtitle.grouping | Finding similar shots… |
@@ -32,7 +32,7 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | grid.more.settings | Settings |
 | grid.select.title | {n} selected |
 | grid.select.done | Done |
-| grid.batch.result | Saved {ok} · {failed} failed · Retry |
+| grid.batch.result | Saved {ok} · {failed} failed · Retry (accessibility only; no toast) |
 | tile.nopreview | No preview |
 | a11y.moveRejects | Move rejects |
 | a11y.filter | Filter |
@@ -41,9 +41,9 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 ## Detail
 | Key | String |
 |---|---|
-| detail.subtitle | {i} / {n} · + JPG · ● Saved |
-| detail.subtitle.rejected | {i} / {n} · Rejected · ● Saved |
-| detail.subtitle.failed | {i} / {n} · ● Save failed · Retry |
+| detail.subtitle | {i} / {n} · + JPG |
+| detail.subtitle.rejected | Rejected (accessibility label only) |
+| detail.subtitle.failed | Save failed. Double-tap to retry. (accessibility label only) |
 | detail.zoom | 100% |
 | info.section.capture | Capture |
 | info.section.file | File |
@@ -51,6 +51,22 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | a11y.rating | {n} stars |
 | a11y.label | Label, {color} |
 | a11y.info / a11y.undo | Info / Undo |
+
+## Save glyph accessibility (owner decision, 2026-11-11)
+
+Save glyphs replace visible status words in grid and detail subtitles and in batch results.
+The counts and companion text remain visible. V4's error banners retain their words.
+
+| Key | Accessibility label only |
+|---|---|
+| a11y.save.saved | Saved |
+| a11y.save.saving | Saving |
+| a11y.save.failed | Save failed. Double-tap to retry. |
+| a11y.save.disconnected | Not connected |
+| a11y.save.viewOnly | View only |
+| a11y.save.cloveOnly | Saved in Clove only |
+
+The Saved in Clove only label retains G1 decision 6's distinction between confirmed app storage and an XMP write.
 
 ## Group review
 | Key | String |
@@ -95,10 +111,10 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 ## Errors
 | Key | String |
 |---|---|
-| error.disconnected.subtitle | Not connected |
+| error.disconnected.subtitle | Not connected (accessibility label only) |
 | error.disconnected.banner | The drive disconnected. Reconnect it, then reopen this folder. |
 | error.disconnected.action | Reopen |
-| error.access.subtitle | View only |
+| error.access.subtitle | View only (accessibility label only) |
 | error.access.banner | Access to this folder is no longer available. |
 | error.access.action | Open |
 | error.unsaved.title | Some marks haven't finished saving. |

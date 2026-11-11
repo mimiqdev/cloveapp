@@ -67,7 +67,7 @@ struct ThemeTile: View {
         }
     }
 
-    /// A miniature of the mark capsule's marks: reject, three stars, label (components.md).
+    /// The frame's miniature glass capsule: reject dot, rating dots and an accent dot.
     private var dotRow: some View {
         HStack(spacing: 8) {
             Circle()
@@ -79,16 +79,19 @@ struct ThemeTile: View {
                 star(filled: false)
             }
             Circle()
-                .fill(theme.tokens.labelBlue.color)
+                .fill(theme.tokens.accent.color)
                 .frame(width: 6, height: 6)
         }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 4)
+        .background(theme.tokens.glass.color, in: Capsule())
     }
 
     /// One star of the miniature, in the theme's rating tokens.
     private func star(filled: Bool) -> some View {
-        Image(systemName: filled ? "star.fill" : "star")
-            .font(.system(size: 8))
-            .foregroundStyle(filled ? theme.tokens.ratingOn.color : theme.tokens.ratingOff.color)
+        Circle()
+            .fill(filled ? theme.tokens.ratingOn.color : theme.tokens.ratingOff.color)
+            .frame(width: 5, height: 5)
     }
 }
 

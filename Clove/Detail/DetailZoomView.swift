@@ -88,8 +88,8 @@ final class DetailZoomProbe {
 /// own, the image is drawn aspect-fit in it, and the minimum scale of 1 is the fit view. The
 /// edges carry a single-tap recognizer with no failure requirement, so a tap there navigates
 /// immediately instead of waiting to see whether a double tap follows (PRD Detail and marking).
-/// The centre carries the double-tap recognizer and no single-tap action, so a single tap in the
-/// middle does nothing and the double tap is never delayed by an action that does not exist.
+/// The centre's presentation tap waits for its double tap, so toggling chrome cannot interrupt
+/// a focus check. Edge taps keep their immediate navigation path.
 ///
 /// A double tap on an edge is therefore two single taps: the edge belongs to navigation only,
 /// and the document states that width in ``DetailEdgeZone/edgeFraction``. Double taps while
@@ -101,9 +101,6 @@ final class DetailZoomProbe {
 /// swipe: a horizontal drag, a zoomed view and marking gestures off all leave it unstarted, so
 /// nothing else on the preview loses a touch to it. The taps never need that help, because a pan
 /// only begins after the finger moves.
-///
-/// Design placeholder: the dark canvas and the plain image are replaced by the visual design;
-/// the gestures themselves are the ones P0-04 and P0-06 fix.
 struct DetailZoomView: UIViewRepresentable {
     /// The pixels to show, or nil while the screen is loading or has nothing to show.
     let image: CGImage?
@@ -187,6 +184,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private let imageView = UIImageView()
     private let edgeTap = UITapGestureRecognizer()
     private let centreDoubleTap = UITapGestureRecognizer()
+    private let centreChromeTap = UITapGestureRecognizer()
     private let markingPan = UIPanGestureRecognizer()
     private let haptics = MarkingSwipeHaptics()
 
@@ -236,7 +234,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .black
+        backgroundColor = .clear
         scrollView.delegate = self
         scrollView.minimumZoomScale = 1
         scrollView.maximumZoomScale = 1
@@ -248,11 +246,16 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         scrollView.addSubview(imageView)
         addSubview(scrollView)
 
+        edgeTap.delegate = self
+        centreChromeTap.delegate = self
         edgeTap.addTarget(self, action: #selector(handleEdgeTap))
         centreDoubleTap.numberOfTapsRequired = 2
         centreDoubleTap.addTarget(self, action: #selector(handleDoubleTap))
         scrollView.addGestureRecognizer(edgeTap)
         scrollView.addGestureRecognizer(centreDoubleTap)
+        centreChromeTap.addTarget(self, action: #selector(handleChromeTap))
+        centreChromeTap.require(toFail: centreDoubleTap)
+        scrollView.addGestureRecognizer(centreChromeTap)
 
         // The marking pan belongs to the container rather than the scroll view, so it is not one
         // of the scroll view's own gestures. One finger only: a second finger is a pinch, which
@@ -267,6 +270,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         accessibilityLabel = "Detail preview"
         accessibilityTraits = .image
         accessibilityValue = "Loading"
+        accessibilityCustomActions = [
+            UIAccessibilityCustomAction(
+                name: "Show or hide controls", target: self,
+                selector: #selector(toggleChromeFromAccessibility))
+        ]
         updateGestureAvailability()
     }
 
@@ -411,6 +419,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// marking swipe; the drag's later samples only move the step. The rules read the settings
     /// and the zoom state, so the recognizer keeps no rule of its own.
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        if recognizer === edgeTap {
+            return DetailZoom.edgeZone(for: recognizer.location(in: self), in: bounds.size)
+                != .centre
+        }
+        if recognizer === centreChromeTap {
+            return DetailZoom.edgeZone(for: recognizer.location(in: self), in: bounds.size)
+                == .centre
+        }
         guard recognizer === markingPan else { return true }
         let translation = markingPan.translation(in: self)
         swipe = rules.beginSwipe(
@@ -520,6 +536,23 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     }
 
     // MARK: - Taps
+
+    /// VoiceOver activation reads the preview; chrome has its own explicit custom action.
+    override func accessibilityActivate() -> Bool { true }
+
+    @objc private func toggleChromeFromAccessibility() -> Bool {
+        guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
+        onEdgeTap?(.centre)
+        return true
+    }
+
+    @objc private func handleChromeTap() {
+        guard !UIAccessibility.isVoiceOverRunning,
+            scrollView.zoomScale <= DetailFitScale.tolerance,
+            DetailZoom.edgeZone(for: centreChromeTap.location(in: self), in: bounds.size) == .centre
+        else { return }
+        onEdgeTap?(.centre)
+    }
 
     @objc private func handleEdgeTap() {
         let zone = DetailZoom.edgeZone(for: edgeTap.location(in: self), in: bounds.size)

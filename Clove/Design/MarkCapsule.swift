@@ -15,7 +15,7 @@ struct MarkCapsule: View {
     /// The photo's label, or nil when it has none (PRD Marking rules).
     let label: LabelColour?
 
-    /// Whether the photo is rejected (G1 decision 5).
+    /// Whether the photo's rating is −1 (PRD Marking rules; `docs/decisions/reject-as-rating.md`).
     let isRejected: Bool
 
     /// The levels input may apply; all five by default, and every level still shows

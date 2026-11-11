@@ -4,6 +4,20 @@ Figma: https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Nativ
 
 Working rule: the PRD is a guide, not the source of truth. Design decisions here can override it.
 
+## Save glyphs (owner decision, 2026-11-11)
+
+Issue #118 replaces visible save-status words in grid and detail with glyphs:
+
+- Saved is a small solid dot in `status/saved` in the subtitle.
+- Saving uses the same dot in `text/secondary`, gently pulsing only after the write has remained pending for about 0.5 seconds. Respect Reduce Motion.
+- Failed is `exclamationmark.circle.fill` in `status/failed`. Tapping retries. A failed photo also has a small `status/failed` dot in its grid tile.
+- Not connected and View only use `externaldrive.badge.xmark` and `lock.fill` in `text/secondary`. The recovery banners keep their words.
+- Rejected has no subtitle word. The filled reject circle, neutral stars and label, and dimmed photo express it.
+- Batch success has no toast. On partial failure, failed tiles have corner dots and the header shows the Failed glyph. Tapping retries the failed items only.
+- Every glyph has a VoiceOver label. The former status strings in `copy.md` are accessibility labels only. Counts and companion text remain visible.
+
+Undo stays in the detail top bar with its existing wiring and hides at 100% zoom. This decision adds no undo behavior. Reject presentation reads `isRejected` and does not depend on its storage representation.
+
 ## Design principles
 
 0. Each device gets the layout that suits it best; cross-device consistency is secondary.

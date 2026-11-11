@@ -16,9 +16,7 @@ import SwiftUI
 /// settings screen applies the next time this screen draws; the screen reads no storage itself
 /// (PRD Gesture-related settings).
 ///
-/// Design placeholder: the filmstrip and the preview's chrome use system components until the
-/// visual design lands. The Undo button is disabled until U8 supplies the one model call it
-/// should invoke.
+/// The handoff's capsule and filmstrip float over the stage. Undo retains its existing wiring.
 struct DetailScreen: View {
     /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
@@ -71,23 +69,15 @@ struct DetailScreen: View {
     /// The marking controls and the preview, then the filmstrip, in the order PRD Detail and
     /// marking fixes.
     private func content(for photo: GridPhoto) -> some View {
-        VStack(spacing: 0) {
-            DetailMarkingView(
-                browsing: browsing,
-                photo: photo,
-                settings: settings,
-                saveState: browsing.saveText(for: photo.id),
-                images: images,
-                zoomPolicy: .detail(settings),
-                order: browsing.photos,
-                actions: actions)
-            Divider()
-            DetailFilmstrip(
-                photos: browsing.photos,
-                current: photo.id,
-                thumbnails: browsing.thumbnails,
-                open: { openPhoto($0) })
-        }
+        DetailMarkingView(
+            browsing: browsing,
+            photo: photo,
+            settings: settings,
+            saveState: browsing.saveText(for: photo.id),
+            images: images,
+            zoomPolicy: .detail(settings),
+            order: browsing.photos,
+            actions: actions)
     }
 
     /// What the marking view asks this screen to do: write a mark, advance after it, and move
@@ -97,7 +87,8 @@ struct DetailScreen: View {
             apply: { change, photo in await browsing.apply(change, to: photo.id) },
             marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
             step: { offset in showPhoto(offset: offset) },
-            markingSwipeBegan: { autoAdvance.cancel() })
+            markingSwipeBegan: { autoAdvance.cancel() },
+            openPhoto: { openPhoto($0) })
     }
 
     // MARK: - Navigation

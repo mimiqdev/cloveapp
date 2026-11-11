@@ -50,6 +50,9 @@ struct DetailMarkingActions {
 
     /// A marking swipe began: drop whatever the last mark was about to do (PRD Auto-advance).
     let markingSwipeBegan: () -> Void
+
+    /// Filmstrip navigation keeps the screen's existing auto-advance cancellation.
+    var openPhoto: (PhotoIdentity) -> Void = { _ in }
 }
 
 /// One photo's preview and marking controls: the HUD, the zoomable preview with its edge taps
@@ -77,8 +80,7 @@ struct DetailMarkingActions {
 /// save state in one place, and the group view's photos are marked and recovered exactly like a
 /// single photo's.
 ///
-/// Design placeholder: the HUD, the preview, the save-state row and the swipe's badge use system
-/// components until the visual design lands.
+/// Detail presentation follows the handoff; the group screen retains its existing layout.
 struct DetailMarkingView: View {
     /// The scene's browsing state, which carries the folder's save state and the retry calls
     /// (PRD P0-08).
@@ -111,6 +113,10 @@ struct DetailMarkingView: View {
     var undo: () -> Void = {}
 
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.cloveTheme) private var theme
+    @State private var hidesChrome = false
+    @State private var showsInformation = false
+    @State private var showsZoomChip = false
 
     /// The pixels on screen, or nil while the first preview loads (PRD P0-04).
     @State private var shown: DetailImage?
@@ -172,6 +178,25 @@ struct DetailMarkingView: View {
     @State private var isPickingFolder = false
 
     var body: some View {
+        Group {
+            if browsing.state.route == .detail {
+                detailLayout
+            } else {
+                groupLayout
+            }
+        }
+        .folderPicker(isPresented: $isPickingFolder) { url in
+            await browsing.openPickedFolder(url)
+        }
+        .task(id: photo.id) { await loadPreview(for: photo) }
+        .onDisappear {
+            upgradeTask?.cancel()
+            Task { await images.cancelPrefetch() }
+        }
+    }
+
+    /// Group review is a separate design task; it keeps its current layout and controls.
+    private var groupLayout: some View {
         VStack(spacing: 0) {
             DetailMarkingHUD(
                 photo: photo,
@@ -188,6 +213,8 @@ struct DetailMarkingView: View {
             SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.detail.saveStatus")
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
+            FolderSaveBanner(
+                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             if let situation = failureSituation {
                 SaveFailureBanner(
                     situation: situation, identifierPrefix: "clove.detail.saveFailure",
@@ -199,16 +226,100 @@ struct DetailMarkingView: View {
             Divider()
             previewArea
         }
-        .folderPicker(isPresented: $isPickingFolder) { url in
-            await browsing.openPickedFolder(url)
+    }
+
+    private var chromeIsVisible: Bool { !hidesChrome && scale <= DetailFitScale.tolerance }
+
+    private var displayMarks: PhotoMarks { photo.marks }
+
+    private var detailLayout: some View {
+        VStack(spacing: 0) {
+            BrowsingHeader(
+                title: photo.fileName, titleIdentifier: "clove.detail.fileName",
+                back: { browsing.back() }
+            ) {
+                HStack(spacing: 0) {
+                    Text(detailSubtitle)
+                        .accessibilityIdentifier("clove.detail.zoom")
+                    if scale <= DetailFitScale.tolerance {
+                        SaveStatusIndicator(
+                            browsing: browsing, identifierPrefix: "clove.detail.saveState",
+                            photo: photo.id)
+                    }
+                }
+            } tools: {
+                if chromeIsVisible {
+                    GlassIconButton(
+                        label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
+                    ) { showsInformation = true }
+                    GlassIconButton(
+                        label: "Undo", symbol: "arrow.uturn.backward",
+                        identifier: "clove.detail.undo",
+                        action: undo
+                    ).disabled(true)
+                }
+            }
+            FolderSaveBanner(
+                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
+            previewArea
+                .overlay(alignment: .bottom) {
+                    if chromeIsVisible {
+                        VStack(spacing: 8) {
+                            DetailFilmstrip(
+                                photos: order, current: photo.id, thumbnails: browsing.thumbnails,
+                                open: actions.openPhoto, groups: browsing.groups,
+                                openGroup: {
+                                    actions.markingSwipeBegan()
+                                    browsing.openGroup($0)
+                                })
+                            DetailMarkCapsule(
+                                marks: displayMarks, settings: settings,
+                                previewRating: swipeFeedback.rating,
+                                rate: { rate($0) }, label: { choose($0) },
+                                toggleReject: { toggleReject() }
+                            )
+                            .disabled(browsing.isMovingRejects)
+                            .padding(.horizontal, 16)
+                        }
+                        .padding(.bottom, 8)
+                        .transition(.opacity)
+                    } else if showsZoomChip && scale > DetailFitScale.tolerance {
+                        Text(zoomName)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.clove.text.primary)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .cloveGlass(in: Capsule())
+                            .padding(.bottom, 12)
+                    }
+                }
         }
-        .task(id: photo.id) { await loadPreview(for: photo) }
-        .onDisappear {
-            // A render the user left behind must not keep reading the folder or write into a
-            // screen that is gone; the neighbour prefetch is dropped too (G1 scheduling row).
-            upgradeTask?.cancel()
-            Task { await images.cancelPrefetch() }
+        .background(Color.clove.bg.stage)
+        .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
+        .task(id: scale > DetailFitScale.tolerance) {
+            showsZoomChip = scale > DetailFitScale.tolerance
+            guard showsZoomChip else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            showsZoomChip = false
         }
+        .sheet(isPresented: $showsInformation) {
+            PhotoInformationSheet(browsing: browsing, photo: photo)
+        }
+    }
+
+    private var detailSubtitle: String {
+        var parts: [String] = []
+        if let index = order.firstIndex(where: { $0.id == photo.id }) {
+            parts.append("\((index + 1).formatted()) / \(order.count.formatted())")
+        }
+        if scale > DetailFitScale.tolerance {
+            parts.append(zoomName)
+        } else {
+            let companions = browsing.thumbnails.companions(for: photo.id)
+            if companions.hasJPEG { parts.append("+ JPG") }
+            if companions.hasHEIF { parts.append("+ HIF") }
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// The zoomable preview and the states that must not look like a loaded image.
@@ -227,7 +338,14 @@ struct DetailMarkingView: View {
             onMarkingSwipeBegin: { actions.markingSwipeBegan() },
             probe: probe
         )
-        .overlay { DetailSwipeFeedbackBadge(feedback: swipeFeedback) }
+        .opacity(
+            browsing.state.route == .detail && displayMarks.isRejected
+                ? theme.tokens.rejectedOpacity : 1
+        )
+        .overlay {
+            DetailSwipeFeedbackBadge(
+                feedback: swipeFeedback, enabledRatings: settings.enabledRatings)
+        }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { size in
@@ -237,7 +355,7 @@ struct DetailMarkingView: View {
         .overlay { previewState }
         .overlay(alignment: .topLeading) { limitationNote }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black)
+        .background(Color.clove.bg.stage)
     }
 
     /// The loading, unavailable or failed state while no pixels are on screen (PRD Scan scope).
@@ -246,8 +364,8 @@ struct DetailMarkingView: View {
             switch phase {
             case .loading:
                 ProgressView("Loading preview…")
-                    .tint(.white)
-                    .foregroundStyle(.white)
+                    .tint(theme.tokens.primaryText.color)
+                    .foregroundStyle(Color.clove.text.primary)
                     .accessibilityIdentifier("clove.detail.loading")
             case .unavailable(let failure):
                 Text(unavailableText(failure))
@@ -569,7 +687,11 @@ struct DetailMarkingView: View {
 
     /// Shows the previous or next photo in the screen's own order (PRD P0-04).
     private func navigate(_ zone: DetailEdgeZone) {
-        guard zone != .centre else { return }
+        if zone == .centre {
+            guard scale <= DetailFitScale.tolerance else { return }
+            hidesChrome.toggle()
+            return
+        }
         actions.step(zone == .previous ? -1 : 1)
     }
 

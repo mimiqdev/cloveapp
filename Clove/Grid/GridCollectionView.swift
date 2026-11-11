@@ -43,6 +43,10 @@ struct GridCollectionView: UIViewRepresentable {
     /// The thumbnails and companion badges the cells draw (PRD Grid, P0-03).
     let thumbnails: any GridThumbnailSource
 
+    var failedPhotos: Set<PhotoIdentity> = []
+    var isSelectingEmpty = false
+    var placeholderCount = 0
+
     /// Opens one photo's detail (PRD Grid, P0-03). A single tap never waits for a second one.
     let openPhoto: (PhotoIdentity) -> Void
 
@@ -63,8 +67,12 @@ struct GridCollectionView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UICollectionView {
+        let coordinator = context.coordinator
         let collectionView = UICollectionView(
-            frame: .zero, collectionViewLayout: Self.makeLayout())
+            frame: .zero,
+            collectionViewLayout: Self.makeLayout(placeholderCount: { [weak coordinator] in
+                coordinator?.placeholderCount ?? 0
+            }))
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = context.coordinator
@@ -74,6 +82,10 @@ struct GridCollectionView: UIViewRepresentable {
     }
 
     func updateUIView(_ collectionView: UICollectionView, context: Context) {
+        if context.coordinator.placeholderCount != placeholderCount {
+            context.coordinator.placeholderCount = placeholderCount
+            collectionView.collectionViewLayout.invalidateLayout()
+        }
         context.coordinator.thumbnails = thumbnails
         context.coordinator.openPhoto = openPhoto
         context.coordinator.openGroup = openGroup
@@ -82,14 +94,28 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.apply(
             items: items, groups: groups, shownPhotos: shownPhotos,
             currentPhoto: currentPhoto, selection: selection,
-            sizeClass: context.environment.horizontalSizeClass)
+            sizeClass: context.environment.horizontalSizeClass,
+            theme: context.environment.cloveTheme, failedPhotos: failedPhotos,
+            isSelectingEmpty: isSelectingEmpty)
+        for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
+            ofKind: UICollectionView.elementKindSectionFooter)
+        {
+            let columns = context.environment.horizontalSizeClass == .regular ? 5 : 3
+            footer.configure(
+                count: placeholderCount, columns: columns, theme: context.environment.cloveTheme)
+        }
     }
 
     /// Three columns at compact width, five at regular width, from a square-ish cell (PRD Grid).
-    private static func makeLayout() -> UICollectionViewCompositionalLayout {
+    private static func makeLayout(placeholderCount: @escaping () -> Int)
+        -> UICollectionViewCompositionalLayout
+    {
         UICollectionViewCompositionalLayout { _, environment in
             let columns = environment.traitCollection.horizontalSizeClass == .regular ? 5 : 3
-            let spacing: CGFloat = 2
+            let spacing: CGFloat = 1.5
+            let side =
+                (environment.container.effectiveContentSize.width - CGFloat(columns - 1) * spacing)
+                / CGFloat(columns)
             let item = NSCollectionLayoutItem(
                 layoutSize: NSCollectionLayoutSize(
                     widthDimension: .fractionalWidth(1 / CGFloat(columns)),
@@ -97,13 +123,24 @@ struct GridCollectionView: UIViewRepresentable {
             let group = NSCollectionLayoutGroup.horizontal(
                 layoutSize: NSCollectionLayoutSize(
                     widthDimension: .fractionalWidth(1),
-                    heightDimension: .fractionalWidth(1 / CGFloat(columns))),
+                    heightDimension: .absolute(side)),
                 repeatingSubitem: item, count: columns)
             group.interItemSpacing = .fixed(spacing)
             let section = NSCollectionLayoutSection(group: group)
             section.contentInsets = NSDirectionalEdgeInsets(
-                top: spacing, leading: spacing, bottom: spacing, trailing: spacing)
+                top: 0, leading: 0, bottom: spacing, trailing: 0)
             section.interGroupSpacing = spacing
+            let unread = placeholderCount()
+            if unread > 0 {
+                let rows = ceil(Double(unread) / Double(columns))
+                section.boundarySupplementaryItems = [
+                    NSCollectionLayoutBoundarySupplementaryItem(
+                        layoutSize: NSCollectionLayoutSize(
+                            widthDimension: .fractionalWidth(1),
+                            heightDimension: .absolute(CGFloat(rows) * (side + spacing))),
+                        elementKind: UICollectionView.elementKindSectionFooter, alignment: .bottom)
+                ]
+            }
             return section
         }
     }
@@ -135,6 +172,10 @@ extension GridCollectionView {
         private weak var collectionView: UICollectionView?
         private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
+        private var theme = CloveTheme.light
+        private var failedPhotos: Set<PhotoIdentity> = []
+        private var isSelectingEmpty = false
+        var placeholderCount = 0
 
         init(
             thumbnails: any GridThumbnailSource,
@@ -160,7 +201,8 @@ extension GridCollectionView {
                 guard let self, let item = self.itemsByID[id] else { return }
                 cell.configure(
                     with: item, isSelected: self.showsSelected(item),
-                    isSelecting: self.isSelecting, thumbnails: self.thumbnails
+                    isSelecting: self.isSelecting, thumbnails: self.thumbnails,
+                    theme: self.theme, hasFailed: self.hasFailedPhoto(in: item)
                 ) { [weak self] group in
                     self?.openGroup(group)
                 }
@@ -169,6 +211,25 @@ extension GridCollectionView {
                 collectionView: collectionView
             ) { view, indexPath, id in
                 view.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: id)
+            }
+            // Even an empty grid needs its section so the opening footer can be displayed.
+            var initialSnapshot = NSDiffableDataSourceSnapshot<Int, GridCellItem.ID>()
+            initialSnapshot.appendSections([0])
+            dataSource?.apply(initialSnapshot, animatingDifferences: false)
+            collectionView.register(
+                GridPlaceholderFooter.self,
+                forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter,
+                withReuseIdentifier: "placeholders")
+            dataSource?.supplementaryViewProvider = { [weak self] view, kind, indexPath in
+                guard let self else { return nil }
+                let footer = view.dequeueReusableSupplementaryView(
+                    ofKind: kind, withReuseIdentifier: "placeholders", for: indexPath)
+                if let footer = footer as? GridPlaceholderFooter {
+                    let columns = view.traitCollection.horizontalSizeClass == .regular ? 5 : 3
+                    footer.configure(
+                        count: self.placeholderCount, columns: columns, theme: self.theme)
+                }
+                return footer
             }
             // A long press starts multi-select (PRD P0-09). It lives on the collection view, so
             // a cell needs no recognizer of its own and a reused cell keeps nothing.
@@ -189,9 +250,17 @@ extension GridCollectionView {
         func apply(
             items newItems: [GridCellItem], groups newGroups: [BrowsingGroup],
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
-            selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?
+            selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?,
+            theme newTheme: CloveTheme, failedPhotos newFailures: Set<PhotoIdentity>,
+            isSelectingEmpty newSelectingEmpty: Bool
         ) {
             guard let collectionView, let dataSource else { return }
+            let styleChanged =
+                theme != newTheme || failedPhotos != newFailures
+                || isSelectingEmpty != newSelectingEmpty
+            theme = newTheme
+            failedPhotos = newFailures
+            isSelectingEmpty = newSelectingEmpty
             if sizeClass != lastSizeClass {
                 lastSizeClass = sizeClass
                 collectionView.collectionViewLayout.invalidateLayout()
@@ -203,7 +272,8 @@ extension GridCollectionView {
                 shownPhotos = newShownPhotos
                 selection = newSelection
                 let restyled = items.compactMap { item in
-                    before.showsSelected(item) == after.showsSelected(item) ? nil : item.id
+                    !styleChanged && before.showsSelected(item) == after.showsSelected(item)
+                        ? nil : item.id
                 }
                 guard !restyled.isEmpty else { return }
                 // Only the cells whose selection changed are redrawn, so a toggle never
@@ -229,7 +299,7 @@ extension GridCollectionView {
             snapshot.appendItems(newItems.map(\.id), toSection: 0)
             let changed: [GridCellItem.ID] = newItems.compactMap { item in
                 guard let old = previousByID[item.id] else { return nil }
-                if old != item { return item.id }
+                if old != item || styleChanged { return item.id }
                 return before.showsSelected(old) != after.showsSelected(item) ? item.id : nil
             }
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
@@ -343,13 +413,24 @@ extension GridCollectionView {
             prefetchRequests[id] = nil
         }
 
+        private func hasFailedPhoto(in item: GridCellItem) -> Bool {
+            if let cover = item.group, cover.isCover,
+                let group = groups.first(where: { $0.id == cover.id })
+            {
+                return group.members.contains {
+                    shownPhotos.contains($0) && failedPhotos.contains($0)
+                }
+            }
+            return failedPhotos.contains(item.photo.id)
+        }
+
         private func item(at indexPath: IndexPath) -> GridCellItem? {
             guard items.indices.contains(indexPath.item) else { return nil }
             return items[indexPath.item]
         }
 
         /// Whether the grid is in multi-select, which a non-empty selection means (PRD P0-09).
-        private var isSelecting: Bool { !selection.isEmpty }
+        private var isSelecting: Bool { isSelectingEmpty || !selection.isEmpty }
 
         /// Whether one cell draws as selected (PRD P0-09).
         private func showsSelected(_ item: GridCellItem) -> Bool {

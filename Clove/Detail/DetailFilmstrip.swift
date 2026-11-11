@@ -1,59 +1,110 @@
 import CloveCore
 import SwiftUI
 
-/// The strip of the photos detail navigates, with the current one marked (PRD P0-04).
-///
-/// The frames are U3's grid thumbnails for the grid's current order and filter, so the filmstrip
-/// shows exactly the photos an edge tap moves through. Each frame shows its rating or Reject, and
-/// a rejected frame is dimmed (PRD In-group culling, layout). Tapping a frame opens that photo.
-/// The strip scrolls to the current photo when it changes, so a tap on an edge keeps it in view.
-///
-/// The group view draws the same strip over the group's members, so both screens identify and
-/// dim a photo the same way (PRD In-group culling).
-///
-/// Design placeholder: plain frames with a system selection border stand in for the design.
+/// Grid-order filmstrip. The current group expands on a quiet tint; other groups stay stacked.
 struct DetailFilmstrip: View {
-    /// The photos in the screen's order: the grid's order and filter in detail, the group's
-    /// member order in the group view (PRD P0-03, P0-04; PRD In-group culling).
     let photos: [GridPhoto]
-
-    /// The photo the screen shows now (PRD P0-04).
     let current: PhotoIdentity?
-
-    /// The grid thumbnails the frames draw (PRD P0-03).
     let thumbnails: any GridThumbnailSource
-
-    /// Opens a tapped photo (PRD P0-04).
     let open: (PhotoIdentity) -> Void
+    var groups: [BrowsingGroup] = []
+    var openGroup: ((BrowsingGroup) -> Void)?
+
+    private struct Entry: Identifiable {
+        let id: PhotoIdentity
+        let photos: [GridPhoto]
+        let group: BrowsingGroup?
+        let expands: Bool
+    }
+
+    private var entries: [Entry] {
+        let byPhoto = Dictionary(
+            groups.flatMap { group in group.members.map { ($0, group) } },
+            uniquingKeysWith: { first, _ in first })
+        var seen: Set<GroupID> = []
+        return photos.compactMap { photo in
+            guard let group = byPhoto[photo.id] else {
+                return Entry(id: photo.id, photos: [photo], group: nil, expands: false)
+            }
+            guard seen.insert(group.id).inserted else { return nil }
+            let members = Set(group.members)
+            let shown = photos.filter { members.contains($0.id) }
+            return Entry(
+                id: photo.id, photos: shown, group: group,
+                expands: current.map { members.contains($0) } ?? false)
+        }
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 4) {
-                    ForEach(photos) { photo in
-                        Button {
-                            open(photo.id)
-                        } label: {
-                            DetailPhotoFrame(
-                                photo: photo, isCurrent: photo.id == current,
-                                thumbnails: thumbnails)
+                LazyHStack(spacing: 8) {
+                    ForEach(entries) { entry in
+                        if entry.expands {
+                            HStack(spacing: 3) {
+                                ForEach(entry.photos) { photo in frame(photo) }
+                            }
+                            .padding(3)
+                            .background {
+                                RoundedRectangle(cornerRadius: 9)
+                                    .fill(Color.clove.group).opacity(0.25)
+                            }
+                        } else if let group = entry.group, let photo = entry.photos.first {
+                            Button {
+                                if let openGroup { openGroup(group) } else { open(photo.id) }
+                            } label: {
+                                DetailPhotoFrame(
+                                    photo: photo, isCurrent: false, thumbnails: thumbnails,
+                                    side: 54, height: 60, showsMarks: false
+                                )
+                                .padding(.top, 4)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.clove.text.secondary).opacity(0.35)
+                                        .padding(.horizontal, 4)
+                                }
+                                .overlay(alignment: .bottomTrailing) {
+                                    Text(group.members.count.formatted())
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(Color.clove.bg.canvas)
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.clove.group, in: Capsule())
+                                        .padding(2)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .id(photo.id)
+                            .accessibilityLabel("Similar group of \(group.members.count) photos")
+                            .accessibilityIdentifier(
+                                "clove.detail.filmstrip.group.\(group.id.rawValue)")
+                        } else if let photo = entry.photos.first {
+                            frame(photo)
                         }
-                        .buttonStyle(.plain)
-                        .id(photo.id)
-                        .accessibilityIdentifier(
-                            "clove.detail.filmstrip.\(photo.id.stem.lowercased())")
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
             }
             .onChange(of: current, initial: true) { _, photo in
                 guard let photo else { return }
                 withAnimation { proxy.scrollTo(photo, anchor: .center) }
             }
         }
-        .frame(height: 64)
+        .frame(height: 70)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.filmstrip")
+    }
+
+    private func frame(_ photo: GridPhoto) -> some View {
+        Button {
+            open(photo.id)
+        } label: {
+            DetailPhotoFrame(
+                photo: photo, isCurrent: photo.id == current, thumbnails: thumbnails,
+                side: 54, height: 60)
+        }
+        .buttonStyle(.plain)
+        .id(photo.id)
+        .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
     }
 }
