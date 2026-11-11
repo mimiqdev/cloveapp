@@ -92,12 +92,14 @@ import Testing
         let clear = FolderProgress.ConfirmedChange(before: rejected, after: PhotoMarks())
         let undo = clear.updating(to: rejected)
         let clearAgain = undo.updating(to: PhotoMarks())
-        for change in [clear, undo, clearAgain] {
+        let rated = clearAgain.updating(to: PhotoMarks(rating: Rating(rawValue: 3)!))
+        for change in [clear, undo, clearAgain, rated] {
             let partial = FolderProgress.snapshot(
                 confirmedMarks: [], scanIsComplete: false, previous: previous,
                 lastViewedPhoto: photo, previewPhotos: [], confirmedChanges: [photo: change])
-            #expect(partial.finished == (change.after == rejected))
-            #expect(partial.left == (change.after == rejected ? 0 : 1))
+            let decided = change.after != PhotoMarks()
+            #expect(partial.finished == decided)
+            #expect(partial.left == (decided ? 0 : 1))
         }
     }
 
