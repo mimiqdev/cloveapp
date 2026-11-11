@@ -169,7 +169,7 @@ final class CloveUITests: XCTestCase {
             let app = launchSample()
             openLibrary(app)
             element(app, "clove.grid.more").tap()
-            element(app, "clove.nav.settings").tap()
+            app.buttons["Settings"].tap()
             chooseTheme(theme, app)
             element(app, "clove.nav.back").tap()
             capture("grid-\(theme)")

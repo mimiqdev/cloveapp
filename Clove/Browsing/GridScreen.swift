@@ -35,7 +35,7 @@ struct GridScreen: View {
     private var cells: [GridCellItem] {
         GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
-            groupsEnabled: store.settings.similarGroupsEnabled,
+            groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
             display: .collapsed
         ).cells
     }
@@ -51,7 +51,7 @@ struct GridScreen: View {
                 ProgressLine(progress: 1, tone: .grouping)
             }
             FolderSaveBanner(browsing: browsing, identifierPrefix: "clove.grid.saveState.failure")
-            if cells.isEmpty {
+            if cells.isEmpty && !browsing.isFolderOpening {
                 emptyState
             } else {
                 GridCollectionView(
@@ -61,6 +61,9 @@ struct GridScreen: View {
                     failedPhotos: Set(
                         browsing.unsavedChanges.filter { $0.state.failure != nil }.map(\.photo)),
                     isSelectingEmpty: selectsEmpty,
+                    placeholderCount: browsing.readingProgress.map {
+                        $0.total == 0 ? 9 : max($0.total - $0.read, 0)
+                    } ?? 0,
                     openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },
                     toggleSelection: { browsing.toggleSelection(of: $0) }
@@ -270,7 +273,9 @@ struct GridScreen: View {
     private var subtitle: String {
         if isSelecting { return browsing.folderTitle }
         if let progress = browsing.readingProgress {
-            return "\(progress.read.formatted()) of \(progress.total.formatted())"
+            return progress.total == 0
+                ? "Reading photos…"
+                : "\(progress.read.formatted()) of \(progress.total.formatted())"
         }
         if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
             return "Finding similar shots…"
