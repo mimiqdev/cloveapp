@@ -136,6 +136,14 @@ final class BrowsingModel {
     private(set) var lastMarkEdits: [DesiredMarkEdit] = []
     private(set) var lastMoveUndo: Result<RejectMoveUndoResult, any Error>?
 
+    static let saveFailureToastMessage = "Some marks weren't saved."
+    static let saveFailureToastRetryTitle = "Retry"
+    private(set) var isSaveFailureToastVisible = false
+    private(set) var saveFailureToastBurst = 0
+    private var previousFailedPhotos: Set<PhotoIdentity> = []
+
+    func dismissSaveFailureToast() { isSaveFailureToastVisible = false }
+
     /// Whether this scene has already read its saved state, so a later appearance never
     /// overwrites what the user has done since.
     private var hasRestored = false
@@ -469,10 +477,15 @@ final class BrowsingModel {
     /// of a retry. Dismissing hides the bar without retrying, which leaves the failed changes
     /// unsaved (PRD P0-08).
     var groupFinishingFailure: GroupFinishingResult? {
-        guard let result = lastGroupFinishing, result != dismissedGroupFailure,
-            result.failedCount > 0
-        else { return nil }
-        return result
+        guard let result = lastGroupFinishing, result != dismissedGroupFailure else { return nil }
+        let statuses = Dictionary(
+            uniqueKeysWithValues: result.outcomes.map { outcome in
+                (outcome.photo, latestChange(for: outcome.photo) ?? outcome.status)
+            })
+        let current = GroupFinishingResult.applied(
+            result.plan, changes: result.outcomes.map(\.change), statuses: statuses,
+            undo: result.undo)
+        return current.failedCount > 0 ? current : nil
     }
 
     /// Snapshots the allowed changes from shown marks and submits one finishing action.
@@ -709,6 +722,7 @@ final class BrowsingModel {
         lastRejectMove = CompletedRejectMove(
             result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
             folder: folder, openGeneration: openGeneration)
+        isSaveFailureToastVisible = false
         isRejectMoveToastVisible = true
         rejectMoveToastAttempt += 1
     }
@@ -809,7 +823,6 @@ final class BrowsingModel {
                     result: result,
                     marksBefore: Dictionary(
                         uniqueKeysWithValues: edits.map { ($0.photo, $0.before) }))
-                announcePartialFailure(result)
             case .finishing(let plan, let edits):
                 await library.recordGroupFinishing(plan.groupID)
                 let result = await persist(edits)
@@ -821,7 +834,6 @@ final class BrowsingModel {
                         }))
                 finishingActions -= 1
                 groupFinishingRuns += 1
-                announcePartialFailure(result)
             case .retry(let edits):
                 let eligible = edits.filter {
                     DesiredMarkRestore.retry($0, current: shownMarks(for: $0.photo)) != nil
@@ -837,7 +849,6 @@ final class BrowsingModel {
                         previous.plan, statuses: statuses)
                     groupFinishingRuns += 1
                 }
-                announcePartialFailure(result)
             case .keep(let edits):
                 let result = await persist(edits)
                 for status in result.outcomes { keepResults[status.identity] = status }
@@ -987,15 +998,25 @@ final class BrowsingModel {
             current[edit.photo] = edit.before
         }
         do {
-            let result = try await library.undoRejectMove(entry, currentMarks: current)
+            let result = try await library.undoRejectMove(
+                entry, currentMarks: current, restoring: edits)
             refresh()
             for restored in result.restored {
                 let edit =
                     edits.first { $0.photo == restored.identity }
                     ?? request(.rating(.rejected), for: restored.identity)
                 let status = library.latestChange(for: restored.identity)
-                if let status { desiredMarks.finish(edit, state: status.state) }
+                if let status {
+                    if status.state.isConfirmed,
+                        let index = confirmedPhotos.firstIndex(where: { $0.id == edit.photo })
+                    {
+                        confirmedPhotos[index].marks = edit.after
+                    }
+                    desiredMarks.finish(edit, state: status.state)
+                }
             }
+            reportSaveFailures(
+                result.restored.compactMap { library.latestChange(for: $0.identity) })
             lastMoveUndo = .success(result)
         } catch {
             let failure = MarkWriteFailure(classifying: error)
@@ -1025,14 +1046,32 @@ final class BrowsingModel {
             }
             desiredMarks.finish(edit, state: status.state)
         }
+        reportSaveFailures(result.outcomes)
         return result
     }
 
-    private func announcePartialFailure(_ result: MarkBatchResult) {
-        guard result.confirmedCount > 0, result.failedCount > 0 else { return }
-        UIAccessibility.post(
-            notification: .announcement,
-            argument: "Saved \(result.confirmedCount) · \(result.failedCount) failed · Retry")
+    private func reportSaveFailures(_ statuses: [MarkChangeStatus]) {
+        let failures = confirmedPhotos.compactMap { photo -> (PhotoIdentity, MarkWriteFailure)? in
+            guard let failure = desiredMarks.entry(for: photo.id)?.state.failure else { return nil }
+            return (photo.id, failure)
+        }
+        let failed = Set(failures.map { $0.0 })
+        let wasEmpty = previousFailedPhotos.isEmpty
+        previousFailedPhotos = failed
+        let hasAccessFailure = failures.contains {
+            $0.1.reason == .permissionLost || $0.1.reason == .locationUnavailable
+        }
+        guard !failed.isEmpty, folderLocationLoss == nil, !hasAccessFailure else {
+            isSaveFailureToastVisible = false
+            return
+        }
+        guard statuses.contains(where: { $0.state.failure != nil }),
+            wasEmpty || !isSaveFailureToastVisible
+        else { return }
+        saveFailureToastBurst += 1
+        isSaveFailureToastVisible = true
+        isRejectMoveToastVisible = false
+        UIAccessibility.post(notification: .announcement, argument: Self.saveFailureToastMessage)
     }
 
     // MARK: - Save state and recovery
@@ -1086,6 +1125,7 @@ final class BrowsingModel {
     /// photo's latest change).
     func retryAllUnfinishedChanges() {
         guard !isMovingRejects else { return }
+        dismissSaveFailureToast()
         let edits = storedPhotos.compactMap { photo -> DesiredMarkEdit? in
             guard let entry = desiredMarks.entry(for: photo.id), entry.state.failure != nil else {
                 return nil
@@ -1222,6 +1262,8 @@ final class BrowsingModel {
         confirmedPhotos = []
         desiredMarks = DesiredPhotoMarks()
         desiredStatusIDs = [:]
+        previousFailedPhotos = []
+        dismissSaveFailureToast()
         groups = []
         thumbnails = library.thumbnails
         detailImages = library.detailImages
@@ -1369,6 +1411,7 @@ final class BrowsingModel {
             // opened again, so it only applies to the folder and the open this scene shows.
             guard folder == library.folder, generation == library.openGeneration else { return }
             folderLocationLoss = loss
+            dismissSaveFailureToast()
             if let index = recents.firstIndex(where: { $0.identity == folder }) {
                 recents[index].needsReconnect = true
             }
@@ -1447,6 +1490,8 @@ final class BrowsingModel {
             shownGeneration = library.openGeneration
             desiredMarks = DesiredPhotoMarks()
             desiredStatusIDs = [:]
+            previousFailedPhotos = []
+            dismissSaveFailureToast()
             changes = PhotoChangeStates()
         }
         confirmedPhotos = library.photos

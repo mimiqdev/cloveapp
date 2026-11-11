@@ -425,7 +425,8 @@ final class FolderLibrarySession: FolderLibrary {
     }
 
     func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
+        restoring edits: [DesiredMarkEdit]
     ) async throws -> RejectMoveUndoResult {
         guard let mover = rejectMover, let session = openSession else {
             throw FolderSessionError.ended
@@ -445,6 +446,11 @@ final class FolderLibrarySession: FolderLibrary {
             for restored in result.restored {
                 if let status = await stores.writes.latestChange(for: restored.identity) {
                     record(status)
+                    if status.state.isConfirmed,
+                        let edit = edits.first(where: { $0.photo == restored.identity })
+                    {
+                        store.setMarks(edit.after, for: edit.photo)
+                    }
                 }
             }
         }

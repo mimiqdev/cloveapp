@@ -164,7 +164,8 @@ protocol FolderLibrary: AnyObject {
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress>
 
     func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
+        restoring edits: [DesiredMarkEdit]
     ) async throws -> RejectMoveUndoResult
 
     /// The latest change to one photo with its save state (PRD P0-08).
@@ -376,7 +377,8 @@ extension FolderLibrary {
     }
 
     func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
+        restoring edits: [DesiredMarkEdit]
     ) async throws -> RejectMoveUndoResult {
         throw RejectMoveUndoRefusal.unknownBatch(entry.batch)
     }

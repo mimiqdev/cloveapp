@@ -6,6 +6,7 @@
 #   CLOVE_SIM_DEVICE_TYPE  simulator device type (default: iPhone 17 Pro)
 #   CLOVE_SIM_RUNTIME      simulator runtime (default: newest installed iOS)
 #   CLOVE_SMOKE_ATTEMPTS   attempts on UI-test-runner bootstrap failure (default: 4)
+# Additional arguments pass to xcodebuild, e.g. -skip-testing:CloveUITests for app unit tests.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -82,7 +83,7 @@ while [ "$attempt" -le "$max_attempts" ]; do
         -only-testing:CloveTests \
         -only-testing:CloveUITests \
         -destination "id=$udid" \
-        -derivedDataPath .build/DerivedData.noindex 2>&1 | tee "$log"
+        -derivedDataPath .build/DerivedData.noindex "$@" 2>&1 | tee "$log"
     code=$?
     set -e
 

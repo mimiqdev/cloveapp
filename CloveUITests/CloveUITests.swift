@@ -50,7 +50,9 @@ final class CloveUITests: XCTestCase {
         let status = element(app, "clove.detail.saveState")
         XCTAssertTrue(waitForLabel("Save failed. Double-tap to retry.", status))
         XCTAssertEqual(label.label, "Label, Red")
-        status.tap()
+        XCTAssertTrue(element(app, "clove.save.toast").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Some marks weren't saved."].exists)
+        element(app, "clove.save.toast.action").tap()
         XCTAssertTrue(waitForLabel("Saved", status))
         XCTAssertEqual(label.label, "Label, Red")
     }
@@ -68,9 +70,33 @@ final class CloveUITests: XCTestCase {
         label.tap()
         element(app, "clove.detail.labels.red").tap()
         XCTAssertTrue(waitForLabel("Not connected", element(app, "clove.detail.saveState")))
+        XCTAssertFalse(element(app, "clove.save.toast").exists)
         XCTAssertEqual(label.label, "Label, Red")
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").label.contains("Red"))
+    }
+
+    @MainActor
+    func testFailureToastHidesWhileTheFailedMarkRemains() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEMS": "2680"])
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        label.tap()
+        element(app, "clove.detail.labels.red").tap()
+        let toast = element(app, "clove.save.toast")
+        XCTAssertTrue(toast.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [
+                    XCTNSPredicateExpectation(
+                        predicate: NSPredicate(format: "exists == false"), object: toast)
+                ], timeout: 8),
+            .completed)
+        XCTAssertEqual(label.label, "Label, Red")
+        XCTAssertEqual(
+            element(app, "clove.detail.saveState").label, "Save failed. Double-tap to retry.")
     }
 
     @MainActor

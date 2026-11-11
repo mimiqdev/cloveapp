@@ -378,9 +378,10 @@ final class TestLibrary: FolderLibrary {
             updateContinuation.yield(.change(status))
             return status
         }
-        var marks = stored[index].marks
-        if let rating = change.rating { marks.rating = rating }
-        if let label = change.label { marks.label = label }
+        let carried = changes[photo].flatMap { $0.state.failure != nil ? $0.requested : nil }
+        let effective = MarkChange(
+            rating: change.rating ?? carried?.rating, label: change.label ?? carried?.label)
+        let marks = stored[index].marks.applying(effective)
         stored[index].marks = marks
 
         let state: MarkChangeState = .savedInSidecar
@@ -429,7 +430,8 @@ final class TestLibrary: FolderLibrary {
     }
 
     func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks]
+        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
+        restoring edits: [DesiredMarkEdit]
     ) async throws -> RejectMoveUndoResult {
         guard let moved = movedPhotoRecords.removeValue(forKey: entry.batch) else {
             throw RejectMoveUndoRefusal.unknownBatch(entry.batch)
@@ -466,6 +468,16 @@ final class TestLibrary: FolderLibrary {
                         rejectStoreFailure: status.state.failure.map {
                             RejectMoveFailure(classifying: $0)
                         })))
+        }
+        let restored = Set(
+            outcomes.compactMap { outcome -> PhotoIdentity? in
+                guard case .restored(let photo) = outcome, photo.isRejectStored else { return nil }
+                return photo.identity
+            })
+        for edit in edits where restored.contains(edit.photo) {
+            if let index = stored.firstIndex(where: { $0.id == edit.photo }) {
+                stored[index].marks = edit.after
+            }
         }
         updateContinuation.yield(.photos([]))
         return RejectMoveUndoResult(id: RejectMoveUndoBatchID(), outcomes: outcomes)
