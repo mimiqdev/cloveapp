@@ -4,6 +4,10 @@ Figma: https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Nativ
 
 Working rule: the PRD is a guide, not the source of truth. Design decisions here can override it.
 
+## Filmstrip group tap (owner decision, 2026-11-11)
+
+In detail, tapping a collapsed group in the filmstrip jumps to the group's first photo, and the group expands in place on its tint. It no longer opens group review, which replaced the whole filmstrip with the group's photos. Group review opens from the grid's group stack.
+
 ## Group decisions and subtitle (supervisor decision, 2026-11-11)
 
 A rating, colour label or Reject decides a photo. Undecided means unmarked: no rating, no label and no Reject. This definition governs the group count, first photo, Undecided only navigation and Continue. A labelled-only keep therefore lets Reject unmarked finish the group. The subtitle is "{n} undecided" followed by the save glyph, with no visible status words. Ignore Continue taps for about 0.5 seconds after Reject unmarked replaces the pill, so a double tap cannot leave the group.

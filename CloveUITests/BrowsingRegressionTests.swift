@@ -197,6 +197,7 @@ extension CloveUITests {
         markThePhoto(in: app)
         rateBySwiping(in: app)
         rejectBySwiping(in: app)
+        expandGroupFromFilmstrip(in: app)
         advanceByEdgeTap(in: app)
         returnToGrid(in: app)
         openGroup(in: app)
@@ -482,6 +483,24 @@ extension CloveUITests {
         let shown = expectation(
             for: NSPredicate(format: "label == %@", name), evaluatedWith: fileName)
         wait(for: [shown], timeout: 10)
+    }
+
+    @MainActor
+    private func expandGroupFromFilmstrip(in app: XCUIApplication) {
+        // MMQ02680 is outside the group, so the filmstrip shows the group as one stack.
+        waitForFileName("MMQ02680.ARW", in: app)
+        let stack = element(in: app, "clove.detail.filmstrip.group.burst-2678")
+        XCTAssertTrue(stack.waitForExistence(timeout: 5), "The filmstrip did not stack the group")
+        stack.tap()
+        waitForFileName("MMQ02678.ARW", in: app)
+        XCTAssertFalse(
+            element(in: app, "clove.group").exists, "The filmstrip stack opened group review")
+        let member = element(in: app, "clove.detail.filmstrip.mmq02679")
+        XCTAssertTrue(
+            member.waitForExistence(timeout: 5), "The group did not expand in the filmstrip")
+        let back = element(in: app, "clove.detail.filmstrip.mmq02680")
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "The filmstrip lost the next photo")
+        back.tap()
     }
 
     @MainActor
