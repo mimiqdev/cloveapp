@@ -59,7 +59,7 @@ struct PhotoDisplayTests {
         #expect(fit.quality == .screenRAW)
         #expect(fit.width == 2000)
         #expect(sample.rawRenderCount == 1)
-        await sample.prefetch(window)
+        await sample.prefetch(window, renderAhead: true)
         #expect(sample.rawRenderCount == 2)
         let held = try image(
             await sample.image(
@@ -84,7 +84,7 @@ struct PhotoDisplayTests {
         #expect(cameraFull.quality == .raster)
         #expect(cameraFull.source.url.pathExtension == "HIF")
         #expect(sample.cameraDecodeCount == 1)
-        await sample.prefetch(cameraWindow)
+        await sample.prefetch(cameraWindow, renderAhead: false)
         #expect(sample.rawRenderCount == 2)
         await sample.leave(window: cameraWindow.id)
         _ = await sample.image(

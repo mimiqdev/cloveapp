@@ -126,8 +126,11 @@ public final class DetailCache: Sendable {
     }
 
     static func fullKey(_ request: DetailRequest) -> DetailCacheKey {
-        DetailCacheKey(
-            source: request.raw ?? request.jpeg ?? request.heif!,
+        guard let source = request.raw ?? request.jpeg ?? request.heif else {
+            preconditionFailure("A detail request needs a file")
+        }
+        return DetailCacheKey(
+            source: source,
             locationIdentity: request.locationIdentity,
             purpose: request.mode == .rawFirst ? .nativeRAW : .fullRaster)
     }
@@ -142,11 +145,12 @@ public final class DetailCache: Sendable {
         state.withLock { state in
             if let window = state.screenWindow, !window.contains(key) { return }
             state.screens[key] = (image, request.position)
-            while state.screens.count > 3 {
-                let farthest = state.screens.max {
+            while state.screens.count > 3,
+                let farthest = state.screens.max(by: {
                     abs($0.value.position - state.currentPosition)
                         < abs($1.value.position - state.currentPosition)
-                }!.key
+                })?.key
+            {
                 state.screens[farthest] = nil
             }
         }

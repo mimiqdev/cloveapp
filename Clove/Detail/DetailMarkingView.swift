@@ -171,7 +171,9 @@ struct DetailMarkingView: View {
 
     var body: some View {
         detailLayout
-            .task(id: photo.id) { await loadPreview(for: photo) }
+            .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
+                await loadPreview(for: photo)
+            }
             .onDisappear {
                 upgradeTask?.cancel()
                 shown = nil
@@ -555,7 +557,12 @@ struct DetailMarkingView: View {
 
     private func photoWindow(for photo: GridPhoto) -> DetailPhotoWindow {
         let index = order.firstIndex(where: { $0.id == photo.id }) ?? 0
-        let direction = previousPosition.map { index < $0 ? -1 : 1 } ?? 1
+        let direction: Int
+        if let currentWindow, currentWindow.current.photo == photo.id {
+            direction = currentWindow.direction
+        } else {
+            direction = previousPosition.map { index < $0 ? -1 : 1 } ?? 1
+        }
         let neighbours = [index - 1, index + 1].compactMap { position -> DetailNeighbour? in
             guard order.indices.contains(position) else { return nil }
             return DetailNeighbour(photo: order[position].id, position: position)
@@ -567,7 +574,10 @@ struct DetailMarkingView: View {
         return DetailPhotoWindow(
             id: windowID,
             current: DetailNeighbour(photo: photo.id, position: index), neighbours: neighbours,
-            direction: direction, mode: displayMode, screenPixels: screenPixels)
+            direction: direction,
+            mode: currentWindow.flatMap { $0.current.photo == photo.id ? $0.mode : nil }
+                ?? displayMode,
+            screenPixels: screenPixels)
     }
 
     /// The preview stays on screen throughout the RAW fit upgrade, with no cue
@@ -583,8 +593,10 @@ struct DetailMarkingView: View {
         isLoadingFit = false
         recordRenderDurations(await images.takeScreenRenderDurations())
         upgradeIfNeeded()
-        guard !Task.isCancelled, shown?.limitation == nil else { return }
-        await images.prefetch(window)
+        guard !Task.isCancelled, let shown, shown.limitation == nil else { return }
+        let renderAhead =
+            shown.quality == .screenRAW || shown.quality == .nativeRAW || !shown.hasRAW
+        await images.prefetch(window, renderAhead: renderAhead)
         recordRenderDurations(await images.takeScreenRenderDurations())
     }
 
@@ -845,6 +857,12 @@ struct DetailMarkingView: View {
             "Preview only — full resolution is unavailable."
         }
     }
+}
+
+/// Filtering a group can change neighbours without changing its current photo.
+private struct DetailDisplayOrder: Hashable {
+    let photo: PhotoIdentity
+    let order: [PhotoIdentity]
 }
 
 /// The first preview's state, so loading, failure and success never look alike (PRD P0-04).

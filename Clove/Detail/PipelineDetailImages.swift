@@ -20,6 +20,7 @@ final class PipelineDetailImages: DetailImageSource {
     private let admitted: DetailWorkAdmission
     private let consumer = UUID()
     private var activeWindow: DetailPhotoWindow?
+    private var navigationGeneration: UInt64 = 0
 
     init(
         pipeline: DetailPipeline,
@@ -32,8 +33,13 @@ final class PipelineDetailImages: DetailImageSource {
     }
 
     func prepare(_ window: DetailPhotoWindow) async {
+        navigationGeneration += 1
+        let generation = navigationGeneration
         activeWindow = window
-        guard let current = sources(for: window.current.photo) else { return }
+        await pipeline.beginNavigation(generation)
+        guard !Task.isCancelled, activeWindow == window, generation == navigationGeneration,
+            let current = sources(for: window.current.photo)
+        else { return }
         let neighbours = window.neighbours.compactMap { neighbour in
             sources(for: neighbour.photo).map { ($0, window.request(for: neighbour)) }
         }
@@ -42,7 +48,8 @@ final class PipelineDetailImages: DetailImageSource {
                 let request = current.request(for: window.request(for: window.current))
             else { return .deferred }
             let adjacent = neighbours.compactMap { $0.0.request(for: $0.1) }
-            await pipeline.navigate(to: request, neighbours: adjacent)
+            guard !Task.isCancelled else { return .deferred }
+            await pipeline.navigate(to: request, neighbours: adjacent, generation: generation)
             return .deferred
         }
     }
@@ -73,7 +80,7 @@ final class PipelineDetailImages: DetailImageSource {
 
     /// Warm both embedded neighbours, then render exactly one ahead. The shared
     /// view calls this only after showing the current photo's screen result.
-    func prefetch(_ window: DetailPhotoWindow) async {
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
         guard activeWindow == window else { return }
         let neighbours = window.neighbours.compactMap { neighbour -> (DetailRequest, Bool)? in
             guard let sources = sources(for: neighbour.photo),
@@ -85,7 +92,9 @@ final class PipelineDetailImages: DetailImageSource {
         await admitted.prefetch { [pipeline] in
             guard !Task.isCancelled else { return }
             await pipeline.prefetch(neighbours.map(\.0))
-            guard !Task.isCancelled, let ahead = neighbours.first(where: \.1)?.0 else { return }
+            guard renderAhead, !Task.isCancelled, let ahead = neighbours.first(where: \.1)?.0 else {
+                return
+            }
             _ = try? await pipeline.screen(for: ahead, priority: .prefetch)
         }
     }
@@ -93,7 +102,8 @@ final class PipelineDetailImages: DetailImageSource {
     func leave(window: UUID) async {
         guard activeWindow?.id == window else { return }
         activeWindow = nil
-        await pipeline.leavePhoto()
+        navigationGeneration += 1
+        await pipeline.leavePhoto(generation: navigationGeneration)
     }
 
     func takeScreenRenderDurations() async -> [Double] {

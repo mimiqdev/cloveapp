@@ -66,14 +66,14 @@ struct DetailPhotoWindow: Hashable, Sendable {
 protocol DetailImageSource: AnyObject {
     func prepare(_ window: DetailPhotoWindow) async
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome
-    func prefetch(_ window: DetailPhotoWindow) async
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async
     func leave(window: UUID) async
     func takeScreenRenderDurations() async -> [Double]
 }
 
 extension DetailImageSource {
     func prepare(_ window: DetailPhotoWindow) async {}
-    func prefetch(_ window: DetailPhotoWindow) async {}
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {}
     func leave(window: UUID) async {}
     func takeScreenRenderDurations() async -> [Double] { [] }
 }

@@ -43,6 +43,7 @@ public actor DetailPipeline {
     private var jobs: [UUID: Job] = [:]
     private var latest: [UUID: UUID] = [:]
     private var closed = false
+    private var navigationGeneration: UInt64 = 0
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(cache: DetailCache = DetailCache(), previewWorkers: Int = 2, queueLimit: Int = 16) {
@@ -65,9 +66,22 @@ public actor DetailPipeline {
 
     /// Called before arrival reads. Releases the full image on photo/mode change,
     /// keeps only this photo's screen render and its two neighbours, and drops old work.
-    public func navigate(to current: DetailRequest, neighbours: [DetailRequest]) {
+    public func navigate(
+        to current: DetailRequest, neighbours: [DetailRequest],
+        generation: UInt64? = nil
+    ) {
+        guard !closed, !Task.isCancelled else { return }
+        if let generation, generation != navigationGeneration { return }
         for job in Array(jobs.values) { cancel(job.id) }
         cache.navigate(to: current, neighbours: neighbours)
+    }
+
+    /// The app reserves arrival ownership before any file-system work. An older
+    /// arrival cannot reclaim ownership after a slow revision read or actor hop.
+    public func beginNavigation(_ generation: UInt64) {
+        guard !closed, generation > navigationGeneration else { return }
+        navigationGeneration = generation
+        for job in Array(jobs.values) { cancel(job.id) }
     }
 
     /// Immediate fit pixels: held screen RAW in RAW mode, otherwise the camera preview.
@@ -110,8 +124,9 @@ public actor DetailPipeline {
 
     /// Leaving the detail stage keeps neighbouring screen renders, but never a
     /// full camera decode or native RAW allocation.
-    public func leavePhoto() {
-        for job in Array(jobs.values) { cancel(job.id) }
+    public func leavePhoto(generation: UInt64) {
+        guard generation > navigationGeneration else { return }
+        beginNavigation(generation)
         cache.releaseNative()
     }
 
@@ -279,7 +294,7 @@ public actor DetailPipeline {
             if best == nil { best = image }
         }
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-        let fullSize: CGSize?
+        var fullSize: CGSize?
         if let camera {
             fullSize = sizes.nativeSize(of: camera, isRAW: false)
         } else {
@@ -287,7 +302,8 @@ public actor DetailPipeline {
                 for: request, previewLongEdge: best?.longEdge ?? 0,
                 cache: cache, sizes: sizes)
         }
-        let shown = best?.withFullResolution(fullSize, hasRAW: request.raw != nil)
+        var shown = best?.withFullResolution(fullSize, hasRAW: request.raw != nil)
+        if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
         if job.effort == .previewOnly {
             if let shown { return verified(.available(shown)) }
             return missing(failures)
@@ -302,6 +318,7 @@ public actor DetailPipeline {
                 purpose: .fullRaster)
             if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
+            if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             if case .image(let pixels) = await reader.fullRaster(fullCamera) {
                 let decoded = DetailImage(
                     image: pixels, source: fullCamera, quality: .raster,
@@ -316,33 +333,32 @@ public actor DetailPipeline {
             if camera != nil {
                 return await perform(job, cache: cache, reader: reader, sizes: sizes)
             }
+            fullSize = fullResolutionSize(
+                for: request, previewLongEdge: best?.longEdge ?? 0,
+                cache: cache, sizes: sizes)
+            if let raw = request.raw {
+                // Keep a screen RAW before attempting native RAW. Returning to a
+                // camera-decode failure must not go back to camera colours.
+                let fallback = await renderScreen(
+                    job, raw: raw, fullSize: fullSize,
+                    shown: shown, failures: failures, cache: cache, reader: reader)
+                if case .available(let image) = fallback { shown = image }
+            }
+            if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
         }
 
         if let raw = request.raw {
             if job.effort == .screen {
-                let start = ContinuousClock.now
-                guard let pixels = await reader.screenRAW(raw, longEdge: request.screenPixels)
-                else {
-                    return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
-                        ?? missing(failures)
-                }
-                let duration = start.duration(to: .now)
-                let milliseconds =
-                    Double(duration.components.seconds) * 1000
-                    + Double(duration.components.attoseconds) / 1e15
-                let rendered = DetailImage(
-                    image: pixels, source: raw, quality: .screenRAW,
-                    hasRAW: true, fullResolutionSize: fullSize)
-                return publish(rendered, job: job) {
-                    cache.storeScreen(rendered, for: request)
-                    cache.recordRenderDuration(milliseconds)
-                }
+                return await renderScreen(
+                    job, raw: raw, fullSize: fullSize,
+                    shown: shown, failures: failures, cache: cache, reader: reader)
             }
             let key = DetailCacheKey(
                 source: raw, locationIdentity: request.locationIdentity,
                 purpose: .nativeRAW)
             if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
+            if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             guard let pixels = await reader.nativeRAW(raw) else {
                 return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
                     ?? missing(failures)
@@ -363,6 +379,7 @@ public actor DetailPipeline {
                 purpose: .fullRaster)
             if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
+            if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             if case .image(let pixels) = await reader.fullRaster(jpeg) {
                 var decoded = DetailImage(
                     image: pixels, source: jpeg, quality: .raster,
@@ -375,6 +392,31 @@ public actor DetailPipeline {
         }
         return shown.map { verified(.available($0.limited(by: .noHigherResolution))) }
             ?? missing(failures)
+    }
+
+    private nonisolated static func renderScreen(
+        _ job: Job, raw: DetailSource,
+        fullSize: CGSize?, shown: DetailImage?, failures: [DetailFailure],
+        cache: DetailCache, reader: any DetailReading
+    ) async -> DetailResult {
+        if let held = cache.screen(for: job.request) { return verified(.available(held)) }
+        if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
+        let start = ContinuousClock.now
+        guard let pixels = await reader.screenRAW(raw, longEdge: job.request.screenPixels) else {
+            return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
+                ?? missing(failures)
+        }
+        let duration = start.duration(to: .now)
+        let milliseconds =
+            Double(duration.components.seconds) * 1000
+            + Double(duration.components.attoseconds) / 1e15
+        let rendered = DetailImage(
+            image: pixels, source: raw, quality: .screenRAW,
+            hasRAW: true, fullResolutionSize: fullSize)
+        return publish(rendered, job: job) {
+            cache.storeScreen(rendered, for: job.request)
+            cache.recordRenderDuration(milliseconds)
+        }
     }
 
     /// Cache insertion and cancellation share the same lock, so obsolete renders

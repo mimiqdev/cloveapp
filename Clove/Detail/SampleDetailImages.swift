@@ -97,8 +97,8 @@ final class SampleDetailImages: DetailImageSource {
         screens = screens.filter { held.contains($0.key) }
     }
 
-    func prefetch(_ window: DetailPhotoWindow) async {
-        guard activeWindow == window,
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        guard renderAhead, activeWindow == window,
             let ahead = window.neighbours.first(where: {
                 $0.position == window.current.position + window.direction
             })
