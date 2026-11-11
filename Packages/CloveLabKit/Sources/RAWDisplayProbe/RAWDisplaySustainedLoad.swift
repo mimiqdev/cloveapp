@@ -33,10 +33,12 @@ public enum RAWDisplaySustainedLoad {
         step: (String) async -> Void = { _ in }
     ) async throws -> [LabMeasurement] {
         let start = ContinuousClock.now
+        let orientation = displaySourceOrientation(url: plan.file)
         var measurements: [LabMeasurement] = []
         // No file name: the report identifies it by its run-local label in the context.
         let baseTags: [String: String] = [
             "variant": plan.variant.name,
+            "orientation": String(orientation),
             "scaleMethod": plan.variant.scaleMethod,
             "requestedLongEdge": String(plan.variant.requestedLongEdge),
             "bounds": "\(plan.maximumRenders) renders or \(Int(plan.maximumSeconds)) s",
@@ -65,6 +67,7 @@ public enum RAWDisplaySustainedLoad {
                     name: "sustained-render", value: timing.milliseconds, unit: "ms",
                     tags: [
                         "index": String(renders), "thermal": thermalName(thermal),
+                        "orientation": String(orientation),
                         "status": timing.error ?? "ok",
                         "outputLongEdge": String(max(timing.width, timing.height)),
                     ]))

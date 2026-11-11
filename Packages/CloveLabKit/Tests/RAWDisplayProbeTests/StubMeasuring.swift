@@ -17,16 +17,28 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
     /// tester releases the gate, so cancellation meets work that is truly in flight.
     private let renderEntered: AsyncStream<Void>.Continuation?
     private let renderRelease: DispatchSemaphore?
+    /// When set, every embedded-preview request announces itself, so a test can time
+    /// a cancellation to a specific photo without sleeping.
+    private let previewEntered: AsyncStream<Void>.Continuation?
+    /// Seconds one embedded-preview request takes.
+    private let previewDelay: Double
+    /// When true, a camera HEIF preview fails, so the walk takes the RAW fallback.
+    private let previewFailsForCamera: Bool
 
     init(
         renderDelay: Double = 0, renderError: String? = nil,
         renderEntered: AsyncStream<Void>.Continuation? = nil,
-        renderRelease: DispatchSemaphore? = nil
+        renderRelease: DispatchSemaphore? = nil,
+        previewEntered: AsyncStream<Void>.Continuation? = nil,
+        previewDelay: Double = 0, previewFailsForCamera: Bool = false
     ) {
         self.renderDelay = max(0, renderDelay)
         self.renderError = renderError
         self.renderEntered = renderEntered
         self.renderRelease = renderRelease
+        self.previewEntered = previewEntered
+        self.previewDelay = max(0, previewDelay)
+        self.previewFailsForCamera = previewFailsForCamera
     }
 
     func count(_ name: String) -> Int {
@@ -98,8 +110,18 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
 
     func embeddedPreview(url: URL, maxPixel: Int) throws -> EmbeddedPreviewTiming {
         try Task.checkCancellation()
+        previewEntered?.yield()
+        if previewDelay > 0 {
+            Thread.sleep(forTimeInterval: previewDelay)
+        }
         increment("embedded-preview")
-        return EmbeddedPreviewTiming(milliseconds: 0.05, width: 400, height: 267)
+        let cameraExtensions = ["hif", "heic", "heif"]
+        if previewFailsForCamera, cameraExtensions.contains(url.pathExtension.lowercased()) {
+            return EmbeddedPreviewTiming(
+                milliseconds: previewDelay * 1_000, width: 0, height: 0, error: "noThumbnail")
+        }
+        return EmbeddedPreviewTiming(
+            milliseconds: previewDelay * 1_000, width: 400, height: 267)
     }
 
     func embeddedPreviewImage(url: URL, maxPixel: Int) throws -> CGImage {

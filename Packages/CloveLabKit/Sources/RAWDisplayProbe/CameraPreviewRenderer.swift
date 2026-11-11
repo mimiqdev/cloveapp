@@ -24,7 +24,7 @@ public final class CameraPreviewRenderer: @unchecked Sendable {
             try measureDisplay {
                 let decoded = try decode(url: url, variant: variant)
                 decodedOrientation = decoded.orientation
-                swapsEdges = decoded.needsOrientation && decoded.orientation >= 5
+                swapsEdges = decoded.orientation >= 5
                 return (decoded.image, decoded.native)
             }
         }
@@ -41,18 +41,14 @@ public final class CameraPreviewRenderer: @unchecked Sendable {
         try Task.checkCancellation()
         return try autoreleasepool {
             let decoded = try decode(url: url, variant: variant)
-            guard decoded.needsOrientation, decoded.orientation != 1 else {
-                return decoded.image
-            }
+            guard decoded.orientation != 1 else { return decoded.image }
             return try oriented(decoded.image, orientation: decoded.orientation)
         }
     }
 
     private func decode(
         url: URL, variant: CameraPreviewVariant
-    ) throws -> (
-        image: CGImage, native: CGSize, orientation: Int, needsOrientation: Bool
-    ) {
+    ) throws -> (image: CGImage, native: CGSize, orientation: Int) {
         try Task.checkCancellation()
         guard
             let source = CGImageSourceCreateWithURL(
@@ -67,9 +63,8 @@ public final class CameraPreviewRenderer: @unchecked Sendable {
         let native = CGSize(
             width: swapsEdges ? height : width, height: swapsEdges ? width : height)
         let image: CGImage?
-        // A thumbnail requested with the transform flag is already oriented; the
-        // other two routes leave orientation to the caller.
-        var needsOrientation = true
+        // Every route times an unoriented decode; orientation is applied as a display
+        // transform outside the timed section.
         switch variant.kind {
         case .fullDecode:
             image = CGImageSourceCreateImageAtIndex(
@@ -83,21 +78,21 @@ public final class CameraPreviewRenderer: @unchecked Sendable {
                 ] as CFDictionary)
         case .screenThumbnail(let longEdge):
             guard longEdge > 0 else { throw RAWDisplayFailure.cannotRender }
-            needsOrientation = false
             // FromImageAlways decodes the full image instead of returning a built-in
-            // thumbnail, which is what a chessboard-free 100% source needs.
+            // thumbnail, which is what a chessboard-free 100% source needs. The
+            // transform flag stays false so the orientation redraw is untimed.
             image = CGImageSourceCreateThumbnailAtIndex(
                 source, 0,
                 [
                     kCGImageSourceThumbnailMaxPixelSize: longEdge,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceCreateThumbnailWithTransform: false,
                     kCGImageSourceShouldCacheImmediately: true,
                     kCGImageSourceCreateThumbnailFromImageIfAbsent: false,
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                 ] as CFDictionary)
         }
         guard let image else { throw RAWDisplayFailure.cannotRender }
-        return (image, native, orientation, needsOrientation)
+        return (image, native, orientation)
     }
 
     /// Applies EXIF orientation as a display transform. An orientation-1 file is

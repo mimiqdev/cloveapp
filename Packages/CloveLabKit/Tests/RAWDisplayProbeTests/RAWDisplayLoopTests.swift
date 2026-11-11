@@ -115,6 +115,16 @@ struct RAWDisplayLoopTests {
         #expect(measuring.count("raw-render") == 2)
     }
 
+    @Test func swipeCountsAWastedRenderWhenThePreviewOutlastsTheDwell() async throws {
+        // The dwell deadline starts at arrival, so a slow preview eats the time the
+        // render would have had.
+        let measuring = StubMeasuring(renderDelay: 0.005, previewDelay: 0.04)
+        let measurements = try await RAWDisplaySwipes.run(
+            plan: swipePlan(photos: 1, dwell: 30), measuring: measuring)
+        #expect(measurements.contains { $0.name == "swipe-renders-wasted" && $0.value == 1 })
+        #expect(measurements.contains { $0.name == "swipe-renders-ready" && $0.value == 0 })
+    }
+
     @Test func swipeCancellationDuringTheLastRenderDrainsIt() async throws {
         let (entered, continuation) = AsyncStream<Void>.makeStream()
         let release = DispatchSemaphore(value: 0)
@@ -132,6 +142,39 @@ struct RAWDisplayLoopTests {
         // The in-flight render drained and no new render was admitted.
         #expect(measuring.count("raw-render") == 1)
         #expect(measuring.count("render-drained") == 1)
+    }
+
+    @Test func swipeCancellationStopsQueuedRenders() async throws {
+        let (previews, continuation) = AsyncStream<Void>.makeStream()
+        let release = DispatchSemaphore(value: 0)
+        let measuring = StubMeasuring(
+            renderRelease: release, previewEntered: continuation)
+        defer { continuation.finish() }
+        let task = Task {
+            try await RAWDisplaySwipes.run(
+                plan: swipePlan(photos: 4, dwell: 0), measuring: measuring)
+        }
+        var iterator = previews.makeAsyncIterator()
+        for _ in 0..<4 {
+            await iterator.next()
+        }
+        task.cancel()
+        release.signal()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        // Only the first decoder ran; the queued renders were cancelled before entry.
+        #expect(measuring.count("raw-render") == 1)
+        #expect(measuring.count("render-drained") == 1)
+    }
+
+    @Test func swipePreviewTimeIncludesTheFallbackAttempt() async throws {
+        let measuring = StubMeasuring(previewDelay: 0.02, previewFailsForCamera: true)
+        let measurements = try await RAWDisplaySwipes.run(
+            plan: swipePlan(photos: 1, dwell: 100), measuring: measuring)
+        let preview = try #require(measurements.first { $0.name == "swipe-preview" })
+        // Two 20 ms attempts; the failed camera request still cost time.
+        #expect(preview.value >= 30)
+        #expect(preview.tags["previewSource"] == "raw-fallback")
+        #expect(preview.tags["orientation"] != nil)
     }
 
     @Test func swipeLoopStopsOnCancellation() async throws {
