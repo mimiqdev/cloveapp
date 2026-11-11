@@ -75,6 +75,7 @@ public enum RAWDisplaySuite {
         progress: @escaping @Sendable (RAWDisplayProgress) async -> Void = { _ in }
     ) async throws -> LabReport {
         let pairs = try RAWDisplayFiles.pairs(in: folder)
+        let labels = RAWDisplayFileLabels(pairs: pairs)
         let variants =
             options.variants ?? RAWDisplayVariant.standard(screenLongEdge: options.screenLongEdge)
         let cameraVariants =
@@ -94,8 +95,9 @@ public enum RAWDisplaySuite {
                 + plannedRenders(
                     files: cameraPairs.count, variants: cameraVariants.count, samples: samples)
                 + colourPairs.count + cameraPairs.count
-                + options.swipeDwells.count
+                + options.swipeDwells.count * photos.count
                 + min(options.cacheFiles, detailed.count) + 1
+                + (detailed.isEmpty ? 0 : 1)
         )
         let runStart = ContinuousClock.now
         var completed = 0
@@ -106,10 +108,10 @@ public enum RAWDisplaySuite {
         }
 
         let rawPhase = try await variantMeasurements(
-            pairs: detailed, folder: folder, variants: variants, warmRepeats: samples,
+            pairs: detailed, labels: labels, variants: variants, warmRepeats: samples,
             measuring: measuring, step: step)
         let cameraPhase = try await cameraPreviewMeasurements(
-            pairs: cameraPairs, folder: folder, variants: cameraVariants, warmRepeats: samples,
+            pairs: cameraPairs, labels: labels, variants: cameraVariants, warmRepeats: samples,
             measuring: measuring, step: step)
         var measurements = rawPhase.measurements + cameraPhase.measurements
 
@@ -117,20 +119,19 @@ public enum RAWDisplaySuite {
         // preview the reader sees today against that render.
         for pair in colourPairs {
             try Task.checkCancellation()
-            await step("Colour: \(RAWDisplayFiles.relativePath(pair.raw, in: folder))")
+            await step("Colour: \(labels.label(for: pair.raw))")
             measurements += try autoreleasepool {
                 try colourMeasurements(
-                    file: pair.raw, cameraPreview: pair.cameraPreview, folder: folder,
+                    file: pair.raw, cameraPreview: pair.cameraPreview, labels: labels,
                     variants: variants, measuring: measuring)
             }
         }
         for pair in cameraPairs {
             try Task.checkCancellation()
-            await step(
-                "Camera preview colour: \(RAWDisplayFiles.relativePath(pair.raw, in: folder))")
+            await step("Camera preview colour: \(labels.label(for: pair.raw))")
             measurements += try autoreleasepool {
                 try cameraPreviewColourMeasurements(
-                    pair: pair, folder: folder, variants: cameraVariants,
+                    pair: pair, labels: labels, variants: cameraVariants,
                     measuring: measuring)
             }
         }
@@ -153,7 +154,7 @@ public enum RAWDisplaySuite {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         measurements += try await RAWDisplayCacheCost.measurements(
-            files: detailed.map(\.raw), folder: folder, variant: screenVariant,
+            files: detailed.map(\.raw), labels: labels, variant: screenVariant,
             measuring: measuring, directory: directory, step: step)
 
         let bestGrid = bestVariant(in: rawPhase.summaries, role: .grid)
@@ -171,7 +172,7 @@ public enum RAWDisplaySuite {
         return LabReport(
             spike: RAWDisplayProbe.descriptor.id,
             context: context(
-                folder: folder, pairs: pairs, detailed: detailed, cameraPairs: cameraPairs,
+                pairs: pairs, detailed: detailed, cameraPairs: cameraPairs,
                 colourPairs: colourPairs, variants: variants, cameraVariants: cameraVariants,
                 options: options, bestScreen: bestScreen, bestGrid: bestGrid),
             measurements: measurements,
@@ -188,12 +189,14 @@ public enum RAWDisplaySuite {
         progress: @escaping @Sendable (RAWDisplayProgress) async -> Void = { _ in }
     ) async throws -> LabReport {
         let pairs = try RAWDisplayFiles.pairs(in: folder)
+        let labels = RAWDisplayFileLabels(pairs: pairs)
         guard let file = pairs.first?.raw else { throw RAWDisplayRunError.noRAWFiles }
         let screenVariants = RAWDisplayVariant.standard(screenLongEdge: options.screenLongEdge)
             .filter { $0.role == .screen }
         guard let fallback = screenVariants.first else { throw RAWDisplayRunError.noRAWFiles }
         let samples = max(1, options.warmRepeats)
-        let total = screenVariants.count * (1 + samples) + options.sustainedMaximumRenders + 2
+        let total =
+            screenVariants.count * (1 + samples) + options.sustainedMaximumRenders + 2 + 1
         var completed = 0
         let step: (String) async -> Void = { message in
             completed += 1
@@ -201,7 +204,7 @@ public enum RAWDisplaySuite {
                 .init(completed: min(completed, total), total: total, message: message))
         }
         let selection = try await variantMeasurements(
-            pairs: Array(pairs.prefix(1)), folder: folder, variants: screenVariants,
+            pairs: Array(pairs.prefix(1)), labels: labels, variants: screenVariants,
             warmRepeats: samples, measuring: measuring, step: step)
         let best = selection.summaries.filter { $0.samples > 0 }.min {
             $0.warmMedian < $1.warmMedian
@@ -220,9 +223,8 @@ public enum RAWDisplaySuite {
         return LabReport(
             spike: RAWDisplayProbe.descriptor.id,
             context: [
-                "phase": "sustained-load", "folderName": folder.lastPathComponent,
-                "rawFiles": String(pairs.count),
-                "file": RAWDisplayFiles.relativePath(file, in: folder),
+                "phase": "sustained-load", "rawFiles": String(pairs.count),
+                "file": labels.label(for: file),
                 "variant": variant.name,
                 "variantRule": "lowest median of warm screen-size renders in the selection pass",
                 "selectionRepeats": String(samples),
@@ -246,18 +248,31 @@ public enum RAWDisplaySuite {
     // MARK: - Variant phases
 
     static func variantMeasurements(
-        pairs: [RAWDisplayPair], folder: URL, variants: [RAWDisplayVariant], warmRepeats: Int,
-        measuring: any RAWDisplayMeasuring, step: (String) async -> Void
+        pairs: [RAWDisplayPair], labels: RAWDisplayFileLabels, variants: [RAWDisplayVariant],
+        warmRepeats: Int, measuring: any RAWDisplayMeasuring,
+        step: (String) async -> Void
     ) async throws -> (measurements: [LabMeasurement], summaries: [DisplayVariantSummary]) {
+        try Task.checkCancellation()
         var measurements: [LabMeasurement] = []
         var coldDone: Set<String> = []
         var coldMilliseconds: [String: Double] = [:]
         var samples: [String: [Double]] = [:]
         var failures: [String: Int] = [:]
         var outputLongEdge: [String: Int] = [:]
+        // One startup render before the cold pass absorbs the process's first Core
+        // Image and RAW setup, so variant a's cold number is not a special case.
+        if let firstPair = pairs.first, let firstVariant = variants.first {
+            try Task.checkCancellation()
+            await step("Startup render: \(labels.label(for: firstPair.raw))")
+            let startup = try measuring.renderRAW(url: firstPair.raw, variant: firstVariant)
+            measurements += startup.measurements(
+                file: labels.label(for: firstPair.raw), variantName: firstVariant.name,
+                role: firstVariant.role.rawValue, phase: .startup,
+                request: requestTags(firstVariant))
+        }
         for pair in pairs {
             try Task.checkCancellation()
-            let relative = RAWDisplayFiles.relativePath(pair.raw, in: folder)
+            let relative = labels.label(for: pair.raw)
             var perFile: [String: [Double]] = [:]
             for variant in variants {
                 if !coldDone.contains(variant.name) {
@@ -324,9 +339,11 @@ public enum RAWDisplaySuite {
     }
 
     static func cameraPreviewMeasurements(
-        pairs: [RAWDisplayPair], folder: URL, variants: [CameraPreviewVariant],
-        warmRepeats: Int, measuring: any RAWDisplayMeasuring, step: (String) async -> Void
+        pairs: [RAWDisplayPair], labels: RAWDisplayFileLabels,
+        variants: [CameraPreviewVariant], warmRepeats: Int,
+        measuring: any RAWDisplayMeasuring, step: (String) async -> Void
     ) async throws -> (measurements: [LabMeasurement], summaries: [DisplayVariantSummary]) {
+        try Task.checkCancellation()
         var measurements: [LabMeasurement] = []
         var coldDone: Set<String> = []
         var coldMilliseconds: [String: Double] = [:]
@@ -336,7 +353,7 @@ public enum RAWDisplaySuite {
         for pair in pairs {
             try Task.checkCancellation()
             guard let camera = pair.cameraPreview else { continue }
-            let relative = RAWDisplayFiles.relativePath(camera, in: folder)
+            let relative = labels.label(for: camera)
             for variant in variants {
                 if !coldDone.contains(variant.name) {
                     coldDone.insert(variant.name)
@@ -386,11 +403,11 @@ public enum RAWDisplaySuite {
     // MARK: - Colour
 
     static func colourMeasurements(
-        file: URL, cameraPreview: URL?, folder: URL, variants: [RAWDisplayVariant],
-        measuring: any RAWDisplayMeasuring
+        file: URL, cameraPreview: URL?, labels: RAWDisplayFileLabels,
+        variants: [RAWDisplayVariant], measuring: any RAWDisplayMeasuring
     ) throws -> [LabMeasurement] {
         var measurements: [LabMeasurement] = []
-        let relative = RAWDisplayFiles.relativePath(file, in: folder)
+        let relative = labels.label(for: file)
         let nativeVariant =
             variants.first { $0.role == .native }
             ?? RAWDisplayVariant(
@@ -450,8 +467,7 @@ public enum RAWDisplaySuite {
                             "file": relative, "method": "camera-embedded-preview",
                             "compare": "camera-preview-vs-raw-native",
                             "reference": "raw-native-rendered-then-lanczos-scaled",
-                            "cameraPreview": RAWDisplayFiles.relativePath(
-                                cameraPreview, in: folder),
+                            "cameraPreview": labels.label(for: cameraPreview),
                             "previewLongEdge": String(max(preview.width, preview.height)),
                         ])
                 } catch is CancellationError {
@@ -475,14 +491,14 @@ public enum RAWDisplaySuite {
     }
 
     static func cameraPreviewColourMeasurements(
-        pair: RAWDisplayPair, folder: URL, variants: [CameraPreviewVariant],
-        measuring: any RAWDisplayMeasuring
+        pair: RAWDisplayPair, labels: RAWDisplayFileLabels,
+        variants: [CameraPreviewVariant], measuring: any RAWDisplayMeasuring
     ) throws -> [LabMeasurement] {
         guard let camera = pair.cameraPreview else { return [] }
         let fullVariant =
             variants.first { $0.kind == .fullDecode }
             ?? CameraPreviewVariant(name: "camera-full-decode", kind: .fullDecode)
-        let relative = RAWDisplayFiles.relativePath(camera, in: folder)
+        let relative = labels.label(for: camera)
         do {
             let full = try measuring.cameraPreviewImage(url: camera, variant: fullVariant)
             let preview = try measuring.embeddedPreviewImage(url: camera, maxPixel: 2_000)
@@ -608,14 +624,14 @@ public enum RAWDisplaySuite {
     }
 
     private static func context(
-        folder: URL, pairs: [RAWDisplayPair], detailed: [RAWDisplayPair],
+        pairs: [RAWDisplayPair], detailed: [RAWDisplayPair],
         cameraPairs: [RAWDisplayPair], colourPairs: [RAWDisplayPair],
         variants: [RAWDisplayVariant], cameraVariants: [CameraPreviewVariant],
         options: RAWDisplayOptions, bestScreen: DisplayVariantSummary?,
         bestGrid: DisplayVariantSummary?
     ) -> [String: String] {
         [
-            "folderName": folder.lastPathComponent,
+            "fileLabels": "raw-NN plus the extension; folder and file names are not recorded",
             "rawFiles": String(pairs.count),
             "rawFilesWithCameraPreview": String(pairs.filter { $0.cameraPreview != nil }.count),
             "detailedRawFiles": String(detailed.count),
@@ -647,12 +663,15 @@ public enum RAWDisplaySuite {
             "Times end at a materialized CPU bitmap, not on-screen presentation or UI scrolling.",
             "scaleFactor and isDraftModeEnabled are decode-time requests set before outputImage; the report records output size and time, not which decoder stage applied them.",
             "Screen and grid variants use CIRAWFilter.scaleFactor. They do not render at native size and downscale, which is what S2's 2000 px row measured.",
-            "Cold means the first render of that variant in this run, in a process that may already have rendered other variants of the same file; it is not a cold process, framework cache or card read.",
+            "Before the cold pass, one startup render of variant a is recorded on its own phase and is not counted as cold. It absorbs the process's first Core Image and RAW setup.",
+            "After the startup render, cold means the first measured render of that variant in this run, in a process that may already have rendered other variants of the same file; it is not a cold process, framework cache or card read.",
             "Warm median and p90 come from \(options.warmRepeats) repeats per file; nearest-rank p90 of 3 is the largest of the three.",
-            "Camera HEIF variants are ImageIO decodes of the HIF, not CIRAWFilter controls; full decode is the 100% source for camera-preview mode.",
+            "Camera HEIF variants are ImageIO decodes of the HIF, not CIRAWFilter controls; full decode is the 100% source for camera-preview mode. Their row is the timed decode; the EXIF orientation redraw is a display transform and is excluded, while the reported size is oriented and every render row carries its source orientation.",
             "Colour numbers compare same-sized sRGB bitmaps with CIEDE2000; the larger reference is Lanczos-reduced after render, so they measure colour plus resampling, not sharpness.",
+            "Every timed render and bitmap copy runs inside a per-render autorelease pool; render-resident-before rows show whether the process baseline stays flat across the run.",
             "Resident memory is process-wide 5 ms sampling: a lower bound that includes framework caches and other work, not an isolated allocation.",
             "Detailed RAW renders use the first \(options.detailedFiles) RAWs; camera HEIF variants use \(options.cameraPreviewPairs) pairs; swipes use \(options.swipePhotos) photos. File discovery reads paths only; the counts above bound every image decode and retained bitmap.",
+            "Report file tags are run-local indices plus the extension (raw-01.ARW, raw-01.HIF); the report records no folder or file names. The swipe walk counts a render as ready only when it finished before the reader left the photo.",
             "The grid folder projection is arithmetic on one measured render time; the concurrency-2 row assumes perfect division and was not measured concurrently.",
             "Run on the physical device, charger unplugged, at room temperature; simulator and Mac numbers are not device numbers.",
         ]

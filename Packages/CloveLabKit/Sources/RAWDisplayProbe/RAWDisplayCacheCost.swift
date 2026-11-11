@@ -14,17 +14,20 @@ public enum RAWDisplayCacheCost {
 
     /// Runs the cache measurements into a temporary directory owned by the caller.
     public static func measurements(
-        files: [URL], folder: URL, variant: RAWDisplayVariant,
+        files: [URL], labels: RAWDisplayFileLabels, variant: RAWDisplayVariant,
         measuring: any RAWDisplayMeasuring, directory: URL,
         step: (String) async -> Void = { _ in }
     ) async throws -> [LabMeasurement] {
         var held: [(file: URL, image: CGImage)] = []
         var measurements: [LabMeasurement] = []
+        // The change row uses RSS before the loop minus RSS after all six are held;
+        // the peak sampler stays a separate column.
+        let residentBefore = RAWDisplayResidentSampler.currentBytes()
         let sampler = RAWDisplayResidentSampler()
         let start = ContinuousClock.now
         for file in files.prefix(heldImageLimit) {
             try Task.checkCancellation()
-            await step("Cache: \(file.lastPathComponent)")
+            await step("Cache: \(labels.label(for: file))")
             do {
                 let image = try measuring.rawImage(url: file, variant: variant)
                 held.append((file, image))
@@ -32,13 +35,14 @@ public enum RAWDisplayCacheCost {
                     LabMeasurement(
                         name: "cache-screen-decoded-memory",
                         value: Double(image.bytesPerRow * image.height), unit: "bytes",
-                        tags: ["file": RAWDisplayFiles.relativePath(file, in: folder)]))
+                        tags: ["file": labels.label(for: file)]))
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                measurements.append(failure(file: file, folder: folder, error: error))
+                measurements.append(failure(file: file, labels: labels, error: error))
             }
         }
+        let residentAfter = RAWDisplayResidentSampler.currentBytes()
         let heldBytes = held.reduce(0) { $0 + $1.image.bytesPerRow * $1.image.height }
         let heldTags: [String: String] = [
             "count": String(held.count), "variant": variant.name,
@@ -51,7 +55,16 @@ public enum RAWDisplayCacheCost {
                 name: "cache-held-decoded-memory", value: Double(heldBytes), unit: "bytes",
                 tags: heldTags),
             LabMeasurement(
-                name: "cache-held-resident", value: Double(sampler.finish()), unit: "bytes",
+                name: "cache-held-resident",
+                value: max(0, Double(residentAfter) - Double(residentBefore)), unit: "bytes",
+                tags: heldTags.merging([
+                    "basis": "RSS after the held renders minus RSS before the loop"
+                ]) { _, new in new }),
+            LabMeasurement(
+                name: "cache-held-resident-absolute", value: Double(residentAfter), unit: "bytes",
+                tags: heldTags),
+            LabMeasurement(
+                name: "cache-held-render-peak", value: Double(sampler.finish()), unit: "bytes",
                 tags: heldTags),
             LabMeasurement(
                 name: "cache-held-duration", value: displayMilliseconds(since: start), unit: "ms",
@@ -60,9 +73,11 @@ public enum RAWDisplayCacheCost {
         for entry in held {
             try Task.checkCancellation()
             for format in [UTType.heic, UTType.jpeg] {
-                measurements += encodeMeasurements(
-                    entry.image, format: format, file: entry.file, folder: folder,
-                    directory: directory)
+                measurements += autoreleasepool {
+                    encodeMeasurements(
+                        entry.image, format: format, file: entry.file, labels: labels,
+                        directory: directory)
+                }
             }
         }
         // Release the held bitmaps before returning so the next phase starts clean.
@@ -71,12 +86,12 @@ public enum RAWDisplayCacheCost {
     }
 
     private static func encodeMeasurements(
-        _ image: CGImage, format: UTType, file: URL, folder: URL, directory: URL
+        _ image: CGImage, format: UTType, file: URL, labels: RAWDisplayFileLabels,
+        directory: URL
     ) -> [LabMeasurement] {
         let name = format == .heic ? "heic" : "jpeg"
         let tags: [String: String] = [
-            "file": RAWDisplayFiles.relativePath(file, in: folder), "format": name,
-            "quality": "0.9",
+            "file": labels.label(for: file), "format": name, "quality": "0.9",
         ]
         let url = directory.appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(name == "heic" ? "heic" : "jpg")
@@ -128,13 +143,12 @@ public enum RAWDisplayCacheCost {
         ]
     }
 
-    private static func failure(file: URL, folder: URL, error: any Error) -> LabMeasurement {
+    private static func failure(
+        file: URL, labels: RAWDisplayFileLabels, error: any Error
+    ) -> LabMeasurement {
         LabMeasurement(
             name: "cache-failure", value: 1, unit: "count",
-            tags: [
-                "file": RAWDisplayFiles.relativePath(file, in: folder),
-                "status": String(describing: error),
-            ])
+            tags: ["file": labels.label(for: file), "status": String(describing: error)])
     }
 }
 

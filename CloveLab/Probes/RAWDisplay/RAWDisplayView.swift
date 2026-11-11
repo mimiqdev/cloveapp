@@ -20,7 +20,7 @@ struct RAWDisplayView: View {
                     "Use local storage with at least 12 RAW + HIF pairs. Keep the charger unplugged and the phone at room temperature for the sustained step."
                 )
                 Text(
-                    "The display suite allows about 4 minutes: RAW variants on the first 12 RAWs, HIF variants on the first 6 pairs, colour, 20-photo swipes, cache and the grid projection. The sustained step allows up to 5 minutes and writes its own report."
+                    "The display suite is bounded at about 5 minutes: RAW variants on the first 12 RAWs, HIF variants on the first 6 pairs, colour, 20-photo swipes, cache and the grid projection. The sustained step allows up to 5 minutes and writes its own report."
                 )
                 FolderPickerButton { folder = $0 }
                     .disabled(running != nil)
@@ -62,7 +62,10 @@ struct RAWDisplayView: View {
         .navigationTitle("S8 · RAW display")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("clovelab.probe.rawdisplay")
-        .onDisappear { running?.cancel() }
+        .onDisappear {
+            running?.cancel()
+            setIdleTimer(disabled: false)
+        }
     }
 
     /// The panel's pixel size in its long direction. The probe stays UIKit-free, so
@@ -79,9 +82,11 @@ struct RAWDisplayView: View {
         progress = nil
         let options = RAWDisplayOptions(screenLongEdge: screenLongEdge)
         let access = folder.startAccessingSecurityScopedResource()
+        setIdleTimer(disabled: true)
         running = Task {
             defer {
                 if access { folder.stopAccessingSecurityScopedResource() }
+                setIdleTimer(disabled: false)
                 running = nil
             }
             let worker = Task.detached(priority: .userInitiated) {
@@ -112,9 +117,11 @@ struct RAWDisplayView: View {
         progress = nil
         let options = sustainedOptions()
         let access = folder.startAccessingSecurityScopedResource()
+        setIdleTimer(disabled: true)
         running = Task {
             defer {
                 if access { folder.stopAccessingSecurityScopedResource() }
+                setIdleTimer(disabled: false)
                 running = nil
             }
             let worker = Task.detached(priority: .userInitiated) {
@@ -149,6 +156,11 @@ struct RAWDisplayView: View {
                 status = "Run failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Keeps the screen awake for the length of a run; every exit path clears it.
+    private func setIdleTimer(disabled: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = disabled
     }
 
     /// The sustained step always uses the brief's 300 renders or five minutes.

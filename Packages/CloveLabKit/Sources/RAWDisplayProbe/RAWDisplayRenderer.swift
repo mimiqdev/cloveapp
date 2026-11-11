@@ -20,8 +20,13 @@ public final class RAWDisplayRenderer: @unchecked Sendable {
     /// One timed render. Errors are recorded in `timing.error`, not thrown, so a
     /// variant that the decoder does not support still reports a row.
     public func render(url: URL, variant: RAWDisplayVariant) throws -> DisplayRenderTiming {
-        try measureDisplay {
-            try renderImage(url: url, variant: variant)
+        let orientation = displaySourceOrientation(url: url)
+        return try autoreleasepool {
+            var timing = try measureDisplay {
+                try renderImage(url: url, variant: variant)
+            }
+            timing.orientation = orientation
+            return timing
         }
     }
 
@@ -29,7 +34,9 @@ public final class RAWDisplayRenderer: @unchecked Sendable {
     /// ``render(url:variant:)``.
     public func image(url: URL, variant: RAWDisplayVariant) throws -> CGImage {
         try Task.checkCancellation()
-        return try renderImage(url: url, variant: variant).image
+        return try autoreleasepool {
+            try renderImage(url: url, variant: variant).image
+        }
     }
 
     private func renderImage(

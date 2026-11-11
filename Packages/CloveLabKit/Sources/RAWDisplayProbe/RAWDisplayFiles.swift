@@ -54,13 +54,6 @@ public enum RAWDisplayFiles {
             .map { raw in RAWDisplayPair(raw: raw, cameraPreview: previews[stemKey(raw)]) }
     }
 
-    /// Path relative to the tested folder, for reports. Falls back to the file name.
-    public static func relativePath(_ file: URL, in folder: URL) -> String {
-        let root = folder.standardizedFileURL.path + "/"
-        let path = file.standardizedFileURL.path
-        return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : file.lastPathComponent
-    }
-
     /// Cancellable path enumeration using the preview probe's discovery rules:
     /// hidden files and `_Rejected` are skipped, and only RAW and camera HEIF
     /// extensions are kept. It reads paths, never image pixels.

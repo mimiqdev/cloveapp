@@ -52,26 +52,32 @@ private final class SwipeRenderCompletion: @unchecked Sendable {
     }
 }
 
-/// One background render in the swipe simulation. The synchronous decoder cannot be
-/// interrupted, so cancelling waits for it to drain before the next one can start.
+/// One background render in the swipe simulation. Renders are chained so a single
+/// decoder is busy at a time: a render that is still running when the reader leaves
+/// keeps running, and the next photo's render waits behind it. The synchronous
+/// decoder cannot be interrupted, but a queued render that is cancelled before it
+/// starts does no decode at all.
 private final class SwipeRender: @unchecked Sendable {
     let index: Int
-    /// When the reader landed on this photo, before its preview request and dwell.
+    /// When the reader landed on this photo, before its preview request.
     let arrival: ContinuousClock.Instant
-    /// When the background render was requested, after the dwell and any drain.
-    let renderStarted: ContinuousClock.Instant
+    /// When this render was requested, before any wait for the previous render.
+    let renderRequested: ContinuousClock.Instant
     let task: Task<Void, Never>
     private let completion = SwipeRenderCompletion()
 
     init(
-        index: Int, arrival: ContinuousClock.Instant, renderStarted: ContinuousClock.Instant,
+        index: Int, arrival: ContinuousClock.Instant, renderRequested: ContinuousClock.Instant,
+        after previous: SwipeRender?,
         render: @escaping @Sendable () throws -> DisplayRenderTiming
     ) {
         self.index = index
         self.arrival = arrival
-        self.renderStarted = renderStarted
+        self.renderRequested = renderRequested
         let completion = self.completion
         task = Task {
+            if let previous { await previous.task.value }
+            guard !Task.isCancelled else { return }
             do {
                 let timing = try render()
                 // A render that returned no pixels is a failure, not a ready image.
@@ -85,12 +91,15 @@ private final class SwipeRender: @unchecked Sendable {
     var finished: SwipeRenderCompletion.Finished? { completion.value }
 }
 
-/// Walks photos the way the detail reader does: arrive, request the preview, stay for
-/// the dwell, then request the screen-size RAW render in the background and move on.
+/// Walks photos the way the detail reader does. The dwell is the time spent on the
+/// photo: arrive, request the preview, start the screen-size render right away, wait
+/// out the dwell, then leave. A render is ready when it finished before leaving;
+/// otherwise it keeps running and counts as wasted, and the next photo's preview is
+/// the contended case.
 public enum RAWDisplaySwipes {
-    /// Runs one walk per dwell. A render counts as ready only when it finished before
-    /// the next arrival with pixels; one that was still running is superseded and
-    /// drained; one that finished without pixels is failed.
+    /// Runs one walk per dwell and reports preview latency, arrival-to-ready time and
+    /// how many renders finished inside their dwell. Every started render is
+    /// classified exactly once as ready, failed or wasted.
     public static func run(
         plan: RAWDisplaySwipePlan, measuring: any RAWDisplayMeasuring,
         step: (String) async -> Void = { _ in }
@@ -99,8 +108,7 @@ public enum RAWDisplaySwipes {
         var measurements: [LabMeasurement] = []
         for dwell in plan.dwellMilliseconds {
             try Task.checkCancellation()
-            await step("Swipe dwell \(dwell) ms")
-            var current: SwipeRender?
+            var renders: [SwipeRender] = []
             var started = 0
             var ready = 0
             var wasted = 0
@@ -108,10 +116,11 @@ public enum RAWDisplaySwipes {
             do {
                 for (index, photo) in photos.enumerated() {
                     try Task.checkCancellation()
+                    await step("Swipe \(dwell) ms: photo \(index + 1)/\(photos.count)")
                     let arrival = ContinuousClock.now
                     // At arrival the previous photo's render may still be running;
                     // sampling that state here is what measures preview contention.
-                    let previous = current
+                    let previous = renders.last
                     let renderRunning = previous.map { $0.finished == nil } ?? false
                     var preview = try measuring.embeddedPreview(
                         url: photo.preview, maxPixel: plan.previewPixels)
@@ -133,100 +142,41 @@ public enum RAWDisplaySwipes {
                                 "previewError": preview.error ?? "none",
                                 "previewLongEdge": String(max(preview.width, preview.height)),
                             ]))
-                    if dwell > 0 {
-                        try await Task.sleep(for: .milliseconds(dwell))
-                    }
-                    if let previous {
-                        if let finished = previous.finished, finished.at <= arrival {
-                            // It completed before the reader left this photo.
-                            if finished.error == nil {
-                                ready += 1
-                                measurements.append(
-                                    LabMeasurement(
-                                        name: "swipe-render-ready",
-                                        value: milliseconds(
-                                            finished.at, since: previous.renderStarted),
-                                        unit: "ms",
-                                        tags: [
-                                            "dwellMs": String(dwell),
-                                            "index": String(previous.index), "status": "ok",
-                                        ]))
-                                measurements.append(
-                                    LabMeasurement(
-                                        name: "swipe-arrival-to-ready",
-                                        value: milliseconds(finished.at, since: previous.arrival),
-                                        unit: "ms",
-                                        tags: [
-                                            "dwellMs": String(dwell),
-                                            "index": String(previous.index), "status": "ok",
-                                        ]))
-                            } else {
-                                failed += 1
-                                measurements.append(
-                                    LabMeasurement(
-                                        name: "swipe-render-failed",
-                                        value: milliseconds(
-                                            finished.at, since: previous.renderStarted),
-                                        unit: "ms",
-                                        tags: [
-                                            "dwellMs": String(dwell),
-                                            "index": String(previous.index),
-                                            "status": finished.error ?? "noPixels",
-                                        ]))
-                            }
-                        } else {
-                            // Superseded after the reader moved on: cancel, drain, count it.
-                            previous.task.cancel()
-                            let drainStart = ContinuousClock.now
-                            await previous.task.value
-                            wasted += 1
-                            measurements.append(
-                                LabMeasurement(
-                                    name: "swipe-render-abandoned",
-                                    value: displayMilliseconds(since: drainStart), unit: "ms",
-                                    tags: [
-                                        "dwellMs": String(dwell), "index": String(previous.index),
-                                        "status": "superseded-while-running",
-                                    ]))
-                        }
-                    }
-                    // Cancelling while the superseded render drained must not buy
-                    // another full decode.
-                    try Task.checkCancellation()
-                    // The best screen-size variant, one at a time, as production would.
+                    // The render starts right away and runs while the reader stays.
                     let variant = plan.screenVariant
                     let raw = photo.raw
-                    let renderStarted = ContinuousClock.now
-                    current = SwipeRender(
-                        index: index, arrival: arrival, renderStarted: renderStarted
+                    let renderRequested = ContinuousClock.now
+                    let current = SwipeRender(
+                        index: index, arrival: arrival, renderRequested: renderRequested,
+                        after: previous
                     ) {
                         try measuring.renderRAW(url: raw, variant: variant)
                     }
+                    renders.append(current)
                     started += 1
-                }
-                // The last photo stays on screen: wait for its render rather than
-                // cancelling it, so the walk does not count the final render as waste.
-                if let last = current {
-                    await last.task.value
-                    if let finished = last.finished {
+                    if dwell > 0 {
+                        try await Task.sleep(for: .milliseconds(dwell))
+                    }
+                    let leaving = ContinuousClock.now
+                    if let finished = current.finished, finished.at <= leaving {
                         if finished.error == nil {
                             ready += 1
                             measurements.append(
                                 LabMeasurement(
                                     name: "swipe-render-ready",
-                                    value: milliseconds(finished.at, since: last.renderStarted),
+                                    value: milliseconds(
+                                        finished.at, since: renderRequested),
                                     unit: "ms",
                                     tags: [
-                                        "dwellMs": String(dwell), "index": String(last.index),
+                                        "dwellMs": String(dwell), "index": String(index),
                                         "status": "ok",
                                     ]))
                             measurements.append(
                                 LabMeasurement(
                                     name: "swipe-arrival-to-ready",
-                                    value: milliseconds(finished.at, since: last.arrival),
-                                    unit: "ms",
+                                    value: milliseconds(finished.at, since: arrival), unit: "ms",
                                     tags: [
-                                        "dwellMs": String(dwell), "index": String(last.index),
+                                        "dwellMs": String(dwell), "index": String(index),
                                         "status": "ok",
                                     ]))
                         } else {
@@ -234,10 +184,10 @@ public enum RAWDisplaySwipes {
                             measurements.append(
                                 LabMeasurement(
                                     name: "swipe-render-failed",
-                                    value: milliseconds(finished.at, since: last.renderStarted),
+                                    value: milliseconds(finished.at, since: renderRequested),
                                     unit: "ms",
                                     tags: [
-                                        "dwellMs": String(dwell), "index": String(last.index),
+                                        "dwellMs": String(dwell), "index": String(index),
                                         "status": finished.error ?? "noPixels",
                                     ]))
                         }
@@ -245,16 +195,21 @@ public enum RAWDisplaySwipes {
                         wasted += 1
                         measurements.append(
                             LabMeasurement(
-                                name: "swipe-render-abandoned", value: 0, unit: "ms",
+                                name: "swipe-render-wasted",
+                                value: displayMilliseconds(since: renderRequested), unit: "ms",
                                 tags: [
-                                    "dwellMs": String(dwell), "index": String(last.index),
-                                    "status": "no-completion-record",
+                                    "dwellMs": String(dwell), "index": String(index),
+                                    "status": "still-running-at-dwell-end",
                                 ]))
                     }
                 }
+                // One render at a time: let the chained decodes drain so nothing leaks.
+                if let last = renders.last {
+                    await last.task.value
+                }
             } catch {
-                current?.task.cancel()
-                await current?.task.value
+                renders.last?.task.cancel()
+                await renders.last?.task.value
                 throw error
             }
             // A cancel that arrived while the last render was draining still has to

@@ -17,29 +17,16 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
     /// tester releases the gate, so cancellation meets work that is truly in flight.
     private let renderEntered: AsyncStream<Void>.Continuation?
     private let renderRelease: DispatchSemaphore?
-    /// When set, every embedded-preview request announces itself, so a test can time
-    /// a cancellation to a specific photo without sleeping.
-    private let previewEntered: AsyncStream<Void>.Continuation?
-    /// Signalled when a render enters; later preview requests wait for it when
-    /// `previewWaitsForRender` is set, so a test knows the first render is in flight.
-    private let renderEntrySignal: DispatchSemaphore?
-    private let previewWaitsForRender: Bool
 
     init(
         renderDelay: Double = 0, renderError: String? = nil,
         renderEntered: AsyncStream<Void>.Continuation? = nil,
-        renderRelease: DispatchSemaphore? = nil,
-        previewEntered: AsyncStream<Void>.Continuation? = nil,
-        renderEntrySignal: DispatchSemaphore? = nil,
-        previewWaitsForRender: Bool = false
+        renderRelease: DispatchSemaphore? = nil
     ) {
         self.renderDelay = max(0, renderDelay)
         self.renderError = renderError
         self.renderEntered = renderEntered
         self.renderRelease = renderRelease
-        self.previewEntered = previewEntered
-        self.renderEntrySignal = renderEntrySignal
-        self.previewWaitsForRender = previewWaitsForRender
     }
 
     func count(_ name: String) -> Int {
@@ -52,7 +39,6 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
 
     private func finishRender() throws {
         renderEntered?.yield()
-        renderEntrySignal?.signal()
         if let renderRelease {
             // Bounded so a broken implementation cannot hang the suite.
             _ = renderRelease.wait(timeout: .now() + 5)
@@ -63,15 +49,11 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
         try Task.checkCancellation()
     }
 
-    func renderRAW(url: URL, variant: RAWDisplayVariant) throws -> DisplayRenderTiming {
-        try Task.checkCancellation()
-        increment("raw-render")
-        increment("raw-\(variant.name)")
-        try finishRender()
+    private func timing(requestedLongEdge: Int, fallbackEdge: Int) -> DisplayRenderTiming {
         var timing = DisplayRenderTiming()
         timing.milliseconds = renderDelay * 1_000 + 0.1
-        timing.width = max(variant.requestedLongEdge, 120)
-        timing.height = max(variant.requestedLongEdge, 120) * 2 / 3
+        timing.width = max(requestedLongEdge, fallbackEdge)
+        timing.height = max(requestedLongEdge, fallbackEdge) * 2 / 3
         timing.nativeWidth = 4_000
         timing.nativeHeight = 3_000
         timing.decodedBytes = timing.width * timing.height * 4
@@ -84,6 +66,14 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
         return timing
     }
 
+    func renderRAW(url: URL, variant: RAWDisplayVariant) throws -> DisplayRenderTiming {
+        try Task.checkCancellation()
+        increment("raw-render")
+        increment("raw-\(variant.name)")
+        try finishRender()
+        return timing(requestedLongEdge: variant.requestedLongEdge, fallbackEdge: 120)
+    }
+
     func renderCameraPreview(
         url: URL, variant: CameraPreviewVariant
     ) throws -> DisplayRenderTiming {
@@ -91,20 +81,7 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
         increment("camera-render")
         increment("camera-\(variant.name)")
         try finishRender()
-        var timing = DisplayRenderTiming()
-        timing.milliseconds = renderDelay * 1_000 + 0.1
-        timing.width = max(variant.requestedLongEdge, 160)
-        timing.height = max(variant.requestedLongEdge, 160) * 2 / 3
-        timing.nativeWidth = 4_000
-        timing.nativeHeight = 3_000
-        timing.decodedBytes = timing.width * timing.height * 4
-        timing.error = renderError
-        if renderError != nil {
-            timing.width = 0
-            timing.height = 0
-            timing.decodedBytes = 0
-        }
-        return timing
+        return timing(requestedLongEdge: variant.requestedLongEdge, fallbackEdge: 160)
     }
 
     func rawImage(url: URL, variant: RAWDisplayVariant) throws -> CGImage {
@@ -121,14 +98,7 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
 
     func embeddedPreview(url: URL, maxPixel: Int) throws -> EmbeddedPreviewTiming {
         try Task.checkCancellation()
-        previewEntered?.yield()
         increment("embedded-preview")
-        if previewWaitsForRender,
-            lock.withLock({ counts["embedded-preview", default: 0] }) > 1
-        {
-            // Bounded; the second photo's preview waits until the first render entered.
-            _ = renderEntrySignal?.wait(timeout: .now() + 5)
-        }
         return EmbeddedPreviewTiming(milliseconds: 0.05, width: 400, height: 267)
     }
 

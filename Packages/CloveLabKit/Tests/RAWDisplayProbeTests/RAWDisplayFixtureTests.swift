@@ -43,6 +43,7 @@ struct RAWDisplayFixtureTests {
             variant: RAWDisplayVariant(
                 name: "native", scale: .native, draft: false, context: .reused, role: .native))
         #expect(native.error == nil)
+        #expect(native.orientation == 1)
         #expect(max(native.width, native.height) == max(native.nativeWidth, native.nativeHeight))
         for edge in [400, 1_500] {
             for draft in [false, true] {
@@ -97,12 +98,15 @@ struct RAWDisplayFixtureTests {
         let full = try renderer.render(
             url: url, variant: CameraPreviewVariant(name: "full", kind: .fullDecode))
         #expect(full.error == nil)
-        // Orientation 6 swaps the edges, as the embedded preview does.
+        // Orientation 6 swaps the edges, as the embedded preview does, and the row
+        // records the source orientation without a timed redraw.
+        #expect(full.orientation == 6)
         #expect(full.width == 20 && full.height == 40)
         #expect(full.nativeWidth == 20 && full.nativeHeight == 40)
         let thumbnail = try renderer.render(
             url: url, variant: CameraPreviewVariant(name: "thumb", kind: .screenThumbnail(20)))
         #expect(thumbnail.error == nil)
+        #expect(thumbnail.orientation == 6)
         #expect(thumbnail.width == 10 && thumbnail.height == 20)
     }
 
@@ -138,10 +142,15 @@ struct RAWDisplayFixtureTests {
         for expected in [
             "render-first-bitmap", "render-summary-median", "colour-deltae00-mean",
             "swipe-preview", "swipe-renders-started", "cache-held-decoded-memory",
-            "grid-folder-projection", "cache-encode", "cache-decode",
+            "cache-held-resident", "grid-folder-projection", "cache-encode", "cache-decode",
         ] {
             #expect(names.contains(expected), "missing \(expected)")
         }
+        #expect(
+            report.measurements.contains {
+                $0.name == "render-first-bitmap" && $0.tags["phase"] == "startup"
+            })
+        #expect(report.measurements.allSatisfy { $0.tags["file"]?.contains("/") != true })
         #expect(report.context["bestScreenVariant"] != "none")
         #expect(report.context["bestGridVariant"] != "none")
         #expect(await progress.last?.completed ?? 0 > 0)

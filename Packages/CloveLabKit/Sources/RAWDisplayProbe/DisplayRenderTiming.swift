@@ -1,6 +1,7 @@
 import CoreGraphics
 import Darwin
 import Foundation
+import ImageIO
 import LabSupport
 
 /// Why a render produced no pixels. Recorded as a report tag, never thrown past the suite.
@@ -21,6 +22,9 @@ public struct DisplayRenderTiming: Sendable {
     public var decodedBytes: Int = 0
     public var residentBefore: UInt64 = 0
     public var sampledPeakResident: UInt64 = 0
+    /// Source EXIF orientation, 1–8. The RAW route applies it in the decoder; the
+    /// camera HEIF full and subsample routes report it and orient only for display.
+    public var orientation: Int = 1
     public var error: String?
 
     public init() {}
@@ -51,6 +55,11 @@ final class RAWDisplayResidentSampler: @unchecked Sendable {
         return lock.withLock { peak }
     }
 
+    /// Current process RSS in bytes, for before/after measurements.
+    static func currentBytes() -> UInt64 {
+        resident()
+    }
+
     private func sample() {
         let value = Self.resident()
         lock.withLock { peak = max(peak, value) }
@@ -66,6 +75,16 @@ final class RAWDisplayResidentSampler: @unchecked Sendable {
         }
         return status == KERN_SUCCESS ? info.resident_size : 0
     }
+}
+
+/// Source EXIF orientation from ImageIO, without decoding pixels.
+func displaySourceOrientation(url: URL) -> Int {
+    guard
+        let source = CGImageSourceCreateWithURL(
+            url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    else { return 1 }
+    return properties[kCGImagePropertyOrientation] as? Int ?? 1
 }
 
 /// Milliseconds between two `ContinuousClock` instants.
@@ -119,6 +138,7 @@ extension DisplayRenderTiming {
         tags["variant"] = variantName
         tags["role"] = role
         tags["phase"] = phase.rawValue
+        tags["orientation"] = String(orientation)
         tags["status"] = error ?? "ok"
         return [
             ("render-first-bitmap", milliseconds, "ms"),

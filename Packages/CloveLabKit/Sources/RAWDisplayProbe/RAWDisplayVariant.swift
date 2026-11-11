@@ -141,7 +141,12 @@ public struct CameraPreviewVariant: Sendable, Hashable {
     }
 }
 
-/// Whether a render is the first of its variant in this run or a repeated one.
+/// Where a render sits in the run: a one-off startup render, the first measured
+/// render of its variant, or a repeat.
 public enum RAWDisplayPhase: String, Sendable, CaseIterable {
+    /// One untimed render before the cold pass, reported on its own row. It absorbs
+    /// the process's first Core Image and RAW setup so variant a's cold number is
+    /// comparable with the others.
+    case startup
     case cold, warm
 }
