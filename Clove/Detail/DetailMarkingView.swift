@@ -338,7 +338,7 @@ struct DetailMarkingView: View {
         .overlay {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
-                bottomInset: chromeIsVisible ? controlsHeight : 0)
+                controlsHeight: controlsHeight, chromeIsVisible: chromeIsVisible)
         }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size

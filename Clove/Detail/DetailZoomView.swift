@@ -137,7 +137,7 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports one finished marking swipe, with its release travel (PRD Rating by swipe distance).
     let onMarkingSwipe: (DetailMarkingSwipeEnd) -> Void
 
-    /// Cancels pending auto-advance when marking starts.
+    /// Cancels pending auto-advance when navigation or marking starts.
     let onSwipeBegin: () -> Void
 
     let hasPrevious: Bool
@@ -326,10 +326,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         // Read before the pixels change: the point the viewport centres on in the old bitmap.
         let kept = zoomSnapshot
         imageView.image = pixels.map { UIImage(cgImage: $0) }
-        if pixels != nil, !scrollView.transform.isIdentity, !isNavigating {
-            scrollView.layer.removeAllAnimations()
-            scrollView.transform = .identity
-        }
+        if !isNavigating { scrollView.transform = .identity }
         shownPixels = pixels.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
         self.fullResolutionPixels = fullResolution
         updateMaximumZoom()
@@ -413,6 +410,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        markingPan.isEnabled = false
+        markingPan.isEnabled = true
+    }
+
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         // The zoom level decides whether a one-finger drag pans or marks, so the split follows
         // every pinch, including one the screen did not ask for (PRD Detail gestures).
@@ -434,9 +436,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 == .centre
         }
         guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
-        guard pan.numberOfTouches == 1, scrollView.zoomScale <= DetailFitScale.tolerance else {
-            return false
-        }
+        guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
         let translation = pan.translation(in: self)
         isNavigating =
             NavigationSwipeRules.axis(
@@ -452,11 +452,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return swipe != nil
     }
 
-    /// Lets the marking pan and the scroll view's own pan read the same drag.
-    ///
-    /// Without this the two pans cancel each other, and which one wins is undefined. At fit the
-    /// scroll view has nothing to scroll, so the drag reaches the marking pan intact; while
-    /// zoomed the marking pan is off and the scroll view pans alone (PRD Detail gestures).
+    /// Lets the fit pan read drags alongside scrolling and yield to pinch.
+    /// Zoomed one-finger drags belong to the scroll view alone.
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
@@ -494,10 +491,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Starts the session for the direction the drag began as.
     private func beginMarkingSwipe() {
-        // The screen drops a pending auto-advance before it can swap the photo out from under the
-        // finger and send this swipe's travel to a different photo (PRD Auto-advance). A drag that
-        // ends up writing nothing therefore also keeps the current photo, which is what the user
-        // still working on it expects.
+        // Keep the current photo under the finger, even if this drag writes nothing.
         onSwipeBegin?()
         haptics.prepare()
         feedback?.clear()
@@ -560,7 +554,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private func handleNavigationPan(_ pan: UIPanGestureRecognizer) {
         let travel = Double(pan.translation(in: self).x)
         switch pan.state {
-        case .began, .changed:
+        case .began:
+            onSwipeBegin?()
+            fallthrough
+        case .changed:
             scrollView.layer.removeAllAnimations()
             let offset = NavigationSwipeRules.offset(
                 travel: travel, width: Double(bounds.width),
@@ -570,25 +567,22 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             let step = NavigationSwipeRules.step(
                 travel: travel, velocity: Double(pan.velocity(in: self).x),
                 width: Double(bounds.width), hasPrevious: hasPrevious, hasNext: hasNext)
-            settleNavigation(step: step)
+            if step != 0 {
+                isNavigating = false
+                onEdgeTap?(step > 0 ? .next : .previous)
+                return
+            }
+            fallthrough
         case .cancelled, .failed:
-            settleNavigation(step: 0)
-        default:
-            break
-        }
-    }
-
-    private func settleNavigation(step: Int) {
-        isNavigating = false
-        if step != 0 {
-            onEdgeTap?(step > 0 ? .next : .previous)
-        } else {
+            isNavigating = false
             UIView.animate(
                 withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8,
-                initialSpringVelocity: 0, options: [.curveEaseOut, .beginFromCurrentState]
+                initialSpringVelocity: 0, options: [.curveEaseOut]
             ) {
                 self.scrollView.transform = .identity
             }
+        default:
+            break
         }
     }
 
