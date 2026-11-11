@@ -109,6 +109,9 @@ struct DetailMarkingView: View {
     /// C5's undo through the one model call U8 adds; the button stays disabled until then.
     var undo: () -> Void = {}
 
+    /// Group review supplies only its header, filter choice and finishing pill.
+    var groupReview: GroupReviewChrome?
+
     @Environment(\.displayScale) private var displayScale
     @Environment(\.cloveTheme) private var theme
     @State private var hidesChrome = false
@@ -175,54 +178,15 @@ struct DetailMarkingView: View {
     @State private var isPickingFolder = false
 
     var body: some View {
-        Group {
-            if browsing.state.route == .detail {
-                detailLayout
-            } else {
-                groupLayout
+        detailLayout
+            .folderPicker(isPresented: $isPickingFolder) { url in
+                await browsing.openPickedFolder(url)
             }
-        }
-        .folderPicker(isPresented: $isPickingFolder) { url in
-            await browsing.openPickedFolder(url)
-        }
-        .task(id: photo.id) { await loadPreview(for: photo) }
-        .onDisappear {
-            upgradeTask?.cancel()
-            Task { await images.cancelPrefetch() }
-        }
-    }
-
-    /// Group review is a separate design task; it keeps its current layout and controls.
-    private var groupLayout: some View {
-        VStack(spacing: 0) {
-            DetailMarkingHUD(
-                photo: photo,
-                settings: settings,
-                saveState: saveState,
-                zoomName: zoomName,
-                rate: { rate($0) },
-                label: { choose($0) },
-                toggleReject: { toggleReject() },
-                undo: undo)
-            // The open folder's own save state, then this photo's failure with the PRD's Retry
-            // and Cancel (PRD P0-08). The folder's row carries a location loss; the photo's row
-            // carries one write that did not confirm.
-            SaveStatusIndicator(browsing: browsing, identifierPrefix: "clove.detail.saveStatus")
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
-            FolderSaveBanner(
-                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
-            if let situation = failureSituation {
-                SaveFailureBanner(
-                    situation: situation, identifierPrefix: "clove.detail.saveFailure",
-                    perform: perform
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
+            .task(id: photo.id) { await loadPreview(for: photo) }
+            .onDisappear {
+                upgradeTask?.cancel()
+                Task { await images.cancelPrefetch() }
             }
-            Divider()
-            previewArea
-        }
     }
 
     private var chromeIsVisible: Bool { !hidesChrome && scale <= DetailFitScale.tolerance }
@@ -232,23 +196,33 @@ struct DetailMarkingView: View {
     private var detailLayout: some View {
         VStack(spacing: 0) {
             BrowsingHeader(
-                title: photo.fileName, titleIdentifier: "clove.detail.fileName",
+                title: groupReview.map { "Group · \($0.group.members.count.formatted()) photos" }
+                    ?? photo.fileName,
+                titleIdentifier: groupReview == nil ? "clove.detail.fileName" : "clove.group.title",
                 back: { browsing.back() }
             ) {
                 HStack(spacing: 0) {
-                    Text(detailSubtitle)
-                        .accessibilityIdentifier("clove.detail.zoom")
+                    Text(
+                        groupReview.map { "\($0.undecided.formatted()) undecided" }
+                            ?? detailSubtitle
+                    )
+                    .accessibilityIdentifier(
+                        groupReview == nil ? "clove.detail.zoom" : "clove.group.undecided")
                     if scale <= DetailFitScale.tolerance {
                         SaveStatusIndicator(
                             browsing: browsing, identifierPrefix: "clove.detail.saveState",
-                            photo: photo.id)
+                            photo: groupReview == nil ? photo.id : nil)
                     }
                 }
             } tools: {
                 if chromeIsVisible {
-                    GlassIconButton(
-                        label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
-                    ) { showsInformation = true }
+                    if let groupReview {
+                        groupMenu(groupReview)
+                    } else {
+                        GlassIconButton(
+                            label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
+                        ) { showsInformation = true }
+                    }
                     GlassIconButton(
                         label: "Undo", symbol: "arrow.uturn.backward",
                         identifier: "clove.detail.undo",
@@ -264,11 +238,21 @@ struct DetailMarkingView: View {
                         VStack(spacing: 8) {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                                open: actions.openPhoto, groups: browsing.groups,
+                                open: actions.openPhoto,
+                                failedPhotos: groupReview == nil
+                                    ? []
+                                    : Set(
+                                        browsing.unsavedChanges.filter { $0.state.failure != nil }
+                                            .map(\.photo)),
+                                groups: groupReview == nil ? browsing.groups : [],
                                 openGroup: {
                                     actions.markingSwipeBegan()
                                     browsing.openGroup($0)
                                 })
+                            if let action = groupReview?.action {
+                                action.disabled(browsing.isMovingRejects)
+                                    .padding(.vertical, 6)
+                            }
                             DetailMarkCapsule(
                                 marks: displayMarks, settings: settings,
                                 previewRating: swipeFeedback.rating,
@@ -304,6 +288,23 @@ struct DetailMarkingView: View {
         }
     }
 
+    private func groupMenu(_ chrome: GroupReviewChrome) -> some View {
+        Menu {
+            Toggle("Undecided only", isOn: chrome.undecidedOnly)
+                .accessibilityIdentifier("clove.group.undecidedOnly")
+            Button("Find similar shots again") { Task { await browsing.runGroupingAgain() } }
+                .accessibilityIdentifier("clove.group.runAgain")
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.title3)
+                .foregroundStyle(Color.clove.text.primary)
+                .frame(width: 44, height: 44)
+                .cloveGlass(in: Circle())
+        }
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("clove.group.more")
+    }
+
     private var detailSubtitle: String {
         var parts: [String] = []
         if let index = order.firstIndex(where: { $0.id == photo.id }) {
@@ -336,8 +337,7 @@ struct DetailMarkingView: View {
             probe: probe
         )
         .opacity(
-            browsing.state.route == .detail && displayMarks.isRejected
-                ? theme.tokens.rejectedOpacity : 1
+            displayMarks.isRejected ? theme.tokens.rejectedOpacity : 1
         )
         .overlay {
             DetailSwipeFeedbackBadge(

@@ -13,10 +13,7 @@ struct GroupScreen: View {
         Group {
             if let group = browsing.currentGroup, let photo = browsing.groupPhoto {
                 HStack(spacing: 0) {
-                    VStack(spacing: 0) {
-                        markingView(photo: photo)
-                        finishingAction(group: group, photo: photo)
-                    }
+                    markingView(group: group, photo: photo)
                     if horizontalSizeClass == .regular {
                         GroupSidebar(
                             photos: visiblePhotos, current: photo.id,
@@ -50,7 +47,7 @@ struct GroupScreen: View {
         browsing.currentGroup.map { GroupPhotoNavigation(group: $0, undecidedOnly: undecidedOnly) }
     }
 
-    private func markingView(photo: GridPhoto) -> some View {
+    private func markingView(group: BrowsingGroup, photo: GridPhoto) -> some View {
         DetailMarkingView(
             browsing: browsing, photo: photo, settings: store.settings,
             saveState: browsing.saveText(for: photo.id), images: browsing.detailImages,
@@ -58,20 +55,26 @@ struct GroupScreen: View {
             actions: DetailMarkingActions(
                 apply: { change, photo in browsing.apply(change, to: photo.id) },
                 marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
-                step: step, markingSwipeBegan: { autoAdvance.cancel() }, openPhoto: show))
+                step: step, markingSwipeBegan: { autoAdvance.cancel() }, openPhoto: show),
+            groupReview: GroupReviewChrome(
+                group: group,
+                undecided: GroupUndecidedCount(browsing.groupPhotos.map(\.marks)).undecided,
+                undecidedOnly: $undecidedOnly, action: finishingAction(group: group, photo: photo)))
     }
 
-    @ViewBuilder private func finishingAction(group: BrowsingGroup, photo: GridPhoto) -> some View {
+    private func finishingAction(group: BrowsingGroup, photo: GridPhoto) -> PillAction? {
         let count = GroupUndecidedCount(browsing.groupPhotos.map(\.marks))
         let plan = GroupFinishingPlan(
             group: group, action: .rejectUnmarked, currentPhoto: photo.id, marks: marks)
         if count.undecided == 0 {
-            PillAction(title: "Continue →", tone: .accent, identifier: "clove.group.continue") {
+            return PillAction(
+                title: "Continue →", tone: .accent, identifier: "clove.group.continue"
+            ) {
                 autoAdvance.cancel()
                 browsing.continueFromGroup()
             }
         } else if plan.availability.isAvailable && !plan.isEmpty {
-            PillAction(
+            return PillAction(
                 title: "Reject \(plan.rejects.count.formatted()) unmarked", tone: .reject,
                 identifier: "clove.group.rejectUnmarked"
             ) {
@@ -79,6 +82,7 @@ struct GroupScreen: View {
                 browsing.runGroupFinishing(plan)
             }
         }
+        return nil
     }
 
     private func show(_ photo: PhotoIdentity) {
