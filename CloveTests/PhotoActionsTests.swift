@@ -18,6 +18,26 @@ struct PhotoActionsTests {
         )
     }
 
+    @Test func toastUndoRestoresBothMovedAndKeptSamplePhotos() async throws {
+        let library = TestLibrary.sample
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let rejected = model.allPlacedPhotos.filter(\.marks.isRejected).map(\.id)
+        let kept = try #require(rejected.first)
+        let moved = try #require(rejected.last)
+        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        model.runRejectMove(plan, kept: [kept]) { _ in }
+        await model.drainActions()
+        let completed = try #require(model.lastRejectMove)
+        #expect(model.shownMarks(for: kept).rating == .unrated)
+        #expect(!model.photos.contains { $0.id == moved })
+        model.undoRejectMove(completed)
+        await model.drainActions()
+        #expect(model.shownMarks(for: kept).isRejected)
+        #expect(model.photos.contains { $0.id == moved && $0.marks.isRejected })
+        #expect(!model.isRejectMoveToastVisible)
+    }
+
     @Test func queuedMoveCannotConsumeALaterReject() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)

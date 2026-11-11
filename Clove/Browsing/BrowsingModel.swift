@@ -405,12 +405,16 @@ final class BrowsingModel {
         state.route = .detail
     }
 
+    /// The group's visible grid cover when it opened, retained if marking hides the whole group.
+    private var groupEntryCover: PhotoIdentity?
+
     /// Opens on the first undecided member, falling back to the first photo of a done group.
     func openGroup(_ group: BrowsingGroup) {
         guard
             let first = group.members.first(where: { shownMarks(for: $0).isUndecided })
                 ?? group.members.first
         else { return }
+        groupEntryCover = photos.first(where: { group.members.contains($0.id) })?.id
         state.groupPosition = BrowsingGroupPosition(group: group.id, photo: first)
         state.currentPhoto = first
         library.setEntryResumePhoto(first)
@@ -524,7 +528,7 @@ final class BrowsingModel {
         else { return }
         switch GroupContinueDestination.next(
             after: group.id, orderedPhotos: allPlacedPhotos, groups: groups,
-            visiblePhotos: Set(photos.map(\.id)))
+            visiblePhotos: Set(photos.map(\.id)), entryCover: groupEntryCover)
         {
         case .group(let next): openGroup(next)
         case .photo(let next): openPhoto(next)
@@ -720,7 +724,8 @@ final class BrowsingModel {
 
     /// The toast restores the completed move and the exact marks its staged keeps left behind.
     func undoRejectMove(_ completed: CompletedRejectMove) {
-        guard completed.folder == state.folder, completed.openGeneration == openGeneration,
+        guard !isMovingRejects, !isChangingFolder,
+            completed.folder == state.folder, completed.openGeneration == openGeneration,
             let photo = completed.keptIdentities.first ?? completed.result.movedIdentities.first
         else { return }
         let kept = (keptEditsByMove[completed.id] ?? []).compactMap {
@@ -1494,6 +1499,7 @@ final class BrowsingModel {
         leavePrompt = nil
         // The finishing action, its failure and its event count belong to the folder that is
         // gone, so a new folder's group view never shows or advances on the old one (PRD P0-12).
+        groupEntryCover = nil
         lastGroupFinishing = nil
         dismissedGroupFailure = nil
         groupFinishingRuns = 0

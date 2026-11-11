@@ -37,14 +37,6 @@ func groupCullingRating(_ value: Int) -> Rating {
     return rating
 }
 
-/// An enabled-level set built from valid test values (PRD Enabled rating levels).
-func groupCullingEnabledRatings(_ values: [Int]) -> EnabledRatings {
-    EnabledRatings(values.map(groupCullingRating)) ?? .all
-}
-
-/// Two enabled levels, so Keep this has to use the lowest rather than the default 1.
-let groupCullingTwoAndFour = groupCullingEnabledRatings([2, 4])
-
 /// Marks a photo has when it has no rating, no label and no Reject (PRD P0-05).
 let groupCullingUnmarked = PhotoMarks()
 

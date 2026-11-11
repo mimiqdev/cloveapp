@@ -5,10 +5,8 @@ import SwiftUI
 /// How a preview's zoom behaves when the screen shows another photo (PRD P0-04; PRD In-group
 /// culling, synchronized zoom).
 ///
-/// PRD Gesture-related settings keeps zoom while navigating on by default in groups and off in
-/// regular detail, and PRD In-group culling adds the position: in a group the next photo opens on
-/// the same spot of the image, so comparing two frames of a burst is one step (PRD P0-12). A
-/// regular detail view keeps the zoom level only, because its photos need no shared position.
+/// Group review always keeps scale and position for comparing the same crop. Regular detail
+/// optionally keeps the zoom level, without sharing position between unrelated photos.
 struct DetailZoomPolicy: Hashable {
     /// Whether the next photo keeps the zoom level (PRD Gesture-related settings).
     var keepsScale: Bool
@@ -22,8 +20,7 @@ struct DetailZoomPolicy: Hashable {
         DetailZoomPolicy(keepsScale: settings.keepZoom.inDetail, keepsPosition: false)
     }
 
-    /// The zoom a group view keeps while navigating its group; on by default (PRD In-group
-    /// culling, synchronized zoom).
+    /// Group zoom and pan are always synced, as specified by the handoff.
     static let group = DetailZoomPolicy(keepsScale: true, keepsPosition: true)
 }
 
@@ -77,7 +74,7 @@ struct DetailMarkingActions {
 /// save state in one place, and the group view's photos are marked and recovered exactly like a
 /// single photo's.
 ///
-/// Detail presentation follows the handoff; the group screen retains its existing layout.
+/// Detail and group review share the same presentation; the group supplies its own header and pill.
 struct DetailMarkingView: View {
     /// The scene's browsing state, which carries the folder's save state and the retry calls
     /// (PRD P0-08).

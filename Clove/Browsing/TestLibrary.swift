@@ -551,6 +551,11 @@ final class TestLibrary: FolderLibrary {
             destinationURL: destination)
     }
 
+    /// Move undo resolves kept sample photos through the same identity-based seam as production.
+    func scannedSet(for identity: PhotoIdentity) -> ScannedPhotoSet? {
+        stored.first(where: { $0.id == identity }).flatMap { scannedSet(for: $0) }
+    }
+
     /// The sample's in-memory set behind one photo, with its companions and packet (P0-10).
     private func scannedSet(for photo: GridPhoto) -> ScannedPhotoSet? {
         let root = URL(fileURLWithPath: "/clove-test-library", isDirectory: true)

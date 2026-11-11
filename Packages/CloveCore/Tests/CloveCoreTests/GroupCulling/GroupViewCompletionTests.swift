@@ -33,6 +33,23 @@ struct GroupContinueTests {
                 visiblePhotos: Set(photos.map(\.id))) == .grid)
     }
 
+    @Test func filteringBeforeCollapsingKeepsInterleavedSinglesInGridOrder() {
+        let next = BrowsingGroup(id: second.id, members: [photos[2].id, photos[4].id])
+        #expect(
+            GroupContinueDestination.next(
+                after: first.id, orderedPhotos: photos, groups: [first, next],
+                visiblePhotos: [photos[0].id, photos[3].id, photos[4].id]) == .photo(photos[3].id))
+    }
+
+    @Test func aHiddenGroupKeepsItsEntryCoverAfterTheFilterRemovedAllItsMembers() {
+        let shifted = BrowsingGroup(id: first.id, members: [photos[0].id, photos[3].id])
+        #expect(
+            GroupContinueDestination.next(
+                after: shifted.id, orderedPhotos: photos, groups: [shifted],
+                visiblePhotos: [photos[1].id, photos[4].id], entryCover: photos[3].id
+            ) == .photo(photos[4].id))
+    }
+
     @Test func filteredOrderSkipsHiddenItemsEvenWhenTheCurrentGroupDisappeared() {
         #expect(
             GroupContinueDestination.next(
