@@ -44,7 +44,7 @@ private final class DetailCancellation: Sendable {
 /// Detail and group review's shared image scheduler. Embedded previews have their
 /// own bounded lane. Screen RAW, native RAW and full camera decodes share one lane.
 /// Obsolete full-size calls drain without publishing. Running screen renders can
-/// survive caller cancellation; the current window decides whether to hold them.
+/// survive caller cancellation and populate the compressed cache.
 public actor DetailPipeline {
     private enum Lane: Sendable { case preview, render }
     private enum Effort: Sendable { case previewOnly, screen, best }
@@ -91,24 +91,16 @@ public actor DetailPipeline {
         self.sizes = sizes
     }
 
-    /// Called before arrival reads. Releases the full image on photo/mode change,
-    /// keeps only this photo's screen render and its two neighbours, and drops old work.
+    /// Called before arrival reads. Releases the full image on photo/mode change
+    /// and cancels queued work. Running screen renders can finish into the cache.
     public func navigate(
-        to current: DetailRequest, neighbours: [DetailRequest],
+        to current: DetailRequest,
         generation: UInt64? = nil
     ) {
         guard !closed, !Task.isCancelled else { return }
         if let generation, generation != navigationGeneration { return }
-        cache.navigate(to: current, neighbours: neighbours)
-        let window = Set(([current] + neighbours.prefix(2)).compactMap(DetailCache.screenKey))
-        for job in Array(jobs.values) {
-            if isRunningScreen(job), let key = DetailCache.screenKey(job.request),
-                window.contains(key)
-            {
-                continue
-            }
-            cancel(job.id)
-        }
+        cache.navigate(to: current)
+        for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
     }
 
     /// The app reserves arrival ownership before any file-system work. An older
@@ -159,7 +151,7 @@ public actor DetailPipeline {
         }
     }
 
-    /// Leaving the detail stage keeps neighbouring screen renders, but never a
+    /// Leaving the detail stage keeps compressed images, but never a
     /// full camera decode or native RAW allocation.
     public func leavePhoto(generation: UInt64) {
         guard generation > navigationGeneration else { return }
@@ -194,6 +186,15 @@ public actor DetailPipeline {
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             guard !closed else { throw DetailPipelineError.closed }
+            if let old = latest[consumer] { cancel(old, preservingRunningScreen: true) }
+            let cache = cache
+            let sizes = sizes
+            let hit = await Task.detached(priority: .userInitiated) {
+                Self.cached(request, effort: effort, cache: cache, sizes: sizes)
+            }.value
+            try Task.checkCancellation()
+            guard !closed else { throw DetailPipelineError.closed }
+            if let hit { return hit }
             return try await withCheckedThrowingContinuation { continuation in
                 if let old = latest[consumer] { cancel(old, preservingRunningScreen: true) }
                 if queue.count >= queueLimit {
@@ -299,6 +300,51 @@ public actor DetailPipeline {
         return nil
     }
 
+    /// Cache reads decode on a worker before admission, so hits never wait for a lane.
+    private nonisolated static func cached(
+        _ request: DetailRequest, effort: Effort, cache: DetailCache,
+        sizes: any DetailNativeSizeReading
+    ) -> DetailResult? {
+        if let raw = request.raw, !isCurrent(raw) { return .unavailable(.sourceChanged) }
+        let camera = cameraSource(request, cache: cache)
+        let usesRAW = request.raw != nil && camera == nil
+        if effort == .best {
+            let source =
+                camera ?? request.raw ?? (request.wantsNativeResolution ? request.jpeg : nil)
+            if let source {
+                let key = DetailCacheKey(
+                    source: source, locationIdentity: request.locationIdentity,
+                    purpose: usesRAW ? .nativeRAW : .fullRaster)
+                return cache.native(for: key).map { verified(.available($0)) }
+            }
+        }
+        if usesRAW {
+            if effort == .best { return nil }
+            if let screen = cache.screen(for: request) { return verified(.available(screen)) }
+            if effort == .screen { return nil }
+        }
+        var best: DetailImage?
+        for step in DetailPreviewPlan.steps(for: request) {
+            guard isCurrent(step.source) else { return .unavailable(.sourceChanged) }
+            let key = DetailCacheKey(
+                source: step.source, locationIdentity: request.locationIdentity,
+                purpose: step.purpose(displayPixels: request.displayPixels))
+            guard let image = cache.image(for: key) else { continue }
+            if DetailPreviewPlan.isUsable(image, from: step) { best = image; break }
+            if best == nil { best = image }
+        }
+        guard let best else { return nil }
+        let size =
+            camera.map { sizes.nativeSize(of: $0, isRAW: false) }
+            ?? fullResolutionSize(
+                for: request, previewLongEdge: best.longEdge, cache: cache, sizes: sizes)
+        let shown = best.withFullResolution(size, hasRAW: request.raw != nil)
+        if effort == .best, request.jpeg == nil {
+            return verified(.available(shown.limited(by: .noHigherResolution)))
+        }
+        return verified(.available(shown))
+    }
+
     private nonisolated static func perform(
         _ job: Job, cache: DetailCache,
         reader: any DetailReading, sizes: any DetailNativeSizeReading
@@ -312,14 +358,14 @@ public actor DetailPipeline {
             return verified(.available(held))
         }
 
-        var best: DetailImage? = usesRAW ? cache.screen(for: request) : nil
+        var best: DetailImage?
         var failures: [DetailFailure] = []
-        for step in best == nil ? DetailPreviewPlan.steps(for: request) : [] {
+        for step in DetailPreviewPlan.steps(for: request) {
             guard isCurrent(step.source) else { return .unavailable(.sourceChanged) }
             let key = DetailCacheKey(
                 source: step.source, locationIdentity: request.locationIdentity,
                 purpose: step.purpose(displayPixels: request.displayPixels))
-            var image = cache.preview(for: key)
+            var image = cache.image(for: key)
             if image == nil {
                 if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
                 switch await reader.read(step, displayPixels: request.displayPixels) {
@@ -327,7 +373,7 @@ public actor DetailPipeline {
                     let candidate = DetailImage(
                         image: pixels, source: step.source,
                         quality: step.quality, hasRAW: false)
-                    cache.storePreview(candidate, for: key)
+                    job.cancellation.storeIfActive { cache.store(candidate, for: key) }
                     image = candidate
                 case .cannotOpen: failures.append(.cannotOpen)
                 case .noUsablePreview: failures.append(.noUsablePreview)
@@ -461,7 +507,7 @@ public actor DetailPipeline {
     }
 
     /// Cache insertion and explicit discard share the same lock. Caller cancellation
-    /// can leave a useful running screen render alive for the new window.
+    /// can leave a useful running screen render alive for the compressed cache.
     private nonisolated static func publish(
         _ image: DetailImage, job: Job,
         store: () -> Void

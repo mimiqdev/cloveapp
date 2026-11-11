@@ -31,12 +31,12 @@ struct DetailNavigationTests {
         let second = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), location: "new")
         await pipeline.beginNavigation(1)
         await pipeline.beginNavigation(2)
-        await pipeline.navigate(to: second, neighbours: [], generation: 2)
+        await pipeline.navigate(to: second, generation: 2)
         let current = Task { try await pipeline.screen(for: second) }
         defer { Task { await gate.release() } }
         try await eventually { await gate.nativePaths.count == 1 }
         await pipeline.beginNavigation(1)
-        await pipeline.navigate(to: first, neighbours: [], generation: 1)
+        await pipeline.navigate(to: first, generation: 1)
         try await letEntriesFinish(gate, natives: 1)
         let image = try availableDetail(try await current.value)
         #expect(image.quality == .screenRAW)

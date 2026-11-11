@@ -40,16 +40,11 @@ final class PipelineDetailImages: DetailImageSource {
         guard !Task.isCancelled, activeWindow == window, generation == navigationGeneration,
             let current = sources(for: window.current.photo)
         else { return }
-        let neighbours = window.neighbours.compactMap { neighbour in
-            sources(for: neighbour.photo).map { ($0, window.request(for: neighbour)) }
-        }
         _ = await admitted.image { [pipeline] in
             guard !Task.isCancelled,
                 let request = current.request(for: window.request(for: window.current))
             else { return .deferred }
-            let adjacent = neighbours.compactMap { $0.0.request(for: $0.1) }
-            guard !Task.isCancelled else { return .deferred }
-            await pipeline.navigate(to: request, neighbours: adjacent, generation: generation)
+            await pipeline.navigate(to: request, generation: generation)
             return .deferred
         }
     }

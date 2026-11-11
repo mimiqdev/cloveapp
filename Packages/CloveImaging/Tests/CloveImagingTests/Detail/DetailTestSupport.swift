@@ -62,7 +62,7 @@ struct DetailTestDirectory {
 
     func cache(megabytes: Int = 32) -> DetailCache {
         var configuration = DetailCache.Configuration()
-        configuration.previewBytes = megabytes * 1024 * 1024
+        configuration.compressedBytes = megabytes * 1024 * 1024
         return DetailCache(configuration: configuration)
     }
 }

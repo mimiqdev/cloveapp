@@ -290,10 +290,10 @@ struct DetailPreviewSourceTests {
         let pipeline = pipeline(cache)
         let request = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"))
         _ = try availableDetail(try await pipeline.preview(for: request))
-        #expect(cache.previewCount >= 1)
+        #expect(cache.imageCount >= 1)
         let start = ContinuousClock.now
         _ = try availableDetail(try await pipeline.preview(for: request))
         #expect(ContinuousClock.now - start < .milliseconds(200))
-        #expect(cache.previewCount == 1)
+        #expect(cache.imageCount == 1)
     }
 }
