@@ -752,9 +752,10 @@ final class FolderLibrarySession: FolderLibrary {
     }
 
     private func cacheEntryPreviews(generation: Int, immediate: Bool) async {
-        guard let session = openSession else { return }
+        guard generation == scanGeneration, let session = openSession,
+            let source = thumbnailSource
+        else { return }
         let identity = folder
-        let source = thumbnails
         let previews =
             completedScanStatus == .complete
             ? Array(store.photos.prefix(3).map(\.id))
