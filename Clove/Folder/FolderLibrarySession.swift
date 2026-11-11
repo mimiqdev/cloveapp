@@ -398,10 +398,6 @@ final class FolderLibrarySession: FolderLibrary {
             order[item.photo] = index
             guard let set = scanned.scannedSet(for: item.photo) else {
                 unavailable.append(item)
-                let status = Self.refused(
-                    item.change, for: item.photo, reason: .locationUnavailable,
-                    message: "The open folder no longer holds this photo.")
-                publish(.change(status))
                 continue
             }
             byChange[item.change, default: []].append(set)
@@ -415,17 +411,27 @@ final class FolderLibrarySession: FolderLibrary {
         let change = items.first?.change ?? MarkChange()
         var queueBatches: [MarkBatchAdmission] = []
         var admissions: [MarkChangeAdmission] = []
-        for (groupChange, sets) in byChange {
-            // The close can begin while an earlier group admits, so every group re-checks it; a
-            // batch never starts a write after the folder's drain (PRD P0-01, P0-08).
+        var groups = byChange.map { (change: $0.key, sets: $0.value) }
+        while let group = groups.first {
+            // The close can begin while an earlier group admits. C4 starts a write at admission,
+            // so a group that is already admitted is kept and awaited, and only the groups left
+            // are refused (PRD P0-01, P0-08).
             guard isCurrentOpen(open) else {
-                return refuseBatch(items, message: "The folder is closing.")
+                unavailable.append(
+                    contentsOf: groups.flatMap { group in
+                        group.sets.compactMap { set in
+                            items.first { $0.photo == set.id }
+                        }
+                    })
+                break
             }
+            groups.removeFirst()
             var confirmed: [PhotoIdentity: PhotoMarks] = [:]
-            for set in sets {
+            for set in group.sets {
                 confirmed[set.id] = scanned.photo(for: set.id)?.marks ?? PhotoMarks()
             }
-            let admission = await stores.writes.admit(groupChange, to: sets, confirmed: confirmed)
+            let admission = await stores.writes.admit(
+                group.change, to: group.sets, confirmed: confirmed)
             queueBatches.append(admission)
             admissions.append(contentsOf: admission.admissions)
         }

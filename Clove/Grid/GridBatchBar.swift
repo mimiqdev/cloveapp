@@ -109,7 +109,7 @@ struct GridBatchBar: View {
                 .accessibilityIdentifier("clove.grid.batch.failure")
             HStack {
                 Button("Retry failed items") {
-                    Task { await browsing.retryFailedBatch() }
+                    browsing.submitRetryBatch()
                 }
                 .disabled(browsing.isApplyingBatch)
                 .accessibilityIdentifier("clove.grid.batch.retry")
@@ -123,7 +123,7 @@ struct GridBatchBar: View {
     /// Sends one bar action to the model, which resolves it per photo and writes one batch
     /// (PRD P0-09).
     private func apply(_ action: BatchMarkAction) {
-        Task { await browsing.applyBatch(action, settings: store.settings) }
+        browsing.submitBatch(action, settings: store.settings)
     }
 
     /// The ratings the bar offers: zero to clear, then every enabled level

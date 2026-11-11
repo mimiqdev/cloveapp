@@ -38,7 +38,10 @@ struct DetailZoomPolicy: Hashable {
 @MainActor
 struct DetailMarkingActions {
     /// Applies one resolved mark change to the photo it belongs to (PRD P0-08).
-    let apply: (MarkChange, GridPhoto) async -> Void
+    ///
+    /// It is synchronous so the screen that handles the tap takes the action's place in the user's
+    /// order before any task runs (``BrowsingModel/submit(_:to:)``).
+    let apply: (MarkChange, GridPhoto) -> Void
 
     /// Starts the auto-advance one written mark asks for, resolved in the screen's own order
     /// (PRD Auto-advance; PRD In-group culling).
@@ -621,7 +624,9 @@ struct DetailMarkingView: View {
     private func apply(_ result: MarkingResult) {
         switch result {
         case .mark(let change, let kind):
-            Task { await actions.apply(change, photo) }
+            // The ticket is reserved synchronously with the tap, so a ⌘Z that arrives before the
+            // write's task runs cannot take the earlier place (PRD P0-05).
+            actions.apply(change, photo)
             actions.marked(kind, photo)
         case .previousPhoto:
             actions.step(-1)
@@ -659,7 +664,7 @@ struct DetailMarkingView: View {
     private func perform(_ action: SaveAction) {
         switch action {
         case .retry, .freeSpaceAndRetry:
-            Task { await browsing.retryLatestChange(for: photo.id) }
+            browsing.submitRetryLatestChange(for: photo.id)
         case .cancel:
             if let status = browsing.latestChange(for: photo.id) {
                 dismissedFailures.insert(status.id)

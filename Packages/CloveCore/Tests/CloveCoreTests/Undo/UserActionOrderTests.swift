@@ -10,7 +10,7 @@ import CloveCore
         _ order: UserActionOrder, _ ticket: Int, into log: Log
     ) -> Task<Void, Never> {
         Task { @MainActor in
-            await order.start(ticket)
+            guard await order.start(ticket) else { return }
             log.append(ticket)
         }
     }
@@ -19,6 +19,13 @@ import CloveCore
     final class Log {
         private(set) var tickets: [Int] = []
         func append(_ ticket: Int) { tickets.append(ticket) }
+    }
+
+    /// Lets the main actor run parked tasks until the log holds `count` tickets, bounded.
+    private func waitForTickets(_ count: Int, in log: Log) async {
+        for _ in 0..<200 where log.tickets.count < count {
+            await Task.yield()
+        }
     }
 
     @Test func actionsStartInArrivalOrderWhateverOrderTheirTasksRun() async {
@@ -39,18 +46,31 @@ import CloveCore
     @Test func aStepRunsAfterTheActionBeforeItAndBeforeTheActionAfterIt() async {
         let order = UserActionOrder()
         let log = Log()
+        let before = order.reserve(.action)
         let step = order.reserve(.step)
-        let action = order.reserve(.action)
+        let after = order.reserve(.action)
 
         let runningStep = startInBackground(order, step, into: log)
-        let runningAction = startInBackground(order, action, into: log)
+        let runningAfter = startInBackground(order, after, into: log)
         await Task.yield()
+        // The step waits for the action before it to start, which has not run yet.
+        #expect(log.tickets.isEmpty)
 
-        // The action waits for the step to finish; the step waits for nothing before it.
-        #expect(log.tickets == [step])
+        let runningBefore = startInBackground(order, before, into: log)
+        await waitForTickets(2, in: log)
+        #expect(log.tickets == [before, step])
+
         order.finishStep(step)
-        _ = await (runningStep.value, runningAction.value)
-        #expect(log.tickets == [step, action])
+        _ = await (runningBefore.value, runningStep.value, runningAfter.value)
+        #expect(log.tickets == [before, step, after])
+    }
+
+    @Test func aCancelledTicketDoesNotStart() async {
+        let order = UserActionOrder()
+        let cancelled = order.reserve(.action)
+        order.cancel(cancelled)
+        #expect(await order.start(cancelled) == false)
+        #expect(await order.start(9999) == false)
     }
 
     @Test func aTapAPressAndAnotherTapKeepTheOrder() async {
@@ -66,11 +86,11 @@ import CloveCore
         let tapOneTask = startInBackground(order, tapOne, into: log)
         let pressTask = startInBackground(order, press, into: log)
         let tapTwoTask = startInBackground(order, tapTwo, into: log)
-        await Task.yield()
+        await waitForTickets(1, in: log)
         #expect(log.tickets == [runningStep])
 
         order.finishStep(runningStep)
-        await Task.yield()
+        await waitForTickets(3, in: log)
         // ★3 started before the press, and ★4 waits for the press to finish.
         #expect(log.tickets == [runningStep, tapOne, press])
         order.finishStep(press)
@@ -88,11 +108,11 @@ import CloveCore
         let firstTask = startInBackground(order, first, into: log)
         let secondTask = startInBackground(order, second, into: log)
         let tapTask = startInBackground(order, tap, into: log)
-        await Task.yield()
+        await waitForTickets(1, in: log)
         #expect(log.tickets == [first])
 
         order.finishStep(first)
-        await Task.yield()
+        await waitForTickets(2, in: log)
         #expect(log.tickets == [first, second])
         order.finishStep(second)
         _ = await (firstTask.value, secondTask.value, tapTask.value)
@@ -106,7 +126,7 @@ import CloveCore
         let tap = order.reserve(.action)
 
         order.cancel(cancelled)
-        await order.start(tap)
+        guard await order.start(tap) else { return }
         log.append(tap)
         #expect(log.tickets == [tap])
     }
@@ -121,7 +141,7 @@ import CloveCore
         await Task.yield()
         #expect(log.tickets.isEmpty)
 
-        await order.start(action)
+        _ = await order.start(action)
         await Task.yield()
         // The step starts once the earlier action started, and ends when the caller finishes it.
         order.finishStep(step)

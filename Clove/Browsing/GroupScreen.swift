@@ -123,7 +123,7 @@ struct GroupScreen: View {
                 GroupFinishingFailureBar(
                     summary: failure.partialFailureSummary ?? "",
                     isBusy: browsing.isRunningGroupFinishing,
-                    retry: { Task { await browsing.retryGroupFinishing() } },
+                    retry: { browsing.submitRetryGroupFinishing() },
                     cancel: { browsing.dismissGroupFinishingFailure() })
             }
         }
@@ -147,7 +147,7 @@ struct GroupScreen: View {
     /// move through the group's member order (PRD In-group culling; PRD Auto-advance).
     private var actions: DetailMarkingActions {
         DetailMarkingActions(
-            apply: { change, photo in await browsing.apply(change, to: photo.id) },
+            apply: { change, photo in browsing.submit(change, to: photo.id) },
             marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
             step: { offset in step(offset) },
             markingSwipeBegan: { autoAdvance.cancel() })
@@ -259,7 +259,7 @@ struct GroupScreen: View {
         guard plan.availability.isAvailable else { return }
         autoAdvance.cancel()
         completionTask?.cancel()
-        Task { await browsing.runGroupFinishing(plan) }
+        browsing.submitGroupFinishing(plan)
     }
 
     /// The last finishing action's failure while it still needs a retry and belongs to this group

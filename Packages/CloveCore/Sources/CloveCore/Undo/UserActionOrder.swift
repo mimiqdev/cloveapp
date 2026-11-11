@@ -56,16 +56,19 @@ public final class UserActionOrder {
 
     /// Waits for this ticket's turn and marks it started (PRD P0-05).
     ///
-    /// A ticket waits for every earlier ticket to start, and for every earlier step to finish. A
-    /// cancelled or unknown ticket returns at once, so a caller that gave up never blocks others.
-    public func start(_ ticket: Int) async {
+    /// A ticket waits for every earlier ticket to start, and for every earlier step to finish.
+    /// - Returns: `false` when the ticket was cancelled or never reserved, so its action must not
+    ///   run unordered; `true` when it may run.
+    @discardableResult
+    public func start(_ ticket: Int) async -> Bool {
         while isBlocked(ticket) {
             await withCheckedContinuation { waiters.append($0) }
         }
-        guard let index = entries.firstIndex(where: { $0.ticket == ticket }) else { return }
+        guard let index = entries.firstIndex(where: { $0.ticket == ticket }) else { return false }
         entries[index].started = true
         prune()
         wake()
+        return true
     }
 
     /// Ends a step's ticket, so later actions may start (PRD P0-05).
