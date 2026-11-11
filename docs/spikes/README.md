@@ -1,7 +1,9 @@
 # Spikes
 
 Spikes S1–S7 answer the questions in the M1 table of
-[DEV-PLAN.md](../DEV-PLAN.md#m1-spikes). A spike does not ship product features:
+[DEV-PLAN.md](../DEV-PLAN.md#m1-spikes); S8 is the follow-up RAW display
+measurement added after G1
+([#122](https://github.com/mimiqdev/cloveapp/issues/122)). A spike does not ship product features:
 its output is a report in this folder plus reusable verification code in Clove
 Lab and the `CloveLabKit` package.
 
@@ -27,6 +29,7 @@ checklist labels, and the report JSON `spike` field and export file names.
 | S5 | `Grouping/` | `GroupingProbe` |
 | S6 | `Scan/` | `ScanProbe` |
 | S7 | `FoldState/` | `FoldStateProbe` |
+| S8 | `RAWDisplay/` | `RAWDisplayProbe` |
 
 Each module's test target is its name plus `Tests`. Shared report tooling lives
 in `LabSupport` and `LabSupportTests`.
@@ -38,7 +41,8 @@ shared change, open an issue for it instead.
 
 ## The harness
 
-Clove Lab lists all seven spikes; each opens its own screen. The shared pieces:
+Clove Lab lists every probe in this table; each opens its own screen. The shared
+pieces:
 
 - `LabSupport.LabReport` and `LabDevice` / `LabApp` / `LabMeasurement`: the
   report a spike writes.
@@ -109,7 +113,7 @@ Every spike writes one JSON file per run. The file name is
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `schemaVersion` | number | `1` for this schema; changes when a field does. |
-| `spike` | string | Spike identifier, `S1`–`S7`. |
+| `spike` | string | Spike identifier, `S0`–`S8`. |
 | `createdAt` | string | ISO 8601 UTC instant the report was produced. |
 | `device.modelIdentifier` | string | Hardware model, for example `iPhone18,2`. |
 | `device.systemName` | string | `iOS`. |
