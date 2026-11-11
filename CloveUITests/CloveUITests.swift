@@ -174,6 +174,15 @@ final class CloveUITests: XCTestCase {
         element(app, "clove.grid.photo.mmq02680").tap()
         let info = element(app, "clove.detail.info")
         XCTAssertTrue(info.waitForExistence(timeout: 5))
+        let navigationPreview = element(app, "clove.detail.preview")
+        let navigationStart = ContinuousClock.now
+        navigationPreview.swipeLeft()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+        print(
+            "Detail navigation swipe to next filename (informational, XCTest input included): \(navigationStart.duration(to: .now))"
+        )
+        navigationPreview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
         info.tap()
         XCTAssertTrue(app.staticTexts["Sample camera · 0123"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["24–70 mm"].exists)

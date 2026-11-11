@@ -312,7 +312,9 @@ struct DetailMarkingView: View {
             onEdgeTap: { navigate($0) },
             onDoubleTap: { doubleTap(at: $0) },
             onMarkingSwipe: { applyMarkingSwipe($0) },
-            onMarkingSwipeBegin: { actions.markingSwipeBegan() },
+            onSwipeBegin: { actions.markingSwipeBegan() },
+            hasPrevious: navigationIndex.map { $0 > 0 } ?? false,
+            hasNext: navigationIndex.map { $0 + 1 < order.count } ?? false,
             probe: probe
         )
         .opacity(
@@ -660,6 +662,8 @@ struct DetailMarkingView: View {
     }
 
     // MARK: - Navigation
+
+    private var navigationIndex: Int? { order.firstIndex { $0.id == photo.id } }
 
     /// Shows the previous or next photo in the screen's own order (PRD P0-04).
     private func navigate(_ zone: DetailEdgeZone) {
