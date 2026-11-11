@@ -304,19 +304,39 @@ final class FolderLibrarySession: FolderLibrary {
             return nil
         }
         guard !change.isEmpty else { return nil }
+        // The open this admission belongs to, so a folder closed and reopened while it waits is
+        // never confused with this one (PRD P0-02, P0-14).
+        let open = scanGeneration
         guard !isClosingFolder, let set = store.scannedSet(for: photo), openSession != nil else {
             return refuse(.locationUnavailable, "The open folder no longer holds this photo.")
         }
         guard case .success(let stores) = await resolvedStores() else {
             return refuse(.unknown, "Clove's stored marks are unavailable.")
         }
-        // The folder can close while the stores resolve.
-        guard !isClosingFolder, openSession != nil else {
+        // The folder can close or be replaced while the stores resolve.
+        guard isCurrentOpen(open) else {
             return refuse(
                 .locationUnavailable, "The folder closed before the change could be admitted.")
         }
         let confirmed = store.photo(for: photo)?.marks ?? PhotoMarks()
         return await stores.writes.admit(change, to: set, confirmed: confirmed)
+    }
+
+    /// Whether one open is still the open folder this session performs work for (PRD P0-14).
+    private func isCurrentOpen(_ open: Int) -> Bool {
+        !isClosingFolder && openSession != nil && open == scanGeneration
+    }
+
+    /// Publishes a refusal for every item of a bar action the folder cannot admit (PRD P0-08).
+    private func refuseBatch(
+        _ items: [BatchMarkItem], message: String
+    ) -> BatchWriteAdmission? {
+        for item in items {
+            let status = Self.refused(
+                item.change, for: item.photo, reason: .locationUnavailable, message: message)
+            publish(.change(status))
+        }
+        return nil
     }
 
     /// Awaits one admitted change's write inside C11's session (PRD P0-08).
@@ -354,7 +374,11 @@ final class FolderLibrarySession: FolderLibrary {
     /// Items can name different changes because C13 resolves the action per photo, so the queue
     /// admits one batch per distinct change and the action's own handle keeps them for a retry.
     func admitBatch(_ items: [BatchMarkItem]) async -> BatchWriteAdmission? {
-        guard !items.isEmpty, !isClosingFolder, openSession != nil else { return nil }
+        guard !items.isEmpty else { return nil }
+        let open = scanGeneration
+        guard !isClosingFolder, openSession != nil else {
+            return refuseBatch(items, message: "The folder is closing.")
+        }
         let scanned = store
         var order: [PhotoIdentity: Int] = [:]
         var byChange: [MarkChange: [ScannedPhotoSet]] = [:]
@@ -371,21 +395,30 @@ final class FolderLibrarySession: FolderLibrary {
             }
             byChange[item.change, default: []].append(set)
         }
-        guard case .success(let stores) = await resolvedStores() else { return nil }
-        guard !isClosingFolder, openSession != nil else { return nil }
+        guard case .success(let stores) = await resolvedStores() else {
+            return refuseBatch(items, message: "Clove's stored marks are unavailable.")
+        }
+        guard isCurrentOpen(open) else {
+            return refuseBatch(items, message: "The folder is closing.")
+        }
+        let change = items.first?.change ?? MarkChange()
         var queueBatches: [MarkBatchAdmission] = []
         var admissions: [MarkChangeAdmission] = []
-        for (change, sets) in byChange {
+        for (groupChange, sets) in byChange {
+            // The close can begin while an earlier group admits, so every group re-checks it; a
+            // batch never starts a write after the folder's drain (PRD P0-01, P0-08).
+            guard isCurrentOpen(open) else {
+                return refuseBatch(items, message: "The folder is closing.")
+            }
             var confirmed: [PhotoIdentity: PhotoMarks] = [:]
             for set in sets {
                 confirmed[set.id] = scanned.photo(for: set.id)?.marks ?? PhotoMarks()
             }
-            let admission = await stores.writes.admit(change, to: sets, confirmed: confirmed)
+            let admission = await stores.writes.admit(groupChange, to: sets, confirmed: confirmed)
             queueBatches.append(admission)
             admissions.append(contentsOf: admission.admissions)
         }
         admissions.sort { (order[$0.photo] ?? .max) < (order[$1.photo] ?? .max) }
-        let change = items.first?.change ?? MarkChange()
         let libraryBatch = MarkBatchID()
         // The action is kept even when nothing reached the queue, so a retry reports the photos
         // the folder no longer holds instead of dropping them (PRD P0-09).

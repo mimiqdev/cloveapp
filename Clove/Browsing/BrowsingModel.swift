@@ -161,9 +161,6 @@ final class BrowsingModel: UndoHistoryHost {
     /// action and C4 admitting that action's writes.
     private var writesInFlight = 0
 
-    /// How many user actions are parked behind a running undo or redo step (PRD P0-05).
-    private var parkedActions = 0
-
     /// How many undo records this scene started and has not seen answered (PRD P0-05).
     ///
     /// A record in flight may already have pushed its entry, so an older step's failure row has to
@@ -173,9 +170,12 @@ final class BrowsingModel: UndoHistoryHost {
     /// Callers parked until one of this scene's conditions clears (PRD P0-05, P0-10).
     private var gateWaiters: [CheckedContinuation<Void, Never>] = []
 
-    /// Whether an undo or redo step is running, so Move rejects waits for it (PRD P0-10) and
-    /// marking waits (PRD P0-05).
-    private(set) var isUndoingStep = false
+    /// The order this scene's user actions run in, so a press never overtakes a tap
+    /// (PRD P0-05's Undo row).
+    ///
+    /// Each action takes a ticket synchronously when it arrives; an undo or redo step takes one
+    /// too, and later actions wait for it to finish.
+    private let userActionOrder = UserActionOrder()
 
     /// The photo the grid must bring into view after an undo, with a token per request
     /// (PRD P0-05's Undo row).
@@ -447,9 +447,10 @@ final class BrowsingModel: UndoHistoryHost {
     /// and let completion move the view before the last result's failures are known.
     func runGroupFinishing(_ plan: GroupFinishingPlan) async {
         guard !isRunningGroupFinishing else { return }
-        // A step restores marks through the same queue, so a finishing action started during one
-        // waits for it instead of merging over the restore (PRD P0-12, P0-05).
-        await waitForUndoStep()
+        // The action takes its place in the user's order like any mark: a step before it finishes
+        // first, and a later step waits for this action to start (PRD P0-12, P0-05).
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         // A second action can start while this one waits, and only one runs at a time.
         guard !isRunningGroupFinishing else { return }
         let folder = state.folder
@@ -480,7 +481,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// never overlap the action it retries.
     func retryGroupFinishing() async {
         guard !isRunningGroupFinishing, lastGroupFinishing != nil else { return }
-        await waitForUndoStep()
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         guard !isRunningGroupFinishing, let result = lastGroupFinishing else { return }
         let folder = state.folder
         dismissedGroupFailure = nil
@@ -653,7 +655,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// pre-batch marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings) async {
         guard !isApplyingBatch, !isMovingRejects else { return }
-        await waitForUndoStep()
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         // Another batch or a Move rejects run can start while this one waits (PRD P0-09, P0-10).
         guard !isApplyingBatch, !isMovingRejects else { return }
         let targets = batchTargets
@@ -689,7 +692,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// stays as it was, so the bar still names the photos that did not save (PRD P0-08).
     func retryFailedBatch() async {
         guard !isApplyingBatch, !isMovingRejects, batchReport?.canRetry == true else { return }
-        await waitForUndoStep()
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         guard !isApplyingBatch, !isMovingRejects, let report = batchReport, report.canRetry
         else { return }
         let folder = state.folder
@@ -762,10 +766,11 @@ final class BrowsingModel: UndoHistoryHost {
     /// exit path, so a failed run never leaves marking blocked.
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
-        // A step writes through C4 too, so the move waits for one that is already running instead
-        // of starting beside it (PRD P0-10's drain and marking block). The wait suspends, so two
-        // queued calls both re-check the flag before either sets it.
-        await wait(while: isUndoingStep)
+        // The move takes its place in the user's order like any action, so an undo step before it
+        // finishes first and a later step waits for it to start (PRD P0-10's drain and marking
+        // block).
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
         isMovingRejects = true
         defer { isMovingRejects = false }
@@ -795,9 +800,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// every photo the run moved. A batch the library can no longer retry answers nil.
     func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
-        // A step writes through C4 too, so the retry waits for one that is already running, then
-        // re-checks everything the wait could have changed (PRD P0-02, P0-10).
-        await wait(while: isUndoingStep)
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
         // The details sheet can outlive its folder open. A record from another open must not
         // clear Reject or move anything in the replacement, even when the folder identity is the
@@ -898,7 +902,8 @@ final class BrowsingModel: UndoHistoryHost {
         // step to finish instead of being merged over by the restore. Waiting cannot deadlock: a
         // step only waits for writes already in flight, never for a new mark.
         guard !isMovingRejects, !change.isEmpty else { return nil }
-        await waitForUndoStep()
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         // A Move rejects run can start while the mark waits, and PRD P0-10 blocks marking then.
         guard !isMovingRejects else { return nil }
         let folder = state.folder
@@ -946,18 +951,6 @@ final class BrowsingModel: UndoHistoryHost {
         return await write()
     }
 
-    /// Waits out a running undo or redo step, so a user action runs in the order it was made.
-    ///
-    /// A step that ends lets these parked actions start before the next queued undo press (see
-    /// ``applyUndoStep(isRedo:_:)``), and a step only waits for writes already in flight, so the
-    /// two never deadlock.
-    private func waitForUndoStep() async {
-        parkedActions += 1
-        await wait(while: isUndoingStep)
-        parkedActions -= 1
-        if parkedActions == 0 { openGates() }
-    }
-
     /// Waits while `condition` holds; ``openGates()`` wakes callers to check again (PRD P0-05).
     private func wait(while condition: @autoclosure () -> Bool) async {
         while condition() {
@@ -997,6 +990,19 @@ final class BrowsingModel: UndoHistoryHost {
         undoBridge.attach(manager)
     }
 
+    /// Reserves this undo or redo press's place in the user's order (PRD P0-05).
+    ///
+    /// The bridge takes it synchronously when the press arrives, before the press waits for a
+    /// running step, so a later tap cannot slip in front of it.
+    func reserveUndoStep() -> Int {
+        userActionOrder.reserve(.step)
+    }
+
+    /// Drops a queued press's reservation, so later actions are not held up (PRD P0-05).
+    func cancelUndoStep(_ ticket: Int) {
+        userActionOrder.cancel(ticket)
+    }
+
     /// Undoes the open folder's next action, from a toolbar button (PRD P0-05).
     ///
     /// The bridge routes it through the scene's undo manager while that manager holds the same
@@ -1012,13 +1018,13 @@ final class BrowsingModel: UndoHistoryHost {
 
     /// Undoes the history's next action through the open folder and returns the view to its photo
     /// (PRD P0-05).
-    func undoThroughHistory() async -> UndoStepResult? {
-        await applyUndoStep(isRedo: false) { await library.undoMarkChange() }
+    func undoThroughHistory(ticket: Int) async -> UndoStepResult? {
+        await applyUndoStep(isRedo: false, ticket: ticket) { await library.undoMarkChange() }
     }
 
     /// Redoes the history's next undone action through the open folder (PRD P0-05).
-    func redoThroughHistory() async -> UndoStepResult? {
-        await applyUndoStep(isRedo: true) { await library.redoMarkChange() }
+    func redoThroughHistory(ticket: Int) async -> UndoStepResult? {
+        await applyUndoStep(isRedo: true, ticket: ticket) { await library.redoMarkChange() }
     }
 
     /// Retries a failed undo or redo step in the direction it failed (PRD P0-08).
@@ -1060,20 +1066,14 @@ final class BrowsingModel: UndoHistoryHost {
 
     /// Runs one undo or redo through the library and applies its answer (PRD P0-05, P0-12).
     private func applyUndoStep(
-        isRedo: Bool, _ step: () async -> UndoStepResult?
+        isRedo: Bool, ticket: Int, _ step: () async -> UndoStepResult?
     ) async -> UndoStepResult? {
         // The screen that asked decides where the view returns to, and the folder the step belongs
         // to must still be the open one when it answers (PRD P0-14).
-        // User actions parked behind the last step start before this one runs, so a later undo
-        // press never overtakes a tap made before it (PRD P0-05).
-        await wait(while: parkedActions > 0)
+        await userActionOrder.start(ticket)
+        defer { userActionOrder.finishStep(ticket) }
         let folder = state.folder
         let generation = library.openGeneration
-        isUndoingStep = true
-        defer {
-            isUndoingStep = false
-            openGates()
-        }
         // A step reads the marks C4 has now, so it waits for the work this scene started: its own
         // writes (a record can already hold an entry whose write has not been admitted), a running
         // finishing action (whose record belongs above the marks it wrote) and a Move rejects run,
@@ -1219,7 +1219,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// photo's latest change).
     func retryLatestChange(for photo: PhotoIdentity) async {
         guard !isMovingRejects else { return }
-        await waitForUndoStep()
+        let order = userActionOrder.reserve(.action)
+        await userActionOrder.start(order)
         guard !isMovingRejects else { return }
         _ = await runWrite { await library.retryLatestChange(for: photo) }
     }

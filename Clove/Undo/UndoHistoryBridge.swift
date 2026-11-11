@@ -11,10 +11,14 @@ protocol UndoHistoryHost: AnyObject {
     var undoAvailability: UndoAvailability { get }
     /// Which folder open the history belongs to (PRD P0-14).
     var undoOpenGeneration: Int { get }
+    /// Reserves this press's place in the user's action order (PRD P0-05).
+    func reserveUndoStep() -> Int
+    /// Drops a queued press's reservation, so later actions are not held up (PRD P0-05).
+    func cancelUndoStep(_ ticket: Int)
     /// Undoes the history's next action through the open folder (PRD P0-05).
-    func undoThroughHistory() async -> UndoStepResult?
+    func undoThroughHistory(ticket: Int) async -> UndoStepResult?
     /// Redoes the history's next undone action through the open folder (PRD P0-05).
-    func redoThroughHistory() async -> UndoStepResult?
+    func redoThroughHistory(ticket: Int) async -> UndoStepResult?
 }
 
 /// Bridges the open folder's undo history to the scene's system undo manager (PRD P0-05).
@@ -72,6 +76,7 @@ final class UndoHistoryBridge {
 
         let direction: Direction
         let openGeneration: Int
+        let ticket: Int
     }
 
     private var queuedPresses: [QueuedPress] = []
@@ -101,8 +106,11 @@ final class UndoHistoryBridge {
     /// Forgets every system step after the open folder's history was replaced or cleared
     /// (PRD P0-05).
     func historyDidReset() {
-        // Presses queued for the history that is gone must not run against the new one.
+        // Presses queued for the history that is gone must not run against the new one, and their
+        // reservations must not hold later actions back.
+        let dropped = queuedPresses
         queuedPresses.removeAll()
+        for press in dropped { host?.cancelUndoStep(press.ticket) }
         rebuild()
     }
 
@@ -116,9 +124,11 @@ final class UndoHistoryBridge {
         // manager's step only when its name is the one this bridge registered for the next mark;
         // otherwise it runs the history directly and never undoes a text edit.
         if let manager, manager.canUndo, manager.undoActionName == host.undoAvailability.undoName {
+            // The handler reserves the press's place when the manager applies it.
             manager.undo()
         } else {
-            Task { await step(isUndo: true) }
+            let ticket = host.reserveUndoStep()
+            Task { await step(isUndo: true, ticket: ticket) }
         }
     }
 
@@ -128,7 +138,8 @@ final class UndoHistoryBridge {
         if let manager, manager.canRedo, manager.redoActionName == host.undoAvailability.redoName {
             manager.redo()
         } else {
-            Task { await step(isUndo: false) }
+            let ticket = host.reserveUndoStep()
+            Task { await step(isUndo: false, ticket: ticket) }
         }
     }
 
@@ -144,12 +155,16 @@ final class UndoHistoryBridge {
         let name = host.undoAvailability.undoName ?? "Mark"
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemRedo() }
         manager.setActionName(name)
+        // The press takes its place in the user's order now, before it waits for a running step,
+        // so a tap made later cannot slip in front of it (PRD P0-05).
+        let ticket = host.reserveUndoStep()
         guard beginStep() else {
             queuedPresses.append(
-                QueuedPress(direction: .undo, openGeneration: host.undoOpenGeneration))
+                QueuedPress(
+                    direction: .undo, openGeneration: host.undoOpenGeneration, ticket: ticket))
             return
         }
-        Task { await finishStep(isUndo: true) }
+        Task { await finishStep(isUndo: true, ticket: ticket) }
     }
 
     /// Runs one system redo: registers the undo pair while the manager applies the redo, then
@@ -159,28 +174,34 @@ final class UndoHistoryBridge {
         let name = host.undoAvailability.redoName ?? "Mark"
         manager.registerUndo(withTarget: self) { bridge in bridge.handleSystemUndo() }
         manager.setActionName(name)
+        let ticket = host.reserveUndoStep()
         guard beginStep() else {
             queuedPresses.append(
-                QueuedPress(direction: .redo, openGeneration: host.undoOpenGeneration))
+                QueuedPress(
+                    direction: .redo, openGeneration: host.undoOpenGeneration, ticket: ticket))
             return
         }
-        Task { await finishStep(isUndo: false) }
+        Task { await finishStep(isUndo: false, ticket: ticket) }
     }
 
     /// Runs one step the manager holds no registration for, such as a scene with no undo manager
     /// (PRD P0-05).
-    private func step(isUndo: Bool) async {
-        guard beginStep() else { return }
-        _ = isUndo ? await host?.undoThroughHistory() : await host?.redoThroughHistory()
+    private func step(isUndo: Bool, ticket: Int) async {
+        guard beginStep() else {
+            host?.cancelUndoStep(ticket)
+            return
+        }
+        _ =
+            isUndo
+            ? await host?.undoThroughHistory(ticket: ticket)
+            : await host?.redoThroughHistory(ticket: ticket)
         isStepping = false
-        // The manager held no registration for this step, so its stacks no longer describe the
-        // history; the mirror is rebuilt from the history once no queued press is left to run
-        // against it.
-        if queuedPresses.isEmpty { rebuild() }
+        let hadQueuedPresses = !queuedPresses.isEmpty
         await runQueuedStep()
-        // A press that ran after the direct step consumed a registration the manager still holds,
-        // so the mirror is brought back in step now that the queue is empty.
-        if !isStepping, queuedPresses.isEmpty { rebuild() }
+        // The manager held no registration for this step, so its stacks no longer describe the
+        // history. Rebuilding clears the redo pairs a queued press just registered, so it happens
+        // once, and only when no queued press ran.
+        if !hadQueuedPresses, queuedPresses.isEmpty { rebuild() }
     }
 
     /// Finishes one step that a system registration started (PRD P0-05).
@@ -190,9 +211,11 @@ final class UndoHistoryBridge {
     /// manager still holds. Only a step the history could not take at all leaves the mirror
     /// without a matching entry, and that is rebuilt from the history. A press that arrived during
     /// the step runs next, with the pair its own application already registered.
-    private func finishStep(isUndo: Bool) async {
+    private func finishStep(isUndo: Bool, ticket: Int) async {
         let result =
-            isUndo ? await host?.undoThroughHistory() : await host?.redoThroughHistory()
+            isUndo
+            ? await host?.undoThroughHistory(ticket: ticket)
+            : await host?.redoThroughHistory(ticket: ticket)
         isStepping = false
         if result == nil, queuedPresses.isEmpty { rebuild() }
         await runQueuedStep()
@@ -207,14 +230,17 @@ final class UndoHistoryBridge {
         guard beginStep() else { return }
         let press = queuedPresses.removeFirst()
         guard press.openGeneration == host.undoOpenGeneration else {
+            // The press belonged to an open that is gone; its reservation must not hold later
+            // actions back.
+            host.cancelUndoStep(press.ticket)
             isStepping = false
             await runQueuedStep()
             return
         }
         let result: UndoStepResult?
         switch press.direction {
-        case .undo: result = await host.undoThroughHistory()
-        case .redo: result = await host.redoThroughHistory()
+        case .undo: result = await host.undoThroughHistory(ticket: press.ticket)
+        case .redo: result = await host.redoThroughHistory(ticket: press.ticket)
         }
         isStepping = false
         if result == nil, queuedPresses.isEmpty { rebuild() }
