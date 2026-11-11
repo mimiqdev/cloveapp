@@ -101,14 +101,16 @@ struct GridScreen: View {
                 .padding(.horizontal)
                 .padding(.bottom, 12)
             } else if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible {
-                MoveRejectsToast(completed: completed) { moveSheet = .details(completed) }
-                    .padding(.horizontal)
-                    .padding(.bottom, 12)
+                MoveRejectsToast(browsing: browsing, completed: completed) {
+                    moveSheet = .details(completed)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 12)
             }
         }
         .task(id: browsing.rejectMoveToastAttempt) {
             guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
             browsing.dismissRejectMoveToast()
         }

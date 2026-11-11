@@ -200,7 +200,7 @@ public struct RejectMoveDetails: Hashable, Sendable {
 
     /// "N photos couldn't be moved" (design handoff, P0-10).
     public let title: String
-    /// "They stay rejected in Clove. Nothing was deleted." (design handoff, P0-10).
+    /// Failed sets stay rejected at their original paths.
     public let subtitle: String
     /// One row per failed or split set, in the result's order (PRD P0-10).
     public let rows: [Row]
@@ -217,7 +217,7 @@ public struct RejectMoveDetails: Hashable, Sendable {
         title =
             unmoved == 1
             ? "1 photo couldn't be moved" : "\(unmoved) photos couldn't be moved"
-        subtitle = "They stay rejected in Clove. Nothing was deleted."
+        subtitle = "They stay rejected in place. Nothing was deleted."
         var rows: [Row] = result.failed.map { set in
             Row(
                 id: set.identity, fileName: Self.fileName(set.files, identity: set.identity),

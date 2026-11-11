@@ -718,7 +718,22 @@ final class BrowsingModel {
         rejectMoveToastAttempt += 1
     }
 
-    /// The toolbar stays disabled; the next undo task can submit the recorded move here.
+    /// The toast restores the completed move and the exact marks its staged keeps left behind.
+    func undoRejectMove(_ completed: CompletedRejectMove) {
+        guard completed.folder == state.folder, completed.openGeneration == openGeneration,
+            let photo = completed.keptIdentities.first ?? completed.result.movedIdentities.first
+        else { return }
+        let kept = (keptEditsByMove[completed.id] ?? []).compactMap {
+            edit -> RejectMoveKeptPhoto? in
+            guard let set = library.scannedSet(for: edit.photo) else { return nil }
+            return RejectMoveKeptPhoto(set: set, marksAfter: edit.after)
+        }
+        submitMoveUndo(
+            RejectMoveUndoEntry(batch: completed.id, keptPhotos: kept, photoToReturnTo: photo))
+        dismissRejectMoveToast()
+    }
+
+    /// Submits a move undo to the existing ordered pipeline.
     func submitMoveUndo(_ entry: RejectMoveUndoEntry) {
         guard !isMovingRejects, !isChangingFolder else { return }
         let edits = entry.keptPhotos.compactMap { kept -> DesiredMarkEdit? in

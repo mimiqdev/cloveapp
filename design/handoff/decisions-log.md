@@ -4,6 +4,10 @@ Figma: https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Nativ
 
 Working rule: the PRD is a guide, not the source of truth. Design decisions here can override it.
 
+## Move Rejects failure copy (supervisor decision, 2026-11-11)
+
+The Details subtitle is "They stay rejected in place. Nothing was deleted." Reject is stored as rating −1 in a RAW set's XMP sidecar, so the earlier "in Clove" wording no longer describes its storage.
+
 ## Save glyphs (owner decision, 2026-11-11)
 
 Issue #118 replaces visible save-status words in grid and detail with glyphs:
