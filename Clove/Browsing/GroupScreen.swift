@@ -123,7 +123,7 @@ struct GroupScreen: View {
                 GroupFinishingFailureBar(
                     summary: failure.partialFailureSummary ?? "",
                     isBusy: browsing.isRunningGroupFinishing,
-                    retry: { Task { await browsing.retryGroupFinishing() } },
+                    retry: { browsing.retryGroupFinishing() },
                     cancel: { browsing.dismissGroupFinishingFailure() })
             }
         }
@@ -147,7 +147,7 @@ struct GroupScreen: View {
     /// move through the group's member order (PRD In-group culling; PRD Auto-advance).
     private var actions: DetailMarkingActions {
         DetailMarkingActions(
-            apply: { change, photo in await browsing.apply(change, to: photo.id) },
+            apply: { change, photo in browsing.apply(change, to: photo.id) },
             marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
             step: { offset in step(offset) },
             markingSwipeBegan: { autoAdvance.cancel() })
@@ -167,12 +167,10 @@ struct GroupScreen: View {
     /// The marks the group's rules read now, so a plan or a navigation step never uses a stale
     /// copy (PRD P0-12).
     ///
-    /// A photo whose rating or label is still being written counts as marked, so a finishing
-    /// action planned within the write's time never rejects it
-    /// (``BrowsingModel/cullingMarks(for:)``).
+    /// Desired marks are already on every group photo before a write starts.
     private var marks: [PhotoIdentity: PhotoMarks] {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
-        for photo in browsing.groupPhotos { marks[photo.id] = browsing.cullingMarks(for: photo) }
+        for photo in browsing.groupPhotos { marks[photo.id] = photo.marks }
         return marks
     }
 
@@ -259,7 +257,7 @@ struct GroupScreen: View {
         guard plan.availability.isAvailable else { return }
         autoAdvance.cancel()
         completionTask?.cancel()
-        Task { await browsing.runGroupFinishing(plan) }
+        browsing.runGroupFinishing(plan)
     }
 
     /// The last finishing action's failure while it still needs a retry and belongs to this group

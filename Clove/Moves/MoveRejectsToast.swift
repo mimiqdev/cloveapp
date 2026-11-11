@@ -172,32 +172,24 @@ struct MoveRejectsDetailsSheet: View {
     private func retry() {
         guard !isRetrying else { return }
         isRetrying = true
-        Task {
-            defer { isRetrying = false }
-            retryError = nil
-            do {
-                guard let retried = try await browsing.retryRejectMove(current) else {
-                    retryError = "Those photos can no longer be retried."
-                    return
-                }
+        retryError = nil
+        browsing.retryRejectMove(current) { outcome in
+            isRetrying = false
+            switch outcome {
+            case .success(let retried):
                 result = retried
                 current = CompletedRejectMove(
                     result: retried, keptIdentities: current.keptIdentities,
                     rejectsFolderName: current.rejectsFolderName,
                     folder: current.folder, openGeneration: current.openGeneration)
-                let details = RejectMoveDetails(result: retried)
-                if details.rows.isEmpty {
-                    // The updated toast now reports the retry's total; closing the sheet leaves
-                    // it visible instead of dismissing the result the person just asked for.
-                    dismiss()
-                }
-            } catch let refusal as RejectMoveRefusal {
+                if RejectMoveDetails(result: retried).rows.isEmpty { dismiss() }
+            case .failure(let refusal as RejectMoveRefusal):
                 if case .undone = refusal {
                     retryError = "This move was undone."
                 } else {
                     retryError = "The failed photos couldn't be retried."
                 }
-            } catch {
+            case .failure:
                 retryError = "The failed photos couldn't be retried."
             }
         }

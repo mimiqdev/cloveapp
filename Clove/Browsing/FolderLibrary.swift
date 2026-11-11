@@ -113,14 +113,6 @@ protocol FolderLibrary: AnyObject {
     /// second consumer.
     var updates: AsyncStream<FolderLibraryUpdate> { get }
 
-    /// Applies one change and returns its status (PRD P0-08).
-    ///
-    /// The call is asynchronous because C4's `MarkWriteQueue.apply(_:to:)` is: the library
-    /// resolves the identity to its scanned set and awaits the queue without changing this
-    /// signature. A failed or unconfirmed write is reported by the returned status, never by
-    /// throwing.
-    func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus
-
     /// Applies one bar action's per-photo changes in one batch and reports each photo's result
     /// (PRD P0-09).
     ///
@@ -135,13 +127,6 @@ protocol FolderLibrary: AnyObject {
     /// cover every item.
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult
 
-    /// Retries only the photos a batch could not save and reports the retry's own result
-    /// (PRD P0-09).
-    ///
-    /// Saved and superseded photos are left alone. Nil means the library can no longer retry that
-    /// batch, for example because the folder it belonged to closed.
-    func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult?
-
     /// Plans Move rejects for the open folder's rejected photos (PRD P0-10).
     ///
     /// The plan is the confirmation sheet's input: how many photos, JPEG/HIF companions and XMP
@@ -150,7 +135,9 @@ protocol FolderLibrary: AnyObject {
     /// switch the caller read from settings at move time (PRD Move rejects, C12). Nothing moves:
     /// building a plan only checks existence. A library that cannot move a folder refuses with
     /// ``RejectMoveRefusal``, which the sheet explains.
-    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan
+    func planRejectMove(
+        configuration: RejectMoveConfiguration, rejected: [PhotoIdentity]
+    ) async throws -> RejectMovePlan
 
     /// Runs a confirmed Move rejects plan under the open folder's session (PRD P0-10).
     ///
@@ -183,15 +170,6 @@ protocol FolderLibrary: AnyObject {
     /// answer in step with the statuses the queue streams; U7 reads the same status for its
     /// retry. Nil means nothing has been requested for the photo, not that everything is saved.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus?
-
-    /// Resends one photo's latest failed change through C4 and reports its final state
-    /// (PRD P0-08).
-    ///
-    /// PRD Failure and recovery offers Retry for a single-photo write failure, and PRD How marks
-    /// reach disk, rule 8, keeps the requested marks until a retry confirms them. A change that
-    /// did not fail, or that a newer change superseded, is never retried. Nil means the photo has
-    /// no change this library can retry, such as one from a folder that closed.
-    func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus?
 
     /// Waits until every admitted write has finished, for the leaving question (PRD P0-08).
     ///
@@ -226,26 +204,14 @@ protocol FolderLibrary: AnyObject {
     /// stream the screen has not caught up with yet. A failed change is finished for draining and
     /// stays for an explicit retry.
     func hasUnfinishedWrites() async -> Bool
-    /// Runs one finishing action's plan in the open folder session (PRD In-group culling,
-    /// finishing actions; PRD P0-12).
-    ///
-    /// The plan is C10's, and C4's write queue is the only writer, so per-photo results, the
-    /// partial-failure counts and a retry of only the failed items come from one place
-    /// (PRD P0-09). A library whose folder cannot write reports the refused changes instead of
-    /// claiming they were saved (PRD P0-08).
-    func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult
-
-    /// Retries only the changes of one finishing action that still need it (PRD P0-09).
-    ///
-    /// Confirmed changes are left alone, so a retry can never repeat a successful write; the
-    /// plan, the dropped photos and C5's undo record stay as they were (PRD P0-12).
-    func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult
 
     /// Whether the group is complete, and where the group view goes next, following C12's
     /// setting (PRD In-group culling, group completion; PRD P0-12).
     ///
     /// The library owns the folder's completion records, so the view never derives a second
     /// rule; a folder that ended answers ``GroupViewCompletion/inProgress``.
+    func recordGroupFinishing(_ group: GroupID) async
+
     func groupCompletion(
         for groupID: GroupID, behaviour: GroupCompletionBehaviour
     ) async -> GroupViewCompletion
@@ -365,27 +331,14 @@ extension FolderLibrary {
 
     func hasUnfinishedWrites() async -> Bool { false }
 
-    /// A library with no writes has nothing to retry or drain and no watch to poll
-    /// (PRD P0-08, P0-02).
-    func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus? {
-        latestChange(for: photo)
-    }
-
     func drainWrites() async {}
 
     func checkFolderLocationNow() async {}
 
     /// A library with no folder to close keeps the folder key it has.
     func closeFolder() async {}
-    /// A library with no folder to write records no finishing action and completes no group
-    /// (PRD In-group culling).
-    func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {
-        GroupFinishingResult.applied(plan, statuses: [:])
-    }
 
-    func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult {
-        result
-    }
+    func recordGroupFinishing(_ group: GroupID) async {}
 
     func groupCompletion(
         for groupID: GroupID, behaviour: GroupCompletionBehaviour
@@ -408,9 +361,9 @@ extension FolderLibrary {
             id: MarkBatchID(), change: items.first?.change ?? MarkChange(), outcomes: outcomes)
     }
 
-    func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult? { nil }
-
-    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
+    func planRejectMove(
+        configuration: RejectMoveConfiguration, rejected: [PhotoIdentity]
+    ) async throws -> RejectMovePlan {
         throw RejectMoveRefusal.disabled
     }
 

@@ -54,18 +54,7 @@ struct SaveStatusIndicator: View {
             if let renderedState {
                 Button {
                     guard state == .failed else { return }
-                    Task {
-                        if let photo {
-                            await browsing.retryLatestChange(for: photo)
-                        } else if browsing.batchReport?.canRetry == true {
-                            await browsing.retryFailedBatch()
-                        } else {
-                            for change in browsing.unsavedChanges where change.state.failure != nil
-                            {
-                                await browsing.retryLatestChange(for: change.photo)
-                            }
-                        }
-                    }
+                    browsing.retryAllUnfinishedChanges()
                 } label: {
                     glyph(for: renderedState)
                         .frame(width: 28, height: 24)
@@ -294,7 +283,7 @@ struct UnsavedChangesView: View {
                 }
                 ToolbarItem(placement: .bottomBar) {
                     Button("Retry all") {
-                        Task { await browsing.retryAllUnfinishedChanges() }
+                        browsing.retryAllUnfinishedChanges()
                     }
                     .disabled(browsing.unsavedChanges.isEmpty)
                     .accessibilityIdentifier("clove.saveState.retryAll")
@@ -322,7 +311,7 @@ struct UnsavedChangesView: View {
             }
             Spacer(minLength: 8)
             Button("Retry") {
-                Task { await browsing.retryLatestChange(for: change.photo) }
+                browsing.retryAllUnfinishedChanges()
             }
             .buttonStyle(.bordered)
             .accessibilityIdentifier("clove.saveState.retry.\(change.photo.stem)")

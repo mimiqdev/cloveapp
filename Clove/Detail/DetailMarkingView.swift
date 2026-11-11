@@ -38,7 +38,7 @@ struct DetailZoomPolicy: Hashable {
 @MainActor
 struct DetailMarkingActions {
     /// Applies one resolved mark change to the photo it belongs to (PRD P0-08).
-    let apply: (MarkChange, GridPhoto) async -> Void
+    let apply: (MarkChange, GridPhoto) -> Void
 
     /// Starts the auto-advance one written mark asks for, resolved in the screen's own order
     /// (PRD Auto-advance; PRD In-group culling).
@@ -699,19 +699,19 @@ struct DetailMarkingView: View {
 
     /// One rating tap, resolved by C13's rating-bar rule (PRD Marking rules).
     private func rate(_ rating: Rating) {
-        apply(rules.result(forRating: rating, marks: photo.marks))
+        apply(rules.result(forRating: rating, marks: browsing.shownMarks(for: photo.id)))
     }
 
     /// One label choice, resolved by C13's label rule (PRD Marking rules).
     private func choose(_ label: ColourLabel) {
-        apply(rules.result(forLabel: label, marks: photo.marks))
+        apply(rules.result(forLabel: label, marks: browsing.shownMarks(for: photo.id)))
     }
 
     /// Toggles Reject, which is the rating −1 (PRD Marking rules).
     private func toggleReject() {
         // The HUD's Reject is a toggle, while the `↓` key only turns Reject on. C13 owns both
         // directions and the mark kind auto-advance reads (PRD Marking rules, PRD Auto-advance).
-        apply(rules.result(forRejectToggle: photo.marks))
+        apply(rules.result(forRejectToggle: browsing.shownMarks(for: photo.id)))
     }
 
     /// Resolves one finished marking swipe through C13's gesture rules (PRD P0-06).
@@ -721,9 +721,15 @@ struct DetailMarkingView: View {
     private func applyMarkingSwipe(_ end: DetailMarkingSwipeEnd) {
         switch end {
         case .rating(let travel):
-            apply(rules.result(forSwipeUpTravel: travel, marks: photo.marks, isZoomed: false))
+            apply(
+                rules.result(
+                    forSwipeUpTravel: travel, marks: browsing.shownMarks(for: photo.id),
+                    isZoomed: false))
         case .reject(let travel):
-            apply(rules.result(forSwipeDownTravel: travel, marks: photo.marks, isZoomed: false))
+            apply(
+                rules.result(
+                    forSwipeDownTravel: travel, marks: browsing.shownMarks(for: photo.id),
+                    isZoomed: false))
         }
     }
 
@@ -736,7 +742,7 @@ struct DetailMarkingView: View {
     private func apply(_ result: MarkingResult) {
         switch result {
         case .mark(let change, let kind):
-            Task { await actions.apply(change, photo) }
+            actions.apply(change, photo)
             actions.marked(kind, photo)
         case .previousPhoto:
             actions.step(-1)
@@ -771,7 +777,7 @@ struct DetailMarkingView: View {
     private func perform(_ action: SaveAction) {
         switch action {
         case .retry, .freeSpaceAndRetry:
-            Task { await browsing.retryLatestChange(for: photo.id) }
+            browsing.retryAllUnfinishedChanges()
         case .cancel:
             if let status = browsing.latestChange(for: photo.id) {
                 dismissedFailures.insert(status.id)

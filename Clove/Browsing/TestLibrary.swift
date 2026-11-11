@@ -215,10 +215,6 @@ final class TestLibrary: FolderLibrary {
     /// The photos whose forced move failure already happened, so a retry moves them (P0-10).
     private var alreadyFailedMoves: Set<PhotoIdentity> = []
 
-    /// The batches this library applied, so a retry touches only their failed photos
-    /// (PRD P0-09).
-    private var batches: [MarkBatchID: [BatchMarkItem]] = [:]
-
     /// The stem suffix whose rejected photos fail their first move, or nil when none does
     /// (PRD P0-10).
     private let failingMoveStemSuffix: String?
@@ -312,18 +308,6 @@ final class TestLibrary: FolderLibrary {
                 FolderScanSummary(photoCount: stored.count, status: .complete)))
     }
 
-    /// Applies only the fields the change names and reports the state C4 would (PRD P0-08).
-    ///
-    /// Every sample photo is a RAW set, whose rating (Reject included) and label belong to its
-    /// sidecar, so a change reports ``MarkChangeState/savedInSidecar``.
-    /// ``MarkChangeState/savedInCloveOnly`` would belong to a standalone JPEG/HIF (G1 decision 6);
-    /// the sample has none. A newer change replaces the photo's status the way the queue
-    /// supersedes an older request, and a photo with nothing requested has no status at all.
-    /// Nothing is written anywhere.
-    func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus {
-        perform(change, for: photo)
-    }
-
     /// Applies one bar action's per-photo changes as one batch (PRD P0-09).
     ///
     /// Each photo is written on its own, the way C4's batch admits each set: a photo the launch
@@ -333,20 +317,8 @@ final class TestLibrary: FolderLibrary {
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         let outcomes = items.map { perform($0.change, for: $0.photo) }
         let batch = MarkBatchID()
-        batches[batch] = items
         return MarkBatchResult(
             id: batch, change: items.first?.change ?? MarkChange(), outcomes: outcomes)
-    }
-
-    /// Retries only the photos one batch could not save (PRD P0-09).
-    func retryFailed(in batch: MarkBatchID) async -> MarkBatchResult? {
-        guard let items = batches[batch] else { return nil }
-        let failed = items.filter { changes[$0.photo]?.state.isUnfinished == true }
-        let outcomes = failed.map { perform($0.change, for: $0.photo) }
-        let retry = MarkBatchID()
-        batches[retry] = items
-        return MarkBatchResult(
-            id: retry, change: items.first?.change ?? MarkChange(), outcomes: outcomes)
     }
 
     /// Applies one change to one photo and reports the state C4 would (PRD P0-08).
@@ -409,9 +381,11 @@ final class TestLibrary: FolderLibrary {
     /// The plan is built in memory from the sample's marks, so the sheet shows the same counts,
     /// companions, XMP files and folder name the real plan would, without checking or touching a
     /// file. A read-only sample refuses the whole request, as PRD P0-10 requires.
-    func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
+    func planRejectMove(
+        configuration: RejectMoveConfiguration, rejected: [PhotoIdentity]
+    ) async throws -> RejectMovePlan {
         try checkMoveRejects(configuration)
-        return makeRejectMovePlan(configuration)
+        return makeRejectMovePlan(configuration, rejected: Set(rejected))
     }
 
     /// Moves the sample's rejected photos and reports their outcomes (PRD P0-10).
@@ -455,13 +429,15 @@ final class TestLibrary: FolderLibrary {
     }
 
     /// Builds the sample plan with one ready set per rejected photo (PRD P0-10).
-    private func makeRejectMovePlan(_ configuration: RejectMoveConfiguration) -> RejectMovePlan {
+    private func makeRejectMovePlan(
+        _ configuration: RejectMoveConfiguration, rejected: Set<PhotoIdentity>
+    ) -> RejectMovePlan {
         let root = URL(fileURLWithPath: "/clove-test-library", isDirectory: true)
         let destination = root.appendingPathComponent(
             configuration.rejectsFolderName.rawValue, isDirectory: true)
         var sets: [ScannedPhotoSet] = []
         var entries: [RejectMovePlanEntry] = []
-        for photo in stored where photo.marks.isRejected {
+        for photo in stored where rejected.contains(photo.id) {
             guard let set = scannedSet(for: photo) else { continue }
             sets.append(set)
             let folder =
@@ -604,24 +580,6 @@ final class TestLibrary: FolderLibrary {
     /// The latest change to one photo with its save state (PRD P0-08).
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes[photo] }
 
-    /// Resends the photo's latest failed change, which the sample then saves (PRD P0-08).
-    ///
-    /// A forced failure happens once per photo, so Retry confirms the change the way C4's queue
-    /// does after the condition that broke the write is gone; a change that did not fail is left
-    /// alone, and a superseded one is never resurrected (PRD How marks reach disk, rule 8).
-    func retryLatestChange(for photo: PhotoIdentity) async -> MarkChangeStatus? {
-        guard let status = changes[photo], status.state.failure != nil else {
-            return changes[photo]
-        }
-        // C4's retry re-admits the same change, so the sample publishes the same identity moving
-        // back to pending before the write lands; the merge rule accepts that one backward move.
-        let pending = MarkChangeStatus(
-            id: status.id, identity: photo, requested: status.requested, state: .pending)
-        changes[photo] = pending
-        updateContinuation.yield(.change(pending))
-        return perform(status.requested, for: photo)
-    }
-
     /// Reports the sample folder's location gone, as C11's watch does (PRD P0-02).
     func reportLocationLoss(_ reason: FolderLocationLoss.Reason) {
         updateContinuation.yield(
@@ -649,7 +607,6 @@ final class TestLibrary: FolderLibrary {
         stored = []
         groups = []
         changes = [:]
-        batches = [:]
         openGeneration += 1
         updateContinuation.yield(.photos([]))
     }
@@ -702,49 +659,11 @@ final class TestLibrary: FolderLibrary {
 
     // MARK: - In-group culling
 
-    /// Runs one finishing action's plan through the sample's own mark call (PRD P0-12).
-    ///
-    /// The sample has no write queue, so it applies the plan's still-allowed changes itself and
-    /// reports the same result shape the real library returns
-    /// (``GroupFinishingResult/applied(_:changes:statuses:undo:)``). The changes are re-checked
-    /// against the marks the sample holds now through C10's own rule, so a photo rated or labelled
-    /// after the screen built its plan is never rejected and its rating is never overwritten
-    /// (PRD P0-12; ``GroupFinishingPlan/changesAllowed(currentMarks:)``). An unavailable plan
-    /// writes nothing and records no completion, exactly like the executor (PRD In-group culling,
-    /// finishing actions).
-    func runGroupFinishing(_ plan: GroupFinishingPlan) async -> GroupFinishingResult {
-        let changes = plan.changesAllowed { self.marks(for: $0) }
-        guard plan.availability.isAvailable else {
-            return GroupFinishingResult.applied(plan, changes: changes, statuses: [:])
-        }
-        await groupCompletion.recordFinishingAction(on: plan.groupID)
-        var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
-        for change in changes {
-            statuses[change.photo] = await apply(change.change, to: change.photo)
-        }
-        return GroupFinishingResult.applied(plan, changes: changes, statuses: statuses)
-    }
-
-    /// Sends the finishing action's failed changes again, and only those (PRD P0-09).
-    func retryGroupFinishing(_ result: GroupFinishingResult) async -> GroupFinishingResult {
-        var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
-        for outcome in result.outcomes { statuses[outcome.photo] = outcome.status }
-        for outcome in result.outcomes where outcome.status.state.isUnfinished {
-            // A retry applies the same requested marks; the sample's marks still allow them or the
-            // change would have been dropped when the action ran (PRD P0-12).
-            statuses[outcome.photo] = await apply(outcome.change.change, to: outcome.photo)
-        }
-        return GroupFinishingResult.applied(
-            result.plan, changes: result.undo.entries, statuses: statuses, undo: result.undo)
-    }
-
-    /// The marks the sample holds for one photo right now, for a finishing action's re-check
-    /// (PRD P0-12).
-    private func marks(for photo: PhotoIdentity) -> PhotoMarks {
-        stored.first { $0.id == photo }?.marks ?? PhotoMarks()
-    }
-
     /// Whether the sample's group is complete, and where the group view goes next (PRD P0-12).
+    func recordGroupFinishing(_ group: GroupID) async {
+        await groupCompletion.recordFinishingAction(on: group)
+    }
+
     func groupCompletion(
         for groupID: GroupID, behaviour: GroupCompletionBehaviour
     ) async -> GroupViewCompletion {
