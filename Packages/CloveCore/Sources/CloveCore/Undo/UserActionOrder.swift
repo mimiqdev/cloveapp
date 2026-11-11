@@ -59,7 +59,6 @@ public final class UserActionOrder {
     /// A ticket waits for every earlier ticket to start, and for every earlier step to finish.
     /// - Returns: `false` when the ticket was cancelled or never reserved, so its action must not
     ///   run unordered; `true` when it may run.
-    @discardableResult
     public func start(_ ticket: Int) async -> Bool {
         while isBlocked(ticket) {
             await withCheckedContinuation { waiters.append($0) }
@@ -77,6 +76,23 @@ public final class UserActionOrder {
         entries[index].finished = true
         prune()
         wake()
+    }
+
+    /// Runs one reservation's work, always starting or releasing the ticket (PRD P0-05).
+    ///
+    /// The work runs only when the ticket's turn comes, and the ticket is always finished
+    /// afterwards — also when the work returns early or throws — because a reservation that never
+    /// starts would hold every later action back for the rest of the scene. A ticket that was
+    /// cancelled first runs nothing.
+    ///
+    /// - Parameters:
+    ///   - ticket: A ticket from ``reserve(_:)``.
+    ///   - work: The action to run when its turn comes.
+    /// - Returns: The work's value, or `nil` when the ticket no longer exists.
+    public func run<T>(_ ticket: Int, _ work: () async throws -> T) async rethrows -> T? {
+        guard await start(ticket) else { return nil }
+        defer { finishStep(ticket) }
+        return try await work()
     }
 
     /// Drops a ticket whose action will never run, so later actions are not held up (PRD P0-05).

@@ -65,6 +65,53 @@ import CloveCore
         #expect(log.tickets == [before, step, after])
     }
 
+    @Test func runReleasesTheTicketWhenTheWorkReturnsEarly() async {
+        let order = UserActionOrder()
+        let log = Log()
+        let first = order.reserve(.action)
+        let second = order.reserve(.action)
+
+        // The first action's work gives up immediately, as a guard after its turn does.
+        let started = await order.run(first) { () -> Bool in
+            log.append(first)
+            return false
+        }
+        #expect(started == false)
+        // The second ticket is not wedged by the first one's early return.
+        _ = await order.run(second) { log.append(second) }
+        #expect(log.tickets == [first, second])
+    }
+
+    @Test func runReleasesTheTicketWhenTheWorkThrows() async {
+        let order = UserActionOrder()
+        let log = Log()
+        let first = order.reserve(.action)
+        let second = order.reserve(.action)
+
+        struct WorkFailed: Error {}
+        await #expect(throws: WorkFailed.self) {
+            try await order.run(first) { () throws -> Void in
+                log.append(first)
+                throw WorkFailed()
+            }
+        }
+        _ = await order.run(second) { log.append(second) }
+        #expect(log.tickets == [first, second])
+    }
+
+    @Test func runOfACancelledTicketRunsNothingAndReleasesNothing() async {
+        let order = UserActionOrder()
+        let log = Log()
+        let cancelled = order.reserve(.action)
+        let later = order.reserve(.action)
+        order.cancel(cancelled)
+
+        let result = await order.run(cancelled) { log.append(cancelled) }
+        #expect(result == nil)
+        _ = await order.run(later) { log.append(later) }
+        #expect(log.tickets == [later])
+    }
+
     @Test func aCancelledTicketDoesNotStart() async {
         let order = UserActionOrder()
         let cancelled = order.reserve(.action)

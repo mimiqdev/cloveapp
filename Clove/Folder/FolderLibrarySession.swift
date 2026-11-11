@@ -392,10 +392,12 @@ final class FolderLibrarySession: FolderLibrary {
         }
         let scanned = store
         var order: [PhotoIdentity: Int] = [:]
+        var itemsByIdentity: [PhotoIdentity: BatchMarkItem] = [:]
         var byChange: [MarkChange: [ScannedPhotoSet]] = [:]
         var unavailable: [BatchMarkItem] = []
         for (index, item) in items.enumerated() {
             order[item.photo] = index
+            itemsByIdentity[item.photo] = item
             guard let set = scanned.scannedSet(for: item.photo) else {
                 unavailable.append(item)
                 continue
@@ -419,9 +421,7 @@ final class FolderLibrarySession: FolderLibrary {
             guard isCurrentOpen(open) else {
                 unavailable.append(
                     contentsOf: groups.flatMap { group in
-                        group.sets.compactMap { set in
-                            items.first { $0.photo == set.id }
-                        }
+                        group.sets.compactMap { set in itemsByIdentity[set.id] }
                     })
                 break
             }

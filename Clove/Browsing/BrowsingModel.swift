@@ -492,33 +492,34 @@ final class BrowsingModel: UndoHistoryHost {
     /// running is ignored, because two overlapping results would each clear the running flag
     /// and let completion move the view before the last result's failures are known.
     func runGroupFinishing(_ plan: GroupFinishingPlan, ticket: Int? = nil) async {
-        guard !isRunningGroupFinishing else { return }
-        // The action takes its place in the user's order like any mark: a step before it finishes
-        // first, and a later step waits for this action to start (PRD P0-12, P0-05).
         let order = ticket ?? userActionOrder.reserve(.action)
-        guard await userActionOrder.start(order) else { return }
-        // A second action can start while this one waits, and only one runs at a time.
-        guard !isRunningGroupFinishing else { return }
-        let folder = state.folder
-        let generation = library.openGeneration
-        dismissedGroupFailure = nil
-        isRunningGroupFinishing = true
-        let result = await runWrite { await library.runGroupFinishing(plan) }
-        // The action happened, but its result must not land in another folder's group view or
-        // make U8 undo a mark in a folder it does not belong to (PRD P0-14). A reopen of the same
-        // folder is another session, so the open generation has to match too.
-        if state.folder == folder, library.openGeneration == generation {
-            finishingResults[plan.groupID] = result
-            clearedFinishingGroups.remove(plan.groupID)
-            groupFinishingRuns += 1
-            // One finishing action is one undo step, from C10's own record of what it changed
-            // (PRD P0-12). A retry resends its failed changes and records nothing more. The action
-            // stays "running" until the record lands, so a mark taken meanwhile waits and takes its
-            // place above it in the history.
-            await recordUndoStep(.groupFinishing(result.undo))
+        _ = await userActionOrder.run(order) {
+            guard !isRunningGroupFinishing else { return }
+            // The action takes its place in the user's order like any mark: a step before it finishes
+            // first, and a later step waits for this action to start (PRD P0-12, P0-05).
+            // A second action can start while this one waits, and only one runs at a time.
+            guard !isRunningGroupFinishing else { return }
+            let folder = state.folder
+            let generation = library.openGeneration
+            dismissedGroupFailure = nil
+            isRunningGroupFinishing = true
+            let result = await runWrite { await library.runGroupFinishing(plan) }
+            // The action happened, but its result must not land in another folder's group view or
+            // make U8 undo a mark in a folder it does not belong to (PRD P0-14). A reopen of the same
+            // folder is another session, so the open generation has to match too.
+            if state.folder == folder, library.openGeneration == generation {
+                finishingResults[plan.groupID] = result
+                clearedFinishingGroups.remove(plan.groupID)
+                groupFinishingRuns += 1
+                // One finishing action is one undo step, from C10's own record of what it changed
+                // (PRD P0-12). A retry resends its failed changes and records nothing more. The action
+                // stays "running" until the record lands, so a mark taken meanwhile waits and takes its
+                // place above it in the history.
+                await recordUndoStep(.groupFinishing(result.undo))
+            }
+            isRunningGroupFinishing = false
+            openGates()
         }
-        isRunningGroupFinishing = false
-        openGates()
     }
 
     /// Retries only the changes that still need it, through C4 (PRD P0-09).
@@ -526,21 +527,22 @@ final class BrowsingModel: UndoHistoryHost {
     /// It shares the one-action-at-a-time rule with ``runGroupFinishing(_:)``, so a retry can
     /// never overlap the action it retries.
     func retryGroupFinishing(ticket: Int? = nil) async {
-        guard !isRunningGroupFinishing, lastGroupFinishing != nil else { return }
         let order = ticket ?? userActionOrder.reserve(.action)
-        guard await userActionOrder.start(order) else { return }
-        guard !isRunningGroupFinishing, let result = lastGroupFinishing else { return }
-        let folder = state.folder
-        dismissedGroupFailure = nil
-        isRunningGroupFinishing = true
-        let retried = await runWrite { await library.retryGroupFinishing(result) }
-        isRunningGroupFinishing = false
-        openGates()
-        // A retry that returns after the folder changed belongs to the folder that is gone.
-        guard state.folder == folder else { return }
-        finishingResults[retried.plan.groupID] = retried
-        clearedFinishingGroups.remove(retried.plan.groupID)
-        groupFinishingRuns += 1
+        _ = await userActionOrder.run(order) {
+            guard !isRunningGroupFinishing, lastGroupFinishing != nil else { return }
+            guard !isRunningGroupFinishing, let result = lastGroupFinishing else { return }
+            let folder = state.folder
+            dismissedGroupFailure = nil
+            isRunningGroupFinishing = true
+            let retried = await runWrite { await library.retryGroupFinishing(result) }
+            isRunningGroupFinishing = false
+            openGates()
+            // A retry that returns after the folder changed belongs to the folder that is gone.
+            guard state.folder == folder else { return }
+            finishingResults[retried.plan.groupID] = retried
+            clearedFinishingGroups.remove(retried.plan.groupID)
+            groupFinishingRuns += 1
+        }
     }
 
     /// Hides the finishing action's failure without retrying it (PRD Failure and recovery).
@@ -706,34 +708,37 @@ final class BrowsingModel: UndoHistoryHost {
     /// (PRD P0-08). A second action is refused while one runs, so both plans cannot read the same
     /// pre-batch marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings, ticket: Int? = nil) async {
-        guard !isApplyingBatch, !isMovingRejects else { return }
         let order = ticket ?? userActionOrder.reserve(.action)
-        guard await userActionOrder.start(order) else { return }
-        // Another batch or a Move rejects run can start while this one waits (PRD P0-09, P0-10).
-        guard !isApplyingBatch, !isMovingRejects else { return }
-        let targets = batchTargets
-        let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
-        guard !plan.items.isEmpty else { return }
-        let folder = state.folder
-        let generation = library.openGeneration
-        let clearances = selectionClearances
-        isApplyingBatch = true
-        defer { isApplyingBatch = false }
-        // One bar action is one undo step, whatever the number of photos it writes. C4 admits every
-        // photo and reports the marks each replaces, so the step is recorded before the writes are
-        // awaited (PRD P0-09, P0-05).
-        let result = await runWrite { () -> MarkBatchResult? in
-            guard let admission = await library.admitBatch(plan.items) else { return nil }
-            await recordUndoStep(.batch(admission: admission))
-            guard state.folder == folder, library.openGeneration == generation else { return nil }
-            return await library.write(admission)
+        _ = await userActionOrder.run(order) {
+            guard !isApplyingBatch, !isMovingRejects else { return }
+            // Another batch or a Move rejects run can start while this one waits (PRD P0-09, P0-10).
+            guard !isApplyingBatch, !isMovingRejects else { return }
+            let targets = batchTargets
+            let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
+            guard !plan.items.isEmpty else { return }
+            let folder = state.folder
+            let generation = library.openGeneration
+            let clearances = selectionClearances
+            isApplyingBatch = true
+            defer { isApplyingBatch = false }
+            // One bar action is one undo step, whatever the number of photos it writes. C4 admits every
+            // photo and reports the marks each replaces, so the step is recorded before the writes are
+            // awaited (PRD P0-09, P0-05).
+            let result = await runWrite { () -> MarkBatchResult? in
+                guard let admission = await library.admitBatch(plan.items) else { return nil }
+                await recordUndoStep(.batch(admission: admission))
+                guard state.folder == folder, library.openGeneration == generation else {
+                    return nil
+                }
+                return await library.write(admission)
+            }
+            guard let result else { return }
+            // The batch happened, but its report must not land in another folder's bar or reopen
+            // after Done cleared the mode it belonged to.
+            guard state.folder == folder else { return }
+            guard clearances == selectionClearances else { return }
+            batchReport = BatchMarkReport(result)
         }
-        guard let result else { return }
-        // The batch happened, but its report must not land in another folder's bar or reopen
-        // after Done cleared the mode it belonged to.
-        guard state.folder == folder else { return }
-        guard clearances == selectionClearances else { return }
-        batchReport = BatchMarkReport(result)
     }
 
     /// Retries only the photos the last batch could not save (PRD P0-09).
@@ -743,21 +748,21 @@ final class BrowsingModel: UndoHistoryHost {
     /// that can no longer retry, such as one whose folder closed, answers nil; the report then
     /// stays as it was, so the bar still names the photos that did not save (PRD P0-08).
     func retryFailedBatch(ticket: Int? = nil) async {
-        guard !isApplyingBatch, !isMovingRejects, batchReport?.canRetry == true else { return }
         let order = ticket ?? userActionOrder.reserve(.action)
-        guard await userActionOrder.start(order) else { return }
-        guard !isApplyingBatch, !isMovingRejects, let report = batchReport, report.canRetry
-        else { return }
-        let folder = state.folder
-        let clearances = selectionClearances
-        let dismissals = reportDismissals
-        isApplyingBatch = true
-        defer { isApplyingBatch = false }
-        guard let result = await runWrite({ await library.retryFailed(in: report.batch) }),
-            state.folder == folder, clearances == selectionClearances,
-            dismissals == reportDismissals
-        else { return }
-        batchReport = report.merging(result)
+        _ = await userActionOrder.run(order) {
+            guard !isApplyingBatch, !isMovingRejects, let report = batchReport, report.canRetry
+            else { return }
+            let folder = state.folder
+            let clearances = selectionClearances
+            let dismissals = reportDismissals
+            isApplyingBatch = true
+            defer { isApplyingBatch = false }
+            guard let result = await runWrite({ await library.retryFailed(in: report.batch) }),
+                state.folder == folder, clearances == selectionClearances,
+                dismissals == reportDismissals
+            else { return }
+            batchReport = report.merging(result)
+        }
     }
 
     // MARK: - Move rejects
@@ -952,43 +957,44 @@ final class BrowsingModel: UndoHistoryHost {
     func apply(_ change: MarkChange, to photo: PhotoIdentity, ticket: Int? = nil)
         async -> MarkChangeStatus?
     {
-        // A step restores marks through the same queue, so a mark taken during one waits for the
-        // step to finish instead of being merged over by the restore. Waiting cannot deadlock: a
-        // step only waits for writes already in flight, never for a new mark.
-        guard !isMovingRejects, !change.isEmpty else { return nil }
         let order = ticket ?? userActionOrder.reserve(.action)
-        guard await userActionOrder.start(order) else { return nil }
-        // A Move rejects run can start while the mark waits, and PRD P0-10 blocks marking then.
-        guard !isMovingRejects else { return nil }
-        let folder = state.folder
-        let generation = library.openGeneration
-        return await runWrite {
-            // C4 admits the change and reports the marks it replaces, so the undo step records
-            // exactly what the user last saw even while other writers run for the photo
-            // (PRD P0-05).
-            guard let admission = await library.admitMarkChange(change, to: photo) else {
-                return nil
-            }
-            // A finishing action re-reads each photo's marks as it runs, so a mark taken meanwhile
-            // has to reach C4 at once. Its write starts first, its undo entry waits for the
-            // action's record, and only then is the write awaited, so the history keeps the
-            // started order even when the write is slow (PRD P0-12, P0-05).
-            if isRunningGroupFinishing {
-                let write = Task { await library.write(admission) }
-                await wait(while: isRunningGroupFinishing)
-                guard state.folder == folder, library.openGeneration == generation else {
+        return await userActionOrder.run(order) {
+            // A step restores marks through the same queue, so a mark taken during one waits for the
+            // step to finish instead of being merged over by the restore. Waiting cannot deadlock: a
+            // step only waits for writes already in flight, never for a new mark.
+            guard !isMovingRejects, !change.isEmpty else { return nil }
+            // A Move rejects run can start while the mark waits, and PRD P0-10 blocks marking then.
+            guard !isMovingRejects else { return nil }
+            let folder = state.folder
+            let generation = library.openGeneration
+            return await runWrite {
+                // C4 admits the change and reports the marks it replaces, so the undo step records
+                // exactly what the user last saw even while other writers run for the photo
+                // (PRD P0-05).
+                guard let admission = await library.admitMarkChange(change, to: photo) else {
+                    return nil
+                }
+                // A finishing action re-reads each photo's marks as it runs, so a mark taken meanwhile
+                // has to reach C4 at once. Its write starts first, its undo entry waits for the
+                // action's record, and only then is the write awaited, so the history keeps the
+                // started order even when the write is slow (PRD P0-12, P0-05).
+                if isRunningGroupFinishing {
+                    let write = Task { await library.write(admission) }
+                    await wait(while: isRunningGroupFinishing)
+                    guard state.folder == folder, library.openGeneration == generation else {
+                        return await write.value
+                    }
+                    await recordUndoStep(.mark(admission: admission))
                     return await write.value
                 }
+                // Otherwise the step is recorded while the write runs, so Undo is live and the
+                // history keeps the user's order (PRD P0-05).
                 await recordUndoStep(.mark(admission: admission))
-                return await write.value
+                // The library refuses the write when that folder or open is gone, so its own answer is
+                // the save state either way (PRD P0-08).
+                return await library.write(admission)
             }
-            // Otherwise the step is recorded while the write runs, so Undo is live and the
-            // history keeps the user's order (PRD P0-05).
-            await recordUndoStep(.mark(admission: admission))
-            // The library refuses the write when that folder or open is gone, so its own answer is
-            // the save state either way (PRD P0-08).
-            return await library.write(admission)
-        }
+        } ?? nil
     }
 
     /// Runs one library action and keeps the scene's in-flight count (PRD P0-05).
@@ -1144,8 +1150,8 @@ final class BrowsingModel: UndoHistoryHost {
     /// Every kind of step goes through this one call, so one action is one entry. A mark and a bar
     /// action are recorded when they start, before their writes finish, so the history keeps the
     /// order the user acted in and Undo is live while the write runs; a step waits for the scene's
-    /// own writes before it reads any marks (``applyUndoStep(isRedo:ticket:_:)``). A finishing action
-    /// is
+    /// own writes before it reads any marks (``applyUndoStep(isRedo:ticket:_:)``). A finishing
+    /// action is
     /// recorded from C10's own record of what it changed. A retry resends an already recorded
     /// change, so it records nothing and never gives one action two entries.
     private func recordUndoStep(_ request: UndoRecordRequest) async {
@@ -1318,11 +1324,12 @@ final class BrowsingModel: UndoHistoryHost {
     /// reach disk, rule 8, keeps a superseded change from being retried (the library reads the
     /// photo's latest change).
     func retryLatestChange(for photo: PhotoIdentity, ticket: Int? = nil) async {
-        guard !isMovingRejects else { return }
         let order = ticket ?? userActionOrder.reserve(.action)
-        guard await userActionOrder.start(order) else { return }
-        guard !isMovingRejects else { return }
-        _ = await runWrite { await library.retryLatestChange(for: photo) }
+        _ = await userActionOrder.run(order) {
+            guard !isMovingRejects else { return }
+            guard !isMovingRejects else { return }
+            _ = await runWrite { await library.retryLatestChange(for: photo) }
+        }
     }
 
     /// Retries every photo the indicator lists, one call per photo (PRD P0-08).
