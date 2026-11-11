@@ -149,6 +149,48 @@ struct DetailDisplayPresentationTests {
         #expect(!hasLoadingCue(window))
     }
 
+    @Test func rejectedDetailKeepsTheRenderedPhotoAtFullBrightness() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photo = browsing.photos[2]
+        browsing.openPhoto(photo.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source)
+                .environment(SettingsStore.sample))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor { source.prefetched.last?.current.photo == photo.id }
+        let preview = try #require(findPreview(in: window))
+        let before = try centrePixels(of: preview, in: window)
+        browsing.apply(.rating(.rejected), to: photo.id)
+        try await waitFor { preview.accessibilityLabel?.contains("Rejected") == true }
+        #expect(try centrePixels(of: preview, in: window) == before)
+        browsing.apply(.rating(.unrated), to: photo.id)
+        try await waitFor { preview.accessibilityLabel == photo.fileName }
+        #expect(try centrePixels(of: preview, in: window) == before)
+    }
+
+    /// Compare displayed photo pixels, including opacity applied by any SwiftUI ancestor.
+    private func centrePixels(of preview: UIView, in window: UIWindow) throws -> Data {
+        let centre = preview.convert(
+            CGPoint(x: preview.bounds.midX, y: preview.bounds.midY), to: window)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40), format: format)
+            .image { context in
+                context.cgContext.translateBy(x: 20 - centre.x, y: 20 - centre.y)
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+        return try #require(image.pngData())
+    }
+
     @Test func rawSwapOrderRefreshAndCameraZoomThroughTheSharedView() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
