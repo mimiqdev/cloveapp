@@ -1,0 +1,121 @@
+name: Verify
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to test merged with the current main (empty tests the chosen branch)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.event.pull_request.number || inputs.pr || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Resolve the tested commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      head: ${{ steps.merge.outputs.head }}
+      main: ${{ steps.merge.outputs.main }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge the latest main
+        id: merge
+        run: scripts/ci/merge-main.sh
+
+  scripts:
+    name: Python script tests
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge main
+        run: scripts/ci/merge-main.sh "${{ needs.prepare.outputs.main }}"
+      # The same commands as `mise run test-fixtures` and `mise run test-release`;
+      # they are logic only and need no Apple tools.
+      - name: Fixture tooling tests
+        run: /usr/bin/python3 scripts/test_fixtures.py
+      - name: Release script tests
+        run: /usr/bin/python3 scripts/test_release_testflight.py
+
+  full:
+    name: Full verify
+    needs: prepare
+    runs-on: xcode-27
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge main
+        run: scripts/ci/merge-main.sh "${{ needs.prepare.outputs.main }}"
+      - name: Runner facts
+        run: scripts/ci/runner-facts.sh
+      - name: Install mise and XcodeGen
+        run: scripts/ci/install-mise.sh
+      - name: Point the fixture cache at the runner
+        run: |
+          echo "CLOVE_FIXTURES_DIR=$RUNNER_TEMP/clove-fixtures" >>"$GITHUB_ENV"
+          mkdir -p .build/ci-logs
+      - name: Restore the fixture downloads
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/clove-fixtures/files
+          key: clove-fixtures-${{ hashFiles('fixtures/manifest.json') }}
+      - name: Fetch fixtures and build the sets
+        run: mise run fixtures-sets 2>&1 | tee .build/ci-logs/fixtures-sets.log
+      - name: mise run verify
+        run: mise run verify 2>&1 | tee .build/ci-logs/verify.log
+      - name: Upload logs and test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .build/ci-logs/
+            .build/DerivedData.noindex/Logs/Test/*.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
+
+  verify:
+    name: verify
+    needs: [prepare, scripts, full]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | python3 -c '
+          import json, sys
+          needs = json.load(sys.stdin)
+          failed = [name for name, job in needs.items() if job["result"] != "success"]
+          for name, job in needs.items():
+              print(name + ": " + job["result"])
+          sys.exit(f"Not passed: {failed}" if failed else 0)
+          '
