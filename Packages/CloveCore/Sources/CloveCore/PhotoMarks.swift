@@ -26,6 +26,11 @@ public struct Rating: RawRepresentable, Hashable, Comparable, Sendable {
     /// Whether the photo is rejected rather than rated (PRD P0-05).
     public var isRejected: Bool { self == .rejected }
 
+    /// The star count to show, or `nil` when the photo has no stars: unrated or rejected.
+    ///
+    /// Reject is −1, so a rejected photo never reads "−1 stars" (PRD P0-05).
+    public var starCount: Int? { rawValue > 0 ? rawValue : nil }
+
     /// Orders ratings by value for PRD P0-03's rating filter, so Reject sorts below unrated.
     public static func < (lhs: Rating, rhs: Rating) -> Bool {
         lhs.rawValue < rhs.rawValue

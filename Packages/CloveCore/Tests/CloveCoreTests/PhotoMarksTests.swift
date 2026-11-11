@@ -14,6 +14,13 @@ func invalidRatingsAreRejected(value: Int) {
     #expect(Rating(rawValue: value) == nil)
 }
 
+@Test func starCountIsNilWithoutStars() throws {
+    #expect(Rating.rejected.starCount == nil)
+    #expect(Rating.unrated.starCount == nil)
+    #expect(try #require(Rating(rawValue: 1)).starCount == 1)
+    #expect(try #require(Rating(rawValue: 5)).starCount == 5)
+}
+
 @Test func defaultAndOrderedRatings() throws {
     #expect(Rating().rawValue == 0)
     #expect(Rating.unrated == Rating(rawValue: 0))

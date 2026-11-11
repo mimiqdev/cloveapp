@@ -821,6 +821,10 @@ final class CloveUITests: XCTestCase {
             swiped.label.contains("2 stars"),
             "A rejected photo kept its stars: \(swiped.label)"
         )
+        XCTAssertFalse(
+            swiped.label.contains("-1"),
+            "A rejected photo read its rating: \(swiped.label)"
+        )
     }
 
     /// The grid opens a group's view from its count tag (PRD Grid, P0-11).
