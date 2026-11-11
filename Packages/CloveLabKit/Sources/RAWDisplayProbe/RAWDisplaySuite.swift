@@ -26,8 +26,9 @@ public struct RAWDisplayOptions: Sendable {
     public var cameraPreviewPairs = 6
     /// Repeats per variant per file, after the variant's first (cold) render.
     public var warmRepeats = 3
-    /// RAW colour comparisons use this many of the detailed files.
-    public var colourFiles = 3
+    /// RAW colour comparisons use this many of the detailed files; the default covers
+    /// every detailed RAW.
+    public var colourFiles = 12
     public var swipePhotos = 20
     public var swipeDwells = [0, 300, 800]
     public var cacheFiles = 6
@@ -651,7 +652,7 @@ public enum RAWDisplaySuite {
             "Camera HEIF variants are ImageIO decodes of the HIF, not CIRAWFilter controls; full decode is the 100% source for camera-preview mode.",
             "Colour numbers compare same-sized sRGB bitmaps with CIEDE2000; the larger reference is Lanczos-reduced after render, so they measure colour plus resampling, not sharpness.",
             "Resident memory is process-wide 5 ms sampling: a lower bound that includes framework caches and other work, not an isolated allocation.",
-            "Detailed RAW renders use the first \(options.detailedFiles) RAWs; camera HEIF variants use \(options.cameraPreviewPairs) pairs; swipes use \(options.swipePhotos) photos; nothing reads a whole folder into memory.",
+            "Detailed RAW renders use the first \(options.detailedFiles) RAWs; camera HEIF variants use \(options.cameraPreviewPairs) pairs; swipes use \(options.swipePhotos) photos. File discovery reads paths only; the counts above bound every image decode and retained bitmap.",
             "The grid folder projection is arithmetic on one measured render time; the concurrency-2 row assumes perfect division and was not measured concurrently.",
             "Run on the physical device, charger unplugged, at room temperature; simulator and Mac numbers are not device numbers.",
         ]

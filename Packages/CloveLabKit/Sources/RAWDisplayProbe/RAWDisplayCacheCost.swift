@@ -18,7 +18,7 @@ public enum RAWDisplayCacheCost {
         measuring: any RAWDisplayMeasuring, directory: URL,
         step: (String) async -> Void = { _ in }
     ) async throws -> [LabMeasurement] {
-        var held: [CGImage] = []
+        var held: [(file: URL, image: CGImage)] = []
         var measurements: [LabMeasurement] = []
         let sampler = RAWDisplayResidentSampler()
         let start = ContinuousClock.now
@@ -27,7 +27,7 @@ public enum RAWDisplayCacheCost {
             await step("Cache: \(file.lastPathComponent)")
             do {
                 let image = try measuring.rawImage(url: file, variant: variant)
-                held.append(image)
+                held.append((file, image))
                 measurements.append(
                     LabMeasurement(
                         name: "cache-screen-decoded-memory",
@@ -39,7 +39,7 @@ public enum RAWDisplayCacheCost {
                 measurements.append(failure(file: file, folder: folder, error: error))
             }
         }
-        let heldBytes = held.reduce(0) { $0 + $1.bytesPerRow * $1.height }
+        let heldBytes = held.reduce(0) { $0 + $1.image.bytesPerRow * $1.image.height }
         let heldTags: [String: String] = [
             "count": String(held.count), "variant": variant.name,
             "note": "screen-size renders held decoded at the same time",
@@ -57,13 +57,12 @@ public enum RAWDisplayCacheCost {
                 name: "cache-held-duration", value: displayMilliseconds(since: start), unit: "ms",
                 tags: heldTags),
         ]
-        for (index, file) in files.prefix(heldImageLimit).enumerated() {
+        for entry in held {
             try Task.checkCancellation()
-            guard index < held.count else { break }
-            let image = held[index]
             for format in [UTType.heic, UTType.jpeg] {
                 measurements += encodeMeasurements(
-                    image, format: format, file: file, folder: folder, directory: directory)
+                    entry.image, format: format, file: entry.file, folder: folder,
+                    directory: directory)
             }
         }
         // Release the held bitmaps before returning so the next phase starts clean.

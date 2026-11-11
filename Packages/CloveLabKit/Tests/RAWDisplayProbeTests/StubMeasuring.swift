@@ -11,9 +11,12 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
     private var counts: [String: Int] = [:]
     /// Seconds one RAW or camera render takes when the test wants work in flight.
     private let renderDelay: Double
+    /// When set, a render returns a timing with this error instead of pixels.
+    private let renderError: String?
 
-    init(renderDelay: Double = 0) {
+    init(renderDelay: Double = 0, renderError: String? = nil) {
         self.renderDelay = max(0, renderDelay)
+        self.renderError = renderError
     }
 
     func count(_ name: String) -> Int {
@@ -28,6 +31,7 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
         if renderDelay > 0 {
             Thread.sleep(forTimeInterval: renderDelay)
         }
+        increment("render-drained")
         try Task.checkCancellation()
     }
 
@@ -43,6 +47,12 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
         timing.nativeWidth = 4_000
         timing.nativeHeight = 3_000
         timing.decodedBytes = timing.width * timing.height * 4
+        timing.error = renderError
+        if renderError != nil {
+            timing.width = 0
+            timing.height = 0
+            timing.decodedBytes = 0
+        }
         return timing
     }
 
@@ -60,6 +70,12 @@ final class StubMeasuring: RAWDisplayMeasuring, @unchecked Sendable {
         timing.nativeWidth = 4_000
         timing.nativeHeight = 3_000
         timing.decodedBytes = timing.width * timing.height * 4
+        timing.error = renderError
+        if renderError != nil {
+            timing.width = 0
+            timing.height = 0
+            timing.decodedBytes = 0
+        }
         return timing
     }
 

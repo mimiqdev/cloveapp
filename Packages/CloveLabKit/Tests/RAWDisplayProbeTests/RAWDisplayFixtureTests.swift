@@ -1,7 +1,9 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import LabSupport
 import Testing
+import UniformTypeIdentifiers
 
 @testable import RAWDisplayProbe
 
@@ -76,6 +78,32 @@ struct RAWDisplayFixtureTests {
             url: url, variant: CameraPreviewVariant(name: "screen", kind: .screenThumbnail(800)))
         #expect(screen.error == nil)
         #expect(abs(max(screen.width, screen.height) - 800) <= 2)
+    }
+
+    @Test func cameraPreviewDecodeAppliesOrientation() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "clove-rawdisplay-orientation-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("oriented.jpg")
+        let image = try solidImage(width: 40, height: 20, red: 10, green: 120, blue: 200)
+        let destination = try #require(
+            CGImageDestinationCreateWithURL(
+                url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(
+            destination, image, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        #expect(CGImageDestinationFinalize(destination))
+        let renderer = CameraPreviewRenderer()
+        let full = try renderer.render(
+            url: url, variant: CameraPreviewVariant(name: "full", kind: .fullDecode))
+        #expect(full.error == nil)
+        // Orientation 6 swaps the edges, as the embedded preview does.
+        #expect(full.width == 20 && full.height == 40)
+        #expect(full.nativeWidth == 20 && full.nativeHeight == 40)
+        let thumbnail = try renderer.render(
+            url: url, variant: CameraPreviewVariant(name: "thumb", kind: .screenThumbnail(20)))
+        #expect(thumbnail.error == nil)
+        #expect(thumbnail.width == 10 && thumbnail.height == 20)
     }
 
     @Test(.enabled(if: Fixtures.set("formats") != nil))

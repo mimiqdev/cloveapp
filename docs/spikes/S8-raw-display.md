@@ -76,6 +76,14 @@ size and then transformed the output, which is why its 592.8 ms sat next to the
 529.1 ms native number; S2 said so in its method. Every c–e row in this probe is a
 different route and must not be compared with S2's 2000 px row.
 
+The camera HEIF full and subsample decodes apply EXIF orientation after decoding,
+because `CGImageSourceCreateImageAtIndex` leaves orientation to the caller and a
+100% source must be displayed the same way as the embedded preview. The thumbnail
+route already applies it through `CreateThumbnailWithTransform`. Output sizes for
+f and g are therefore display-oriented (edges swapped for orientations 5–8), and a
+rotated file's f/g time includes the orientation redraw. The RAW routes are
+unaffected because `CIRAWFilter` applies orientation itself.
+
 The probe records the requested long edge, the actual output size and the time to
 a **materialized CPU bitmap** (`image.dataProvider?.data`). It does not inspect
 which internal decoder stage honours `scaleFactor` or draft mode, and it does not
@@ -112,18 +120,26 @@ Three comparisons are reported:
 
 ### Swipe simulation
 
-Walks up to 20 photos per dwell (0, 300 and 800 ms). For each photo it requests the
-embedded preview at 2000 px, waits the dwell, starts the fastest screen-size RAW
-variant measured earlier in the run in a background task, and moves on. One render
-is in flight at a time, as in production. A render that has not finished when the
-next photo arrives is cancelled and drained; the drain is timed. At the end of the
-walk the last render is awaited, because the reader stays on that photo.
+Walks up to 20 photos per dwell (0, 300 and 800 ms). Arrival is the instant the
+reader lands on a photo. From there it requests the embedded preview at 2000 px,
+waits the dwell, then requests the fastest screen-size RAW variant measured earlier
+in the run in a background task and moves on. One render is in flight at a time, as
+in production. A render that has not finished **before the next arrival** is
+superseded: it is cancelled, drained, and its drain is timed. At the end of the walk
+the last render is awaited, because the reader stays on that photo.
 
-Recorded: preview time with a render running and with none, the time from arrival
-to the render completing (`swipe-render-ready`, the probe's proxy for "showing"),
-drain after supersede, and started/ready/wasted counts. Presentation is not
-measured. If the camera HEIF preview has no usable pixels, the preview request
-falls back to the RAW's own embedded preview and the tag says so.
+Two times are recorded for a render that succeeds: `swipe-render-ready` from
+requesting the render to its completion, and `swipe-arrival-to-ready` from arrival
+to completion, which therefore also contains the preview request and the dwell.
+Neither is an on-screen presentation measurement; completion of the bitmap is the
+proxy for "showing". A render that finishes before the next arrival but returns no
+pixels is recorded as `swipe-render-failed`, not ready. `swipe-renders-started`,
+`-ready`, `-wasted` and `-failed` classify every started render exactly once.
+
+Preview time is tagged with `renderRunning`, sampled at arrival: a photo whose
+previous render is still running is the contention case. If the camera HEIF preview
+has no usable pixels, the preview request falls back to the RAW's own embedded
+preview and the tag says so.
 
 ### Sustained load
 
@@ -154,15 +170,18 @@ a concurrent measurement; the concurrency-2 row assumes perfect division.
 
 - Detailed RAW variants: first **12** RAWs.
 - Camera HEIF variants and their colour comparison: first **6** RAW + HEIF pairs.
-  The brief allows this reduction when the run would exceed about ten minutes;
-  the full-HIF decode is the slowest step and the device run must stay near the
-  owner's budget.
-- Colour: first **3** of the detailed RAWs.
+  The supervisor's 2026-11-11 scope note allows 6 pairs instead of 12 when the HIF
+  variants would push the run over about ten minutes; this probe takes that option
+  and says so here. The full-HIF decode is the slowest step.
+- Colour: **every** detailed RAW (up to 12) for the reduced-variant comparisons.
 - Swipes: first **20** photos, three dwells.
 - Cache: **6** files.
 - Sustained: 300 renders or 5 minutes, on its own button.
 - Every loop checks cancellation between steps and is bounded by the counts above.
-  No loop reads a whole folder into memory.
+  File discovery uses the preview probe's enumerator: it reads paths (skipping
+  hidden files and `_Rejected`), sorts them, then samples the first N. Those counts
+  bound every image decode and every retained bitmap; discovery itself does not
+  decode or retain image pixels.
 
 ### Memory
 
@@ -184,19 +203,20 @@ the warm renders, and the baseline grows across this serial run, so read the
 
 | Variant | Long edge asked | Actual output | Cold ms | Warm median ms | Warm p90 ms | Decoded MiB | Peak RSS MiB / baseline |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| a native, fresh context | native | 2768×1848 | 264.1 | 92.2 | 92.6 | 19.51 | 166.3 / 120.4 |
-| b native, reused context | native | 2768×1848 | 86.0 | 82.8 | 85.3 | 19.51 | 228.4 / 195.8 |
-| c screen `scaleFactor` | 2000 | 2000×1336 | 74.6 | 75.0 | 75.8 | 10.19 | 297.5 / 281.2 |
-| d screen `scaleFactor`, draft | 2000 | 2000×1336 | 75.1 | 72.6 | 75.4 | 10.19 | 362.7 / 346.3 |
-| e grid `scaleFactor` | 400 | 400×268 | 69.3 | 67.0 | 67.8 | 0.41 | 429.1 / 412.3 |
-| e grid `scaleFactor`, draft | 400 | 400×268 | 67.6 | 68.9 | 70.8 | 0.41 | 494.2 / 477.9 |
+| a native, fresh context | native | 2768×1848 | 275.9 | 95.0 | 99.3 | 19.51 | 163.0 / 120.4 |
+| b native, reused context | native | 2768×1848 | 93.0 | 82.1 | 87.9 | 19.51 | 212.1 / 195.8 |
+| c screen `scaleFactor` | 2000 | 2000×1336 | 80.7 | 74.6 | 75.6 | 10.19 | 307.7 / 281.2 |
+| d screen `scaleFactor`, draft | 2000 | 2000×1336 | 75.7 | 74.4 | 75.2 | 10.19 | 362.7 / 346.3 |
+| e grid `scaleFactor` | 400 | 400×268 | 68.8 | 69.7 | 70.0 | 0.41 | 428.7 / 412.3 |
+| e grid `scaleFactor`, draft | 400 | 400×268 | 69.8 | 68.1 | 69.3 | 0.41 | 494.2 / 477.9 |
 
 Every row succeeded. The requested long edge arrived within 2 px on this fixture.
-On this host `scaleFactor` saved only about 17 ms at screen size and 25 ms at grid
-size against the native reused-context render; draft mode did not separate from
-non-draft at either size. The first cold native render paid a one-off setup cost of
-about 172 ms over its warm median. Those are Mac numbers from a loaded host and
-must not be read as iPhone ratios.
+On this host `scaleFactor` saved about **7.5 ms** at screen size and **12.4 ms**
+(draft off) or **14.0 ms** (draft on) at grid size against the native reused-context
+render; against the fresh-context native render the saving was about **20–25 ms**.
+Draft mode did not separate from non-draft at either size. The first cold
+fresh-context native render paid about **181 ms** over its warm median. Those are
+Mac numbers from a loaded host and must not be read as iPhone ratios.
 
 ### macOS: camera HEIF variants, not device numbers
 
@@ -204,14 +224,15 @@ Same fixture session; the HEIC is the generated fixture, not a camera HIF.
 
 | Variant | Actual output | Cold ms | Warm median ms | Warm p90 ms | Decoded MiB | Peak RSS MiB / baseline |
 | --- | --- | --- | --- | --- | --- | --- |
-| f full decode | 2768×1848 | 140.1 | 82.1 | 84.6 | 19.51 | 580.5 / 570.6 |
-| g subsample factor 2 | 1384×924 | 40.9 | 40.1 | 40.2 | 4.88 | 563.8 / 561.9 |
-| g screen thumbnail, always | 2000×1336 | 49.8 | 49.7 | 50.3 | 10.19 | 586.4 / 584.5 |
+| f full decode | 2768×1848 | 143.2 | 82.4 | 83.6 | 19.51 | 585.9 / 570.6 |
+| g subsample factor 2 | 1384×924 | 41.2 | 40.1 | 41.4 | 4.88 | 563.7 / 561.9 |
+| g screen thumbnail, always | 2000×1336 | 50.0 | 49.3 | 50.7 | 10.19 | 586.3 / 584.5 |
 
 The full decode produced exactly the container's pixel size and the subsample
-factor halved both edges, so both requests are honoured on this platform. Again,
-macOS numbers from a loaded host; the A1 II HIF is 8640×5760 and the device run is
-what matters.
+factor halved both edges, so both requests are honoured on this platform. This
+fixture carries no rotation; the orientation handling is covered by a generated
+orientation-6 JPEG test instead. Again, macOS numbers from a loaded host; the A1 II
+HIF is 8640×5760 and the device run is what matters.
 
 ### macOS: colour agreement, not device numbers
 
@@ -239,15 +260,18 @@ One photo per walk, so no render was ever superseded and the preview never ran
 while a render was in flight. These rows exercise the path and its counters, not
 contention.
 
-| Dwell | Preview median ms | Preview source | Arrival → render ready ms | Started / ready / wasted |
+| Dwell | Preview median ms (source, 1616 px) | Render ready ms | Arrival → ready ms | Started / ready / wasted / failed |
 | --- | --- | --- | --- | --- |
-| 0 ms | 16.4 | RAW fallback (HEIC preview unavailable) | 79.3 | 1 / 1 / 0 |
-| 300 ms | 15.2 | RAW fallback | 120.7 | 1 / 1 / 0 |
-| 800 ms | 15.7 | RAW fallback | 121.1 | 1 / 1 / 0 |
+| 0 ms | 16.9, RAW fallback, no render running | 82.7 | 100.6 | 1 / 1 / 0 / 0 |
+| 300 ms | 15.7, RAW fallback, no render running | 119.0 | 437.4 | 1 / 1 / 0 / 0 |
+| 800 ms | 15.3, RAW fallback, no render running | 119.3 | 967.9 | 1 / 1 / 0 / 0 |
 
-The 300 and 800 ms rows include the dwell in the wall-clock distance from starting
-the render to its completion in this single-photo walk; they are not evidence that
-a longer dwell slows the render.
+The HEIC fixture has no embedded preview on macOS, so these preview requests used
+the RAW's own 1616 px preview. With one photo per walk, the preview never had a
+render running, nothing was superseded, and the arrival-to-ready rows are simply
+the preview request plus the dwell plus the render plus process noise. They are not
+evidence that a longer dwell slows the render, and they say nothing about
+contention.
 
 ### macOS: cache cost, not device numbers
 
@@ -255,32 +279,33 @@ One screen-size render (2000×1336, 10.19 MiB decoded), encoded at quality 0.9.
 
 | Measurement | HEIC | JPEG |
 | --- | --- | --- |
-| Encode ms | 40.7 | 13.5 |
+| Encode ms | 40.9 | 14.2 |
 | File bytes | 708,390 | 854,362 |
-| Decode ms | 15.7 | 7.3 |
+| Decode ms | 17.0 | 7.3 |
 | Decoded bytes | 10,688,000 | 10,688,000 |
 
 The six-held-image sample has one image on this run: 10,688,000 B summed bitmap
-bytes, 215.8 MiB sampled process RSS, 73.3 ms of renders. The device run with six
-files is what answers the six-image question.
+bytes, 216,121,344 B (206.1 MiB) sampled process RSS, 74.1 ms of renders. The device
+run with six files is what answers the six-image question.
 
 ### macOS: grid projection, not device numbers
 
-Best 400 px variant: `raw-grid-scale`, warm median **67.0 ms** per photo.
+Best 400 px variant in this run: `raw-grid-scale-draft`, warm median **68.1 ms**
+per photo.
 
 | Projection | 2000 photos |
 | --- | --- |
-| Concurrency 1, arithmetic | 133.9 s |
-| Concurrency 2, arithmetic, perfect division | 67.0 s |
+| Concurrency 1, arithmetic | 136.1 s |
+| Concurrency 2, arithmetic, perfect division | 68.1 s |
 
 The device run's numbers replace this projection; it is not a concurrent
 measurement and not a promise that two decoders halve the time.
 
 ### macOS: sustained-load path check, not device numbers
 
-10-render bound, one file, selected variant `raw-screen-scale-draft` (72.8 ms
-selection median against 76.0 ms for draft off). Total 742.7 ms; individual renders
-71.1–75.6 ms; thermal state `nominal` at start and end, no transitions; no battery
+10-render bound, one file, selected variant `raw-screen-scale-draft` (76.4 ms
+selection median against 82.9 ms for draft off). Total 744.4 ms; individual renders
+71.4–76.5 ms; thermal state `nominal` at start and end, no transitions; no battery
 reading on macOS. This only shows that the second button's code path runs. Heat,
 thermal transitions and battery drain need the device.
 
@@ -314,11 +339,11 @@ pairs, iPhone 17 Pro Max and iPad Pro.
 | Pending | HIF embedded preview vs RAW native | Pending | Pending | Pending | Pending |
 | Pending | full HIF decode vs HIF preview | Pending | Pending | Pending | Pending |
 
-| Status | Dwell | Preview ms, render running / idle | Arrival → ready ms | Started / ready / wasted |
-| --- | --- | --- | --- | --- |
-| Pending | 0 ms | Pending | Pending | Pending |
-| Pending | 300 ms | Pending | Pending | Pending |
-| Pending | 800 ms | Pending | Pending | Pending |
+| Status | Dwell | Preview ms, render running / idle | Render ready ms | Arrival → ready ms | Started / ready / wasted / failed |
+| --- | --- | --- | --- | --- | --- |
+| Pending | 0 ms | Pending | Pending | Pending | Pending |
+| Pending | 300 ms | Pending | Pending | Pending | Pending |
+| Pending | 800 ms | Pending | Pending | Pending | Pending |
 
 | Status | Sustained load | Value |
 | --- | --- | --- |
