@@ -114,7 +114,7 @@ mise run test-core
 mise run test-imaging
 mise run test-lab
 mise run build-lab
-mise run smoke
-# The smoke task has built Clove for testing; run the flows on that build.
-./scripts/smoke.sh flows
+mise run build-tests
+# The unit, smoke and flow tests on one simulator, on the build above.
+./scripts/smoke.sh all
 """

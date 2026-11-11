@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Run a Clove simulator test suite on a simulator created only for this run.
 #
-# Usage: scripts/smoke.sh [smoke|flows] [xcodebuild arguments]
+# Usage: scripts/smoke.sh [smoke|flows|all] [xcodebuild arguments]
 #   smoke (default)  the app unit tests (CloveTests) and the one smoke UI test (CloveSmokeTests)
 #   flows            the long UI flow tests (CloveFlowTests)
+#   all              all of the above on one simulator, for verify and CI: a new
+#                    simulator's first boot costs minutes, so it is paid once
 #
 # It runs `xcodebuild test-without-building` against the build that
 # `mise run build-tests` left in .build/DerivedData.noindex, so the app is
@@ -22,7 +24,7 @@ cd "$(dirname "$0")/.."
 
 suite="smoke"
 case "${1:-}" in
-    smoke | flows)
+    smoke | flows | all)
         suite="$1"
         shift
         ;;
@@ -95,6 +97,7 @@ is_runner_failure() {
 case "$suite" in
     smoke) test_targets=(-only-testing:CloveTests -only-testing:CloveUITests/CloveSmokeTests) ;;
     flows) test_targets=(-only-testing:CloveUITests/CloveFlowTests) ;;
+    all) test_targets=(-only-testing:CloveTests -only-testing:CloveUITests) ;;
 esac
 test_targets+=("$@")
 for argument in "$@"; do

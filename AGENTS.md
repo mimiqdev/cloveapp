@@ -52,7 +52,7 @@ XcodeGen. Every task is listed here.
 | `mise run smoke` | `build-tests`, then `scripts/smoke.sh smoke`: a throwaway simulator runs `CloveTests` and the one smoke UI test (`CloveSmokeTests`) with `xcodebuild test-without-building`, and is deleted on exit. | After UI changes; part of `check`. |
 | `mise run ui-flows` | `build-tests`, then `scripts/smoke.sh flows`: the long UI flow tests (`CloveFlowTests`) on their own throwaway simulator. | After changing a flow or a flow test. |
 | `mise run check` | `generate`, `lint`, `test-core`, `test-imaging`, `smoke` (which builds Clove for testing once), in order, stopping at the first failure. | While working and on every fix round. About 3 minutes warm. |
-| `mise run verify` | Everything `check` runs, plus `test-fixtures`, `test-release`, `test-lab`, `build-lab`, and the UI flows on the same build. The Clove app is compiled once. | The full local gate, when you want all of CI's coverage on a Mac. |
+| `mise run verify` | Everything `check` runs, plus `test-fixtures`, `test-release`, `test-lab`, `build-lab`, then `scripts/smoke.sh all`: the app unit, smoke and flow tests on one simulator. The Clove app is compiled once. | The full local gate, when you want all of CI's coverage on a Mac. |
 
 ### When to run what
 
@@ -73,8 +73,10 @@ XcodeGen. Every task is listed here.
   `main` into it with `scripts/ci/merge-main.sh`, and prints the head, main and
   merge SHAs. It never tests `refs/pull/N/merge`.
 - Jobs: the Python script tests on `ubuntu-latest`; lint, the package tests and
-  the CloveLab build on one standard `xcode-27` runner; the Clove test build,
-  the smoke test and the UI flows on another. Both macOS jobs select Xcode 27.2
+  the CloveLab build on one standard `xcode-27` runner; the Clove test build
+  and `scripts/smoke.sh all` on another. A new simulator's first boot takes
+  about 7 minutes there, so all the app tests share one simulator. Both macOS
+  jobs select Xcode 27.2
   and start with `scripts/ci/runner-facts.sh`, which fails if Xcode 27.2 or an
   iOS 27 simulator runtime is missing.
 - The fixture downloads are cached on the hash of `fixtures/manifest.json`.
@@ -144,10 +146,10 @@ XcodeGen. Every task is listed here.
   with `-derivedDataPath`. The `.noindex` suffix keeps Spotlight from indexing
   build products. Do not use the default DerivedData location or `/tmp`.
 - Never reuse or boot an existing simulator for automation. `scripts/smoke.sh`
-  creates its own `Clove <suite> <tag>` device (`smoke` or `flows`), tags it with `CLOVE_SIM_TAG` or the
+  creates its own `Clove <suite> <tag>` device (`smoke`, `flows` or `all`), tags it with `CLOVE_SIM_TAG` or the
   branch name plus PID, and always deletes it with `trap` — including on failure.
   `CLOVE_SIM_DEVICE_TYPE` and `CLOVE_SIM_RUNTIME` override the defaults
-  (iPhone 17 Pro on the newest installed iOS runtime). If the UI test runner
+  (iPhone 17 Pro on the newest installed iOS runtime that runs it). If the UI test runner
   fails to attach before any test runs (an XCTest/simulator bootstrap failure),
   the script retries on a fresh simulator; `CLOVE_SMOKE_ATTEMPTS` changes the
   attempt count (default 4). Real assertion failures fail immediately.

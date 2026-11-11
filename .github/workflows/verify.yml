@@ -103,7 +103,7 @@ jobs:
           if-no-files-found: ignore
 
   app:
-    name: Clove build, smoke test and UI flows
+    name: Clove build and app tests
     runs-on: xcode-27
     timeout-minutes: 60
     env:
@@ -127,11 +127,10 @@ jobs:
           mise run generate 2>&1 | tee .build/ci-logs/generate.log
       - name: mise run build-tests
         run: mise run build-tests 2>&1 | tee .build/ci-logs/build-tests.log
-      # Both suites run test-without-building on the build above.
-      - name: Smoke test
-        run: scripts/smoke.sh smoke 2>&1 | tee .build/ci-logs/smoke.log
-      - name: UI flows
-        run: scripts/smoke.sh flows 2>&1 | tee .build/ci-logs/ui-flows.log
+      # The unit, smoke and flow tests on one simulator, test-without-building on the
+      # build above: a new simulator's first boot here takes about 7 minutes.
+      - name: App unit, smoke and UI flow tests
+        run: scripts/smoke.sh all 2>&1 | tee .build/ci-logs/app-tests.log
       - name: Upload logs and test results
         if: failure()
         uses: actions/upload-artifact@v7
