@@ -230,7 +230,7 @@ struct DetailMarkingView: View {
 
     private var chromeIsVisible: Bool { !hidesChrome && scale <= DetailFitScale.tolerance }
 
-    private var displayMarks: PhotoMarks { browsing.cullingMarks(for: photo) }
+    private var displayMarks: PhotoMarks { photo.marks }
 
     private var detailLayout: some View {
         VStack(spacing: 0) {
@@ -308,8 +308,10 @@ struct DetailMarkingView: View {
     }
 
     private var detailSubtitle: String {
-        let index = order.firstIndex(where: { $0.id == photo.id }).map { $0 + 1 } ?? 1
-        var parts = ["\(index.formatted()) / \(order.count.formatted())"]
+        var parts: [String] = []
+        if let index = order.firstIndex(where: { $0.id == photo.id }) {
+            parts.append("\((index + 1).formatted()) / \(order.count.formatted())")
+        }
         if scale > DetailFitScale.tolerance {
             parts.append(zoomName)
         } else {
@@ -686,6 +688,7 @@ struct DetailMarkingView: View {
     /// Shows the previous or next photo in the screen's own order (PRD P0-04).
     private func navigate(_ zone: DetailEdgeZone) {
         if zone == .centre {
+            guard scale <= DetailFitScale.tolerance else { return }
             hidesChrome.toggle()
             return
         }

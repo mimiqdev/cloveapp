@@ -69,13 +69,9 @@ struct DetailScreen: View {
     /// The marking controls and the preview, then the filmstrip, in the order PRD Detail and
     /// marking fixes.
     private func content(for photo: GridPhoto) -> some View {
-        // The capsule and its existing input rules must read the same marks after a pending
-        // or failed change. This display copy leaves the library's confirmed record untouched.
-        var displayedPhoto = photo
-        displayedPhoto.marks = browsing.cullingMarks(for: photo)
-        return DetailMarkingView(
+        DetailMarkingView(
             browsing: browsing,
-            photo: displayedPhoto,
+            photo: photo,
             settings: settings,
             saveState: browsing.saveText(for: photo.id),
             images: images,

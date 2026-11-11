@@ -101,9 +101,6 @@ final class DetailZoomProbe {
 /// swipe: a horizontal drag, a zoomed view and marking gestures off all leave it unstarted, so
 /// nothing else on the preview loses a touch to it. The taps never need that help, because a pan
 /// only begins after the finger moves.
-///
-/// Design placeholder: the dark canvas and the plain image are replaced by the visual design;
-/// the gestures themselves are the ones P0-04 and P0-06 fix.
 struct DetailZoomView: UIViewRepresentable {
     /// The pixels to show, or nil while the screen is loading or has nothing to show.
     let image: CGImage?
@@ -273,6 +270,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         accessibilityLabel = "Detail preview"
         accessibilityTraits = .image
         accessibilityValue = "Loading"
+        accessibilityCustomActions = [
+            UIAccessibilityCustomAction(
+                name: "Show or hide controls", target: self,
+                selector: #selector(toggleChromeFromAccessibility))
+        ]
         updateGestureAvailability()
     }
 
@@ -535,8 +537,18 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     // MARK: - Taps
 
+    /// VoiceOver activation reads the preview; chrome has its own explicit custom action.
+    override func accessibilityActivate() -> Bool { true }
+
+    @objc private func toggleChromeFromAccessibility() -> Bool {
+        guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
+        onEdgeTap?(.centre)
+        return true
+    }
+
     @objc private func handleChromeTap() {
-        guard
+        guard !UIAccessibility.isVoiceOverRunning,
+            scrollView.zoomScale <= DetailFitScale.tolerance,
             DetailZoom.edgeZone(for: centreChromeTap.location(in: self), in: bounds.size) == .centre
         else { return }
         onEdgeTap?(.centre)

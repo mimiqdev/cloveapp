@@ -15,10 +15,30 @@ struct SaveStatusIndicator: View {
 
     /// Nil summarises the folder; a photo reads only its own latest change.
     var photo: PhotoIdentity?
+    var showsOnlyProblems = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var savingIsVisible = false
+    @State private var previousGlyph = SaveGlyphState.saved
+    @State private var revealedSaving: SavingDelayKey?
     @State private var pulse = false
+
+    private struct SavingDelayKey: Hashable {
+        let state: SaveGlyphState
+        let photo: PhotoIdentity?
+        let reduceMotion: Bool
+    }
+
+    private var delayKey: SavingDelayKey {
+        SavingDelayKey(state: state, photo: photo, reduceMotion: reduceMotion)
+    }
+
+    private var renderedState: SaveGlyphState {
+        state == .saving ? (revealedSaving == delayKey ? .saving : previousGlyph) : state
+    }
+
+    private var hidesUnneededGlyph: Bool {
+        showsOnlyProblems && ![.failed, .disconnected, .viewOnly].contains(renderedState)
+    }
 
     /// Whether the unsaved photos' list is presented (PRD P0-08).
     @State private var showingUnsaved = false
@@ -43,22 +63,31 @@ struct SaveStatusIndicator: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(state.label)
+        .accessibilityLabel(renderedState.label)
         .accessibilityIdentifier(identifierPrefix)
-        .accessibilityHidden(state == .saving && !savingIsVisible)
+        .opacity(hidesUnneededGlyph ? 0 : 1)
+        .accessibilityHidden(hidesUnneededGlyph)
         .contextMenu {
             if !browsing.unsavedChanges.isEmpty {
                 Button("Unsaved marks") { showingUnsaved = true }
             }
         }
-        .task(id: state) {
-            savingIsVisible = false
-            pulse = false
-            guard state == .saving else { return }
+        .task(id: delayKey) {
+            withAnimation(nil) {
+                revealedSaving = nil
+                pulse = false
+            }
+            guard state == .saving else {
+                previousGlyph = state
+                return
+            }
+            let key = delayKey
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            savingIsVisible = true
+            revealedSaving = key
             if !reduceMotion {
+                await Task.yield()
+                guard !Task.isCancelled else { return }
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                     pulse = true
                 }
@@ -72,20 +101,21 @@ struct SaveStatusIndicator: View {
     }
 
     @ViewBuilder private var glyph: some View {
-        switch state {
+        switch renderedState {
         case .saved, .cloveOnly:
             Circle().fill(Color.clove.status.saved).frame(width: 8, height: 8)
         case .saving:
             Circle().fill(Color.clove.text.secondary).frame(width: 8, height: 8)
-                .opacity(savingIsVisible ? (pulse ? 0.4 : 1) : 0)
+                .opacity(reduceMotion ? 1 : (pulse ? 0.4 : 1))
+                .id(delayKey)
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(Color.clove.status.failed)
         case .disconnected, .viewOnly, .stored:
             Image(
-                systemName: state == .disconnected
+                systemName: renderedState == .disconnected
                     ? "externaldrive.badge.xmark"
-                    : state == .viewOnly ? "lock.fill" : "internaldrive"
+                    : renderedState == .viewOnly ? "lock.fill" : "internaldrive"
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
@@ -114,7 +144,7 @@ struct SaveStatusIndicator: View {
 
 }
 
-private enum SaveGlyphState: Equatable {
+private enum SaveGlyphState: Hashable {
     case saved, saving, failed, disconnected, viewOnly, stored, cloveOnly
 
     var label: String {

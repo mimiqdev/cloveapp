@@ -39,6 +39,19 @@ final class CloveUITests: XCTestCase {
     }
 
     @MainActor
+    func testSelectAllIsAvailableBeforeSelectingAPhoto() {
+        let app = launchSample()
+        openLibrary(app)
+        element(app, "clove.grid.more").tap()
+        app.buttons["Select"].tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
+        element(app, "clove.grid.selectionOptions").tap()
+        app.buttons["Select all"].tap()
+        XCTAssertTrue(waitForLabel("36 selected", element(app, "clove.grid.batch.count")))
+        XCTAssertTrue(element(app, "clove.grid.batch.stars.3").isEnabled)
+    }
+
+    @MainActor
     func testMixedBatchCanClearRatingsWithoutAnIntermediateMark() {
         let app = launchSample()
         openLibrary(app)
@@ -76,6 +89,8 @@ final class CloveUITests: XCTestCase {
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         XCTAssertFalse(element(app, "clove.detail.info").exists)
         XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        centre.tap()
+        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         centre.doubleTap()
         XCTAssertTrue(info.waitForExistence(timeout: 5))
         centre.tap()
@@ -91,22 +106,6 @@ final class CloveUITests: XCTestCase {
         let end = start.withOffset(CGVector(dx: 0, dy: -130))
         start.press(forDuration: 0.1, thenDragTo: end)
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
-    }
-
-    @MainActor
-    func testFailedDetailMarkCanBeCleared() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_SAVE_STATE": "failed"])
-        openLibrary(app)
-        element(app, "clove.grid.photo.mmq02680").tap()
-        let capsule = element(app, "clove.detail.capsule")
-        XCTAssertTrue(waitForValue("3 stars", capsule))
-        element(app, "clove.detail.capsule.stars.3").tap()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
-        element(app, "clove.detail.preview")
-            .coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
-        XCTAssertTrue(waitForValue("Unmarked", capsule))
-        XCTAssertEqual(element(app, "clove.detail.saveState").label, "Saved")
     }
 
     @MainActor

@@ -67,8 +67,12 @@ struct GridCollectionView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UICollectionView {
+        let coordinator = context.coordinator
         let collectionView = UICollectionView(
-            frame: .zero, collectionViewLayout: Self.makeLayout())
+            frame: .zero,
+            collectionViewLayout: Self.makeLayout(placeholderCount: { [weak coordinator] in
+                coordinator?.placeholderCount ?? 0
+            }))
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = context.coordinator
@@ -80,8 +84,7 @@ struct GridCollectionView: UIViewRepresentable {
     func updateUIView(_ collectionView: UICollectionView, context: Context) {
         if context.coordinator.placeholderCount != placeholderCount {
             context.coordinator.placeholderCount = placeholderCount
-            collectionView.setCollectionViewLayout(
-                Self.makeLayout(placeholderCount: placeholderCount), animated: false)
+            collectionView.collectionViewLayout.invalidateLayout()
         }
         context.coordinator.thumbnails = thumbnails
         context.coordinator.openPhoto = openPhoto
@@ -104,7 +107,8 @@ struct GridCollectionView: UIViewRepresentable {
     }
 
     /// Three columns at compact width, five at regular width, from a square-ish cell (PRD Grid).
-    private static func makeLayout(placeholderCount: Int = 0) -> UICollectionViewCompositionalLayout
+    private static func makeLayout(placeholderCount: @escaping () -> Int)
+        -> UICollectionViewCompositionalLayout
     {
         UICollectionViewCompositionalLayout { _, environment in
             let columns = environment.traitCollection.horizontalSizeClass == .regular ? 5 : 3
@@ -126,8 +130,9 @@ struct GridCollectionView: UIViewRepresentable {
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0, leading: 0, bottom: spacing, trailing: 0)
             section.interGroupSpacing = spacing
-            if placeholderCount > 0 {
-                let rows = ceil(Double(placeholderCount) / Double(columns))
+            let unread = placeholderCount()
+            if unread > 0 {
+                let rows = ceil(Double(unread) / Double(columns))
                 section.boundarySupplementaryItems = [
                     NSCollectionLayoutBoundarySupplementaryItem(
                         layoutSize: NSCollectionLayoutSize(

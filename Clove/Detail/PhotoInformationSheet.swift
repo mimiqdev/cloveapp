@@ -25,7 +25,7 @@ struct PhotoInformationSheet: View {
                         if let size = sizeText(information.image) { row("Size", size) }
                         row(
                             "Marks",
-                            MarkSummary.text(for: browsing.cullingMarks(for: photo)) + " · "
+                            MarkSummary.text(for: photo.marks) + " · "
                                 + (information.usesSidecar ? "XMP sidecar" : "Clove only"))
                         HStack {
                             Text("Status")
@@ -66,6 +66,8 @@ struct PhotoInformationSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .task(id: photo.id) {
+            information = nil
+            isLoading = true
             let result = await browsing.information(for: photo.id)
             guard !Task.isCancelled else { return }
             information = result
@@ -118,17 +120,7 @@ struct PhotoInformationSheet: View {
     }
 
     private func exposureText(_ image: ImageInformation) -> String? {
-        var parts: [String] = []
-        if let seconds = image.exposureSeconds {
-            parts.append(
-                seconds < 1
-                    ? "1/\((1 / seconds).formatted(.number.precision(.fractionLength(0)))) s"
-                    : "\(seconds.formatted()) s")
-        }
-        if let aperture = image.aperture { parts.append("ƒ/\(aperture.formatted())") }
-        if let iso = image.iso { parts.append("ISO \(iso.formatted())") }
-        if let focal = image.focalLengthMillimetres { parts.append("\(focal.formatted()) mm") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        ExposureFormatting.text(for: image)
     }
 
     private func sizeText(_ image: ImageInformation?) -> String? {

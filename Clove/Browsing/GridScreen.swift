@@ -126,14 +126,23 @@ struct GridScreen: View {
         ) {
             HStack(spacing: 0) {
                 Text(subtitle).lineLimit(1)
-                if browsing.readingProgress == nil && !browsing.isFindingSimilarShots || isSelecting
-                {
-                    SaveStatusIndicator(
-                        browsing: browsing, identifierPrefix: "clove.grid.saveState")
-                }
+                SaveStatusIndicator(
+                    browsing: browsing, identifierPrefix: "clove.grid.saveState",
+                    showsOnlyProblems: browsing.isFolderOpening && !isSelecting)
             }
         } tools: {
             if isSelecting {
+                Menu {
+                    Button("Select all") { browsing.selectAllVisible(cells) }
+                        .accessibilityIdentifier("clove.grid.batch.selectAll")
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(Color.clove.text.primary)
+                        .frame(width: 44, height: 44)
+                        .cloveGlass(in: Circle())
+                }
+                .accessibilityLabel("Selection options")
+                .accessibilityIdentifier("clove.grid.selectionOptions")
                 Button("Done") {
                     browsing.clearSelection()
                     selectsEmpty = false
