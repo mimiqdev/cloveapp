@@ -82,8 +82,8 @@ extension GridDisplay {
         }
     }
 
-    /// Collapsed display: one cover per group, on its first shown member (PRD Grid, collapsed).
-    ///
+    /// Collapsed display keeps the first shown position, with the first non-rejected shown
+    /// member as cover. All-rejected groups use the first shown member and are dimmed.
     /// A group whose members the filter hid has no cover, because the grid never shows a cell
     /// that names no photo it can draw (PRD P0-03).
     private static func collapsedCells(

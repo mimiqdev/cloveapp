@@ -471,14 +471,13 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             return
         }
         let travel = -Double(pan.translation(in: self).y)
-        let location = pan.location(in: self)
         switch pan.state {
         case .began:
             beginMarkingSwipe()
         case .changed:
-            updateMarkingSwipe(travel: travel, at: location)
+            updateMarkingSwipe(travel: travel)
         case .ended:
-            updateMarkingSwipe(travel: travel, at: location)
+            updateMarkingSwipe(travel: travel)
             finishMarkingSwipe(travel: travel)
         case .cancelled, .failed:
             // A system cancel writes nothing and leaves the marks as they were (PRD P0-06).
@@ -511,8 +510,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     }
 
     /// Moves the live session and reports the step boundary and the badge it reached.
-    private func updateMarkingSwipe(travel: Double, at location: CGPoint) {
-        feedback?.location = location
+    private func updateMarkingSwipe(travel: Double) {
         switch swipe {
         case .rating:
             guard var session = ratingSession else { return }

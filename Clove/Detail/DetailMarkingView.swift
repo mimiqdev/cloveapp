@@ -111,6 +111,7 @@ struct DetailMarkingView: View {
     @State private var hidesChrome = false
     @State private var showsInformation = false
     @State private var showsZoomChip = false
+    @State private var controlsHeight: CGFloat = 0
 
     /// The pixels on screen, or nil while the first preview loads (PRD P0-04).
     @State private var shown: DetailImage?
@@ -242,6 +243,11 @@ struct DetailMarkingView: View {
                             .padding(.horizontal, 16)
                         }
                         .padding(.bottom, 8)
+                        .onGeometryChange(for: CGFloat.self) {
+                            $0.size.height
+                        } action: {
+                            controlsHeight = $0
+                        }
                         .transition(.opacity)
                     } else if showsZoomChip && scale > DetailFitScale.tolerance {
                         Text(zoomName)
@@ -322,7 +328,8 @@ struct DetailMarkingView: View {
         )
         .overlay {
             DetailSwipeFeedbackBadge(
-                feedback: swipeFeedback, enabledRatings: settings.enabledRatings)
+                feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
+                bottomInset: controlsHeight)
         }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
