@@ -1,6 +1,7 @@
 import CloveCore
 import Foundation
 import Observation
+import UIKit
 
 /// The browsing state every screen reads and changes (PRD P0-13, P0-14).
 ///
@@ -105,7 +106,11 @@ final class BrowsingModel {
     private(set) var recentsFailure: FolderAccessFailure?
 
     /// The library's photos with their marks, before this state's order and filter (PRD P0-03).
+    private var confirmedPhotos: [GridPhoto]
+
+    /// Shown marks are updated at submission and confirmation, rather than mapped on every read.
     private var storedPhotos: [GridPhoto]
+    private var photoIndices: [PhotoIdentity: Int] = [:]
 
     /// The latest change to each photo, with its save state (PRD P0-08).
     ///
@@ -113,6 +118,26 @@ final class BrowsingModel {
     /// applied change repaints the screen through observation and a streamed transition shows
     /// "Writing…" without a refresh of its own.
     private var changes = PhotoChangeStates()
+    private var desiredMarks = DesiredPhotoMarks()
+    private var desiredStatusIDs: [PhotoIdentity: MarkChangeID] = [:]
+    private var actionPipeline = PhotoActionPipeline()
+    private var actionConsumer: Task<Void, Never>?
+    private var finishingActions = 0
+    private var shownGeneration: Int
+    private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
+    private var keptEditsByMove: [RejectMoveBatchID: [DesiredMarkEdit]] = [:]
+
+    /// Snapshots are taken synchronously from desired marks, ready for the next undo task.
+    private(set) var lastMarkEdits: [DesiredMarkEdit] = []
+    private(set) var lastMoveUndo: Result<RejectMoveUndoResult, any Error>?
+
+    static let saveFailureToastMessage = "Some marks weren't saved."
+    static let saveFailureToastRetryTitle = "Retry"
+    private(set) var isSaveFailureToastVisible = false
+    private(set) var saveFailureToastBurst = 0
+    private var previousFailedPhotos: Set<PhotoIdentity> = []
+
+    func dismissSaveFailureToast() { isSaveFailureToastVisible = false }
 
     /// Whether this scene has already read its saved state, so a later appearance never
     /// overwrites what the user has done since.
@@ -139,6 +164,12 @@ final class BrowsingModel {
     /// How many opens this scene started, so a leaving destination never replaces a folder the
     /// user opened while it waited (PRD P0-08).
     private var openRequests = 0
+    private var folderClose: Task<Void, Never>?
+
+    private var folderReplacements = 0
+
+    /// Refuse new actions while a pick or reopen drains and replaces the folder's generation.
+    var isChangingFolder: Bool { folderReplacements > 0 }
 
     /// The saved scene waiting for its folder to hold the photos it names (PRD P0-14).
     ///
@@ -152,12 +183,14 @@ final class BrowsingModel {
     /// Creates the model over one library, starting at entry unless a state is passed in.
     init(library: any FolderLibrary, state: BrowsingState = .entry) {
         self.library = library
+        self.shownGeneration = library.openGeneration
         self.state = state
         self.groups = library.groups
         self.recents = library.recents
         self.thumbnails = library.thumbnails
         self.detailImages = library.detailImages
         self.recentFailures = [:]
+        self.confirmedPhotos = library.photos
         self.storedPhotos = library.photos
         refresh()
         updateTask = Task { [weak self, updates = library.updates] in
@@ -198,8 +231,8 @@ final class BrowsingModel {
 
     /// The photo the detail route shows, with its current marks (PRD Detail and marking).
     var currentPhoto: GridPhoto? {
-        guard let id = state.currentPhoto else { return nil }
-        return storedPhotos.first { $0.id == id }
+        guard let id = state.currentPhoto, let index = photoIndices[id] else { return nil }
+        return storedPhotos[index]
     }
 
     /// The open group's photos with their marks, in the group's member order (PRD P0-12).
@@ -207,9 +240,9 @@ final class BrowsingModel {
         guard let position = state.groupPosition,
             let group = groups.first(where: { $0.id == position.group })
         else { return [] }
-        var byIdentity: [PhotoIdentity: GridPhoto] = [:]
-        for photo in storedPhotos { byIdentity[photo.id] = photo }
-        return group.members.compactMap { byIdentity[$0] }
+        return group.members.compactMap { photo in
+            photoIndices[photo].map { storedPhotos[$0] }
+        }
     }
 
     /// The group the group view shows, from grouping's published groups (PRD P0-11, P0-12).
@@ -254,6 +287,7 @@ final class BrowsingModel {
     /// coming back from the grid does not need the picker again. A folder that opens answers
     /// whatever the last failed open left on entry, so the message goes with it (PRD P0-02).
     func openFolder() {
+        guard !hasLeftFolder else { return }
         openRequests += 1
         pendingRestore = nil
         folderFailure = nil
@@ -273,10 +307,14 @@ final class BrowsingModel {
 
     /// Opens a folder the user chose, once any leaving question is answered (PRD P0-01).
     private func openPickedFolderNow(_ url: URL) async {
+        folderReplacements += 1
+        defer { folderReplacements -= 1 }
         openRequests += 1
         // An earlier folder's loss and save states do not apply to whatever this open installs.
         // Clearing the loss before the await keeps a loss the new open reports (PRD P0-02).
         folderLocationLoss = nil
+        await folderClose?.value
+        await drainActions()
         folderFailure = await library.pick(url)
         guard folderFailure == nil else { return }
         // PRD Failure and recovery: a real open reads the actual XMP, so what is on screen starts
@@ -300,7 +338,7 @@ final class BrowsingModel {
     /// the question comes first; reopening the folder that is already open is not leaving it.
     func reopen(_ recent: RecentFolder) async {
         pendingRestore = nil
-        if state.folder == recent.identity {
+        if !hasLeftFolder, state.folder == recent.identity {
             openRequests += 1
             recentFailures[recent.id] = nil
             folderFailure = nil
@@ -330,10 +368,14 @@ final class BrowsingModel {
 
     /// Reopens one remembered folder, once any leaving question is answered (PRD P0-02).
     private func reopenNow(_ recent: RecentFolder) async {
+        folderReplacements += 1
+        defer { folderReplacements -= 1 }
         openRequests += 1
         // The reopen reads the folder again, so the loss the watch reported is no longer current,
         // and a loss the new open reports after the await still applies (PRD P0-02).
         folderLocationLoss = nil
+        await folderClose?.value
+        await drainActions()
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
             return
@@ -413,7 +455,7 @@ final class BrowsingModel {
     /// A finishing action's marks stream in one photo at a time, so the group can look complete
     /// before the action returns and its failures are known; advancing meanwhile would hide the
     /// retry (PRD Failure and recovery).
-    private(set) var isRunningGroupFinishing = false
+    var isRunningGroupFinishing: Bool { finishingActions > 0 }
 
     /// Counts the finishing actions and retries this scene has run (PRD P0-12).
     ///
@@ -433,49 +475,38 @@ final class BrowsingModel {
     /// of a retry. Dismissing hides the bar without retrying, which leaves the failed changes
     /// unsaved (PRD P0-08).
     var groupFinishingFailure: GroupFinishingResult? {
-        guard let result = lastGroupFinishing, result != dismissedGroupFailure,
-            result.failedCount > 0
-        else { return nil }
-        return result
+        guard let result = lastGroupFinishing, result != dismissedGroupFailure else { return nil }
+        let statuses = Dictionary(
+            uniqueKeysWithValues: result.outcomes.map { outcome in
+                // A confirmed result stays final even while its UI stream catches up.
+                // Only unfinished outcomes follow a newer marking action or retry.
+                let status =
+                    outcome.status.state.isConfirmed
+                    ? outcome.status : latestChange(for: outcome.photo) ?? outcome.status
+                return (outcome.photo, status)
+            })
+        let current = GroupFinishingResult.applied(
+            result.plan, changes: result.outcomes.map(\.change), statuses: statuses,
+            undo: result.undo)
+        return current.failedCount > 0 ? current : nil
     }
 
-    /// Runs one finishing action's plan in the open folder session and keeps its result
-    /// (PRD In-group culling, finishing actions; PRD P0-12).
-    ///
-    /// The library applies C10's plan through C4's write queue, so per-photo results, the
-    /// partial-failure counts and a retry of only the failed items all come from one place
-    /// (PRD P0-09). Only one finishing action runs at a time: a second request while one is
-    /// running is ignored, because two overlapping results would each clear the running flag
-    /// and let completion move the view before the last result's failures are known.
-    func runGroupFinishing(_ plan: GroupFinishingPlan) async {
-        guard !isRunningGroupFinishing else { return }
-        let folder = state.folder
+    /// Snapshots the allowed changes from shown marks and submits one finishing action.
+    func runGroupFinishing(_ plan: GroupFinishingPlan) {
+        guard !isMovingRejects, !isChangingFolder, plan.availability.isAvailable else { return }
+        let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
+            request($0.change, for: $0.photo)
+        }
         dismissedGroupFailure = nil
-        isRunningGroupFinishing = true
-        let result = await library.runGroupFinishing(plan)
-        isRunningGroupFinishing = false
-        // The action happened, but its result must not land in another folder's group view or
-        // make U8 undo a mark in a folder it does not belong to (PRD P0-14).
-        guard state.folder == folder else { return }
-        lastGroupFinishing = result
-        groupFinishingRuns += 1
+        finishingActions += 1
+        lastMarkEdits = edits
+        submit(.finishing(plan, edits))
     }
 
-    /// Retries only the changes that still need it, through C4 (PRD P0-09).
-    ///
-    /// It shares the one-action-at-a-time rule with ``runGroupFinishing(_:)``, so a retry can
-    /// never overlap the action it retries.
-    func retryGroupFinishing() async {
-        guard !isRunningGroupFinishing, let result = lastGroupFinishing else { return }
-        let folder = state.folder
+    /// Retries the failed photos through the same entry used by the Failed glyph.
+    func retryGroupFinishing() {
         dismissedGroupFailure = nil
-        isRunningGroupFinishing = true
-        let retried = await library.retryGroupFinishing(result)
-        isRunningGroupFinishing = false
-        // A retry that returns after the folder changed belongs to the folder that is gone.
-        guard state.folder == folder else { return }
-        lastGroupFinishing = retried
-        groupFinishingRuns += 1
+        retryAllUnfinishedChanges()
     }
 
     /// Hides the finishing action's failure without retrying it (PRD Failure and recovery).
@@ -489,7 +520,7 @@ final class BrowsingModel {
     /// A complete group either stays (the setting says stay) or opens the next group in grid
     /// order that is not complete, skipping completed ones. With no incomplete group left, the
     /// view returns to the grid. The answer comes from the folder session's completion record,
-    /// which the finishing executor writes and the marks complete, so the view never derives a
+    /// which the ordered finishing action writes and the marks complete, so the view never derives a
     /// second rule (``GroupViewCompletion``).
     ///
     /// The group, the route and the task are re-checked after the query: leaving the group view,
@@ -498,7 +529,8 @@ final class BrowsingModel {
     func advanceFromCompletedGroup(_ behaviour: GroupCompletionBehaviour) async {
         guard state.route == .group, let position = state.groupPosition else { return }
         let completion = await library.groupCompletion(
-            for: position.group, behaviour: behaviour)
+            for: position.group, behaviour: behaviour,
+            marks: Dictionary(uniqueKeysWithValues: storedPhotos.map { ($0.id, $0.marks) }))
         let failure = groupFinishingFailure
         guard !Task.isCancelled, state.route == .group,
             state.groupPosition?.group == position.group,
@@ -570,17 +602,6 @@ final class BrowsingModel {
         }
     }
 
-    /// The last batch the bar applied, with each targeted photo's marks before it
-    /// (PRD P0-09; C5's `MarkUndoHistory.recordBatch`).
-    ///
-    /// U8 records one undo entry per bar action from this value. A retry does not replace it, so
-    /// retrying a failed item never records a second entry for the same action.
-    private(set) var lastBatch: BatchMarkApplication?
-
-    /// What the multi-select bar reports for the batch it applied, or nil when there is nothing
-    /// to report or the bar dismissed it (PRD P0-09, PRD Failure and recovery).
-    private(set) var batchReport: BatchMarkReport?
-
     /// The photos one batch marks: the selection narrowed to the photos the grid shows, in grid
     /// order (PRD P0-09). A photo the filter hides stays selected and is not marked.
     var batchTargets: [GridPhoto] {
@@ -598,22 +619,6 @@ final class BrowsingModel {
     private var batchSelection: BatchSelection {
         BatchSelection(groups: groups, selection: state.selection)
     }
-
-    /// Whether a batch write or a retry is running, so the bar cannot start a second one
-    /// (PRD P0-09).
-    ///
-    /// A batch is planned from the marks on screen, so two actions at once would both plan from
-    /// the marks the first one is about to replace, and the later report could describe the
-    /// action the earlier one superseded.
-    private(set) var isApplyingBatch = false
-
-    /// How many times multi-select ended, so a batch that finishes after Done reports nothing
-    /// into a later session (PRD P0-09).
-    private var selectionClearances = 0
-
-    /// How many times the bar dismissed its report, so a retry that finishes after Cancel does
-    /// not bring the report the user dismissed back (PRD P0-09).
-    private var reportDismissals = 0
 
     /// Enters multi-select on one cell's photos (PRD P0-09).
     ///
@@ -636,63 +641,21 @@ final class BrowsingModel {
         state.selection = batchSelection.selectingAll(cells)
     }
 
-    /// Leaves multi-select, clears the selection and drops the batch's report (PRD P0-09).
+    /// Leaves multi-select and clears the selection (PRD P0-09).
     ///
-    /// A failed photo keeps its failure in ``latestChange(for:)`` and shows no mark it did not
-    /// save; U7's global save state reports the unfinished writes from there.
+    /// Failed photos keep their desired marks and unsaved status after selection ends.
     func clearSelection() {
         state.selection = []
-        batchReport = nil
-        selectionClearances += 1
     }
 
-    /// Applies one bar action to the selected photos the grid shows (PRD P0-09).
-    ///
-    /// One call is one batch: the library admits each change group's photos before awaiting that
-    /// group's results, so a bar action over 50 photos writes them concurrently and reports one
-    /// result with one retry handle. Each photo's save state still arrives through the library's
-    /// stream, like any other change, so a failed photo never shows a mark it did not save
-    /// (PRD P0-08). A second action is refused while one runs, so both plans cannot read the same
-    /// pre-batch marks.
-    func applyBatch(_ action: BatchMarkAction, settings: AppSettings) async {
-        guard !isApplyingBatch, !isMovingRejects else { return }
-        let targets = batchTargets
-        let plan = BatchMarkPlan(action: action, photos: targets, settings: settings)
+    /// Updates the selected photos immediately and queues one batch with their before and after marks.
+    func applyBatch(_ action: BatchMarkAction, settings: AppSettings) {
+        guard !isMovingRejects, !isChangingFolder else { return }
+        let plan = BatchMarkPlan(action: action, photos: batchTargets, settings: settings)
         guard !plan.items.isEmpty else { return }
-        var marksBefore: [PhotoIdentity: PhotoMarks] = [:]
-        for photo in targets { marksBefore[photo.id] = photo.marks }
-        let folder = state.folder
-        let clearances = selectionClearances
-        isApplyingBatch = true
-        defer { isApplyingBatch = false }
-        let result = await library.apply(plan.items)
-        // The batch happened, but its report must not land in another folder's bar or reopen
-        // after Done cleared the mode it belonged to.
-        guard state.folder == folder else { return }
-        lastBatch = BatchMarkApplication(result: result, marksBefore: marksBefore)
-        guard clearances == selectionClearances else { return }
-        batchReport = BatchMarkReport(result)
-    }
-
-    /// Retries only the photos the last batch could not save (PRD P0-09).
-    ///
-    /// The saved photos are left alone, and the retry's result merges with the action's, so the
-    /// bar keeps counting the whole action instead of only the photos the retry resent. A library
-    /// that can no longer retry, such as one whose folder closed, answers nil; the report then
-    /// stays as it was, so the bar still names the photos that did not save (PRD P0-08).
-    func retryFailedBatch() async {
-        guard !isApplyingBatch, !isMovingRejects, let report = batchReport, report.canRetry
-        else { return }
-        let folder = state.folder
-        let clearances = selectionClearances
-        let dismissals = reportDismissals
-        isApplyingBatch = true
-        defer { isApplyingBatch = false }
-        guard let result = await library.retryFailed(in: report.batch),
-            state.folder == folder, clearances == selectionClearances,
-            dismissals == reportDismissals
-        else { return }
-        batchReport = report.merging(result)
+        let edits = plan.items.map { request($0.change, for: $0.photo) }
+        lastMarkEdits = edits
+        submit(.batch(edits))
     }
 
     // MARK: - Move rejects
@@ -719,17 +682,9 @@ final class BrowsingModel {
     /// the same batch ID (PRD P0-10).
     private(set) var rejectMoveToastAttempt = 0
 
-    /// Whether a Move rejects run is in progress (PRD P0-10).
-    ///
-    /// C6 drains the mark queue before it moves and skips a set with an unfinished mark change,
-    /// so marking stays blocked for the whole run: the detail controls and the batch bar cannot
-    /// start a write that would target a path the move is about to change.
+    /// Blocks new marks only while the consumer is executing a move, retry, or move undo.
     private(set) var isMovingRejects = false
-
-    /// The progress steps of the next or running Move rejects (PRD P0-10).
-    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
-        await library.rejectMoveProgress()
-    }
+    private(set) var rejectMoveFinishedCount = 0
 
     /// Plans Move rejects for the open folder's rejected photos (PRD P0-10).
     ///
@@ -737,20 +692,30 @@ final class BrowsingModel {
     /// The configuration is read from settings by the caller at move time, so a renamed folder
     /// applies without reopening the folder (PRD Move rejects, C12).
     func planRejectMove(configuration: RejectMoveConfiguration) async throws -> RejectMovePlan {
-        try await library.planRejectMove(configuration: configuration)
+        try await library.planRejectMove(
+            configuration: configuration,
+            rejected: storedPhotos.filter(\.marks.isRejected).map(\.id))
     }
 
-    /// Runs a confirmed Move rejects plan (PRD P0-10).
-    ///
-    /// The library drops every confirmed set from its photos and publishes the change through
-    /// ``FolderLibrary/updates``, so the grid loses the moved photos and ``refresh()`` reconciles
-    /// the selection, current photo and group place with what remains. The flag is set before the
-    /// wait and cleared on every exit path, so a failed run never leaves marking blocked.
-    func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
-        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
-        isMovingRejects = true
-        defer { isMovingRejects = false }
-        return try await library.runRejectMove(plan)
+    /// Commits staged keeps and queues the move behind them and every earlier user action.
+    func runRejectMove(
+        _ plan: RejectMovePlan, kept: [PhotoIdentity],
+        completion: @escaping (Result<RejectMoveResult, any Error>) -> Void
+    ) {
+        guard !isChangingFolder else {
+            completion(.failure(RejectMoveRefusal.disabled))
+            return
+        }
+        guard !isMovingRejects else { return }
+        let edits = kept.map { request(.rating(.unrated), for: $0) }
+        lastMarkEdits = edits
+        submit(.keep(edits))
+        let revisions = Dictionary(
+            uniqueKeysWithValues: storedPhotos.filter(\.marks.isRejected).map {
+                ($0.id, desiredMarks.revision(for: $0.id))
+            })
+        let id = submit(.move(plan, kept: edits, revisions: revisions))
+        moveCompletions[id] = completion
     }
 
     /// Records one completed move, so the toast can show it and C14 can undo it (PRD P0-10).
@@ -761,8 +726,27 @@ final class BrowsingModel {
         lastRejectMove = CompletedRejectMove(
             result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
             folder: folder, openGeneration: openGeneration)
+        isSaveFailureToastVisible = false
         isRejectMoveToastVisible = true
         rejectMoveToastAttempt += 1
+    }
+
+    /// The toolbar stays disabled; the next undo task can submit the recorded move here.
+    func submitMoveUndo(_ entry: RejectMoveUndoEntry) {
+        guard !isMovingRejects, !isChangingFolder else { return }
+        let edits = entry.keptPhotos.compactMap { kept -> DesiredMarkEdit? in
+            var target = kept.marksAfter
+            target.rating = .rejected
+            guard
+                let change = DesiredMarkRestore.change(
+                    photo: kept.set.id, current: shownMarks(for: kept.set.id),
+                    expected: kept.marksAfter, target: target,
+                    fields: .rating(kept.marksAfter.rating))
+            else { return nil }
+            return request(change, for: kept.set.id)
+        }
+        lastMarkEdits = edits
+        submit(.moveUndo(entry, edits))
     }
 
     /// Hides the move toast while keeping the completed move for a later undo (PRD P0-10).
@@ -770,109 +754,347 @@ final class BrowsingModel {
         isRejectMoveToastVisible = false
     }
 
-    /// Retries a completed move's failed sets and keeps the moved ones in the record (P0-10).
-    ///
-    /// The retry's outcomes replace only the failures, so the toast and C14's record still count
-    /// every photo the run moved. A batch the library can no longer retry answers nil.
-    func retryRejectMove(_ completed: CompletedRejectMove) async throws -> RejectMoveResult? {
-        guard !isMovingRejects else { throw RejectMoveRefusal.disabled }
-        // The details sheet can outlive its folder open. A record from another open must not
-        // clear Reject or move anything in the replacement, even when the folder identity is the
-        // same after a reopen (PRD P0-02, P0-10).
-        guard
-            completed.openGeneration == openGeneration, completed.folder == state.folder
-        else { return nil }
-        let folder = completed.folder
-        let generation = completed.openGeneration
-        let selection = RejectMoveRetrySelection(
-            result: completed.result,
-            keptIdentities: Set(completed.keptIdentities),
-            rejectedIdentities: Set(
-                storedPhotos.filter(\.marks.isRejected).map(\.id)))
-        guard
-            selection.hasRetryableMoves || !selection.clearFailures.isEmpty
-                || !selection.noLongerRejected.isEmpty
-        else { return nil }
-        isMovingRejects = true
-        defer { isMovingRejects = false }
-
-        // C6 first, without the failures whose Reject was cleared. If its batch is gone, nothing
-        // else changes and the details sheet can report the failure.
-        var retried: RejectMoveResult?
-        if selection.hasRetryableMoves {
-            guard
-                let result = try await library.retryFailedRejects(
-                    in: completed.result.id, excluding: selection.excludedFromRetry)
-            else { return nil }
-            retried = result
+    /// Queues a retry in the original folder open. The consumer compares current desired marks.
+    func retryRejectMove(
+        _ completed: CompletedRejectMove,
+        completion: @escaping (Result<RejectMoveResult, any Error>) -> Void
+    ) {
+        guard !isMovingRejects, !isChangingFolder, completed.openGeneration == openGeneration,
+            completed.folder == state.folder
+        else {
+            completion(.failure(RejectMoveRefusal.disabled))
+            return
         }
-
-        guard state.folder == folder, openGeneration == generation else { return nil }
-
-        // A kept photo's Reject clear is a C4 write, not a C6 move, so it is retried through the
-        // same mark path. An unresolved one stays in the failure list for the next attempt.
-        var clearing = RejectMoveKeepClearing()
-        for set in selection.clearFailures {
-            guard state.folder == folder, openGeneration == generation else { return nil }
-            let status = await library.apply(.rating(.unrated), to: set.identity)
-            clearing.record(status, for: set.identity, files: set.files)
-        }
-        guard state.folder == folder, openGeneration == generation else { return nil }
-
-        let combined = RejectMoveRetryMerge.result(
-            previous: completed.result, retried: retried,
-            unresolvedClearFailures: clearing.clearFailures,
-            noLongerRejected: selection.noLongerRejected.map(\.identity))
-        lastRejectMove = CompletedRejectMove(
-            result: combined, keptIdentities: completed.keptIdentities,
-            rejectsFolderName: completed.rejectsFolderName,
-            folder: completed.folder, openGeneration: completed.openGeneration)
-        isRejectMoveToastVisible = true
-        rejectMoveToastAttempt += 1
-        return combined
-    }
-
-    /// Dismisses the batch's report without retrying (PRD Failure and recovery: Cancel).
-    ///
-    /// A retry that is already running will not put the report back, so Cancel leaves the bar
-    /// without a failure report; the photos that did not save keep their failed status for U7.
-    func dismissBatchReport() {
-        batchReport = nil
-        reportDismissals += 1
+        let id = submit(.retryMove(completed.result, kept: keptEditsByMove[completed.id] ?? []))
+        moveCompletions[id] = completion
     }
 
     /// The latest change to one photo with its save state, or nil when nothing was requested
     /// (PRD P0-08). U7 reads the same status for its retry.
     func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? {
-        changes.latest(for: photo)
-    }
-
-    /// The marks in-group culling reads for one photo, including a requested change C4 has not
-    /// saved yet (PRD P0-12; PRD How marks reach disk, rule 8).
-    ///
-    /// A finishing action must never reject a photo whose rating or colour label the user has
-    /// already asked for, and auto-advance can bring the next photo onto the screen while the
-    /// previous photo's write is still running. C4 keeps a request's marks until a newer change
-    /// replaces them, so an unfinished change counts as marked here, exactly as it does in the
-    /// open folder's own re-check (``FolderLibrary/runGroupFinishing(_:)``).
-    func cullingMarks(for photo: GridPhoto) -> PhotoMarks {
-        guard let latest = latestChange(for: photo.id), latest.state.isUnfinished else {
-            return photo.marks
+        if let entry = desiredMarks.entry(for: photo), let id = desiredStatusIDs[photo] {
+            return MarkChangeStatus(
+                id: id, identity: photo,
+                requested: entry.edit.change, state: entry.state)
         }
-        return photo.marks.including(latest.requested)
+        return changes.latest(for: photo)
     }
 
-    /// Applies one change to one photo through the library and shows its marks and save state
-    /// (PRD P0-08).
-    ///
-    /// The await is C4's write queue. The change's states arrive only through the library's
-    /// ordered stream, never from this call's return: a returned status can arrive after a newer
-    /// change was admitted, which would let an older finished state paint over the newer one
-    /// (``PhotoChangeStates``). A failed write therefore never shows a mark it did not confirm.
+    /// Every screen and marking rule reads desired marks while they await confirmation.
+    func shownMarks(for photo: PhotoIdentity) -> PhotoMarks {
+        guard let index = photoIndices[photo] else { return PhotoMarks() }
+        return storedPhotos[index].marks
+    }
+
+    /// Shows the requested mark and submits its write before returning to the input handler.
+    func apply(_ change: MarkChange, to photo: PhotoIdentity) {
+        guard !isMovingRejects, !isChangingFolder, !hasLeftFolder, !change.isEmpty else { return }
+        let edit = request(change, for: photo)
+        lastMarkEdits = [edit]
+        submit(.mark(edit))
+    }
+
+    // MARK: - Ordered actions
+
+    private func request(_ change: MarkChange, for photo: PhotoIdentity) -> DesiredMarkEdit {
+        let confirmed = photoIndices[photo].map { confirmedPhotos[$0].marks } ?? PhotoMarks()
+        let edit = desiredMarks.apply(change, to: photo, confirmed: confirmed)
+        desiredStatusIDs[photo] = MarkChangeID()
+        previousFailedPhotos.remove(photo)
+        updateShownPhoto(photo)
+        return edit
+    }
+
+    private func updateShownPhoto(_ photo: PhotoIdentity) {
+        guard let index = photoIndices[photo] else { return }
+        storedPhotos[index].marks = desiredMarks.shown(
+            for: photo, confirmed: confirmedPhotos[index].marks)
+    }
+
     @discardableResult
-    func apply(_ change: MarkChange, to photo: PhotoIdentity) async -> MarkChangeStatus? {
-        guard !isMovingRejects, !change.isEmpty else { return nil }
-        return await library.apply(change, to: photo)
+    private func submit(_ action: PhotoAction) -> UInt64 {
+        let id = actionPipeline.submit(action)
+        if actionConsumer == nil {
+            actionConsumer = Task { [weak self] in
+                await self?.consumeActions()
+            }
+        }
+        return id
+    }
+
+    func drainActions() async { await actionConsumer?.value }
+
+    private func consumeActions() async {
+        var keptStatuses: [MarkChangeStatus] = []
+        while let entry = actionPipeline.beginNext() {
+            switch entry.action {
+            case .mark(let edit):
+                _ = await persist([edit])
+            case .batch(let edits):
+                _ = await persist(edits)
+            case .finishing(let plan, let edits):
+                await library.recordGroupFinishing(plan.groupID)
+                let result = await persist(edits)
+                lastGroupFinishing = GroupFinishingResult.applied(
+                    plan,
+                    statuses: Dictionary(
+                        uniqueKeysWithValues: result.outcomes.map {
+                            ($0.identity, $0)
+                        }))
+                finishingActions -= 1
+                groupFinishingRuns += 1
+            case .retry(let edits):
+                let eligible = edits.filter {
+                    DesiredMarkRestore.retry($0, current: shownMarks(for: $0.photo)) != nil
+                }
+                let result = await persist(eligible)
+                if let previous = lastGroupFinishing {
+                    let unfinished = Set(
+                        previous.outcomes.filter { $0.status.state.isUnfinished }.map(\.photo))
+                    let retried = result.outcomes.filter { unfinished.contains($0.identity) }
+                    if !retried.isEmpty {
+                        var statuses = Dictionary(
+                            uniqueKeysWithValues: previous.outcomes.map {
+                                ($0.photo, $0.status)
+                            })
+                        for status in retried { statuses[status.identity] = status }
+                        lastGroupFinishing = GroupFinishingResult.applied(
+                            previous.plan, changes: previous.outcomes.map(\.change),
+                            statuses: statuses, undo: previous.undo)
+                        groupFinishingRuns += 1
+                    }
+                }
+            case .keep(let edits):
+                keptStatuses = await persist(edits).outcomes
+            case .move(let preview, let kept, let revisions):
+                await performMove(
+                    preview, kept: kept, keptStatuses: keptStatuses,
+                    revisions: revisions, actionID: entry.id)
+                keptStatuses = []
+            case .retryMove(let previous, let kept):
+                await performMoveRetry(previous, kept: kept, actionID: entry.id)
+            case .moveUndo(let move, let edits):
+                await performMoveUndo(move, edits: edits)
+            }
+            actionPipeline.finish(entry.id)
+        }
+        actionConsumer = nil
+    }
+
+    private func performMove(
+        _ preview: RejectMovePlan, kept: [DesiredMarkEdit], keptStatuses: [MarkChangeStatus],
+        revisions: [PhotoIdentity: UInt64], actionID: UInt64
+    ) async {
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+        let context = (folder: state.folder, generation: openGeneration)
+        let progress = await observeMoveProgress()
+        defer { progress.cancel() }
+        do {
+            let excluded = Set(kept.map(\.photo))
+            let rejected = storedPhotos.filter {
+                $0.marks.isRejected && !excluded.contains($0.id)
+                    && revisions[$0.id] == desiredMarks.revision(for: $0.id)
+            }.map(\.id)
+            await library.drainWrites()
+            let plan = try await library.planRejectMove(
+                configuration: preview.configuration, rejected: rejected)
+            let moved = try await library.runRejectMove(plan)
+            let clearFailures = keptStatuses.compactMap { status -> RejectMoveOutcome? in
+                guard let failure = status.state.failure else { return nil }
+                return .failed(
+                    RejectMoveFailedSet(
+                        identity: status.identity, failure: RejectMoveFailure(classifying: failure),
+                        files: preview.readyEntries.first { $0.identity == status.identity }?.files
+                            ?? []
+                    ))
+            }
+            let difference = RejectMovePlanDifference(
+                preview: preview.removing(kept: excluded), actual: plan)
+            let result = RejectMoveResult(
+                id: moved.id, outcomes: moved.outcomes + clearFailures,
+                planDifference: difference.hasChanges ? difference : moved.planDifference)
+            if let difference = result.planDifference {
+                UIAccessibility.post(notification: .announcement, argument: difference.announcement)
+            }
+            keptEditsByMove[result.id] = kept
+            recordRejectMove(
+                result, keptIdentities: kept.map(\.photo),
+                rejectsFolderName: plan.configuration.rejectsFolderName,
+                folder: context.folder, openGeneration: context.generation)
+            refresh()
+            moveCompletions.removeValue(forKey: actionID)?(.success(result))
+        } catch {
+            // A whole-request refusal restores only keeps the user has not changed since.
+            let restores = kept.compactMap { edit -> DesiredMarkEdit? in
+                guard
+                    let change = DesiredMarkRestore.change(
+                        photo: edit.photo, current: shownMarks(for: edit.photo),
+                        expected: edit.after, target: edit.before, fields: edit.change)
+                else { return nil }
+                return request(change, for: edit.photo)
+            }
+            _ = await persist(restores)
+            moveCompletions.removeValue(forKey: actionID)?(.failure(error))
+        }
+    }
+
+    private func observeMoveProgress() async -> Task<Void, Never> {
+        rejectMoveFinishedCount = 0
+        let updates = await library.rejectMoveProgress()
+        return Task { [weak self] in
+            for await update in updates {
+                guard let self, !Task.isCancelled else { return }
+                switch update {
+                case .setStarted: break
+                case .setFinished: self.rejectMoveFinishedCount += 1
+                case .finished: return
+                }
+            }
+        }
+    }
+
+    private func performMoveRetry(
+        _ previous: RejectMoveResult, kept: [DesiredMarkEdit], actionID: UInt64
+    ) async {
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+        do {
+            let keptByPhoto = Dictionary(uniqueKeysWithValues: kept.map { ($0.photo, $0) })
+            var excluded: Set<PhotoIdentity> = []
+            var changed: [RejectMoveOutcome] = []
+            var retryEdits: [DesiredMarkEdit] = []
+            for failed in previous.failed {
+                if let edit = keptByPhoto[failed.identity] {
+                    excluded.insert(failed.identity)
+                    if DesiredMarkRestore.retry(edit, current: shownMarks(for: edit.photo)) != nil {
+                        // Glyph recovery may already have confirmed this clear. Retry only a
+                        // current failure, using its current revision rather than the move's old edit.
+                        if let current = desiredMarks.entry(for: edit.photo),
+                            current.state.failure != nil
+                        {
+                            desiredMarks.retry(current.edit)
+                            previousFailedPhotos.remove(current.edit.photo)
+                            retryEdits.append(current.edit)
+                        }
+                    } else {
+                        changed.append(changedSince(failed.identity))
+                    }
+                } else if !shownMarks(for: failed.identity).isRejected {
+                    excluded.insert(failed.identity)
+                    changed.append(changedSince(failed.identity))
+                }
+            }
+            let clears = await persist(retryEdits)
+            let retried = try await library.retryFailedRejects(in: previous.id, excluding: excluded)
+            let failures = clears.outcomes.compactMap { status -> RejectMoveOutcome? in
+                guard let failure = status.state.failure else { return nil }
+                return .failed(
+                    RejectMoveFailedSet(
+                        identity: status.identity, failure: RejectMoveFailure(classifying: failure),
+                        files: previous.failed.first { $0.identity == status.identity }?.files ?? []
+                    ))
+            }
+            let settled = previous.outcomes.filter {
+                if case .failed = $0 { return false }
+                return true
+            }
+            let result = RejectMoveResult(
+                id: previous.id, outcomes: settled + (retried?.outcomes ?? []) + failures + changed)
+            if let completed = lastRejectMove {
+                recordRejectMove(
+                    result, keptIdentities: completed.keptIdentities,
+                    rejectsFolderName: completed.rejectsFolderName,
+                    folder: completed.folder, openGeneration: completed.openGeneration)
+            }
+            refresh()
+            moveCompletions.removeValue(forKey: actionID)?(.success(result))
+        } catch {
+            moveCompletions.removeValue(forKey: actionID)?(.failure(error))
+        }
+    }
+
+    private func performMoveUndo(_ entry: RejectMoveUndoEntry, edits: [DesiredMarkEdit]) async {
+        isMovingRejects = true
+        defer { isMovingRejects = false }
+        var current = Dictionary(uniqueKeysWithValues: storedPhotos.map { ($0.id, $0.marks) })
+        for edit in edits where desiredMarks.entry(for: edit.photo)?.edit.revision == edit.revision
+        {
+            current[edit.photo] = edit.before
+        }
+        do {
+            let result = try await library.undoRejectMove(
+                entry, currentMarks: current, restoring: edits)
+            refresh()
+            for restored in result.restored {
+                let edit =
+                    edits.first { $0.photo == restored.identity }
+                    ?? request(.rating(.rejected), for: restored.identity)
+                let status = library.latestChange(for: restored.identity)
+                if let status {
+                    if status.state.isConfirmed, let index = photoIndices[edit.photo] {
+                        confirmedPhotos[index].marks = edit.after
+                    }
+                    desiredMarks.finish(edit, state: status.state)
+                    updateShownPhoto(edit.photo)
+                }
+            }
+            reportSaveFailures(
+                result.restored.compactMap { library.latestChange(for: $0.identity) })
+            lastMoveUndo = .success(result)
+        } catch {
+            let failure = MarkWriteFailure(classifying: error)
+            for edit in edits { desiredMarks.finish(edit, state: .failed(failure)) }
+            lastMoveUndo = .failure(error)
+        }
+    }
+
+    private func changedSince(_ photo: PhotoIdentity) -> RejectMoveOutcome {
+        .skipped(
+            RejectMoveSkippedSet(
+                identity: photo, reason: .noLongerRejected,
+                message: "The photo's marks changed since this action."))
+    }
+
+    private func persist(_ edits: [DesiredMarkEdit]) async -> MarkBatchResult {
+        let result = await library.apply(
+            edits.map { BatchMarkItem(photo: $0.photo, change: $0.change) })
+        for edit in edits {
+            guard let status = result.outcomes.first(where: { $0.identity == edit.photo }) else {
+                continue
+            }
+            if status.state.isConfirmed, let index = photoIndices[edit.photo] {
+                confirmedPhotos[index].marks = edit.after
+            }
+            desiredMarks.finish(edit, state: status.state)
+            updateShownPhoto(edit.photo)
+        }
+        reportSaveFailures(result.outcomes)
+        return result
+    }
+
+    private func reportSaveFailures(_ statuses: [MarkChangeStatus]) {
+        let failures = confirmedPhotos.compactMap { photo -> (PhotoIdentity, MarkWriteFailure)? in
+            guard let failure = desiredMarks.entry(for: photo.id)?.state.failure else { return nil }
+            return (photo.id, failure)
+        }
+        let failed = Set(failures.map { $0.0 })
+        let wasEmpty = previousFailedPhotos.isEmpty
+        previousFailedPhotos = failed
+        let hasAccessFailure = failures.contains {
+            $0.1.reason == .permissionLost || $0.1.reason == .locationUnavailable
+        }
+        guard !failed.isEmpty, folderLocationLoss == nil, !hasAccessFailure else {
+            isSaveFailureToastVisible = false
+            return
+        }
+        guard statuses.contains(where: { $0.state.failure != nil && failed.contains($0.identity) }),
+            wasEmpty || !isSaveFailureToastVisible
+        else { return }
+        saveFailureToastBurst += 1
+        isSaveFailureToastVisible = true
+        isRejectMoveToastVisible = false
+        UIAccessibility.post(notification: .announcement, argument: Self.saveFailureToastMessage)
     }
 
     // MARK: - Save state and recovery
@@ -882,7 +1104,7 @@ final class BrowsingModel {
     /// It summarises every photo's latest change in the open folder, so it never claims Saved
     /// for a write C4 has not confirmed and never misses a photo whose change failed.
     var saveSummary: FolderSaveSummary {
-        FolderSaveSummary(states: storedPhotos.compactMap { changes.latest(for: $0.id)?.state })
+        FolderSaveSummary(states: storedPhotos.compactMap { latestChange(for: $0.id)?.state })
     }
 
     /// What the marking HUD's save-state line says for one photo (PRD P0-08).
@@ -901,13 +1123,10 @@ final class BrowsingModel {
         folderLocationLoss.map { SaveStatus.situation(for: $0) }
     }
 
-    /// The photos whose change has not finished saving, in grid order (PRD P0-08).
-    ///
-    /// The indicator's count opens this list, so each row can retry exactly one photo and the
-    /// whole list can retry them all with the same per-photo call.
+    /// Lists photos with desired marks that have not confirmed, including failures.
     var unsavedChanges: [UnsavedChange] {
         storedPhotos.compactMap { photo in
-            guard let status = changes.latest(for: photo.id), status.state.isUnfinished else {
+            guard let status = latestChange(for: photo.id), status.state.isUnfinished else {
                 return nil
             }
             return UnsavedChange(
@@ -918,24 +1137,32 @@ final class BrowsingModel {
     /// Whether leaving the open folder asks first (PRD Failure and recovery, last row).
     var leaveConfirmation: LeaveFolderConfirmation {
         LeaveFolderConfirmation(
-            states: storedPhotos.compactMap { changes.latest(for: $0.id)?.state })
+            states: storedPhotos.compactMap { latestChange(for: $0.id)?.state })
     }
 
-    /// Resends one photo's latest failed change through C4 (PRD P0-08).
-    ///
-    /// The retry's transitions arrive on the library's ordered stream like any other change, so a
-    /// retried change shows **Writing…** and then only what its storage confirmed. PRD How marks
-    /// reach disk, rule 8, keeps a superseded change from being retried (the library reads the
-    /// photo's latest change).
-    func retryLatestChange(for photo: PhotoIdentity) async {
-        _ = await library.retryLatestChange(for: photo)
+    /// Retries all current failed photos as one ordered action, including single and batch marks.
+    func retryAllUnfinishedChanges() {
+        retryFailedChanges(in: storedPhotos.map(\.id))
     }
 
-    /// Retries every photo the indicator lists, one call per photo (PRD P0-08).
-    func retryAllUnfinishedChanges() async {
-        for change in unsavedChanges {
-            await retryLatestChange(for: change.photo)
+    /// Retries one unsaved-list row through the same compare-and-set pipeline as Retry all.
+    func retryFailedChange(for photo: PhotoIdentity) {
+        retryFailedChanges(in: [photo])
+    }
+
+    private func retryFailedChanges(in photos: [PhotoIdentity]) {
+        guard !isMovingRejects, !isChangingFolder else { return }
+        dismissSaveFailureToast()
+        let edits = photos.compactMap { photo -> DesiredMarkEdit? in
+            guard let entry = desiredMarks.entry(for: photo), entry.state.failure != nil else {
+                return nil
+            }
+            desiredMarks.retry(entry.edit)
+            previousFailedPhotos.remove(photo)
+            return entry.edit
         }
+        guard !edits.isEmpty else { return }
+        submit(.retry(edits))
     }
 
     /// Checks the open folder's location now, as a return to the foreground asks (PRD P0-02).
@@ -1006,10 +1233,21 @@ final class BrowsingModel {
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
         if let lastViewed = state.currentPhoto { library.setEntryResumePhoto(lastViewed) }
-        showEntryAfterLeaving()
-        // Leaving closes the folder even when the next destination never opens, so its scan stops
-        // and its scope is not held for a folder the user no longer sees (G1 folder access).
-        await library.closeFolder()
+        state.route = .entry
+        hasLeftFolder = true
+        state.folder = nil
+        let generation = library.openGeneration
+        let close = Task {
+            await drainActions()
+            // Every later open waits for this close, so it can only end this generation.
+            guard library.openGeneration == generation, hasLeftFolder, state.folder == nil else {
+                return
+            }
+            showEntryAfterLeaving()
+            await library.closeFolder()
+        }
+        folderClose = close
+        await close.value
         // A folder the user opened while the close drained wins: the destination they were
         // heading for before that must not replace it (PRD P0-08).
         guard token == openRequests else { return }
@@ -1049,7 +1287,13 @@ final class BrowsingModel {
         // The closed folder's completed move cannot be undone through its ended session.
         lastRejectMove = nil
         isRejectMoveToastVisible = false
+        confirmedPhotos = []
         storedPhotos = []
+        photoIndices = [:]
+        desiredMarks = DesiredPhotoMarks()
+        desiredStatusIDs = [:]
+        previousFailedPhotos = []
+        dismissSaveFailureToast()
         groups = []
         thumbnails = library.thumbnails
         detailImages = library.detailImages
@@ -1197,6 +1441,7 @@ final class BrowsingModel {
             // opened again, so it only applies to the folder and the open this scene shows.
             guard folder == library.folder, generation == library.openGeneration else { return }
             folderLocationLoss = loss
+            dismissSaveFailureToast()
             if let index = recents.firstIndex(where: { $0.identity == folder }) {
                 recents[index].needsReconnect = true
             }
@@ -1251,11 +1496,6 @@ final class BrowsingModel {
         dismissedGroupFailure = nil
         groupFinishingRuns = 0
 
-        // Another folder replaces every selected photo's identity, so the batch's report and
-        // U8's undo snapshot go with the selection.
-        lastBatch = nil
-        batchReport = nil
-        selectionClearances += 1
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
@@ -1273,7 +1513,22 @@ final class BrowsingModel {
     /// deliberately not copied from the library here: they arrive only on the ordered update
     /// stream, so a snapshot can never paint an older transition over a newer one.
     private func refresh() {
-        storedPhotos = library.photos
+        if shownGeneration != library.openGeneration {
+            shownGeneration = library.openGeneration
+            desiredMarks = DesiredPhotoMarks()
+            desiredStatusIDs = [:]
+            previousFailedPhotos = []
+            dismissSaveFailureToast()
+            changes = PhotoChangeStates()
+        }
+        confirmedPhotos = library.photos
+        photoIndices = Dictionary(
+            uniqueKeysWithValues: confirmedPhotos.enumerated().map { ($0.element.id, $0.offset) })
+        storedPhotos = confirmedPhotos.map { photo in
+            var shown = photo
+            shown.marks = desiredMarks.shown(for: photo.id, confirmed: photo.marks)
+            return shown
+        }
         groups = library.groups
         reconcileRemovedPhotos()
     }
@@ -1285,11 +1540,9 @@ final class BrowsingModel {
     /// scan; a detail or group route whose photo is gone returns to the grid, the same fallback a
     /// restore uses. Grouping's own update then keeps a surviving group's place.
     private func reconcileRemovedPhotos() {
-        let present = Set(storedPhotos.map(\.id))
+        let present = Set(photoIndices.keys)
         if !state.selection.isSubset(of: present) {
             state.selection.formIntersection(present)
-            batchReport = nil
-            selectionClearances += 1
         }
         if let current = state.currentPhoto, !present.contains(current) {
             state.currentPhoto = nil
@@ -1300,21 +1553,6 @@ final class BrowsingModel {
             if state.route == .group { state.route = .grid }
         }
     }
-}
-
-/// One batch the multi-select bar applied, with what U8's undo entry needs (PRD P0-09, C5).
-///
-/// The batch is already written when this value exists, so it holds what the action cannot be
-/// re-derived from: C4's per-photo results, including the failed photos a retry resends, and the
-/// marks each targeted photo had just before the batch. U8 passes both to
-/// `MarkUndoHistory.recordBatch(_:marksBefore:)` from the one ``BrowsingModel/applyBatch(_:settings:)``
-/// call, which is what keeps one bar action to one undo entry.
-struct BatchMarkApplication: Sendable {
-    /// C4's per-photo results, with the photos the batch could not save (PRD P0-09).
-    let result: MarkBatchResult
-
-    /// Each targeted photo's marks before the batch, keyed by C1's identity (PRD P0-05).
-    let marksBefore: [PhotoIdentity: PhotoMarks]
 }
 
 /// The latest completed Move rejects run, kept for the toast and C14's undo (PRD P0-10).

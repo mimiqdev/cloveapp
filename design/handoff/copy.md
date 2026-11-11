@@ -32,7 +32,7 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | grid.more.settings | Settings |
 | grid.select.title | {n} selected |
 | grid.select.done | Done |
-| grid.batch.result | Saved {ok} · {failed} failed · Retry (accessibility only; no toast) |
+| grid.batch.result | Saved {ok} · {failed} failed · Retry (accessibility only; failure bursts announce save.toast.failed) |
 | tile.nopreview | No preview |
 | a11y.moveRejects | Move rejects |
 | a11y.filter | Filter |
@@ -67,6 +67,15 @@ The counts and companion text remain visible. V4's error banners retain their wo
 | a11y.save.cloveOnly | Saved in Clove only |
 
 The Saved in Clove only label retains G1 decision 6's distinction between confirmed app storage and an XMP write.
+
+## Save-failure toast (owner decision, 2026-11-11)
+
+| Key | String |
+|---|---|
+| save.toast.failed | Some marks weren't saved. |
+| save.toast.retry | Retry |
+
+Show one toast per failure burst, above the bottom edge in the Move rejects toast position. Hide it after about six seconds. Retry resends all failed photos through one ordered action. Announce `save.toast.failed` with VoiceOver, including for partial batch failures. Drive loss and lost access use the error banner instead. The marks, Failed glyph, and corner dots remain after the toast hides.
 
 ## Group review
 | Key | String |

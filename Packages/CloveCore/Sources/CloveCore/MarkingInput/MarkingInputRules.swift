@@ -234,10 +234,3 @@ public struct MarkingInputRules: Hashable, Sendable {
         marks.applying(change) == marks ? .noChange : .mark(change, kind)
     }
 }
-
-extension PhotoMarks {
-    /// The marks after `change`, which replaces only the fields it names.
-    func applying(_ change: MarkChange) -> PhotoMarks {
-        PhotoMarks(rating: change.rating ?? rating, label: change.label ?? label)
-    }
-}

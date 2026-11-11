@@ -28,7 +28,7 @@ struct RejectMoveUndoRecoveryTests {
         let moves = fixture.fileSystem.count(of: .move)
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.conflictCount == 1)
         #expect(result.restoredCount == 0)
@@ -68,7 +68,7 @@ struct RejectMoveUndoRecoveryTests {
         fixture.fileSystem.fail(.move, at: raw.source, with: POSIXError(.EEXIST))
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.conflictCount == 1)
         #expect(result.failedCount == 0)
@@ -96,7 +96,7 @@ struct RejectMoveUndoRecoveryTests {
         fixture.fileSystem.fail(.move, at: jpeg.source, with: POSIXError(.EIO))
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.failedCount == 1)
         #expect(result.restoredCount == 0)
@@ -129,7 +129,7 @@ struct RejectMoveUndoRecoveryTests {
         fixture.fileSystem.fail(.fileSize, at: raw.source, with: POSIXError(.EIO))
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.failedCount == 1)
         #expect(result.restoredCount == 0)
@@ -157,7 +157,7 @@ struct RejectMoveUndoRecoveryTests {
             with: POSIXError(.EIO))
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.splitCount == 1)
         #expect(result.failedCount == 0)
@@ -166,7 +166,9 @@ struct RejectMoveUndoRecoveryTests {
         #expect(!split.rollbackFailures.isEmpty)
         #expect(split.files.map(\.location) == [.source, .destination, .destination])
         // The split set's files are in two places, so a retry is never offered for it.
-        #expect(try await fixture.mover.retryFailedUndo(in: result.id) == nil)
+        #expect(
+            try await fixture.mover.retryFailedUndo(
+                in: result.id, currentMarks: { _ in PhotoMarks() }) == nil)
     }
 
     /// A file the rollback returned is under the rejects folder even when its old path is reused.
@@ -196,7 +198,7 @@ struct RejectMoveUndoRecoveryTests {
         }
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         let split = try #require(result.split.first)
         #expect(split.files.map(\.location) == [.source, .destination, .destination])
@@ -232,7 +234,7 @@ struct RejectMoveUndoRecoveryTests {
         }
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         let split = try #require(result.split.first)
         #expect(split.files.map(\.location) == [.source, .destination, .unknown])
@@ -256,7 +258,7 @@ struct RejectMoveUndoRecoveryTests {
         }
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.restoredCount == 1)
         #expect(result.failedCount == 0)
@@ -293,7 +295,8 @@ struct RejectMoveUndoRecoveryTests {
         fixture.fileSystem.fail(.move, at: blocked.source, with: POSIXError(.EIO))
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: sets[0].id))
+            undoEntry(for: moveResult, returningTo: sets[0].id), currentMarks: { _ in PhotoMarks() }
+        )
 
         #expect(result.restoredCount == 1)
         #expect(result.failedCount == 1)
@@ -301,7 +304,8 @@ struct RejectMoveUndoRecoveryTests {
         #expect(fixture.folder.exists("_Rejected/DCIM/100BBBBB/IMG_0002.ARW"))
 
         fixture.fileSystem.stopFailing(.move)
-        let retried = try await fixture.mover.retryFailedUndo(in: result.id)
+        let retried = try await fixture.mover.retryFailedUndo(
+            in: result.id, currentMarks: { _ in PhotoMarks() })
         let retry = try #require(retried)
 
         #expect(retry.outcomes.map(\.identity) == [sets[1].id])
@@ -313,7 +317,9 @@ struct RejectMoveUndoRecoveryTests {
                 #expect(fixture.folder.exists(relativePath(of: url, in: fixture.folder)))
             }
         }
-        #expect(try await fixture.mover.retryFailedUndo(in: result.id) == nil)
+        #expect(
+            try await fixture.mover.retryFailedUndo(
+                in: result.id, currentMarks: { _ in PhotoMarks() }) == nil)
     }
 
     /// A retry sends the failed photos of a mixed attempt: no restored, conflicted or split one.
@@ -353,7 +359,8 @@ struct RejectMoveUndoRecoveryTests {
         fixture.fileSystem.fail(.move, at: splitRaw.destination, with: POSIXError(.EIO))
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: restored.id))
+            undoEntry(for: moveResult, returningTo: restored.id),
+            currentMarks: { _ in PhotoMarks() })
 
         #expect(result.restoredIdentities == [restored.id])
         #expect(result.conflicts.map(\.identity) == [conflicted.id])
@@ -361,7 +368,8 @@ struct RejectMoveUndoRecoveryTests {
         #expect(result.split.map(\.identity) == [split.id])
 
         fixture.fileSystem.stopFailing(.move)
-        let retried = try await fixture.mover.retryFailedUndo(in: result.id)
+        let retried = try await fixture.mover.retryFailedUndo(
+            in: result.id, currentMarks: { _ in PhotoMarks() })
         let retry = try #require(retried)
 
         #expect(retry.outcomes.map(\.identity) == [failed.id])
@@ -394,7 +402,7 @@ struct RejectMoveUndoRecoveryTests {
         try fixture.folder.write("intruder", to: relativePath(of: blocked, in: fixture.folder))
         let firstRun = try await fixture.move(plan)
         let entry = undoEntry(for: firstRun, returningTo: first.id)
-        _ = try await fixture.mover.undo(entry)
+        _ = try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         #expect(fixture.folder.exists("DCIM/100AAAAA/IMG_0001.ARW"))
 
         try FileManager.default.removeItem(at: blocked)
@@ -410,7 +418,7 @@ struct RejectMoveUndoRecoveryTests {
         // The set never moved, so its Reject was never removed and is still there.
         #expect(try await undoTestStoresReject(second, in: fixture))
         await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(entry.batch)) {
-            try await fixture.mover.undo(entry)
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         }
     }
 
@@ -432,7 +440,7 @@ struct RejectMoveUndoRecoveryTests {
         let moves = fixture.fileSystem.count(of: .move)
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         #expect(result.missingFilesCount == 1)
         #expect(result.failedCount == 0)
@@ -450,7 +458,9 @@ struct RejectMoveUndoRecoveryTests {
             let original = bytes[relativePath(of: file.source, in: fixture.folder)]
             #expect(fixture.folder.contents(of: path) == original)
         }
-        #expect(try await fixture.mover.retryFailedUndo(in: result.id) == nil)
+        #expect(
+            try await fixture.mover.retryFailedUndo(
+                in: result.id, currentMarks: { _ in PhotoMarks() }) == nil)
     }
 
     /// A file no longer where the last rename put it is unknown, never the file at its old path.
@@ -480,7 +490,7 @@ struct RejectMoveUndoRecoveryTests {
         }
 
         let result = try await fixture.mover.undo(
-            undoEntry(for: moveResult, returningTo: set.id))
+            undoEntry(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
 
         let split = try #require(result.split.first)
         #expect(split.files.map(\.location) == [.source, .unknown, .destination])
@@ -508,7 +518,9 @@ struct RejectMoveUndoRecoveryTests {
         }
         defer { watchdog.cancel() }
         let stream = await fixture.mover.undoProgressUpdates()
-        let undoTask = Task { try await fixture.mover.undo(entry) }
+        let undoTask = Task {
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+        }
         var iterator = stream.makeAsyncIterator()
         let announced = await iterator.next()
         guard case .photoStarted? = announced else {
@@ -518,7 +530,7 @@ struct RejectMoveUndoRecoveryTests {
         }
 
         await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(entry.batch)) {
-            try await fixture.mover.undo(entry)
+            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
         }
         gate.signal()
         let result = try await undoTask.value

@@ -139,7 +139,7 @@ import Testing
         #expect(status.state.isConfirmed)
         let photo = set.id
         let partial = FolderProgress(
-            confirmedMarks: [PhotoMarks().including(status.requested)], isComplete: false,
+            confirmedMarks: [PhotoMarks().applying(status.requested)], isComplete: false,
             lastViewedPhoto: photo, previewPhotos: [photo])
         try await access.recordProgress(partial, for: opened.recent.identity)
         await queue.drain()

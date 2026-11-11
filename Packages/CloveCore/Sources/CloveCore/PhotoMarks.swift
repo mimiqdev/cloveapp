@@ -141,3 +141,10 @@ public struct PhotoMarks: Hashable, Sendable {
         self.init(rating: rating, label: label)
     }
 }
+
+extension PhotoMarks {
+    /// The marks after a request, replacing only the fields it names.
+    public func applying(_ change: MarkChange) -> PhotoMarks {
+        PhotoMarks(rating: change.rating ?? rating, label: change.label ?? label)
+    }
+}

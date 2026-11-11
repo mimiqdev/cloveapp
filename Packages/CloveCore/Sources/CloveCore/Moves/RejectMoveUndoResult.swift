@@ -223,6 +223,8 @@ public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
     case split(RejectMoveUndoSplitPhoto)
     /// The photo's files are no longer all under the rejects folder, so nothing was attempted.
     case missingFiles(RejectMoveUndoMissingFiles)
+    /// The kept photo has newer desired marks; undo leaves it alone.
+    case changedSince(PhotoIdentity)
 
     /// The photo's stable identity, whatever the result (G1 decision 5).
     public var identity: PhotoIdentity {
@@ -232,6 +234,7 @@ public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
         case .failed(let photo): photo.identity
         case .split(let photo): photo.identity
         case .missingFiles(let set): set.identity
+        case .changedSince(let photo): photo
         }
     }
 
@@ -321,8 +324,15 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
     public var missingFilesCount: Int { missingFiles.count }
 
     /// PRD P0-10's "M photos couldn't be restored": everything but the restored photos.
+    public var changedSince: [PhotoIdentity] {
+        outcomes.compactMap {
+            guard case .changedSince(let photo) = $0 else { return nil }
+            return photo
+        }
+    }
+
     public var unrestoredCount: Int {
-        conflictCount + failedCount + splitCount + missingFilesCount
+        conflictCount + failedCount + splitCount + missingFilesCount + changedSince.count
     }
 
     /// Every photo the grid shows again, in the caller's order (PRD P0-10's Undo rule).

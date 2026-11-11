@@ -23,6 +23,26 @@ struct BrowseShell: View {
                 compactLayout
             }
         }
+        .overlay(alignment: .bottom) {
+            if !usesSplitLayout, [.detail, .group].contains(browsing.state.route),
+                browsing.isSaveFailureToastVisible
+            {
+                Toast(
+                    message: BrowsingModel.saveFailureToastMessage,
+                    actionTitle: BrowsingModel.saveFailureToastRetryTitle,
+                    identifier: "clove.save.toast",
+                    onAction: { browsing.retryAllUnfinishedChanges() }
+                )
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+            }
+        }
+        .task(id: browsing.saveFailureToastBurst) {
+            guard browsing.isSaveFailureToastVisible else { return }
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            browsing.dismissSaveFailureToast()
+        }
         // PRD Failure and recovery asks before leaving a folder with unconfirmed writes, wherever
         // the leaving started: the back button, a pick or a Recents tap.
         .modifier(LeaveFolderPromptView(browsing: browsing))

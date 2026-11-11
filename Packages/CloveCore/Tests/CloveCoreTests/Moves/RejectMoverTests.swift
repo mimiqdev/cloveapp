@@ -67,7 +67,12 @@ struct RejectMoverTests {
             formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
         try writeMoveSet(set, in: fixture.folder)
         let plan = try await fixture.plan([set])
-        try fixture.folder.write("intruder", to: "_Rejected/DCIM/IMG_0001.JPG")
+        let blocked = fixture.folder.file("_Rejected/DCIM/IMG_0001.JPG")
+        fixture.fileSystem.beforeOperation = { record in
+            if record.step == .move, record.url == blocked, record.count == 1 {
+                try? Data("intruder".utf8).write(to: blocked)
+            }
+        }
         let before = fixture.folder.fileCount()
 
         let result = try await fixture.move(plan)
@@ -82,7 +87,7 @@ struct RejectMoverTests {
         for url in set.photoSet.fileURLs {
             #expect(fixture.folder.exists(relativePath(of: url, in: fixture.folder)))
         }
-        #expect(fixture.folder.fileCount() == before)
+        #expect(fixture.folder.fileCount() == before + 1)
     }
 
     /// A destination on another volume is refused before any folder is created or file moved.

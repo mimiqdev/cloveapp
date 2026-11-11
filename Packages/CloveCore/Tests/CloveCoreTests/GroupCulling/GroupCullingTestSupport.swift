@@ -48,29 +48,6 @@ let groupCullingTwoAndFour = groupCullingEnabledRatings([2, 4])
 /// Marks a photo has when it has no rating, no label and no Reject (PRD P0-05).
 let groupCullingUnmarked = PhotoMarks()
 
-/// The marks the executor reads at execution time, changeable after a plan was built.
-///
-/// The executor re-checks planned changes against the marks read now, so a test has to be able
-/// to write a mark between planning and executing (PRD P0-12).
-actor GroupCullingMarksSource {
-    private var marks: [PhotoIdentity: PhotoMarks]
-
-    /// Starts from a snapshot of marks; a missing photo reads as unmarked.
-    init(_ marks: [PhotoIdentity: PhotoMarks] = [:]) {
-        self.marks = marks
-    }
-
-    /// Stores one photo's marks, as another marking action between plan and execution would.
-    func set(_ marks: PhotoMarks, for photo: PhotoIdentity) {
-        self.marks[photo] = marks
-    }
-
-    /// The marks read for one photo; a missing photo is unmarked.
-    func marks(for photo: PhotoIdentity) -> PhotoMarks {
-        marks[photo] ?? PhotoMarks()
-    }
-}
-
 /// A dictionary of marks, built one photo at a time so tests read like the group view.
 func groupCullingMarks(_ entries: [(PhotoIdentity, PhotoMarks)]) -> [PhotoIdentity: PhotoMarks] {
     var marks: [PhotoIdentity: PhotoMarks] = [:]

@@ -16,6 +16,7 @@ struct RejectMoveUndoJob: Sendable {
     let files: [RejectMoveFilePlan]
     /// Whether the confirmation kept the photo, so only its Reject comes back (PRD Move rejects).
     let keptInConfirmation: Bool
+    let expectedMarks: PhotoMarks?
 }
 
 /// The completed run one undo step restores, shared by its first attempt and every retry.
@@ -33,7 +34,7 @@ final class RejectMoveUndoRun {
     /// PRD Move rejects applies a keep on Move: it clears the photo's Reject and moves nothing.
     /// The run holds them, so the step restores them from whichever handle the caller undoes,
     /// not only from a ``RejectMoveUndoEntry`` that happens to carry them.
-    var kept: [ScannedPhotoSet]
+    var kept: [RejectMoveKeptPhoto]
     /// Whether an undo step already restored this run (PRD P0-10's Undo applies once).
     var isUndone: Bool
 
@@ -56,9 +57,9 @@ final class RejectMoveUndoRun {
     }
 
     /// Records the photos the confirmation kept, once each (PRD Move rejects).
-    func keep(_ photos: [ScannedPhotoSet]) {
-        var seen = Set(kept.map(\.id))
-        for photo in photos where seen.insert(photo.id).inserted {
+    func keep(_ photos: [RejectMoveKeptPhoto]) {
+        var seen = Set(kept.map(\.set.id))
+        for photo in photos where seen.insert(photo.set.id).inserted {
             kept.append(photo)
         }
     }
@@ -410,9 +411,10 @@ extension RejectMover {
     /// - Throws: A refusal that touched nothing: the run is unknown or already undone, or the
     ///   location reports itself read-only. A refusal also ends the attempt on the progress
     ///   stream, so no reader waits for a photo that will never be restored.
-    public func undo(_ entry: RejectMoveUndoEntry) async throws(RejectMoveUndoRefusal)
-        -> RejectMoveUndoResult
-    {
+    public func undo(
+        _ entry: RejectMoveUndoEntry,
+        currentMarks: @Sendable (PhotoIdentity) async -> PhotoMarks?
+    ) async throws(RejectMoveUndoRefusal) -> RejectMoveUndoResult {
         guard let run = undoableRuns[entry.batch] else {
             throw publishing(.unknownBatch(entry.batch), for: entry.batch)
         }
@@ -434,7 +436,8 @@ extension RejectMover {
         // and a forward retry of this run are both refused from here on.
         run.close()
         forgetFailedSets(of: entry.batch)
-        return await performUndo(jobs, rootURL: run.rootURL, batch: entry.batch)
+        return await performUndo(
+            jobs, rootURL: run.rootURL, batch: entry.batch, currentMarks: currentMarks)
     }
 
     /// Attaches the photos the confirmation kept to a completed run (PRD Move rejects).
@@ -443,7 +446,7 @@ extension RejectMover {
     /// The run keeps them, so the undo step restores them whichever handle the caller holds;
     /// ``RejectMoveUndoEntry/keptPhotos`` stays a way to pass them with the entry itself. A batch
     /// the mover does not hold is ignored.
-    public func recordKeptPhotos(_ photos: [ScannedPhotoSet], for batch: RejectMoveBatchID) {
+    public func recordKeptPhotos(_ photos: [RejectMoveKeptPhoto], for batch: RejectMoveBatchID) {
         undoableRuns[batch]?.keep(photos)
     }
 
@@ -459,9 +462,10 @@ extension RejectMover {
     ///   left to retry.
     /// - Throws: ``RejectMoveUndoRefusal/readOnlyLocation(_:)`` when the location is read-only,
     ///   which also ends the attempt on the progress stream.
-    public func retryFailedUndo(in batch: RejectMoveUndoBatchID) async throws(RejectMoveUndoRefusal)
-        -> RejectMoveUndoResult?
-    {
+    public func retryFailedUndo(
+        in batch: RejectMoveUndoBatchID,
+        currentMarks: @Sendable (PhotoIdentity) async -> PhotoMarks?
+    ) async throws(RejectMoveUndoRefusal) -> RejectMoveUndoResult? {
         guard let retry = undoRetries[batch] else { return nil }
         do {
             try preflightUndo(retry.rootURL)
@@ -469,7 +473,8 @@ extension RejectMover {
             throw publishing(error, for: retry.batch)
         }
         undoRetries[batch] = nil
-        return await performUndo(retry.jobs, rootURL: retry.rootURL, batch: retry.batch)
+        return await performUndo(
+            retry.jobs, rootURL: retry.rootURL, batch: retry.batch, currentMarks: currentMarks)
     }
 
     /// Every undo progress step, as a stream a UI can wrap into its own observation.
@@ -516,7 +521,8 @@ extension RejectMover {
     /// hide the photos that did come back. A run with no photo to restore still returns a result,
     /// so the caller's one step always ends.
     private func performUndo(
-        _ jobs: [RejectMoveUndoJob], rootURL: URL, batch: RejectMoveBatchID
+        _ jobs: [RejectMoveUndoJob], rootURL: URL, batch: RejectMoveBatchID,
+        currentMarks: @Sendable (PhotoIdentity) async -> PhotoMarks?
     ) async -> RejectMoveUndoResult {
         let id = RejectMoveUndoBatchID()
         let runner = RejectMoveUndoRunner(fileSystem: fileSystem, markQueue: markQueue)
@@ -525,7 +531,23 @@ extension RejectMover {
         var failedJobs: [RejectMoveUndoJob] = []
         for job in jobs {
             publishUndo(.photoStarted(attempt: id, photo: job.identity))
-            let outcome = await runner.restore(job)
+            let outcome: RejectMoveUndoOutcome
+            if let expected = job.expectedMarks {
+                let current = await currentMarks(job.identity)
+                var target = expected
+                target.rating = .rejected
+                if let current,
+                    DesiredMarkRestore.change(
+                        photo: job.identity, current: current, expected: expected,
+                        target: target, fields: .rating(expected.rating)) != nil
+                {
+                    outcome = await runner.restore(job)
+                } else {
+                    outcome = .changedSince(job.identity)
+                }
+            } else {
+                outcome = await runner.restore(job)
+            }
             outcomes.append(outcome)
             publishUndo(.photoFinished(attempt: id, outcome: outcome))
             if case .failed = outcome { failedJobs.append(job) }
@@ -564,10 +586,11 @@ extension RejectMover {
     private func undoJobs(for run: RejectMoveUndoRun) -> [RejectMoveUndoJob] {
         var jobs = run.moved
         var seen = Set(jobs.map(\.identity))
-        for photo in run.kept where seen.insert(photo.id).inserted {
+        for photo in run.kept where seen.insert(photo.set.id).inserted {
             jobs.append(
                 RejectMoveUndoJob(
-                    identity: photo.id, set: photo, files: [], keptInConfirmation: true))
+                    identity: photo.set.id, set: photo.set, files: [], keptInConfirmation: true,
+                    expectedMarks: photo.marksAfter))
         }
         return jobs
     }
@@ -630,7 +653,7 @@ extension RejectMover {
             moved.append(
                 RejectMoveUndoJob(
                     identity: set.identity, set: scanned, files: set.files,
-                    keptInConfirmation: false))
+                    keptInConfirmation: false, expectedMarks: nil))
         }
         undoableRuns[result.id] = RejectMoveUndoRun(rootURL: plan.rootURL, moved: moved)
     }

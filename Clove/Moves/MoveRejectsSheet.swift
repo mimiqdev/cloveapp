@@ -85,9 +85,7 @@ struct MoveRejectsSheet: View {
                     .accessibilityIdentifier("clove.moves.cancel")
                 Spacer()
                 Button(copy.moveButtonTitle) {
-                    Task {
-                        if await flow.move(plan) { dismiss() }
-                    }
+                    flow.move(plan) { dismiss() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(selection.movingCount == 0)
