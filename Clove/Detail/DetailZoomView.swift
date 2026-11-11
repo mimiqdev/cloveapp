@@ -137,7 +137,7 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports one finished marking swipe, with its release travel (PRD Rating by swipe distance).
     let onMarkingSwipe: (DetailMarkingSwipeEnd) -> Void
 
-    /// Cancels pending auto-advance when either navigation or marking starts.
+    /// Cancels pending auto-advance when marking starts.
     let onSwipeBegin: () -> Void
 
     let hasPrevious: Bool
@@ -192,7 +192,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private let markingPan = UIPanGestureRecognizer()
     private let haptics = MarkingSwipeHaptics()
     private var isNavigating = false
-    private var isSettlingNavigation = false
 
     /// The marking swipe the current drag began as, or nil when the drag is not one.
     private var swipe: MarkingSwipe?
@@ -327,6 +326,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         // Read before the pixels change: the point the viewport centres on in the old bitmap.
         let kept = zoomSnapshot
         imageView.image = pixels.map { UIImage(cgImage: $0) }
+        if pixels != nil, !isNavigating {
+            scrollView.layer.removeAllAnimations()
+            scrollView.transform = .identity
+        }
         shownPixels = pixels.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
         self.fullResolutionPixels = fullResolution
         updateMaximumZoom()
@@ -430,15 +433,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             return DetailZoom.edgeZone(for: recognizer.location(in: self), in: bounds.size)
                 == .centre
         }
-        guard recognizer === markingPan else { return true }
-        return beginSwipe(translation: markingPan.translation(in: self))
-    }
-
-    /// Takes the recognizer's starting sample once; subsequent travel keeps this direction.
-    func beginSwipe(translation: CGPoint) -> Bool {
-        guard !isSettlingNavigation, scrollView.zoomScale <= DetailFitScale.tolerance else {
+        guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
+        guard pan.numberOfTouches == 1, scrollView.zoomScale <= DetailFitScale.tolerance else {
             return false
         }
+        let translation = pan.translation(in: self)
         isNavigating =
             NavigationSwipeRules.axis(
                 horizontal: Double(translation.x), vertical: Double(translation.y)) == .horizontal
@@ -462,14 +461,16 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
-        gestureRecognizer === markingPan && other === scrollView.panGestureRecognizer
+        gestureRecognizer === markingPan
+            && (other === scrollView.panGestureRecognizer
+                || other === scrollView.pinchGestureRecognizer)
     }
 
     /// Feeds one sample of the drag to the session and shows the step it reached.
     ///
     /// UIKit counts down as positive and C13's sessions count up as positive, so the travel is
     /// the negated translation; velocity is never read (PRD Rating by swipe distance).
-    @objc private func handleMarkingPan(_ pan: UIPanGestureRecognizer) {
+    @objc func handleMarkingPan(_ pan: UIPanGestureRecognizer) {
         if isNavigating {
             handleNavigationPan(pan)
             return
@@ -559,10 +560,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private func handleNavigationPan(_ pan: UIPanGestureRecognizer) {
         let travel = Double(pan.translation(in: self).x)
         switch pan.state {
-        case .began:
-            onSwipeBegin?()
-            fallthrough
-        case .changed:
+        case .began, .changed:
+            scrollView.layer.removeAllAnimations()
             let offset = NavigationSwipeRules.offset(
                 travel: travel, width: Double(bounds.width),
                 hasPrevious: hasPrevious, hasNext: hasNext)
@@ -581,19 +580,15 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     private func settleNavigation(step: Int) {
         isNavigating = false
-        isSettlingNavigation = true
-        let destination = step == 0 ? 0 : (step > 0 ? -bounds.width : bounds.width)
-        UIView.animate(
-            withDuration: step == 0 ? 0.3 : 0.18,
-            delay: 0, usingSpringWithDamping: step == 0 ? 0.8 : 1,
-            initialSpringVelocity: 0, options: [.curveEaseOut]
-        ) {
-            self.scrollView.transform = CGAffineTransform(translationX: destination, y: 0)
-        } completion: { [weak self] _ in
-            guard let self else { return }
-            self.scrollView.transform = .identity
-            self.isSettlingNavigation = false
-            if step != 0 { self.onEdgeTap?(step > 0 ? .next : .previous) }
+        if step != 0 {
+            onEdgeTap?(step > 0 ? .next : .previous)
+        } else {
+            UIView.animate(
+                withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8,
+                initialSpringVelocity: 0, options: [.curveEaseOut, .beginFromCurrentState]
+            ) {
+                self.scrollView.transform = .identity
+            }
         }
     }
 
