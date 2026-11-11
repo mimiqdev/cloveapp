@@ -241,9 +241,44 @@ struct DetailDisplayPresentationTests {
                 $0.0 == next && ($0.1.need == .morePixels || $0.1.need == .fullResolution)
             })
         // Retaining zoom did not decode; a person's own pinch still does.
-        preview.onZoomChange?(4)
+        let pinchScale = try #require(preview.zoomSnapshot).scale + 1
+        preview.onZoomChange?(pinchScale)
         try await waitFor { source.requests.contains { $0.0 == next && $0.1.need == .morePixels } }
         if mode == .cameraPreviewFirst { #expect(source.sample.rawRenderCount == 0) }
+    }
+
+    @Test func groupNavigationPreservesTheZoomedImagePoint() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        source.prefetchEnabled = false
+        let store = SettingsStore.sample
+        store.update { $0.keepZoom.inDetail = false }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let group = try #require(browsing.groups.first)
+        browsing.openPhoto(group.members[0])
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await waitFor { source.prefetched.last?.current.photo == group.members[0] }
+        let preview = try #require(findPreview(in: window))
+        preview.onDoubleTap?(.center)
+        try await waitFor { source.delivered.contains(.nativeRAW) && preview.zoomSnapshot != nil }
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        scroll.setContentOffset(
+            CGPoint(
+                x: (scroll.contentSize.width - scroll.bounds.width) * 0.7,
+                y: (scroll.contentSize.height - scroll.bounds.height) * 0.3), animated: false)
+        let before = try #require(preview.zoomSnapshot)
+        browsing.openPhoto(group.members[1])
+        try await waitFor { source.prefetched.last?.current.photo == group.members[1] }
+        let after = try #require(preview.zoomSnapshot)
+        #expect(abs(before.scale - after.scale) < 0.02)
+        #expect(abs(before.anchor.x - after.anchor.x) < 0.02)
+        #expect(abs(before.anchor.y - after.anchor.y) < 0.02)
     }
 
     @Test func attachmentUsesStableDisplayEdgeAndReturningToFirstUsesHeldRaw() async throws {

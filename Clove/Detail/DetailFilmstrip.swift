@@ -37,6 +37,15 @@ struct DetailFilmstrip: View {
     }
 
     var body: some View {
+        VStack(spacing: 6) {
+            if let finishingAction { finishingAction }
+            strip
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clove.detail.filmstrip")
+    }
+
+    private var strip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .bottom, spacing: 8) {
@@ -75,18 +84,15 @@ struct DetailFilmstrip: View {
                         }
                     }
                 }
-                .padding(.horizontal, finishingAction == nil ? 10 : 80)
-                .padding(.top, finishingAction == nil ? 3 : 49)
-                .padding(.bottom, 3)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
             }
             .onChange(of: current, initial: true) { _, photo in
                 guard let photo else { return }
                 withAnimation { proxy.scrollTo(photo, anchor: .center) }
             }
         }
-        .frame(height: finishingAction == nil ? 70 : 116)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.detail.filmstrip")
+        .frame(height: 70)
     }
 
     private func frame(_ photo: GridPhoto) -> some View {
@@ -99,11 +105,6 @@ struct DetailFilmstrip: View {
             )
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .top) {
-            if photo.id == current, let finishingAction {
-                finishingAction.fixedSize().offset(y: -46)
-            }
-        }
         .id(photo.id)
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
     }
