@@ -6,18 +6,6 @@ import Testing
 
 @MainActor
 struct PhotoActionsTests {
-    private func finishingPlan(
-        group: BrowsingGroup, model: BrowsingModel, library: ControlledPhotoLibrary
-    ) -> GroupFinishingPlan {
-        let protected = library.identity("c")
-        model.apply(.label(ColourLabel(colour: .blue)), to: protected)
-        return GroupFinishingPlan(
-            group: BrowsingGroup(id: group.id, members: group.members + [protected]),
-            action: .rejectUnmarked, currentPhoto: group.members[0],
-            marks: Dictionary(uniqueKeysWithValues: model.allPlacedPhotos.map { ($0.id, $0.marks) })
-        )
-    }
-
     private func labelledGroupScenario() -> (
         BrowsingModel, ControlledPhotoLibrary, GroupFinishingPlan
     ) {
@@ -39,10 +27,6 @@ struct PhotoActionsTests {
     @Test func aLabelledOnlyKeepFinishesAndContinuesToTheNextGridItem() async throws {
         let (model, library, plan) = labelledGroupScenario()
         #expect(model.groupPhoto?.id == library.identity("b"))
-        #expect(GroupUndecidedCount(model.groupPhotos.map(\.marks)).undecided == 3)
-        #expect(
-            model.groupPhotos.filter { $0.marks.isUndecided }.map(\.id)
-                == ["b", "c", "d"].map { library.identity($0) })
         model.runGroupFinishing(plan)
         #expect(GroupUndecidedCount(model.groupPhotos.map(\.marks)).isCompleteByMarks)
         #expect(
@@ -54,8 +38,7 @@ struct PhotoActionsTests {
         #expect(model.state.currentPhoto == library.identity("next"))
         await model.drainActions()
         #expect(
-            library.photos.first { $0.id == library.identity("a") }?.marks
-                == PhotoMarks(label: ColourLabel(colour: .green)))
+            library.photos.first { $0.id == library.identity("a") }?.marks.label.colour == .green)
     }
 
     @Test func aContinueTapImmediatelyAfterRejectUnmarkedStaysInTheGroup() async {
@@ -68,77 +51,111 @@ struct PhotoActionsTests {
         await model.drainActions()
     }
 
-    @Test func toastUndoRestoresBothMovedAndKeptSamplePhotos() async throws {
-        let library = TestLibrary.sample
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let rejected = model.allPlacedPhotos.filter(\.marks.isRejected).map(\.id)
-        let kept = try #require(rejected.first)
-        let moved = try #require(rejected.last)
-        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(plan, kept: [kept]) { _ in }
-        await model.drainActions()
-        let completed = try #require(model.lastRejectMove)
-        #expect(model.shownMarks(for: kept).rating == .unrated)
-        #expect(!model.photos.contains { $0.id == moved })
-        model.undoRejectMove(completed)
-        await model.drainActions()
-        #expect(model.shownMarks(for: kept).isRejected)
-        #expect(model.photos.contains { $0.id == moved && $0.marks.isRejected })
-        #expect(!model.isRejectMoveToastVisible)
-    }
-
-    @Test func aSwipeDuringAMoveDoesNotMarkOrStartAutoAdvance() async throws {
+    @Test func aTapShowsImmediatelyAndTwoQuickMarksWriteInOrder() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
         model.openFolder()
-        let photo = try #require(model.photos.first)
-        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        library.holdsMove = true
-        model.runRejectMove(plan, kept: []) { _ in }
-        try await waitUntil { library.isRunningMove }
-        model.openPhoto(photo.id)
-        var advances = 0
-        let detail = markingView(model, photo: photo, advanced: { advances += 1 })
-        detail.applyMarkingSwipe(.rating(travel: 100))
-        detail.applyMarkingSwipe(.reject(travel: 100))
-        #expect(!model.canMark)
-        #expect(advances == 0)
-        #expect(model.shownMarks(for: photo.id) == photo.marks)
-        library.holdsMove = false
+        let photo = library.identity("a")
+        let three = try #require(Rating(rawValue: 3))
+        library.heldPhoto = photo
+        model.apply(.rating(three), to: photo)
+        #expect(model.shownMarks(for: photo).rating == three)
+        #expect(library.photos.first?.marks.rating == .unrated)
+        try await waitUntil { library.writing == photo }
+        model.apply(.label(ColourLabel(colour: .blue)), to: photo)
+        #expect(model.shownMarks(for: photo).label.colour == .blue)
+        library.heldPhoto = nil
         await model.drainActions()
-        #expect(model.canMark)
-        detail.applyMarkingSwipe(.rating(travel: 100))
-        #expect(advances == 1)
-        await model.drainActions()
+        #expect(
+            library.writes.map(\.change) == [.rating(three), .label(ColourLabel(colour: .blue))])
+        #expect(model.shownMarks(for: photo) == library.photos.first?.marks)
     }
 
-    @Test func disconnectDropsFailedAndPendingMarksAndStopsTheRemainingActions() async throws {
+    @Test func aFailedWriteRereadsTheFileAndDoesNotCarryItsFieldsForward() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = library.identity("a")
+        let disk = PhotoMarks(rating: try #require(Rating(rawValue: 2)))
+        library.failNext.insert(photo)
+        library.rereadValues[photo] = disk
+        model.apply(.label(ColourLabel(colour: .red)), to: photo)
+        #expect(model.shownMarks(for: photo).label.colour == .red)
+        await model.drainActions()
+        #expect(library.rereads == [photo])
+        #expect(model.shownMarks(for: photo) == disk)
+        #expect(model.isSaveFailureToastVisible)
+        #expect(BrowsingModel.saveFailureToastMessage == "Couldn't save the mark.")
+        model.apply(.rating(.rejected), to: photo)
+        await model.drainActions()
+        #expect(library.writes.last?.change == .rating(.rejected))
+        #expect(model.shownMarks(for: photo).label.isClear)
+    }
+
+    @Test func aBatchFailureShowsOneToastAndRestoresOnlyItsFailedPhoto() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
         model.openFolder()
         let a = library.identity("a")
         let b = library.identity("b")
-        library.failNext.insert(a)
+        model.toggleSelection(a)
+        model.toggleSelection(b)
+        library.failNext = [a]
+        let three = try #require(Rating(rawValue: 3))
+        model.applyBatch(.rating(three), settings: AppSettings())
+        await model.drainActions()
+        #expect(model.shownMarks(for: a).rating == .unrated)
+        #expect(model.shownMarks(for: b).rating == three)
+        #expect(model.isSaveFailureToastVisible)
+        #expect(model.saveFailureToastBurst == 1)
+        library.failNext = [a]
         model.apply(.label(ColourLabel(colour: .red)), to: a)
         await model.drainActions()
-        library.heldPhoto = b
-        model.apply(.rating(try #require(Rating(rawValue: 4))), to: b)
-        try await waitUntil { library.writing == b }
-        model.apply(.label(ColourLabel(colour: .green)), to: a)
-        let writes = library.events.count
+        #expect(model.saveFailureToastBurst == 1)
+        model.dismissSaveFailureToast()
+        library.failNext = [a]
+        model.apply(.label(ColourLabel(colour: .blue)), to: a)
+        await model.drainActions()
+        #expect(model.saveFailureToastBurst == 2)
+    }
+
+    @Test func leavingWithAHeldWriteShowsEntryWithoutWaiting() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = library.identity("a")
+        library.heldPhoto = photo
+        model.apply(.rating(.rejected), to: photo)
+        try await waitUntil { library.writing == photo }
+        model.back()
+        #expect(model.state.route == .entry)
+        #expect(model.state.folder == nil)
+        #expect(library.closeCount == 0)
+        library.heldPhoto = nil
+        await model.drainActions()
+        try await waitUntil { library.closeCount == 1 }
+    }
+
+    @Test func disconnectDropsPendingMarksAndStopsTheRemainingActions() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let a = library.identity("a")
+        let b = library.identity("b")
+        library.heldPhoto = a
+        model.apply(.rating(.rejected), to: a)
+        try await waitUntil { library.writing == a }
+        model.apply(.label(ColourLabel(colour: .blue)), to: b)
         library.reportDriveLoss()
         try await waitUntil { model.folderLocationLoss != nil }
-        await model.drainActions()
         #expect(model.shownMarks(for: a) == PhotoMarks())
         #expect(model.shownMarks(for: b) == PhotoMarks())
-        #expect(model.latestChange(for: a) == nil)
-        #expect(model.latestChange(for: b) == nil)
-        #expect(model.unsavedChanges.isEmpty)
-        #expect(library.events.count == writes)
-        model.retryAllUnfinishedChanges()
+        #expect(!model.canMark)
+        library.failNext.insert(a)
+        library.heldPhoto = nil
         await model.drainActions()
-        #expect(library.events.count == writes)
+        #expect(library.writes.map(\.photo) == [a])
+        #expect(!model.isSaveFailureToastVisible)
     }
 
     @Test func disconnectedSwipesCannotMarkOrAdvanceAndReopenUsesFreshDiskMarks() async throws {
@@ -155,21 +172,102 @@ struct PhotoActionsTests {
         detail.applyMarkingSwipe(.reject(travel: 100))
         #expect(!model.canMark)
         #expect(advances == 0)
-        #expect(library.events.isEmpty)
+        #expect(library.writes.isEmpty)
         library.reopenFailure = .locationUnavailable(FolderErrorChain(CocoaError(.fileNoSuchFile)))
         await model.reopenOpenFolder()
         #expect(!model.canMark)
-        #expect(model.folderLocationLoss != nil)
         library.reopenFailure = nil
-        let disk = PhotoMarks(
-            rating: try #require(Rating(rawValue: 2)), label: ColourLabel(colour: .blue))
-        library.reopenedMarks[photo.id] = disk
+        let disk = PhotoMarks(rating: try #require(Rating(rawValue: 2)))
+        library.rereadValues[photo.id] = disk
         await model.reopenOpenFolder()
-        await model.drainActions()
         #expect(model.shownMarks(for: photo.id) == disk)
-        #expect(model.latestChange(for: photo.id) == nil)
         #expect(model.canMark)
-        #expect(library.events.isEmpty)
+    }
+
+    @Test func aSwipeDuringAMoveDoesNotMarkOrStartAutoAdvance() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = try #require(model.photos.first)
+        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        library.holdsMove = true
+        model.runRejectMove(plan, kept: []) { _ in }
+        try await waitUntil { library.isRunningMove }
+        model.openPhoto(photo.id)
+        var advances = 0
+        let detail = markingView(model, photo: photo, advanced: { advances += 1 })
+        detail.applyMarkingSwipe(.rating(travel: 100))
+        #expect(!model.canMark)
+        #expect(advances == 0)
+        library.holdsMove = false
+        await model.drainActions()
+        #expect(model.canMark)
+    }
+
+    @Test func queuedMoveCannotConsumeALaterRejectOrMoveAPhotoWithALaterEdit() async throws {
+        let library = ControlledPhotoLibrary(rejected: ["b", "c"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let a = library.identity("a")
+        let b = library.identity("b")
+        library.heldPhoto = a
+        model.apply(.label(ColourLabel(colour: .red)), to: a)
+        try await waitUntil { library.writing == a }
+        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        model.runRejectMove(preview, kept: []) { _ in }
+        model.apply(.label(ColourLabel(colour: .blue)), to: b)
+        library.heldPhoto = nil
+        await model.drainActions()
+        #expect(library.moves == [[library.identity("c")]])
+        #expect(model.shownMarks(for: b).label.colour == .blue)
+    }
+
+    @Test func aFailedClearDoesNotHoldBackARejectedPhotoFromALaterMove() async throws {
+        let library = ControlledPhotoLibrary(rejected: ["a"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let a = library.identity("a")
+        library.failNext.insert(a)
+        model.apply(.rating(.unrated), to: a)
+        await model.drainActions()
+        #expect(model.shownMarks(for: a).isRejected)
+        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        model.runRejectMove(preview, kept: []) { _ in }
+        await model.drainActions()
+        #expect(library.moves == [[a]])
+    }
+
+    @Test func toastUndoRestoresBothMovedAndKeptSamplePhotos() async throws {
+        let model = BrowsingModel(library: TestLibrary.sample)
+        model.openFolder()
+        let rejected = model.allPlacedPhotos.filter(\.marks.isRejected).map(\.id)
+        let kept = try #require(rejected.first)
+        let moved = try #require(rejected.last)
+        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        model.runRejectMove(plan, kept: [kept]) { _ in }
+        await model.drainActions()
+        let completed = try #require(model.lastRejectMove)
+        #expect(model.shownMarks(for: kept).rating == .unrated)
+        #expect(!model.photos.contains { $0.id == moved })
+        model.undoRejectMove(completed)
+        await model.drainActions()
+        #expect(model.shownMarks(for: kept).isRejected)
+        #expect(model.photos.contains { $0.id == moved && $0.marks.isRejected })
+    }
+
+    @Test func aReopenRefusesNewMarksUntilItsGenerationIsInstalled() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.holdsReopen = true
+        let reopen = Task { await model.reopenOpenFolder() }
+        try await waitUntil { library.isReopening }
+        #expect(!model.canMark)
+        model.apply(.rating(.rejected), to: library.identity("a"))
+        #expect(library.writes.isEmpty)
+        library.holdsReopen = false
+        await reopen.value
+        #expect(model.canMark)
     }
 
     private func markingView(
@@ -183,519 +281,41 @@ struct PhotoActionsTests {
                 marked: { _, _ in advanced() }, step: { _ in }, markingSwipeBegan: {}))
     }
 
-    @Test func queuedMoveCannotConsumeALaterReject() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        let c = library.identity("c")
-        library.heldPhoto = a
-        model.apply(.rating(try #require(Rating(rawValue: 2))), to: a)
-        try await waitUntil { library.writing == a }
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: []) { _ in }
-        model.apply(.rating(.rejected), to: b)
-        #expect(model.shownMarks(for: b).isRejected)
-        library.heldPhoto = nil
-        await model.drainActions()
-        #expect(library.moves == [[c]])
-        #expect(library.events == ["write:a", "move:c", "write:b"])
-        #expect(model.photos.contains { $0.id == b && $0.marks.isRejected })
-        try await waitUntil { model.latestChange(for: b)?.state.isConfirmed == true }
-    }
-
-    @Test func laterEditKeepsItsPhotoOutOfAnEarlierMove() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let c = library.identity("c")
-        library.heldPhoto = a
-        model.apply(.label(ColourLabel(colour: .red)), to: a)
-        try await waitUntil { library.writing == a }
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: []) { _ in }
-        model.apply(.label(ColourLabel(colour: .blue)), to: c)
-        library.heldPhoto = nil
-        await model.drainActions()
-        #expect(library.moves == [[]])
-        #expect(model.photos.contains { $0.id == c && $0.marks.label.colour == .blue })
-        try await waitUntil { model.latestChange(for: c)?.state.isConfirmed == true }
-    }
-
-    @Test func resumeWaitsForDepartureAndAcceptsNewMarks() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        library.heldPhoto = a
-        model.apply(.label(ColourLabel(colour: .red)), to: a)
-        try await waitUntil { library.writing == a }
-        model.back()
-        #expect(model.leaveConfirmation.unfinishedCount == 1)
-        let leave = Task { await model.leaveAnyway() }
-        try await waitUntil { model.state.route == .entry && model.state.folder == nil }
-        let recent = try #require(library.recents.first)
-        let resume = Task { await model.resume(recent) }
-        library.heldPhoto = nil
-        await leave.value
-        await resume.value
-        #expect(library.closeCount == 1)
-        #expect(library.reopenCount == 1)
-        #expect(!library.isClosed)
-        #expect(model.state.folder == library.folder)
-        let three = try #require(Rating(rawValue: 3))
-        model.apply(.rating(three), to: b)
-        #expect(model.shownMarks(for: b).rating == three)
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: b)?.state.isConfirmed == true }
-    }
-
-    @Test func failedKeepRetryThroughConsumerPreservesLaterFourStars() async throws {
-        let library = ControlledPhotoLibrary(rejected: ["a", "c"])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let kept = library.identity("a")
-        library.failNext.insert(kept)
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: [kept]) { _ in }
-        await model.drainActions()
-        #expect(model.shownMarks(for: kept).rating == .unrated)
-        #expect(model.latestChange(for: kept)?.state.failure != nil)
-        let completed = try #require(model.lastRejectMove)
-        let four = try #require(Rating(rawValue: 4))
-        model.apply(.rating(four), to: kept)
-        await model.drainActions()
-        model.retryRejectMove(completed) { _ in }
-        await model.drainActions()
-        #expect(model.shownMarks(for: kept).rating == four)
-        #expect(model.lastRejectMove?.result.noLongerRejectedCount == 1)
-        #expect(library.photos.first { $0.id == kept }?.marks.rating == four)
-    }
-
-    @Test func moveUndoThroughConsumerReportsKeptPhotoChangedSince() async throws {
-        let library = ControlledPhotoLibrary(rejected: ["a", "c"])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let kept = library.identity("a")
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: [kept]) { _ in }
-        await model.drainActions()
-        let completed = try #require(model.lastRejectMove)
-        let three = try #require(Rating(rawValue: 3))
-        model.apply(.rating(three), to: kept)
-        await model.drainActions()
-        let set = try #require(library.scannedSet(for: kept))
-        model.submitMoveUndo(
-            RejectMoveUndoEntry(
-                batch: completed.id,
-                keptPhotos: [RejectMoveKeptPhoto(set: set, marksAfter: PhotoMarks())],
-                photoToReturnTo: kept))
-        await model.drainActions()
-        let outcome = try #require(model.lastMoveUndo)
-        let result = try outcome.get()
-        #expect(result.changedSince == [kept])
-        #expect(model.shownMarks(for: kept).rating == three)
-    }
-
-    @Test func retryingALaterMarkDoesNotFinishTheGroupAgain() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
-        model.openGroup(group)
-        model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
-        await model.drainActions()
-        let finished = try #require(model.lastGroupFinishing)
-        model.back()
-        model.openGroup(group)
-        library.failNext.insert(a)
-        model.apply(.rating(try #require(Rating(rawValue: 4))), to: a)
-        await model.drainActions()
-        model.retryAllUnfinishedChanges()
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: a)?.state.isConfirmed == true }
-        #expect(model.lastGroupFinishing == finished)
-        #expect(model.state.route == .group)
-        #expect(model.state.groupPosition?.group == group.id)
-    }
-
-    @Test func onlyRetriesOfUnfinishedGroupPhotosUpdateFinishingState() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        let c = library.identity("c")
-        let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
-        library.failNext.insert(a)
-        model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
-        await model.drainActions()
-        let finished = try #require(model.lastGroupFinishing)
-        #expect(model.saveSummary.failed == 1)
-        #expect(model.isSaveFailureToastVisible)
-        library.failNext.insert(c)
-        model.apply(.label(ColourLabel(colour: .red)), to: c)
-        await model.drainActions()
-        model.retryFailedChange(for: c)
-        await model.drainActions()
-        #expect(model.lastGroupFinishing == finished)
-        #expect(model.saveSummary.failed == 1)
-        model.retryAllUnfinishedChanges()
-        await model.drainActions()
-        // The displayed status stream drains independently of the action consumer.
-        try await waitUntil {
-            model.saveSummary.failed == 0 && model.latestChange(for: a)?.state.isConfirmed == true
-        }
-        #expect(model.saveSummary.failed == 0)
-        #expect(model.latestChange(for: a)?.state.isConfirmed == true)
-        #expect(model.lastGroupFinishing?.failedCount == 0)
-        #expect(model.lastGroupFinishing?.savedCount == 2)
-    }
-
-    @Test func rowRetryResendsOnlyItsPhoto() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        library.failNext = [a, b]
-        model.apply(.label(ColourLabel(colour: .red)), to: a)
-        model.apply(.label(ColourLabel(colour: .blue)), to: b)
-        await model.drainActions()
-        let writes = library.events.count
-        model.retryFailedChange(for: a)
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: a)?.state.isConfirmed == true }
-        #expect(Array(library.events.dropFirst(writes)) == ["write:a"])
-        #expect(model.latestChange(for: b)?.state.failure != nil)
-        #expect(model.shownMarks(for: b).label.colour == .blue)
-    }
-
-    @Test func rowRetryKeepsTheSameCompareAndSetRule() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        library.failNext.insert(a)
-        model.apply(.label(ColourLabel(colour: .red)), to: a)
-        await model.drainActions()
-        library.heldPhoto = b
-        model.apply(.label(ColourLabel(colour: .blue)), to: b)
-        try await waitUntil { library.writing == b }
-        let writes = library.events.count
-        model.retryFailedChange(for: a)
-        let four = try #require(Rating(rawValue: 4))
-        model.apply(.rating(four), to: a)
-        library.heldPhoto = nil
-        await model.drainActions()
-        #expect(Array(library.events.dropFirst(writes)) == ["write:b", "write:a"])
-        #expect(model.shownMarks(for: a).rating == four)
-        try await waitUntil { model.latestChange(for: a)?.state.isConfirmed == true }
-    }
-
-    @Test func aReopenRefusesNewMarksUntilItsGenerationIsInstalled() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let four = try #require(Rating(rawValue: 4))
-        library.holdsReopen = true
-        let reopen = Task { await model.reopenOpenFolder() }
-        try await waitUntil { library.isReopening }
-        #expect(model.isChangingFolder)
-        model.apply(.rating(four), to: a)
-        #expect(model.shownMarks(for: a).rating == .unrated)
-        #expect(model.lastMarkEdits.isEmpty)
-        library.holdsReopen = false
-        await reopen.value
-        #expect(!model.isChangingFolder)
-        #expect(model.shownMarks(for: a).rating == .unrated)
-        model.apply(.rating(four), to: a)
-        #expect(model.shownMarks(for: a).rating == four)
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: a)?.state.isConfirmed == true }
-    }
-
-    @Test func shownPhotoCacheTracksConfirmationAndReindexesAfterAMove() async throws {
-        let library = ControlledPhotoLibrary(rejected: ["a"])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let b = library.identity("b")
-        let c = library.identity("c")
-        model.openPhoto(b)
-        model.apply(.label(ColourLabel(colour: .red)), to: b)
-        #expect(model.currentPhoto?.marks.label.colour == .red)
-        await model.drainActions()
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: []) { _ in }
-        await model.drainActions()
-        #expect(library.photos.map(\.id) == [b, c])
-        let five = try #require(Rating(rawValue: 5))
-        model.apply(.rating(five), to: b)
-        #expect(
-            model.currentPhoto?.marks == PhotoMarks(rating: five, label: ColourLabel(colour: .red)))
-        #expect(model.shownMarks(for: c).rating == .unrated)
-        await model.drainActions()
-        #expect(library.photos.first { $0.id == b }?.marks.rating == five)
-        #expect(model.photos.first { $0.id == b }?.marks.rating == five)
-    }
-
-    @Test func supersededFinishingFailureClearsTheSharedFailedState() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        library.failNext.insert(a)
-        let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
-        let plan = finishingPlan(group: group, model: model, library: library)
-        model.runGroupFinishing(plan)
-        await model.drainActions()
-        #expect(model.saveSummary.failed == 1)
-        #expect(model.isSaveFailureToastVisible)
-        model.apply(.rating(try #require(Rating(rawValue: 4))), to: a)
-        await model.drainActions()
-        try await waitUntil { model.saveSummary.failed == 0 }
-        let writes = library.events.count
-        model.retryAllUnfinishedChanges()
-        await model.drainActions()
-        #expect(model.saveSummary.failed == 0)
-        #expect(!model.isSaveFailureToastVisible)
-        #expect(library.events.count == writes)
-    }
-
-    @Test func confirmedFinishingDoesNotRegressWhileItsStatusStreamIsPending() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        library.withholdsFinalStatuses = true
-        let a = library.identity("a")
-        let b = library.identity("b")
-        let group = BrowsingGroup(id: GroupID(rawValue: "group"), members: [a, b])
-        model.runGroupFinishing(finishingPlan(group: group, model: model, library: library))
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: a)?.state == .pending }
-        #expect(model.lastGroupFinishing?.savedCount == 2)
-        #expect(model.saveSummary.failed == 0)
-        #expect(!model.isSaveFailureToastVisible)
-    }
-
-    @Test func moveUndoFoldsTheCompleteConfirmedDesiredMarks() async throws {
-        let library = ControlledPhotoLibrary(rejected: ["a", "c"])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        library.failNext.insert(a)
-        model.apply(.label(ColourLabel(colour: .red)), to: a)
-        await model.drainActions()
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        library.failNext.insert(a)
-        model.runRejectMove(preview, kept: [a]) { _ in }
-        await model.drainActions()
-        let completed = try #require(model.lastRejectMove)
-        let set = try #require(library.scannedSet(for: a))
-        let expected = PhotoMarks(label: ColourLabel(colour: .red))
-        model.submitMoveUndo(
-            RejectMoveUndoEntry(
-                batch: completed.id,
-                keptPhotos: [RejectMoveKeptPhoto(set: set, marksAfter: expected)],
-                photoToReturnTo: a))
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: a)?.state.isConfirmed == true }
-        #expect(
-            model.shownMarks(for: a)
-                == PhotoMarks(rating: .rejected, label: ColourLabel(colour: .red)))
-        #expect(library.photos.first { $0.id == a }?.marks.label.colour == .red)
-        #expect(library.writtenMarks[a]?.label.colour == .red)
-    }
-
-    @Test func moveDetailsDoesNotRepeatAClearAlreadyRecoveredByTheGlyph() async throws {
-        let library = ControlledPhotoLibrary(rejected: ["a", "c"])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let kept = library.identity("a")
-        library.failNext.insert(kept)
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: [kept]) { _ in }
-        await model.drainActions()
-        let completed = try #require(model.lastRejectMove)
-        model.retryAllUnfinishedChanges()
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: kept)?.state.isConfirmed == true }
-        let writes = library.events.count
-        library.failNext.insert(kept)
-        model.retryRejectMove(completed) { _ in }
-        await model.drainActions()
-        #expect(library.events.count == writes)
-        #expect(library.failNext.contains(kept))
-        #expect(model.lastRejectMove?.result.failedCount == 0)
-        #expect(model.latestChange(for: kept)?.state.isConfirmed == true)
-        #expect(!model.isSaveFailureToastVisible)
-    }
-
-    @Test func moveDetailsRetriesTheCurrentFailedRevision() async throws {
-        let library = ControlledPhotoLibrary(rejected: ["a", "c"])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let kept = library.identity("a")
-        library.failNext.insert(kept)
-        let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: [kept]) { _ in }
-        await model.drainActions()
-        let completed = try #require(model.lastRejectMove)
-        model.apply(.rating(try #require(Rating(rawValue: 4))), to: kept)
-        await model.drainActions()
-        library.failNext.insert(kept)
-        model.apply(.rating(.unrated), to: kept)
-        await model.drainActions()
-        #expect(model.latestChange(for: kept)?.state.failure != nil)
-        model.retryRejectMove(completed) { _ in }
-        await model.drainActions()
-        try await waitUntil { model.latestChange(for: kept)?.state.isConfirmed == true }
-        #expect(model.shownMarks(for: kept).rating == .unrated)
-        #expect(model.lastRejectMove?.result.failedCount == 0)
-    }
-
-    @Test func saveFailuresShareOneToastUntilItHidesAndRetryResendsAll() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let a = library.identity("a")
-        let b = library.identity("b")
-        let c = library.identity("c")
-        model.toggleSelection(a)
-        model.toggleSelection(b)
-        library.failNext = [a, b]
-        model.applyBatch(.rating(try #require(Rating(rawValue: 3))), settings: AppSettings())
-        await model.drainActions()
-        #expect(model.isSaveFailureToastVisible)
-        #expect(model.saveFailureToastBurst == 1)
-        library.failNext.insert(c)
-        model.apply(.label(ColourLabel(colour: .red)), to: c)
-        await model.drainActions()
-        #expect(model.saveFailureToastBurst == 1)
-        model.dismissSaveFailureToast()
-        library.failNext.insert(a)
-        model.apply(.label(ColourLabel(colour: .blue)), to: a)
-        await model.drainActions()
-        #expect(model.saveFailureToastBurst == 2)
-        model.recordRejectMove(
-            RejectMoveResult(id: RejectMoveBatchID(), outcomes: []), keptIdentities: [],
-            rejectsFolderName: .defaultFolderName, folder: library.folder, openGeneration: 0)
-        #expect(!model.isSaveFailureToastVisible)
-        #expect(model.isRejectMoveToastVisible)
-        library.failNext.insert(b)
-        model.apply(.label(ColourLabel(colour: .green)), to: b)
-        await model.drainActions()
-        #expect(model.saveFailureToastBurst == 3)
-        #expect(!model.isRejectMoveToastVisible)
-        let writes = library.events.count
-        model.retryAllUnfinishedChanges()
-        await model.drainActions()
-        try await waitUntil { model.unsavedChanges.isEmpty }
-        #expect(library.events.count == writes + 3)
-        #expect(!model.isSaveFailureToastVisible)
-    }
-
-    @Test func failureAfterTheFailedCountReturnsToZeroStartsANewBurst() async throws {
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let photo = library.identity("a")
-        library.failNext.insert(photo)
-        model.apply(.label(ColourLabel(colour: .red)), to: photo)
-        await model.drainActions()
-        #expect(model.saveFailureToastBurst == 1)
-        library.failNext.insert(photo)
-        model.apply(.label(ColourLabel(colour: .blue)), to: photo)
-        await model.drainActions()
-        #expect(model.saveFailureToastBurst == 2)
-        #expect(model.isSaveFailureToastVisible)
-    }
-
-    @Test func saveToastIsSuppressedForLostAccessAndDriveLoss() async throws {
-        for reason in [MarkWriteFailureReason.permissionLost, .locationUnavailable] {
-            let library = ControlledPhotoLibrary()
-            let model = BrowsingModel(library: library)
-            model.openFolder()
-            let photo = library.identity("a")
-            library.failureReason = reason
-            library.failNext.insert(photo)
-            model.apply(.label(ColourLabel(colour: .red)), to: photo)
-            await model.drainActions()
-            #expect(!model.isSaveFailureToastVisible)
-            if reason == .locationUnavailable {
-                #expect(model.shownMarks(for: photo) == PhotoMarks())
-                #expect(model.latestChange(for: photo) == nil)
-                #expect(!model.canMark)
-            } else {
-                #expect(model.shownMarks(for: photo).label.colour == .red)
-            }
-        }
-        let library = ControlledPhotoLibrary()
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        library.reportDriveLoss()
-        try await waitUntil { model.folderLocationLoss != nil }
-        let photo = library.identity("a")
-        library.failNext.insert(photo)
-        model.apply(.label(ColourLabel(colour: .red)), to: photo)
-        await model.drainActions()
-        #expect(!model.isSaveFailureToastVisible)
-        #expect(model.shownMarks(for: photo) == PhotoMarks())
-        #expect(model.latestChange(for: photo) == nil)
-    }
-
     private func waitUntil(_ condition: () -> Bool) async throws {
         for _ in 0..<1000 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(5))
         }
-        throw TestWaitFailure()
+        throw PhotoActionWaitFailure()
     }
 }
 
-private struct TestWaitFailure: Error {}
+private struct PhotoActionWaitFailure: Error {}
 
-/// A bounded, controllable storage seam. Tests drive the real BrowsingModel consumer above it.
 @MainActor
 private final class ControlledPhotoLibrary: FolderLibrary {
     let folder: FolderIdentity
-    private let recentID: UUID
+    private let recentID = UUID()
     var photos: [GridPhoto] = []
     var groups: [BrowsingGroup] = []
     let updates: AsyncStream<FolderLibraryUpdate>
     private let continuation: AsyncStream<FolderLibraryUpdate>.Continuation
-    private var statuses: [PhotoIdentity: MarkChangeStatus] = [:]
-    private var closedPhotos: [GridPhoto] = []
-    private var movedPhotos: [RejectMoveBatchID: [GridPhoto]] = [:]
     var openGeneration = 0
-    var isClosed = false
     var closeCount = 0
-    var reopenCount = 0
     var heldPhoto: PhotoIdentity?
     var writing: PhotoIdentity?
     var failNext: Set<PhotoIdentity> = []
-    var failureReason: MarkWriteFailureReason = .notConfirmed
-    var withholdsFinalStatuses = false
-    var holdsReopen = false
-    var isReopening = false
-    var reopenFailure: FolderAccessFailure?
-    var events: [String] = []
+    var rereadValues: [PhotoIdentity: PhotoMarks] = [:]
+    var rereads: [PhotoIdentity] = []
+    var writes: [BatchMarkItem] = []
     var moves: [[PhotoIdentity]] = []
     var holdsMove = false
     var isRunningMove = false
-    var reopenedMarks: [PhotoIdentity: PhotoMarks] = [:]
-    var writtenMarks: [PhotoIdentity: PhotoMarks] = [:]
+    var holdsReopen = false
+    var isReopening = false
+    var reopenFailure: FolderAccessFailure?
 
     init(rejected: Set<String> = ["c"], stems: [String] = ["a", "b", "c"]) {
-        recentID = UUID()
         folder = FolderIdentity(rawValue: recentID.uuidString)
         (updates, continuation) = AsyncStream.makeStream()
         photos = stems.map { stem in
@@ -713,53 +333,36 @@ private final class ControlledPhotoLibrary: FolderLibrary {
         PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: stem)
     }
 
-    func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { statuses[photo] }
-
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         var outcomes: [MarkChangeStatus] = []
         for item in items {
-            let id = MarkChangeID()
-            continuation.yield(
-                .change(
-                    MarkChangeStatus(
-                        id: id, identity: item.photo, requested: item.change, state: .pending)))
             writing = item.photo
             for _ in 0..<1000 {
-                if heldPhoto != item.photo || Task.isCancelled { break }
+                if heldPhoto != item.photo { break }
                 try? await Task.sleep(for: .milliseconds(5))
             }
-            guard !Task.isCancelled else {
-                writing = nil
-                return MarkBatchResult(id: MarkBatchID(), change: MarkChange(), outcomes: [])
-            }
-            events.append("write:\(item.photo.stem)")
+            writes.append(item)
             let fails = heldPhoto == item.photo || failNext.remove(item.photo) != nil
-            let state: MarkChangeState =
-                fails
-                ? .failed(MarkWriteFailure(reason: failureReason, message: "Controlled failure"))
-                : .savedInSidecar
             if !fails, let index = photos.firstIndex(where: { $0.id == item.photo }) {
-                let carried = statuses[item.photo].flatMap {
-                    $0.state.failure != nil ? $0.requested : nil
-                }
-                let effective = MarkChange(
-                    rating: item.change.rating ?? carried?.rating,
-                    label: item.change.label ?? carried?.label)
-                writtenMarks[item.photo] = (writtenMarks[item.photo] ?? photos[index].marks)
-                    .applying(effective)
                 photos[index].marks = photos[index].marks.applying(item.change)
             }
-            let status = MarkChangeStatus(
-                id: id, identity: item.photo, requested: item.change, state: state)
-            statuses[item.photo] = status
-            outcomes.append(status)
-            if !withholdsFinalStatuses { continuation.yield(.change(status)) }
-            if state.failure?.reason == .locationUnavailable { break }
+            outcomes.append(
+                MarkChangeStatus(
+                    id: MarkChangeID(), identity: item.photo, requested: item.change,
+                    state: fails
+                        ? .failed(MarkWriteFailure(reason: .unknown, message: "Controlled failure"))
+                        : .savedInSidecar))
         }
         writing = nil
-        continuation.yield(.photos(photos))
         return MarkBatchResult(
             id: MarkBatchID(), change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+    }
+
+    func rereadMarks(for identities: [PhotoIdentity]) async {
+        rereads.append(contentsOf: identities)
+        for index in photos.indices where identities.contains(photos[index].id) {
+            if let marks = rereadValues[photos[index].id] { photos[index].marks = marks }
+        }
     }
 
     func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? {
@@ -801,8 +404,8 @@ private final class ControlledPhotoLibrary: FolderLibrary {
         }
         let ids = plan.readyEntries.map(\.identity)
         moves.append(ids)
-        events.append("move:" + ids.map(\.stem).joined(separator: ","))
-        let result = RejectMoveResult(
+        photos.removeAll { ids.contains($0.id) }
+        return RejectMoveResult(
             id: RejectMoveBatchID(),
             outcomes: plan.readyEntries.map {
                 .moved(
@@ -810,51 +413,6 @@ private final class ControlledPhotoLibrary: FolderLibrary {
                         identity: $0.identity, files: $0.files, removedStoredReject: false,
                         staleRejectRecord: nil))
             })
-        movedPhotos[result.id] = photos.filter { ids.contains($0.id) }
-        photos.removeAll { ids.contains($0.id) }
-        continuation.yield(.photos(photos))
-        return result
-    }
-
-    func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
-        restoring edits: [DesiredMarkEdit]
-    ) async throws -> RejectMoveUndoResult {
-        var outcomes: [RejectMoveUndoOutcome] = []
-        for photo in movedPhotos.removeValue(forKey: entry.batch) ?? [] {
-            photos.append(photo)
-            guard let set = scannedSet(for: photo.id) else { continue }
-            _ = await apply([BatchMarkItem(photo: photo.id, change: .rating(.rejected))])
-            outcomes.append(
-                .restored(
-                    RejectMoveUndoRestoredPhoto(
-                        identity: photo.id, set: set, files: [], keptInConfirmation: false,
-                        rejectStoreFailure: nil)))
-        }
-        for kept in entry.keptPhotos {
-            guard currentMarks[kept.set.id] == kept.marksAfter else {
-                outcomes.append(.changedSince(kept.set.id))
-                continue
-            }
-            _ = await apply([BatchMarkItem(photo: kept.set.id, change: .rating(.rejected))])
-            outcomes.append(
-                .restored(
-                    RejectMoveUndoRestoredPhoto(
-                        identity: kept.set.id, set: kept.set, files: [], keptInConfirmation: true,
-                        rejectStoreFailure: nil)))
-        }
-        let restored = Set(
-            outcomes.compactMap { outcome -> PhotoIdentity? in
-                guard case .restored(let photo) = outcome else { return nil }
-                return photo.identity
-            })
-        for edit in edits where restored.contains(edit.photo) {
-            if let index = photos.firstIndex(where: { $0.id == edit.photo }) {
-                photos[index].marks = edit.after
-            }
-        }
-        continuation.yield(.photos(photos))
-        return RejectMoveUndoResult(id: RejectMoveUndoBatchID(), outcomes: outcomes)
     }
 
     func reportDriveLoss() {
@@ -865,20 +423,13 @@ private final class ControlledPhotoLibrary: FolderLibrary {
                 generation: openGeneration))
     }
 
-    func discardPendingChanges() async { statuses = [:] }
-
     func closeFolder() async {
         closeCount += 1
-        closedPhotos = photos
         photos = []
-        statuses = [:]
-        isClosed = true
         openGeneration += 1
-        continuation.yield(.photos([]))
     }
 
     func reopen(_ recent: RecentFolder) async -> FolderAccessFailure? {
-        reopenCount += 1
         isReopening = true
         defer { isReopening = false }
         if let reopenFailure { return reopenFailure }
@@ -886,17 +437,8 @@ private final class ControlledPhotoLibrary: FolderLibrary {
             if !holdsReopen { break }
             try? await Task.sleep(for: .milliseconds(5))
         }
-        guard !holdsReopen else {
-            return .locationUnavailable(FolderErrorChain(CocoaError(.fileReadUnknown)))
-        }
-        if isClosed { photos = closedPhotos }
-        for index in photos.indices {
-            if let marks = reopenedMarks[photos[index].id] { photos[index].marks = marks }
-        }
-        statuses = [:]
-        isClosed = false
+        await rereadMarks(for: photos.map(\.id))
         openGeneration += 1
-        continuation.yield(.photos(photos))
         return nil
     }
 }

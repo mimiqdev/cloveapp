@@ -173,7 +173,6 @@ final class TestLibrary: FolderLibrary {
 
     func reopen(_ recent: RecentFolder) async -> FolderAccessFailure? {
         guard recent.identity == folder else { return .unknownRecent(recent.id) }
-        for change in changes.values { updateContinuation.yield(.change(change)) }
         if let sampleLocationLoss { reportLocationLoss(sampleLocationLoss) }
         return nil
     }
@@ -196,7 +195,6 @@ final class TestLibrary: FolderLibrary {
 
     private let updateContinuation: AsyncStream<FolderLibraryUpdate>.Continuation
     private var stored: [GridPhoto]
-    private var changes: [PhotoIdentity: MarkChangeStatus]
 
     /// The stem suffix U4's launch value names, whose photos fail their first write (PRD P0-09).
     /// The sample's finishing-action records, so a group it finishes counts as complete like the
@@ -224,8 +222,6 @@ final class TestLibrary: FolderLibrary {
     /// Whether this sample refuses Move rejects as a read-only location (PRD P0-10).
     private let readOnly: Bool
 
-    /// The entries a retry may resend, one batch per run that had a failure (PRD P0-10).
-    private var rejectMoveBatches: [RejectMoveBatchID: [RejectMovePlanEntry]] = [:]
     private var movedPhotoRecords: [RejectMoveBatchID: [GridPhoto]] = [:]
 
     /// The progress stream the move sheet reads while a sample move runs (PRD P0-10).
@@ -252,7 +248,6 @@ final class TestLibrary: FolderLibrary {
         stored = []
         groups = []
         allGroups = []
-        changes = [:]
         failingStemSuffix = nil
         failingMoveStemSuffix = nil
         readOnly = false
@@ -269,7 +264,6 @@ final class TestLibrary: FolderLibrary {
     init(
         photos: [GridPhoto],
         groups: [BrowsingGroup],
-        changes: [MarkChangeStatus] = [],
         failingStemSuffix: String? = nil,
         failingMoveStemSuffix: String? = nil,
         readOnly: Bool = false,
@@ -283,9 +277,6 @@ final class TestLibrary: FolderLibrary {
         stored = photos
         self.groups = groups
         allGroups = groups
-        var byPhoto: [PhotoIdentity: MarkChangeStatus] = [:]
-        for change in changes { byPhoto[change.identity] = change }
-        self.changes = byPhoto
         self.failingStemSuffix = failingStemSuffix
         self.failingMoveStemSuffix = failingMoveStemSuffix
         self.readOnly = readOnly
@@ -296,9 +287,6 @@ final class TestLibrary: FolderLibrary {
         thumbnails = TestLibrary.sampleThumbnails
         self.detailImages = detailImages ?? SampleDetailImages()
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
-        // The stream buffers these until the model starts reading it, so the sample opens with
-        // the save states, the loss and the scan state it was built with (PRD P0-08, P0-02).
-        for change in changes { updateContinuation.yield(.change(change)) }
         if let locationLoss {
             updateContinuation.yield(
                 .locationLost(
@@ -321,18 +309,8 @@ final class TestLibrary: FolderLibrary {
     /// retries only the photos that did not save.
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         let ids = items.map { _ in MarkChangeID() }
-        for (item, id) in zip(items, ids) {
-            let pending = MarkChangeStatus(
-                id: id, identity: item.photo, requested: item.change, state: .pending)
-            changes[item.photo] = pending
-            updateContinuation.yield(.change(pending))
-        }
         if writeDelay > .zero { try? await Task.sleep(for: writeDelay) }
-        guard !Task.isCancelled else {
-            return MarkBatchResult(id: MarkBatchID(), change: MarkChange(), outcomes: [])
-        }
         if disconnectsOnWrite {
-            changes = [:]
             reportLocationLoss(.externalVolumeDisconnected)
             return MarkBatchResult(
                 id: MarkBatchID(), change: items.first?.change ?? MarkChange(),
@@ -348,11 +326,6 @@ final class TestLibrary: FolderLibrary {
         for (item, id) in zip(items, ids) {
             let status = perform(item.change, for: item.photo, id: id)
             outcomes.append(status)
-            if status.state.failure?.reason == .locationUnavailable {
-                changes = [:]
-                reportLocationLoss(.externalVolumeDisconnected)
-                break
-            }
         }
         let batch = MarkBatchID()
         return MarkBatchResult(
@@ -361,10 +334,7 @@ final class TestLibrary: FolderLibrary {
 
     /// Applies one change to one photo and reports the state C4 would (PRD P0-08).
     ///
-    /// A newer change replaces the photo's status the way the queue supersedes an older request,
-    /// and a photo with nothing requested has no status at all. A forced failure leaves the
-    /// photo's marks untouched, keeps the requested change for a retry, and happens only once per
-    /// photo, so a retry shows what retrying does (PRD P0-08, P0-09). Nothing is written anywhere.
+    /// A forced failure leaves the sample's stored marks untouched. Nothing is written to disk.
     private func perform(
         _ change: MarkChange, for photo: PhotoIdentity, id: MarkChangeID
     ) -> MarkChangeStatus {
@@ -386,32 +356,24 @@ final class TestLibrary: FolderLibrary {
                         message: "The sample library does not hold this photo.")))
         }
         if shouldFailFirstWrite(to: photo) {
-            // Keep confirmed storage unchanged. BrowsingModel retains the desired marks and
-            // shows Failed until a later write confirms them.
+            // The model reads the sample's unchanged marks after this failure.
             let status = MarkChangeStatus(
                 id: id, identity: photo, requested: change,
                 state: .failed(
                     MarkWriteFailure(
                         reason: forcedFailureReason(for: photo),
                         message: "The sample library's forced failure.")))
-            changes[photo] = status
-            updateContinuation.yield(.change(status))
             return status
         }
-        let carried = changes[photo].flatMap { $0.state.failure != nil ? $0.requested : nil }
-        let effective = MarkChange(
-            rating: change.rating ?? carried?.rating, label: change.label ?? carried?.label)
-        let marks = stored[index].marks.applying(effective)
+        let marks = stored[index].marks.applying(change)
         stored[index].marks = marks
 
         let state: MarkChangeState = .savedInSidecar
         let status = MarkChangeStatus(
             id: id, identity: photo, requested: change, state: state)
-        changes[photo] = status
         // The sample publishes through the same stream as the real library, so every verify
         // exercises the model's update path (PRD P0-08, P0-13).
         updateContinuation.yield(.reads(times: [:], marks: [photo: marks]))
-        updateContinuation.yield(.change(status))
         return status
     }
 
@@ -437,16 +399,6 @@ final class TestLibrary: FolderLibrary {
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult {
         try checkMoveRejects(plan.configuration)
         return simulateMove(plan.entries)
-    }
-
-    /// Retries only the sample sets an earlier move could not move (PRD P0-10).
-    func retryFailedRejects(
-        in batch: RejectMoveBatchID, excluding identities: Set<PhotoIdentity>
-    ) async throws -> RejectMoveResult? {
-        guard let entries = rejectMoveBatches[batch], !readOnly else { return nil }
-        rejectMoveBatches[batch] = nil
-        return simulateMove(
-            entries.filter { !identities.contains($0.identity) }, batchID: batch)
     }
 
     func undoRejectMove(
@@ -620,14 +572,10 @@ final class TestLibrary: FolderLibrary {
             contentsOf: stored.filter { moved.contains($0.id) })
         if !moved.isEmpty {
             stored.removeAll { moved.contains($0.id) }
-            changes = changes.filter { !moved.contains($0.key) }
             updateGroupsAfterMove(moved)
             updateContinuation.yield(.photos([]))
         }
         let result = RejectMoveResult(id: id, outcomes: outcomes)
-        let failed = Set(result.failed.map(\.identity))
-        let retryable = entries.filter { failed.contains($0.identity) }
-        if !retryable.isEmpty { rejectMoveBatches[result.id] = retryable }
         rejectMoveContinuation?.yield(.finished(result))
         rejectMoveContinuation = nil
         return result
@@ -680,9 +628,6 @@ final class TestLibrary: FolderLibrary {
         updateContinuation.yield(.groups(next))
     }
 
-    /// The latest change to one photo with its save state (PRD P0-08).
-    func latestChange(for photo: PhotoIdentity) -> MarkChangeStatus? { changes[photo] }
-
     /// Reports the sample folder's location gone, as C11's watch does (PRD P0-02).
     func reportLocationLoss(_ reason: FolderLocationLoss.Reason) {
         updateContinuation.yield(
@@ -691,9 +636,7 @@ final class TestLibrary: FolderLibrary {
                 generation: openGeneration))
     }
 
-    func discardPendingChanges() async {
-        changes = [:]
-    }
+    func discardPendingChanges() async {}
 
     /// Waits for the sample's writes; a launch can make this take long enough to see
     /// (PRD Failure and recovery).
@@ -707,7 +650,6 @@ final class TestLibrary: FolderLibrary {
     func closeFolder() async {
         stored = []
         groups = []
-        changes = [:]
         openGeneration += 1
         updateContinuation.yield(.photos([]))
     }
@@ -754,19 +696,6 @@ final class TestLibrary: FolderLibrary {
                 updateContinuation.yield(.groupingActivity(true))
             }
         }
-        let photo = Self.samplePhoto(2680)
-        let state: MarkChangeState
-        switch environment["CLOVE_TEST_LIBRARY_SAVE_STATE"] {
-        case "saving": state = .writing
-        case "failed":
-            state = .failed(
-                MarkWriteFailure(reason: .notConfirmed, message: "Sample write did not confirm."))
-        default: return
-        }
-        let status = MarkChangeStatus(
-            id: MarkChangeID(), identity: photo, requested: .rating(Self.stars(3)), state: state)
-        changes[photo] = status
-        updateContinuation.yield(.change(status))
     }
 
     /// Turns the sample's groups on or off through the same call the settings screen makes
@@ -847,7 +776,7 @@ final class TestLibrary: FolderLibrary {
                 marks: sampleMarks[index])
         }
         return TestLibrary(
-            photos: photos, groups: sampleGroups, changes: sampleChanges,
+            photos: photos, groups: sampleGroups,
             failingStemSuffix: failingStemSuffix,
             failingMoveStemSuffix: failingMoveStemSuffix, readOnly: readOnly,
             detailImages: sampleDetailImages, failingStems: failingStems,
@@ -868,22 +797,6 @@ final class TestLibrary: FolderLibrary {
             BrowsingGroup(
                 id: GroupID(rawValue: "burst-2696"),
                 members: samplePhotos(2696...2698)),
-        ]
-    }
-
-    /// The save states the sample starts with (PRD P0-08).
-    ///
-    /// One photo starts saved, so the indicator's normal reading is **All saved** and a launch
-    /// that forces a failure can watch it come back to that. The requested marks are kept on the
-    /// status so a failure made in the sample has something to retry (PRD How marks reach disk,
-    /// rule 8).
-    private static var sampleChanges: [MarkChangeStatus] {
-        [
-            MarkChangeStatus(
-                id: MarkChangeID(),
-                identity: samplePhoto(2679),
-                requested: .rating(stars(3)),
-                state: .savedInSidecar)
         ]
     }
 

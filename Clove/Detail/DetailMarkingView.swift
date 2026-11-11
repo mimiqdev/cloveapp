@@ -70,13 +70,13 @@ struct DetailMarkingActions {
 ///
 /// The folder's save state and the current photo's failure belong to this same block (PRD P0-08):
 /// the folder's one indicator sits under the HUD, and a change that did not confirm brings the
-/// PRD's single-photo copy with its Retry and Cancel. Both screens therefore report and retry a
+/// shared failure toast. Both screens therefore report a
 /// save state in one place, and the group view's photos are marked and recovered exactly like a
 /// single photo's.
 ///
 /// Detail and group review share the same presentation; the group supplies its own header and pill.
 struct DetailMarkingView: View {
-    /// The scene's browsing state, which carries the folder's save state and the retry calls
+    /// The scene's browsing state and ordered marking actions
     /// (PRD P0-08).
     let browsing: BrowsingModel
 
@@ -203,8 +203,7 @@ struct DetailMarkingView: View {
                         groupReview == nil ? "clove.detail.zoom" : "clove.group.undecided")
                     if scale <= DetailFitScale.tolerance {
                         SaveStatusIndicator(
-                            browsing: browsing, identifierPrefix: "clove.detail.saveState",
-                            photo: groupReview == nil ? photo.id : nil)
+                            browsing: browsing, identifierPrefix: "clove.detail.saveState")
                     }
                 }
             } tools: {
@@ -232,11 +231,6 @@ struct DetailMarkingView: View {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
                                 open: actions.openPhoto,
-                                failedPhotos: groupReview == nil
-                                    ? []
-                                    : Set(
-                                        browsing.unsavedChanges.filter { $0.state.failure != nil }
-                                            .map(\.photo)),
                                 groups: groupReview == nil ? browsing.groups : [])
                             if let action = groupReview?.action {
                                 action.disabled(!browsing.canMark)

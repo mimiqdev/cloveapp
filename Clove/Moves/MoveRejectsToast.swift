@@ -1,7 +1,7 @@
 import CloveCore
 import SwiftUI
 
-/// Move results use the same glass toast as marking failures, with a single contextual action.
+/// Move results retain Undo; failure details describe the files left in place.
 struct MoveRejectsToast: View {
     let browsing: BrowsingModel
     let completed: CompletedRejectMove
@@ -10,33 +10,28 @@ struct MoveRejectsToast: View {
     var body: some View {
         let copy = RejectMoveToast(
             result: completed.result, rejectsFolderName: completed.rejectsFolderName)
-        Toast(
-            message: copy.message,
-            detail: [copy.failureMessage, copy.skippedMessage, copy.noLongerRejectedMessage]
-                .compactMap { $0 }.joined(separator: " ").nilIfEmpty,
-            actionTitle: copy.showsDetails ? "Details" : "Undo",
-            identifier: "clove.moves.toast",
-            onAction: {
-                if copy.showsDetails { showDetails() } else { browsing.undoRejectMove(completed) }
-            })
+        VStack(spacing: 4) {
+            if copy.showsDetails {
+                Button("Details", action: showDetails)
+                    .accessibilityIdentifier("clove.moves.toast.details")
+            }
+            Toast(
+                message: copy.message,
+                detail: [copy.failureMessage, copy.skippedMessage].compactMap { $0 }
+                    .joined(separator: " ").nilIfEmpty,
+                actionTitle: "Undo", identifier: "clove.moves.toast",
+                onAction: { browsing.undoRejectMove(completed) })
+        }
     }
 }
 
-/// Per-photo failures remain visible in place, and Try again submits only failed sets.
 struct MoveRejectsDetailsSheet: View {
     let browsing: BrowsingModel
+    let completed: CompletedRejectMove
     @Environment(\.dismiss) private var dismiss
-    @State private var current: CompletedRejectMove
-    @State private var retryError: String?
-    @State private var isRetrying = false
-
-    init(browsing: BrowsingModel, completed: CompletedRejectMove) {
-        self.browsing = browsing
-        _current = State(initialValue: completed)
-    }
 
     var body: some View {
-        let details = RejectMoveDetails(result: current.result)
+        let details = RejectMoveDetails(result: completed.result)
         VStack(alignment: .leading, spacing: 16) {
             Text(details.title).font(.title3.bold())
                 .accessibilityIdentifier("clove.moves.details.title")
@@ -53,30 +48,10 @@ struct MoveRejectsDetailsSheet: View {
                 }
                 .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 14))
                 if let skipped = details.skippedMessage { Text(skipped).font(.footnote) }
-                if let notRejected = details.noLongerRejectedMessage {
-                    Text(notRejected).font(.footnote)
-                }
-                if let retryError {
-                    Text(retryError).foregroundStyle(Color.clove.reject)
-                        .accessibilityIdentifier("clove.moves.details.error")
-                }
             }
-            HStack(spacing: 10) {
-                Button("Done") {
-                    browsing.dismissRejectMoveToast()
-                    dismiss()
-                }
+            Button("Done") { dismiss() }
                 .buttonStyle(MoveSheetButtonStyle(secondary: true))
-                .disabled(isRetrying)
                 .accessibilityIdentifier("clove.moves.details.done")
-                if details.canRetry {
-                    Button("Try again") { retry() }
-                        .buttonStyle(MoveSheetButtonStyle())
-                        .disabled(isRetrying)
-                        .accessibilityIdentifier("clove.moves.details.retry")
-                }
-            }
-            if isRetrying { ProgressView().accessibilityIdentifier("clove.moves.details.retrying") }
         }
         .padding(20).padding(.top, 12)
         .foregroundStyle(Color.clove.text.primary)
@@ -84,7 +59,6 @@ struct MoveRejectsDetailsSheet: View {
         .presentationBackground(Color.clove.surface.sheet)
         .presentationDetents([.height(340), .large])
         .presentationDragIndicator(.visible)
-        .interactiveDismissDisabled(isRetrying)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.moves.details.sheet")
     }
@@ -102,31 +76,6 @@ struct MoveRejectsDetailsSheet: View {
         .padding(12)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("clove.moves.details.row.\(row.id.stem)")
-    }
-
-    private func retry() {
-        guard !isRetrying else { return }
-        isRetrying = true
-        retryError = nil
-        browsing.retryRejectMove(current) { outcome in
-            isRetrying = false
-            switch outcome {
-            case .success(let retried):
-                current = CompletedRejectMove(
-                    result: retried, keptIdentities: current.keptIdentities,
-                    rejectsFolderName: current.rejectsFolderName,
-                    folder: current.folder, openGeneration: current.openGeneration)
-                if RejectMoveDetails(result: retried).rows.isEmpty { dismiss() }
-            case .failure(let refusal as RejectMoveRefusal):
-                if case .undone = refusal {
-                    retryError = "This move was undone."
-                } else {
-                    retryError = "The failed photos couldn't be retried."
-                }
-            case .failure:
-                retryError = "The failed photos couldn't be retried."
-            }
-        }
     }
 }
 

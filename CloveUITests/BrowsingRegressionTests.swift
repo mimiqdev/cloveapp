@@ -208,12 +208,12 @@ extension CloveUITests {
         hideAndShowSimilarGroups(in: app)
         selectPhotosForABatch(in: app)
         rateTheSelection(in: app)
-        retryTheFailedPhotos(in: app)
+        checkFailedPhotoUsesFileMarks(in: app)
         leaveMultiSelect(in: app)
         clearFinishingReject(in: app)
         rejectPhotosForMove(in: app)
         checkMoveRejectsSetting(in: app)
-        moveRejectsWithRetry(in: app)
+        moveRejectsAndCheckFailures(in: app)
     }
 
     @MainActor
@@ -387,7 +387,6 @@ extension CloveUITests {
 
         // A pinch still zooms, and while zoomed a one-finger drag pans instead of marking
         // (PRD Detail gestures: vertical marking swipes are disabled while zoomed).
-        let saveState = element(in: app, "clove.detail.saveState")
         let marks = element(in: app, "clove.detail.marks")
         let marksAtFit = marks.value as? String
         preview.pinch(withScale: 2, velocity: 1)
@@ -407,22 +406,10 @@ extension CloveUITests {
         XCTAssertEqual(
             marks.value as? String, marksAtFit, "The zoomed drag rated the photo instead of panning"
         )
-        waitForSavedGlyph(saveState)
-    }
-
-    @MainActor
-    private func waitForSavedGlyph(_ glyph: XCUIElement) {
-        let saved = expectation(
-            for: NSPredicate(format: "exists == true AND label == %@", "Saved"),
-            evaluatedWith: glyph)
-        wait(for: [saved], timeout: 10)
     }
 
     @MainActor
     private func markThePhoto(in app: XCUIApplication) {
-        let saveState = element(in: app, "clove.detail.saveState")
-        waitForSavedGlyph(saveState)
-
         let fourStars = element(in: app, "clove.detail.rate.4")
         XCTAssertTrue(
             fourStars.waitForExistence(timeout: 10), "The detail view had no rating buttons")
@@ -454,8 +441,6 @@ extension CloveUITests {
             for: NSPredicate(format: "value CONTAINS %@", "2 stars"), evaluatedWith: marks)
         wait(for: [twoStars], timeout: 10)
 
-        let saveState = element(in: app, "clove.detail.saveState")
-        waitForSavedGlyph(saveState)
     }
 
     @MainActor
@@ -825,29 +810,12 @@ extension CloveUITests {
     }
 
     @MainActor
-    private func retryTheFailedPhotos(in app: XCUIApplication) {
-        let copy = "Save failed. Double-tap to retry."
-        let failure = element(in: app, "clove.grid.saveState")
-        let reported = expectation(
-            for: NSPredicate(format: "exists == true AND label == %@", copy),
-            evaluatedWith: failure)
-        wait(for: [reported], timeout: 10)
-        XCTAssertEqual(failure.label, copy, "The partial-failure copy changed")
-        // Failure leaves the user's requested marks visible and unsaved until retry confirms.
+    private func checkFailedPhotoUsesFileMarks(in app: XCUIApplication) {
+        XCTAssertTrue(app.staticTexts["Couldn't save the mark."].waitForExistence(timeout: 5))
         let failed = element(in: app, "clove.grid.photo.mmq02680")
-        XCTAssertTrue(
-            failed.label.contains("2 stars"),
-            "The failed photo lost its desired mark: \(failed.label)")
-
-        failure.tap()
-        let confirmed = expectation(
-            for: NSPredicate(format: "label != %@", copy), evaluatedWith: failure)
-        wait(for: [confirmed], timeout: 10)
-
-        let retried = element(in: app, "clove.grid.photo.mmq02680")
-        let rated = expectation(
-            for: NSPredicate(format: "label CONTAINS %@", "2 stars"), evaluatedWith: retried)
-        wait(for: [rated], timeout: 10)
+        let restored = expectation(
+            for: NSPredicate(format: "NOT (label CONTAINS %@)", "2 stars"), evaluatedWith: failed)
+        wait(for: [restored], timeout: 5)
     }
 
     @MainActor
@@ -898,7 +866,7 @@ extension CloveUITests {
     }
 
     @MainActor
-    private func moveRejectsWithRetry(in app: XCUIApplication) {
+    private func moveRejectsAndCheckFailures(in app: XCUIApplication) {
         let move = element(in: app, "clove.grid.moveRejects")
         XCTAssertTrue(
             move.waitForExistence(timeout: 10), "The grid did not offer Move rejects")
@@ -939,7 +907,7 @@ extension CloveUITests {
             failure.label, "1 couldn't be moved", "The partial toast changed its counts")
 
         // Details opens before the other grid queries, so a long test run never races the toast.
-        element(in: app, "clove.moves.toast.action").tap()
+        element(in: app, "clove.moves.toast.details").tap()
         let detailsTitle = element(in: app, "clove.moves.details.subtitle")
         XCTAssertTrue(
             detailsTitle.waitForExistence(timeout: 10), "Details did not open its sheet")
@@ -951,17 +919,15 @@ extension CloveUITests {
             element(in: app, "clove.moves.details.row.mmq02689").exists,
             "Details did not list the photo that could not move")
 
-        element(in: app, "clove.moves.details.retry").tap()
-        XCTAssertTrue(app.staticTexts["Moved 1 to _Rejected"].waitForExistence(timeout: 10))
+        element(in: app, "clove.moves.details.done").tap()
 
         let kept = element(in: app, "clove.grid.photo.mmq02681")
-        XCTAssertTrue(kept.exists, "The retry moved the kept photo")
+        XCTAssertTrue(kept.exists, "The move lost the kept photo")
         XCTAssertFalse(
             kept.label.contains("Rejected"), "The kept photo kept its Reject: \(kept.label)")
-        let moved = element(in: app, "clove.grid.photo.mmq02689")
-        let gone = expectation(
-            for: NSPredicate(format: "exists == false"), evaluatedWith: moved)
-        wait(for: [gone], timeout: 10)
+        let failed = element(in: app, "clove.grid.photo.mmq02689")
+        XCTAssertTrue(failed.exists)
+        XCTAssertTrue(failed.label.contains("Rejected"))
     }
 
     @MainActor
