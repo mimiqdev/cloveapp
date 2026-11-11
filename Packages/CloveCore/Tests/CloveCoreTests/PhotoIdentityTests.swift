@@ -24,7 +24,7 @@ import CloveCore
         triple.id
             == PhotoIdentity(folderID: folder, relativeFolderPath: "DCIM/100CAM", stem: "IMG_0001"))
     #expect(Set([alone.id, raw.id, triple.id]).count == 1)
-    #expect([raw.id: PhotoMarks(isRejected: true)][triple.id]?.isRejected == true)
+    #expect([raw.id: PhotoMarks(rating: .rejected)][triple.id]?.isRejected == true)
 }
 
 @Test func identitySeparatesFoldersSubfoldersAndStems() {

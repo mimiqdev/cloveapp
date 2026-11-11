@@ -2,16 +2,15 @@ import Foundation
 
 /// One of a photo's marks that an undo step can restore (PRD P0-05).
 ///
-/// PRD P0-05 applies ratings, colour labels and Reject separately, and G1 decision 5 keeps
-/// Reject independent of the other two. Undo therefore restores each field on its own: undoing
-/// a rating never rewrites a label or a Reject that a later action changed.
+/// PRD P0-05 applies ratings and colour labels separately, and a Reject is the rating value −1
+/// (decision record `reject-as-rating.md`). Undo therefore restores the rating and the label on
+/// their own: undoing a Reject restores the stars it replaced, and undoing a rating never
+/// rewrites a label that a later action changed.
 public enum MarkUndoField: String, CaseIterable, Hashable, Sendable {
-    /// The 0–5 star rating (PRD P0-05); XMP for a RAW set (G1 decision 2).
+    /// The −1…5 rating, Reject included; XMP for a RAW set (G1 decision 2).
     case rating
     /// The colour label (PRD P0-05); XMP for a RAW set (G1 decisions 2 and 6).
     case label
-    /// Clove's internal Reject, stored in Clove and never written to XMP (G1 decision 5).
-    case reject
 }
 
 /// Why an undo or redo left one field alone instead of restoring it (PRD P0-05).
@@ -160,18 +159,18 @@ public struct MarkUndoEntry: Hashable, Sendable, Identifiable {
 
     /// A short action name for the undo menu title; the final copy belongs to U8.
     ///
-    /// A single or batch change is named after its strongest field: a rating that also cleared
-    /// Reject (PRD Marking rules) reads as "Rating", and a Reject-only change reads as "Reject".
+    /// A single or batch change is named after the field it set: a rating of −1 (PRD Marking
+    /// rules) reads as "Reject", and any other rating reads as "Rating".
     public var actionName: String {
         if let groupFinishing { return groupFinishing.actionName }
         return MarkUndoEntry.actionName(for: photos.first?.change ?? MarkChange())
     }
 
-    /// The name one mark change uses in the undo menu, rating first, then label, then Reject.
+    /// The name one mark change uses in the undo menu: Reject for −1, then rating, then label.
     static func actionName(for change: MarkChange) -> String {
+        if change.rating == .rejected { return "Reject" }
         if change.rating != nil { return "Rating" }
         if change.label != nil { return "Label" }
-        if change.reject != nil { return "Reject" }
         return "Mark"
     }
 

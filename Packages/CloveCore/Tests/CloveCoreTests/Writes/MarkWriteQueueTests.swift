@@ -107,7 +107,7 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(try Data(contentsOf: sidecar).isEmpty)
 }
 
-@Test func rejectIsStoredInCloveAndNeverReachesXmp() async throws {
+@Test func rejectIsWrittenToTheSidecarAsRatingMinusOne() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let double = WriteFileSystemDouble()
@@ -115,15 +115,14 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let set = try makeScannedSet(folder: makeFolderIdentity(), root: folder.url, stem: "MMQ05184")
     let sidecar = folder.file("MMQ05184.xmp")
 
-    let status = await queue.apply(.reject(true), to: set)
+    let status = await queue.apply(.rating(.rejected), to: set)
 
-    // G1 decision 5: confirmed in Clove storage, but not "Saved", which belongs to XMP.
-    #expect(status.state == .storedInClove)
-    #expect(status.state.isSaved == false)
-    #expect(status.state.isConfirmed)
-    #expect(try await queue.storedMarks(for: set.id)?.isRejected == true)
-    #expect(double.count(of: .replace, at: sidecar) == 0)
-    #expect(!FileManager.default.fileExists(atPath: sidecar.path))
+    // Reject is the rating −1, so a RAW set writes it to its one storage and reads it back.
+    #expect(status.state == .savedInSidecar)
+    #expect(status.state.isSaved)
+    #expect(try marks(at: sidecar).rating == .rated(.rejected))
+    #expect(double.count(of: .replace, at: sidecar) == 1)
+    #expect(try await queue.storedMarks(for: set.id) == nil)
 }
 
 @Test func standaloneJpegMarksAreSavedInCloveOnly() async throws {
@@ -150,22 +149,22 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(!FileManager.default.fileExists(atPath: proposedSidecar.path))
 }
 
-@Test func aChangeThatSetsBothStoragesConfirmsBoth() async throws {
+@Test func aRatingAndLabelWriteToTheOneStorageTheSetUses() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let queue = makeQueue(folder, WriteFileSystemDouble())
     let set = try makeScannedSet(folder: makeFolderIdentity(), root: folder.url, stem: "MMQ05184")
     let sidecar = folder.file("MMQ05184.xmp")
 
-    let status = await queue.apply(MarkChange(rating: three, label: green, reject: true), to: set)
+    let status = await queue.apply(MarkChange(rating: three, label: green), to: set)
     let stored = try await queue.storedMarks(for: set.id)
 
     #expect(status.state == .savedInSidecar)
     #expect(try marks(at: sidecar) == XMPMarks(rating: .rated(three), label: green))
-    #expect(stored?.isRejected == true)
+    #expect(stored == nil)
 }
 
-@Test func noWritePathPutsRejectACloveNamespaceOrRatingMinusOneIntoXmp() async throws {
+@Test func rejectUsesTheStandardRatingAndNeverACloveNamespace() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let double = WriteFileSystemDouble()
@@ -175,14 +174,14 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
         formats: [.raw, .jpeg, .heif])
     let sidecar = folder.file("MMQ05184.xmp")
 
-    let status = await queue.apply(MarkChange(rating: three, label: green, reject: true), to: set)
+    let status = await queue.apply(.rating(.rejected), to: set)
 
     #expect(status.state == .savedInSidecar)
     let text = try String(contentsOf: sidecar, encoding: .utf8)
     #expect(!text.lowercased().contains("clove"), "a Clove namespace reached XMP")
-    #expect(!text.contains("-1"), "Rating -1 reached XMP")
-    #expect(!text.contains("Reject"), "Reject reached XMP")
-    #expect(try marks(at: sidecar) == XMPMarks(rating: .rated(three), label: green))
+    #expect(!text.contains("Reject"), "a separate Reject field reached XMP")
+    #expect(text.contains("-1"), "Reject did not write the standard rating −1")
+    #expect(try marks(at: sidecar) == XMPMarks(rating: .rated(.rejected)))
 
     // G1 decisions 1–2: companions are reference files, never opened for writing.
     for companion in [folder.file("MMQ05184.JPG"), folder.file("MMQ05184.HIF")] {
@@ -195,7 +194,7 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
         }, "a file outside the sidecar and Clove storage was replaced")
 }
 
-@Test func rejectingARawSetDoesNotTouchItsSidecar() async throws {
+@Test func rejectingARawSetRewritesItsSidecarRating() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let queue = makeQueue(folder, WriteFileSystemDouble())
@@ -204,10 +203,11 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     _ = await queue.apply(.rating(three), to: set)
     let before = try Data(contentsOf: sidecar)
 
-    let status = await queue.apply(.reject(true), to: set)
+    let status = await queue.apply(.rating(.rejected), to: set)
 
-    #expect(status.state == .storedInClove)
-    #expect(try Data(contentsOf: sidecar) == before)
+    #expect(status.state == .savedInSidecar)
+    #expect(try Data(contentsOf: sidecar) != before)
+    #expect(try marks(at: sidecar).rating == .rated(.rejected))
 }
 
 @Test func aLiveCloveStoreIsReadBackByTheQueue() async throws {
@@ -215,35 +215,37 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     defer { folder.remove() }
     let queue = makeQueue(folder, WriteFileSystemDouble())
     let identity = makeFolderIdentity()
-    let first = try makeScannedSet(folder: identity, root: folder.url, stem: "MMQ05184")
+    let first = try makeScannedSet(
+        folder: identity, root: folder.url, stem: "IMG_0001", formats: [.jpeg])
     let second = try makeScannedSet(
         folder: identity, root: folder.url, stem: "IMG_0002", relativeFolderPath: "DCIM",
         formats: [.jpeg])
-    _ = await queue.apply(.reject(true), to: first)
-    _ = await queue.apply(MarkChange(rating: four, reject: true), to: second)
+    _ = await queue.apply(.rating(.rejected), to: first)
+    _ = await queue.apply(.rating(four), to: second)
 
     let stored = try await queue.storedMarks(for: identity)
 
     #expect(stored.count == 2)
     #expect(stored[first.id]?.isRejected == true)
     #expect(stored[second.id]?.rating == four)
-    #expect(stored[second.id]?.isRejected == true)
+    #expect(stored[second.id]?.isRejected == false)
 }
 
-@Test func removingRejectAfterAConfirmedMoveIsConfirmedByReadBack() async throws {
+@Test func clearingRejectAfterAConfirmedMoveIsConfirmedByReadBack() async throws {
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let queue = makeQueue(folder, WriteFileSystemDouble())
-    let set = try makeScannedSet(folder: makeFolderIdentity(), root: folder.url, stem: "MMQ05184")
-    _ = await queue.apply(MarkChange(rating: three, reject: true), to: set)
+    let set = try makeScannedSet(
+        folder: makeFolderIdentity(), root: folder.url, stem: "IMG_0001", formats: [.jpeg])
+    _ = await queue.apply(.rating(.rejected), to: set)
 
-    let removed = try await queue.removeReject(for: set.id)
+    let cleared = try await queue.clearReject(for: set.id)
     let stored = try await queue.storedMarks(for: set.id)
 
-    #expect(removed)
-    // The rating went to XMP, so nothing is left in Clove and the entry is gone.
+    #expect(cleared)
+    // The only stored mark was the Reject rating, so the entry is gone.
     #expect(stored == nil)
-    #expect(try await queue.removeReject(for: set.id) == false)
+    #expect(try await queue.clearReject(for: set.id) == false)
 }
 
 @Test func aBatchReportsSavedAndFailedCounts() async throws {
@@ -374,19 +376,20 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     async let first = queue.apply(.rating(three), to: set)
     #expect(waitForTestSignal(reached))
     async let second = queue.apply(.label(green), to: set)
-    async let third = queue.apply(.reject(true), to: set)
+    async let third = queue.apply(.rating(.rejected), to: set)
     try await Task.sleep(for: .milliseconds(150))
     release.signal()
     let results = await [first, second, third]
 
-    // The first write confirmed its own request; the two that arrived while it ran shared one
-    // write of the latest cumulative marks, and each request still got its own final state.
-    #expect(results[0].state == .savedInSidecar)
+    // The third request changed the rating the first one set, so the first was superseded
+    // (PRD How marks reach disk, rule 8). The second and third shared one write of the latest
+    // cumulative marks, and each request still got its own final state.
+    #expect(results[0].state.isSuperseded)
     #expect(results[1].state == .savedInSidecar)
-    #expect(results[2].state == .storedInClove)
+    #expect(results[2].state == .savedInSidecar)
     #expect(double.count(of: .replace, at: sidecar) == 2)
-    #expect(try marks(at: sidecar) == XMPMarks(rating: .rated(three), label: green))
-    #expect(try await queue.storedMarks(for: set.id)?.isRejected == true)
+    #expect(try marks(at: sidecar) == XMPMarks(rating: .rated(.rejected), label: green))
+    #expect(try await queue.storedMarks(for: set.id) == nil)
     #expect(try folder.stagingNames().isEmpty)
 }
 
@@ -497,9 +500,9 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let set = try makeScannedSet(folder: makeFolderIdentity(), root: folder.url, stem: "MMQ05184")
 
     #expect(await queue.latestChange(for: set.id) == nil)
-    let first = await queue.apply(.reject(true), to: set)
+    let first = await queue.apply(.rating(.rejected), to: set)
     #expect(await queue.latestChange(for: set.id)?.id == first.id)
-    let second = await queue.apply(.reject(false), to: set)
+    let second = await queue.apply(.rating(.unrated), to: set)
     #expect(await queue.latestChange(for: set.id)?.id == second.id)
 }
 
@@ -507,8 +510,9 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let folder = try WriteTestFolder()
     defer { folder.remove() }
     let queue = makeQueue(folder, WriteFileSystemDouble())
-    let set = try makeScannedSet(folder: makeFolderIdentity(), root: folder.url, stem: "MMQ05184")
-    _ = await queue.apply(.reject(true), to: set)
+    let set = try makeScannedSet(
+        folder: makeFolderIdentity(), root: folder.url, stem: "IMG_0001", formats: [.jpeg])
+    _ = await queue.apply(.rating(.rejected), to: set)
     let storeDirectory = folder.file("store")
     let names = try FileManager.default.contentsOfDirectory(atPath: storeDirectory.path)
     let name = try #require(names.first { $0.hasSuffix(".json") })
@@ -516,7 +520,7 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let corrupt = Data("{ this is not Clove storage".utf8)
     try corrupt.write(to: storage)
 
-    let status = await queue.apply(.reject(false), to: set)
+    let status = await queue.apply(.rating(.unrated), to: set)
 
     #expect(status.state.failure?.storeError != nil)
     #expect(status.state.isSaved == false)

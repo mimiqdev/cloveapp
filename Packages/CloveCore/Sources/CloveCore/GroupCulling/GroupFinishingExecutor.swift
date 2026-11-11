@@ -99,7 +99,7 @@ public struct GroupFinishingExecutor: Sendable {
         }
         var rejectedBatchID: MarkBatchID?
         if !rejectSets.isEmpty {
-            let batch = await queue.apply(MarkChange(reject: true), to: rejectSets)
+            let batch = await queue.apply(MarkChange(rating: .rejected), to: rejectSets)
             rejectedBatchID = batch.id
             for change in rejectChanges {
                 if let status = batch.outcomes.first(where: { $0.identity == change.photo }) {

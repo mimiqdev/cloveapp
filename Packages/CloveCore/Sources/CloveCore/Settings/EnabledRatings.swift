@@ -19,12 +19,13 @@ public struct EnabledRatings: Hashable, Sendable {
 
     /// Accepts levels from 1 to 5, sorting and de-duplicating them.
     ///
-    /// Returns nil when the input is empty or contains zero. Zero means unrated, and every
-    /// configuration needs at least one rating step; both are enforced rather than repaired.
-    /// The 0–5 `Rating` type still represents stored and displayed ratings outside this set.
+    /// Returns nil when the input is empty or names a value that is not a star level. Zero means
+    /// unrated and −1 means Reject, and every configuration needs at least one star step; both
+    /// are enforced rather than repaired. The −1…5 `Rating` type still represents stored and
+    /// displayed ratings outside this set.
     public init?<Levels: Sequence>(_ levels: Levels) where Levels.Element == Rating {
         let chosen = Set(levels)
-        guard !chosen.isEmpty, !chosen.contains(.unrated) else { return nil }
+        guard !chosen.isEmpty, chosen.allSatisfy({ $0 > .unrated }) else { return nil }
         self.sortedLevels = chosen.sorted()
     }
 

@@ -330,9 +330,9 @@ public enum RejectMoveRetryMerge {
 
 /// The result of clearing Reject on the kept photos before a move (design handoff, P0-10).
 ///
-/// A keep is committed by a Reject-off write through C4. A failed write leaves that photo out of
-/// the move and reports it with the failures; a later whole-request refusal restores Reject on
-/// every photo whose clear was confirmed.
+/// A keep is committed by writing the rating 0 through C4, which clears Reject. A failed write
+/// leaves that photo out of the move and reports it with the failures; a later whole-request
+/// refusal restores Reject on every photo whose clear was confirmed.
 public struct RejectMoveKeepClearing: Hashable, Sendable {
     /// The kept photos whose Reject was confirmed cleared, in order (P0-10).
     public private(set) var clearedIdentities: [PhotoIdentity]

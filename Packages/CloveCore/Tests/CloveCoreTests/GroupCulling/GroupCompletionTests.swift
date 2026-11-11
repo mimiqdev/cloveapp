@@ -11,12 +11,12 @@ struct GroupCompletionTests {
         let group = groupCullingGroup("marks", members: members)
         let partly = groupCullingMarks([
             (members[0], PhotoMarks(rating: groupCullingRating(3))),
-            (members[1], PhotoMarks(isRejected: true)),
+            (members[1], PhotoMarks(rating: .rejected)),
             (members[2], PhotoMarks(label: ColourLabel(colour: .red))),
         ])
         let complete = groupCullingMarks([
             (members[0], PhotoMarks(rating: groupCullingRating(3))),
-            (members[1], PhotoMarks(isRejected: true)),
+            (members[1], PhotoMarks(rating: .rejected)),
             (members[2], PhotoMarks(rating: groupCullingRating(1))),
         ])
 
@@ -57,7 +57,7 @@ struct GroupCompletionTests {
         let groups = groupCullingGroups([first, second, third, fourth])
         let marks = groupCullingMarks([
             (second.members[0], PhotoMarks(rating: groupCullingRating(2))),
-            (second.members[1], PhotoMarks(isRejected: true)),
+            (second.members[1], PhotoMarks(rating: .rejected)),
         ])
         await tracker.recordFinishingAction(on: third.id)
 

@@ -17,7 +17,7 @@ public struct XMPEdit: Hashable, Sendable {
         self.label = label
     }
 
-    /// An edit that only sets a rating (PRD P0-05).
+    /// An edit that only sets a rating, −1 for Reject (PRD P0-05).
     public static func rating(_ rating: Rating) -> XMPEdit {
         XMPEdit(rating: .set(rating))
     }
@@ -32,7 +32,7 @@ public struct XMPEdit: Hashable, Sendable {
 public enum XMPRatingChange: Hashable, Sendable {
     /// Leave the on-disk rating unchanged, including an external value (PRD P0-07).
     case keep
-    /// Write this 0–5 rating (PRD P0-05).
+    /// Write this −1…5 rating, where −1 is Reject (PRD P0-05).
     case set(Rating)
 }
 

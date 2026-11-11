@@ -76,7 +76,7 @@ public struct RejectMoveMovedSet: Hashable, Sendable {
     public let identity: PhotoIdentity
     /// Every file with its source and its confirmed destination (PRD P0-10).
     public let files: [RejectMoveFilePlan]
-    /// Whether a stored Reject was removed and confirmed after the move (G1 decision 5).
+    /// Whether a stored Reject was cleared and confirmed after the move (PRD P0-08).
     public let removedStoredReject: Bool
     /// A stored Reject that could not be removed, kept for a later cleanup (PRD P0-08).
     public let staleRejectRecord: RejectMoveFailure?

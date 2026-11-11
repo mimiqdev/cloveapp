@@ -99,7 +99,7 @@ struct SaveStatusIndicator: View {
         if summary.failed > 0 { return "exclamationmark.triangle" }
         if summary.writing > 0 { return "arrow.triangle.2.circlepath" }
         if summary.isAllSaved { return "checkmark.circle" }
-        if summary.savedInCloveOnly > 0 || summary.storedInClove > 0 { return "internaldrive" }
+        if summary.savedInCloveOnly > 0 { return "internaldrive" }
         return "circle.dashed"
     }
 

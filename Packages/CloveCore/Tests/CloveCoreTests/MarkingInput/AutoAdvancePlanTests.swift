@@ -64,7 +64,7 @@ import CloveCore
             MarkingFixtures.photo("B", marks: PhotoMarks()),
             MarkingFixtures.photo("C", marks: PhotoMarks(rating: three)),
             MarkingFixtures.photo("D", marks: PhotoMarks(label: ColourLabel(colour: .red))),
-            MarkingFixtures.photo("E", marks: PhotoMarks(isRejected: true)),
+            MarkingFixtures.photo("E", marks: PhotoMarks(rating: .rejected)),
             MarkingFixtures.photo("F", marks: PhotoMarks()),
         ]
         let rules = MarkingInputRules(
@@ -80,7 +80,7 @@ import CloveCore
         let photos = [
             MarkingFixtures.photo("A"),
             MarkingFixtures.photo("B", marks: PhotoMarks(rating: three)),
-            MarkingFixtures.photo("C", marks: PhotoMarks(isRejected: true)),
+            MarkingFixtures.photo("C", marks: PhotoMarks(rating: .rejected)),
         ]
         let rules = MarkingInputRules(
             settings: AppSettings(autoAdvance: AutoAdvance(destination: .nextUnmarkedPhoto)))

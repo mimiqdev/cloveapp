@@ -52,7 +52,6 @@ private func primarySelectionAndEveryMarkDestination(combination: FileCombinatio
         ? .xmpSidecar(directory.appendingPathComponent("IMG_0001.xmp")) : .cloveStorage
     #expect(photo.markPersistence.rating == expected)
     #expect(photo.markPersistence.label == expected)
-    #expect(photo.markPersistence.reject == .cloveStorage)
     #expect(photo.markPersistence == MarkPersistence(for: photo))
     #expect(photo.sidecarURL == nil)
     #expect(photo.fileURLs == photo.imageFiles.map(\.url))
@@ -84,7 +83,6 @@ private func extensionCaseNeverChangesActualSpelling(rawExtension: String, heifE
     #expect(photo.sidecarURL == sidecar)
     #expect(photo.markPersistence.rating == .xmpSidecar(sidecar))
     #expect(photo.markPersistence.label == .xmpSidecar(sidecar))
-    #expect(photo.markPersistence.reject == .cloveStorage)
     #expect(photo.fileURLs == [raw, jpeg, heif, sidecar])
     let newPhoto = try PhotoSet(folderID: folderID, relativeFolderPath: "DCIM/100CAM", rawURL: raw)
     #expect(
@@ -100,7 +98,6 @@ private func extensionCaseNeverChangesActualSpelling(rawExtension: String, heifE
     #expect(
         photo.markPersistence.rating == .xmpSidecar(directory.appendingPathComponent("ProRAW.xmp")))
     #expect(photo.markPersistence.label == photo.markPersistence.rating)
-    #expect(photo.markPersistence.reject == .cloveStorage)
 }
 
 @Test private func invalidSetsAreRejectedWithoutIO() throws {

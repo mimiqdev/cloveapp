@@ -57,18 +57,18 @@ struct MarkUndoGroupFinishingTests {
         #expect(undoResult.completion?.state == .cleared)
         #expect(undoResult.savedCount == 3)
         #expect(await completion.hasFinishingAction(on: group.id) == false)
-        // Every photo is back: no rating in A's sidecar, no stored Reject for B and C.
+        // Every photo is back: no rating in any sidecar, Reject included (G1 decision 2).
         #expect(try undoSidecarMarks(at: fixture.sidecar(0)).rating == .rated(.unrated))
-        #expect(try await fixture.queue.storedMarks(for: photos[1]) == nil)
-        #expect(try await fixture.queue.storedMarks(for: photos[2]) == nil)
+        #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(.unrated))
+        #expect(try undoSidecarMarks(at: fixture.sidecar(2)).rating == .rated(.unrated))
 
         let redoResult = try #require(await undoRedoStep(fixture))
         #expect(redoResult.completion?.state == .restored)
         #expect(await completion.hasFinishingAction(on: group.id))
         // Keep this gave the unrated current photo the lowest enabled rating (1).
         #expect(try undoSidecarMarks(at: fixture.sidecar(0)).rating == .rated(undoRating(1)))
-        #expect(try await fixture.queue.storedMarks(for: photos[1])?.isRejected == true)
-        #expect(try await fixture.queue.storedMarks(for: photos[2])?.isRejected == true)
+        #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(.rejected))
+        #expect(try undoSidecarMarks(at: fixture.sidecar(2)).rating == .rated(.rejected))
     }
 
     /// Keep rated, reject the rest: undo restores the rejects and redo restores completion.
@@ -94,16 +94,16 @@ struct MarkUndoGroupFinishingTests {
         #expect(undoResult.completion?.groupID == group.id)
         #expect(undoResult.completion?.state == .cleared)
         #expect(await completion.hasFinishingAction(on: group.id) == false)
-        #expect(try await fixture.queue.storedMarks(for: photos[1]) == nil)
-        #expect(try await fixture.queue.storedMarks(for: photos[2]) == nil)
+        #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(.unrated))
+        #expect(try undoSidecarMarks(at: fixture.sidecar(2)).rating == .rated(.unrated))
         // The rated photo was not part of the action, so its rating never changed.
         #expect(try undoSidecarMarks(at: fixture.sidecar(0)).rating == .rated(undoRating(4)))
 
         let redoResult = try #require(await undoRedoStep(fixture))
         #expect(redoResult.completion?.state == .restored)
         #expect(await completion.hasFinishingAction(on: group.id))
-        #expect(try await fixture.queue.storedMarks(for: photos[1])?.isRejected == true)
-        #expect(try await fixture.queue.storedMarks(for: photos[2])?.isRejected == true)
+        #expect(try undoSidecarMarks(at: fixture.sidecar(1)).rating == .rated(.rejected))
+        #expect(try undoSidecarMarks(at: fixture.sidecar(2)).rating == .rated(.rejected))
     }
 
     /// Undoing a finishing action that restores nothing leaves the group completion alone.

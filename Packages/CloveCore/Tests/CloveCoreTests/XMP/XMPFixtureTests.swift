@@ -46,7 +46,7 @@ private let committedMarks: [(name: String, rating: XMPRating, label: ColourLabe
     ("label-pink.xmp", XMPRating(2), ColourLabel(colour: .pink)),
     ("lightroom-full.xmp", XMPRating(5), ColourLabel(colour: .purple)),
     ("photo-mechanic.xmp", XMPRating(4), ColourLabel(colour: .red)),
-    ("rating-minus-one.xmp", .external(-1), .clear),
+    ("rating-minus-one.xmp", .rated(.rejected), .clear),
 ]
 
 @Test func readsTheCommittedSidecars() throws {

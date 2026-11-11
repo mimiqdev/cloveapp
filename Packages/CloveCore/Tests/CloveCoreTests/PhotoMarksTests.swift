@@ -2,22 +2,34 @@ import Testing
 
 import CloveCore
 
-@Test(arguments: Array(0...5))
+@Test(arguments: Array(-1...5))
 func validRatingsRoundTrip(value: Int) throws {
     let rating = try #require(Rating(rawValue: value))
     #expect(rating.rawValue == value)
     #expect(Rating(rawValue: rating.rawValue) == rating)
 }
 
-@Test(arguments: [Int.min, -2, -1, 6, 7, Int.max])
+@Test(arguments: [Int.min, -2, 6, 7, Int.max])
 func invalidRatingsAreRejected(value: Int) {
     #expect(Rating(rawValue: value) == nil)
+}
+
+@Test func starCountIsNilWithoutStars() throws {
+    #expect(Rating.rejected.starCount == nil)
+    #expect(Rating.unrated.starCount == nil)
+    #expect(try #require(Rating(rawValue: 1)).starCount == 1)
+    #expect(try #require(Rating(rawValue: 5)).starCount == 5)
 }
 
 @Test func defaultAndOrderedRatings() throws {
     #expect(Rating().rawValue == 0)
     #expect(Rating.unrated == Rating(rawValue: 0))
     #expect(try #require(Rating(rawValue: 2)) < #require(Rating(rawValue: 5)))
+    // Reject is −1, below unrated, so "N stars or higher" never includes it (PRD P0-03).
+    #expect(Rating.rejected.rawValue == -1)
+    #expect(Rating.rejected.isRejected)
+    #expect(!Rating.unrated.isRejected)
+    #expect(Rating.rejected < .unrated)
 }
 
 @Test func fixedEnglishLabelNamesIncludeExtendedColours() {
@@ -54,17 +66,16 @@ func unknownLabelsKeepExactExternalText(text: String) {
     #expect(ColourLabel.clear.rawValue == "")
     #expect(ColourLabel.clear.isClear)
     #expect(ColourLabel.clear.colour == nil)
-    #expect(PhotoMarks() == PhotoMarks(rating: .unrated, label: .clear, isRejected: false))
+    #expect(PhotoMarks() == PhotoMarks(rating: .unrated, label: .clear))
     let rating = try #require(Rating(rawValue: 4))
     let label = ColourLabel(rawValue: "External workflow")
     var marks = PhotoMarks(rating: rating, label: label)
-    marks.isRejected = true
-    #expect(marks.rating == rating)
+    marks.rating = .rejected
+    #expect(marks.isRejected)
+    #expect(marks.rating == .rejected)
     #expect(marks.label == label)
     marks.rating = .unrated
-    #expect(marks.isRejected)
-    #expect(marks.label == label)
-    marks.isRejected = false
+    #expect(!marks.isRejected)
     #expect(marks.rating == .unrated)
     #expect(marks.label == label)
 }

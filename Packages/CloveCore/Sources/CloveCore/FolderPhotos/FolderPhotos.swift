@@ -111,12 +111,11 @@ public struct FolderPhotos: Sendable {
     /// Applies the fields a confirmed change named to the photo's marks (PRD P0-08).
     ///
     /// A field the change left nil keeps its value, the same rule C4 applies per field, so a
-    /// rating never clears Reject and a Reject toggle never clears a label.
+    /// rating change never clears a label and a label never changes the rating.
     public mutating func apply(_ change: MarkChange, to id: PhotoIdentity) {
         guard var photo = gridPhotos[id] else { return }
         if let rating = change.rating { photo.marks.rating = rating }
         if let label = change.label { photo.marks.label = label }
-        if let reject = change.reject { photo.marks.isRejected = reject }
         gridPhotos[id] = photo
     }
 

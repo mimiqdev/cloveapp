@@ -796,8 +796,8 @@ final class CloveUITests: XCTestCase {
     }
 
     /// Back returns from detail to the grid, and the grid shows the marks the update path carried
-    /// back through the library: the bar's rating, the swipe's rating and its Reject
-    /// (PRD P0-03, P0-06, P0-08).
+    /// back through the library: the bar's rating, and the Reject the swipe down wrote in place of
+    /// the swipe up's stars (PRD P0-03, P0-06, P0-08).
     @MainActor
     private func returnToGrid(in app: XCUIApplication) {
         let back = element(in: app, "clove.nav.back")
@@ -813,12 +813,17 @@ final class CloveUITests: XCTestCase {
         let swiped = element(in: app, "clove.grid.photo.mmq02679")
         XCTAssertTrue(swiped.exists, "The grid did not show the swiped photo")
         XCTAssertTrue(
-            swiped.label.contains("2 stars"),
-            "The grid did not show the rating the swipe wrote: \(swiped.label)"
-        )
-        XCTAssertTrue(
             swiped.label.contains("Rejected"),
             "The grid did not show the Reject the swipe wrote: \(swiped.label)"
+        )
+        // Reject is the rating −1, so the swipe down replaced the 2 stars the swipe up wrote.
+        XCTAssertFalse(
+            swiped.label.contains("2 stars"),
+            "A rejected photo kept its stars: \(swiped.label)"
+        )
+        XCTAssertFalse(
+            swiped.label.contains("-1"),
+            "A rejected photo read its rating: \(swiped.label)"
         )
     }
 

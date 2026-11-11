@@ -18,15 +18,17 @@ enum MarkingFixtures {
     }
 
     /// Marks built from plain values, so tests read like product states.
+    ///
+    /// Reject is the rating −1, so `rejected` replaces `value`; a photo is never rated and
+    /// rejected at once.
     static func marks(
         stars value: Int = 0,
         label: LabelColour? = nil,
         rejected: Bool = false
     ) throws -> PhotoMarks {
         PhotoMarks(
-            rating: try stars(value),
-            label: label.map { ColourLabel(colour: $0) } ?? .clear,
-            isRejected: rejected)
+            rating: rejected ? .rejected : try stars(value),
+            label: label.map { ColourLabel(colour: $0) } ?? .clear)
     }
 
     /// A photo in the test folder's root; the ordering time is irrelevant to these rules.

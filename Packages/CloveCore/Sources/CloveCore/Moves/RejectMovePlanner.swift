@@ -120,8 +120,10 @@ public struct RejectMovePlanner: Sendable {
     /// The set's files in primary, companion, sidecar order (G1 decision 5).
     ///
     /// The sidecar is the resolved packet from C2, falling back to C1's own spelling when the
-    /// caller already put it on the set; it is never invented. A set with no packet moves its
-    /// images only, because no XMP exists to carry (G1 decisions 2 and 6).
+    /// caller already put it on the set. A RAW set scanned without a packet may have gained one
+    /// from C4, because rejecting or rating it writes `xmp:Rating` to C1's proposed spelling; that
+    /// packet moves with the set too. A set with no packet at all moves its images only, because
+    /// no XMP exists to carry (G1 decisions 2 and 6).
     private func members(of set: ScannedPhotoSet) -> [(role: RejectMoveFileRole, url: URL)] {
         var members: [(role: RejectMoveFileRole, url: URL)] = []
         for file in set.photoSet.imageFiles {
@@ -132,11 +134,23 @@ public struct RejectMovePlanner: Sendable {
             case .heifCompanion: members.append((.heifCompanion, file.url))
             }
         }
-        let sidecar = set.sidecar.resolvedURL ?? set.photoSet.sidecarURL
+        let sidecar = set.sidecar.resolvedURL ?? set.photoSet.sidecarURL ?? createdSidecar(of: set)
         if let sidecar, !members.contains(where: { $0.url == sidecar }) {
             members.append((.sidecar, sidecar))
         }
         return members
+    }
+
+    /// The packet C4 created after the scan for a RAW set, when it now exists.
+    ///
+    /// C2 found no packet, so a write went to C1's proposed spelling: the primary's name with
+    /// `.xmp`. Only that exact path is considered, because that is the one C4 writes.
+    private func createdSidecar(of set: ScannedPhotoSet) -> URL? {
+        guard case .absent = set.sidecar, set.photoSet.primary.format == .raw else { return nil }
+        let proposed =
+            set.photoSet.primary.url.deletingPathExtension().appendingPathExtension("xmp")
+        guard (try? fileSystem.exists(at: proposed)) == true else { return nil }
+        return proposed
     }
 
     /// Whether the set must not move at all, and why (PRD P0-10, G1 Sidecar naming).

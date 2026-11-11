@@ -15,7 +15,7 @@ struct GroupPhotoNavigationTests {
         groupCullingMarks([
             (members[0], PhotoMarks()),
             (members[1], PhotoMarks(rating: groupCullingRating(2))),
-            (members[2], PhotoMarks(isRejected: true)),
+            (members[2], PhotoMarks(rating: .rejected)),
             (members[3], PhotoMarks(label: ColourLabel(colour: .blue))),
         ])
     }
@@ -46,7 +46,7 @@ struct GroupPhotoNavigationTests {
         let onlyFirstUndecided = groupCullingMarks([
             (members[0], PhotoMarks()),
             (members[1], PhotoMarks(rating: groupCullingRating(2))),
-            (members[2], PhotoMarks(isRejected: true)),
+            (members[2], PhotoMarks(rating: .rejected)),
             (members[3], PhotoMarks(rating: groupCullingRating(5))),
         ])
 
@@ -67,7 +67,7 @@ struct GroupPhotoNavigationTests {
         let allMarked = groupCullingMarks([
             (members[0], PhotoMarks(rating: groupCullingRating(1))),
             (members[1], PhotoMarks(rating: groupCullingRating(2))),
-            (members[2], PhotoMarks(isRejected: true)),
+            (members[2], PhotoMarks(rating: .rejected)),
             (members[3], PhotoMarks(rating: groupCullingRating(5))),
         ])
 
@@ -78,7 +78,7 @@ struct GroupPhotoNavigationTests {
         let onlyCurrentUndecided = groupCullingMarks([
             (members[0], PhotoMarks(rating: groupCullingRating(2))),
             (members[1], PhotoMarks()),
-            (members[2], PhotoMarks(isRejected: true)),
+            (members[2], PhotoMarks(rating: .rejected)),
             (members[3], PhotoMarks(rating: groupCullingRating(4))),
         ])
         #expect(

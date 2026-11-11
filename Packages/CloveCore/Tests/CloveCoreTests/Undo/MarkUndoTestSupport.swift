@@ -31,13 +31,14 @@ func undoSeedSidecar(_ marks: PhotoMarks, at url: URL) async {
 
 /// The marks a folder session would read now: XMP for a RAW set, Clove storage otherwise.
 ///
-/// PRD How marks reach disk, rule 1, reads ratings and labels from the sidecar and Reject from
-/// app storage (G1 decisions 2 and 5). Tests use this to check what the next read returns.
+/// PRD How marks reach disk, rule 1, reads a RAW set's rating (Reject included) and label from
+/// the sidecar and a standalone photo's from app storage (G1 decisions 2 and 6). Tests use this
+/// to check what the next read returns.
 func undoCurrentMarks(
     for set: ScannedPhotoSet,
     stored: [PhotoIdentity: CloveStoredMarks]
 ) throws -> PhotoMarks {
-    var marks = PhotoMarks(isRejected: stored[set.id]?.isRejected ?? false)
+    var marks = PhotoMarks()
     switch set.photoSet.markPersistence.rating {
     case .cloveStorage:
         marks.rating = stored[set.id]?.rating ?? .unrated
@@ -57,7 +58,7 @@ func undoCurrentMarks(
 /// Reading the storage rather than a mirror is what makes a newer mark visible to a step, so a
 /// field another app or a later write changed is kept (PRD P0-05).
 actor UndoFolderReader {
-    /// C4's queue, for Clove-stored Reject and standalone marks (G1 decisions 5–6).
+    /// C4's queue, for sidecar writes and standalone Clove-stored marks (G1 decisions 2 and 6).
     private let queue: MarkWriteQueue
     /// The sets the session can read, keyed by C1's identity.
     private let sets: [PhotoIdentity: ScannedPhotoSet]

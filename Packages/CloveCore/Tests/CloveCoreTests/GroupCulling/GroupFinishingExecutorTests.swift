@@ -56,15 +56,12 @@ struct GroupFinishingExecutorTests {
         #expect(
             try groupCullingSidecarMarks(at: folder.file("A.xmp")).rating
                 == .rated(groupCullingRating(2)))
-        // PRD P0-12: every other unmarked photo is rejected, stored in Clove (G1 decision 5).
-        let storedB = try await queue.storedMarks(for: members[1])
-        let storedC = try await queue.storedMarks(for: members[2])
-        let storedKept = try await queue.storedMarks(for: members[0])
-        #expect(storedB?.isRejected == true)
-        #expect(storedC?.isRejected == true)
-        #expect(storedKept == nil)
+        // PRD P0-12: every other unmarked photo is rejected as −1 in its own sidecar, so a RAW
+        // set's marks go to one storage only (decision record `reject-as-rating.md`).
+        #expect(try groupCullingSidecarMarks(at: folder.file("B.xmp")).rating == .rated(.rejected))
+        #expect(try groupCullingSidecarMarks(at: folder.file("C.xmp")).rating == .rated(.rejected))
         #expect(try folder.stagingNames().isEmpty)
-        #expect(try folder.stagingNames(in: "store").isEmpty)
+        // A RAW set's marks never reach Clove storage, so there is no store folder to check.
         #expect(await completion.hasFinishingAction(on: group.id))
         #expect(await completion.isComplete(group, marks: [:]))
 
@@ -75,7 +72,7 @@ struct GroupFinishingExecutorTests {
         #expect(result.undo.entries.map(\.photo) == members)
         #expect(result.undo.entries[0].marksBefore == PhotoMarks())
         #expect(result.undo.entries[0].change == MarkChange(rating: groupCullingRating(2)))
-        #expect(result.undo.entries[1].change == MarkChange(reject: true))
+        #expect(result.undo.entries[1].change == MarkChange(rating: .rejected))
     }
 
     @Test func anEmptyPlanWritesNothingAndStillCompletesTheGroup() async throws {
@@ -333,7 +330,7 @@ struct GroupFinishingExecutorTests {
         let group = groupCullingGroup("undo", members: members)
         let source = makeSource(
             [
-                members[0]: PhotoMarks(isRejected: true),
+                members[0]: PhotoMarks(rating: .rejected),
                 members[1]: PhotoMarks(label: ColourLabel(colour: .red)),
             ])
         let plan = GroupFinishingPlan(
@@ -353,13 +350,11 @@ struct GroupFinishingExecutorTests {
         #expect(result.undo.photoToReturnTo == members[0])
         #expect(result.undo.entries.map(\.photo) == [members[0], members[2]])
         let kept = result.undo.entries[0]
-        #expect(kept.marksBefore == PhotoMarks(isRejected: true))
-        #expect(
-            kept.change
-                == MarkChange(rating: groupCullingRating(2), reject: false))
+        #expect(kept.marksBefore == PhotoMarks(rating: .rejected))
+        #expect(kept.change == MarkChange(rating: groupCullingRating(2)))
         let rejected = result.undo.entries[1]
         #expect(rejected.marksBefore == PhotoMarks())
-        #expect(rejected.change == MarkChange(reject: true))
+        #expect(rejected.change == MarkChange(rating: .rejected))
         // A labelled photo is untouched, so it has no undo entry.
         #expect(!result.undo.entries.contains { $0.photo == members[1] })
     }
@@ -386,7 +381,7 @@ struct GroupFinishingExecutorTests {
             entries.append((members[index], PhotoMarks(label: ColourLabel(colour: .green))))
         }
         for index in 12..<16 {
-            entries.append((members[index], PhotoMarks(isRejected: true)))
+            entries.append((members[index], PhotoMarks(rating: .rejected)))
         }
         let source = makeSource(groupCullingMarks(entries))
         let plan = GroupFinishingPlan(
@@ -409,8 +404,14 @@ struct GroupFinishingExecutorTests {
             #expect(stored == nil, "a marked photo was rejected")
         }
         for index in 16..<24 {
-            let stored = try await queue.storedMarks(for: members[index])
-            #expect(stored?.isRejected == true)
+            let set = try #require(sets.first { $0.id == members[index] })
+            let url = try #require(
+                set.sidecar.resolvedURL
+                    ?? set.photoSet.primary.url.deletingPathExtension()
+                    .appendingPathExtension("xmp"))
+            #expect(
+                try groupCullingSidecarMarks(at: url).rating == .rated(.rejected),
+                "an unmarked photo was not rejected")
         }
         #expect(result.undo.photoToReturnTo == members[0])
     }

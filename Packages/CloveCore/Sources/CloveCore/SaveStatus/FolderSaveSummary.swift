@@ -5,22 +5,20 @@ import Foundation
 ///
 /// PRD P0-08 keeps save status always visible and confirms each change in its own storage, so
 /// the indicator summarises the folder instead of repeating every photo: **Writing…** while a
-/// change is admitted and unfinished, **All saved** only once every requested change read back
-/// as a sidecar write, and a count for the photos whose change did not confirm or is only
-/// confirmed in Clove. PRD Failure and recovery requires the failed count to stay visible while
-/// other writes run, so a failure never hides behind **Writing…**.
+/// change is admitted and unfinished, **All saved** only once every requested change read back,
+/// and a count for the photos whose change did not confirm or is only confirmed in Clove. PRD
+/// Failure and recovery requires the failed count to stay visible while other writes run, so a
+/// failure never hides behind **Writing…**.
 ///
-/// G1 decisions 5 and 6 keep three confirmed kinds apart: a sidecar write is **Saved**, a
-/// standalone JPEG/HIF mark is **Saved in Clove only**, and a Reject that is merely stored is
-/// **Stored in Clove**. The folder line never folds either Clove kind into **All saved**, and a
-/// folder with nothing requested says so rather than claiming everything was saved.
+/// G1 decision 6 keeps two confirmed kinds apart: a sidecar write is **Saved**, and a standalone
+/// JPEG/HIF mark is **Saved in Clove only**. The folder line never folds the Clove kind into
+/// **All saved**, and a folder with nothing requested says so rather than claiming everything
+/// was saved.
 public struct FolderSaveSummary: Hashable, Sendable {
     /// How many changes read back from their sidecar (PRD P0-08's **Saved**).
     public let savedInSidecar: Int
     /// How many standalone marks are confirmed in Clove storage only (G1 decision 6).
     public let savedInCloveOnly: Int
-    /// How many Rejects are confirmed in Clove storage and not moved yet (G1 decision 5).
-    public let storedInClove: Int
     /// How many changes are waiting for or running their write.
     public let writing: Int
     /// How many changes did not confirm (PRD P0-08).
@@ -33,7 +31,6 @@ public struct FolderSaveSummary: Hashable, Sendable {
     public init(states: [MarkChangeState]) {
         var savedInSidecar = 0
         var savedInCloveOnly = 0
-        var storedInClove = 0
         var writing = 0
         var failed = 0
         for state in states {
@@ -46,15 +43,12 @@ public struct FolderSaveSummary: Hashable, Sendable {
                 savedInSidecar += 1
             case .savedInCloveOnly:
                 savedInCloveOnly += 1
-            case .storedInClove:
-                storedInClove += 1
             case .superseded:
                 break
             }
         }
         self.savedInSidecar = savedInSidecar
         self.savedInCloveOnly = savedInCloveOnly
-        self.storedInClove = storedInClove
         self.writing = writing
         self.failed = failed
     }
@@ -64,15 +58,13 @@ public struct FolderSaveSummary: Hashable, Sendable {
 
     /// Whether every recorded change is a confirmed sidecar write.
     public var isAllSaved: Bool {
-        failed == 0 && writing == 0 && savedInCloveOnly == 0 && storedInClove == 0
-            && savedInSidecar > 0
+        failed == 0 && writing == 0 && savedInCloveOnly == 0 && savedInSidecar > 0
     }
 
     /// What the indicator reads.
     ///
     /// A failure is never hidden by a running write (PRD Failure and recovery), and a Clove-only
-    /// mark or a stored Reject keeps its own words instead of being called saved
-    /// (G1 decisions 5–6).
+    /// mark keeps its own words instead of being called saved (G1 decision 6).
     public var text: String {
         if failed > 0 {
             let unsaved = failed == 1 ? "1 photo not saved" : "\(failed) photos not saved"
@@ -88,10 +80,6 @@ public struct FolderSaveSummary: Hashable, Sendable {
             parts.append(
                 savedInCloveOnly == 1
                     ? "1 saved in Clove only" : "\(savedInCloveOnly) saved in Clove only")
-        }
-        if storedInClove > 0 {
-            parts.append(
-                storedInClove == 1 ? "1 stored in Clove" : "\(storedInClove) stored in Clove")
         }
         return parts.isEmpty ? "No changes yet" : parts.joined(separator: ", ")
     }

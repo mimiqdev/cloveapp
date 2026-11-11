@@ -253,9 +253,9 @@ public actor MarkUndoHistory {
 
     /// Clears both stacks when the folder closes (PRD P0-05).
     ///
-    /// PRD P0-05 does not ask for a history across launches and G1 decision 5 stores unmoved
-    /// rejects per folder session, so a reopened folder starts with nothing to undo. A step
-    /// still running finishes its writes but does not repopulate the cleared history.
+    /// PRD P0-05 does not ask for a history across launches, so a reopened folder starts with
+    /// nothing to undo; the marks themselves are in their photo's storage. A step still running
+    /// finishes its writes but does not repopulate the cleared history.
     public func clear() {
         undoStack.removeAll()
         redoStack.removeAll()

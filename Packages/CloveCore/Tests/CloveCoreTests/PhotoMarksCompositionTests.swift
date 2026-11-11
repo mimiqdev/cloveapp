@@ -30,17 +30,18 @@ struct PhotoMarksCompositionTests {
         #expect(marks == PhotoMarks())
     }
 
-    @Test func aRawSetsSidecarWinsAndRejectComesFromClove() throws {
+    @Test func aRawSetReadsOnlyItsSidecarEvenWhenCloveHoldsMarks() throws {
         let marks = PhotoMarks(
-            stored: CloveStoredMarks(isRejected: true),
+            stored: CloveStoredMarks(rating: .rejected),
             xmp: XMPMarks(
                 rating: .rated(Rating(rawValue: 4) ?? .unrated),
                 label: ColourLabel(colour: .red)),
             persistence: try rawPersistence())
 
+        // A RAW set's marks, Reject included, live in its sidecar only (G1 decision 2).
         #expect(marks.rating.rawValue == 4)
         #expect(marks.label.colour == .red)
-        #expect(marks.isRejected)
+        #expect(!marks.isRejected)
     }
 
     @Test func anExplicitSidecarClearNeverRevivesStoredMarks() throws {
@@ -69,10 +70,17 @@ struct PhotoMarksCompositionTests {
         #expect(!marks.isRejected)
     }
 
-    @Test func anExternalRatingIsNeverReject() throws {
-        // G1 decision 5 keeps xmp:Rating −1 an external value, not Clove's Reject flag.
-        let external = PhotoMarks(
+    @Test func aSidecarRatingMinusOneReadsAsReject() throws {
+        let marks = PhotoMarks(
             xmp: XMPMarks(rating: XMPRating(-1)), persistence: try rawPersistence())
+        #expect(marks.rating == .rejected)
+        #expect(marks.isRejected)
+    }
+
+    @Test func anotherOutOfRangeRatingReadsAsUnrated() throws {
+        // Only −1 is Reject; every other out-of-range value has no place in Clove's marks.
+        let external = PhotoMarks(
+            xmp: XMPMarks(rating: XMPRating(6)), persistence: try rawPersistence())
         #expect(external.rating == .unrated)
         #expect(!external.isRejected)
     }

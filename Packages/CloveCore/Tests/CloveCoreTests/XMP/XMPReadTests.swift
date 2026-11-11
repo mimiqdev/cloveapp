@@ -52,13 +52,19 @@ let xmpCodec = XMPCodec()
     #expect(try xmpCodec.read(nil) == .unmarked)
 }
 
-@Test(arguments: [-1, -2, 6, 7, 42])
+@Test(arguments: [-2, 6, 7, 42])
 func readsOutOfRangeRatingsAsExternal(value: Int) throws {
     let packet = xmpDescriptionPacket(attributes: "xmp:Rating=\"\(value)\"")
     let marks = try xmpCodec.read(packet)
     #expect(marks.rating == .external(value))
     #expect(marks.rating.rating == nil)
     #expect(marks.rating.externalValue == value)
+}
+
+@Test func readsRatingMinusOneAsReject() throws {
+    // −1 is Reject, written by Adobe Bridge and Clove alike (PRD P0-07).
+    let packet = xmpDescriptionPacket(attributes: "xmp:Rating=\"-1\"")
+    #expect(try xmpCodec.read(packet).rating == .rated(.rejected))
 }
 
 @Test(arguments: LabelColour.allCases)

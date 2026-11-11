@@ -41,6 +41,15 @@ import CloveCore
         #expect(BrowsingState.decoded(from: data) == .entry)
     }
 
+    /// Reject is −1 and unrated is 0, so neither is a star minimum (PRD P0-03).
+    @Test(arguments: [-1, 0])
+    func aFilterMinimumWithoutStarsStartsAtEntry(minimum: Int) throws {
+        let data = try rewritten(
+            BrowsingFixtures.saved, setting: "filter",
+            to: ["kind": "ratedAtLeast", "minimum": minimum])
+        #expect(BrowsingState.decoded(from: data) == .entry)
+    }
+
     @Test func unknownFilterKindStartsAtEntry() throws {
         let data = try rewritten(BrowsingFixtures.saved, setting: "filter", to: ["kind": "stars"])
         #expect(BrowsingState.decoded(from: data) == .entry)

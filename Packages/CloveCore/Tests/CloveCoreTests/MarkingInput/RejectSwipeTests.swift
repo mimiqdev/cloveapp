@@ -44,7 +44,7 @@ import CloveCore
 
         #expect(
             rules.result(forSwipeDownTravel: -100, marks: marks, isZoomed: false)
-                == .mark(MarkChange(reject: true), .reject))
+                == .mark(MarkChange(rating: .rejected), .reject))
         #expect(rules.result(forSwipeDownTravel: -99, marks: marks, isZoomed: false) == .noChange)
     }
 
@@ -65,13 +65,13 @@ import CloveCore
                 isZoomed: false) == .noChange)
     }
 
-    @Test func rejectingKeepsTheRatingAndLabel() throws {
+    @Test func rejectingReplacesTheRatingAndKeepsTheLabel() throws {
         let rules = MarkingInputRules()
         let marks = try MarkingFixtures.marks(stars: 3, label: .red)
 
-        // The change names Reject only, so the stored rating and label are kept (PRD P0-05).
+        // Reject is the rating −1, so it replaces the stars; the label is untouched (PRD P0-05).
         #expect(
             rules.result(forSwipeDownTravel: -120, marks: marks, isZoomed: false)
-                == .mark(MarkChange(reject: true), .reject))
+                == .mark(MarkChange(rating: .rejected), .reject))
     }
 }

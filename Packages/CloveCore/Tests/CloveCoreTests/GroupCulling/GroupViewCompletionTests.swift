@@ -44,7 +44,7 @@ struct GroupViewCompletionTests {
     private var secondGroupUndecided: [PhotoIdentity: PhotoMarks] {
         groupCullingMarks([
             (first, PhotoMarks(rating: groupCullingRating(3))),
-            (second, PhotoMarks(isRejected: true)),
+            (second, PhotoMarks(rating: .rejected)),
             (third, PhotoMarks(rating: groupCullingRating(5))),
         ])
     }

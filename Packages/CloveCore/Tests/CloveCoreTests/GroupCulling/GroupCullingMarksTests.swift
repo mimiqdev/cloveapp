@@ -9,7 +9,7 @@ struct GroupCullingMarksTests {
         let unmarked = PhotoMarks()
         let labelOnly = PhotoMarks(label: ColourLabel(colour: .red))
         let rated = PhotoMarks(rating: groupCullingRating(3))
-        let rejected = PhotoMarks(isRejected: true)
+        let rejected = PhotoMarks(rating: .rejected)
 
         #expect(unmarked.isUndecided)
         #expect(unmarked.isUnmarked)
@@ -34,7 +34,7 @@ struct GroupCullingMarksTests {
             PhotoMarks(),
             PhotoMarks(label: ColourLabel(colour: .green)),
             PhotoMarks(rating: groupCullingRating(2)),
-            PhotoMarks(isRejected: true),
+            PhotoMarks(rating: .rejected),
         ])
 
         #expect(count.undecided == 2)
@@ -60,7 +60,7 @@ struct GroupCullingMarksTests {
         let group = groupCullingGroup("complete", members: members)
         let partly = groupCullingMarks([
             (members[0], PhotoMarks(rating: groupCullingRating(3))),
-            (members[1], PhotoMarks(isRejected: true)),
+            (members[1], PhotoMarks(rating: .rejected)),
             (members[2], PhotoMarks(label: ColourLabel(colour: .purple))),
         ])
 
@@ -69,7 +69,7 @@ struct GroupCullingMarksTests {
 
         let complete = groupCullingMarks([
             (members[0], PhotoMarks(rating: groupCullingRating(3))),
-            (members[1], PhotoMarks(isRejected: true)),
+            (members[1], PhotoMarks(rating: .rejected)),
             (members[2], PhotoMarks(rating: groupCullingRating(1))),
         ])
         let count = GroupUndecidedCount(group: group, marks: complete)
