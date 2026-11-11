@@ -258,10 +258,28 @@ final class CloveUITests: XCTestCase {
         element(app, "clove.moves.confirm").tap()
         XCTAssertTrue(element(app, "clove.moves.toast.action").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.moves.toast.action").label, "Undo")
-        element(app, "clove.moves.toast.details").tap()
+        element(app, "clove.moves.toast.secondaryAction").tap()
         XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").waitForExistence(timeout: 5))
         element(app, "clove.moves.details.done").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02685").label.contains("Rejected"))
+    }
+
+    @MainActor
+    func testAMoveThatMovedNothingOffersDetailsWithoutUndo() {
+        let app = launchSample([
+            "CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX": "",
+            "CLOVE_TEST_LIBRARY_KEEP_TOAST": "1",
+        ])
+        openLibrary(app)
+        element(app, "clove.grid.moveRejects").tap()
+        element(app, "clove.moves.confirm").tap()
+        let toast = element(app, "clove.moves.toast")
+        XCTAssertTrue(toast.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.moves.toast.action").exists)
+        let details = toast.buttons["clove.moves.toast.secondaryAction"]
+        XCTAssertTrue(details.exists)
+        details.tap()
+        XCTAssertTrue(element(app, "clove.moves.details.sheet").waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -329,7 +347,7 @@ final class CloveUITests: XCTestCase {
             element(partial, "clove.moves.confirm").tap()
             XCTAssertTrue(partial.staticTexts["1 couldn't be moved"].waitForExistence(timeout: 5))
             capture("move-partial-\(theme)")
-            element(partial, "clove.moves.toast.action").tap()
+            element(partial, "clove.moves.toast.secondaryAction").tap()
             XCTAssertTrue(
                 element(partial, "clove.moves.details.sheet").waitForExistence(timeout: 5))
             capture("move-details-\(theme)")

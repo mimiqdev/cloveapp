@@ -60,7 +60,7 @@
         let last = await queue.apply(.rating(ratings[2]), to: single)
         let lastBatch = await queue.apply(.rating(ratings[2]), to: sets)
         #expect(last.state == .savedInSidecar)
-        #expect(lastBatch.confirmedCount == 50)
+        #expect(lastBatch.confirmed.count == 50)
         #expect(try await queue.storedMarks(for: single.id) == nil)
         #expect(try folder.stagingNames().isEmpty)
     }

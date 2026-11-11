@@ -907,7 +907,7 @@ extension CloveUITests {
             failure.label, "1 couldn't be moved", "The partial toast changed its counts")
 
         // Details opens before the other grid queries, so a long test run never races the toast.
-        element(in: app, "clove.moves.toast.details").tap()
+        element(in: app, "clove.moves.toast.secondaryAction").tap()
         let detailsTitle = element(in: app, "clove.moves.details.subtitle")
         XCTAssertTrue(
             detailsTitle.waitForExistence(timeout: 10), "Details did not open its sheet")

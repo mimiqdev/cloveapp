@@ -2,7 +2,7 @@ import Foundation
 
 /// Why a change did not reach its storage, in the situations U7 has copy for.
 ///
-/// PRD P0-08 requires a visible failure reason and a retry, and PRD Failure and recovery
+/// A failed write retains its reason, and PRD Failure and recovery
 /// keeps read-only storage and insufficient space apart. The cases follow S1's
 /// "Failure table and proposed PRD mapping": the mapping never infers a full or read-only
 /// location from a generic failed write, so everything unrecognised stays ``unknown``.
@@ -127,8 +127,7 @@ public struct MarkWriteErrorEntry: Hashable, Sendable {
 
 /// Why one requested change is not saved, with every diagnostic the write kept.
 ///
-/// PRD P0-08 requires the failed change to stay visible and retryable and never to appear
-/// saved. The requested marks stay on the change itself (``MarkChangeStatus/requested``);
+/// The requested marks stay on the completed result (``MarkChangeStatus/requested``);
 /// this value explains the failure. It keeps the codec or store error as a typed field so a
 /// later UI can choose copy without parsing text, and the full `NSError` chain so S1's
 /// diagnostic survives the write (S1 failure snapshot).

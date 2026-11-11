@@ -29,7 +29,6 @@ struct RejectMoveRecoveryTests {
         #expect(result.movedCount == 2)
         #expect(result.failedCount == 1)
         #expect(result.failed.first?.identity == sets[1].id)
-        #expect(result.partialFailureSummary == "Moved 2 photos. 1 photos couldn't be moved.")
         #expect(fixture.folder.exists("DCIM/1/IMG_0001.ARW"))
         #expect(fixture.folder.exists("_Rejected/DCIM/0/IMG_0000.ARW"))
         #expect(fixture.folder.exists("_Rejected/DCIM/2/IMG_0002.ARW"))

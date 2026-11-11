@@ -2,8 +2,7 @@
 ///
 /// The three outcomes the plan asks for are read off one value:
 ///
-/// - **Written**: ``status`` holds C4's final state, so the UI can show PRD P0-08's save state
-///   and offer the queue's retry.
+/// - **Written**: ``status`` holds C4's completed write result.
 /// - **Skipped, already at the target**: nothing was written because the photo already held the
 ///   value the step would restore (``alreadyAtTarget``).
 /// - **Not undone**: at least one field kept its newer value, with the field and reason in
@@ -34,7 +33,7 @@ public struct MarkUndoPhotoOutcome: Hashable, Sendable {
         self.alreadyAtTarget = alreadyAtTarget
     }
 
-    /// Whether this photo went through C4, with its status for PRD P0-08's save state.
+    /// Whether this photo went through C4.
     public var isWritten: Bool { status != nil }
 
     /// Whether the photo already held every value the step would restore, so nothing was written.
@@ -46,7 +45,7 @@ public struct MarkUndoPhotoOutcome: Hashable, Sendable {
     /// Whether the photo now holds a value this step restored (PRD P0-05).
     ///
     /// A confirmed write reached its target, and a field already at the target needed none. A
-    /// failed or superseded write did not, which is why it is not counted here (PRD P0-08).
+    /// failed write did not, which is why it is not counted here.
     public var reachedTarget: Bool {
         status?.state.isConfirmed == true || !alreadyAtTarget.isEmpty
     }
@@ -57,13 +56,8 @@ public struct MarkUndoPhotoOutcome: Hashable, Sendable {
 
 /// What one undo or redo produced, per photo and for the view (PRD P0-05, P0-12; DEV-PLAN C5).
 ///
-/// The plan's C5 row asks every step to report per-photo outcomes, the batch counts behind
-/// "Saved N photos. M photos couldn't be saved." (PRD Failure and recovery, partial batch
-/// failure), and the photo to return to. ``actionName`` is the short undo menu title.
-///
-/// A confirmed restore counts as saved here even when the marks live in Clove storage rather
-/// than XMP. Reporting "Saved 0 photos" for a successful undo would misstate
-/// it. PRD P0-08 keeps the wording per storage, so U8 decides the copy it shows.
+/// Each step reports per-photo outcomes and the photo to return to. ``actionName`` is the
+/// short undo menu title.
 public struct MarkUndoResult: Hashable, Sendable {
     /// A short action name for the undo menu title (the UI owns the final copy).
     public let actionName: String
@@ -73,12 +67,8 @@ public struct MarkUndoResult: Hashable, Sendable {
     public let outcomes: [MarkUndoPhotoOutcome]
     /// Whether the step removed its entry from the history because it restored nothing.
     ///
-    /// Every field kept a newer mark or its photo was unavailable, and no write is left to
-    /// retry. The entry is on neither stack: keeping it would make the next undo hit the same
-    /// entry again instead of reaching an older action (PRD P0-05's last-in, first-out undo).
-    /// U8 can use this to tell the user and take the action off the menu. A failed or unfinished
-    /// write keeps its entry instead, unless a new recorded action already cleared the redo
-    /// future while the step ran.
+    /// Every field kept a newer mark or its photo was unavailable. The entry is on neither
+    /// stack, so the next undo reaches an older action (PRD P0-05's last-in, first-out undo).
     public let droppedFromHistory: Bool
 
     /// Describes the result of one step; the history builds these.
@@ -94,12 +84,7 @@ public struct MarkUndoResult: Hashable, Sendable {
         self.droppedFromHistory = droppedFromHistory
     }
 
-    /// Photos whose restore C4 confirmed in the storage the marks use (PRD P0-08).
-    public var savedCount: Int {
-        outcomes.filter { $0.status?.state.isConfirmed == true }.count
-    }
-
-    /// Photos whose restore still needs a retry through C4 (PRD P0-09).
+    /// Photos whose restore failed through C4.
     public var failedCount: Int {
         outcomes.filter { $0.status?.state.failure != nil }.count
     }
@@ -110,12 +95,4 @@ public struct MarkUndoResult: Hashable, Sendable {
     /// Photos no field could be restored for, because newer marks won (PRD P0-05).
     public var notUndoneCount: Int { outcomes.filter(\.isNotUndone).count }
 
-    /// The PRD's "Partial batch failure" wording, or `nil` when no restore needs a retry.
-    ///
-    /// This follows the PRD's "Saved N photos. M photos couldn't be saved." copy; the exact
-    /// strings stay U8's decision (PRD Failure and recovery).
-    public var partialFailureSummary: String? {
-        guard failedCount > 0 else { return nil }
-        return "Saved \(savedCount) photos. \(failedCount) photos couldn't be saved."
-    }
 }

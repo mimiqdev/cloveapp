@@ -17,7 +17,6 @@ struct GroupFinishingAppliedTests {
             state: .failed(MarkWriteFailure(reason: .notConfirmed, message: "Read-back failed.")))
         let result = GroupFinishingResult.applied(
             plan, statuses: [photos[1]: saved, photos[2]: failed])
-        #expect(result.savedCount == 1)
         #expect(result.failedCount == 1)
         #expect(result.droppedPhotos == [photos[3]])
         #expect(result.undo.entries.map(\.photo) == [photos[1], photos[2]])
