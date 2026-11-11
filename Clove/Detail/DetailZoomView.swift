@@ -128,7 +128,7 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports every scale the scroll view shows, for the screen's pixel-demand decision.
     let onZoomChange: (CGFloat) -> Void
 
-    /// Reports a single tap on an edge that navigates.
+    /// Reports edge navigation from a tap or a completed swipe.
     let onEdgeTap: (DetailEdgeZone) -> Void
 
     /// Reports a double tap in the centre area, with the tapped point in unit image coordinates.
@@ -326,7 +326,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         // Read before the pixels change: the point the viewport centres on in the old bitmap.
         let kept = zoomSnapshot
         imageView.image = pixels.map { UIImage(cgImage: $0) }
-        if pixels != nil, !isNavigating {
+        if pixels != nil, !scrollView.transform.isIdentity, !isNavigating {
             scrollView.layer.removeAllAnimations()
             scrollView.transform = .identity
         }
