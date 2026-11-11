@@ -15,12 +15,19 @@ actor EntryThumbnailStore {
         let file: ThumbnailRevision
     }
 
+    private let root: URL?
     private var retainedNames: [FolderIdentity: Set<String>] = [:]
 
-    private func directory(for folder: FolderIdentity) -> URL? {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+    init(
+        directory: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+            .first?
             .appendingPathComponent("EntryPreviews", isDirectory: true)
-            .appendingPathComponent(Self.key(folder.rawValue), isDirectory: true)
+    ) {
+        root = directory
+    }
+
+    private func directory(for folder: FolderIdentity) -> URL? {
+        root?.appendingPathComponent(Self.key(folder.rawValue), isDirectory: true)
     }
 
     private static func key(_ text: String) -> String {
