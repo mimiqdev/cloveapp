@@ -8,7 +8,7 @@ import SwiftUI
 /// UIKit refuse the presentation, so the choice is handed back from the sheet's `onDismiss`,
 /// after the dismissal has finished (PRD P0-01, P0-02).
 ///
-/// Design placeholder: the picker itself is the system document picker (PRD P0-01).
+/// The picker is the system document picker (PRD P0-01).
 struct FolderPickingModifier: ViewModifier {
     /// Whether the picker is presented.
     @Binding var isPresented: Bool

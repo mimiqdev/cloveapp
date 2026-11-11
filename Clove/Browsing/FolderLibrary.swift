@@ -322,6 +322,18 @@ protocol FolderLibrary: AnyObject {
     /// nothing had ever opened, so entry reports this next to the Recents list.
     var recentsFailure: FolderAccessFailure? { get }
 
+    /// Updates the resume identity without doing I/O (handoff Entry).
+    func setEntryResumePhoto(_ photo: PhotoIdentity)
+
+    /// Remembers the last viewed photo with confirmed progress (handoff Entry).
+    func recordEntryProgress(lastViewed: PhotoIdentity?) async
+
+    /// Flushes progress and the latest hero preview before leaving or backgrounding (handoff Entry).
+    func flushEntryState(lastViewed: PhotoIdentity?) async
+
+    /// Cached previews for Entry; no folder access is performed here (handoff Entry).
+    func entryThumbnail(for photo: PhotoIdentity) async -> GridThumbnailOutcome
+
     /// Re-reads C11's Recents list, keeping what the store holds (PRD P0-02).
     func reloadRecents() async
 
@@ -365,6 +377,21 @@ extension FolderLibrary {
     var recents: [RecentFolder] { [] }
 
     var recentsFailure: FolderAccessFailure? { nil }
+
+    func setEntryResumePhoto(_ photo: PhotoIdentity) {}
+
+    func recordEntryProgress(lastViewed: PhotoIdentity?) async {}
+
+    func flushEntryState(lastViewed: PhotoIdentity?) async {
+        await recordEntryProgress(lastViewed: lastViewed)
+    }
+
+    func entryThumbnail(for photo: PhotoIdentity) async -> GridThumbnailOutcome {
+        guard let image = await EntryThumbnailStore.shared.image(for: photo) else {
+            return .unavailable
+        }
+        return .image(image)
+    }
 
     func reloadRecents() async {}
 

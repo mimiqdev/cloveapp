@@ -37,6 +37,7 @@ struct GridScreen: View {
     /// One item drives one sheet, so the confirmation and the failure details never try to
     /// present at the same time.
     @State private var moveSheet: MoveSheetRoute?
+    @State private var isPickingEmptyFolder = false
 
     /// One Move rejects presentation: the confirmation flow or its failure details (P0-10).
     private enum MoveSheetRoute: Identifiable {
@@ -104,7 +105,9 @@ struct GridScreen: View {
                     openPhoto: { browsing.openPhoto($0) },
                     openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },
-                    toggleSelection: { browsing.toggleSelection(of: $0) })
+                    toggleSelection: { browsing.toggleSelection(of: $0) }
+                )
+                .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -183,6 +186,9 @@ struct GridScreen: View {
                 MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
             }
         }
+        .folderPicker(isPresented: $isPickingEmptyFolder) { url in
+            await browsing.openPickedFolder(url)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.grid")
     }
@@ -241,16 +247,19 @@ struct GridScreen: View {
     }
 
     /// What the grid shows when it has no cell to draw (PRD P0-01, P0-03).
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No photos", systemImage: "photo.on.rectangle")
-        } description: {
-            Text(
-                browsing.hasFolderContents
-                    ? "No photos match this filter." : "Open a folder to see its photos.")
+    @ViewBuilder private var emptyState: some View {
+        if !browsing.hasFolderContents && !browsing.isFolderOpening {
+            EntryEmptyState(isEmptyFolder: true) { isPickingEmptyFolder = true }
+                .accessibilityIdentifier("clove.grid.empty")
+        } else {
+            ContentUnavailableView {
+                Label("No photos", systemImage: "photo.on.rectangle")
+            } description: {
+                Text(browsing.isFolderOpening ? "Reading photos…" : "No photos match this filter.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("clove.grid.empty")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("clove.grid.empty")
     }
 
     /// Opens one similar group's view from its count tag or its cover (PRD Grid, P0-11).

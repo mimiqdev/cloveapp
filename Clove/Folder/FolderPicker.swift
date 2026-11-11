@@ -9,8 +9,7 @@ import UniformTypeIdentifiers
 /// library. The picked URL is handed to C11's `pick`, which starts and stops the security scope
 /// itself (G1 folder access), so the picker holds nothing after it reports the URL.
 ///
-/// Design placeholder: the entry screen presents this as a sheet; the visual design replaces how
-/// the action looks, not that it opens the system picker.
+/// Entry and recovery actions present this system picker as a sheet.
 struct FolderPicker: UIViewControllerRepresentable {
     /// Called with the folder the user chose.
     var onPick: (URL) -> Void

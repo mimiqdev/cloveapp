@@ -14,8 +14,7 @@ import SwiftUI
 /// makes the same per-photo call for each. Reaching a lost folder offers the PRD's
 /// Reconnect/reopen or Select-through-Open action.
 ///
-/// Design placeholder: the row, its symbols, its sheet and its buttons are system components
-/// until the visual design lands.
+/// Folder losses use the handoff's glass banner and subtitle (screens.md, Errors).
 struct SaveStatusIndicator: View {
     /// The scene's browsing state and the operations this indicator performs on it.
     let browsing: BrowsingModel
@@ -33,9 +32,15 @@ struct SaveStatusIndicator: View {
     var body: some View {
         Group {
             if let situation = browsing.folderSituation {
-                SaveFailureBanner(
-                    situation: situation, identifierPrefix: "\(identifierPrefix).failure",
-                    perform: perform)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(situation == .driveDisconnected ? "Not connected" : "View only")
+                        .font(.caption)
+                        .foregroundStyle(Color.clove.text.secondary)
+                        .accessibilityIdentifier("\(identifierPrefix).subtitle")
+                    SaveFailureBanner(
+                        situation: situation, identifierPrefix: "\(identifierPrefix).failure",
+                        perform: perform)
+                }
             } else {
                 summaryControl
             }
@@ -120,8 +125,7 @@ struct SaveStatusIndicator: View {
 /// does, because reopening the open folder, choosing another folder and retrying one change are
 /// different calls.
 ///
-/// Design placeholder: a system label and bordered buttons stand in for the design's failure
-/// banner.
+/// Folder loss uses V1's ErrorBanner (handoff Errors); other failures retain their actions.
 struct SaveFailureBanner: View {
     /// The situation to explain, with its PRD copy and actions.
     let situation: SaveSituation
@@ -133,6 +137,24 @@ struct SaveFailureBanner: View {
     let perform: (SaveAction) -> Void
 
     var body: some View {
+        if situation == .driveDisconnected {
+            ErrorBanner(
+                message: "The drive disconnected.",
+                detail: "Reconnect it, then reopen this folder.",
+                actionTitle: "Reopen", identifier: identifierPrefix
+            ) { perform(.reopenFolder) }
+        } else if situation == .lostPermission || situation == .locationUnavailable {
+            ErrorBanner(
+                message: "Access to this folder is no longer available.",
+                detail: "Open it again to keep marking.",
+                actionTitle: "Open", identifier: identifierPrefix
+            ) { perform(.openFolder) }
+        } else {
+            otherFailure
+        }
+    }
+
+    private var otherFailure: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label {
                 Text(situation.message)
@@ -140,7 +162,7 @@ struct SaveFailureBanner: View {
                 Image(systemName: "exclamationmark.triangle")
             }
             .font(.caption)
-            .foregroundStyle(.orange)
+            .foregroundStyle(Color.clove.status.failed)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(situation.message)
             .accessibilityIdentifier("\(identifierPrefix).message")
@@ -163,7 +185,7 @@ struct SaveFailureBanner: View {
 /// repeating the whole folder. Retry resends one photo's latest failed change, and Retry all
 /// makes the same call for each, so a row never claims a save C4 has not confirmed.
 ///
-/// Design placeholder: a system list, sheet and buttons stand in for the design's list.
+/// Uses a system list and sheet for the retry details outside the designed error banner.
 struct UnsavedChangesView: View {
     /// The scene's browsing state and the retry calls this list makes.
     let browsing: BrowsingModel

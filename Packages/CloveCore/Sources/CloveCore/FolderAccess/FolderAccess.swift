@@ -105,6 +105,7 @@ public actor FolderAccess {
             existing.identityKeys = facts.identityKeys
             existing.mediaType = facts.mediaType
             existing.lastOpened = openedAt
+            existing.needsReconnect = false
             updated[index] = existing
             recent = existing
         } else {
@@ -177,6 +178,7 @@ public actor FolderAccess {
         recent.identityKeys = recent.identityKeys.merging(facts.identityKeys)
         recent.mediaType = facts.mediaType
         recent.lastOpened = now()
+        recent.needsReconnect = false
         var updated = folders
         updated[index] = recent
         do {
@@ -202,6 +204,22 @@ public actor FolderAccess {
         folders[index].photoCount = summary.photoCount
         folders[index].scanStatus = summary.status
         folders[index].lastOpened = now()
+        try store.save(folders)
+    }
+
+    /// Stores only confirmed progress without changing the last-opened date (handoff Entry).
+    public func recordProgress(_ progress: FolderProgress, for identity: FolderIdentity) throws {
+        var folders = try store.load()
+        guard let index = folders.firstIndex(where: { $0.identity == identity }) else { return }
+        folders[index].progress = progress
+        try store.save(folders)
+    }
+
+    /// Remembers an observed loss without probing folders on Entry (handoff Entry; G1 access).
+    public func recordLocationLoss(for identity: FolderIdentity) throws {
+        var folders = try store.load()
+        guard let index = folders.firstIndex(where: { $0.identity == identity }) else { return }
+        folders[index].needsReconnect = true
         try store.save(folders)
     }
 

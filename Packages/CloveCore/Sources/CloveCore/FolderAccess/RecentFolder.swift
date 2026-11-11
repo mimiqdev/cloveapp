@@ -112,6 +112,10 @@ public struct RecentFolder: Identifiable, Codable, Hashable, Sendable {
     public var scanStatus: FolderScanStatus?
     /// When the folder last opened successfully; failed opens never change it (PRD P0-02).
     public var lastOpened: Date
+    /// Confirmed progress, absent in older Recents records (handoff screens.md, Entry).
+    public var progress: FolderProgress?
+    /// Last observed location loss; nil means no known loss, not proof of access (PRD P0-02).
+    public var needsReconnect: Bool?
 
     /// Creates a remembered folder; only `pick` and `reopen` in `FolderAccess` write these records.
     public init(
@@ -123,7 +127,9 @@ public struct RecentFolder: Identifiable, Codable, Hashable, Sendable {
         mediaType: FolderMediaType = .unknown,
         photoCount: Int? = nil,
         scanStatus: FolderScanStatus? = nil,
-        lastOpened: Date = Date()
+        lastOpened: Date = Date(),
+        progress: FolderProgress? = nil,
+        needsReconnect: Bool? = nil
     ) {
         self.id = id
         self.bookmark = bookmark
@@ -134,6 +140,8 @@ public struct RecentFolder: Identifiable, Codable, Hashable, Sendable {
         self.photoCount = photoCount
         self.scanStatus = scanStatus
         self.lastOpened = lastOpened
+        self.progress = progress
+        self.needsReconnect = needsReconnect
     }
 
     /// The folder key used by photo identities and Clove-stored marks (G1 decision 5; PRD P0-02).

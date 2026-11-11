@@ -87,8 +87,11 @@ struct RootView: View {
                     // G1 folder access watches with presenters plus a 500 ms foreground poll, so
                     // a scene that comes back asks at once instead of waiting one interval to
                     // learn the drive is gone (PRD P0-02).
-                    guard phase == .active else { return }
-                    Task { await browsing.checkFolderLocation() }
+                    if phase == .active {
+                        Task { await browsing.checkFolderLocation() }
+                    } else if phase == .background {
+                        Task { await browsing.recordEntryProgress() }
+                    }
                 }
                 .environment(settings)
         }

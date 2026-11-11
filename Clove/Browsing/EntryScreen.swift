@@ -1,61 +1,30 @@
 import CloveCore
 import SwiftUI
 
-/// Entry: open a folder, reopen one from Recents, or see why a remembered folder could not open
-/// (PRD Entry, P0-01, P0-02).
-///
-/// The primary action opens the system folder picker; C11 validates the picked folder with a real
-/// read before the grid appears. Each Recents row shows the fields PRD P0-02 lists and reopens its
-/// remembered location with one tap.
-///
-/// Design placeholder: the visual design replaces the list, the row layout and the button style;
-/// the copy for every failure stays U7's. U2's files keep only this structure and the identifiers
-/// its UI test uses.
+/// Resume-first Entry and first launch (handoff screens.md §01; PRD P0-02).
+/// Reading Recents and app-private previews never opens or enumerates a remembered folder.
 struct EntryScreen: View {
-    /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
-
-    /// Whether the system folder picker is presented (PRD P0-01).
     @State private var isPickingFolder = false
 
     var body: some View {
-        List {
-            Section {
-                Button("Open folder…", systemImage: "folder.badge.plus") {
-                    isPickingFolder = true
+        VStack(spacing: 0) {
+            HStack {
+                Text("Clove").font(.title.bold())
+                Spacer()
+                GlassIconButton(
+                    label: "Settings", symbol: "gearshape", identifier: "clove.nav.settings"
+                ) {
+                    browsing.showSettings()
                 }
-                .accessibilityIdentifier("clove.entry.pickFolder")
-                if browsing.canContinueBrowsing {
-                    // The open folder stays open when entry comes back into view, so returning to
-                    // it needs no second pick and no second scan (PRD P0-01).
-                    Button("Continue browsing", systemImage: "photo.on.rectangle") {
-                        browsing.openFolder()
-                    }
-                    .accessibilityIdentifier("clove.entry.openFolder")
-                } else {
-                    Text("No folder is open.")
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("clove.entry.noFolder")
-                }
-            } header: {
-                Text("Folder")
-            } footer: {
-                folderFooter
             }
-            Section {
-                if browsing.recents.isEmpty {
-                    Text("No recent folders.")
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("clove.entry.noRecents")
-                } else {
-                    ForEach(browsing.recents) { recent in
-                        recentRow(recent)
-                    }
-                }
-            } header: {
-                Text("Recents")
-            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            entryContent
         }
+        .background(Color.clove.bg.canvas)
+        .foregroundStyle(Color.clove.text.primary)
+        .toolbar(.hidden, for: .navigationBar)
         .folderPicker(isPresented: $isPickingFolder) { url in
             await browsing.openPickedFolder(url)
         }
@@ -64,42 +33,228 @@ struct EntryScreen: View {
         .accessibilityIdentifier("clove.entry")
     }
 
-    /// Why the last pick or launch restore did not open a folder, or the entry hint (PRD P0-02).
-    @ViewBuilder
-    private var folderFooter: some View {
-        if let failure = browsing.folderFailure {
-            Text(FolderFailureExplanation.text(for: failure))
-                .accessibilityIdentifier("clove.entry.folderFailure")
-        } else if browsing.recentsFailure != nil {
-            // PRD P0-02: a stored list that cannot be read is explained, not shown as empty.
-            Text("Clove could not read its list of recent folders.")
-                .accessibilityIdentifier("clove.entry.recentsFailure")
-        } else {
-            Text("Choose a folder to browse its photos. Nothing is copied into Clove.")
-                .accessibilityIdentifier("clove.entry.hint")
+    @ViewBuilder private var entryContent: some View {
+        Group {
+            if !browsing.hasLoadedRecents && browsing.recents.isEmpty {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let hero = browsing.recents.first {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        heroCard(hero)
+                        if browsing.recents.count > 1 {
+                            Text("Earlier")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.clove.text.secondary)
+                            VStack(spacing: 0) {
+                                ForEach(Array(browsing.recents.dropFirst())) { recent in
+                                    recentRow(recent)
+                                    if recent.id != browsing.recents.last?.id {
+                                        Rectangle().fill(Color.clove.separator).frame(height: 0.5)
+                                    }
+                                }
+                            }
+                        }
+                        failureText
+                    }
+                    .frame(maxWidth: 560)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    Button {
+                        isPickingFolder = true
+                    } label: {
+                        Label("Open folder", systemImage: "folder")
+                            .font(.headline)
+                            .foregroundStyle(Color.clove.accent)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 15)
+                            .cloveGlass(in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("clove.entry.pickFolder")
+                    .padding(.vertical, 12)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    EntryEmptyState { isPickingFolder = true }
+                    failureText.padding(.horizontal)
+                }
+                .accessibilityIdentifier("clove.entry.noRecents")
+            }
         }
     }
 
-    /// One remembered folder: its path, the fields P0-02 lists, and why it did not reopen.
-    private func recentRow(_ recent: RecentFolder) -> some View {
+    private func needsReconnect(_ recent: RecentFolder) -> Bool {
+        if let failure = browsing.recentFailure(for: recent.id) {
+            return FolderFailureExplanation.needsReconnect(failure)
+        }
+        return recent.needsReconnect == true
+    }
+
+    private func heroCard(_ recent: RecentFolder) -> some View {
         Button {
-            Task { await browsing.reopen(recent) }
+            if needsReconnect(recent) || browsing.recentFailure(for: recent.id) != nil {
+                isPickingFolder = true
+            } else {
+                Task { await browsing.resume(recent) }
+            }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(recent.pathSummary)
-                Text(RecentFolderSummary.detail(for: recent))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let failure = browsing.recentFailure(for: recent.id) {
-                    // PRD P0-02 asks for the reason on the item and for the folder again, so the
-                    // reason never replaces the row or the tap that retries it.
-                    Text(FolderFailureExplanation.text(for: failure))
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .accessibilityIdentifier("clove.entry.recentFailure")
+            ZStack(alignment: .bottomLeading) {
+                EntryPhoto(
+                    photo: recent.progress?.lastViewedPhoto ?? recent.progress?.previewPhotos.first,
+                    browsing: browsing)
+                LinearGradient(
+                    colors: [
+                        CloveTheme.dark.tokens.stage.color.opacity(0),
+                        CloveTheme.dark.tokens.stage.color,
+                    ],
+                    startPoint: .center, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(RecentFolderSummary.name(for: recent))
+                        .font(.title.bold())
+                        .lineLimit(2)
+                    HStack(alignment: .bottom, spacing: 12) {
+                        Text(RecentFolderSummary.location(for: recent))
+                            .font(.subheadline)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                        if needsReconnect(recent) {
+                            Text("Reconnect").font(.subheadline.weight(.semibold))
+                        } else if let progress = recent.progress,
+                            progress.isComplete || progress.total > 0
+                        {
+                            Text(
+                                progress.isComplete
+                                    ? "\(progress.left.formatted()) left"
+                                    : "At least \(progress.left.formatted()) left"
+                            )
+                            .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    if let failure = browsing.recentFailure(for: recent.id), !needsReconnect(recent)
+                    {
+                        Text(FolderFailureExplanation.text(for: failure))
+                            .font(.caption)
+                            .accessibilityIdentifier("clove.entry.recentFailure")
+                    }
+                    if let progress = recent.progress {
+                        progressLine(progress).padding(.top, 10)
+                    }
                 }
+                .foregroundStyle(CloveTheme.dark.tokens.primaryText.color)
+                .padding(20)
+            }
+            .frame(height: 380)
+            .overlay(alignment: .topLeading) {
+                Text("Continue · \(RecentFolderSummary.relativeDate(recent.lastOpened))")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(CloveTheme.dark.tokens.primaryText.color)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(CloveTheme.dark.tokens.stage.color.opacity(0.45), in: Capsule())
+                    .padding(16)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("clove.entry.openFolder")
+        .accessibilityLabel("Continue · \(RecentFolderSummary.name(for: recent))")
+    }
+
+    private func progressLine(_ progress: FolderProgress) -> some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                Rectangle().fill(Color.clove.accent)
+                    .frame(
+                        width: geometry.size.width * Double(progress.marked)
+                            / Double(max(1, progress.total)))
+                Rectangle().fill(Color.clove.reject)
+                    .frame(
+                        width: geometry.size.width * Double(progress.rejected)
+                            / Double(max(1, progress.total)))
+                Rectangle().fill(Color.clove.rating.off)
             }
         }
+        .frame(height: 3)
+        .clipShape(Capsule())
+        .accessibilityLabel(
+            "\(progress.marked) marked, \(progress.rejected) rejected, \(progress.left) left")
+    }
+
+    private func recentRow(_ recent: RecentFolder) -> some View {
+        let reconnect = needsReconnect(recent)
+        return Button {
+            if reconnect || browsing.recentFailure(for: recent.id) != nil {
+                isPickingFolder = true
+            } else {
+                Task { await browsing.reopen(recent) }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                HStack(spacing: 1) {
+                    ForEach(0..<3) { index in
+                        let photos = recent.progress?.previewPhotos ?? []
+                        EntryPhoto(
+                            photo: index < photos.count ? photos[index] : nil, browsing: browsing)
+                    }
+                }
+                .frame(width: 104, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .opacity(reconnect ? 0.5 : 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(RecentFolderSummary.name(for: recent)).font(.subheadline.weight(.semibold))
+                    Text(
+                        reconnect
+                            ? "Not connected" : RecentFolderSummary.location(for: recent)
+                    )
+                    .font(.caption).foregroundStyle(Color.clove.text.secondary)
+                    if let failure = browsing.recentFailure(for: recent.id), !reconnect {
+                        Text(FolderFailureExplanation.text(for: failure))
+                            .font(.caption).foregroundStyle(Color.clove.text.secondary)
+                            .lineLimit(nil)
+                            .accessibilityIdentifier("clove.entry.recentFailure")
+                    }
+                }
+                .lineLimit(2)
+                .opacity(reconnect ? 0.5 : 1)
+                Spacer(minLength: 0)
+                if reconnect {
+                    Text("Reconnect")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.clove.accent)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .cloveGlass(in: Capsule())
+                        .accessibilityIdentifier("clove.entry.reconnect")
+                } else {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(RecentFolderSummary.count(for: recent)).font(.subheadline)
+                        if recent.progress?.finished == true {
+                            Text("Done").foregroundStyle(Color.clove.status.saved)
+                                .accessibilityIdentifier("clove.entry.done")
+                        } else {
+                            Text(recent.lastOpened, format: .dateTime.month(.abbreviated).day())
+                                .foregroundStyle(Color.clove.text.secondary)
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("clove.entry.recent.\(recent.id.uuidString)")
+    }
+
+    @ViewBuilder private var failureText: some View {
+        if let failure = browsing.folderFailure {
+            Text(FolderFailureExplanation.text(for: failure))
+                .font(.footnote).foregroundStyle(Color.clove.text.secondary)
+                .accessibilityIdentifier("clove.entry.folderFailure")
+        } else if browsing.recentsFailure != nil {
+            Text("Clove could not read its list of recent folders.")
+                .font(.footnote).foregroundStyle(Color.clove.text.secondary)
+                .accessibilityIdentifier("clove.entry.recentsFailure")
+        }
     }
 }

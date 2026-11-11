@@ -27,6 +27,7 @@ final class CloveUITests: XCTestCase {
             "The Clove root view did not appear"
         )
 
+        checkEntryAndSettings(in: app)
         openTestLibrary(in: app)
         checkGridOverlays(in: app)
         showOnlyRejectedThenAll(in: app)
@@ -104,13 +105,14 @@ final class CloveUITests: XCTestCase {
         )
         openTestLibrary(in: app)
 
-        let message = element(in: app, "clove.grid.saveState.failure.message")
-        XCTAssertTrue(message.waitForExistence(timeout: 10), "The grid did not explain the loss")
-        XCTAssertEqual(
-            message.label, "The drive disconnected. Reconnect it, then reopen this folder.",
-            "The disconnected-drive copy changed")
         XCTAssertTrue(
-            element(in: app, "clove.grid.saveState.failure.reopenFolder").exists,
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "label == %@", "The drive disconnected.")
+            ).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Reconnect it, then reopen this folder."].exists)
+        XCTAssertEqual(element(in: app, "clove.grid.saveState.subtitle").label, "Not connected")
+        XCTAssertTrue(
+            element(in: app, "clove.grid.saveState.failure.action").exists,
             "The loss offered no Reconnect/reopen action")
         XCTAssertFalse(
             element(in: app, "clove.grid.saveState").exists,
@@ -234,38 +236,30 @@ final class CloveUITests: XCTestCase {
         )
         back(in: app)
 
-        let title = element(in: app, "clove.leavePrompt.title")
+        let title = app.alerts.staticTexts["Some marks haven't finished saving."]
         XCTAssertTrue(title.waitForExistence(timeout: 10), "Leaving did not ask first")
         XCTAssertEqual(title.label, "Some marks haven't finished saving.")
-        // Wait for writes drains C4 and, because the failed change is still unfinished, the
-        // question stays so the user can still choose Leave anyway (PRD Failure and recovery).
-        let wait = element(in: app, "clove.leavePrompt.wait")
-        XCTAssertTrue(wait.exists, "The question did not offer Wait for writes")
-        wait.tap()
-        // The waiting state is visible while C4 drains, and Leave anyway stays available
-        // (PRD Failure and recovery: the user can still choose it).
+        // Wait cancels departure. A failed change remains available for Retry in this folder.
+        app.alerts.buttons["Wait"].firstMatch.tap()
+        XCTAssertTrue(waitForDisappearance(title, timeout: 5), "Wait did not dismiss the alert")
         XCTAssertTrue(
-            waitForElement(element(in: app, "clove.leavePrompt.waiting"), timeout: 5),
-            "Wait for writes showed no waiting state")
-        let leave = element(in: app, "clove.leavePrompt.leaveAnyway")
-        XCTAssertTrue(leave.exists, "Waiting for writes took away the Leave anyway answer")
+            element(in: app, "clove.grid").waitForExistence(timeout: 5), "Wait left the folder")
+        XCTAssertFalse(element(in: app, "clove.entry").exists, "Wait returned to Entry")
+        XCTAssertEqual(element(in: app, "clove.grid.saveState").label, "1 photo not saved")
+        element(in: app, "clove.grid.saveState").tap()
         XCTAssertTrue(
-            waitForDisappearance(element(in: app, "clove.leavePrompt.waiting"), timeout: 10),
-            "The waiting state never finished")
-        // The failed change is still unfinished, so the question stays for an explicit answer.
-        XCTAssertTrue(
-            element(in: app, "clove.leavePrompt.title").exists,
-            "The question left while a change was still unfinished")
-        leave.tap()
+            element(in: app, "clove.saveState.retryAll").waitForExistence(timeout: 5),
+            "Wait prevented access to Retry")
+        element(in: app, "clove.saveState.unsaved.close").tap()
+        back(in: app)
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "A later departure did not ask again")
+        app.alerts.buttons["Leave anyway"].firstMatch.tap()
 
         XCTAssertTrue(
             element(in: app, "clove.entry").waitForExistence(timeout: 10),
             "Leave anyway did not show entry"
         )
-        XCTAssertTrue(
-            element(in: app, "clove.entry.noFolder").waitForExistence(timeout: 10),
-            "Leave anyway left the folder open"
-        )
+        XCTAssertFalse(element(in: app, "clove.grid").exists, "Leave anyway left the grid open")
     }
 
     /// Opens one sample photo's detail from the grid (PRD P0-03).
@@ -391,6 +385,10 @@ final class CloveUITests: XCTestCase {
             element(in: app, "clove.root").waitForExistence(timeout: 30),
             "The Clove root view did not appear")
         openSettings(in: app)
+        chooseAdvanceDestination("Next unmarked photo", in: app)
+        setAutoAdvanceEnabled(false, in: app)
+        _ = scrollToSettingsControl(
+            "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
         setAppearanceMatchSystem(in: app, on: true)
         attachScreenshot(named: "settings-appearance-light")
         setAppearanceMatchSystem(in: app, on: false)
@@ -418,12 +416,38 @@ final class CloveUITests: XCTestCase {
                 of: app.buttons["clove.settings.appearance.theme.nord"], timeout: 10),
             "The relaunch lost the chosen theme")
 
+        setAutoAdvanceEnabled(true, in: app)
+        let destination = scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app)
+        XCTAssertTrue(
+            destination.label.contains("Next unmarked photo")
+                || String(describing: destination.value).contains("Next unmarked photo"),
+            "Disabling and relaunching lost the remembered auto-advance destination")
+        chooseAdvanceDestination("Next photo", in: app)
+        _ = scrollToSettingsControl(
+            "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
+
         // Matching the system again in a light simulator brings the Light theme back: the theme
         // follows the device, not the dark color scheme the app had set for Nord.
         setAppearanceMatchSystem(in: app, on: true)
         XCTAssertTrue(
             waitForSelection(of: app.buttons["clove.settings.appearance.theme.light"], timeout: 5),
             "Matching a light system did not bring the Light theme back")
+    }
+
+    @MainActor
+    private func chooseAdvanceDestination(_ name: String, in app: XCUIApplication) {
+        scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app).tap()
+        app.buttons[name].firstMatch.tap()
+    }
+
+    @MainActor
+    private func setAutoAdvanceEnabled(_ enabled: Bool, in app: XCUIApplication) {
+        let toggle = scrollToSettingsControl(
+            "clove.settings.autoAdvanceEnabled", in: app, scrollsUp: false)
+        if switchValue(toggle) != (enabled ? "1" : "0") {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(waitForValue(enabled ? "1" : "0", of: toggle, timeout: 5))
     }
 
     /// Puts the app back on Match system light/dark and the Light theme after the appearance test,
@@ -507,10 +531,32 @@ final class CloveUITests: XCTestCase {
 
     /// Entry opens the test library and the grid appears.
     @MainActor
+    private func checkEntryAndSettings(in app: XCUIApplication) {
+        XCTAssertTrue(element(in: app, "clove.entry.openFolder").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "96, Done")).firstMatch
+                .waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.buttons.matching(
+                NSPredicate(format: "label CONTAINS %@", "Not connected, Reconnect")
+            ).firstMatch.waitForExistence(timeout: 5))
+        attachScreenshot(named: "entry-resume")
+        element(in: app, "clove.nav.settings").tap()
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.appearance").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.culling").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app, "clove.settings.section.move").waitForExistence(timeout: 5))
+        attachScreenshot(named: "settings-sections")
+        back(in: app)
+    }
+
+    @MainActor
     private func openTestLibrary(in app: XCUIApplication) {
         let open = element(in: app, "clove.entry.openFolder")
         XCTAssertTrue(open.waitForExistence(timeout: 10), "Entry did not offer the test library")
         open.tap()
+        if element(in: app, "clove.detail").waitForExistence(timeout: 2) { back(in: app) }
         XCTAssertTrue(
             element(in: app, "clove.grid").waitForExistence(timeout: 10),
             "The grid did not appear after opening the folder"
@@ -1074,12 +1120,12 @@ final class CloveUITests: XCTestCase {
     /// fails the check instead of hanging the run.
     @MainActor
     private func scrollToSettingsControl(
-        _ identifier: String, in app: XCUIApplication, swipes: Int = 6
+        _ identifier: String, in app: XCUIApplication, swipes: Int = 6, scrollsUp: Bool = true
     ) -> XCUIElement {
         let control = element(in: app, identifier)
         for _ in 0..<swipes {
             if control.exists && control.isHittable { return control }
-            app.swipeUp()
+            if scrollsUp { app.swipeUp() } else { app.swipeDown() }
         }
         return control
     }
