@@ -18,7 +18,9 @@ struct SaveStatusIndicator: View {
     var showsOnlyProblems = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var previousGlyph = SaveGlyphState.saved
+    /// A fresh indicator has no history; it must not invent a Saved glyph during the delay.
+    @State private var previousGlyph: SaveGlyphState?
+    @State private var previousPhoto: PhotoIdentity?
     @State private var revealedSaving: SavingDelayKey?
     @State private var pulse = false
 
@@ -32,48 +34,62 @@ struct SaveStatusIndicator: View {
         SavingDelayKey(state: state, photo: photo, reduceMotion: reduceMotion)
     }
 
-    private var renderedState: SaveGlyphState {
-        state == .saving ? (revealedSaving == delayKey ? .saving : previousGlyph) : state
+    private var renderedState: SaveGlyphState? {
+        guard state == .saving else { return state }
+        if revealedSaving == delayKey { return .saving }
+        // Ignore another photo's history before the photo-change task has a chance to reset it.
+        return previousPhoto == photo ? previousGlyph : nil
     }
 
     private var hidesUnneededGlyph: Bool {
-        showsOnlyProblems && ![.failed, .disconnected, .viewOnly].contains(renderedState)
+        guard let renderedState else { return true }
+        return showsOnlyProblems && ![.failed, .disconnected, .viewOnly].contains(renderedState)
     }
 
     /// Whether the unsaved photos' list is presented (PRD P0-08).
     @State private var showingUnsaved = false
 
     var body: some View {
-        Button {
-            guard state == .failed else { return }
-            Task {
-                if let photo {
-                    await browsing.retryLatestChange(for: photo)
-                } else if browsing.batchReport?.canRetry == true {
-                    await browsing.retryFailedBatch()
-                } else {
-                    for change in browsing.unsavedChanges where change.state.failure != nil {
-                        await browsing.retryLatestChange(for: change.photo)
+        ZStack {
+            if let renderedState {
+                Button {
+                    guard state == .failed else { return }
+                    Task {
+                        if let photo {
+                            await browsing.retryLatestChange(for: photo)
+                        } else if browsing.batchReport?.canRetry == true {
+                            await browsing.retryFailedBatch()
+                        } else {
+                            for change in browsing.unsavedChanges where change.state.failure != nil
+                            {
+                                await browsing.retryLatestChange(for: change.photo)
+                            }
+                        }
+                    }
+                } label: {
+                    glyph(for: renderedState)
+                        .frame(width: 28, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(renderedState.label)
+                .accessibilityIdentifier(identifierPrefix)
+                .opacity(hidesUnneededGlyph ? 0 : 1)
+                .accessibilityHidden(hidesUnneededGlyph)
+                .contextMenu {
+                    if !browsing.unsavedChanges.isEmpty {
+                        Button("Unsaved marks") { showingUnsaved = true }
                     }
                 }
             }
-        } label: {
-            glyph
-                .frame(width: 28, height: 24)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(renderedState.label)
-        .accessibilityIdentifier(identifierPrefix)
-        .opacity(hidesUnneededGlyph ? 0 : 1)
-        .accessibilityHidden(hidesUnneededGlyph)
-        .contextMenu {
-            if !browsing.unsavedChanges.isEmpty {
-                Button("Unsaved marks") { showingUnsaved = true }
-            }
-        }
+        .frame(height: 24)
         .task(id: delayKey) {
             withAnimation(nil) {
+                if previousPhoto != photo {
+                    previousGlyph = nil
+                    previousPhoto = photo
+                }
                 revealedSaving = nil
                 pulse = false
             }
@@ -100,8 +116,8 @@ struct SaveStatusIndicator: View {
         }
     }
 
-    @ViewBuilder private var glyph: some View {
-        switch renderedState {
+    @ViewBuilder private func glyph(for shown: SaveGlyphState) -> some View {
+        switch shown {
         case .saved, .cloveOnly:
             Circle().fill(Color.clove.status.saved).frame(width: 8, height: 8)
         case .saving:
@@ -113,7 +129,7 @@ struct SaveStatusIndicator: View {
                 .foregroundStyle(Color.clove.status.failed)
         case .disconnected, .viewOnly:
             Image(
-                systemName: renderedState == .disconnected
+                systemName: shown == .disconnected
                     ? "externaldrive.badge.xmark" : "lock.fill"
             )
             .foregroundStyle(Color.clove.text.secondary)

@@ -241,14 +241,21 @@ extension CloveUITests {
         XCTAssertEqual(
             marks.value as? String, marksAtFit, "The zoomed drag rated the photo instead of panning"
         )
-        XCTAssertEqual(saveState.label, "Saved", "The zoomed drag wrote a mark")
+        waitForSavedGlyph(saveState)
+    }
+
+    @MainActor
+    private func waitForSavedGlyph(_ glyph: XCUIElement) {
+        let saved = expectation(
+            for: NSPredicate(format: "exists == true AND label == %@", "Saved"),
+            evaluatedWith: glyph)
+        wait(for: [saved], timeout: 10)
     }
 
     @MainActor
     private func markThePhoto(in app: XCUIApplication) {
         let saveState = element(in: app, "clove.detail.saveState")
-        XCTAssertTrue(saveState.waitForExistence(timeout: 10), "The detail view had no save state")
-        XCTAssertEqual(saveState.label, "Saved")
+        waitForSavedGlyph(saveState)
 
         let fourStars = element(in: app, "clove.detail.rate.4")
         XCTAssertTrue(
@@ -282,9 +289,7 @@ extension CloveUITests {
         wait(for: [twoStars], timeout: 10)
 
         let saveState = element(in: app, "clove.detail.saveState")
-        let saved = expectation(
-            for: NSPredicate(format: "label == %@", "Saved"), evaluatedWith: saveState)
-        wait(for: [saved], timeout: 10)
+        waitForSavedGlyph(saveState)
     }
 
     @MainActor
@@ -672,8 +677,10 @@ extension CloveUITests {
     private func retryTheFailedPhotos(in app: XCUIApplication) {
         let copy = "Save failed. Double-tap to retry."
         let failure = element(in: app, "clove.grid.saveState")
-        XCTAssertTrue(
-            failure.waitForExistence(timeout: 10), "The batch did not report its failure")
+        let reported = expectation(
+            for: NSPredicate(format: "exists == true AND label == %@", copy),
+            evaluatedWith: failure)
+        wait(for: [reported], timeout: 10)
         XCTAssertEqual(failure.label, copy, "The partial-failure copy changed")
         // The report exists only after the batch finished, so this checks the final state: the
         // photo that failed keeps the marks it had (PRD P0-09, P0-08).
