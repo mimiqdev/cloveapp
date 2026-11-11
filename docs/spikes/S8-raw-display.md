@@ -35,7 +35,7 @@ and two reduced HIF decodes next to the RAW variants.
   `CLOVE_RAW_DISPLAY_REPORT` set. Every count is clamped to the files present, so
   the Mac run used 1 RAW, 1 camera-preview pair, 1 colour file and 1 cache file and
   a 10-render sustained bound. Screen long edge was **2000 px**, a stand-in for a
-  device screen, not a measured screen size. The display run took **5.1 s** on the
+  device screen, not a measured screen size. The display run took **5.0 s** on the
   loaded Mac; the device estimate below is derived from that.
 - Report rows never contain the folder or file names: a RAW is `raw-01.<EXT>` and
   its camera preview shares the number (`raw-01.HIF`). The two JSON files are the
@@ -221,8 +221,8 @@ lower bound that includes framework caches and other work, and a decode buffer c
 be missed between samples. The report also records the RSS immediately before each
 render. With per-render `autoreleasepool` wrapping, the warm baseline no longer grows
 **inside a variant**: within each RAW variant it moved by at most 0.3 MiB. Across
-variants the warm RAW baselines run from 89.2 to 120.8 MiB, and the camera baselines
-from 167.5 to 193.9 MiB; the earlier build climbed from about 120 MiB to 585 MiB
+variants the warm RAW baseline medians run from 89.2 to 120.8 MiB (individual warm
+baselines start at 89.0 MiB), and the camera baseline medians from 167.5 to 193.9 MiB; the earlier build climbed from about 120 MiB to 585 MiB
 over the same RAW variants. The camera repeats rise by up to about 13 MiB. The cause
 of the remaining between-variant and camera growth is not isolated by this probe;
 it is consistent with framework caches but not proven to be only that. The
@@ -237,7 +237,7 @@ isolated allocation count.
 One fixture ARW, 2768×1848, one warm repeat set of 3, after the startup row
 (**151.4 ms**, `phase: startup`). Times in milliseconds to a materialized bitmap.
 Memory is MiB (2²⁰ bytes); peak and baseline are medians of the warm renders. The
-baseline no longer grows across the run, so the peak is a useful working-memory
+baseline no longer grows inside a variant, so the peak is a useful working-memory
 bound rather than an artifact of earlier variants.
 
 | Variant | Long edge asked | Actual output | Cold ms | Warm median ms | Warm p90 ms | Decoded MiB | Peak RSS MiB / baseline |
@@ -275,7 +275,8 @@ Baseline flatness across the same run, first → last of the three warm renders:
 
 The earlier build's baseline climbed from about 120 to 585 MiB over the same
 variants; per-render `autoreleasepool` wrapping removed that growth. The camera
-rows still show a small rise (up to about 13 MiB), attributed to framework caches
+rows still show a small rise (up to about 13 MiB), consistent with framework caches
+but not isolated by this probe
 rather than retained render bitmaps. These are process-wide RSS baselines, not
 isolated allocations.
 
@@ -332,7 +333,8 @@ The HEIC fixture has no embedded preview on macOS, so these preview requests use
 the RAW's own 1616 px preview. With a 0 ms dwell the render (about 67–100 ms on
 this host) had not finished before the reader left, so it counts as wasted; the
 300 and 800 ms rows finish inside the dwell and count as ready, with
-arrival-to-ready equal to preview plus render. A 20-photo device walk is what
+arrival-to-ready covering the preview, the render and the small orchestration gaps
+between them. A 20-photo device walk is what
 measures contention, because only then does one photo's render run into the next
 photo's preview.
 
