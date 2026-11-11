@@ -87,6 +87,18 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: "NO"
 
+  CloveTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: CloveTests
+    dependencies:
+      - target: Clove
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mimiqdev.clove.tests
+
   CloveUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -111,6 +123,7 @@ schemes:
       config: Debug
       gatherCoverageData: false
       targets:
+        - CloveTests
         - CloveUITests
   CloveLab:
     build:

@@ -23,6 +23,9 @@ public struct DesiredPhotoMarks: Sendable {
 
     public func entry(for photo: PhotoIdentity) -> Entry? { entries[photo] }
 
+    /// Confirming a revision does not change its input order.
+    public func revision(for photo: PhotoIdentity) -> UInt64 { revisions[photo] ?? 0 }
+
     public func shown(for photo: PhotoIdentity, confirmed: PhotoMarks) -> PhotoMarks {
         entries[photo]?.edit.after ?? confirmed
     }

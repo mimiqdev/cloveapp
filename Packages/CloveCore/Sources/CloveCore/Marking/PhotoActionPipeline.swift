@@ -4,7 +4,7 @@ public enum PhotoAction: Sendable {
     case batch([DesiredMarkEdit])
     case finishing(GroupFinishingPlan, [DesiredMarkEdit])
     case keep([DesiredMarkEdit])
-    case move(RejectMovePlan, kept: [DesiredMarkEdit])
+    case move(RejectMovePlan, kept: [DesiredMarkEdit], revisions: [PhotoIdentity: UInt64])
     case moveUndo(RejectMoveUndoEntry, [DesiredMarkEdit])
     case retry([DesiredMarkEdit])
     case retryMove(RejectMoveResult, kept: [DesiredMarkEdit])

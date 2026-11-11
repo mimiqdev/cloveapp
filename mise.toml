@@ -10,11 +10,11 @@ run = "./scripts/generate-xcodeproj.sh"
 
 [tasks.lint]
 description = "Lint Swift sources with swift-format"
-run = "swift format lint --strict --recursive --configuration .swift-format Clove CloveLab CloveUITests Packages"
+run = "swift format lint --strict --recursive --configuration .swift-format Clove CloveLab CloveTests CloveUITests Packages"
 
 [tasks.format]
 description = "Format Swift sources in place with swift-format"
-run = "swift format format --in-place --recursive --configuration .swift-format Clove CloveLab CloveUITests Packages"
+run = "swift format format --in-place --recursive --configuration .swift-format Clove CloveLab CloveTests CloveUITests Packages"
 
 [tasks.test-core]
 description = "Run CloveCore package tests on macOS"

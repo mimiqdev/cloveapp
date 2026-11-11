@@ -201,14 +201,6 @@ protocol FolderLibrary: AnyObject {
     /// it showed the folder.
     var openGeneration: Int { get }
 
-    /// Whether a change is still admitted and unfinished, read from the write queue itself
-    /// (PRD P0-08).
-    ///
-    /// The leaving question asks this after draining: the queue's own answer cannot lag behind a
-    /// stream the screen has not caught up with yet. A failed change is finished for draining and
-    /// stays for an explicit retry.
-    func hasUnfinishedWrites() async -> Bool
-
     /// Whether the group is complete, and where the group view goes next, following C12's
     /// setting (PRD In-group culling, group completion; PRD P0-12).
     ///
@@ -333,8 +325,6 @@ extension FolderLibrary {
     /// A library that installed nothing answers a generation a reader compares with zero, and one
     /// with no writes has nothing unfinished (PRD P0-02, P0-08).
     var openGeneration: Int { 0 }
-
-    func hasUnfinishedWrites() async -> Bool { false }
 
     func drainWrites() async {}
 

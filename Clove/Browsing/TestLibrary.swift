@@ -661,12 +661,6 @@ final class TestLibrary: FolderLibrary {
         try? await Task.sleep(for: drainDelay)
     }
 
-    /// Whether a change admitted in this open is still unfinished, so Wait for writes keeps the
-    /// question (PRD P0-08).
-    func hasUnfinishedWrites() async -> Bool {
-        changes.values.contains { $0.state.isUnfinished }
-    }
-
     /// Closes the sample folder, so leaving with unfinished writes really drops its photos
     /// (PRD P0-08).
     func closeFolder() async {

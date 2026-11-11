@@ -79,6 +79,7 @@ while [ "$attempt" -le "$max_attempts" ]; do
     xcodebuild test \
         -project Clove.xcodeproj \
         -scheme Clove \
+        -only-testing:CloveTests \
         -only-testing:CloveUITests \
         -destination "id=$udid" \
         -derivedDataPath .build/DerivedData.noindex 2>&1 | tee "$log"

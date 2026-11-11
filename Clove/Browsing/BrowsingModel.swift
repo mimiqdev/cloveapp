@@ -127,7 +127,6 @@ final class BrowsingModel {
     private var actionPipeline = PhotoActionPipeline()
     private var actionConsumer: Task<Void, Never>?
     private var finishingActions = 0
-    private var batchContexts: [UInt64: Int] = [:]
     private var shownGeneration: Int
     private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
     private var keepResults: [PhotoIdentity: MarkChangeStatus] = [:]
@@ -162,6 +161,7 @@ final class BrowsingModel {
     /// How many opens this scene started, so a leaving destination never replaces a folder the
     /// user opened while it waited (PRD P0-08).
     private var openRequests = 0
+    private var folderClose: Task<Void, Never>?
 
     /// The saved scene waiting for its folder to hold the photos it names (PRD P0-14).
     ///
@@ -184,6 +184,13 @@ final class BrowsingModel {
         self.recentFailures = [:]
         self.confirmedPhotos = library.photos
         refresh()
+        for photo in confirmedPhotos {
+            guard let status = library.latestChange(for: photo.id), status.state.isUnfinished else {
+                continue
+            }
+            let edit = request(status.requested, for: photo.id)
+            desiredMarks.finish(edit, state: status.state)
+        }
         updateTask = Task { [weak self, updates = library.updates] in
             for await update in updates {
                 guard let self else { return }
@@ -278,6 +285,7 @@ final class BrowsingModel {
     /// coming back from the grid does not need the picker again. A folder that opens answers
     /// whatever the last failed open left on entry, so the message goes with it (PRD P0-02).
     func openFolder() {
+        guard !hasLeftFolder else { return }
         openRequests += 1
         pendingRestore = nil
         folderFailure = nil
@@ -301,6 +309,7 @@ final class BrowsingModel {
         // An earlier folder's loss and save states do not apply to whatever this open installs.
         // Clearing the loss before the await keeps a loss the new open reports (PRD P0-02).
         folderLocationLoss = nil
+        await folderClose?.value
         await drainActions()
         folderFailure = await library.pick(url)
         guard folderFailure == nil else { return }
@@ -325,7 +334,7 @@ final class BrowsingModel {
     /// the question comes first; reopening the folder that is already open is not leaving it.
     func reopen(_ recent: RecentFolder) async {
         pendingRestore = nil
-        if state.folder == recent.identity {
+        if !hasLeftFolder, state.folder == recent.identity {
             openRequests += 1
             recentFailures[recent.id] = nil
             folderFailure = nil
@@ -359,6 +368,7 @@ final class BrowsingModel {
         // The reopen reads the folder again, so the loss the watch reported is no longer current,
         // and a loss the new open reports after the await still applies (PRD P0-02).
         folderLocationLoss = nil
+        await folderClose?.value
         await drainActions()
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
@@ -579,10 +589,6 @@ final class BrowsingModel {
     /// The latest completed batch and the desired marks each photo had before it.
     private(set) var lastBatch: BatchMarkApplication?
 
-    /// What the multi-select bar reports for the batch it applied, or nil when there is nothing
-    /// to report or the bar dismissed it (PRD P0-09, PRD Failure and recovery).
-    private(set) var batchReport: BatchMarkReport?
-
     /// The photos one batch marks: the selection narrowed to the photos the grid shows, in grid
     /// order (PRD P0-09). A photo the filter hides stays selected and is not marked.
     var batchTargets: [GridPhoto] {
@@ -600,10 +606,6 @@ final class BrowsingModel {
     private var batchSelection: BatchSelection {
         BatchSelection(groups: groups, selection: state.selection)
     }
-
-    /// How many times multi-select ended, so a batch that finishes after Done reports nothing
-    /// into a later session (PRD P0-09).
-    private var selectionClearances = 0
 
     /// Enters multi-select on one cell's photos (PRD P0-09).
     ///
@@ -631,8 +633,6 @@ final class BrowsingModel {
     /// Failed photos keep their desired marks and unsaved status after selection ends.
     func clearSelection() {
         state.selection = []
-        batchReport = nil
-        selectionClearances += 1
     }
 
     /// Updates the selected photos immediately and queues one batch with their before and after marks.
@@ -642,8 +642,7 @@ final class BrowsingModel {
         guard !plan.items.isEmpty else { return }
         let edits = plan.items.map { request($0.change, for: $0.photo) }
         lastMarkEdits = edits
-        let id = submit(.batch(edits))
-        batchContexts[id] = selectionClearances
+        submit(.batch(edits))
     }
 
     // MARK: - Move rejects
@@ -674,11 +673,6 @@ final class BrowsingModel {
     private(set) var isMovingRejects = false
     private(set) var rejectMoveFinishedCount = 0
 
-    /// The progress steps of the next or running Move rejects (PRD P0-10).
-    func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
-        await library.rejectMoveProgress()
-    }
-
     /// Plans Move rejects for the open folder's rejected photos (PRD P0-10).
     ///
     /// The plan is the confirmation sheet's input; nothing moves until ``runRejectMove(_:)``.
@@ -699,7 +693,11 @@ final class BrowsingModel {
         let edits = kept.map { request(.rating(.unrated), for: $0) }
         lastMarkEdits = edits
         submit(.keep(edits))
-        let id = submit(.move(plan, kept: edits))
+        let revisions = Dictionary(
+            uniqueKeysWithValues: storedPhotos.filter(\.marks.isRejected).map {
+                ($0.id, desiredMarks.revision(for: $0.id))
+            })
+        let id = submit(.move(plan, kept: edits, revisions: revisions))
         moveCompletions[id] = completion
     }
 
@@ -751,14 +749,6 @@ final class BrowsingModel {
         }
         let id = submit(.retryMove(completed.result, kept: keptEditsByMove[completed.id] ?? []))
         moveCompletions[id] = completion
-    }
-
-    /// Dismisses the batch's report without retrying (PRD Failure and recovery: Cancel).
-    ///
-    /// A retry that is already running will not put the report back, so Cancel leaves the bar
-    /// without a failure report; the photos that did not save keep their failed status for U7.
-    func dismissBatchReport() {
-        batchReport = nil
     }
 
     /// The latest change to one photo with its save state, or nil when nothing was requested
@@ -814,13 +804,11 @@ final class BrowsingModel {
             case .mark(let edit):
                 _ = await persist([edit])
             case .batch(let edits):
-                let clearances = batchContexts.removeValue(forKey: entry.id)
                 let result = await persist(edits)
                 lastBatch = BatchMarkApplication(
                     result: result,
                     marksBefore: Dictionary(
                         uniqueKeysWithValues: edits.map { ($0.photo, $0.before) }))
-                if clearances == selectionClearances { batchReport = BatchMarkReport(result) }
                 announcePartialFailure(result)
             case .finishing(let plan, let edits):
                 await library.recordGroupFinishing(plan.groupID)
@@ -839,7 +827,6 @@ final class BrowsingModel {
                     DesiredMarkRestore.retry($0, current: shownMarks(for: $0.photo)) != nil
                 }
                 let result = await persist(eligible)
-                if let report = batchReport { batchReport = report.merging(result) }
                 if let previous = lastGroupFinishing {
                     var statuses = Dictionary(
                         uniqueKeysWithValues: previous.outcomes.map {
@@ -854,8 +841,8 @@ final class BrowsingModel {
             case .keep(let edits):
                 let result = await persist(edits)
                 for status in result.outcomes { keepResults[status.identity] = status }
-            case .move(let preview, let kept):
-                await performMove(preview, kept: kept, actionID: entry.id)
+            case .move(let preview, let kept, let revisions):
+                await performMove(preview, kept: kept, revisions: revisions, actionID: entry.id)
             case .retryMove(let previous, let kept):
                 await performMoveRetry(previous, kept: kept, actionID: entry.id)
             case .moveUndo(let move, let edits):
@@ -867,7 +854,8 @@ final class BrowsingModel {
     }
 
     private func performMove(
-        _ preview: RejectMovePlan, kept: [DesiredMarkEdit], actionID: UInt64
+        _ preview: RejectMovePlan, kept: [DesiredMarkEdit],
+        revisions: [PhotoIdentity: UInt64], actionID: UInt64
     ) async {
         isMovingRejects = true
         defer { isMovingRejects = false }
@@ -878,6 +866,7 @@ final class BrowsingModel {
             let excluded = Set(kept.map(\.photo))
             let rejected = storedPhotos.filter {
                 $0.marks.isRejected && !excluded.contains($0.id)
+                    && revisions[$0.id] == desiredMarks.revision(for: $0.id)
             }.map(\.id)
             await library.drainWrites()
             let plan = try await library.planRejectMove(
@@ -1178,11 +1167,19 @@ final class BrowsingModel {
         if let lastViewed = state.currentPhoto { library.setEntryResumePhoto(lastViewed) }
         state.route = .entry
         hasLeftFolder = true
-        await drainActions()
-        showEntryAfterLeaving()
-        // Leaving closes the folder even when the next destination never opens, so its scan stops
-        // and its scope is not held for a folder the user no longer sees (G1 folder access).
-        await library.closeFolder()
+        state.folder = nil
+        let generation = library.openGeneration
+        let close = Task {
+            await drainActions()
+            // Every later open waits for this close, so it can only end this generation.
+            guard library.openGeneration == generation, hasLeftFolder, state.folder == nil else {
+                return
+            }
+            showEntryAfterLeaving()
+            await library.closeFolder()
+        }
+        folderClose = close
+        await close.value
         // A folder the user opened while the close drained wins: the destination they were
         // heading for before that must not replace it (PRD P0-08).
         guard token == openRequests else { return }
@@ -1429,8 +1426,6 @@ final class BrowsingModel {
         // Another folder replaces every selected photo's identity, so the batch's report and
         // U8's undo snapshot go with the selection.
         lastBatch = nil
-        batchReport = nil
-        selectionClearances += 1
         // Whatever the folder published before this screen caught up (a scan batch that landed
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
@@ -1469,8 +1464,6 @@ final class BrowsingModel {
         let present = Set(storedPhotos.map(\.id))
         if !state.selection.isSubset(of: present) {
             state.selection.formIntersection(present)
-            batchReport = nil
-            selectionClearances += 1
         }
         if let current = state.currentPhoto, !present.contains(current) {
             state.currentPhoto = nil
