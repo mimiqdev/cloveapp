@@ -539,7 +539,8 @@ extension CloveUITests {
     private func cullTheGroup(in app: XCUIApplication) {
         // The group opens at its first undecided photo, with detail's capsule.
         XCTAssertEqual(groupHeader(in: app).label, "1 undecided")
-        XCTAssertTrue(element(in: app, "clove.detail.filmstrip.mmq02681").isSelected)
+        let capsule = element(in: app, "clove.detail.capsule")
+        XCTAssertTrue(waitForValue("Unmarked", of: capsule, timeout: 5))
         element(in: app, "clove.detail.capsule.stars.3").tap()
         XCTAssertTrue(element(in: app, "clove.group.continue").waitForExistence(timeout: 5))
         element(in: app, "clove.group.continue").tap()
@@ -553,11 +554,11 @@ extension CloveUITests {
         }
         nextGroup.tap()
         element(in: app, "clove.detail.capsule.stars.4").tap()
-        let second = element(in: app, "clove.detail.filmstrip.mmq02697")
-        XCTAssertTrue(waitForSelection(of: second, timeout: 5))
+        XCTAssertEqual(groupHeader(in: app).label, "2 undecided")
+        XCTAssertTrue(waitForValue("Unmarked", of: capsule, timeout: 5))
         element(in: app, "clove.detail.capsule.stars.3").tap()
-        let last = element(in: app, "clove.detail.filmstrip.mmq02698")
-        XCTAssertTrue(waitForSelection(of: last, timeout: 5))
+        XCTAssertEqual(groupHeader(in: app).label, "1 undecided")
+        XCTAssertTrue(waitForValue("Unmarked", of: capsule, timeout: 5))
         element(in: app, "clove.group.rejectUnmarked").tap()
         XCTAssertTrue(element(in: app, "clove.group.continue").waitForExistence(timeout: 5))
         element(in: app, "clove.group.continue").tap()

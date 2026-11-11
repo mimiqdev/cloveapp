@@ -42,7 +42,9 @@ struct MoveRejectsSheet: View {
                 Text(
                     total == 0
                         ? "Clearing kept rejects"
-                        : "Moving \(min(finished + 1, total)) of \(total) photos"
+                        : total == 1
+                            ? "Moving 1 photo"
+                            : "Moving \(min(finished + 1, total)) of \(total) photos"
                 )
                 .accessibilityIdentifier("clove.moves.progress")
             }
