@@ -324,7 +324,7 @@ struct DetailDisplayPresentationTests {
         scroll.setContentOffset(
             CGPoint(
                 x: (scroll.contentSize.width - scroll.bounds.width) * 0.7,
-                y: (scroll.contentSize.height - scroll.bounds.height) * 0.3), animated: false)
+                y: scroll.contentOffset.y), animated: false)
         let before = try #require(preview.zoomSnapshot)
         browsing.openPhoto(group.members[1])
         try await waitFor { source.prefetched.last?.current.photo == group.members[1] }
