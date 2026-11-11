@@ -4,6 +4,10 @@ Figma: https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Nativ
 
 Working rule: the PRD is a guide, not the source of truth. Design decisions here can override it.
 
+## Drive disconnected drops unsaved marks (owner decision, 2026-11-11)
+
+When the drive disconnects, stop the action and write queues and drop the folder's pending and failed marks and their status. Show the photos' last-read marks and the existing disconnected banner. Marking stays off until Reopen. Reopen reads the XMP sidecars fresh; no unfinished edits, retries or conflict state carry across the open. The XMP and photo are the source of truth.
+
 ## Filmstrip group tap (owner decision, 2026-11-11)
 
 In detail, tapping a collapsed group in the filmstrip jumps to the group's first photo, and the group expands in place on its tint. It no longer opens group review, which replaced the whole filmstrip with the group's photos. Group review opens from the grid's group stack.

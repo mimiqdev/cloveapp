@@ -24,8 +24,8 @@ import Foundation
 ///
 /// The queue is an actor, so its state needs no other lock. Writes for different photos may
 /// run at the same time; writes to one sidecar are serialized by ``SidecarMarkWriter``.
-/// Admitted changes always finish, including when the caller's task is cancelled, so a
-/// cancelled UI action cannot leave a half-written state.
+/// Ordinary caller cancellation does not interrupt admitted work. A disconnect explicitly
+/// discards the folder's requests and cancels its writers before another replacement starts.
 public actor MarkWriteQueue {
     /// The sidecar writer shared by every change (G1 Safe writes serialization).
     private let writer: SidecarMarkWriter
@@ -101,6 +101,11 @@ public actor MarkWriteQueue {
     /// - Returns: The change's final status, with the requested marks kept on failure.
     @discardableResult
     public func apply(_ change: MarkChange, to set: ScannedPhotoSet) async -> MarkChangeStatus {
+        guard !Task.isCancelled else {
+            return MarkChangeStatus(
+                id: MarkChangeID(), identity: set.id, requested: change,
+                state: .failed(MarkWriteFailure(classifying: CancellationError())))
+        }
         guard !change.isEmpty else {
             return MarkChangeStatus(
                 id: MarkChangeID(), identity: set.photoSet.id, requested: change,
@@ -112,8 +117,7 @@ public actor MarkWriteQueue {
         let id = admit(change, for: set)
         await waitFor(id)
         return changes[id]
-            ?? MarkChangeStatus(
-                id: id, identity: set.photoSet.id, requested: change, state: .writing)
+            ?? Self.disconnected(id: id, photo: set.id, change: change)
     }
 
     /// Applies one change to many photo sets and returns the per-photo results (PRD P0-09).
@@ -126,6 +130,15 @@ public actor MarkWriteQueue {
     @discardableResult
     public func apply(_ change: MarkChange, to sets: [ScannedPhotoSet]) async -> MarkBatchResult {
         let batchID = MarkBatchID()
+        guard !Task.isCancelled else {
+            return MarkBatchResult(
+                id: batchID, change: change,
+                outcomes: sets.map {
+                    MarkChangeStatus(
+                        id: MarkChangeID(), identity: $0.id, requested: change,
+                        state: .failed(MarkWriteFailure(classifying: CancellationError())))
+                })
+        }
         var ids: [MarkChangeID] = []
         var outcomes: [MarkChangeStatus] = []
         for set in sets {
@@ -141,11 +154,13 @@ public actor MarkWriteQueue {
             }
             ids.append(admit(change, for: set))
         }
-        for id in ids {
+        for (index, id) in ids.enumerated() {
             await waitFor(id)
-            if let status = changes[id] { outcomes.append(status) }
+            outcomes.append(
+                changes[id] ?? Self.disconnected(id: id, photo: sets[index].id, change: change))
         }
-        batches[batchID] = AppliedBatch(change: change, ids: ids)
+        let remaining = ids.filter { changes[$0] != nil }
+        if !remaining.isEmpty { batches[batchID] = AppliedBatch(change: change, ids: remaining) }
         return MarkBatchResult(id: batchID, change: change, outcomes: outcomes)
     }
 
@@ -214,7 +229,10 @@ public actor MarkWriteQueue {
             if let retried = await retry(id) { outcomes.append(retried) }
         }
         let result = MarkBatchResult(id: MarkBatchID(), change: batch.change, outcomes: outcomes)
-        batches[result.id] = AppliedBatch(change: batch.change, ids: outcomes.map(\.id))
+        let remaining = outcomes.map(\.id).filter { changes[$0] != nil }
+        if !remaining.isEmpty {
+            batches[result.id] = AppliedBatch(change: batch.change, ids: remaining)
+        }
         return result
     }
 
@@ -256,6 +274,40 @@ public actor MarkWriteQueue {
             Task { await self?.removeObserver(observerID) }
         }
         return stream
+    }
+
+    /// Stops a disconnected folder's writers and drops all of its requests and status.
+    /// Canceled writers remove their own staging files; no request remains available to retry.
+    public func discardChanges(in folder: FolderIdentity) {
+        let photos = Set(latestByPhoto.keys.filter { $0.folderID == folder })
+            .union(writeTasks.keys.filter { $0.folderID == folder })
+        for photo in photos {
+            writeTasks[photo]?.cancel()
+            pending[photo] = nil
+            failed[photo] = nil
+            latestByPhoto[photo] = nil
+        }
+        let discarded = order.filter { changes[$0]?.identity.folderID == folder }
+        for id in discarded {
+            changes[id] = nil
+            sets[id] = nil
+            resumeWaiters(for: id)
+        }
+        order.removeAll { changes[$0] == nil }
+        for (id, var batch) in batches {
+            batch.ids.removeAll { changes[$0] == nil }
+            batches[id] = batch.ids.isEmpty ? nil : batch
+        }
+        finishDrainingIfIdle()
+    }
+
+    private static func disconnected(
+        id: MarkChangeID, photo: PhotoIdentity, change: MarkChange
+    ) -> MarkChangeStatus {
+        MarkChangeStatus(
+            id: id, identity: photo, requested: change,
+            state: .failed(
+                MarkWriteFailure(reason: .locationUnavailable, message: "The drive disconnected.")))
     }
 
     /// Forgets a folder's unfinished and failed changes once its work has drained
@@ -435,11 +487,20 @@ public actor MarkWriteQueue {
     /// finish with this write's outcome; a request whose fields a newer one overwrote was
     /// already superseded at admission.
     private func runWrites(for identity: PhotoIdentity) async {
-        while let current = pending[identity], !current.waiting.isEmpty {
+        while !Task.isCancelled, let current = pending[identity], !current.waiting.isEmpty {
             guard let set = latestSet(for: identity) else { break }
             let attempted = current.waiting
             for id in attempted { transition(id, to: .writing) }
             let failure = await perform(current.fields, for: set)
+            guard !Task.isCancelled else { break }
+            if let failure, failure.reason == .locationUnavailable {
+                // Publish the location loss once, then retain none of this folder's status.
+                for id in attempted {
+                    if let status = changes[id] { notify(status.withState(.failed(failure))) }
+                }
+                discardChanges(in: identity.folderID)
+                break
+            }
 
             if var record = pending[identity] {
                 record.waiting.removeAll { attempted.contains($0) }
@@ -527,6 +588,7 @@ public actor MarkWriteQueue {
 
         if usesCloveStorage {
             do {
+                try Task.checkCancellation()
                 try await store.apply(stored, to: set.photoSet.id)
             } catch {
                 if failure == nil { failure = MarkWriteFailure(classifying: error) }

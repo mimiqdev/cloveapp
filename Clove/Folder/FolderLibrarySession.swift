@@ -92,6 +92,7 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// The latest save state per photo, kept in step with C4's ordered stream (PRD P0-08).
     private var changes = PhotoChangeStates()
+    private var isDisconnected = false
 
     /// The session holding the open folder's scope, ended when another folder opens.
     private var openSession: FolderAccessSession?
@@ -182,6 +183,11 @@ final class FolderLibrarySession: FolderLibrary {
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         updates = stream
         updatesContinuation = continuation
+        observeWriteStates()
+    }
+
+    private func observeWriteStates() {
+        writeStatusTask?.cancel()
         // The observer holds the queue and the stream, never the library: a closed scene must be
         // able to release the library and, with it, the folder's scope.
         writeStatusTask = Task { [weak self, stores] in
@@ -240,6 +246,17 @@ final class FolderLibrarySession: FolderLibrary {
         await stores.writes.drain()
     }
 
+    func discardPendingChanges() async {
+        isDisconnected = true
+        changes = PhotoChangeStates()
+        writeStatusTask?.cancel()
+        writeStatusTask = nil
+        openScan?.cancel()
+        scanTask?.cancel()
+        guard case .success(let stores) = await resolvedStores() else { return }
+        await stores.writes.discardChanges(in: folder)
+    }
+
     /// Checks the open folder's location now, for a scene that came back to the foreground
     /// (PRD P0-02, G1 folder access). Nothing is watched while no folder is open.
     func checkFolderLocationNow() async {
@@ -291,7 +308,10 @@ final class FolderLibrarySession: FolderLibrary {
     /// counts it as a failure and the photo keeps the marks it had (PRD P0-08).
     func apply(_ items: [BatchMarkItem]) async -> MarkBatchResult {
         let change = items.first?.change ?? MarkChange()
-        guard let session = openSession, !items.isEmpty else {
+        guard !Task.isCancelled else {
+            return MarkBatchResult(id: MarkBatchID(), change: change, outcomes: [])
+        }
+        guard !isDisconnected, let session = openSession, !items.isEmpty else {
             return Self.refusedBatch(
                 items, change: change, reason: .locationUnavailable,
                 message: "The open folder no longer holds these photos.")
@@ -321,6 +341,7 @@ final class FolderLibrarySession: FolderLibrary {
         }
         var outcomes = refused
         for (change, sets) in byChange {
+            guard !isDisconnected, !Task.isCancelled else { break }
             let admitted: MarkBatchResult? = try? await session.withAdmittedWork {
                 await stores.writes.apply(change, to: sets)
             }
@@ -336,6 +357,12 @@ final class FolderLibrarySession: FolderLibrary {
                 continue
             }
             outcomes.append(contentsOf: result.outcomes)
+            if let loss = result.outcomes.first(where: {
+                $0.state.failure?.reason == .locationUnavailable
+            }) {
+                record(loss)
+                break
+            }
         }
         outcomes.sort { (order[$0.identity] ?? .max) < (order[$1.identity] ?? .max) }
         // Fold confirmations before returning; the status observer may still be catching up.
@@ -680,6 +707,8 @@ final class FolderLibrarySession: FolderLibrary {
         scanGeneration += 1
         let generation = scanGeneration
         folder = session.folder.id
+        isDisconnected = false
+        observeWriteStates()
         openSession = session
         store = FolderPhotos()
         changes = PhotoChangeStates()
@@ -852,7 +881,7 @@ final class FolderLibrarySession: FolderLibrary {
         storedMarks: [PhotoIdentity: CloveStoredMarks],
         generation: Int
     ) -> [ScannedPhotoSet] {
-        guard generation == scanGeneration else { return [] }
+        guard generation == scanGeneration, !isDisconnected else { return [] }
         let items = items.filter { item in
             guard case .photo(let set) = item else { return true }
             return !movedRejectIdentities.contains(set.id)
@@ -870,7 +899,7 @@ final class FolderLibrarySession: FolderLibrary {
         sets: [ScannedPhotoSet],
         generation: Int
     ) {
-        guard generation == scanGeneration else { return }
+        guard generation == scanGeneration, !isDisconnected else { return }
         let timeZone = TimeZone.current
         var times: [PhotoIdentity: PhotoTimeState] = [:]
         for read in reads {
@@ -905,7 +934,7 @@ final class FolderLibrarySession: FolderLibrary {
         stores: Stores,
         generation: Int
     ) async {
-        guard generation == scanGeneration else { return }
+        guard generation == scanGeneration, !isDisconnected else { return }
         let recorded = FolderScanSummary(
             photoCount: summary.logicalPhotoCount,
             status: summary.status == .complete ? .complete : .partial)
@@ -1209,7 +1238,13 @@ final class FolderLibrarySession: FolderLibrary {
     /// carries the folder's identity and the open so a reader that had already suspended cannot
     /// apply it to a newer folder or to a later open of the same folder either.
     private func locationLost(_ loss: FolderLocationLoss, folder: FolderIdentity, generation: Int) {
-        guard generation == scanGeneration else { return }
+        guard generation == scanGeneration, !isDisconnected else { return }
+        isDisconnected = true
+        changes = PhotoChangeStates()
+        writeStatusTask?.cancel()
+        writeStatusTask = nil
+        openScan?.cancel()
+        scanTask?.cancel()
         publish(.locationLost(folder: folder, loss: loss, generation: generation))
         Task { [stores] in
             guard let access = try? await stores.value.access else { return }
@@ -1225,7 +1260,13 @@ final class FolderLibrarySession: FolderLibrary {
     /// an older change a newer one replaced, and painting its fields would show an older rating
     /// again. The same rule keeps ``latestChange(for:)`` equal to the queue's newest change.
     private func record(_ status: MarkChangeStatus) {
-        guard status.identity.folderID == folder else { return }
+        guard status.identity.folderID == folder, !isDisconnected else { return }
+        if status.state.failure?.reason == .locationUnavailable {
+            locationLost(
+                FolderLocationLoss(reason: .externalVolumeDisconnected, date: Date()),
+                folder: folder, generation: scanGeneration)
+            return
+        }
         changedPhotos.insert(status.identity)
         if changes.insert(status), status.state.isConfirmed {
             applyConfirmedProgressChange(status)

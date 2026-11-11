@@ -309,13 +309,17 @@ final class BrowsingModel {
         folderReplacements += 1
         defer { folderReplacements -= 1 }
         openRequests += 1
-        // An earlier folder's loss and save states do not apply to whatever this open installs.
-        // Clearing the loss before the await keeps a loss the new open reports (PRD P0-02).
+        // Clearing before the await keeps a loss the new open reports. A failed pick has not
+        // reconnected the old folder, so its disconnected gate must remain in effect.
+        let previousLoss = folderLocationLoss
         folderLocationLoss = nil
         await folderClose?.value
         await drainActions()
         folderFailure = await library.pick(url)
-        guard folderFailure == nil else { return }
+        guard folderFailure == nil else {
+            if folderLocationLoss == nil { folderLocationLoss = previousLoss }
+            return
+        }
         // PRD Failure and recovery: a real open reads the actual XMP, so what is on screen starts
         // from this open's changes and never from a failure the closed folder left behind.
         changes = PhotoChangeStates()
@@ -337,7 +341,9 @@ final class BrowsingModel {
     /// the question comes first; reopening the folder that is already open is not leaving it.
     func reopen(_ recent: RecentFolder) async {
         pendingRestore = nil
-        if !hasLeftFolder, state.folder == recent.identity {
+        if !hasLeftFolder, state.folder == recent.identity, folderLocationLoss == nil,
+            recentFailures[recent.id] == nil, recent.needsReconnect != true
+        {
             openRequests += 1
             recentFailures[recent.id] = nil
             folderFailure = nil
@@ -370,13 +376,14 @@ final class BrowsingModel {
         folderReplacements += 1
         defer { folderReplacements -= 1 }
         openRequests += 1
-        // The reopen reads the folder again, so the loss the watch reported is no longer current,
-        // and a loss the new open reports after the await still applies (PRD P0-02).
+        // Keep a new open's own loss, and retain the old gate if reopening fails.
+        let previousLoss = folderLocationLoss
         folderLocationLoss = nil
         await folderClose?.value
         await drainActions()
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
+            if folderLocationLoss == nil { folderLocationLoss = previousLoss }
             return
         }
         recentFailures[recent.id] = nil
@@ -456,7 +463,7 @@ final class BrowsingModel {
 
     /// Snapshots the allowed changes from shown marks and submits one finishing action.
     func runGroupFinishing(_ plan: GroupFinishingPlan) {
-        guard !isMovingRejects, !isChangingFolder, plan.availability.isAvailable else { return }
+        guard canMark, plan.availability.isAvailable else { return }
         let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
             request($0.change, for: $0.photo)
         }
@@ -590,7 +597,7 @@ final class BrowsingModel {
 
     /// Updates the selected photos immediately and queues one batch with their before and after marks.
     func applyBatch(_ action: BatchMarkAction, settings: AppSettings) {
-        guard !isMovingRejects, !isChangingFolder else { return }
+        guard canMark else { return }
         let plan = BatchMarkPlan(action: action, photos: batchTargets, settings: settings)
         guard !plan.items.isEmpty else { return }
         let edits = plan.items.map { request($0.change, for: $0.photo) }
@@ -642,11 +649,10 @@ final class BrowsingModel {
         _ plan: RejectMovePlan, kept: [PhotoIdentity],
         completion: @escaping (Result<RejectMoveResult, any Error>) -> Void
     ) {
-        guard !isChangingFolder else {
+        guard canMark else {
             completion(.failure(RejectMoveRefusal.disabled))
             return
         }
-        guard !isMovingRejects else { return }
         let edits = kept.map { request(.rating(.unrated), for: $0) }
         lastMarkEdits = edits
         submit(.keep(edits))
@@ -673,7 +679,7 @@ final class BrowsingModel {
 
     /// The toast restores the completed move and the exact marks its staged keeps left behind.
     func undoRejectMove(_ completed: CompletedRejectMove) {
-        guard !isMovingRejects, !isChangingFolder,
+        guard canMark,
             completed.folder == state.folder, completed.openGeneration == openGeneration,
             let photo = completed.keptIdentities.first ?? completed.result.movedIdentities.first
         else { return }
@@ -689,7 +695,7 @@ final class BrowsingModel {
 
     /// Submits a move undo to the existing ordered pipeline.
     func submitMoveUndo(_ entry: RejectMoveUndoEntry) {
-        guard !isMovingRejects, !isChangingFolder else { return }
+        guard canMark else { return }
         let edits = entry.keptPhotos.compactMap { kept -> DesiredMarkEdit? in
             var target = kept.marksAfter
             target.rating = .rejected
@@ -715,7 +721,7 @@ final class BrowsingModel {
         _ completed: CompletedRejectMove,
         completion: @escaping (Result<RejectMoveResult, any Error>) -> Void
     ) {
-        guard !isMovingRejects, !isChangingFolder, completed.openGeneration == openGeneration,
+        guard canMark, completed.openGeneration == openGeneration,
             completed.folder == state.folder
         else {
             completion(.failure(RejectMoveRefusal.disabled))
@@ -742,9 +748,14 @@ final class BrowsingModel {
         return storedPhotos[index].marks
     }
 
+    /// Inputs check admission before planning auto-advance as well as before submitting a mark.
+    var canMark: Bool {
+        !isMovingRejects && !isChangingFolder && !hasLeftFolder && folderLocationLoss == nil
+    }
+
     /// Shows the requested mark and submits its write before returning to the input handler.
     func apply(_ change: MarkChange, to photo: PhotoIdentity) {
-        guard !isMovingRejects, !isChangingFolder, !hasLeftFolder, !change.isEmpty else { return }
+        guard canMark, !change.isEmpty else { return }
         let edit = request(change, for: photo)
         lastMarkEdits = [edit]
         submit(.mark(edit))
@@ -782,7 +793,7 @@ final class BrowsingModel {
 
     private func consumeActions() async {
         var keptStatuses: [MarkChangeStatus] = []
-        while let entry = actionPipeline.beginNext() {
+        while !Task.isCancelled, let entry = actionPipeline.beginNext() {
             switch entry.action {
             case .mark(let edit):
                 _ = await persist([edit])
@@ -790,6 +801,7 @@ final class BrowsingModel {
                 _ = await persist(edits)
             case .finishing(let plan, let edits):
                 let result = await persist(edits)
+                guard !Task.isCancelled else { break }
                 lastGroupFinishing = GroupFinishingResult.applied(
                     plan,
                     statuses: Dictionary(
@@ -849,9 +861,12 @@ final class BrowsingModel {
                     && revisions[$0.id] == desiredMarks.revision(for: $0.id)
             }.map(\.id)
             await library.drainWrites()
+            try Task.checkCancellation()
             let plan = try await library.planRejectMove(
                 configuration: preview.configuration, rejected: rejected)
+            try Task.checkCancellation()
             let moved = try await library.runRejectMove(plan)
+            try Task.checkCancellation()
             let clearFailures = keptStatuses.compactMap { status -> RejectMoveOutcome? in
                 guard let failure = status.state.failure else { return nil }
                 return .failed(
@@ -877,6 +892,7 @@ final class BrowsingModel {
             refresh()
             moveCompletions.removeValue(forKey: actionID)?(.success(result))
         } catch {
+            guard !Task.isCancelled else { return }
             // A whole-request refusal restores only keeps the user has not changed since.
             let restores = kept.compactMap { edit -> DesiredMarkEdit? in
                 guard
@@ -938,7 +954,9 @@ final class BrowsingModel {
                 }
             }
             let clears = await persist(retryEdits)
+            try Task.checkCancellation()
             let retried = try await library.retryFailedRejects(in: previous.id, excluding: excluded)
+            try Task.checkCancellation()
             let failures = clears.outcomes.compactMap { status -> RejectMoveOutcome? in
                 guard let failure = status.state.failure else { return nil }
                 return .failed(
@@ -977,6 +995,7 @@ final class BrowsingModel {
         do {
             let result = try await library.undoRejectMove(
                 entry, currentMarks: current, restoring: edits)
+            try Task.checkCancellation()
             refresh()
             for restored in result.restored {
                 let edit =
@@ -995,6 +1014,7 @@ final class BrowsingModel {
                 result.restored.compactMap { library.latestChange(for: $0.identity) })
             lastMoveUndo = .success(result)
         } catch {
+            guard !Task.isCancelled else { return }
             let failure = MarkWriteFailure(classifying: error)
             for edit in edits { desiredMarks.finish(edit, state: .failed(failure)) }
             lastMoveUndo = .failure(error)
@@ -1009,8 +1029,17 @@ final class BrowsingModel {
     }
 
     private func persist(_ edits: [DesiredMarkEdit]) async -> MarkBatchResult {
+        guard !Task.isCancelled, folderLocationLoss == nil else {
+            return MarkBatchResult(id: MarkBatchID(), change: MarkChange(), outcomes: [])
+        }
         let result = await library.apply(
             edits.map { BatchMarkItem(photo: $0.photo, change: $0.change) })
+        guard !Task.isCancelled, folderLocationLoss == nil else { return result }
+        if result.outcomes.contains(where: { $0.state.failure?.reason == .locationUnavailable }) {
+            await discardDisconnectedChanges(
+                FolderLocationLoss(reason: .externalVolumeDisconnected, date: Date()))
+            return result
+        }
         for edit in edits {
             guard let status = result.outcomes.first(where: { $0.identity == edit.photo }) else {
                 continue
@@ -1093,7 +1122,7 @@ final class BrowsingModel {
     }
 
     private func retryFailedChanges(in photos: [PhotoIdentity]) {
-        guard !isMovingRejects, !isChangingFolder else { return }
+        guard canMark else { return }
         dismissSaveFailureToast()
         let edits = photos.compactMap { photo -> DesiredMarkEdit? in
             guard let entry = desiredMarks.entry(for: photo), entry.state.failure != nil else {
@@ -1105,6 +1134,31 @@ final class BrowsingModel {
         }
         guard !edits.isEmpty else { return }
         submit(.retry(edits))
+    }
+
+    /// Drive loss is terminal for this open's work. Reopen reads the files, with no retry state.
+    private func discardDisconnectedChanges(_ loss: FolderLocationLoss) async {
+        guard folderLocationLoss == nil else { return }
+        folderLocationLoss = loss
+        actionConsumer?.cancel()
+        actionPipeline.removePending()
+        desiredMarks = DesiredPhotoMarks()
+        desiredStatusIDs = [:]
+        changes = PhotoChangeStates()
+        storedPhotos = confirmedPhotos
+        previousFailedPhotos = []
+        lastMarkEdits = []
+        lastGroupFinishing = nil
+        lastRejectMove = nil
+        lastMoveUndo = nil
+        leavePrompt = nil
+        keptEditsByMove = [:]
+        isRejectMoveToastVisible = false
+        dismissSaveFailureToast()
+        let completions = moveCompletions.values
+        moveCompletions = [:]
+        for completion in completions { completion(.failure(RejectMoveRefusal.disabled)) }
+        await library.discardPendingChanges()
     }
 
     /// Checks the open folder's location now, as a return to the foreground asks (PRD P0-02).
@@ -1373,6 +1427,12 @@ final class BrowsingModel {
             resolvePendingRestore(scanFinished: true)
             await reloadRecents()
         case .change(let status):
+            guard folderLocationLoss == nil else { return }
+            if status.state.failure?.reason == .locationUnavailable {
+                await discardDisconnectedChanges(
+                    FolderLocationLoss(reason: .externalVolumeDisconnected, date: Date()))
+                return
+            }
             // A streamed transition keeps "Writing…" and "Saved" current without re-reading
             // every photo, and the merge rule keeps a finished change from moving backwards.
             changes.insert(status)
@@ -1382,8 +1442,7 @@ final class BrowsingModel {
             // A buffered loss can arrive after another folder opened, or after the same folder
             // opened again, so it only applies to the folder and the open this scene shows.
             guard folder == library.folder, generation == library.openGeneration else { return }
-            folderLocationLoss = loss
-            dismissSaveFailureToast()
+            await discardDisconnectedChanges(loss)
             if let index = recents.firstIndex(where: { $0.identity == folder }) {
                 recents[index].needsReconnect = true
             }
