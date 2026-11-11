@@ -239,6 +239,9 @@ struct DetailDisplayPresentationTests {
 
     @Test func secondTouchYieldsNavigationToPinch() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.layoutIfNeeded()
+        preview.setImage(
+            try testPixels(gray: 0), fullResolutionPixels: CGSize(width: 4000, height: 3000))
         let pan = DetailTestPan()
         pan.travel = CGPoint(x: -15, y: 0)
         pan.touches = 2
