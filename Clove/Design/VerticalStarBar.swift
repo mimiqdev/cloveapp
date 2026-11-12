@@ -220,16 +220,24 @@ struct VerticalStarBarDisplay: View {
     var isReject = false
 
     private let metrics = VerticalStarBarMetrics(size: .phone)
+    private static let spacing: CGFloat = 10
+    private static let chipSize: CGFloat = 40
+
+    /// The whole read-out, including the gap and reject chip, for stage placement.
+    static var size: CGSize {
+        let metrics = VerticalStarBarMetrics(size: .phone)
+        return CGSize(width: metrics.width, height: metrics.height + spacing + chipSize)
+    }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: Self.spacing) {
             VerticalStarBarStars(rating: rating, enabledRatings: enabledRatings, size: .phone)
                 .frame(width: metrics.width, height: metrics.height)
                 .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius))
             Image(systemName: "xmark")
                 .font(.subheadline)
                 .foregroundStyle(isReject ? Color.clove.reject : Color.clove.text.secondary)
-                .frame(width: 40, height: 40)
+                .frame(width: Self.chipSize, height: Self.chipSize)
                 .cloveGlass(in: Circle())
         }
         .allowsHitTesting(false)

@@ -15,10 +15,10 @@ public struct RejectMovePlanner: Sendable {
     public static let maximumSuffixAttempts = 1_000
 
     /// The file operations the plan's existence checks go through (PRD P0-10).
-    private let fileSystem: any RejectMoveFileSystem
+    private let fileSystem: any PhotoFileSystem
 
     /// Creates a planner over the production file system unless a test supplies another.
-    public init(fileSystem: any RejectMoveFileSystem = FoundationRejectMoveFileSystem()) {
+    public init(fileSystem: any PhotoFileSystem = FoundationPhotoFileSystem()) {
         self.fileSystem = fileSystem
     }
 
@@ -83,74 +83,42 @@ public struct RejectMovePlanner: Sendable {
             relativeFolderPath.isEmpty
             ? destinationURL
             : destinationURL.appendingPathComponent(relativeFolderPath, isDirectory: true)
-        let sources = members(of: set)
+        let sources = PhotoSetFileCollector(fileSystem: fileSystem).members(of: set)
+
         guard !sources.isEmpty else {
             return .refused(identity: identity, refusal: .outsideOpenedFolder)
         }
-        // PRD P0-10: one suffix for the whole set, so a RAW, its companions and its XMP still
-        // pair by stem after the move. The first attempt is the untouched name.
-        var attempt = 0
-        while attempt <= Self.maximumSuffixAttempts {
-            let files = sources.map { member in
-                RejectMoveFilePlan(
-                    role: member.role,
-                    source: member.url,
-                    destination: folder.appendingPathComponent(
-                        RejectMoveNaming.suffixed(member.url.lastPathComponent, attempt: attempt)))
-            }
-            do {
-                if try files.allSatisfy({ try fileSystem.exists(at: $0.destination) == false }) {
-                    return .ready(
-                        RejectMoveSetPlan(
-                            identity: identity, relativeFolderPath: relativeFolderPath,
-                            destinationFolder: folder, files: files))
+        do {
+            if let moves = try PhotoSetFileMovePlanner(fileSystem: fileSystem).plan(
+                sources: sources, folder: folder, maximumSuffixAttempts: Self.maximumSuffixAttempts)
+            {
+                let files = moves.map { move in
+                    let role: RejectMoveFileRole
+                    if move.source == set.photoSet.primary.url {
+                        role = .primary
+                    } else if move.source == set.photoSet.jpegCompanion?.url {
+                        role = .jpegCompanion
+                    } else if move.source == set.photoSet.heifCompanion?.url {
+                        role = .heifCompanion
+                    } else {
+                        role = .sidecar
+                    }
+                    return RejectMoveFilePlan(
+                        role: role, source: move.source, destination: move.destination)
                 }
-            } catch {
-                return .refused(
-                    identity: identity,
-                    refusal: .destinationCheckFailed(RejectMoveFailure(classifying: error)))
+                return .ready(
+                    RejectMoveSetPlan(
+                        identity: identity, relativeFolderPath: relativeFolderPath,
+                        destinationFolder: folder, files: files))
             }
-            attempt += 1
+        } catch {
+            return .refused(
+                identity: identity,
+                refusal: .destinationCheckFailed(RejectMoveFailure(classifying: error)))
         }
         return .refused(
             identity: identity,
             refusal: .destinationUnavailable(attempts: Self.maximumSuffixAttempts))
-    }
-
-    /// The set's files in primary, companion, sidecar order (G1 decision 5).
-    ///
-    /// The sidecar is the resolved packet from C2, falling back to C1's own spelling when the
-    /// caller already put it on the set. A RAW set scanned without a packet may have gained one
-    /// from C4, because rejecting or rating it writes `xmp:Rating` to C1's proposed spelling; that
-    /// packet moves with the set too. A set with no packet at all moves its images only, because
-    /// no XMP exists to carry (G1 decisions 2 and 6).
-    private func members(of set: ScannedPhotoSet) -> [(role: RejectMoveFileRole, url: URL)] {
-        var members: [(role: RejectMoveFileRole, url: URL)] = []
-        for file in set.photoSet.imageFiles {
-            guard let role = set.photoSet.role(of: file) else { continue }
-            switch role {
-            case .primary: members.append((.primary, file.url))
-            case .jpegCompanion: members.append((.jpegCompanion, file.url))
-            case .heifCompanion: members.append((.heifCompanion, file.url))
-            }
-        }
-        let sidecar = set.sidecar.resolvedURL ?? set.photoSet.sidecarURL ?? createdSidecar(of: set)
-        if let sidecar, !members.contains(where: { $0.url == sidecar }) {
-            members.append((.sidecar, sidecar))
-        }
-        return members
-    }
-
-    /// The packet C4 created after the scan for a RAW set, when it now exists.
-    ///
-    /// C2 found no packet, so a write went to C1's proposed spelling: the primary's name with
-    /// `.xmp`. Only that exact path is considered, because that is the one C4 writes.
-    private func createdSidecar(of set: ScannedPhotoSet) -> URL? {
-        guard case .absent = set.sidecar, set.photoSet.primary.format == .raw else { return nil }
-        let proposed =
-            set.photoSet.primary.url.deletingPathExtension().appendingPathExtension("xmp")
-        guard (try? fileSystem.exists(at: proposed)) == true else { return nil }
-        return proposed
     }
 
     /// Whether the set must not move at all, and why (PRD P0-10, G1 Sidecar naming).
@@ -178,11 +146,11 @@ public struct RejectMovePlanner: Sendable {
             relativeFolderPath.isEmpty
             ? request.rootURL
             : request.rootURL.appendingPathComponent(relativeFolderPath, isDirectory: true)
-        guard RejectMovePath.matches(sourceFolder, expectedFolder) else {
+        guard PhotoFilePath.matches(sourceFolder, expectedFolder) else {
             return .outsideOpenedFolder
         }
         for file in set.photoSet.fileURLs {
-            guard RejectMovePath.matches(file.deletingLastPathComponent(), sourceFolder) else {
+            guard PhotoFilePath.matches(file.deletingLastPathComponent(), sourceFolder) else {
                 return .outsideOpenedFolder
             }
         }

@@ -407,10 +407,21 @@ final class CloveFlowTests: XCTestCase {
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
         XCTAssertTrue(String(describing: element(app, "clove.detail.capsule").value).contains("4"))
-        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
-        let end = start.withOffset(CGVector(dx: 0, dy: -130))
-        start.press(forDuration: 0.1, thenDragTo: end)
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+        for (side, horizontalStart, nextPhoto) in [
+            ("right", 0.8, "MMQ02681.ARW"),
+            // Finishing the sample group advances to the following standalone photo.
+            ("left-third", 0.2, "MMQ02680.ARW"),
+        ] {
+            let start = preview.coordinate(
+                withNormalizedOffset: CGVector(dx: horizontalStart, dy: 0.5))
+            let end = start.withOffset(CGVector(dx: 0, dy: -130))
+            print("Swipe beside touch: \(side)")
+            start.press(
+                forDuration: 0.1, thenDragTo: end, withVelocity: .slow,
+                thenHoldForDuration: 2)
+            XCTAssertTrue(waitForLabel(nextPhoto, element(app, "clove.detail.fileName")))
+            XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
+        }
     }
 
     @MainActor

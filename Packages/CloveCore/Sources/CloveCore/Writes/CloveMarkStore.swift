@@ -11,10 +11,14 @@ public enum CloveMarkStoreError: Error, Hashable, Sendable, CustomStringConverti
     /// The stored file is not a valid Clove mark file, or names a different folder.
     /// The store refuses to overwrite it and reports the path and reason.
     case corruptStorage(URL, reason: String)
+    /// Rekeying stays within one opened folder's store, including its relative subfolders.
+    case differentFolderIdentities
 
     /// A developer-facing explanation; product copy belongs to the save-state UI.
     public var description: String {
         switch self {
+        case .differentFolderIdentities:
+            return "Stored marks can only be renamed within the same opened folder."
         case .corruptStorage(let url, let reason):
             return "Clove's stored marks at \(url.lastPathComponent) are unreadable: \(reason)"
         }
@@ -105,6 +109,26 @@ public actor CloveMarkStore {
         if let label = change.label { marks.label = label.isClear ? nil : label }
         storage.set(marks, for: identity)
         try save(storage, folderID: identity.folderID)
+    }
+
+    /// Moves a standalone photo's marks to its confirmed relative folder and stem.
+    ///
+    /// The caller drains `MarkWriteQueue` and prevents new writes during the rename. Both
+    /// identities belong to the same opened folder; relative subfolders may differ. Moving
+    /// within one storage file is atomic. An unmarked source clears a stale destination entry.
+    /// If this write fails after the caller moved the files, the marks stay under the old key;
+    /// the renamer reports that failure and stops, without retries or recovery.
+    public func rekey(from source: PhotoIdentity, to destination: PhotoIdentity) throws {
+        guard source.folderID == destination.folderID else {
+            throw CloveMarkStoreError.differentFolderIdentities
+        }
+        guard source != destination else { return }
+        var storage = try load(folderID: source.folderID)
+        let marks = storage.photo(for: source)?.marks ?? CloveStoredMarks()
+        guard !marks.isEmpty || storage.photo(for: destination) != nil else { return }
+        storage.set(CloveStoredMarks(), for: source)
+        storage.set(marks, for: destination)
+        try save(storage, folderID: source.folderID)
     }
 
     /// Drops a stored Reject after C6 confirms the move to `_Rejected`.
