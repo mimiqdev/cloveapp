@@ -92,14 +92,14 @@ depends = ["build-tests"]
 run = "./scripts/smoke.sh flows"
 
 [tasks.check]
-description = "Quick local check for every fix round: generate, lint, the core and imaging tests, build Clove for testing, the smoke test"
+description = "Quick local check for every change, with no simulator: generate, lint, the core and imaging tests, build Clove for testing"
 run = """
 set -eu
 mise run generate
 mise run lint
 mise run test-core
 mise run test-imaging
-mise run smoke
+mise run build-tests
 """
 
 # .github/workflows/verify.yml re-lists these steps as CI jobs; change both together.

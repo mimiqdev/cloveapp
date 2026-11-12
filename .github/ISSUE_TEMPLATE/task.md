@@ -35,9 +35,9 @@ Out of scope:
 ## Checks to run
 
 <!-- Exact commands. The worker pastes their output into the pull request.
-     mise run check on every fix round; CI runs the full gate (mise run verify's
-     coverage) on every push. Add test-lab, test-fixtures, test-release or
-     ui-flows when the change reaches them. -->
+     mise run check on every change (no simulator); CI runs the full gate
+     nightly. Add test-lab, test-fixtures or test-release when the change
+     reaches them, and run only the UI or app tests the change touches. -->
 
 ```sh
 mise run check
