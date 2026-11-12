@@ -11,6 +11,7 @@ final class GridPhotoCell: UICollectionViewCell {
     private var isUnavailable = false
     private var retriesUnavailable = false
     private var showsSelection = false
+    private var showsCurrent = false
     private var theme = CloveTheme.light
     private var isSelecting = false
     private var onOpenGroup: (GroupID) -> Void = { _ in }
@@ -25,7 +26,7 @@ final class GridPhotoCell: UICollectionViewCell {
     required init?(coder: NSCoder) { nil }
 
     func configure(
-        with item: GridCellItem, isSelected: Bool, isSelecting: Bool,
+        with item: GridCellItem, isSelected: Bool, isCurrent: Bool = false, isSelecting: Bool,
         thumbnails: any GridThumbnailSource, theme: CloveTheme,
         onOpenGroup: @escaping (GroupID) -> Void
     ) {
@@ -33,6 +34,7 @@ final class GridPhotoCell: UICollectionViewCell {
         currentItem = item
         currentCompanions = thumbnails.companions(for: item.photo.id)
         showsSelection = isSelected
+        showsCurrent = isCurrent
         self.theme = theme
         self.isSelecting = isSelecting
         self.onOpenGroup = onOpenGroup
@@ -74,7 +76,7 @@ final class GridPhotoCell: UICollectionViewCell {
         guard let item = currentItem else { return }
         let tile = GridTile(
             item: item, thumbnail: thumbnail, companions: currentCompanions,
-            isUnavailable: isUnavailable, isSelected: showsSelection,
+            isUnavailable: isUnavailable, isSelected: showsSelection, isCurrent: showsCurrent,
             isSelecting: isSelecting, openGroup: onOpenGroup)
         let theme = theme
         contentConfiguration = UIHostingConfiguration {
@@ -128,6 +130,8 @@ private struct GridTile: View {
     let companions: GridCompanions
     let isUnavailable: Bool
     let isSelected: Bool
+    /// The expanded Duo's group-member pane rings the member on screen (#198).
+    var isCurrent = false
     let isSelecting: Bool
     let openGroup: (GroupID) -> Void
     @Environment(\.cloveTheme) private var theme
@@ -154,9 +158,15 @@ private struct GridTile: View {
             }
             .background(Color.clove.surface.card)
         }
+        .overlay {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.clove.text.primary, lineWidth: 2)
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAddTraits(isSelected || isCurrent ? .isSelected : [])
         .accessibilityIdentifier(
             isCover
                 ? "clove.grid.group.\(item.group?.id.rawValue ?? "")"

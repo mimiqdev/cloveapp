@@ -47,6 +47,9 @@ struct GridCollectionView: UIViewRepresentable {
     var placeholderCount = 0
     /// Duo uses six columns in the grid and two beside a focused photo.
     var columnCount: Int?
+    /// Whether the cell drawing the current photo carries its ring. The expanded Duo's
+    /// group-member pane turns this on so the person can see which member is open (#198).
+    var highlightsCurrentPhoto = false
 
     /// Opens one photo's detail (PRD Grid, P0-03). A single tap never waits for a second one.
     let openPhoto: (PhotoIdentity) -> Void
@@ -91,6 +94,7 @@ struct GridCollectionView: UIViewRepresentable {
             collectionView.collectionViewLayout.invalidateLayout()
         }
         context.coordinator.thumbnails = thumbnails
+        context.coordinator.highlightsCurrentPhoto = highlightsCurrentPhoto
         context.coordinator.openPhoto = openPhoto
         context.coordinator.openGroup = openGroup
         context.coordinator.beginSelection = beginSelection
@@ -195,6 +199,13 @@ extension GridCollectionView {
         private var isSelectingEmpty = false
         var placeholderCount = 0
         var columnCount: Int?
+        var highlightsCurrentPhoto = false
+        /// The current photo the cell registration reads when it configures a cell (#198).
+        private var currentPhoto: PhotoIdentity?
+        /// The current photo and highlight flag the visible cells were configured with,
+        /// so moving to another member reconfigures exactly the two affected cells (#198).
+        private var drawnCurrentPhoto: PhotoIdentity?
+        private var drawnHighlight = false
 
         init(
             thumbnails: any GridThumbnailSource,
@@ -220,6 +231,7 @@ extension GridCollectionView {
                 guard let self, let item = self.itemsByID[id] else { return }
                 cell.configure(
                     with: item, isSelected: self.showsSelected(item),
+                    isCurrent: self.highlightsCurrentPhoto && item.photo.id == self.currentPhoto,
                     isSelecting: self.isSelecting, thumbnails: self.thumbnails,
                     theme: self.theme
                 ) { [weak self] group in
@@ -280,6 +292,15 @@ extension GridCollectionView {
             guard let collectionView, let dataSource else { return }
             let styleChanged =
                 theme != newTheme || isSelectingEmpty != newSelectingEmpty
+                || drawnHighlight != highlightsCurrentPhoto
+            let highlightMoved =
+                highlightsCurrentPhoto && drawnCurrentPhoto != currentPhoto
+                && !styleChanged
+            let highlightCells = Set(
+                [drawnCurrentPhoto, currentPhoto].compactMap { $0 })
+            drawnCurrentPhoto = currentPhoto
+            drawnHighlight = highlightsCurrentPhoto
+            self.currentPhoto = currentPhoto
             theme = newTheme
             isSelectingEmpty = newSelectingEmpty
             if sizeClass != lastSizeClass {
@@ -293,7 +314,8 @@ extension GridCollectionView {
                 shownPhotos = newShownPhotos
                 selection = newSelection
                 let restyled = items.compactMap { item in
-                    !styleChanged && before.showsSelected(item) == after.showsSelected(item)
+                    if highlightMoved && highlightCells.contains(item.photo.id) { return item.id }
+                    return !styleChanged && before.showsSelected(item) == after.showsSelected(item)
                         ? nil : item.id
                 }
                 guard !restyled.isEmpty else { return }
@@ -319,6 +341,7 @@ extension GridCollectionView {
             snapshot.appendSections([0])
             snapshot.appendItems(newItems.map(\.id), toSection: 0)
             let changed: [GridCellItem.ID] = newItems.compactMap { item in
+                if highlightMoved && highlightCells.contains(item.photo.id) { return item.id }
                 guard let old = previousByID[item.id] else { return nil }
                 if old != item || styleChanged { return item.id }
                 return before.showsSelected(old) != after.showsSelected(item) ? item.id : nil
