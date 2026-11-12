@@ -10,7 +10,7 @@ iPad detail: the right rail replaces the capsule and never hides; swipe marking 
 
 ## Batch rename: select, order, rename; a name in use is replaced, not refused (owner, 2026-11-12, #173)
 
-Batch rename is select, order, rename, with no undo (#176). A target name already used by a file outside the batch shows a warning, and Rename replaces it, instead of forcing the person to choose another name (owner, 2026-11-12). The draft moves the replaced file set to `_Rejected`, so nothing is deleted; this needs the owner's confirmation and a change to #175, which currently refuses the batch. Names that can't exist (invalid characters, over 255 bytes, duplicates within the batch) still block.
+Batch rename is select, order, rename, with no undo (#176). A target name already used by a file outside the batch shows a warning, and Rename replaces it, instead of forcing the person to choose another name (owner, 2026-11-12). The replaced file set moves to `_Rejected`, so nothing is deleted (owner, 2026-11-12). #175 and #176 are updated to match. Names that can't exist (invalid characters, over 255 bytes, duplicates within the batch) still block.
 
 ## Swipe star bar sits beside the touch (owner, 2026-11-12)
 
