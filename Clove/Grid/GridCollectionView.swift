@@ -312,7 +312,18 @@ extension GridCollectionView {
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
             dataSource.apply(snapshot, animatingDifferences: false)
 
-            guard let held else { return }
+            guard let held else {
+                // A width change can create a collection view. Its first snapshot resumes at
+                // the model's current photo without storing another scroll or layout state.
+                if previousIDs.isEmpty, let currentPhoto,
+                    let cell = GridCellItem.cell(
+                        for: currentPhoto, in: newItems, groups: newGroups, shown: newShownPhotos),
+                    let index = newItems.firstIndex(where: { $0.id == cell })
+                {
+                    restore(index: index, offset: 0)
+                }
+                return
+            }
             // The current photo may now be drawn by a different cell, such as a cover keyed by
             // a refined group; hold that cell where the photo's old cell was.
             if held.isCurrentPhoto, let currentPhoto,

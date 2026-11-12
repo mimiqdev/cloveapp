@@ -10,25 +10,28 @@ struct BrowseShell: View {
     private var isRegular: Bool { horizontalSizeClass == .regular }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: navigationPath) {
             Group {
-                if isRegular, browsing.state.route == .grid {
-                    NavigationSplitView {
-                        FolderSidebar(browsing: browsing)
-                            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
-                            .toolbar(.hidden, for: .navigationBar)
-                    } detail: {
+                if browsing.state.route != .entry, browsing.state.folder != nil {
+                    if isRegular {
+                        folderLayout
+                    } else {
                         GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
-                            .toolbar(.hidden, for: .navigationBar)
                     }
-                    .navigationSplitViewStyle(.balanced)
                 } else {
-                    screen(for: browsing.state.route)
+                    EntryScreen(browsing: browsing)
                 }
             }
-            .browsingChrome(
-                title: title, browsing: browsing,
-                backTitle: isRegular && browsing.state.folder != nil ? browsing.filterTitle : nil)
+            .browsingChrome(title: title, browsing: browsing)
+            .navigationDestination(for: BrowserRoute.self) { route in
+                screen(for: route)
+                    .browsingChrome(
+                        title: title, browsing: browsing,
+                        backTitle: isRegular && browsing.state.folder != nil
+                            ? browsing.filterTitle : nil
+                    )
+                    .navigationBarBackButtonHidden()
+            }
         }
         .overlay(alignment: .bottom) {
             if browsing.state.route == .detail, browsing.isSaveFailureToastVisible {
@@ -46,6 +49,37 @@ struct BrowseShell: View {
             guard !Task.isCancelled else { return }
             browsing.dismissSaveFailureToast()
         }
+    }
+
+    /// The existing route drives the stack, so resizing never creates another navigation state.
+    private var navigationPath: Binding<[BrowserRoute]> {
+        Binding(
+            get: {
+                switch browsing.state.route {
+                case .detail, .settings: [browsing.state.route]
+                case .entry, .grid: []
+                }
+            },
+            set: { path in
+                if path.isEmpty,
+                    browsing.state.route == .detail || browsing.state.route == .settings
+                {
+                    browsing.back()
+                }
+            })
+    }
+
+    /// The outer stack pushes destinations over both columns and keeps the grid's viewport alive.
+    private var folderLayout: some View {
+        NavigationSplitView {
+            FolderSidebar(browsing: browsing)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+                .toolbar(.hidden, for: .navigationBar)
+        } detail: {
+            GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+                .toolbar(.hidden, for: .navigationBar)
+        }
+        .navigationSplitViewStyle(.balanced)
     }
 
     @ViewBuilder

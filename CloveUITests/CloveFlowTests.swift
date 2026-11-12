@@ -9,10 +9,12 @@ final class CloveFlowTests: XCTestCase {
     @MainActor
     func testIPadSidebarFiltersAndFullScreenDetail() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
-        XCUIDevice.shared.orientation = .landscapeLeft
-        defer { XCUIDevice.shared.orientation = .portrait }
         let app = launchSample()
-        defer { app.terminate() }
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
         openLibrary(app)
         let sidebar = element(app, "clove.sidebar")
         XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
@@ -28,7 +30,16 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.grid.more").tap()
             app.buttons["Settings"].tap()
             XCTAssertFalse(sidebar.exists)
-            chooseTheme(theme, app)
+            let matchSystem = app.switches["clove.settings.appearance.matchSystem"]
+            if matchSystem.value as? String == "1" {
+                matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                    .withOffset(CGVector(dx: -50, dy: 0)).tap()
+                XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), matchSystem))
+            }
+            let tile = element(app, "clove.settings.appearance.theme.\(theme)")
+            tile.tap()
+            XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tile))
+            capture("ipad-settings-back-\(theme)")
             let back = element(app, "clove.nav.back")
             XCTAssertEqual(back.label, "Back")
             back.tap()
@@ -62,6 +73,18 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 5))
         element(app, "clove.sidebar.all").tap()
         XCTAssertTrue(waitForLabel("All", title))
+        element(app, "clove.grid").collectionViews.firstMatch.swipeUp()
+        let lastPhoto = element(app, "clove.grid.photo.mmq02713")
+        XCTAssertTrue(lastPhoto.isHittable)
+        let previousY = lastPhoto.frame.minY
+        lastPhoto.tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertTrue(lastPhoto.isHittable)
+        XCTAssertEqual(lastPhoto.frame.minY, previousY, accuracy: 3)
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.entry").waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -701,7 +724,7 @@ final class CloveFlowTests: XCTestCase {
 
     @MainActor
     private func capture(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIApplication().screenshot())
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

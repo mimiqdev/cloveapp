@@ -14,7 +14,15 @@ struct FolderSidebar: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(browsing.folderTitle).font(.headline)
+                    Button {
+                        browsing.back()
+                    } label: {
+                        Label(browsing.folderTitle, systemImage: "chevron.left")
+                            .font(.headline)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back")
+                    .accessibilityIdentifier("clove.nav.back")
                     if let source = browsing.folderSource {
                         Text(source).font(.caption).foregroundStyle(.secondary)
                     }
