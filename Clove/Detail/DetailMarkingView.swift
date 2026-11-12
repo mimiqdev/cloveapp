@@ -76,6 +76,7 @@ struct DetailMarkingView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.displayScale) private var displayScale
     @State private var hidesChrome = false
     @State private var windowID = UUID()
@@ -447,7 +448,8 @@ struct DetailMarkingView: View {
             onSwipeBegin: { actions.markingSwipeBegan() },
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
-            probe: probe
+            probe: probe,
+            keepsFitStationary: isDuoExpanded
         )
         .accessibilityLabel(
             displayMarks.isRejected ? "\(photo.fileName), Rejected" : photo.fileName
