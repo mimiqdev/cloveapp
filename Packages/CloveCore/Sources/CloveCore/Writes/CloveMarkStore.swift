@@ -31,6 +31,12 @@ public enum CloveMarkStoreError: Error, Hashable, Sendable, CustomStringConverti
 /// The store is an actor because the write queue and the open path can read and write the
 /// same folder's file, and its actor isolation is the only lock it needs.
 public actor CloveMarkStore {
+    // Keep synchronous storage transactions off the cooperative pool without actor reentrancy.
+    private nonisolated let queue = DispatchSerialQueue(label: "Clove.CloveMarkStore")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
+
     /// The directory holding one file per folder identity; injectable for tests.
     private let directory: URL
     /// The staged replacement seam shared with the sidecar writer (G1 Safe writes).

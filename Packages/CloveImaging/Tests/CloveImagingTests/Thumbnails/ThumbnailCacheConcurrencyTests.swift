@@ -8,7 +8,7 @@ import Testing
 /// Deadlines bound a regression failure; no performance threshold is asserted.
 private final class ThumbnailIOGate: Sendable {
     private let armed = Mutex(false)
-    private let entered = DispatchSemaphore(value: 0)
+    private let entry = AsyncStream<Void>.makeStream()
     private let released = DispatchSemaphore(value: 0)
 
     func arm() { armed.withLock { $0 = true } }
@@ -19,11 +19,12 @@ private final class ThumbnailIOGate: Sendable {
             return value
         }
         guard pause else { return }
-        entered.signal()
+        entry.continuation.yield(())
         #expect(released.wait(timeout: .now() + 10) == .success)
     }
-    func waitForEntry() throws {
-        try #require(entered.wait(timeout: .now() + 5) == .success)
+    func waitForEntry() async {
+        var entries = entry.stream.makeAsyncIterator()
+        await entries.next()
     }
     func release() { released.signal() }
 }
@@ -41,14 +42,16 @@ private final class ThumbnailCacheOperation<Value: Sendable>: Sendable {
         }
     }
 
-    func value(timeout: TimeInterval = 5) throws -> Value {
-        try #require(completion.wait(timeout: .now() + timeout) == .success)
+    func value() async throws -> Value {
+        await withCheckedContinuation { continuation in
+            completion.notify(queue: .global()) { continuation.resume() }
+        }
         return try #require(result.withLock { $0 }).get()
     }
 }
 
 struct ThumbnailCacheConcurrencyTests {
-    @Test func pausedStoreAllowsUnrelatedMemoryAndDiskHits() throws {
+    @Test func pausedStoreAllowsUnrelatedMemoryAndDiskHits() async throws {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let diskRequest = try thumbnailRequest(directory.image(name: "disk.jpg"))
@@ -64,22 +67,19 @@ struct ThumbnailCacheConcurrencyTests {
         try cache.store(image, for: memoryRequest)
         gate.arm()
         let store = ThumbnailCacheOperation { try cache.store(image, for: storeRequest) }
-        defer {
-            gate.release()
-            _ = try? store.value()
-        }
-        try gate.waitForEntry()
+        defer { gate.release() }
+        await gate.waitForEntry()
         let memoryHit = ThumbnailCacheOperation { cache.result(for: memoryRequest) }
         let diskHit = ThumbnailCacheOperation { cache.result(for: diskRequest) }
-        #expect(try memoryHit.value(timeout: 2) != nil)
-        #expect(try diskHit.value(timeout: 2) != nil)
+        #expect(try await memoryHit.value() != nil)
+        #expect(try await diskHit.value() != nil)
         // Both lookups completed while the store is still inside beforeCommit.
         gate.release()
-        try store.value()
+        try await store.value()
         #expect(cache.result(for: storeRequest) != nil)
     }
 
-    @Test func concurrentStoresOfOneKeyPublishLastWriterAndKeepByteCostsCorrect() throws {
+    @Test func concurrentStoresOfOneKeyPublishLastWriterAndKeepByteCostsCorrect() async throws {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let request = try thumbnailRequest(directory.image())
@@ -101,18 +101,15 @@ struct ThumbnailCacheConcurrencyTests {
             beforeCommit: { _ in gate.pauseIfArmed() })
         gate.arm()
         let lastWriter = ThumbnailCacheOperation { try cache.store(large, for: request) }
-        defer {
-            gate.release()
-            _ = try? lastWriter.value()
-        }
-        try gate.waitForEntry()
+        defer { gate.release() }
+        await gate.waitForEntry()
         // This store begins later, but publishes before the paused writer.
         let firstWriter = ThumbnailCacheOperation { try cache.store(small, for: request) }
-        try firstWriter.value(timeout: 2)
+        try await firstWriter.value()
         let interim = try availableThumbnail(#require(cache.result(for: request)))
         #expect(max(interim.width, interim.height) == 200)
         gate.release()
-        try lastWriter.value()
+        try await lastWriter.value()
         let memory = try availableThumbnail(#require(cache.result(for: request)))
         #expect(max(memory.width, memory.height) == 400)
         cache.releaseMemory()
@@ -139,15 +136,15 @@ struct ThumbnailCacheConcurrencyTests {
         #expect(reopened.result(for: third) != nil)
     }
 
-    @Test func evictionDuringDiskDecodeReturnsMissWithoutPromotingStalePixels() throws {
-        try invalidatedDiskRead(replaceSameKey: false)
+    @Test func evictionDuringDiskDecodeReturnsMissWithoutPromotingStalePixels() async throws {
+        try await invalidatedDiskRead(replaceSameKey: false)
     }
 
-    @Test func replacementDuringDiskDecodeReturnsMissAndKeepsNewerFile() throws {
-        try invalidatedDiskRead(replaceSameKey: true)
+    @Test func replacementDuringDiskDecodeReturnsMissAndKeepsNewerFile() async throws {
+        try await invalidatedDiskRead(replaceSameKey: true)
     }
 
-    private func invalidatedDiskRead(replaceSameKey: Bool) throws {
+    private func invalidatedDiskRead(replaceSameKey: Bool) async throws {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let request = try thumbnailRequest(directory.image())
@@ -169,11 +166,8 @@ struct ThumbnailCacheConcurrencyTests {
             beforeCommit: { _ in }, afterDecode: { gate.pauseIfArmed() })
         gate.arm()
         let reading = ThumbnailCacheOperation { cache.result(for: request) }
-        defer {
-            gate.release()
-            _ = try? reading.value()
-        }
-        try gate.waitForEntry()
+        defer { gate.release() }
+        await gate.waitForEntry()
         let newer: ThumbnailRequest
         let newImage: ThumbnailResult
         if replaceSameKey {
@@ -185,9 +179,9 @@ struct ThumbnailCacheConcurrencyTests {
             newImage = image
         }
         let writing = ThumbnailCacheOperation { try cache.store(newImage, for: newer) }
-        try writing.value(timeout: 2)
+        try await writing.value()
         gate.release()
-        #expect(try reading.value() == nil)
+        #expect(try await reading.value() == nil)
         let current = try availableThumbnail(#require(cache.result(for: newer)))
         #expect(max(current.width, current.height) == (replaceSameKey ? 200 : 400))
         #expect(try FileManager.default.contentsOfDirectory(atPath: cacheURL.path).count == 1)

@@ -69,13 +69,14 @@ struct OrderedMarkMoveTests {
         #expect(preview.sidecarCount == 0)
         let gate = DispatchSemaphore(value: 0)
         defer { gate.signal() }
-        let entered = DispatchSemaphore(value: 0)
+        let (entered, entry) = AsyncStream<Void>.makeStream()
+        var entries = entered.makeAsyncIterator()
         fixture.markFileSystem.blockWrites { _ in
-            entered.signal()
+            entry.yield(())
             return gate
         }
         let write = Task { await fixture.queue.apply(.rating(.rejected), to: set) }
-        #expect(waitForTestSignal(entered))
+        await entries.next()
         let move = Task { try await fixture.move(preview) }
         try await eventually { fixture.fileSystem.count(of: .isReadOnlyVolume) >= 2 }
         #expect(fixture.fileSystem.count(of: .move) == 0)

@@ -39,7 +39,21 @@ public struct MetadataReader: Sendable {
             func admit() {
                 let index = next
                 let url = urls[index]
-                group.addTask { (index, read(url: url)) }
+                group.addTask {
+                    guard !Task.isCancelled else {
+                        return (index, MetadataFileResult(url: url, outcome: .failure(.cancelled)))
+                    }
+                    let outcome = await withCheckedContinuation { continuation in
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            continuation.resume(returning: autoreleasepool { readFile(url) })
+                        }
+                    }
+                    return (
+                        index,
+                        MetadataFileResult(
+                            url: url, outcome: Task.isCancelled ? .failure(.cancelled) : outcome)
+                    )
+                }
                 next += 1
             }
             if !Task.isCancelled {

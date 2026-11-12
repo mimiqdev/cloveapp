@@ -88,11 +88,13 @@ XcodeGen. Every task is listed here.
 - The fixture downloads are cached on the hash of `fixtures/manifest.json`.
   `mise run fixtures-sets` builds every set before the package tests, so the
   fixture tests run instead of skipping.
-- The package tests run with `--no-parallel` in CI. In parallel on the 3-core
-  runner, tests that block on semaphores starve the cooperative thread pool:
-  some CloveCore tests time out and CloveImaging hangs
-  ([#146](https://github.com/mimiqdev/cloveapp/issues/146)). Locally they run
-  in parallel as before.
+- CloveCore and CloveImaging tests run in parallel in CI, including on the
+  3-core runner. Test-side gate waits suspend, and synchronous write transactions,
+  metadata batch reads and detail-size reads use Dispatch threads so they cannot
+  starve the cooperative pool ([#146](https://github.com/mimiqdev/cloveapp/issues/146)).
+  CloveLabKit still runs with `--no-parallel`: its synchronous RAW swipe probes
+  can block cooperative workers ([#177](https://github.com/mimiqdev/cloveapp/issues/177)).
+  Local package tasks use parallel execution by default.
 - **`verify`** is the last job, which passes only when every other job
   passed. Merges don't wait for it, except for the changes listed under
   "Merge" in `docs/AGENT-WORKFLOW.md`. A failed nightly run becomes an issue

@@ -218,7 +218,7 @@ public actor DetailPipeline {
                         Self.hasCached(request, effort: effort, cache: cache), nil as DetailResult?
                     )
                 }
-                let result = Self.cached(request, effort: effort, cache: cache, sizes: sizes)
+                let result = await Self.cached(request, effort: effort, cache: cache, sizes: sizes)
                 return (result != nil, result)
             }.value
             try Task.checkCancellation()
@@ -358,7 +358,7 @@ public actor DetailPipeline {
     private nonisolated static func cached(
         _ request: DetailRequest, effort: Effort, cache: DetailCache,
         sizes: any DetailNativeSizeReading
-    ) -> DetailResult? {
+    ) async -> DetailResult? {
         if let raw = request.raw, !isCurrent(raw) { return .unavailable(.sourceChanged) }
         let camera = cameraSource(request, cache: cache)
         let usesRAW = request.raw != nil && camera == nil
@@ -389,7 +389,7 @@ public actor DetailPipeline {
         guard let best else { return nil }
         let size: CGSize?
         if let camera {
-            size = sizes.nativeSize(of: camera, isRAW: false)
+            size = await sizes.readNativeSize(of: camera, isRAW: false)
         } else if let reference = request.raw ?? request.jpeg,
             case .known(let known) = cache.nativeSize(for: reference)
         {
@@ -450,9 +450,9 @@ public actor DetailPipeline {
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
         var fullSize: CGSize?
         if let camera {
-            fullSize = sizes.nativeSize(of: camera, isRAW: false)
+            fullSize = await sizes.readNativeSize(of: camera, isRAW: false)
         } else {
-            fullSize = fullResolutionSize(
+            fullSize = await fullResolutionSize(
                 for: request, previewLongEdge: best?.longEdge ?? 0,
                 cache: cache, sizes: sizes)
         }
@@ -487,7 +487,7 @@ public actor DetailPipeline {
             if camera != nil {
                 return await perform(job, cache: cache, reader: reader, sizes: sizes)
             }
-            fullSize = fullResolutionSize(
+            fullSize = await fullResolutionSize(
                 for: request, previewLongEdge: best?.longEdge ?? 0,
                 cache: cache, sizes: sizes)
             if let raw = request.raw {
@@ -598,7 +598,7 @@ public actor DetailPipeline {
     private nonisolated static func fullResolutionSize(
         for request: DetailRequest,
         previewLongEdge: Int, cache: DetailCache, sizes: any DetailNativeSizeReading
-    ) -> CGSize? {
+    ) async -> CGSize? {
         guard let reference = request.raw ?? request.jpeg, isCurrent(reference) else { return nil }
         if let cached = cache.nativeSize(for: reference) {
             switch cached {
@@ -606,7 +606,7 @@ public actor DetailPipeline {
             case .unknown: return nil
             }
         }
-        var size = sizes.nativeSize(of: reference, isRAW: request.raw != nil)
+        var size = await sizes.readNativeSize(of: reference, isRAW: request.raw != nil)
         if let read = size, request.raw != nil,
             max(read.width, read.height) <= CGFloat(previewLongEdge)
         {

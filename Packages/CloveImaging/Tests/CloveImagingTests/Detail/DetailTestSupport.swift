@@ -122,10 +122,12 @@ func detailFailure(_ result: DetailResult) throws -> DetailFailure {
     return failure
 }
 
-/// Polls an actor condition; used instead of sleeping on scheduling decisions.
+/// Observes scheduling decisions without spinning against the worker being awaited.
 func eventually(_ condition: () async -> Bool) async throws {
     let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-    while !(await condition()), ContinuousClock.now < deadline { await Task.yield() }
+    while !(await condition()), ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(1))
+    }
     try #require(await condition(), "Condition did not become true in time")
 }
 

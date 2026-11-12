@@ -264,15 +264,6 @@ func makeFolderIdentity(_ name: String = "folder") -> FolderIdentity {
     FolderIdentity(rawValue: "test-\(name)-\(UUID().uuidString)")
 }
 
-/// Waits for a test gate from a synchronous helper.
-///
-/// `DispatchSemaphore.wait` is unavailable from an async context, and the coalescing and
-/// drain tests need the calling thread held until one write reaches its gate. The wait is
-/// bounded, so a broken test fails instead of hanging the suite.
-func waitForTestSignal(_ semaphore: DispatchSemaphore, seconds: Double = 10) -> Bool {
-    semaphore.wait(timeout: .now() + seconds) == .success
-}
-
 /// A valid packet with unknown content another app could have written.
 let writeTestUnknownPacket = Data(
     """

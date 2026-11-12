@@ -31,7 +31,9 @@ struct ThumbnailSchedulingTests {
 
     private func eventually(_ condition: () async -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while !(await condition()), ContinuousClock.now < deadline { await Task.yield() }
+        while !(await condition()), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
         #expect(await condition())
         try #require(await condition())
     }
