@@ -14,27 +14,45 @@ struct DetailSchedulingTests {
             DetailFixtures.file(name), displayPixels: 1200, location: "folder-\(index)")
     }
 
+    /// Admission tests need file revisions, but not camera decoding or RAW-size discovery.
+    /// Keep those operations synthetic too, so render-entry deadlines measure scheduling.
+    private func makePipeline(
+        _ gate: DetailReadGate, previewWorkers: Int = 2, queueLimit: Int = 16
+    ) -> DetailPipeline {
+        let previews = [
+            "sony-ilce-7s.ARW", "canon-eos-r6.CR3", "nikon-d500.NEF", "fujifilm-x-s10.RAF",
+        ].map { DetailPreviewSubstitution(file: $0, width: 1200, height: 800) }
+        return DetailPipeline(
+            cache: DetailCache(), previewWorkers: previewWorkers, queueLimit: queueLimit,
+            reader: GatedDetailReader(gate: gate, substitutions: previews),
+            sizes: StubDetailNativeSizeReader(size: nil))
+    }
+
     @Test func rawRendersStaySerial() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
-        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate)
         let first = Task {
             try await pipeline.image(
                 for: try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true),
                 consumer: UUID())
         }
-        try await eventually { await gate.nativePaths.count == 1 }
+        try await eventually("First RAW render enters the gate") {
+            await gate.nativePaths.count == 1
+        }
         let second = Task {
             try await pipeline.image(
                 for: try rawRequest(DetailFixtures.file("canon-eos-r6.CR3"), native: true),
                 consumer: UUID())
         }
-        try await eventually { await pipeline.queuedCount == 1 }
+        try await eventually("Second RAW render queues") { await pipeline.queuedCount == 1 }
         // The second render waits for the first slot: one RAW render at a time.
         #expect(await gate.nativePaths.count == 1)
         #expect(await pipeline.activeRenderCount == 1)
         await gate.release()
-        try await eventually { await gate.nativePaths.count == 2 }
+        try await eventually("Second RAW render enters after release") {
+            await gate.nativePaths.count == 2
+        }
         #expect(await gate.maximumNativeEntries == 1)
         try await letEntriesFinish(gate, natives: 2)
         _ = try await first.value
@@ -45,7 +63,7 @@ struct DetailSchedulingTests {
     @Test func queuedRenderIsDroppedWhenANewerOneArrives() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
-        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate)
         let active = Task {
             try await pipeline.image(
                 for: try rawRequest(DetailFixtures.file("canon-eos-r6.CR3"), native: true),
@@ -76,7 +94,7 @@ struct DetailSchedulingTests {
     @Test func supersededRenderDrainsItsResultIntoNothing() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
-        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate)
         let consumer = UUID()
         let old = Task {
             try await pipeline.image(
@@ -103,8 +121,7 @@ struct DetailSchedulingTests {
     @Test func visiblePreviewWorkGoesBeforeQueuedPrefetch() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: false, holdPreview: true)
-        let pipeline = DetailPipeline(
-            cache: DetailCache(), previewWorkers: 1, reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate, previewWorkers: 1)
         let active = Task {
             try await pipeline.preview(for: try previewRequest("sony-ilce-7s.ARW", index: 1))
         }
@@ -130,8 +147,7 @@ struct DetailSchedulingTests {
     @Test func previewWorkersStayBounded() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: false, holdPreview: true)
-        let pipeline = DetailPipeline(
-            cache: DetailCache(), previewWorkers: 2, reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate, previewWorkers: 2)
         let names = [
             "sony-ilce-7s.ARW", "nikon-d500.NEF", "canon-eos-r6.CR3", "fujifilm-x-s10.RAF",
         ]
@@ -152,9 +168,7 @@ struct DetailSchedulingTests {
     @Test func visibleRequestDisplacesQueuedPrefetchAndQueueHasAHardLimit() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: false, holdPreview: true)
-        let pipeline = DetailPipeline(
-            cache: DetailCache(), previewWorkers: 1, queueLimit: 2,
-            reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate, previewWorkers: 1, queueLimit: 2)
         let active = Task {
             try await pipeline.preview(for: try previewRequest("sony-ilce-7s.ARW", index: 1))
         }
@@ -188,7 +202,7 @@ struct DetailSchedulingTests {
 
     @Test func prefetchFillsPreviewsAndNeverRenders() async throws {
         let gate = DetailReadGate()
-        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate)
         await pipeline.prefetch([
             try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true),
             try rawRequest(DetailFixtures.file("nikon-d500.NEF"), displayPixels: 4000),
@@ -201,8 +215,7 @@ struct DetailSchedulingTests {
     @Test func cancelPrefetchDropsQueuedNeighbours() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: false, holdPreview: true)
-        let pipeline = DetailPipeline(
-            cache: DetailCache(), previewWorkers: 1, reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate, previewWorkers: 1)
         let active = Task {
             try await pipeline.preview(for: try previewRequest("sony-ilce-7s.ARW", index: 1))
         }
@@ -221,7 +234,7 @@ struct DetailSchedulingTests {
     @Test func closeWaitsForTheRunningRenderBeforeFolderAccessEnds() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
-        let pipeline = DetailPipeline(cache: DetailCache(), reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate)
         let active = Task {
             try await pipeline.image(
                 for: try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true),
@@ -249,8 +262,7 @@ struct DetailSchedulingTests {
     @Test func aNewerRequestFromTheSameConsumerSupersedesTheQueuedOne() async throws {
         let gate = DetailReadGate()
         await gate.configure(behaviour: .synthetic, holdNative: false, holdPreview: true)
-        let pipeline = DetailPipeline(
-            cache: DetailCache(), previewWorkers: 1, reader: GatedDetailReader(gate: gate))
+        let pipeline = makePipeline(gate, previewWorkers: 1)
         let consumer = UUID()
         let old = Task {
             try await pipeline.preview(

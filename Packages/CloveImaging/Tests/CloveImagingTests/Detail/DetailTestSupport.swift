@@ -123,12 +123,14 @@ func detailFailure(_ result: DetailResult) throws -> DetailFailure {
 }
 
 /// Observes scheduling decisions without spinning against the worker being awaited.
-func eventually(_ condition: () async -> Bool) async throws {
+func eventually(
+    _ description: String = "Condition did not become true in time", _ condition: () async -> Bool
+) async throws {
     let deadline = ContinuousClock.now.advanced(by: .seconds(10))
     while !(await condition()), ContinuousClock.now < deadline {
         try await Task.sleep(for: .milliseconds(1))
     }
-    try #require(await condition(), "Condition did not become true in time")
+    try #require(await condition(), Comment(rawValue: description))
 }
 
 /// Asserts a request was cancelled or superseded rather than delivering pixels.
