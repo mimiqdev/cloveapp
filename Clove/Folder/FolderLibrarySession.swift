@@ -432,7 +432,7 @@ final class FolderLibrarySession: FolderLibrary {
                 try Task.checkCancellation()
                 let wallTime =
                     template.includesCaptureDate
-                    ? await ImageInformationReader().read(url: set.photoSet.primary.url)?
+                    ? ImageInformationReader().read(url: set.photoSet.primary.url)?
                         .captureWallTime
                     : nil
                 items.append(RenameItem(set: set, captureWallTime: wallTime))
