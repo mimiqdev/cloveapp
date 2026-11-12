@@ -196,6 +196,14 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         chooseRailTheme("light", app)
+        turnOffAutoAdvance(app)
+        element(app, "clove.nav.back").tap()
+    }
+
+    /// Turns the settle that follows a mark off, on the open Settings screen, so a test reads the
+    /// marks it set instead of a photo it navigated to.
+    @MainActor
+    private func turnOffAutoAdvance(_ app: XCUIApplication) {
         let advance = app.switches["clove.settings.autoAdvanceEnabled"]
         for _ in 0..<5 {
             if advance.isHittable { break }
@@ -206,7 +214,6 @@ final class CloveFlowTests: XCTestCase {
                 .withOffset(CGVector(dx: -50, dy: 0)).tap()
         }
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), advance))
-        element(app, "clove.nav.back").tap()
     }
 
     @MainActor
@@ -254,6 +261,36 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "clove.detail.info").exists)
         XCTAssertTrue(element(app, "clove.detail.undo").exists)
+    }
+
+    /// Hardware keys mark and navigate through the marking path the capsule uses (PRD P0-06).
+    @MainActor
+    func testDetailHardwareKeysMarkAndNavigate() {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        turnOffAutoAdvance(app)
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let capsule = element(app, "clove.detail.capsule")
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        app.typeKey("3", modifierFlags: [])
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "3 stars"), capsule))
+        app.typeKey("x", modifierFlags: [])
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Rejected"), capsule))
+        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "3 stars"), capsule))
+        element(app, "clove.detail.info").tap()
+        element(app, "clove.detail.info.done").tap()
+        app.typeKey("0", modifierFlags: [])
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
     }
 
     @MainActor
