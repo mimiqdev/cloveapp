@@ -1,10 +1,13 @@
 name: Verify
 
+# Pull requests get a quick check: lint, the CloveCore and CloveImaging tests, and a
+# build of Clove for testing. The full suite (CloveLab, the app unit, smoke and flow
+# tests on a simulator) runs nightly on main and on every manual run.
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+  schedule:
+    - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
       pr:
@@ -15,12 +18,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request cancels its older run. Each push to main has its
-# own group and is never cancelled, so every main commit gets a verdict. A manual
-# run with pr=N stays out of that pull request's group.
+# A newer push to a pull request cancels its older run. A manual run with pr=N stays
+# out of that pull request's group.
 concurrency:
-  group: verify-${{ github.event_name == 'push' && format('main-{0}', github.sha) || format('{0}-{1}', github.event_name, github.event.pull_request.number || inputs.pr || github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: verify-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.pr || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # An explicit bash shell adds -o pipefail, so `| tee` never hides a failure.
 defaults:
@@ -30,8 +32,10 @@ defaults:
 env:
   # The pull request's head, never refs/pull/N/merge; each job merges the latest main into it.
   HEAD_REF: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha || github.sha }}
+  # 'true' for the nightly and manual runs, 'false' for the quick pull request check.
+  FULL: ${{ github.event_name != 'pull_request' }}
 
-# These jobs re-list the steps of `mise run verify` in mise.toml; change both together.
+# The full run re-lists the steps of `mise run verify` in mise.toml; change both together.
 jobs:
   scripts:
     name: Python script tests
@@ -91,11 +95,14 @@ jobs:
         timeout-minutes: 15
         run: mise run test-imaging --no-parallel 2>&1 | tee .build/ci-logs/test-imaging.log
       - name: mise run test-lab
+        if: env.FULL == 'true'
         timeout-minutes: 15
         run: mise run test-lab --no-parallel 2>&1 | tee .build/ci-logs/test-lab.log
       - name: mise run generate
+        if: env.FULL == 'true'
         run: mise run generate 2>&1 | tee .build/ci-logs/generate.log
       - name: mise run build-lab
+        if: env.FULL == 'true'
         run: mise run build-lab 2>&1 | tee .build/ci-logs/build-lab.log
       - name: Upload logs
         if: failure()
@@ -134,6 +141,7 @@ jobs:
       # The unit, smoke and flow tests on one simulator, test-without-building on the
       # build above: a new simulator's first boot here takes about 7 minutes.
       - name: App unit, smoke and UI flow tests
+        if: env.FULL == 'true'
         run: scripts/smoke.sh all 2>&1 | tee .build/ci-logs/app-tests.log
       - name: Upload logs and test results
         if: failure()

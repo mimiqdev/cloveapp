@@ -46,35 +46,41 @@ XcodeGen. Every task is listed here.
 | `mise run test-core` | `swift test --package-path Packages/CloveCore`. | While editing `CloveCore`; runs on macOS, no simulator. |
 | `mise run test-imaging` | `swift test --package-path Packages/CloveImaging`. | While editing `CloveImaging`; runs on macOS, no simulator. |
 | `mise run test-lab` | `swift test --package-path Packages/CloveLabKit`: the lab harness and probe test targets. Fixture tests skip when a set is missing. | While editing `Packages/CloveLabKit`; runs on macOS, no simulator. |
-| `mise run build-tests` | `xcodebuild build-for-testing` for the `Clove` scheme: the app plus `CloveTests` and `CloveUITests`, iOS Simulator, no signing. | Run for you by `smoke` and `ui-flows`; on its own after app changes. |
+| `mise run build-tests` | `xcodebuild build-for-testing` for the `Clove` scheme: the app plus `CloveTests` and `CloveUITests`, iOS Simulator, no signing. | Part of `check`; also run for you by `smoke` and `ui-flows`. |
 | `mise run build-lab` | `xcodebuild build` for the `CloveLab` scheme, iOS Simulator, no signing. | After changing `CloveLab/` or a package the lab links. |
 | `mise run build` | `build-tests`, then `build-lab`. | To build both apps without testing. |
-| `mise run smoke` | `build-tests`, then `scripts/smoke.sh smoke`: a throwaway simulator runs `CloveTests` and the one smoke UI test (`CloveSmokeTests`) with `xcodebuild test-without-building`, and is deleted on exit. | After UI changes; part of `check`. |
+| `mise run smoke` | `build-tests`, then `scripts/smoke.sh smoke`: a throwaway simulator runs `CloveTests` and the one smoke UI test (`CloveSmokeTests`) with `xcodebuild test-without-building`, and is deleted on exit. | When a change touches what `CloveTests` or the smoke test covers; nightly in CI. |
 | `mise run ui-flows` | `build-tests`, then `scripts/smoke.sh flows`: the long UI flow tests (`CloveFlowTests`) on their own throwaway simulator. | After changing a flow or a flow test. |
-| `mise run check` | `generate`, `lint`, `test-core`, `test-imaging`, `smoke` (which builds Clove for testing once), in order, stopping at the first failure. | While working and on every fix round. About 3 minutes warm. |
+| `mise run check` | `generate`, `lint`, `test-core`, `test-imaging`, `build-tests`, in order, stopping at the first failure. No simulator. | On every change and fix round. |
 | `mise run verify` | Everything `check` runs, plus `test-fixtures`, `test-release`, `test-lab`, `build-lab`, then `scripts/smoke.sh all`: the app unit, smoke and flow tests on one simulator. The Clove app is compiled once. | The full local gate, when you want all of CI's coverage on a Mac. |
 
 ### When to run what
 
-- While working, and on every fix round: `mise run check`.
+- On every change and fix round: `mise run check`. It runs no simulator; the
+  app unit tests and the UI tests run nightly in CI.
+- A change to a UI flow, or a new or changed app or UI test, runs only those
+  tests: `scripts/smoke.sh flows -only-testing:CloveUITests/CloveFlowTests/<test>`
+  (or `smoke` with `-only-testing:CloveTests/<suite>`).
 - A change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab`
   (and `mise run build-lab` for app code).
 - A change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`;
   a change to the release script or its config adds `mise run test-release`.
-- A change to a UI flow, or to a flow test, adds `mise run ui-flows`.
-- The full gate runs in CI on every push to a pull request. Run `mise run verify`
-  locally only when you need the whole gate on the Mac.
+- The full gate runs in CI nightly and by hand. Run `mise run verify` locally
+  only when you need the whole gate on the Mac.
 
 ## Continuous integration
 
-- `.github/workflows/verify.yml` runs on every pull request against `main`, on
-  every push to `main`, and by hand (`workflow_dispatch`, with an optional pull
-  request number). It checks out the pull request's head, merges the latest
+- `.github/workflows/verify.yml` runs a quick check on every pull request
+  against `main`: the script tests, lint, the CloveCore and CloveImaging tests,
+  and a build of Clove for testing, with no simulator. The full suite adds the
+  CloveLab tests and build and `scripts/smoke.sh all`; it runs nightly on `main`
+  (19:00 UTC) and by hand (`workflow_dispatch`, with an optional pull request
+  number). It checks out the pull request's head, merges the latest
   `main` into it with `scripts/ci/merge-main.sh`, and prints the head, main and
   merge SHAs. It never tests `refs/pull/N/merge`.
 - Jobs: the Python script tests on `ubuntu-latest`; lint, the package tests and
-  the CloveLab build on one standard `xcode-27` runner; the Clove test build
-  and `scripts/smoke.sh all` on another. A new simulator's first boot takes
+  (full only) the CloveLab build on one standard `xcode-27` runner; the Clove
+  test build and (full only) `scripts/smoke.sh all` on another. A new simulator's first boot takes
   about 7 minutes there, so all the app tests share one simulator. Both macOS
   jobs select Xcode 27.2
   and start with `scripts/ci/runner-facts.sh`, which fails if Xcode 27.2 or an
@@ -89,12 +95,13 @@ XcodeGen. Every task is listed here.
   in parallel as before.
 - **`verify`** is the last job, which passes only when every other job
   passed. Merges don't wait for it, except for the changes listed under
-  "Merge" in `docs/AGENT-WORKFLOW.md`.
+  "Merge" in `docs/AGENT-WORKFLOW.md`. A failed nightly run becomes an issue
+  and is fixed next.
 - No secrets, no signing, read-only `contents` permission, `pull_request` only.
   On failure the logs and `.xcresult` bundles are uploaded for 7 days; they hold
   only build and test output.
-- To re-check a pull request against today's `main`, run the workflow by hand
-  with its number: `gh workflow run verify.yml -f pr=<number>`.
+- To run the full suite on a pull request merged with today's `main`, run the
+  workflow by hand with its number: `gh workflow run verify.yml -f pr=<number>`.
 - Only GitHub's own actions are used. Any other action needs a decision record
   in `docs/decisions/` and a full commit SHA pin.
 

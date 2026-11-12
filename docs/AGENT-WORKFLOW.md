@@ -17,6 +17,7 @@ How tasks in the [development plan](DEV-PLAN.md) move from a GitHub issue to a m
 - **Tools** come from mise (`mise.toml` in the repository pins xcodegen). Run project commands through `mise run <task>` or `mise exec --`.
 - **Build output** stays inside the checkout (`-derivedDataPath .build/DerivedData.noindex`; Spotlight skips folders ending in `.noindex`), so it lands on the T7 and is removed with the checkout.
 - **Simulators:** each worker creates its own simulator device named `Clove <task ID>` and deletes it when done, so parallel test runs never share a device.
+- **At most two workers** run on the Mac at once, and at most one of them runs simulator UI work. More than that loads the Mac until builds crawl and UI tests fail for no reason.
 - **Signing** files live in `~/.config/apple/` on the Mac and are referenced from gitignored local config. They never enter the repository, a log, an issue, or a pull request.
 
 ## Models
@@ -48,12 +49,12 @@ At most **three workers run at once**, limited by the Mac's internal disk (simul
 
 - Stay within the issue's scope. Open a new issue for anything outside it.
 - Commit in small steps. Push the branch and open a pull request from the [template](../.github/pull_request_template.md), titled `[<ID>] <summary>` and containing `Closes #<issue>`.
-- While working and on every fix round, run `mise run check`: generate, lint, the `CloveCore` and `CloveImaging` tests, one build of Clove for testing, and the smoke test. It takes about 3 minutes warm.
+- On every change and fix round, run `mise run check`: generate, lint, the `CloveCore` and `CloveImaging` tests, and one build of Clove for testing. It boots no simulator; the app unit tests and UI tests run nightly in CI.
 - Add the matching task when a change reaches further:
   - a change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab`;
   - a change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`, and a change to the release script adds `mise run test-release`;
-  - a change to a UI flow or a flow test adds `mise run ui-flows`.
-- Workers don't run `mise run verify` and don't wait for CI. At the end, after merging the latest `main`, run `mise run check` once, plus the tests for what you changed, and paste the results. CI runs the whole suite on every push to the pull request (`.github/workflows/verify.yml`); link the run in the report.
+  - a change to a UI flow, or a new or changed app or UI test, runs only those tests with `scripts/smoke.sh flows -only-testing:<test>` (or `smoke` for `CloveTests`), not the whole suite.
+- Workers don't run `mise run verify` and don't wait for CI. At the end, after merging the latest `main`, run `mise run check` once, plus the tests for what you changed, and paste the results. CI runs a quick check on every push to the pull request (`.github/workflows/verify.yml`); link the run in the report.
 - Run every other check the issue lists and paste the real output, trimmed to the relevant lines, into the pull request.
 - Never merge, never push to `main`, never force-push a branch someone else is working on, and never touch signing files beyond reading them through the configured paths.
 
@@ -84,6 +85,8 @@ For `blocked` or `needs-decision`, the worker also comments the same block on th
 
 ### 5. Review (supervisor)
 
+The supervisor reads every diff. A second, independent model review is only for changes to how marks are written, the XMP format, or a large UI change. Screenshots in the pull request are only for UI design-to-code tasks.
+
 1. Read the diff against the issue's acceptance criteria and the PRD.
 2. Ask whether each new state, branch or recovery path is needed ([AGENTS.md](../AGENTS.md#keep-it-simple), "Keep it simple"). When a finding sits inside machinery that isn't needed, the fix is to delete the machinery, not patch it.
 3. Check the worker's `mise run check` output, and that the branch merged with `main` still compiles. Re-run on the Mac only what the change needs, such as device checks or a timing the issue asks for.
@@ -96,9 +99,9 @@ For `blocked` or `needs-decision`, the worker also comments the same block on th
 
 The supervisor squash-merges every pull request once review and verification pass, including documentation, tooling, and release configuration.
 
-Clove is early, so the merge gate is light: the review, the worker's `mise run check`, and a compile of the branch merged with the current `main`. Don't wait for the full CI run, and don't re-run anything because `main` moved. CI still runs the whole suite on every pull request and every push to `main`. A failure there becomes an issue and is fixed next.
+Clove is early, so the merge gate is light: the review, the worker's `mise run check`, and a compile of the branch merged with the current `main`. Don't wait for the full CI run, and don't re-run anything because `main` moved. CI runs a quick check on every pull request and the whole suite nightly on `main`. A failure there becomes an issue and is fixed next.
 
-Wait for a green CI run only when a change touches how marks are written, the XMP format, `project.yml`, CI, or the release script.
+Run the full suite by hand (`gh workflow run verify.yml -f pr=<number>`) and wait for it to pass only when a change touches how marks are written, the XMP format, `project.yml`, CI, or the release script.
 
 The product owner is involved only for decisions that are theirs to make:
 
