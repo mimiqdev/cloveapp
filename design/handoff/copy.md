@@ -109,9 +109,9 @@ The pill sits centred in its own row above the filmstrip. Hide it with chrome, w
 ## Errors
 | Key | String |
 |---|---|
-| error.disconnected.subtitle | Not connected (accessibility label only) |
+| error.disconnected.subtitle | Not connected (accessibility label of the `externaldrive.badge.xmark` glyph) |
 | error.disconnected.banner | The drive disconnected. Reconnect it, then reopen this folder. |
 | error.disconnected.action | Reopen |
-| error.access.subtitle | View only (accessibility label only) |
+| error.access.subtitle | View only (accessibility label of the `lock.fill` glyph) |
 | error.access.banner | Access to this folder is no longer available. |
 | error.access.action | Open |

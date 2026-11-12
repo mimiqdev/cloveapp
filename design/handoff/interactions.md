@@ -5,7 +5,7 @@ Items tagged **(proposed)** were not reviewed in the design. They are sensible d
 ## Core model
 
 - A **mark** is a rating and a label (none or one of 5 colors). The rating can be −1, which is Reject, so a photo is never rated and rejected at once: rejecting replaces the stars, and undoing restores them. Marks are written to the photo's XMP sidecar, in the folder where the photos live; a standalone JPEG/HIF keeps its rating and label in Clove. Nothing is imported or copied.
-- Every mark appears at once and saves in user action order. A pending mark is shown until its write finishes; otherwise the files supply the marks. There is no save status. Only folder access problems appear in the subtitle: "Not connected" or "View only".
+- Every mark appears at once and saves in user action order. A pending mark is shown until its write finishes; otherwise the files supply the marks. There is no save status. Only folder access problems appear in the subtitle, as a glyph (`externaldrive.badge.xmark` or `lock.fill`); "Not connected" and "View only" are its VoiceOver labels.
 - **Undo** (top bar, or the Duo dock) reverts the last mark change, a "Reject N unmarked", or a Move Rejects. It is a stack and works across photos.
 - **Reject never deletes.** Rejected photos stay in place (dimmed in the grid and filmstrip; full brightness with a corner glyph in detail) until the person runs Move Rejects, which moves them to `_Rejected/` inside the same folder.
 
@@ -57,7 +57,8 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 ## iPad
 
-- The sidebar is the filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
+- The sidebar is the filter. Selecting a row sets the grid's filter and title, and clears any other sidebar filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
+- Tapping a photo opens detail full screen; "‹ All" (the selected row's name) goes back with the same filter.
 - Detail has a right rail instead of the capsule: tap or drag the vertical star bar, tap Reject, or tap a label dot. Tapping the current rating or label clears it. The rail never hides; single tap and zoom hide the filmstrip, Reject N unmarked pill and top bar buttons while the stage keeps its size.
 - Swipe marking stays on the photo as on iPhone: slow vertical drags use the relative slider with live feedback in the rail's stars; quick down clears then rejects by distance. A downward swipe on Reject leaves it rejected; up steps through 0 to enabled stars.
 - Full keyboard support as above **(proposed)**. Pointer hover shows the rail's tooltips.
@@ -104,6 +105,13 @@ Photo only ──Back──▶ Grid
 - **Leaving the folder**: leave immediately without a prompt. Pending writes finish in the background or are dropped when the folder closes.
 - **A connected write fails**: show one "Couldn't save the mark." toast, read that photo's marks from the files again and show them. Retain no failed mark and do not retry.
 - **Entry**: a folder whose drive is gone shows a faded row with Reconnect, which re-runs the picker for that folder.
+
+## Batch rename (draft, #176)
+
+1. In select mode, tap Rename…. The order view shows only the selected photos.
+2. Drag tiles to set the order; the numbers update live. VoiceOver gets "Move earlier", "Move later", "Move to start" and "Move to end". Tap a tile to check focus in a zoomable viewer that swipes in this order. Cancel drops the order.
+3. Tap Next. The name sheet previews every new name live. A name already used in the folder warns and is replaced, with the old file set moved to `_Rejected`. Names that can't exist (invalid characters, too long, duplicates in the batch) block Rename.
+4. Tap Rename. Pending marks finish first, then the sheet shows progress and can't be dismissed. Afterwards the folder is read again, the mark undo history is cleared, select mode ends, and a toast reports the result. Renaming has no Undo.
 
 ## Theme switching
 
