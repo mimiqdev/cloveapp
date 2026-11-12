@@ -238,10 +238,7 @@ struct DetailMarkingView: View {
             }
             DuoDock(
                 back: { browsing.back() },
-                undo: {
-                    actions.markingSwipeBegan()
-                    browsing.undoLastMark()
-                }, canUndo: browsing.canUndoMark
+                undo: undo, canUndo: browsing.canUndoMark
             ) {
                 duo.tools
                 GlassIconButton(
@@ -842,7 +839,7 @@ struct DetailMarkingView: View {
         apply(rules.result(for: key, marks: browsing.shownMarks(for: photo.id)))
     }
 
-    /// Undoes the last mark, which the top bar's Undo and `⌘Z` share (PRD Undo row).
+    /// Undoes the last mark from the top bar, Duo dock or `⌘Z` (PRD Undo row).
     private func undo() {
         actions.markingSwipeBegan()
         browsing.undoLastMark()
