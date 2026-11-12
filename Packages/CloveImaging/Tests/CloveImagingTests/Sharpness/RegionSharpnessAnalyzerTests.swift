@@ -135,35 +135,115 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         #expect(reader.highResolutionReadCount == 1)
     }
 
-    @Test func afDoesNotWaitForFaceDetection() async throws {
-        // The AF region is computed before the detector is entered; this test pins that order
-        // through a detector that records when it is entered, and the analysis still delivers
-        // its AF score even when detection finds nothing.
-        final class OrderingDetector: FaceRegionDetecting, @unchecked Sendable {
-            private let entered = Mutex(false)
+    @Test func afResultIsDeliveredBeforeFaceDetectionCompletes() async throws {
+        // A detector that parks until the test releases it. The early-AF callback must fire
+        // with the scored AF region while detection is still running (#208: AF-region scoring
+        // must not wait for face detection).
+        final class GatedDetector: FaceRegionDetecting, @unchecked Sendable {
+            let gate = Mutex<[CheckedContinuation<FaceDetectionOutcome, Never>]>([])
             func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
-                entered.withLock { $0 = true }
+                await withCheckedContinuation { continuation in
+                    gate.withLock { $0.append(continuation) }
+                }
                 return .faces([])
             }
-            var wasEntered: Bool { entered.withLock { $0 } }
         }
+        let detector = GatedDetector()
         let reader = RecordingReader()
         reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
         reader.previewImage = previewImage
         reader.highResolutionImage = sharpImage
-        let detector = OrderingDetector()
         let analyzer = RegionSharpnessAnalyzer(reader: reader, faces: detector)
 
-        let analysis = await analyzer.analyze(try request())
+        let delivered = Mutex<RegionSharpnessPathResult?>(nil)
+        let analysisTask = Task {
+            await analyzer.analyze(try request()) { early in
+                delivered.withLock { $0 = early }
+            }
+        }
 
-        guard case .regions(let afRegions) = analysis.autofocus else {
-            Issue.record("Expected AF regions")
+        // The AF result arrives while the detector is still parked: no release has happened.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var early: RegionSharpnessPathResult?
+        while ContinuousClock.now < deadline {
+            early = delivered.withLock { $0 }
+            if early != nil { break }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        let waiting = detector.gate.withLock { !$0.isEmpty }
+        try #require(early != nil, "AF result must arrive before detection completes")
+        #expect(waiting, "the detector must still be parked when the AF result arrives")
+        guard case .regions(let afRegions) = early else {
+            Issue.record("Expected the scored AF region, got \(String(describing: early))")
+            analysisTask.cancel()
             return
         }
-        #expect(afRegions.first?.score != nil)
-        #expect(detector.wasEntered)
+        #expect(afRegions.count == 1)
+        #expect(afRegions[0].kind == .cameraAutofocus)
+        #expect(afRegions[0].score != nil)
+
+        // Releasing the detector lets the analysis finish; its combined result carries the
+        // same AF answer plus the (empty) face path.
+        let waiters = detector.gate.withLock { $0 }
+        detector.gate.withLock { $0.removeAll() }
+        for waiter in waiters { waiter.resume(returning: .faces([])) }
+        let analysis = try await analysisTask.value
+        guard
+            case .regions(let combinedAutofocus) = analysis.autofocus,
+            case .regions(let earlyRegions) = early
+        else {
+            Issue.record("The combined result must carry the same scored AF regions")
+            return
+        }
+        #expect(combinedAutofocus.map(\.region) == earlyRegions.map(\.region))
+        #expect(combinedAutofocus.map(\.score) == earlyRegions.map(\.score))
+        guard case .unavailable(.noFacesDetected) = analysis.faces else {
+            Issue.record("Expected the released detection's answer on the face path")
+            return
+        }
+        // One acquisition still served both paths' regions.
+        #expect(reader.highResolutionReadCount == 1)
     }
 
+    @Test func unavailableAFIsDeliveredEarlyToo() async throws {
+        // Metadata unavailable needs no pixels, so the early callback fires straight after
+        // the metadata read — even with a parked detector and no acquisition.
+        final class ParkedDetector: FaceRegionDetecting, @unchecked Sendable {
+            let parked = Mutex<[CheckedContinuation<FaceDetectionOutcome, Never>]>([])
+            func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
+                // Parked until the test's task is cancelled; the continuation is leaked by
+                // design for the lifetime of this short-lived test.
+                return await withCheckedContinuation { continuation in
+                    parked.withLock { $0.append(continuation) }
+                }
+            }
+        }
+        let reader = RecordingReader()
+        reader.propertiesAnswer = ImageProperties(["{TIFF}": ["Make": "SONY"]])
+        reader.previewImage = previewImage
+        let analyzer = RegionSharpnessAnalyzer(reader: reader, faces: ParkedDetector())
+
+        let delivered = Mutex<RegionSharpnessPathResult?>(nil)
+        let analysisTask = Task {
+            await analyzer.analyze(try request()) { early in
+                delivered.withLock { $0 = early }
+            }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var early: RegionSharpnessPathResult?
+        while ContinuousClock.now < deadline {
+            early = delivered.withLock { $0 }
+            if early != nil { break }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        analysisTask.cancel()
+        try #require(early != nil, "AF unavailability must arrive before detection completes")
+        guard case .unavailable(.noAutofocusMetadata(let evidence)) = early else {
+            Issue.record("Expected early AF unavailability with evidence")
+            return
+        }
+        #expect(evidence.cameraMake == "SONY")
+    }
     @Test func missingAutofocusMetadataReportsEvidenceNotAnEmptyRegion() async throws {
         let reader = RecordingReader()
         reader.propertiesAnswer = ImageProperties([
@@ -209,6 +289,34 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         #expect(afRegions.first?.score == nil)
         // A located region with no pixels says why instead of guessing a score.
         #expect(afRegions.first?.unavailableBecause == .pixelsUnavailable)
+    }
+
+    @Test func staleAcquisitionMapsToStaleSourcePerRegion() async throws {
+        // A source that changed mid-analysis is the one failure that is about the photo's
+        // identity rather than its pixels, so it keeps its own reason on every region.
+        let reader = RecordingReader()
+        reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
+        reader.previewImage = previewImage
+        reader.highResolutionFailure = .staleSource
+        let analyzer = RegionSharpnessAnalyzer(
+            reader: reader,
+            faces: StubFaceDetector(
+                outcome: .faces([face(NormalizedRegion(x: 0.3, y: 0.3, width: 0.3, height: 0.3))])))
+
+        let analysis = await analyzer.analyze(try request())
+
+        #expect(analysis.acquisitionFailure == .staleSource)
+        guard case .regions(let afRegions) = analysis.autofocus else {
+            Issue.record("AF region was located, so it stays reported")
+            return
+        }
+        #expect(afRegions.first?.unavailableBecause == .staleSource)
+        guard case .regions(let faceRegions) = analysis.faces else {
+            Issue.record("Expected face regions")
+            return
+        }
+        #expect(faceRegions.allSatisfy { $0.unavailableBecause == .staleSource })
+        #expect(faceRegions.allSatisfy { $0.score == nil })
     }
 
     @Test func failedPreviewFailsOnlyTheFacePath() async throws {

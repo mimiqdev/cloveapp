@@ -114,12 +114,14 @@ public enum RegionScoreUnavailable: String, Sendable {
     case staleSource
 }
 
-/// The failure of an image read the analysis depends on.
+/// The failure of an image read the analysis depends on. A `staleSource` read is mapped
+/// through to every region as ``RegionScoreUnavailable/staleSource``.
 public enum RegionImageFailure: Error, Sendable {
     case cannotOpen
     case noUsablePreview
     case queueFull
     case closed
+    case staleSource
 }
 
 /// One region's outcome: where it is, and either its sharpness evidence or the explicit reason

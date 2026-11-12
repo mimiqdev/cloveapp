@@ -83,7 +83,7 @@ public struct DetailRegionSharpnessReading: RegionSharpnessReading {
         switch failure {
         case .cannotOpen: return .cannotOpen
         case .noUsablePreview: return .noUsablePreview
-        case .sourceChanged: return .noUsablePreview
+        case .sourceChanged: return .staleSource
         }
     }
 

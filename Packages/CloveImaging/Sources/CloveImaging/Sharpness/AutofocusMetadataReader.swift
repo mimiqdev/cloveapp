@@ -71,12 +71,16 @@ public struct AutofocusMetadataReader: Sendable {
     public func regions(
         of url: URL, properties: [String: Any]
     ) -> Result<AutofocusRegion, AutofocusMetadataEvidence> {
-        let make = (properties["{TIFF}"] as? [String: Any])?["Make"] as? String
+        let tiff = properties["{TIFF}"] as? [String: Any] ?? [:]
+        let make = tiff["Make"] as? String
         let exif = properties["{Exif}"] as? [String: Any] ?? [:]
         let aux = properties["{ExifAux}"] as? [String: Any] ?? [:]
+        // The root orientation matches the pixels ImageIO delivers (DetailRenderer and
+        // DetailNativeSize read it the same way); TIFF is the fallback a bare EXIF-only
+        // dictionary offers.
         let orientation =
-            (properties["{TIFF}"] as? [String: Any])?["Orientation"] as? Int
-            ?? (exif["Orientation"] as? Int) ?? 1
+            properties["Orientation"] as? Int
+            ?? tiff["Orientation"] as? Int ?? 1
 
         var inspected: [AutofocusMetadataEvidence.Inspection] = []
         if let afInfo = aux["AFInfo"] {

@@ -61,6 +61,64 @@ import Testing
         #expect(region.x + region.width <= 1 && region.y + region.height <= 1)
     }
 
+    /// An off-center SubjectArea under orientation 6, where the axes actually swap and the
+    /// box visibly moves: a storage-space box centered low-left ends up upper-left after the
+    /// 90° CW display rotation. A centered fixture cannot prove this.
+    @Test func offCenterSubjectAreaMovesUnderOrientation6() throws {
+        // Storage space: 4000×3000 pixels, center at (1000, 2200), size 400×300 — off-center.
+        let properties: [String: Any] = [
+            "Orientation": 6,
+            "{Exif}": [
+                "SubjectArea": [1000, 2200, 400, 300],
+                "PixelXDimension": 4000,
+                "PixelYDimension": 3000,
+            ],
+        ]
+        let region = try #require(try resultProperties(properties))
+        // Storage-space center, normalized: (0.25, 2200/3000 ≈ 0.7333).
+        // Display space (orientation 6, 90° CW): (x, y) → (1 − y, x), so the center lands at
+        // (0.2667, 0.25); the box is now 300 wide and 400 tall.
+        #expect(abs(region.centerX - (1 - 2200.0 / 3000.0)) < 1e-9)
+        #expect(abs(region.centerY - 0.25) < 1e-9)
+        #expect(abs(region.width - 300.0 / 3000.0) < 1e-9)
+        #expect(abs(region.height - 400.0 / 4000.0) < 1e-9)
+        #expect(region.x >= 0 && region.y >= 0)
+        #expect(region.x + region.width <= 1 && region.y + region.height <= 1)
+    }
+
+    /// The root `Orientation` is authoritative when both it and TIFF carry one, matching the
+    /// property ImageIO's pixel routes use.
+    @Test func rootOrientationWinsOverTIFF() throws {
+        let properties: [String: Any] = [
+            "Orientation": 6,
+            "{TIFF}": ["Orientation": 1],
+            "{Exif}": [
+                "SubjectArea": [1000, 2200, 400, 300],
+                "PixelXDimension": 4000,
+                "PixelYDimension": 3000,
+            ],
+        ]
+        let region = try #require(try resultProperties(properties))
+        // Orientation 6 swaps the axes; orientation 1 would not.
+        #expect(abs(region.width - 300.0 / 3000.0) < 1e-9)
+        #expect(abs(region.height - 400.0 / 4000.0) < 1e-9)
+    }
+
+    /// TIFF is the fallback when the root dictionary carries no orientation at all.
+    @Test func tiffOrientationIsTheFallback() throws {
+        let properties: [String: Any] = [
+            "{TIFF}": ["Orientation": 6],
+            "{Exif}": [
+                "SubjectArea": [1000, 2200, 400, 300],
+                "PixelXDimension": 4000,
+                "PixelYDimension": 3000,
+            ],
+        ]
+        let region = try #require(try resultProperties(properties))
+        #expect(abs(region.width - 300.0 / 3000.0) < 1e-9)
+        #expect(abs(region.height - 400.0 / 4000.0) < 1e-9)
+    }
+
     /// `sony-ilce-7s.ARW` and its HEIC: no path ImageIO exposes carries AF data, so the
     /// reader reports each inspected path missing, with the make recorded as evidence.
     @Test func sonyWithoutExposedCoordinatesReportsMissingWithEvidence() {
