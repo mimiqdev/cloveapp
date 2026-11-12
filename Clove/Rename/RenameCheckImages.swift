@@ -26,9 +26,10 @@ final class RenameCheckImages {
         unavailable = false
         isLoadingFit = true
         isZoomed = false
-        placeholder = await source.placeholder(
+        let loadedPlaceholder = await source.placeholder(
             for: window.current.photo, gridThumbnails: thumbnails)
         guard !Task.isCancelled else { return }
+        placeholder = loadedPlaceholder
         await source.prepare(window)
         guard !Task.isCancelled else { return }
         let preview = await source.image(for: window.current.photo, request: window.request())

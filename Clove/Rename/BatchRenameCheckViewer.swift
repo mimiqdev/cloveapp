@@ -51,7 +51,7 @@ struct BatchRenameCheckViewer: View {
                 doubleTapZoomEnabled: true, rules: rules, currentRating: .unrated,
                 feedback: feedback,
                 onZoomChange: { value in
-                    if abs(value - scale) > 0.01 { nativeAnchor = nil }
+                    nativeAnchor = nil
                     scale = value
                 },
                 onEdgeTap: { zone in
