@@ -4,6 +4,8 @@ This package is everything an implementation session needs to build the Clove MV
 
 **Figma file:** [Clove — Native concept](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept), page **"Clove · MVP design"**. The page "Archive · original concept" holds superseded work. **Do not build from the Archive page.** The frames were last synced to the app on 12 Nov 2026 (main at `7470617`); the 10 Nov versions of changed frames are on the Archive page under "Superseded · 10 Nov handoff". The iPad frames are provisional until #152 and #163 land.
 
+**Prototype:** the page "Prototype · iPhone" holds copies of the Light iPhone frames wired for clicking: open the [iPhone prototype](https://www.figma.com/proto/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=248-2165&starting-point-node-id=248-2165) (flow "iPhone · Open a folder and cull"). It covers Entry, the grid with its menus and Select mode, detail (swipe star bar, 100% zoom, Reject, Label, Info), a stack in detail, Move Rejects with the quick grid and the Undo toast, and Settings. Transitions are placeholders, not the motion design. The copies don't follow edits to the MVP page; recopy them after a change.
+
 ## What's in here
 
 | File | What it is | Read it when |
