@@ -112,7 +112,7 @@ if [ -n "$duo_test" ] && [ "$device_type" != "iPhone Duo" ]; then
 fi
 
 udid=""
-log=$(mktemp -t clove-smoke)
+log=$(mktemp 2>/dev/null || mktemp -t clove-smoke)
 
 cleanup() {
     if [ -n "$udid" ]; then
