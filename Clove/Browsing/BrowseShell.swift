@@ -43,15 +43,6 @@ struct BrowseShell: View {
                     .navigationBarBackButtonHidden()
             }
         }
-        .overlay(alignment: .bottom) {
-            if browsing.state.route == .detail, !isDuoExpanded,
-                let message = browsing.failureToastMessage
-            {
-                Toast(message: message, identifier: "clove.save.toast")
-                    .padding(.horizontal)
-                    .padding(.bottom, 12)
-            }
-        }
         .task(id: browsing.failureToastBurst) {
             guard browsing.failureToastMessage != nil else { return }
             try? await Task.sleep(for: .seconds(6))

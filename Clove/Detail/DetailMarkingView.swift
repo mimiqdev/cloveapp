@@ -314,6 +314,12 @@ struct DetailMarkingView: View {
             FolderSaveBanner(
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             previewArea
+            // The failure toast sits above the filmstrip, clear of the capsule row
+            // (handoff screens.md §03, components.md Toast).
+            if let message = browsing.failureToastMessage, chromeIsVisible {
+                Toast(message: message, identifier: "clove.save.toast")
+                    .padding(.horizontal, 16)
+            }
             // The marking capsule gets its own reserved row beneath the fitted photo,
             // never over the image and never in the system side toolbar (#200).
             if isDuoExpanded && chromeIsVisible {
@@ -395,6 +401,12 @@ struct DetailMarkingView: View {
             .overlay(alignment: .bottom) {
                 if chromeIsVisible {
                     VStack(spacing: 8) {
+                        // The save/read failure toast sits above the filmstrip so it never
+                        // covers the mark capsule (handoff screens.md §03, components.md Toast).
+                        if let message = browsing.failureToastMessage {
+                            Toast(message: message, identifier: "clove.save.toast")
+                                .padding(.horizontal, 16)
+                        }
                         DetailFilmstrip(
                             photos: order, current: photo.id, thumbnails: browsing.thumbnails,
                             open: actions.openPhoto,
