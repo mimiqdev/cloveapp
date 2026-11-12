@@ -203,7 +203,7 @@ final class FolderGrouping {
             reuseCache: reusingCache)
         guard !isClosed else { return }
         // The grouper's own result, read here rather than waited for, so the caller's next step
-        // runs after the first publication instead of racing it (PRD P0-14).
+        // runs after the first publication instead of racing it.
         let result = await grouping.current
         guard !isClosed else { return }
         adopt(result.browsingGroups)
