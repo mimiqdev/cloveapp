@@ -10,6 +10,8 @@ struct GridScreen: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(SettingsStore.self) private var store
     @State private var moveSheet: MoveSheetRoute?
+    @State private var renameFlow: BatchRenameFlow?
+    @State private var showsRenameDetails = false
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
     @State private var selectsEmpty = false
@@ -86,14 +88,31 @@ struct GridScreen: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if isSelecting {
-                GridBatchBar(browsing: browsing, cells: cells)
-                    .disabled(!browsing.canMark)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                VStack(spacing: 8) {
+                    Button {
+                        renameFlow = BatchRenameFlow(browsing: browsing)
+                    } label: {
+                        Text("Rename…")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.clove.accent)
+                            .padding(.horizontal, 20).padding(.vertical, 10)
+                            .cloveGlass(in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(browsing.batchTargets.isEmpty || !browsing.canMark)
+                    .accessibilityIdentifier("clove.grid.batch.rename")
+                    GridBatchBar(browsing: browsing, cells: cells)
+                        .disabled(!browsing.canMark)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
         }
         .overlay(alignment: .bottom) {
-            if let message = browsing.failureToastMessage {
+            if let completed = browsing.completedRename, browsing.isRenameToastVisible {
+                BatchRenameToast(completed: completed) { showsRenameDetails = true }
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else if let message = browsing.failureToastMessage {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal)
                     .padding(.bottom, 12)
@@ -110,6 +129,25 @@ struct GridScreen: View {
             try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
             browsing.dismissRejectMoveToast()
+        }
+        .task(id: browsing.renameToastAttempt) {
+            guard browsing.isRenameToastVisible, !TestLibrary.keepsMoveToast else { return }
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            browsing.dismissRenameToast()
+        }
+        .fullScreenCover(
+            item: $renameFlow,
+            onDismiss: {
+                if !browsing.isSelecting { selectsEmpty = false }
+            }
+        ) { flow in
+            BatchRenameOrderScreen(flow: flow)
+        }
+        .sheet(isPresented: $showsRenameDetails) {
+            if let completed = browsing.completedRename {
+                BatchRenameDetailsSheet(completed: completed)
+            }
         }
         .sheet(item: $moveSheet) { route in
             switch route {

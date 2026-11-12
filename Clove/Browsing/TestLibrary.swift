@@ -184,6 +184,9 @@ final class TestLibrary: FolderLibrary {
 
     private let updateContinuation: AsyncStream<FolderLibraryUpdate>.Continuation
     private var stored: [GridPhoto]
+    private var renameFiles: SampleRenameFiles?
+    private var sampleRenamer: BatchRenamer?
+    private var showsRenameProblem = false
 
     /// The stem suffixes whose photos fail their first write (PRD P0-08).
     private let failingStems: [String]
@@ -353,6 +356,76 @@ final class TestLibrary: FolderLibrary {
         // exercises the model's update path (PRD P0-08, P0-13).
         updateContinuation.yield(.reads(times: [:], marks: [photo: marks]))
         return status
+    }
+
+    // MARK: - Batch rename
+
+    func planBatchRename(
+        order: [PhotoIdentity], template: RenameTemplate, destination: RenameDestination,
+        rejectsFolderName: RejectsFolderName
+    ) async throws -> BatchRenamePlan {
+        guard !readOnly else { throw RenameFlowError.unavailable }
+        if renameFiles == nil {
+            let files = SampleRenameFiles(sets: stored.compactMap { scannedSet(for: $0) })
+            renameFiles = files
+            sampleRenamer = BatchRenamer(
+                store: CloveMarkStore(directory: FileManager.default.temporaryDirectory),
+                fileSystem: files)
+        }
+        let items = try order.map { identity -> RenameItem in
+            guard let set = scannedSet(for: identity) else { throw RenameFlowError.photoMissing }
+            return RenameItem(set: set, captureWallTime: Date(timeIntervalSince1970: 1_760_000_000))
+        }
+        guard let sampleRenamer else { throw RenameFlowError.unavailable }
+        return await sampleRenamer.plan(
+            for: BatchRenameRequest(
+                rootURL: URL(fileURLWithPath: "/clove-test-library", isDirectory: true),
+                items: items, template: template, destination: destination,
+                rejectsFolderName: rejectsFolderName))
+    }
+
+    func runBatchRename(
+        _ plan: BatchRenamePlan,
+        progress: @escaping @MainActor @Sendable (BatchRenameProgress) -> Void
+    ) async throws -> BatchRenameResult {
+        guard let sampleRenamer, !readOnly else { throw RenameFlowError.unavailable }
+        let updates = await sampleRenamer.progressUpdates()
+        let observer = Task { @MainActor in
+            for await update in updates {
+                progress(update)
+                if case .finished = update { return }
+            }
+        }
+        let result: BatchRenameResult
+        do {
+            result = try await sampleRenamer.rename(plan)
+            await observer.value
+        } catch {
+            observer.cancel()
+            throw error
+        }
+        let completed = CompletedBatchRename(plan: plan, result: result)
+        let replaced = Set(result.replacedSets.map(\.identity))
+        stored = stored.filter { !replaced.contains($0.id) }.map { photo in
+            let identity = completed.newIdentity(for: photo.id)
+            guard identity != photo.id else { return photo }
+            let stem =
+                result.temporarySets.first { $0.identity == photo.id }?.stem
+                ?? plan.rows.first { $0.id == photo.id }?.newStem ?? identity.stem
+            return GridPhoto(
+                id: identity, fileName: stem + ".ARW", time: photo.time, marks: photo.marks)
+
+        }
+        groups = []
+        allGroups = []
+        return result
+    }
+
+    func rescanAfterRename() async throws {
+        updateContinuation.yield(.scanStarted)
+        updateContinuation.yield(.photos(stored))
+        updateContinuation.yield(
+            .scanFinished(FolderScanSummary(photoCount: stored.count, status: .complete)))
     }
 
     // MARK: - Move rejects
@@ -529,7 +602,11 @@ final class TestLibrary: FolderLibrary {
         let images = set.imageFiles.map { file in
             ScannedImageFile(file: file, size: nil, modificationDate: nil)
         }
-        return ScannedPhotoSet(photoSet: set, sidecar: .resolved(sidecar), imageFiles: images)
+        let association: SidecarState =
+            showsRenameProblem && photo.id.stem == "mmq02680"
+            ? .ambiguous([sidecar, folder.appendingPathComponent("\(stem).XMP")])
+            : .resolved(sidecar)
+        return ScannedPhotoSet(photoSet: set, sidecar: association, imageFiles: images)
     }
 
     /// Simulates one run, publishing progress and the photos that left the sample (P0-10).
@@ -647,6 +724,15 @@ final class TestLibrary: FolderLibrary {
     /// Held presentation states for screenshots and short UI tests. Normal sample launches
     /// remain fully opened and saved. Values are read only when the test library is selected.
     private func installPresentationSamples(environment: [String: String]) {
+        if environment["CLOVE_TEST_LIBRARY_RENAME_PREVIEW"] == "1" {
+            showsRenameProblem = true
+            stored.append(
+                GridPhoto(
+                    id: PhotoIdentity(
+                        folderID: folder, relativeFolderPath: "DCIM/100CAM", stem: "Test_001"),
+                    fileName: "Test_001.ARW", time: .known(PhotoTime(fileCreation: Date())),
+                    marks: PhotoMarks()))
+        }
         if let state = environment["CLOVE_TEST_LIBRARY_GROUP_STATE"],
             let group = groups.first, state == "unmarked" || state == "done"
         {
