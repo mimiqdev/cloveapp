@@ -11,6 +11,7 @@ struct BatchRenameCheckViewer: View {
     @State private var current: PhotoIdentity?
     @State private var pixels: RenameCheckImages
     @State private var scale: CGFloat = 1
+    @State private var nativeAnchor: UnitPoint?
     @State private var size: CGSize = .zero
     @State private var command: DetailZoomCommand?
     @State private var commandID = 0
@@ -48,7 +49,10 @@ struct BatchRenameCheckViewer: View {
                 image: shown?.image ?? placeholder,
                 fullResolutionPixels: shown?.fullResolutionPixels, command: command,
                 doubleTapZoomEnabled: true, rules: rules, feedback: feedback,
-                onZoomChange: { scale = $0 },
+                onZoomChange: { value in
+                    if abs(value - scale) > 0.01 { nativeAnchor = nil }
+                    scale = value
+                },
                 onEdgeTap: { zone in
                     if zone == .next { step(1) }
                     if zone == .previous { step(-1) }
@@ -80,6 +84,9 @@ struct BatchRenameCheckViewer: View {
         .onChange(of: scale > DetailFitScale.tolerance) { _, zoomed in
             pixels.setZoomed(zoomed)
         }
+        .onChange(of: shown?.fullResolutionPixels) { _, _ in
+            if let nativeAnchor, scale > DetailFitScale.tolerance { zoomToNative(at: nativeAnchor) }
+        }
         .onDisappear { pixels.close() }
     }
 
@@ -94,6 +101,7 @@ struct BatchRenameCheckViewer: View {
     }
 
     private func load() async {
+        nativeAnchor = nil
         scale = 1
         commandID += 1
         command = DetailZoomCommand(id: commandID, kind: .fit)
@@ -107,19 +115,26 @@ struct BatchRenameCheckViewer: View {
     }
 
     private func doubleTap(_ anchor: UnitPoint) {
-        commandID += 1
         if scale > DetailFitScale.tolerance {
+            nativeAnchor = nil
             scale = 1
+            commandID += 1
             command = DetailZoomCommand(id: commandID, kind: .fit)
         } else {
-            let pixels = shown?.image ?? placeholder
-            let shownSize = pixels.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
-            scale =
-                DetailZoom.fullResolutionTarget(
-                    nativePixels: shown?.fullResolutionPixels ?? shownSize,
-                    shownPixels: shownSize, viewSize: size, screenScale: displayScale)
-                ?? DetailZoom.inspectionScale
-            command = DetailZoomCommand(id: commandID, kind: .scale(scale, anchor: anchor))
+            nativeAnchor = anchor
+            zoomToNative(at: anchor)
         }
+    }
+
+    private func zoomToNative(at anchor: UnitPoint) {
+        let bitmap = shown?.image ?? placeholder
+        let shownSize = bitmap.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
+        scale =
+            DetailZoom.fullResolutionTarget(
+                nativePixels: shown?.fullResolutionPixels,
+                shownPixels: shownSize, viewSize: size, screenScale: displayScale)
+            ?? DetailZoom.inspectionScale
+        commandID += 1
+        command = DetailZoomCommand(id: commandID, kind: .scale(scale, anchor: anchor))
     }
 }

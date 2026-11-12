@@ -11,6 +11,9 @@ struct BatchRenameOrderScreen: View {
         VStack(spacing: 0) {
             HStack {
                 Button("Cancel") { dismiss() }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 16).frame(height: 44)
+                    .cloveGlass(in: Capsule())
                     .accessibilityIdentifier("clove.rename.cancel")
                 Spacer(minLength: 4)
                 VStack(spacing: 2) {
@@ -20,6 +23,10 @@ struct BatchRenameOrderScreen: View {
                 }
                 Spacer(minLength: 4)
                 Button("Next") { showsName = true }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.clove.accent)
+                    .padding(.horizontal, 16).frame(height: 44)
+                    .cloveGlass(in: Capsule())
                     .disabled(flow.order.isEmpty)
                     .accessibilityIdentifier("clove.rename.next")
             }

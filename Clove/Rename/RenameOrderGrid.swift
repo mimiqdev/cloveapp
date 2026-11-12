@@ -18,7 +18,8 @@ struct RenameOrderGrid: UIViewRepresentable {
                 / CGFloat(columns)
             let item = NSCollectionLayoutItem(
                 layoutSize: NSCollectionLayoutSize(
-                    widthDimension: .fractionalWidth(1), heightDimension: .fractionalHeight(1)))
+                    widthDimension: .fractionalWidth(1 / CGFloat(columns)),
+                    heightDimension: .fractionalHeight(1)))
             let group = NSCollectionLayoutGroup.horizontal(
                 layoutSize: NSCollectionLayoutSize(
                     widthDimension: .fractionalWidth(1), heightDimension: .absolute(side)),
