@@ -260,7 +260,7 @@ else {
 }
 if session["CGSSessionScreenIsLocked"] as? Bool == true {
     fail(
-        "The GUI session is logged in but locked. Unlock the Mini through Screen Sharing and keep it unlocked for Device Hub AX tests; no manual pose click is required.",
+        "The GUI session is logged in but locked. This manual Open-pose tool needs an unlocked session; the headless Duo cover runner never calls it and is unaffected.",
         code: 78)
 }
 let prompts = arguments.contains("--request-access")
