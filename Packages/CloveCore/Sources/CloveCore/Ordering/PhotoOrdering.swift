@@ -73,7 +73,9 @@ public struct PhotoOrdering: Sendable {
     public func photos(order: PhotoOrder = .captureTime, matching filter: PhotoFilter = .all)
         -> [GridPhoto]
     {
-        let accepted = placed.filter { filter.matches($0.marks) }
+        let accepted = placed.filter {
+            filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
+        }
         switch order {
         case .captureTime:
             return accepted.sorted(by: precedes)

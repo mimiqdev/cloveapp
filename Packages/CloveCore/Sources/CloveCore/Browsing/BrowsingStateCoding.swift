@@ -119,10 +119,12 @@ private struct EncodedPhoto: Codable, Hashable {
 private struct EncodedFilter: Codable {
     var kind: String
     var minimum: Int?
+    var path: String?
 
     init(_ filter: PhotoFilter) {
         kind = filter.encodedSpelling
         if case .ratedAtLeast(let rating) = filter { minimum = rating.rawValue }
+        if case .subfolder(let folderPath) = filter { path = folderPath }
     }
 
     var filter: PhotoFilter? {
@@ -130,6 +132,9 @@ private struct EncodedFilter: Codable {
         case "all": return .all
         case "unmarked": return .unmarked
         case "rejected": return .rejected
+        case "subfolder":
+            guard let path else { return nil }
+            return .subfolder(path)
         case "ratedAtLeast":
             // Reject is −1 and unrated is 0, so neither can be a star minimum (PRD P0-03).
             guard let minimum, minimum > Rating.unrated.rawValue,
@@ -148,6 +153,7 @@ private extension PhotoFilter {
         case .unmarked: "unmarked"
         case .rejected: "rejected"
         case .ratedAtLeast: "ratedAtLeast"
+        case .subfolder: "subfolder"
         }
     }
 }

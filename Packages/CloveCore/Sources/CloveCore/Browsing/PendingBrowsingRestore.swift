@@ -55,7 +55,14 @@ public struct PendingBrowsingRestore: Hashable, Sendable {
         current: BrowsingState, contents: FolderContents, scanFinished: Bool
     ) -> PendingBrowsingRestoreDecision {
         guard current == shown, contents.folder == saved.folder else { return .drop }
-        guard scanFinished || namedPhotos.isSubset(of: Set(contents.photos)) else { return .wait }
+        if !scanFinished {
+            guard namedPhotos.isSubset(of: Set(contents.photos)) else { return .wait }
+            if case .subfolder(let path) = saved.filter,
+                !contents.photos.contains(where: { $0.relativeFolderPath == path })
+            {
+                return .wait
+            }
+        }
         return .apply(saved.restored(from: .available(contents)))
     }
 
