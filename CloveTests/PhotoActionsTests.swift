@@ -133,6 +133,7 @@ struct PhotoActionsTests {
         #expect(model.shownMarks(for: photo) == disk)
         #expect(model.failureToastMessage == BrowsingModel.saveFailureToastMessage)
         #expect(BrowsingModel.saveFailureToastMessage == "Couldn't save the mark.")
+        #expect(BrowsingModel.readFailureToastMessage == "Couldn't read some marks.")
         model.apply(.rating(.rejected), to: photo)
         await model.drainActions()
         #expect(library.writes.last?.change == .rating(.rejected))
