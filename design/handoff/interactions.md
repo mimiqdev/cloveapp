@@ -30,8 +30,8 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 | Grid | Filter button | Opens the filter menu. Picking an item applies it at once, and the button fills with `accent`. |
 | Grid | "…" ▶ Select | Select mode: tap tiles to toggle, then use the capsule to mark all of them. Done exits. |
 | Detail | Swipe left or right | Next or previous photo in grid order (filtered order when a filter is on). |
-| Detail | **Swipe up** and hold | Shows the vertical star bar. Dragging up fills stars from the bottom; release commits. The capsule stars preview the live value. |
-| Detail | **Swipe down** | Reject (the ✕ chip under the star bar). Swiping down again on a rejected photo clears the reject. |
+| Detail | **Slow vertical drag** | Relative slider from the current rating: up raises, down lowers through enabled stars, 0 and −1, one step per 60 pt with a light haptic. Reverse across the start in the same gesture. The star bar stays beside the original touch and the capsule/rail stars preview the value; clear shows an empty bar, Reject shows ✕ immediately. Release commits the preview once for undo, without changing the label. |
+| Detail | **Quick swipe down** | Mode is chosen once from the first ~100 ms (starting threshold 500 pt/s downward). Three stops: starting rating, 0 at 60 pt (medium haptic), −1 at 180 pt (heavier haptic). Reverse from Reject to 0; up past the start restores the original. Unrated still passes through 0; Reject cannot lower further, and up steps −1 → 0 → enabled stars. Quick up is a slow slider. No hold or momentum. Distances and haptic strengths need device tuning. Glyphs only; stage words are VoiceOver labels. |
 | Detail | Tap the capsule's reject, stars or label | Sets the mark directly. Tapping the current star value clears it. The label opens the picker, and picking closes it. |
 | Detail | Single tap on the photo | Hides or shows the chrome (capsule, filmstrip, top bar buttons). |
 | Detail | Double-tap or pinch | 100% zoom at the tapped point. The chrome hides. Double-tap again to fit. |
@@ -59,7 +59,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 - The sidebar is the filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
 - Detail has a right rail instead of the capsule: tap or drag the vertical star bar, tap Reject, or tap a label dot. Tapping the current rating or label clears it. The rail never hides; single tap and zoom hide the filmstrip, Reject N unmarked pill and top bar buttons while the stage keeps its size.
-- Swipe marking stays on the photo as on iPhone: swipe up to rate with live feedback in the rail's stars, and swipe down to toggle Reject.
+- Swipe marking stays on the photo as on iPhone: slow vertical drags use the relative slider with live feedback in the rail's stars; quick down clears then rejects by distance. A downward swipe on Reject leaves it rejected; up steps through 0 to enabled stars.
 - Full keyboard support as above **(proposed)**. Pointer hover shows the rail's tooltips.
 
 ## Duo cover (folded)

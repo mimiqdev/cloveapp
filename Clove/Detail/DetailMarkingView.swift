@@ -291,6 +291,7 @@ struct DetailMarkingView: View {
             command: command,
             doubleTapZoomEnabled: settings.doubleTap == .zoom,
             rules: rules,
+            currentRating: browsing.shownMarks(for: photo.id).rating,
             feedback: swipeFeedback,
             onZoomChange: { zoomChanged($0) },
             onEdgeTap: { navigate($0) },
@@ -763,20 +764,12 @@ struct DetailMarkingView: View {
     ///
     /// The preview only begins a marking swipe at fit, and a one-finger drag cannot change the
     /// zoom, so the release is never the zoomed case those rules also guard against.
-    func applyMarkingSwipe(_ end: DetailMarkingSwipeEnd) {
+    func applyMarkingSwipe(_ rating: Rating) {
         guard browsing.canMark else { return }
-        switch end {
-        case .rating(let travel):
-            apply(
-                rules.result(
-                    forSwipeUpTravel: travel, marks: browsing.shownMarks(for: photo.id),
-                    isZoomed: false))
-        case .reject(let travel):
-            apply(
-                rules.result(
-                    forSwipeDownTravel: travel, marks: browsing.shownMarks(for: photo.id),
-                    isZoomed: false))
-        }
+        apply(
+            rules.result(
+                forSwipeRating: rating, marks: browsing.shownMarks(for: photo.id),
+                isZoomed: false))
     }
 
     /// Applies one resolved marking input and asks the screen to start the advance it asks for

@@ -35,19 +35,6 @@ struct DetailZoomCommand: Equatable {
     }
 }
 
-/// What one marking swipe ended with, for the screen to resolve through C13's rules
-/// (PRD Rating by swipe distance, PRD Detail gestures).
-///
-/// Only a swipe that began at fit reports an end, so the screen resolves it as an unzoomed
-/// release; a system cancel reports nothing and writes nothing.
-enum DetailMarkingSwipeEnd: Equatable {
-    /// A swipe up released at this travel, in points with up positive.
-    case rating(travel: Double)
-
-    /// A swipe down released at this travel, in points with up positive, so down is negative.
-    case reject(travel: Double)
-}
-
 extension DetailZoomAnchor {
     /// The same position as SwiftUI's unit point, for the preview's zoom command (PRD P0-04).
     var unitPoint: UnitPoint { UnitPoint(x: x, y: y) }
@@ -118,10 +105,11 @@ struct DetailZoomView: UIViewRepresentable {
     /// Whether the centre double-tap does anything (C12's `doubleTap` setting).
     let doubleTapZoomEnabled: Bool
 
-    /// C13's rules for the current settings: the drag that begins a marking swipe, the two
-    /// session ladders that measure it, and the gesture switches it reads (PRD Detail gestures,
-    /// PRD Rating by swipe distance, PRD Gesture-related settings).
+    /// The current settings and initial axis split for marking.
     let rules: MarkingInputRules
+
+    /// Captured once by the session as the relative slider's starting value.
+    let currentRating: Rating
 
     /// The live rating or Reject indicator (PRD P0-06).
     let feedback: DetailSwipeFeedback
@@ -135,8 +123,8 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports a double tap in the centre area, with the tapped point in unit image coordinates.
     let onDoubleTap: (UnitPoint) -> Void
 
-    /// Reports one finished marking swipe, with its release travel (PRD Rating by swipe distance).
-    let onMarkingSwipe: (DetailMarkingSwipeEnd) -> Void
+    /// Reports the preview value once per release; cancellation reports nothing.
+    let onMarkingSwipe: (Rating) -> Void
 
     /// Cancels pending auto-advance when navigation or marking starts.
     let onSwipeBegin: () -> Void
@@ -160,6 +148,7 @@ struct DetailZoomView: UIViewRepresentable {
         view.hasNext = hasNext
         view.feedback = feedback
         view.rules = rules
+        view.currentRating = currentRating
         return view
     }
 
@@ -173,6 +162,7 @@ struct DetailZoomView: UIViewRepresentable {
         view.hasNext = hasNext
         view.feedback = feedback
         view.rules = rules
+        view.currentRating = currentRating
         view.setDoubleTapEnabled(doubleTapZoomEnabled)
         // The image goes in before the command, so a 100% command for new pixels uses the new
         // pixel size and a quality change never needs a second pass.
@@ -194,17 +184,12 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private let haptics = MarkingSwipeHaptics()
     private var isNavigating = false
 
-    /// The marking swipe the current drag began as, or nil when the drag is not one.
-    private var swipe: MarkingSwipe?
-
-    /// The live step ladder of an upward swipe (PRD Rating by swipe distance).
-    private var ratingSession: SwipeRatingSession?
-
-    /// The live threshold of a downward swipe (PRD Detail gestures).
-    private var rejectSession: RejectSwipeSession?
-
-    /// Whether the last sample was past the Reject threshold, so each crossing ticks once.
-    private var wasPastRejectThreshold = false
+    /// One preview session for either direction, discarded on cancel.
+    private var markingSession: MarkingSwipeSession?
+    private var markingStartTime: TimeInterval = 0
+    private var markingTouchStart: CGPoint = .zero
+    private var velocitySample: Task<Void, Never>?
+    var currentRating: Rating = .unrated
 
     /// The pixels on screen, so a command can clamp and a double tap can report an image point.
     private var shownPixels: CGSize = .zero
@@ -226,7 +211,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     var onZoomChange: ((CGFloat) -> Void)?
     var onEdgeTap: ((DetailEdgeZone) -> Void)?
     var onDoubleTap: ((UnitPoint) -> Void)?
-    var onMarkingSwipe: ((DetailMarkingSwipeEnd) -> Void)?
+    var onMarkingSwipe: ((Rating) -> Void)?
     var onSwipeBegin: (() -> Void)?
     var hasPrevious = false
     var hasNext = false
@@ -438,6 +423,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     // MARK: - Marking swipe
 
+    /// UIPan translation starts at recognition, losing more distance on a fast swipe. Capture
+    /// touch-down so the continuous ladder always measures the full travel from the same origin.
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool
+    {
+        if recognizer === markingPan { markingTouchStart = touch.location(in: self) }
+        return true
+    }
+
     /// Locks the dominant axis once. Later samples cannot switch between navigation and marking.
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
         if recognizer === edgeTap {
@@ -454,15 +447,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         isNavigating =
             NavigationSwipeRules.axis(
                 horizontal: Double(translation.x), vertical: Double(translation.y)) == .horizontal
-        if isNavigating {
-            swipe = nil
-            return true
-        }
-        swipe = rules.beginSwipe(
+        if isNavigating { return true }
+        return rules.beginsSwipe(
             horizontalTravel: Double(translation.x),
             verticalTravel: -Double(translation.y),
             isZoomed: scrollView.zoomScale > DetailFitScale.tolerance)
-        return swipe != nil
     }
 
     /// Lets the fit pan read drags alongside scrolling and yield to pinch.
@@ -478,25 +467,25 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Feeds one sample of the drag to the session and shows the step it reached.
     ///
-    /// UIKit counts down as positive and C13's sessions count up as positive, so the travel is
-    /// the negated translation; velocity is never read (PRD Rating by swipe distance).
+    /// UIKit counts down as positive; the session counts up as positive and samples the first
+    /// approximately 100 ms once to choose slow or quick.
     @objc func handleMarkingPan(_ pan: UIPanGestureRecognizer) {
         if isNavigating {
             handleNavigationPan(pan)
             return
         }
-        let travel = -Double(pan.translation(in: self).y)
+        let travel = Double(markingTouchStart.y - pan.location(in: self).y)
         switch pan.state {
         case .began:
-            beginMarkingSwipe(
-                at: CGPoint(
-                    x: pan.location(in: self).x - pan.translation(in: self).x,
-                    y: pan.location(in: self).y - pan.translation(in: self).y))
+            beginMarkingSwipe(at: markingTouchStart)
+            updateMarkingSwipe(travel: travel)
         case .changed:
             updateMarkingSwipe(travel: travel)
         case .ended:
-            updateMarkingSwipe(travel: travel)
-            finishMarkingSwipe(travel: travel)
+            updateMarkingSwipe(travel: travel, releasing: true)
+            let rating = markingSession?.rating
+            clearMarkingSwipe()
+            if let rating { onMarkingSwipe?(rating) }
         case .cancelled, .failed:
             // A system cancel writes nothing and leaves the marks as they were (PRD P0-06).
             clearMarkingSwipe()
@@ -505,64 +494,42 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         }
     }
 
-    /// Starts the session for the direction the drag began as.
     private func beginMarkingSwipe(at startLocation: CGPoint) {
-        // Keep the current photo under the finger, even if this drag writes nothing.
         onSwipeBegin?()
         haptics.prepare()
-        feedback?.clear()
+        markingStartTime = ProcessInfo.processInfo.systemUptime
+        markingSession = rules.swipeSession(startingRating: currentRating)
         feedback?.startLocation = startLocation
-        wasPastRejectThreshold = false
-        switch swipe {
-        case .rating:
-            ratingSession = rules.swipeRatingSession()
-            rejectSession = nil
-        case .reject:
-            rejectSession = rules.rejectSwipeSession()
-            ratingSession = nil
-        case nil:
-            break
+        feedback?.rating = currentRating
+        // Resolve the initial speed even if the finger stops moving inside the sample window.
+        // This timer only chooses the mode; holding never advances clear to Reject.
+        velocitySample = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(MarkingSwipeRules.velocityWindow))
+            } catch { return }
+            guard let self else { return }
+            self.updateMarkingSwipe(
+                travel: Double(self.markingTouchStart.y - self.markingPan.location(in: self).y))
         }
     }
 
-    /// Moves the live session and reports the step boundary and the badge it reached.
-    private func updateMarkingSwipe(travel: Double) {
-        switch swipe {
-        case .rating:
-            guard var session = ratingSession else { return }
-            for _ in session.update(travel: travel) { haptics.crossedStep() }
-            ratingSession = session
-            feedback?.rating = session.rating
-        case .reject:
-            guard var session = rejectSession else { return }
-            session.update(travel: travel)
-            rejectSession = session
-            let isPast = session.isPastThreshold
-            if isPast != wasPastRejectThreshold { haptics.crossedRejectThreshold() }
-            wasPastRejectThreshold = isPast
-            feedback?.isReject = isPast
-        case nil:
-            break
-        }
+    /// Every crossing previews and ticks; only the release callback writes a mark.
+    private func updateMarkingSwipe(travel: Double, releasing: Bool = false) {
+        guard var session = markingSession else { return }
+        let elapsed = ProcessInfo.processInfo.systemUptime - markingStartTime
+        let crossings =
+            releasing
+            ? session.release(travel: travel, elapsed: elapsed)
+            : session.update(travel: travel, elapsed: elapsed)
+        for crossing in crossings { haptics.crossed(crossing.haptic) }
+        markingSession = session
+        feedback?.rating = session.rating
     }
 
-    /// Reports the release and hides the badge; the screen decides what the release writes.
-    private func finishMarkingSwipe(travel: Double) {
-        let finished = swipe
-        clearMarkingSwipe()
-        switch finished {
-        case .rating: onMarkingSwipe?(.rating(travel: travel))
-        case .reject: onMarkingSwipe?(.reject(travel: travel))
-        case nil: break
-        }
-    }
-
-    /// Drops the session and the badge, which is what a cancel and a release both look like.
     private func clearMarkingSwipe() {
-        swipe = nil
-        ratingSession = nil
-        rejectSession = nil
-        wasPastRejectThreshold = false
+        velocitySample?.cancel()
+        velocitySample = nil
+        markingSession = nil
         feedback?.clear()
     }
 

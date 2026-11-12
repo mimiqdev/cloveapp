@@ -16,9 +16,6 @@ private func rating(_ value: Int) throws -> Rating {
 
     #expect(enabled.levels == [one, two, three, four, five])
     #expect(enabled.count == 5)
-    for step in 1...5 {
-        #expect(enabled.rating(forSwipeStep: step) == (try rating(step)))
-    }
 }
 
 @Test func levelsOneThroughThreeGiveThreeSteps() throws {
@@ -29,13 +26,7 @@ private func rating(_ value: Int) throws -> Rating {
     let enabled = try #require(EnabledRatings([one, two, three]))
 
     #expect(enabled.count == 3)
-    #expect(enabled.rating(forSwipeStep: 1) == one)
-    #expect(enabled.rating(forSwipeStep: 2) == two)
-    #expect(enabled.rating(forSwipeStep: 3) == three)
-    // A longer swipe keeps the highest enabled level rather than inventing a fourth step.
-    #expect(enabled.rating(forSwipeStep: 4) == three)
-    #expect(enabled.rating(forSwipeStep: 0) == nil)
-    #expect(enabled.rating(forSwipeStep: -1) == nil)
+    #expect(enabled.levels == [one, two, three])
     #expect(!enabled.canApply(four))
     #expect(enabled.next(after: three) == nil)
 }
@@ -47,10 +38,7 @@ private func rating(_ value: Int) throws -> Rating {
     let enabled = try #require(EnabledRatings([one, three, five]))
 
     #expect(enabled.count == 3)
-    #expect(enabled.rating(forSwipeStep: 1) == one)
-    #expect(enabled.rating(forSwipeStep: 2) == three)
-    #expect(enabled.rating(forSwipeStep: 3) == five)
-    #expect(enabled.rating(forSwipeStep: 4) == five)
+    #expect(enabled.levels == [one, three, five])
     #expect(enabled.canApply(one))
     #expect(!enabled.canApply(try rating(2)))
 }
@@ -60,8 +48,7 @@ private func rating(_ value: Int) throws -> Rating {
     let enabled = try #require(EnabledRatings([three]))
 
     #expect(enabled.count == 1)
-    #expect(enabled.rating(forSwipeStep: 1) == three)
-    #expect(enabled.rating(forSwipeStep: 2) == three)
+    #expect(enabled.levels == [three])
     #expect(enabled.canApply(three))
     #expect(!enabled.canApply(try rating(1)))
     #expect(!enabled.canApply(try rating(5)))
@@ -75,7 +62,7 @@ private func rating(_ value: Int) throws -> Rating {
     #expect(EnabledRatings([Rating]()) == nil)
     #expect(EnabledRatings([Rating.unrated]) == nil)
     #expect(EnabledRatings([Rating.unrated, three]) == nil)
-    // Reject is not a star level, so the ladder can never produce it.
+    // Reject is always a gesture stage, rather than a configurable star level.
     #expect(EnabledRatings([Rating.rejected]) == nil)
     #expect(EnabledRatings([Rating.rejected, three]) == nil)
 

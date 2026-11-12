@@ -1,104 +1,50 @@
+import CloveCore
 import Testing
 
-import CloveCore
-
 @Suite struct MarkingSwipeRulesTests {
-    private let rules = MarkingSwipeRules.standard
-
-    @Test func aSteepUpwardDragBeginsARatingSwipe() {
+    @Test(arguments: [
+        (0.0, 30.0, true), (0, -30, true), (60, 10, false),
+        (-40, 30, false), (30, 30, true), (30, 0, false),
+    ])
+    func initialAxis(horizontal: Double, vertical: Double, expected: Bool) {
         #expect(
-            rules.swipe(
-                horizontalTravel: 0, verticalTravel: 30, isZoomed: false, gesturesEnabled: true)
-                == .rating)
+            MarkingInputRules().beginsSwipe(
+                horizontalTravel: horizontal, verticalTravel: vertical, isZoomed: false) == expected
+        )
     }
 
-    @Test func aSteepDownwardDragBeginsARejectSwipe() {
+    @Test func zoomAndSettingsDisableSwipes() {
+        var settings = AppSettings()
+        settings.gesturesEnabled = false
         #expect(
-            rules.swipe(
-                horizontalTravel: 0, verticalTravel: -30, isZoomed: false, gesturesEnabled: true)
-                == .reject)
+            !MarkingInputRules(settings: settings).beginsSwipe(
+                horizontalTravel: 0, verticalTravel: -90, isZoomed: false))
+        #expect(
+            !MarkingInputRules().beginsSwipe(
+                horizontalTravel: 0, verticalTravel: 90, isZoomed: true))
+        #expect(
+            !MarkingSwipeRules(verticalToHorizontalRatio: 1.5).beginsSwipe(
+                horizontalTravel: 30, verticalTravel: 30, isZoomed: false, gesturesEnabled: true))
     }
 
-    @Test func aHorizontalDragNeverBeginsAMarkingSwipe() {
-        // A sideways drag stays free for navigation (PRD Detail gestures).
+    @Test func releaseGuardsAndLabelPreservation() throws {
+        let marks = PhotoMarks(
+            rating: try #require(Rating(rawValue: 3)), label: ColourLabel(colour: .green))
+        let rules = MarkingInputRules()
         #expect(
-            rules.swipe(
-                horizontalTravel: 60, verticalTravel: 10, isZoomed: false, gesturesEnabled: true)
-                == nil)
-    }
-
-    @Test func aDragFlatterThanTheSplitNeverBeginsAMarkingSwipe() {
-        #expect(
-            rules.swipe(
-                horizontalTravel: -40, verticalTravel: 30, isZoomed: false, gesturesEnabled: true)
-                == nil)
-    }
-
-    @Test func aDragAtTheSplitBeginsAMarkingSwipe() {
-        // The launch ratio of 1 puts the split at 45°; the boundary belongs to marking.
-        #expect(
-            rules.swipe(
-                horizontalTravel: 30, verticalTravel: 30, isZoomed: false, gesturesEnabled: true)
-                == .rating)
-    }
-
-    @Test func aDragWithNoVerticalTravelNeverBeginsAMarkingSwipe() {
-        #expect(
-            rules.swipe(
-                horizontalTravel: 30, verticalTravel: 0, isZoomed: false, gesturesEnabled: true)
-                == nil)
-    }
-
-    @Test func aZoomedViewNeverBeginsAMarkingSwipe() {
-        // Zoomed, a one-finger drag pans instead (PRD Detail gestures).
-        #expect(
-            rules.swipe(
-                horizontalTravel: 0, verticalTravel: 120, isZoomed: true, gesturesEnabled: true)
-                == nil)
-        #expect(
-            rules.swipe(
-                horizontalTravel: 0, verticalTravel: -120, isZoomed: true, gesturesEnabled: true)
-                == nil)
-    }
-
-    @Test func markingGesturesOffNeverBeginAMarkingSwipe() {
-        // PRD Gesture-related settings: gestures on or off.
-        #expect(
-            rules.swipe(
-                horizontalTravel: 0, verticalTravel: 120, isZoomed: false, gesturesEnabled: false)
-                == nil)
-    }
-
-    @Test func aStricterRatioRefusesADiagonalDrag() {
-        let strict = MarkingSwipeRules(verticalToHorizontalRatio: 1.5)
-
-        #expect(
-            strict.swipe(
-                horizontalTravel: 30, verticalTravel: 30, isZoomed: false, gesturesEnabled: true)
-                == nil)
-        #expect(
-            strict.swipe(
-                horizontalTravel: 10, verticalTravel: 30, isZoomed: false, gesturesEnabled: true)
-                == .rating)
-    }
-
-    @Test func theSettingsDecideWhetherASwipeBegins() {
-        // The preview asks the rules, which read the setting, so the recognizer and the settings
-        // cannot disagree (PRD Gesture-related settings).
-        var off = AppSettings()
-        off.gesturesEnabled = false
-        let withoutGestures = MarkingInputRules(settings: off)
-        let on = MarkingInputRules()
-
-        #expect(
-            withoutGestures.beginSwipe(horizontalTravel: 0, verticalTravel: 90, isZoomed: false)
-                == nil)
-        #expect(
-            on.beginSwipe(horizontalTravel: 0, verticalTravel: 90, isZoomed: false) == .rating)
-        #expect(
-            on.beginSwipe(horizontalTravel: 0, verticalTravel: -90, isZoomed: false) == .reject)
-        #expect(
-            on.beginSwipe(horizontalTravel: 90, verticalTravel: 4, isZoomed: false) == nil)
-        #expect(on.beginSwipe(horizontalTravel: 0, verticalTravel: 90, isZoomed: true) == nil)
+            rules.result(forSwipeRating: marks.rating, marks: marks, isZoomed: false) == .noChange)
+        for rating in [Rating.unrated, .rejected] {
+            let result = rules.result(forSwipeRating: rating, marks: marks, isZoomed: false)
+            #expect(
+                result == .mark(MarkChange(rating: rating), rating == .rejected ? .reject : .rating)
+            )
+            #expect(marks.applying(MarkChange(rating: rating)).label == marks.label)
+            #expect(rules.result(forSwipeRating: rating, marks: marks, isZoomed: true) == .noChange)
+            var settings = AppSettings()
+            settings.gesturesEnabled = false
+            #expect(
+                MarkingInputRules(settings: settings).result(
+                    forSwipeRating: rating, marks: marks, isZoomed: false) == .noChange)
+        }
     }
 }
