@@ -1,36 +1,27 @@
 # Orchestrator guide
 
-How the Clove orchestrator routes work to machines and workers with T3 Code,
-and what it does with each result. The orchestrator performs the supervisor
-role in [docs/AGENT-WORKFLOW.md](AGENT-WORKFLOW.md): task issues, workers,
-review, merge, releases.
+Operating reference for the Clove orchestrator: how it routes work to
+machines and workers with T3 Code, and what it does with each result. The
+orchestrator performs the supervisor role described in
+[docs/AGENT-WORKFLOW.md](AGENT-WORKFLOW.md#roles).
 
-mmq-mode owns the task workflow itself: sizing, process, verification, and
-the PR handoff. This guide does not repeat it and creates no second
-workflow. Repository constraints live in [AGENTS.md](../AGENTS.md); process
-and merge policy live in [docs/AGENT-WORKFLOW.md](AGENT-WORKFLOW.md). Where
-those files speak, they win. So do the owner's current requests and the
-tools' own contracts, which change; this guide records how to work with
-them, not a frozen snapshot.
-
-## A task, end to end
-
-1. Choose the destination machine from the table below, and verify the
-   environment, project, and model catalog live before routing.
-2. Start the work: a delegate for subordinate work; a new top-level thread
-   only when the user asks for one or the work needs its own checkout.
-3. Brief the worker with the issue, the checks, and mmq-mode discovery.
-4. Take the result through T3; never poll.
-5. Re-read the issue, review the diff, run the Linux compile gate.
-6. Merge when the gate passes; record supervisor decisions on issue #150.
-7. Release only from the Mac mini, only with the owner's upload
-   authorization.
+mmq-mode owns the task workflow: sizing, process, verification, and the PR
+handoff. This guide records only Clove's orchestration settings and T3
+operation; it does not repeat mmq-mode or create a second workflow.
+Repository constraints live in [AGENTS.md](../AGENTS.md).
+[docs/AGENT-WORKFLOW.md](AGENT-WORKFLOW.md) is cited here only where it
+still applies: the project's roles, the worker report format, and the
+merge policy. Precedence within this guide's scope: the owner's current
+instructions and the T3 tools' own contracts come first; role and model
+choices follow current preferences and the live destination catalogs. The
+workflow document's worker-count cap and model table predate later owner
+decisions and do not govern routing.
 
 ## Machines and projects
 
 | Machine | T3 environment | Clove project | Checkout | SSH | Used for |
 | --- | --- | --- | --- | --- | --- |
-| Linux orchestrator (this machine) | `52d2b9be-8ee4-4b39-bba4-943a174ff059` | `c773872d-978a-48d2-99e6-f0665c4e7140` | `/data/Workspace/t3ws/projects/cloveapp` | — | routing, review, merge, the Linux compile gate; no Darwin builds, tests, simulators, or releases |
+| Linux orchestrator (this machine) | `52d2b9be-8ee4-4b39-bba4-943a174ff059` | `c773872d-978a-48d2-99e6-f0665c4e7140` | `/data/Workspace/t3ws/projects/cloveapp` | — | routing, review, merge, the Linux compile gate; no native Darwin execution — no tests, simulator, or signing |
 | Mac mini ("Shiny's Mac mini") | `99357d1a-e0bf-475f-a9c0-d494ddd3b182` | `mcp:9f0bab0d-27c9-4208-9f01-c745966f7476` | `/Volumes/T7/Projects/cloveapp`; T3 worktrees under `~/.t3/worktrees/cloveapp`, a symlink onto the T7 | `macmini-home` | builds, simulator tests, TestFlight releases; signing material lives here |
 | MacBook Air ("Tony's MacBook Air") | `355a00f7-76d9-4c69-b52d-407cab78dabc` | `mcp:a6c326f3-30e6-4ef4-a94d-1856d24c26de` | `/Users/tony.liu/Projects/cloveapp` | `mba-tailnet` | second worker Mac; a laptop, so often unreachable; no signing material |
 
@@ -54,19 +45,26 @@ Machine notes:
   sits in the keychain. Test `gh` from inside a worker context, not an SSH
   shell.
 
-A launch names the destination explicitly. Compact example for the Mac mini;
-the model value is a placeholder, picked from the live catalog (next
-section):
+A delegate names the destination explicitly. Compact `delegate_task`
+example for the Mac mini; the model value is a placeholder, picked from the
+live catalog (next section). `isolation: "worktree"` assumes the
+destination supports delegated worktree isolation — check its capabilities
+first; if it does not, omit it and report the constraint ("Starting work"
+below).
 
 ```json
 {
-  "title": "[C7] Group engine",
-  "message": "Read issue #123, AGENTS.md, and the plan rows it references. Use /skill:mmq-mode; the repository wins on conflict, and you report the conflict in the PR.",
-  "environmentId": "99357d1a-e0bf-475f-a9c0-d494ddd3b182",
-  "projectId": "mcp:9f0bab0d-27c9-4208-9f01-c745966f7476",
-  "workspaceStrategy": { "type": "worktree", "baseRef": "origin/main", "startFromOrigin": true },
+  "task": "Read issue <number>, AGENTS.md, and the plan rows it references. Use /skill:mmq-mode; the repository wins on conflict, and you report the conflict in the PR.",
+  "title": "<task title>",
+  "role": "implementation",
+  "isolation": "worktree",
   "runtimeMode": "full-access",
-  "modelSelection": { "provider": "pi", "instanceId": "pi", "model": "<exact catalog ID for this role and destination>" }
+  "target": {
+    "environmentId": "99357d1a-e0bf-475f-a9c0-d494ddd3b182",
+    "projectId": "mcp:9f0bab0d-27c9-4208-9f01-c745966f7476",
+    "providerInstanceId": "pi",
+    "model": "<exact catalog ID for this role and destination>"
+  }
 }
 ```
 
@@ -85,8 +83,8 @@ Dated references, not defaults:
   was used for UI design-to-code workers. An older Flash default had already
   been superseded by per-task choice.
 - 2026-11-12, MacBook Air: `magpie/remote-magpie/group/general`.
-- 2026-12, this Linux orchestrator worker: `magpie/group/ps-fast`; the Air's
-  catalog carried `magpie/remote-magpie/group/ps-fast`.
+- 2026-11-12, this Linux orchestrator worker: `magpie/group/ps-fast`; the
+  Air's catalog lists the alias `magpie/remote-magpie/group/ps-fast`.
 
 A model or provider change takes effect on the worker's next run, never
 midway through the current one. A thread's model is readable and settable
@@ -98,18 +96,17 @@ up anything the stopped run left, such as simulators or watchers.
 
 ## Starting work
 
-- Subordinate work (a review, a focused check, a small follow-up) goes
-  through `delegate_task`, with `isolation: "worktree"` where supported.
+- Subordinate work — an implementation task, a review, a focused check —
+  goes through `delegate_task`, with `isolation: "worktree"` when the
+  destination supports it.
+- If delegated isolation is not supported for a destination, stop and
+  report the capability constraint precisely. Never fall back to the shared
+  root checkout silently, never create a checkout with shell `git`
+  commands, and never start a top-level thread the user did not ask for.
 - `t3_thread_launch` creates a new top-level thread only when the user asks
-  for one, or when the work needs its own checkout that delegation cannot
-  provide. Bind the checkout with `workspaceStrategy`. Independent work
+  for one. It binds the checkout with `workspaceStrategy`: independent work
   starts from `origin/main` with `startFromOrigin`; dependent or stacked
-  work starts from its explicit base instead, preserved.
-- If a destination does not support delegated worktree isolation, do not
-  fall back to the shared root checkout silently: use a launched thread with
-  a worktree, or say why the work cannot start.
-- Never create a worker checkout with shell `git` commands; checkouts come
-  from the tools.
+  work starts from its explicit base, preserved.
 - Capacity: at most two workers per Mac, and at most one of them doing
   simulator work.
 
@@ -146,9 +143,9 @@ Every brief names:
 
 ## Review, fix rounds, and merge
 
-Follow [docs/AGENT-WORKFLOW.md](AGENT-WORKFLOW.md#task-lifecycle) for the
-lifecycle and [AGENTS.md](../AGENTS.md) for what each change must check.
-Clove-specific practice on top of them:
+The merge policy in [docs/AGENT-WORKFLOW.md](AGENT-WORKFLOW.md#6-merge)
+still applies, and [AGENTS.md](../AGENTS.md) lists what each change must
+check. Clove-specific practice:
 
 - Re-read the issue before reviewing; it may have changed under the PR.
 - The orchestrator reads every diff itself. The second-model review stays
@@ -183,11 +180,11 @@ ledger.
 - `/data/Workspace/build/clove-linux-check.sh <ref>` is the compile gate:
   strict `swift format lint`, the three packages cross-compiled for iOS, and
   the Clove app target type-checked against the iOS SDK with Swift 6 and
-  complete strict concurrency. Around 25 seconds; exits nonzero on any
-  failure.
-- It runs no tests, so a pass never means tests passed: CloveCore and the
-  app cannot run here. Darwin-side work (tests, simulators, screenshots,
-  releases) does not happen on this machine.
+  complete strict concurrency. It exits nonzero on any failure.
+- It compiles but runs nothing native: CloveCore imports Darwin and
+  CryptoKit, and the app needs a simulator, so a pass never means tests
+  passed. No native Darwin execution, tests, simulator, screenshots, or
+  signing happen on this machine.
 - The script is external to the repository and shares scratch space and a
   detached worktree under `/data/Workspace/build`. Run it serially, one ref
   at a time.
@@ -214,7 +211,7 @@ following [docs/release.md](release.md). The operational points:
   Connect finishes processing. Report which state was reached, not
   "released".
 
-Duo simulator pose automation
-([#197](https://github.com/mimiqdev/cloveapp/issues/197)) is in progress.
-When it lands, link its helper script and its own guide for
-graphical-session and Accessibility setup; this guide records none of that.
+Graphical-session and Accessibility setup for simulator automation is not
+recorded here. Issue
+[#197](https://github.com/mimiqdev/cloveapp/issues/197) is the reference
+for the latest state and any helper guide.
