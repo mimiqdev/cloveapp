@@ -316,7 +316,7 @@ struct DetailMarkingView: View {
             previewArea
             // The failure toast sits above the filmstrip, clear of the capsule row
             // (handoff screens.md §03, components.md Toast).
-            if let message = browsing.failureToastMessage, chromeIsVisible {
+            if let message = browsing.failureToastMessage {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal, 16)
             }
@@ -399,44 +399,47 @@ struct DetailMarkingView: View {
     private var photoStage: some View {
         previewArea
             .overlay(alignment: .bottom) {
-                if chromeIsVisible {
-                    VStack(spacing: 8) {
-                        // The save/read failure toast sits above the filmstrip so it never
-                        // covers the mark capsule (handoff screens.md §03, components.md Toast).
-                        if let message = browsing.failureToastMessage {
-                            Toast(message: message, identifier: "clove.save.toast")
-                                .padding(.horizontal, 16)
-                        }
-                        DetailFilmstrip(
-                            photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                            open: actions.openPhoto,
-                            groups: browsing.groups, finishingAction: finishingAction)
-                        if !usesRail {
-                            DetailMarkCapsule(
-                                marks: displayMarks, settings: settings,
-                                previewRating: swipeFeedback.rating,
-                                rate: { rate($0) }, label: { choose($0) },
-                                toggleReject: { toggleReject() }
-                            )
-                            .disabled(!browsing.canMark)
+                VStack(spacing: 8) {
+                    // The save/read failure toast sits above the filmstrip so it never
+                    // covers the mark capsule (handoff screens.md §03, components.md Toast).
+                    // It is transient feedback, not chrome, and remains visible at 100% zoom.
+                    if let message = browsing.failureToastMessage {
+                        Toast(message: message, identifier: "clove.save.toast")
                             .padding(.horizontal, 16)
+                    }
+                    if chromeIsVisible {
+                        VStack(spacing: 8) {
+                            DetailFilmstrip(
+                                photos: order, current: photo.id, thumbnails: browsing.thumbnails,
+                                open: actions.openPhoto,
+                                groups: browsing.groups, finishingAction: finishingAction)
+                            if !usesRail {
+                                DetailMarkCapsule(
+                                    marks: displayMarks, settings: settings,
+                                    previewRating: swipeFeedback.rating,
+                                    rate: { rate($0) }, label: { choose($0) },
+                                    toggleReject: { toggleReject() }
+                                )
+                                .disabled(!browsing.canMark)
+                                .padding(.horizontal, 16)
+                            }
                         }
+                        .padding(.bottom, 8)
+                    } else if showsZoomChip && scale > DetailFitScale.tolerance {
+                        Text(zoomName)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.clove.text.primary)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .cloveGlass(in: Capsule())
+                            .padding(.bottom, 12)
                     }
-                    .padding(.bottom, 8)
-                    .onGeometryChange(for: CGFloat.self) {
-                        $0.size.height
-                    } action: {
-                        controlsHeight = $0
-                    }
-                    .transition(.opacity)
-                } else if showsZoomChip && scale > DetailFitScale.tolerance {
-                    Text(zoomName)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.clove.text.primary)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .cloveGlass(in: Capsule())
-                        .padding(.bottom, 12)
                 }
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    controlsHeight = $0
+                }
+                .transition(.opacity)
             }
     }
 

@@ -96,6 +96,7 @@ struct PhotoInformationSheet: View {
             if let marks {
                 HStack(spacing: marks.spacing) {
                     marks.content
+                    Text("·").foregroundStyle(Color.clove.text.secondary)
                     Text(
                         information?.usesSidecar == true ? "XMP sidecar" : "Clove only"
                     )
@@ -126,8 +127,8 @@ struct PhotoInformationSheet: View {
         if photo.marks.isRejected {
             parts.append("✕")
         }
-        let text = parts.isEmpty ? Text("Unmarked") : Text(parts.joined(separator: " "))
-        return (2, text.foregroundStyle(Color.clove.rating.on))
+        let text = parts.isEmpty ? Text("Unmarked") : Text(parts.joined(separator: " · "))
+        return (6, text.foregroundStyle(Color.clove.rating.on))
     }
 
     private func takenText(_ image: ImageInformation) -> String? {
