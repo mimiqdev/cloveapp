@@ -92,6 +92,155 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.entry").waitForExistence(timeout: 5))
     }
 
+    /// Rail input and chrome share the detail actions; screenshots use only the sample library.
+    @MainActor
+    func testIPadDetailRailMarkingAndChrome() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
+        let app = launchSample()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        openLibrary(app)
+        prepareRailComparison(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let rail = element(app, "clove.detail.rail")
+        let stars = element(app, "clove.detail.rail.stars.3")
+        let reject = element(app, "clove.detail.rail.reject")
+        let green = element(app, "clove.detail.rail.label.green")
+        let preview = element(app, "clove.detail.preview")
+        let strip = element(app, "clove.detail.filmstrip")
+        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertEqual(rail.frame.width, 96, accuracy: 1)
+        XCTAssertLessThanOrEqual(strip.frame.maxX, rail.frame.minX + 1)
+        XCTAssertEqual(element(app, "clove.detail.info").frame.width, 40, accuracy: 1)
+        stars.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), stars))
+        stars.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == false"), stars))
+        green.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), green))
+        XCTAssertFalse(element(app, "clove.detail.labels").exists)
+        green.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == false"), green))
+        let bar = element(app, "clove.detail.rail.stars")
+        let bottom = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        let middle = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        bottom.press(forDuration: 0.1, thenDragTo: middle)
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), stars))
+        // A drag back to the same rating keeps it; a tap clears it.
+        bottom.press(forDuration: 0.1, thenDragTo: middle)
+        XCTAssertTrue(stars.isSelected)
+        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: -6)))
+        XCTAssertTrue(stars.isSelected)
+        green.tap()
+        capture("ipad-detail-rail-light")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(stars.isSelected)
+        XCTAssertTrue(green.isSelected)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let stageFrame = preview.frame
+        let railFrame = rail.frame
+        let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+        centre.tap()
+        XCTAssertTrue(waitForGone(strip))
+        XCTAssertTrue(rail.isHittable)
+        XCTAssertEqual(preview.frame, stageFrame)
+        XCTAssertEqual(rail.frame, railFrame)
+        XCTAssertFalse(element(app, "clove.detail.info").exists)
+        centre.tap()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        centre.doubleTap()
+        XCTAssertTrue(waitForLabel("3 / 36 · 100%", element(app, "clove.detail.zoom")))
+        XCTAssertFalse(strip.exists)
+        XCTAssertTrue(rail.isHittable)
+        XCTAssertEqual(preview.frame, stageFrame)
+        centre.doubleTap()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        reject.tap()
+        XCTAssertTrue(waitForLabel("Rejected", reject))
+        XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
+        XCTAssertFalse(stars.isSelected)
+        XCTAssertFalse(green.isSelected)
+        XCTAssertLessThan(element(app, "clove.detail.rejectGlyph").frame.maxX, rail.frame.minX)
+        capture("ipad-detail-rail-rejected")
+        centre.tap()
+        XCTAssertTrue(waitForGone(strip))
+        XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
+        XCTAssertTrue(reject.isHittable)
+        centre.tap()
+        reject.tap()
+        XCTAssertTrue(waitForLabel("Reject", reject))
+        XCTAssertFalse(element(app, "clove.detail.rejectGlyph").exists)
+        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -130)))
+        XCTAssertTrue(String(describing: rail.value).contains("stars"))
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        chooseRailTheme("dark", app)
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        capture("ipad-detail-rail-dark")
+        app.terminate()
+        checkDisabledRail()
+    }
+
+    @MainActor
+    private func prepareRailComparison(_ app: XCUIApplication) {
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        chooseRailTheme("light", app)
+        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
+        for _ in 0..<5 {
+            if advance.isHittable { break }
+            app.swipeUp()
+        }
+        if advance.value as? String == "1" {
+            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                .withOffset(CGVector(dx: -50, dy: 0)).tap()
+        }
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), advance))
+        element(app, "clove.nav.back").tap()
+    }
+
+    @MainActor
+    private func chooseRailTheme(_ theme: String, _ app: XCUIApplication) {
+        let matchSystem = app.switches["clove.settings.appearance.matchSystem"]
+        if matchSystem.value as? String == "1" {
+            matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                .withOffset(CGVector(dx: -50, dy: 0)).tap()
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), matchSystem))
+        }
+        let tile = element(app, "clove.settings.appearance.theme.\(theme)")
+        tile.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tile))
+    }
+
+    @MainActor
+    private func checkDisabledRail() {
+        let disconnected = launchSample(["CLOVE_TEST_LIBRARY_LOCATION_LOSS": "location"])
+        defer { disconnected.terminate() }
+        openLibrary(disconnected)
+        element(disconnected, "clove.grid.photo.mmq02680").tap()
+        let rail = element(disconnected, "clove.detail.rail")
+        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(disconnected, "clove.detail.rail.stars.3").isEnabled)
+        XCTAssertFalse(element(disconnected, "clove.detail.rail.reject").isEnabled)
+        XCTAssertFalse(element(disconnected, "clove.detail.rail.label.green").isEnabled)
+        let marks = rail.value as? String
+        let bar = element(disconnected, "clove.detail.rail.stars")
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).press(
+            forDuration: 0.1,
+            thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)))
+        XCTAssertEqual(rail.value as? String, marks)
+    }
+
     @MainActor
     func testGridAndDetailControls() {
         let app = launchSample()
