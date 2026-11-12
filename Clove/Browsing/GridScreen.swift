@@ -185,7 +185,7 @@ struct GridScreen: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .foregroundStyle(Color.clove.text.primary)
-                    .frame(width: 44, height: 44)
+                    .frame(width: isRegular ? 40 : 44, height: isRegular ? 40 : 44)
                     .cloveGlass(in: Circle())
             }
             .accessibilityLabel("Selection options")

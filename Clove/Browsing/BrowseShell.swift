@@ -126,8 +126,10 @@ extension View {
                         Button {
                             browsing.back()
                         } label: {
-                            Label(backTitle, systemImage: "chevron.left")
-                                .labelStyle(.titleAndIcon)
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                Text(backTitle)
+                            }
                         }
                         .accessibilityLabel("Back")
                         .accessibilityIdentifier("clove.nav.back")
