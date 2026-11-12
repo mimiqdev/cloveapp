@@ -19,7 +19,7 @@ struct RejectRatingTransitionTests {
     @Test func rejectInputsSetMinusOneAndReplaceStars() throws {
         for marks in [PhotoMarks(), try threeStars()] {
             #expect(
-                rules.result(forSwipeDownTravel: -100, marks: marks, isZoomed: false)
+                rules.result(forSwipeRating: .rejected, marks: marks, isZoomed: false)
                     == .mark(MarkChange(rating: .rejected), .reject))
             #expect(
                 rules.result(for: .reject, marks: marks)
@@ -30,7 +30,7 @@ struct RejectRatingTransitionTests {
     /// Rejecting a photo that is already rejected changes nothing (PRD P0-06 acceptance).
     @Test func rejectingAnAlreadyRejectedPhotoChangesNothing() {
         #expect(
-            rules.result(forSwipeDownTravel: -100, marks: rejected, isZoomed: false) == .noChange)
+            rules.result(forSwipeRating: .rejected, marks: rejected, isZoomed: false) == .noChange)
         #expect(rules.result(for: .reject, marks: rejected) == .noChange)
     }
 
@@ -79,33 +79,6 @@ struct RejectRatingTransitionTests {
         #expect(
             rules.result(for: .nextRating, marks: rejected)
                 == .mark(MarkChange(rating: try #require(Rating(rawValue: 3))), .rating))
-    }
-
-    /// A swipe up from a rejected photo starts at step 0 and applies the step's enabled level;
-    /// inside the dead zone it writes nothing.
-    @Test func swipeUpFromARejectedPhotoStartsAtZero() throws {
-        let one = try #require(Rating(rawValue: 1))
-        let three = try #require(Rating(rawValue: 3))
-        #expect(
-            rules.result(forSwipeUpTravel: 20, marks: rejected, isZoomed: false) == .noChange)
-        #expect(
-            rules.result(forSwipeUpTravel: 45, marks: rejected, isZoomed: false)
-                == .mark(MarkChange(rating: one), .rating))
-        #expect(
-            rules.result(forSwipeUpTravel: 160, marks: rejected, isZoomed: false)
-                == .mark(MarkChange(rating: three), .rating))
-    }
-
-    /// The ladder's live rating never reaches −1, whatever the travel.
-    @Test func theRatingLadderNeverProducesReject() throws {
-        var session = SwipeRatingSession(enabledRatings: .all)
-        #expect(session.release(atTravel: -500) == nil)
-        #expect(session.release(atTravel: 20) == nil)
-        for travel in stride(from: 40.0, through: 400.0, by: 30.0) {
-            let released = session.release(atTravel: travel)
-            #expect(released != .rejected, "step at \(travel) produced Reject")
-            #expect(released != .unrated)
-        }
     }
 
     /// A label change never changes the rating or Reject (PRD Marking rules).

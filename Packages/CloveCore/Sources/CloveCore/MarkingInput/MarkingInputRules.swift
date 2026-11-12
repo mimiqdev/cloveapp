@@ -11,110 +11,44 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// The settings the rules read: gestures, enabled ratings and auto-advance (PRD P0-06).
     public var settings: AppSettings
 
-    /// The swipe-up distances (PRD Rating by swipe distance); starting values, tunable.
-    public var swipeRatingRules: SwipeRatingRules
-
-    /// The swipe-down Reject threshold (PRD Detail gestures); a starting value, tunable.
-    public var rejectSwipeRules: RejectSwipeRules
-
-    /// The drag that begins a marking swipe (PRD Detail gestures); a starting value, tunable.
+    /// The initial axis split; the session owns the continuous vertical ladder.
     public var markingSwipeRules: MarkingSwipeRules
 
-    /// Creates the rules from the current settings and the gesture constants.
     public init(
         settings: AppSettings = AppSettings(),
-        swipeRatingRules: SwipeRatingRules = .standard,
-        rejectSwipeRules: RejectSwipeRules = .standard,
         markingSwipeRules: MarkingSwipeRules = .standard
     ) {
         self.settings = settings
-        self.swipeRatingRules = swipeRatingRules
-        self.rejectSwipeRules = rejectSwipeRules
         self.markingSwipeRules = markingSwipeRules
     }
 
-    // MARK: - Swipe-up rating
-
-    /// The marking swipe a drag on the detail preview begins as, or nil when it begins none
-    /// (PRD Detail gestures).
-    ///
-    /// This is the preview's one question as a drag starts: marking gestures off (PRD
-    /// Gesture-related settings), a zoomed view and a more horizontal than vertical drag all
-    /// answer nil, and the recognizer then leaves the drag alone. The step ladder is separate,
-    /// because it is read on every sample of a swipe that did begin.
-    public func beginSwipe(
-        horizontalTravel: Double,
-        verticalTravel: Double,
-        isZoomed: Bool
-    ) -> MarkingSwipe? {
-        markingSwipeRules.swipe(
-            horizontalTravel: horizontalTravel,
-            verticalTravel: verticalTravel,
-            isZoomed: isZoomed,
-            gesturesEnabled: settings.gesturesEnabled)
+    /// Claims only vertical, unzoomed drags when gestures are enabled.
+    public func beginsSwipe(
+        horizontalTravel: Double, verticalTravel: Double, isZoomed: Bool
+    ) -> Bool {
+        markingSwipeRules.beginsSwipe(
+            horizontalTravel: horizontalTravel, verticalTravel: verticalTravel,
+            isZoomed: isZoomed, gesturesEnabled: settings.gesturesEnabled)
     }
 
-    /// Starts a swipe-up gesture that measures with this rule set.
-    ///
-    /// The session reports the live step for the rating shown near the finger and the per-step
-    /// haptic; the release result comes from `result(forSwipeUpTravel:marks:isZoomed:)`, which
-    /// applies `settings.enabledRatings`.
-    public func swipeRatingSession() -> SwipeRatingSession {
-        SwipeRatingSession(enabledRatings: settings.enabledRatings, rules: swipeRatingRules)
+    public func swipeSession(startingRating: Rating) -> MarkingSwipeSession {
+        MarkingSwipeSession(startingRating: startingRating, enabledRatings: settings.enabledRatings)
     }
 
-    /// The result of releasing a swipe-up at this travel, in points with up positive.
-    ///
-    /// The release position decides (PRD Rating by swipe distance). Step 0 writes nothing, and
-    /// a short flick past the dead zone gives the lowest enabled step. The applied rating is the
-    /// enabled level for the step, so a current rating that another app wrote at a disabled
-    /// level is still replaced by the step's enabled level. The ladder starts at 0 and never
-    /// produces Reject, so a swipe on a rejected photo replaces −1 with stars (PRD Detail
-    /// gestures); a swipe never clears a rating.
+    /// Commits exactly the preview, once per release. No label change, no velocity at release.
     public func result(
-        forSwipeUpTravel travel: Double,
-        marks: PhotoMarks,
-        isZoomed: Bool
+        forSwipeRating rating: Rating, marks: PhotoMarks, isZoomed: Bool
     ) -> MarkingResult {
         guard settings.gesturesEnabled, !isZoomed else { return .noChange }
-        let step = swipeRatingRules.step(
-            forTravel: travel, maximumStep: settings.enabledRatings.count)
-        guard step > 0, let rating = settings.enabledRatings.rating(forSwipeStep: step) else {
-            return .noChange
-        }
-        return markResult(ratingChange(applying: rating, to: marks), kind: .rating, marks: marks)
-    }
-
-    // MARK: - Swipe-down Reject
-
-    /// Starts a swipe-down gesture that measures with this rule set.
-    public func rejectSwipeSession() -> RejectSwipeSession {
-        RejectSwipeSession(rules: rejectSwipeRules)
-    }
-
-    /// The result of releasing a swipe-down at this travel, in points with up positive.
-    ///
-    /// Past the threshold the photo is rejected, which sets the rating to −1 and replaces any
-    /// stars; released back inside it, nothing happens (PRD Detail gestures). A photo that is
-    /// already rejected yields no change, because applying the same Reject leaves the marks equal
-    /// (PRD P0-06 acceptance).
-    public func result(
-        forSwipeDownTravel travel: Double,
-        marks: PhotoMarks,
-        isZoomed: Bool
-    ) -> MarkingResult {
-        guard settings.gesturesEnabled, !isZoomed,
-            rejectSwipeRules.isPastThreshold(travel: travel)
-        else { return .noChange }
-        return markResult(MarkChange(rating: .rejected), kind: .reject, marks: marks)
+        return markResult(
+            MarkChange(rating: rating), kind: rating == .rejected ? .reject : .rating, marks: marks)
     }
 
     // MARK: - Keyboard and controls
 
     /// The result of the HUD's Reject toggle: on sets −1, off sets 0 (PRD Marking rules).
     ///
-    /// This is the one Reject input that can clear the mark; the swipe down and the `↓` key only
-    /// turn it on. The label is never touched, and a second toggle in either direction returns
+    /// The `↓` key only turns it on. The label is never touched, and a second toggle returns
     /// the photo to the other state.
     public func result(forRejectToggle marks: PhotoMarks) -> MarkingResult {
         markResult(
