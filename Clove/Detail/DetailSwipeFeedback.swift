@@ -12,6 +12,9 @@ import UIKit
 @MainActor
 @Observable
 final class DetailSwipeFeedback {
+    /// The original touch in stage coordinates, captured once when the marking swipe begins.
+    var startLocation: CGPoint = .zero
+
     /// The enabled rating the finger is on, or nil inside the dead zone (PRD Enabled rating
     /// levels).
     var rating: Rating?
@@ -46,7 +49,8 @@ struct DetailSwipeFeedbackBadge: View {
                 )
                 .position(
                     Self.position(
-                        in: proxy.size, controlsHeight: controlsHeight,
+                        in: proxy.size, startLocation: feedback.startLocation,
+                        controlsHeight: controlsHeight,
                         chromeIsVisible: chromeIsVisible)
                 )
                 .allowsHitTesting(false)
@@ -58,11 +62,24 @@ struct DetailSwipeFeedbackBadge: View {
         }
     }
 
-    static func position(in size: CGSize, controlsHeight: CGFloat, chromeIsVisible: Bool) -> CGPoint
-    {
-        CGPoint(
-            x: max(size.width - 36, 20),
-            y: max(0, size.height - (chromeIsVisible ? controlsHeight : 0)) / 2)
+    static func position(
+        in size: CGSize, startLocation: CGPoint, controlsHeight: CGFloat, chromeIsVisible: Bool
+    ) -> CGPoint {
+        let bar = VerticalStarBarDisplay.size
+        let inset: CGFloat = 8
+        // 24 pt from the finger's edge, allowing 22 pt from its centre to that edge.
+        let offset = 46 + bar.width / 2
+        let proposedX = startLocation.x + (startLocation.x < size.width / 3 ? offset : -offset)
+        let minX = inset + bar.width / 2
+        let maxX = max(minX, size.width - inset - bar.width / 2)
+        // The stage begins below the header and is already inside the screen's safe area.
+        let minY = inset + bar.height / 2
+        let maxY = max(
+            minY,
+            size.height - (chromeIsVisible ? controlsHeight : 0) - inset - bar.height / 2)
+        return CGPoint(
+            x: min(max(proposedX, minX), maxX),
+            y: min(max(startLocation.y, minY), maxY))
     }
 }
 

@@ -488,7 +488,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         let travel = -Double(pan.translation(in: self).y)
         switch pan.state {
         case .began:
-            beginMarkingSwipe()
+            beginMarkingSwipe(
+                at: CGPoint(
+                    x: pan.location(in: self).x - pan.translation(in: self).x,
+                    y: pan.location(in: self).y - pan.translation(in: self).y))
         case .changed:
             updateMarkingSwipe(travel: travel)
         case .ended:
@@ -503,11 +506,12 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     }
 
     /// Starts the session for the direction the drag began as.
-    private func beginMarkingSwipe() {
+    private func beginMarkingSwipe(at startLocation: CGPoint) {
         // Keep the current photo under the finger, even if this drag writes nothing.
         onSwipeBegin?()
         haptics.prepare()
         feedback?.clear()
+        feedback?.startLocation = startLocation
         wasPastRejectThreshold = false
         switch swipe {
         case .rating:
