@@ -151,7 +151,10 @@ extension CloveFlowTests {
     @MainActor
     private func back(in app: XCUIApplication) {
         let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.exists, "The screen had no back button")
+        // A just-pushed screen publishes its container before its header's back button, so this
+        // waits on the observed state rather than one immediate snapshot (#212).
+        XCTAssertTrue(
+            back.waitForExistence(timeout: 10), "The screen had no back button")
         back.tap()
     }
 
@@ -171,7 +174,7 @@ extension CloveFlowTests {
                 .exists)
         XCTAssertTrue(
             app.buttons.matching(
-                NSPredicate(format: "label CONTAINS %@", "Not connected, Reconnect")
+                NSPredicate(format: "label CONTAINS %@", "Drive not connected, Reconnect")
             ).firstMatch.exists)
         attachScreenshot(named: "entry-resume")
         element(in: app, "clove.nav.settings").tap()
@@ -189,7 +192,11 @@ extension CloveFlowTests {
         let open = element(in: app, "clove.entry.openFolder")
         XCTAssertTrue(open.exists, "Entry did not offer the test library")
         open.tap()
-        if element(in: app, "clove.detail").exists { back(in: app) }
+        // The hero resumes the folder at its last-viewed photo, so detail can be the first
+        // screen this open shows. The pushed screen's chrome is deferred (its container reaches
+        // the accessibility tree before the back button), so this boundary reads the observed
+        // outcome instead of one immediate snapshot (#193, #210).
+        if element(in: app, "clove.detail").waitForExistence(timeout: 2) { back(in: app) }
         XCTAssertTrue(
             element(in: app, "clove.grid").waitForExistence(timeout: 10),
             "The grid did not appear after opening the folder"
