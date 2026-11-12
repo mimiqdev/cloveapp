@@ -16,29 +16,28 @@ final class CloveSmokeTests: XCTestCase {
             "The Clove root view did not appear")
 
         let open = element(app, "clove.entry.openFolder")
-        XCTAssertTrue(open.waitForExistence(timeout: 10), "Entry did not offer the test library")
+        XCTAssertTrue(open.exists, "Entry did not offer the test library")
         open.tap()
         if element(app, "clove.detail").exists { element(app, "clove.nav.back").tap() }
         XCTAssertTrue(
             element(app, "clove.grid").waitForExistence(timeout: 10),
             "The grid did not appear after opening the test library")
         let photo = element(app, "clove.grid.photo.mmq02680")
-        XCTAssertTrue(photo.waitForExistence(timeout: 10), "The grid showed no photos")
+        XCTAssertTrue(photo.exists, "The grid showed no photos")
 
         photo.tap()
         let fileName = element(app, "clove.detail.fileName")
-        XCTAssertTrue(fileName.waitForExistence(timeout: 10), "Detail did not open")
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         element(app, "clove.nav.back").tap()
-        XCTAssertTrue(photo.waitForExistence(timeout: 10), "Back did not return to the grid")
+        XCTAssertTrue(photo.exists, "Back did not return to the grid")
 
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         XCTAssertTrue(
-            element(app, "clove.settings").waitForExistence(timeout: 10), "Settings did not open")
+            element(app, "clove.settings").exists, "Settings did not open")
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(
-            element(app, "clove.grid").waitForExistence(timeout: 10),
+            element(app, "clove.grid").exists,
             "Closing Settings did not return to the grid")
     }
 
