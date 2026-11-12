@@ -95,7 +95,6 @@ struct RootView: View {
                 }
                 .environment(settings)
                 .modifier(DuoLayout())
-                .modifier(DuoSampleViewport())
         }
     }
 

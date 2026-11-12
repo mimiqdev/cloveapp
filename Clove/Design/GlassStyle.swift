@@ -10,12 +10,9 @@ import SwiftUI
 private struct CloveGlass<S: Shape>: ViewModifier {
     /// The outline the glass is clipped to, such as a circle or the controls' capsule.
     let shape: S
-    var isEnabled: Bool
 
     func body(content: Content) -> some View {
-        if !isEnabled {
-            content
-        } else if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *) {
             content.glassEffect(.regular, in: shape)
         } else {
             content
@@ -31,7 +28,7 @@ private struct CloveGlass<S: Shape>: ViewModifier {
 
 extension View {
     /// Draws the shared glass material behind the view, in ``shape`` (components.md).
-    func cloveGlass(in shape: some Shape, isEnabled: Bool = true) -> some View {
-        modifier(CloveGlass(shape: shape, isEnabled: isEnabled))
+    func cloveGlass(in shape: some Shape) -> some View {
+        modifier(CloveGlass(shape: shape))
     }
 }
