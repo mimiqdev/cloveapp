@@ -39,16 +39,32 @@ if ! compgen -G ".build/DerivedData.noindex/Build/Products/Clove_*.xctestrun" >/
     exit 1
 fi
 
+duo_test=""
+for argument in "$@"; do
+    case "$argument" in
+        # A Duo simulator boots in the Closed (cover) pose headlessly, so the
+        # cover flow needs no Device Hub interaction and runs with no GUI session.
+        -only-testing:CloveUITests/CloveFlowTests/testDuoCoverToolbarMarkAndPickers)
+            duo_test="testDuoCoverToolbarMarkAndPickers" ;;
+        # The Open pose exists only as a Device Hub control; there is no headless
+        # way to select it, so this runner refuses the expanded flow.
+        -only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly)
+            echo "error: the Open pose has no headless runner; select Open in Device Hub on an unlocked GUI session and see docs/duo-simulator.md" >&2
+            exit 1 ;;
+        -only-testing:CloveUITests/CloveFlowTests/testDuo*)
+            echo "error: this Duo target needs an explicit mapping in scripts/smoke.sh" >&2
+            exit 1 ;;
+        *) continue ;;
+    esac
+done
+
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "nogit")
 tag="${CLOVE_SIM_TAG:-$(printf '%s-%s' "$branch" "$$" | sed 's/[^A-Za-z0-9._-]/-/g')}"
 device_type="${CLOVE_SIM_DEVICE_TYPE:-iPhone 17 Pro}"
 # Targeted Duo flows use real Duo hardware emulation when its runtime is installed.
 # The rest of the flow suite keeps its normal phone destination.
-if [ -z "${CLOVE_SIM_DEVICE_TYPE:-}" ]; then
-    for argument in "$@"; do
-        case "$argument" in
-            -only-testing:CloveUITests/CloveFlowTests/testDuo*)
-                if xcrun simctl list runtimes --json | python3 -c '
+if [ -n "$duo_test" ] && [ -z "${CLOVE_SIM_DEVICE_TYPE:-}" ]; then
+    if xcrun simctl list runtimes --json | python3 -c '
 import json, sys
 selected_runtime = sys.argv[1]
 available = any(
@@ -59,12 +75,8 @@ available = any(
 )
 sys.exit(0 if available else 1)
 ' "${CLOVE_SIM_RUNTIME:-}"; then
-                    device_type="iPhone Duo"
-                fi
-                break
-                ;;
-        esac
-    done
+        device_type="iPhone Duo"
+    fi
 fi
 
 if [ -n "${CLOVE_SIM_RUNTIME:-}" ]; then
@@ -94,8 +106,13 @@ print(newest["identifier"])
     )
 fi
 
+if [ -n "$duo_test" ] && [ "$device_type" != "iPhone Duo" ]; then
+    echo "error: the selected runtime/device cannot run the real Duo flow; select a compatible Duo runtime (27.2 build 24B91016s)" >&2
+    exit 1
+fi
+
 udid=""
-log=$(mktemp -t clove-smoke)
+log=$(mktemp 2>/dev/null || mktemp -t clove-smoke)
 
 cleanup() {
     if [ -n "$udid" ]; then
@@ -105,6 +122,7 @@ cleanup() {
     rm -f "$log"
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 # The UI test runner intermittently fails to attach before the assertion runs.
 # Those failures are infrastructure, not test results, so retry them on a fresh
@@ -135,26 +153,51 @@ max_attempts="${CLOVE_SMOKE_ATTEMPTS:-4}"
 attempt=1
 while [ "$attempt" -le "$max_attempts" ]; do
     xcrun simctl list devices | grep 'Clove ' || true
-    echo "Creating simulator 'Clove $suite $tag' ($device_type, $runtime), attempt $attempt"
-    udid=$(xcrun simctl create "Clove $suite $tag" "$device_type" "$runtime")
+    if [ -n "$duo_test" ]; then
+        xcrun simctl list devices --json | python3 -c '
+import json, sys
+active = [device for group in json.load(sys.stdin)["devices"].values() for device in group
+          if device["state"] == "Booted" and device["name"].startswith("Clove ")]
+if active:
+    for device in active:
+        print("error: simulator slot occupied by " + device["name"] + " (" + device["udid"] + ")", file=sys.stderr)
+    sys.exit(1)
+'
+    fi
+    device_name="Clove $suite $tag attempt-$attempt"
+    echo "Creating simulator '$device_name' ($device_type, $runtime), attempt $attempt"
+    udid=$(xcrun simctl create "$device_name" "$device_type" "$runtime")
 
     # Let the simulator and its accessibility service finish starting; launching
     # the UI test runner too early fails on some runtimes.
     xcrun simctl bootstatus "$udid" -b
 
+    run_targets=("${test_targets[@]}")
+    if [ -n "$duo_test" ] && [ "$attempt" -gt 1 ]; then
+        for ((index=0;index<${#run_targets[@]}-1;index++)); do
+            if [ "${run_targets[$index]}" = "-resultBundlePath" ]; then
+                bundle="${run_targets[$((index + 1))]}"
+                run_targets[$((index + 1))]="${bundle%.xcresult}.attempt-$attempt.xcresult"
+            fi
+        done
+    fi
     : >"$log"
     set +e
     xcodebuild test-without-building \
         -project Clove.xcodeproj \
         -scheme Clove \
         -parallel-testing-enabled NO \
-        "${test_targets[@]}" \
+        "${run_targets[@]}" \
         -destination "id=$udid" \
         -derivedDataPath .build/DerivedData.noindex 2>&1 | tee "$log"
     code=$?
     set -e
 
     if [ "$code" -eq 0 ]; then
+        if [ -n "$duo_test" ] && ! grep -Fq "$duo_test]' passed" "$log"; then
+            echo "error: the real Duo flow did not execute and pass; a skipped Duo test is not success" >&2
+            exit 1
+        fi
         break
     fi
     if [ "$attempt" -ge "$max_attempts" ] || ! is_runner_failure; then

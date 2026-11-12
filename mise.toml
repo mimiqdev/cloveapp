@@ -9,12 +9,16 @@ description = "Generate Clove.xcodeproj from project.yml"
 run = "./scripts/generate-xcodeproj.sh"
 
 [tasks.lint]
-description = "Lint Swift sources with swift-format"
-run = "swift format lint --strict --recursive --configuration .swift-format Clove CloveLab CloveTests CloveUITests Packages"
+description = "Lint Swift sources and typecheck the macOS Duo helper"
+run = """
+set -eu
+swift format lint --strict --recursive --configuration .swift-format Clove CloveLab CloveTests CloveUITests Packages scripts/duo-devicehub.swift
+xcrun swiftc -swift-version 6 -typecheck scripts/duo-devicehub.swift
+"""
 
 [tasks.format]
 description = "Format Swift sources in place with swift-format"
-run = "swift format format --in-place --recursive --configuration .swift-format Clove CloveLab CloveTests CloveUITests Packages"
+run = "swift format format --in-place --recursive --configuration .swift-format Clove CloveLab CloveTests CloveUITests Packages scripts/duo-devicehub.swift"
 
 [tasks.test-core]
 description = "Run CloveCore package tests on macOS"
@@ -92,11 +96,12 @@ depends = ["build-tests"]
 run = "./scripts/smoke.sh flows"
 
 [tasks.check]
-description = "Quick local check for every change, with no simulator: generate, lint, the core and imaging tests, build Clove for testing"
+description = "Quick local check with no simulator: generate, lint, runner tests, package tests, and build Clove for testing"
 run = """
 set -eu
 mise run generate
 mise run lint
+/usr/bin/python3 scripts/test_smoke.py
 mise run test-core
 mise run test-imaging
 mise run build-tests
@@ -111,6 +116,7 @@ mise run generate
 mise run lint
 mise run test-fixtures
 mise run test-release
+/usr/bin/python3 scripts/test_smoke.py
 mise run test-core
 mise run test-imaging
 mise run test-lab
