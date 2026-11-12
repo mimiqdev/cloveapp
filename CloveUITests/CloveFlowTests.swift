@@ -928,8 +928,8 @@ final class CloveFlowTests: XCTestCase {
         capture("grid-opening-before-first-photo")
     }
 
-    /// Runs on the Duo's actual inner display. Device Hub must have selected Open;
-    /// the public XCTest API currently has no hinge/pose setter.
+    /// Runs on the Duo's actual inner display. The Open pose must be selected in
+    /// Device Hub on an unlocked GUI session; no headless lever exists for it.
     @MainActor
     func testDuoGridFocusDockMarkAndPhotoOnly() throws {
         try XCTSkipUnless(
@@ -944,7 +944,7 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         try XCTSkipUnless(
             app.windows.firstMatch.horizontalSizeClass == .regular,
-            "Select Open in Device Hub to test the Duo inner display")
+            "the Duo is not in the Open pose; select Open in Device Hub to test the inner display")
         prepareDuo(app)
         exerciseDuo(app)
     }
@@ -1076,6 +1076,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.duo.groupMembers").exists)
     }
 
+    /// Runs on the Duo's cover display. A Duo simulator boots in the Closed pose
+    /// headlessly, so this flow runs with no Device Hub interaction.
     @MainActor
     func testDuoCoverToolbarMarkAndPickers() throws {
         try XCTSkipUnless(
@@ -1087,7 +1089,7 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         try XCTSkipUnless(
             app.windows.firstMatch.horizontalSizeClass == .compact,
-            "Select Closed in Device Hub to test the Duo cover")
+            "the Duo is not in the Closed pose; select Closed in Device Hub to test the cover")
         prepareDuo(app)
         XCTAssertFalse(element(app, "clove.duo.dock").exists)
         XCTAssertFalse(element(app, "clove.sidebar").exists)

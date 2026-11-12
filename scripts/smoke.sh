@@ -39,25 +39,23 @@ if ! compgen -G ".build/DerivedData.noindex/Build/Products/Clove_*.xctestrun" >/
     exit 1
 fi
 
-duo_pose=""
 duo_test=""
 for argument in "$@"; do
     case "$argument" in
-        -only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly)
-            requested_pose="open" ;;
+        # A Duo simulator boots in the Closed (cover) pose headlessly, so the
+        # cover flow needs no Device Hub interaction and runs with no GUI session.
         -only-testing:CloveUITests/CloveFlowTests/testDuoCoverToolbarMarkAndPickers)
-            requested_pose="closed" ;;
+            duo_test="testDuoCoverToolbarMarkAndPickers" ;;
+        # The Open pose exists only as a Device Hub control; there is no headless
+        # way to select it, so this runner refuses the expanded flow.
+        -only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly)
+            echo "error: the Open pose has no headless runner; select Open in Device Hub on an unlocked GUI session and see docs/duo-simulator.md" >&2
+            exit 1 ;;
         -only-testing:CloveUITests/CloveFlowTests/testDuo*)
-            echo "error: this Duo target needs an explicit pose mapping in scripts/smoke.sh" >&2
+            echo "error: this Duo target needs an explicit mapping in scripts/smoke.sh" >&2
             exit 1 ;;
         *) continue ;;
     esac
-    if [ -n "$duo_pose" ] && [ "$duo_pose" != "$requested_pose" ]; then
-        echo "error: run the Open and Closed Duo flows separately" >&2
-        exit 1
-    fi
-    duo_pose="$requested_pose"
-    duo_test="${argument##*/}"
 done
 
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "nogit")
@@ -65,7 +63,7 @@ tag="${CLOVE_SIM_TAG:-$(printf '%s-%s' "$branch" "$$" | sed 's/[^A-Za-z0-9._-]/-
 device_type="${CLOVE_SIM_DEVICE_TYPE:-iPhone 17 Pro}"
 # Targeted Duo flows use real Duo hardware emulation when its runtime is installed.
 # The rest of the flow suite keeps its normal phone destination.
-if [ -n "$duo_pose" ] && [ -z "${CLOVE_SIM_DEVICE_TYPE:-}" ]; then
+if [ -n "$duo_test" ] && [ -z "${CLOVE_SIM_DEVICE_TYPE:-}" ]; then
     if xcrun simctl list runtimes --json | python3 -c '
 import json, sys
 selected_runtime = sys.argv[1]
@@ -108,16 +106,12 @@ print(newest["identifier"])
     )
 fi
 
-if [ -n "$duo_pose" ]; then
-    if [ "$device_type" != "iPhone Duo" ]; then
-        echo "error: the selected runtime/device cannot run the real Duo flow; select a compatible Duo runtime (27.2 build 24B91016s)" >&2
-        exit 1
-    fi
-    scripts/duo-pose.sh --check-access
+if [ -n "$duo_test" ] && [ "$device_type" != "iPhone Duo" ]; then
+    echo "error: the selected runtime/device cannot run the real Duo flow; select a compatible Duo runtime (27.2 build 24B91016s)" >&2
+    exit 1
 fi
 
 udid=""
-caffeinate_pid=""
 log=$(mktemp -t clove-smoke)
 
 cleanup() {
@@ -125,17 +119,10 @@ cleanup() {
         xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
         xcrun simctl delete "$udid" >/dev/null 2>&1 || true
     fi
-    if [ -n "$caffeinate_pid" ]; then
-        kill "$caffeinate_pid" >/dev/null 2>&1 || true
-    fi
     rm -f "$log"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
-if [ -n "$duo_pose" ]; then
-    caffeinate -d -i -w "$$" &
-    caffeinate_pid=$!
-fi
 
 # The UI test runner intermittently fails to attach before the assertion runs.
 # Those failures are infrastructure, not test results, so retry them on a fresh
@@ -166,7 +153,7 @@ max_attempts="${CLOVE_SMOKE_ATTEMPTS:-4}"
 attempt=1
 while [ "$attempt" -le "$max_attempts" ]; do
     xcrun simctl list devices | grep 'Clove ' || true
-    if [ -n "$duo_pose" ]; then
+    if [ -n "$duo_test" ]; then
         xcrun simctl list devices --json | python3 -c '
 import json, sys
 active = [device for group in json.load(sys.stdin)["devices"].values() for device in group
@@ -184,12 +171,9 @@ if active:
     # Let the simulator and its accessibility service finish starting; launching
     # the UI test runner too early fails on some runtimes.
     xcrun simctl bootstatus "$udid" -b
-    if [ -n "$duo_pose" ]; then
-        scripts/duo-pose.sh --udid "$udid" --name "$device_name" --pose "$duo_pose"
-    fi
 
     run_targets=("${test_targets[@]}")
-    if [ -n "$duo_pose" ] && [ "$attempt" -gt 1 ]; then
+    if [ -n "$duo_test" ] && [ "$attempt" -gt 1 ]; then
         for ((index=0;index<${#run_targets[@]}-1;index++)); do
             if [ "${run_targets[$index]}" = "-resultBundlePath" ]; then
                 bundle="${run_targets[$((index + 1))]}"
@@ -211,7 +195,7 @@ if active:
 
     if [ "$code" -eq 0 ]; then
         if [ -n "$duo_test" ] && ! grep -Fq "$duo_test]' passed" "$log"; then
-            echo "error: the real Duo flow did not execute and pass; a closed-pose skip is not success" >&2
+            echo "error: the real Duo flow did not execute and pass; a skipped Duo test is not success" >&2
             exit 1
         fi
         break

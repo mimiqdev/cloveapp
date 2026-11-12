@@ -11,18 +11,16 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET = "testDuoGridFocusDockMarkAndPhotoOnly"
+TARGET = "testDuoCoverToolbarMarkAndPickers"
 TOOL = r'''#!/usr/bin/env python3
-import json, os, signal, sys
+import json, os, sys
 from pathlib import Path
 root = Path(os.environ["SMOKE_TEST_ROOT"])
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
 with (root / "calls.jsonl").open("a") as f:
     f.write(json.dumps([name, args]) + "\n")
-if name == "caffeinate":
-    signal.pause()
-elif name == "xcrun":
+if name == "xcrun":
     if args[:3] == ["simctl", "list", "runtimes"]:
         print(json.dumps({"runtimes": [{"identifier": "runtime.duo", "version": "27.2",
             "isAvailable": True, "platform": "iOS", "supportedDeviceTypes": [{"name": "iPhone Duo"}]}]}))
@@ -47,7 +45,7 @@ elif name == "xcodebuild":
         print("failed to initialize for UI testing")
         sys.exit(65)
     result = "skipped" if mode == "skip" else "passed"
-    print("Test Case '-[CloveUITests.CloveFlowTests testDuoGridFocusDockMarkAndPhotoOnly]' " + result)
+    print("Test Case '-[CloveUITests.CloveFlowTests testDuoCoverToolbarMarkAndPickers]' " + result)
 '''
 
 
@@ -58,16 +56,13 @@ class SmokeRunnerTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "scripts").mkdir()
         shutil.copyfile(ROOT / "scripts/smoke.sh", self.root / "scripts/smoke.sh")
-        pose = self.root / "scripts/duo-pose.sh"
-        pose.write_text("#!/bin/sh\nexit 0\n")
-        pose.chmod(0o755)
         (self.root / "Clove.xcodeproj").mkdir()
         products = self.root / ".build/DerivedData.noindex/Build/Products"
         products.mkdir(parents=True)
         (products / "Clove_test.xctestrun").touch()
         tools = self.root / "bin"
         tools.mkdir()
-        for name in ["xcrun", "xcodebuild", "caffeinate"]:
+        for name in ["xcrun", "xcodebuild"]:
             path = tools / name
             path.write_text(TOOL)
             path.chmod(0o755)
@@ -109,13 +104,27 @@ class SmokeRunnerTests(unittest.TestCase):
     def test_skipped_duo_test_is_failure_and_still_cleans_owned_device(self):
         result, calls = self.run_runner("skip")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("a closed-pose skip is not success", result.stderr)
+        self.assertIn("a skipped Duo test is not success", result.stderr)
         self.assertIn(["xcrun", ["simctl", "delete", "owned-1"]], calls)
 
     def test_incompatible_runtime_override_fails_before_creating_device(self):
         result, calls = self.run_runner("pass", {"CLOVE_SIM_RUNTIME": "runtime.phone"})
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(tool == "xcrun" and args[:2] == ["simctl", "create"] for tool, args in calls))
+
+    def test_expanded_flow_is_rejected_headlessly_without_creating_a_device(self):
+        environment = {**self.environment, "SMOKE_TEST_MODE": "pass"}
+        result = subprocess.run(
+            ["bash", "scripts/smoke.sh", "flows",
+             "-only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly"],
+            cwd=self.root, env=environment, text=True, capture_output=True, timeout=15,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no headless runner", result.stderr)
+        calls = self.root / "calls.jsonl"
+        records = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+        self.assertFalse(
+            any(tool == "xcrun" and args[:2] == ["simctl", "create"] for tool, args in records))
 
 
 if __name__ == "__main__":
