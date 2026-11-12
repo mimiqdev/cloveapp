@@ -49,7 +49,7 @@ Test devices: iPhone 17 Pro Max, iPad Pro, and iPhone Duo. The owner's camera me
 | `CloveImaging` (Swift package) | Preview extraction and caching, full RAW decoding, image feature computation | ImageIO, Core Image, Vision |
 | `Clove` (app) | UI, gestures, scene state | Both packages |
 | `CloveLabKit` (Swift package) | Topic-named lab probes and report tooling | Foundation, ImageIO, Core Image, Vision |
-| `CloveLab` (debug app) | Spike verification and device measurements | `CloveCore`, `CloveImaging`, `CloveLabKit` |
+| `CloveLab` (debug app) | Spike verification and device measurements | `CloveLabKit` |
 
 `CloveCore` and `CloveImaging` tests run with `swift test` on macOS without a simulator, which gives agents the fastest iteration loop.
 
