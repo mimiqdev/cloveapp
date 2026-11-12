@@ -389,6 +389,78 @@
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2083",
       "device": "iphone",
       "screenshot": "screens/12-errors-lost-access.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "Select mode with Rename… (draft)",
+      "nodeId": "259:2552",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=259-2552",
+      "device": "iphone",
+      "screenshot": "screens/13-rename-select.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "Order (drag to reorder) (draft)",
+      "nodeId": "259:3217",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=259-3217",
+      "device": "iphone",
+      "screenshot": "screens/13-rename-order.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "Check focus viewer (draft)",
+      "nodeId": "259:3926",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=259-3926",
+      "device": "iphone",
+      "screenshot": "screens/13-rename-check-viewer.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "Name sheet: a name in use warns, Rename replaces (draft)",
+      "nodeId": "260:2330",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-2330",
+      "device": "iphone",
+      "screenshot": "screens/13-rename-name-sheet-replace-warning.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "Renaming (progress) (draft)",
+      "nodeId": "260:2553",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-2553",
+      "device": "iphone",
+      "screenshot": "screens/13-rename-running.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "Done toast (draft)",
+      "nodeId": "260:2770",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-2770",
+      "device": "iphone",
+      "screenshot": "screens/13-rename-done-toast.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "Partial failure toast (draft)",
+      "nodeId": "260:3371",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-3371",
+      "device": "iphone",
+      "screenshot": "screens/13-rename-partial-failure-toast.png"
+    },
+    {
+      "section": "rename",
+      "row": "13 Batch rename (draft, #176)",
+      "name": "iPad: order grid with the name form sheet (draft)",
+      "nodeId": "260:3974",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-3974",
+      "device": "ipad",
+      "screenshot": "screens/13-rename-ipad-name-form-sheet.png"
     }
   ]
 }

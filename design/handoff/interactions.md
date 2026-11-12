@@ -106,6 +106,13 @@ Photo only ──Back──▶ Grid
 - **A connected write fails**: show one "Couldn't save the mark." toast, read that photo's marks from the files again and show them. Retain no failed mark and do not retry.
 - **Entry**: a folder whose drive is gone shows a faded row with Reconnect, which re-runs the picker for that folder.
 
+## Batch rename (draft, #176)
+
+1. In select mode, tap Rename…. The order view shows only the selected photos.
+2. Drag tiles to set the order; the numbers update live. VoiceOver gets "Move earlier", "Move later", "Move to start" and "Move to end". Tap a tile to check focus in a zoomable viewer that swipes in this order. Cancel drops the order.
+3. Tap Next. The name sheet previews every new name live. A name already used in the folder warns and is replaced, with the old file set moved to `_Rejected`. Names that can't exist (invalid characters, too long, duplicates in the batch) block Rename.
+4. Tap Rename. Pending marks finish first, then the sheet shows progress and can't be dismissed. Afterwards the folder is read again, the mark undo history is cleared, select mode ends, and a toast reports the result. Renaming has no Undo.
+
 ## Theme switching
 
 - Settings ▶ Appearance. With "Match system light/dark" on, Light and Dark follow the system, and the picker selection is ignored for those two. Picking another theme turns the toggle off.

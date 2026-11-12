@@ -8,6 +8,10 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Batch rename: select, order, rename; a name in use is replaced, not refused (owner, 2026-11-12, #173)
+
+Batch rename is select, order, rename, with no undo (#176). A target name already used by a file outside the batch shows a warning, and Rename replaces it, instead of forcing the person to choose another name (owner, 2026-11-12). The draft moves the replaced file set to `_Rejected`, so nothing is deleted; this needs the owner's confirmation and a change to #175, which currently refuses the batch. Names that can't exist (invalid characters, over 255 bytes, duplicates within the batch) still block.
+
 ## Swipe star bar sits beside the touch (owner, 2026-11-12)
 
 The swipe star bar is no longer fixed at the right edge. It appears beside where the swipe started, vertically centred on the touch start and 24 pt to the left of the finger (to its right when the touch starts in the left third), clamped inside the stage clear of the top bar and filmstrip. It stays put for the whole swipe, so it never sits under the finger and does not chase it. This supersedes "a fixed indicator at the right edge, never under the finger" (#125 comment, built in #145). Frames: `03-detail-swipe-up-star-bar` and the #125 proposal board.

@@ -11,7 +11,7 @@ This package is everything an implementation session needs to build the Clove MV
 | File | What it is | Read it when |
 |---|---|---|
 | `screens.md` | Every screen and state per device, with Figma links and behavior notes. **The main spec.** | Building any screen. |
-| `screens/` | A 1x PNG of each of the 43 frames, Light and Dark side by side. | Seeing what a state looks like without Figma. |
+| `screens/` | A 1x PNG of each of the 51 frames, Light and Dark side by side. | Seeing what a state looks like without Figma. |
 | `frames.json` | The same frame list in machine-readable form (section, name, node id, URL, device, screenshot path). | Scripting Figma MCP calls or splitting work across agents. |
 | `tokens/clove-themes.json` | All 21 tokens × 8 themes as hex, with the Swift names and usage notes. | Generating the color assets or the `Color.clove` theme struct. |
 | `tokens/tokens.md` | The same tokens as a readable table, plus the theming rules. | Checking a color by eye. |

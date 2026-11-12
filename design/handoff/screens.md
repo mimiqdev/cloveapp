@@ -224,6 +224,33 @@ The iPad frames were drawn before the sidebar (#170) and the detail rail (#174) 
 - **Lost access**: the same pattern. The subtitle adds the `lock.fill` glyph (VoiceOver: "View only"), and the banner says "Access to this folder is no longer available." with **Open**.
 - There is no "Leaving with unsaved marks" alert. Leaving never waits on saves.
 
+## 13 Batch rename (draft for #176, not reviewed)
+
+A first draft of the flow in #176 for the designer. The engine is #175.
+
+| State | Node |
+|---|---|
+| [Select mode with Rename…](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=259-2552) · [png](screens/13-rename-select.png) | 259:2552 |
+| [Order (drag to reorder)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=259-3217) · [png](screens/13-rename-order.png) | 259:3217 |
+| [Check focus viewer](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=259-3926) · [png](screens/13-rename-check-viewer.png) | 259:3926 |
+| [Name sheet: a name in use warns, Rename replaces](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-2330) · [png](screens/13-rename-name-sheet-replace-warning.png) | 260:2330 |
+| [Renaming (progress)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-2553) · [png](screens/13-rename-running.png) | 260:2553 |
+| [Done toast](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-2770) · [png](screens/13-rename-done-toast.png) | 260:2770 |
+| [Partial failure toast](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-3371) · [png](screens/13-rename-partial-failure-toast.png) | 260:3371 |
+| [iPad: order grid with the name form sheet](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=260-3974) · [png](screens/13-rename-ipad-name-form-sheet.png) | 260:3974 |
+
+- **Select**: in select mode a "Rename…" pill sits centred above the batch capsule, in the same place as the group pill in detail. It shows once one photo is selected and the folder can be written to.
+- **Order**: a full-screen grid of only the selected photos, in the grid's current sort. Each tile has its position in an `accent` circle at the top leading corner. Dragging lifts the tile (larger, with a shadow), leaves an empty slot where it will land, and renumbers the other tiles as it moves. The top bar has Cancel, "Order N photos" with "Drag to reorder · tap to check", and Next. The order is never saved; Cancel drops it.
+- **Check focus**: tapping a tile opens the photo full screen with the detail zoom (double-tap or pinch to 100%). The subtitle reads "2 of 6", and swiping moves through this order. There is no capsule, filmstrip, Info or Undo. Back returns to the order grid.
+- **Name sheet**: a large-detent sheet over the order grid. The fields are Prefix, Add capture date, Start number and Digits (steppers). Below them is a live preview: the new name, then the current name with its companions ("IMG_4795.CR3 + JPG").
+  - **A name already in this folder** (outside the batch) doesn't block. The row gets a `label/yellow` "!" and "Replaces a file with this name". The line above the button counts the names in use, and the button turns `reject` and reads "Rename 6 · Replace 1". The replaced file set moves to `_Rejected`, so nothing is deleted.
+  - Invalid characters, names over 255 bytes and two equal names in the batch still block: those rows use `reject` text and the button is disabled. That state isn't drawn yet.
+  - The footer reads "Renaming can't be undone. Replaced files move to _Rejected."
+- **Renaming**: the grabber goes away and the sheet can't be swiped down. The fields dim to 40%, the title reads "Renaming 6 photos…", and a progress line with "Renaming 3 of 6…" replaces the button.
+- **Done**: the folder is read again, select mode ends and the toast says "Renamed 6 photos". There is no Undo.
+- **Partial failure**: the toast reads "Renamed 4 of 6" with the reason ("IMG_4806.CR3 was in use") and Details. Details lists the failure and any photo left under a temporary name, like the Couldn't move sheet.
+- **iPad**: the order grid uses 6 columns, and the name sheet is a 540 pt form sheet.
+
 ## Not designed (build with system defaults, or ask)
 
 - An empty folder (no supported photos). Suggested: the first-launch layout with "No photos in this folder."
