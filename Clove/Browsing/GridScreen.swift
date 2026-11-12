@@ -109,13 +109,13 @@ struct GridScreen: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if let completed = browsing.completedRename, browsing.isRenameToastVisible {
-                BatchRenameToast(completed: completed) { showsRenameDetails = true }
-                    .padding(.horizontal).padding(.bottom, 12)
-            } else if let message = browsing.failureToastMessage {
+            if let message = browsing.failureToastMessage {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal)
                     .padding(.bottom, 12)
+            } else if let completed = browsing.completedRename, browsing.isRenameToastVisible {
+                BatchRenameToast(completed: completed) { showsRenameDetails = true }
+                    .padding(.horizontal).padding(.bottom, 12)
             } else if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible {
                 MoveRejectsToast(browsing: browsing, completed: completed) {
                     moveSheet = .details(completed)

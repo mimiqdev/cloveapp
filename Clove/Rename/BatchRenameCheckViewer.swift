@@ -48,7 +48,8 @@ struct BatchRenameCheckViewer: View {
             DetailZoomView(
                 image: shown?.image ?? placeholder,
                 fullResolutionPixels: shown?.fullResolutionPixels, command: command,
-                doubleTapZoomEnabled: true, rules: rules, feedback: feedback,
+                doubleTapZoomEnabled: true, rules: rules, currentRating: .unrated,
+                feedback: feedback,
                 onZoomChange: { value in
                     if abs(value - scale) > 0.01 { nativeAnchor = nil }
                     scale = value
