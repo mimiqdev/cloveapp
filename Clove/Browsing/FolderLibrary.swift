@@ -142,6 +142,19 @@ protocol FolderLibrary: AnyObject {
     /// Progress arrives on ``rejectMoveProgress()`` while the call runs.
     func runRejectMove(_ plan: RejectMovePlan) async throws -> RejectMoveResult
 
+    func planBatchRename(
+        order: [PhotoIdentity], template: RenameTemplate, destination: RenameDestination,
+        rejectsFolderName: RejectsFolderName
+    ) async throws -> BatchRenamePlan
+
+    func runBatchRename(
+        _ plan: BatchRenamePlan,
+        progress: @escaping @MainActor @Sendable (BatchRenameProgress) -> Void
+    ) async throws -> BatchRenameResult
+
+    /// Reads the files again after any completed rename, including a partial failure.
+    func rescanAfterRename() async throws
+
     /// The progress steps of the next or running Move rejects (PRD P0-10).
     ///
     /// The stream yields each set as it starts and finishes, then the run's result. A library that
@@ -334,6 +347,22 @@ extension FolderLibrary {
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
         AsyncStream { $0.finish() }
     }
+
+    func planBatchRename(
+        order: [PhotoIdentity], template: RenameTemplate, destination: RenameDestination,
+        rejectsFolderName: RejectsFolderName
+    ) async throws -> BatchRenamePlan {
+        throw RenameFlowError.unavailable
+    }
+
+    func runBatchRename(
+        _ plan: BatchRenamePlan,
+        progress: @escaping @MainActor @Sendable (BatchRenameProgress) -> Void
+    ) async throws -> BatchRenameResult {
+        throw RenameFlowError.unavailable
+    }
+
+    func rescanAfterRename() async throws { throw RenameFlowError.unavailable }
 
     func undoRejectMove(
         _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
