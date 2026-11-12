@@ -24,6 +24,8 @@ struct GlassIconButton: View {
 
     /// The size components.md measures on the device.
     var size: ControlSize = .phone
+    /// A dock capsule supplies the shared glass behind its child glyphs.
+    var showsGlass = true
 
     /// The identifier the screen's UI test uses.
     let identifier: String
@@ -44,7 +46,7 @@ struct GlassIconButton: View {
             }
             .frame(width: diameter, height: diameter)
             .contentShape(Circle())
-            .cloveGlass(in: Circle())
+            .cloveGlass(in: Circle(), isEnabled: showsGlass)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

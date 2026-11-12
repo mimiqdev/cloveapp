@@ -7,7 +7,11 @@ struct BrowseShell: View {
     let browsing: BrowsingModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    private var isRegular: Bool { horizontalSizeClass == .regular }
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+
+    private var isRegular: Bool {
+        horizontalSizeClass == .regular && !isDuoExpanded
+    }
 
     var body: some View {
         NavigationStack(path: navigationPath) {
@@ -34,7 +38,9 @@ struct BrowseShell: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if browsing.state.route == .detail, let message = browsing.failureToastMessage {
+            if browsing.state.route == .detail, !isDuoExpanded,
+                let message = browsing.failureToastMessage
+            {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal)
                     .padding(.bottom, 12)
@@ -53,7 +59,8 @@ struct BrowseShell: View {
         Binding(
             get: {
                 switch browsing.state.route {
-                case .detail, .settings: [browsing.state.route]
+                case .detail: isDuoExpanded ? [] : [.detail]
+                case .settings: [.settings]
                 case .entry, .grid: []
                 }
             },
