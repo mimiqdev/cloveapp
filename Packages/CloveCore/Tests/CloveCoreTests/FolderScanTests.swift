@@ -442,12 +442,29 @@ struct FolderScanTests {
         }
         let scan = FolderScan(folderURL: folder.url, folderID: testFolderID)
         let gate = TestGate()
-        let consumer = Task { () throws -> Int in
+        let consumer = Task { () -> Int in
             await gate.wait()
             var received = 0
-            for try await _ in scan { received += 1 }
+            do {
+                for try await _ in scan {
+                    // The sequence's cancellation contract is cooperative at batch
+                    // boundaries: a cancelled consumer stops admitting batches, including
+                    // ones the walk already buffered (the app's scan loop checks the same way).
+                    try Task.checkCancellation()
+                    received += 1
+                }
+            } catch is CancellationError {
+                // The expected stop: the consumer ends here instead of draining the buffer.
+            }
             return received
         }
+        // The producer finished while the consumer was still parked at the gate, so all four
+        // batches (64+64+64+8) are sitting in the stream's buffer — the interleaving CI
+        // caught (#213), where the old assertion raced the producer and lost. Waiting on the
+        // walk's observable end (the summary) makes it the only possible interleaving, with
+        // no sleep: a cancelled consumer must not admit any buffered batch.
+        let summary = try await scan.summary()
+        #expect(summary.logicalPhotoCount == 200)
         consumer.cancel()
         await gate.open()
         let received = try await consumer.value
