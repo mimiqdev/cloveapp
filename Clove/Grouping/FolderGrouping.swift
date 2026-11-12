@@ -9,8 +9,8 @@ import Foundation
 /// reaches into grouping:
 ///
 /// - ``begin(photos:revision:enabled:)`` runs step 2 and publishes its result — the cache's
-///   finished groups when they still match — before the library reports the scan finished, so a
-///   saved group view has groups to validate against (PRD P0-14).
+///   finished groups when they still match — before the library reports the scan finished
+///   (PRD P0-11).
 /// - The background pass asks I3 for the features of the photos a group can form from, on its own
 ///   low-priority workers and through the grid's preview cache, then applies one refinement pass
 ///   (PRD Similar groups step 3). It never touches the grid's thumbnail workers or queue, so
@@ -49,6 +49,9 @@ final class FolderGrouping {
     private var enabled = true
     /// Whether the folder ended, so a pass that resumes late starts nothing (G1 folder access).
     private var isClosed = false
+    /// Whether ``begin(photos:revision:enabled:)`` installed this folder's input, so Run again
+    /// and a setting change only act on a grouping that has started (PRD P0-11).
+    private var hasBegun = false
     /// The result the library last received, so an unchanged publication stays quiet.
     private var published: [BrowsingGroup] = []
     /// The background feature and refinement pass, cancelled by a new run or by closing.
@@ -108,7 +111,7 @@ final class FolderGrouping {
     /// Runs step 2 for the folder and publishes it (PRD Similar groups steps 1–2, P0-11).
     ///
     /// It returns once the time-only groups — or the cache's finished result — are published, so
-    /// the library can report the scan finished knowing the folder's groups exist (P0-14). The
+    /// the library can report the scan finished knowing the folder's groups exist. The
     /// refinement that needs features keeps running afterwards.
     func begin(
         photos: [GroupingPhoto], revision: GroupingInputRevision, enabled: Bool
@@ -116,11 +119,16 @@ final class FolderGrouping {
         inputs = photos
         self.revision = revision
         self.enabled = enabled
+        hasBegun = true
         await run(reusingCache: true)
     }
 
     /// Runs grouping again from the folder's current photos with the cache bypassed (P0-11).
+    ///
+    /// A folder whose first pass has not started yet ignores this: its input arrives with
+    /// ``begin(photos:revision:enabled:)``, which the library calls once the scan finishes.
     func runAgain(photos: [GroupingPhoto]) async {
+        guard hasBegun else { return }
         inputs = photos
         await run(reusingCache: false)
     }
@@ -128,10 +136,11 @@ final class FolderGrouping {
     /// Applies the similar-groups setting to the open folder (PRD P0-11, `AppSettings`).
     ///
     /// Turning it off publishes no groups and stops feature work; the cache stays as it was, so
-    /// turning it back on shows the finished result at once. The settings screen reaches this
-    /// through the folder library's one call.
+    /// turning it back on shows the finished result at once. A folder whose first pass has not
+    /// started yet ignores the change: its time stage reads the setting when it begins. The
+    /// settings screen reaches this through the folder library's one call.
     func setEnabled(_ enabled: Bool, photos: [GroupingPhoto]) async {
-        guard !isClosed, enabled != self.enabled else { return }
+        guard hasBegun, !isClosed, enabled != self.enabled else { return }
         inputs = photos
         self.enabled = enabled
         await run(reusingCache: true)
@@ -194,7 +203,7 @@ final class FolderGrouping {
             reuseCache: reusingCache)
         guard !isClosed else { return }
         // The grouper's own result, read here rather than waited for, so the caller's next step
-        // runs after the first publication instead of racing it (PRD P0-14).
+        // runs after the first publication instead of racing it.
         let result = await grouping.current
         guard !isClosed else { return }
         adopt(result.browsingGroups)

@@ -59,13 +59,14 @@ Counts and companion text remain visible. Only access problems add a subtitle in
 | a11y.save.disconnected | Not connected |
 | a11y.save.viewOnly | View only |
 
-## Save-failure toast (owner decision, 2026-11-11)
+## Failure toast (owner decision, 2026-11-11)
 
 | Key | String |
 |---|---|
 | save.toast.failed | Couldn't save the mark. |
+| read.toast.failed | Couldn't read some marks. |
 
-Show one toast per failure burst, above the bottom edge in the Move rejects toast position. Hide it after about six seconds. Announce `save.toast.failed` with VoiceOver, including for partial batch failures. Re-read failed photos and display their file's marks. Drive loss uses the error banner instead.
+Show one toast per failure burst, above the bottom edge in the Move rejects toast position. Hide it after about six seconds. Announce the toast's copy with VoiceOver, including for partial batch failures. Re-read failed photos and display their file's marks. A sidecar that cannot be read says `read.toast.failed` instead, because nothing was saved. Drive loss uses the error banner instead.
 
 ## Groups in detail
 | Key | String |

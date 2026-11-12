@@ -34,7 +34,7 @@ struct FolderWriteFailureTests {
         try await waitUntil { model.folderLocationLoss != nil }
         #expect(!model.canMark)
         #expect(model.shownMarks(for: photo).rating == two)
-        #expect(!model.isSaveFailureToastVisible)
+        #expect(model.failureToastMessage == nil)
         let writesBefore = try Data(contentsOf: hidden.appendingPathComponent("photo.xmp"))
         model.apply(.label(ColourLabel(colour: .red)), to: photo)
         await model.drainActions()
@@ -75,7 +75,7 @@ struct FolderWriteFailureTests {
         fileSystem.setFailing(true)
         model.apply(.label(ColourLabel(colour: .red)), to: photo)
         await model.drainActions()
-        #expect(model.isSaveFailureToastVisible)
+        #expect(model.failureToastMessage == BrowsingModel.saveFailureToastMessage)
         #expect(model.shownMarks(for: photo) == PhotoMarks(rating: three))
         fileSystem.setFailing(false)
         model.apply(.rating(.rejected), to: photo)
@@ -119,12 +119,12 @@ struct FolderWriteFailureTests {
         model.apply(.label(ColourLabel(colour: .red)), to: photo)
         await model.drainActions()
         #expect(model.shownMarks(for: photo) == PhotoMarks(rating: three))
-        #expect(model.isSaveFailureToastVisible)
-        #expect(model.saveFailureToastBurst == 1)
+        #expect(model.failureToastMessage == BrowsingModel.saveFailureToastMessage)
+        #expect(model.failureToastBurst == 1)
         try FileManager.default.removeItem(at: sidecar)
         try await library.rereadMarks(for: [photo])
         try await waitUntil { model.shownMarks(for: photo) == PhotoMarks() }
-        model.dismissSaveFailureToast()
+        model.dismissFailureToast()
         try FileManager.default.createDirectory(at: sidecar, withIntermediateDirectories: false)
         try Data("photo".utf8).write(to: photos.appendingPathComponent("other.ARW"))
         try XMPCodec().write(.rating(three), into: nil).write(
@@ -133,8 +133,8 @@ struct FolderWriteFailureTests {
         try await waitUntil { !model.isFolderOpening && model.photos.count == 2 }
         let other = try #require(model.photos.first { $0.id.stem == "other" }?.id)
         #expect(model.shownMarks(for: other).rating == three)
-        #expect(model.isSaveFailureToastVisible)
-        #expect(model.saveFailureToastBurst == 2)
+        #expect(model.failureToastMessage == BrowsingModel.readFailureToastMessage)
+        #expect(model.failureToastBurst == 2)
         await library.closeFolder()
     }
 
