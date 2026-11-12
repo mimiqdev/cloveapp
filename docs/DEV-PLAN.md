@@ -11,7 +11,7 @@ All development is done by agents. The product owner handles real-device verific
 ### Agent rules
 
 - One task, one issue, one branch, one PR. Issue and PR titles start with the task ID, for example `[C3] XMP codec`.
-- Every PR includes tests and merges only after verification passes on the Mac mini: build, unit tests, and simulator smoke test, all run by `mise run verify`. The supervisor re-runs it before merging. There is no hosted CI for launch.
+- Every PR includes tests and merges only after verification passes: the `verify` check of the GitHub Actions workflow runs the whole gate (build, unit and package tests, the simulator smoke test and UI flows) on a hosted macOS runner after merging the latest `main`. Workers run `mise run check` locally; the supervisor merges on a green run against the current `main`.
 - Stay within the task's scope. Open an issue for anything outside it instead of fixing it in passing.
 - A spike's output is a report at `docs/spikes/Sx-name.md` (what was tested, data, conclusion, recommendation) plus reusable verification code. Spikes do not ship product features.
 - Where a decision is needed, list the options and a recommendation in the report or PR. The product owner decides at the gate.

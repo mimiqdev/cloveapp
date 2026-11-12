@@ -48,7 +48,13 @@ At most **three workers run at once**, limited by the Mac's internal disk (simul
 
 - Stay within the issue's scope. Open a new issue for anything outside it.
 - Commit in small steps. Push the branch and open a pull request from the [template](../.github/pull_request_template.md), titled `[<ID>] <summary>` and containing `Closes #<issue>`.
-- Run every check the issue lists and paste the real output, trimmed to the relevant lines, into the pull request. `mise run verify` includes the `CloveLabKit` probe tests (`mise run test-lab`).
+- While working and on every fix round, run `mise run check`: generate, lint, the `CloveCore` and `CloveImaging` tests, one build of Clove for testing, and the smoke test. It takes about 3 minutes warm.
+- Add the matching task when a change reaches further:
+  - a change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab`;
+  - a change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`, and a change to the release script adds `mise run test-release`;
+  - a change to a UI flow or a flow test adds `mise run ui-flows`.
+- Workers don't need a full local `mise run verify`. CI runs the whole gate on every push to the pull request (`.github/workflows/verify.yml`, after merging the latest `main`). A pull request is ready when CI is green on its latest push; link that run in the report.
+- Run every other check the issue lists and paste the real output, trimmed to the relevant lines, into the pull request.
 - Never merge, never push to `main`, never force-push a branch someone else is working on, and never touch signing files beyond reading them through the configured paths.
 
 **Stop and report** instead of guessing when:
@@ -80,7 +86,7 @@ For `blocked` or `needs-decision`, the worker also comments the same block on th
 
 1. Read the diff against the issue's acceptance criteria and the PRD.
 2. Ask whether each new state, branch or recovery path is needed ([AGENTS.md](../AGENTS.md#keep-it-simple), "Keep it simple"). When a finding sits inside machinery that isn't needed, the fix is to delete the machinery, not patch it.
-3. Re-run the issue's checks in the worker's checkout on the Mac. The worker's pasted output is not enough on its own.
+3. Check the CI run on the pull request's latest push. Re-run on the Mac only what CI cannot cover, such as device checks or a timing the issue asks for. The worker's pasted output is not enough on its own.
 4. Then one of:
    - **Small problems:** the supervisor fixes them on the branch.
    - **Larger problems:** a new worker thread on the same checkout, briefed with the findings as a review comment on the pull request. Its report uses the same block.
@@ -89,6 +95,8 @@ For `blocked` or `needs-decision`, the worker also comments the same block on th
 ### 6. Merge
 
 The supervisor squash-merges every pull request once review and verification pass, including documentation, tooling, and release configuration.
+
+The merge gate is the `verify` check of the CI workflow. Merge only when the latest run passed against the current `main`. If `main` moved since that run, re-run it first with the pull request's number (`gh workflow run verify.yml -f pr=<number>`, or **Run workflow** in the Actions tab), and merge when that run is green.
 
 The product owner is involved only for decisions that are theirs to make:
 

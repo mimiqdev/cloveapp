@@ -11,7 +11,7 @@ build, test, lint, and simulator smoke-test pipeline is in place.
 
 ```sh
 mise install                 # installs the pinned XcodeGen
-mise run verify              # generate, lint, test, build, smoke test
+mise run check               # generate, lint, core and imaging tests, smoke test
 ```
 
 Useful day-to-day commands:
@@ -21,11 +21,13 @@ mise run generate            # write Clove.xcodeproj, then open it in Xcode
 mise run test-core           # CloveCore tests, on macOS
 mise run test-imaging        # CloveImaging tests, on macOS
 mise run build               # build Clove and CloveLab for the simulator
-mise run smoke               # UI smoke test on a throwaway simulator
+mise run smoke               # app unit tests and the UI smoke test on a throwaway simulator
+mise run ui-flows            # the long UI flow tests on a throwaway simulator
+mise run verify              # the full gate that CI runs on every pull request
 ```
 
 Requirements: Xcode 27 or later on macOS, and [mise](https://mise.jdx.dev).
-No signing setup is needed for `mise run verify`.
+No signing setup is needed for any of these, or for CI (`.github/workflows/verify.yml`).
 
 To run on a device, copy `Config/Local.xcconfig.example` to
 `Config/Local.xcconfig` and set `DEVELOPMENT_TEAM` there. That file is

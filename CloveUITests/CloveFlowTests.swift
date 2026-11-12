@@ -1,8 +1,10 @@
 import UIKit
 import XCTest
 
-/// Short smoke paths through the real controls, backed by the in-memory library.
-final class CloveUITests: XCTestCase {
+/// The UI flow tests: longer paths through the real controls, backed by the in-memory library.
+///
+/// `mise run ui-flows` runs them; the smoke test is `CloveSmokeTests`.
+final class CloveFlowTests: XCTestCase {
     @MainActor
     func testGridAndDetailControls() {
         let app = launchSample()
@@ -403,7 +405,7 @@ final class CloveUITests: XCTestCase {
         }
     }
 
-    /// Explicit visual comparison only; the everyday smoke run skips this matrix.
+    /// Explicit visual comparison only; the everyday flow run skips this matrix.
     @MainActor
     func testCaptureGroupAndMoveReferencesWhenRequested() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_GROUP_MOVES"] == "1")
@@ -481,7 +483,7 @@ final class CloveUITests: XCTestCase {
         element(app, "clove.nav.back").tap()
     }
 
-    /// Explicit screenshot run only. The normal smoke suite skips this comparison matrix.
+    /// Explicit screenshot run only. The normal flow run skips this comparison matrix.
     @MainActor
     func testCaptureDesignReferencesWhenRequested() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_DESIGN"] == "1")

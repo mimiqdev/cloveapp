@@ -34,11 +34,16 @@ Out of scope:
 
 ## Checks to run
 
-<!-- Exact commands. The worker pastes their output into the pull request. -->
+<!-- Exact commands. The worker pastes their output into the pull request.
+     mise run check on every fix round; CI runs the full gate (mise run verify's
+     coverage) on every push. Add test-lab, test-fixtures, test-release or
+     ui-flows when the change reaches them. -->
 
 ```sh
-mise run verify
+mise run check
 ```
+
+CI (`verify`) green on the pull request's latest push.
 
 ## Depends on
 
