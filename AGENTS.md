@@ -62,19 +62,22 @@ XcodeGen. Every task is listed here.
 - A change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`;
   a change to the release script or its config adds `mise run test-release`.
 - A change to a UI flow, or to a flow test, adds `mise run ui-flows`.
-- The full gate runs in CI on every push to a pull request. Run `mise run verify`
-  locally only when you need the whole gate on the Mac.
+- The full gate runs in CI nightly and by hand. Run `mise run verify` locally
+  only when you need the whole gate on the Mac.
 
 ## Continuous integration
 
-- `.github/workflows/verify.yml` runs on every pull request against `main`, on
-  every push to `main`, and by hand (`workflow_dispatch`, with an optional pull
-  request number). It checks out the pull request's head, merges the latest
+- `.github/workflows/verify.yml` runs a quick check on every pull request
+  against `main`: the script tests, lint, the CloveCore and CloveImaging tests,
+  and a build of Clove for testing, with no simulator. The full suite adds the
+  CloveLab tests and build and `scripts/smoke.sh all`; it runs nightly on `main`
+  (19:00 UTC) and by hand (`workflow_dispatch`, with an optional pull request
+  number). It checks out the pull request's head, merges the latest
   `main` into it with `scripts/ci/merge-main.sh`, and prints the head, main and
   merge SHAs. It never tests `refs/pull/N/merge`.
 - Jobs: the Python script tests on `ubuntu-latest`; lint, the package tests and
-  the CloveLab build on one standard `xcode-27` runner; the Clove test build
-  and `scripts/smoke.sh all` on another. A new simulator's first boot takes
+  (full only) the CloveLab build on one standard `xcode-27` runner; the Clove
+  test build and (full only) `scripts/smoke.sh all` on another. A new simulator's first boot takes
   about 7 minutes there, so all the app tests share one simulator. Both macOS
   jobs select Xcode 27.2
   and start with `scripts/ci/runner-facts.sh`, which fails if Xcode 27.2 or an
@@ -89,12 +92,13 @@ XcodeGen. Every task is listed here.
   in parallel as before.
 - **`verify`** is the last job, which passes only when every other job
   passed. Merges don't wait for it, except for the changes listed under
-  "Merge" in `docs/AGENT-WORKFLOW.md`.
+  "Merge" in `docs/AGENT-WORKFLOW.md`. A failed nightly run becomes an issue
+  and is fixed next.
 - No secrets, no signing, read-only `contents` permission, `pull_request` only.
   On failure the logs and `.xcresult` bundles are uploaded for 7 days; they hold
   only build and test output.
-- To re-check a pull request against today's `main`, run the workflow by hand
-  with its number: `gh workflow run verify.yml -f pr=<number>`.
+- To run the full suite on a pull request merged with today's `main`, run the
+  workflow by hand with its number: `gh workflow run verify.yml -f pr=<number>`.
 - Only GitHub's own actions are used. Any other action needs a decision record
   in `docs/decisions/` and a full commit SHA pin.
 

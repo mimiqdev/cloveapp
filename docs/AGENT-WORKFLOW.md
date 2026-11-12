@@ -53,7 +53,7 @@ At most **three workers run at once**, limited by the Mac's internal disk (simul
   - a change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab`;
   - a change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`, and a change to the release script adds `mise run test-release`;
   - a change to a UI flow or a flow test adds `mise run ui-flows`.
-- Workers don't run `mise run verify` and don't wait for CI. At the end, after merging the latest `main`, run `mise run check` once, plus the tests for what you changed, and paste the results. CI runs the whole suite on every push to the pull request (`.github/workflows/verify.yml`); link the run in the report.
+- Workers don't run `mise run verify` and don't wait for CI. At the end, after merging the latest `main`, run `mise run check` once, plus the tests for what you changed, and paste the results. CI runs a quick check on every push to the pull request (`.github/workflows/verify.yml`); link the run in the report.
 - Run every other check the issue lists and paste the real output, trimmed to the relevant lines, into the pull request.
 - Never merge, never push to `main`, never force-push a branch someone else is working on, and never touch signing files beyond reading them through the configured paths.
 
@@ -96,9 +96,9 @@ For `blocked` or `needs-decision`, the worker also comments the same block on th
 
 The supervisor squash-merges every pull request once review and verification pass, including documentation, tooling, and release configuration.
 
-Clove is early, so the merge gate is light: the review, the worker's `mise run check`, and a compile of the branch merged with the current `main`. Don't wait for the full CI run, and don't re-run anything because `main` moved. CI still runs the whole suite on every pull request and every push to `main`. A failure there becomes an issue and is fixed next.
+Clove is early, so the merge gate is light: the review, the worker's `mise run check`, and a compile of the branch merged with the current `main`. Don't wait for the full CI run, and don't re-run anything because `main` moved. CI runs a quick check on every pull request and the whole suite nightly on `main`. A failure there becomes an issue and is fixed next.
 
-Wait for a green CI run only when a change touches how marks are written, the XMP format, `project.yml`, CI, or the release script.
+Run the full suite by hand (`gh workflow run verify.yml -f pr=<number>`) and wait for it to pass only when a change touches how marks are written, the XMP format, `project.yml`, CI, or the release script.
 
 The product owner is involved only for decisions that are theirs to make:
 
