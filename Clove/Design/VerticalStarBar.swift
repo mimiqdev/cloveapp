@@ -221,6 +221,12 @@ struct VerticalStarBarDisplay: View {
 
     private let metrics = VerticalStarBarMetrics(size: .phone)
 
+    /// The whole read-out, including the gap and reject chip, for stage placement.
+    static var size: CGSize {
+        let metrics = VerticalStarBarMetrics(size: .phone)
+        return CGSize(width: metrics.width, height: metrics.height + 10 + 40)
+    }
+
     var body: some View {
         VStack(spacing: 10) {
             VerticalStarBarStars(rating: rating, enabledRatings: enabledRatings, size: .phone)
