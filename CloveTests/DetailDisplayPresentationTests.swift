@@ -498,6 +498,20 @@ struct DetailDisplayPresentationTests {
         #expect(image.image?.cgImage === replacement)
     }
 
+    /// A tap that begins while zoomed must never reach chrome, even when the double tap that
+    /// returns the view to fit is delivered before it (#131).
+    @Test func chromeTapIsLiveOnlyAtFit() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.setImage(try testPixels(gray: 0))
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+        #expect(preview.chromeTapIsEnabled)
+        preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
+        #expect(!preview.chromeTapIsEnabled)
+        preview.apply(DetailZoomCommand(id: 2, kind: .fit))
+        #expect(preview.chromeTapIsEnabled)
+    }
+
     private func testPixels(gray: CGFloat) throws -> CGImage {
         let context = try #require(
             CGContext(

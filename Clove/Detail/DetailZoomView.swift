@@ -89,7 +89,8 @@ final class DetailZoomProbe {
 /// edges carry a single-tap recognizer with no failure requirement, so a tap there navigates
 /// immediately instead of waiting to see whether a double tap follows (PRD Detail and marking).
 /// The centre's presentation tap waits for its double tap, so toggling chrome cannot interrupt
-/// a focus check. Edge taps keep their immediate navigation path.
+/// a focus check, and it is off while zoomed, where a tap does nothing (PRD Detail gestures).
+/// Edge taps keep their immediate navigation path.
 ///
 /// A double tap on an edge is therefore two single taps: the edge belongs to navigation only,
 /// and the document states that width in ``DetailEdgeZone/edgeFraction``. Double taps while
@@ -305,6 +306,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return nil
     }
 
+    /// Whether a centre tap can show or hide the chrome, which it can only at fit (PRD Detail and
+    /// marking).
+    var chromeTapIsEnabled: Bool { centreChromeTap.isEnabled }
+
     /// Replaces the pixels without touching the zoom or the position (PRD P0-04).
     ///
     /// A quality change from an embedded preview to a native render is the same call, so the
@@ -356,15 +361,23 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         centreDoubleTap.isEnabled = isEnabled
     }
 
-    /// Switches the fit-only pan off while zoomed, where a one-finger drag pans the image.
+    /// Switches the fit-only inputs off while zoomed, where a one-finger drag pans the image and a
+    /// tap changes nothing (PRD Detail gestures).
     ///
     /// The scroll view's own pan stays enabled throughout: at fit there is nothing to scroll, so
     /// the two pans cannot compete, and simultaneous recognition below means neither cancels the
     /// other. Turning the scroll view's pan off at fit would also cost U5's pinch, which needs it
     /// for two-finger panning as it zooms.
+    ///
+    /// The chrome tap is off rather than left to fail its zoom check when it is delivered. A tap
+    /// made while zoomed is held until the double tap it may belong to fails, so under load its
+    /// action can arrive after a double tap has already returned the view to fit; it would then
+    /// toggle the chrome and hide Info, Undo and the capsule for a tap the person made while
+    /// zoomed (#131). A disabled recognizer never starts, so that tap has nothing to deliver.
     private func updateGestureAvailability() {
         let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
         markingPan.isEnabled = !isZoomed
+        centreChromeTap.isEnabled = !isZoomed
     }
 
     /// Applies one command exactly once (PRD P0-04).
@@ -599,7 +612,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     @objc private func handleChromeTap() {
         guard !UIAccessibility.isVoiceOverRunning,
-            scrollView.zoomScale <= DetailFitScale.tolerance,
             DetailZoom.edgeZone(for: centreChromeTap.location(in: self), in: bounds.size) == .centre
         else { return }
         onEdgeTap?(.centre)
