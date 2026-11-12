@@ -30,7 +30,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 | Grid | Filter button | Opens the filter menu. Picking an item applies it at once, and the button fills with `accent`. |
 | Grid | "…" ▶ Select | Select mode: tap tiles to toggle, then use the capsule to mark all of them. Done exits. |
 | Detail | Swipe left or right | Next or previous photo in grid order (filtered order when a filter is on). |
-| Detail | **Swipe up** and hold | Shows the vertical star bar. Dragging up fills stars from the bottom; release commits. The capsule stars preview the live value. |
+| Detail | **Swipe up** and hold | Shows the vertical star bar beside where the swipe started (centred on the touch start, 24 pt to the left of the finger, or to its right when the touch starts in the left third; clamped inside the stage). It stays put while the finger moves. Dragging up fills stars from the bottom; release commits. The capsule stars preview the live value. |
 | Detail | **Swipe down** | Reject (the ✕ chip under the star bar). Coming with #125: a quick swipe down first clears the rating to 0, then rejects; see the proposal frame `03-detail-swipe-star-bar-cleared-step-proposal`. |
 | Detail | Tap the capsule's reject, stars or label | Sets the mark directly. Tapping the current star value clears it. The label opens the picker, and picking closes it. |
 | Detail | Single tap on the photo | Hides or shows the chrome (capsule, filmstrip, top bar buttons). |

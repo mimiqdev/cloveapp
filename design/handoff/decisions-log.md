@@ -8,6 +8,10 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Swipe star bar sits beside the touch (owner, 2026-11-12)
+
+The swipe star bar is no longer fixed at the right edge. It appears beside where the swipe started, vertically centred on the touch start and 24 pt to the left of the finger (to its right when the touch starts in the left third), clamped inside the stage clear of the top bar and filmstrip. It stays put for the whole swipe, so it never sits under the finger and does not chase it. This supersedes "a fixed indicator at the right edge, never under the finger" (#125 comment, built in #145). Frames: `03-detail-swipe-up-star-bar` and the #125 proposal board.
+
 ## Figma frames synced to the build (2026-11-12)
 
 The frames on the "Clove · MVP design" page now match the app on main at `7470617` (owner's implementation notes, 2026-11-12). The 10 Nov versions of every removed or redrawn frame are on the Archive page under "Superseded · 10 Nov handoff".

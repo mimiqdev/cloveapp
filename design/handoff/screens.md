@@ -93,7 +93,7 @@ Devices:
 
 **Label popover**: tapping the label circle pops 5 color dots (plus none) above the capsule. Picking one closes it.
 
-**Swipe-up star bar**: swiping up on the photo shows a compact vertical bar of empty stars that fill from the bottom as you drag, up to the enabled levels. A ✕ chip below it is the swipe-down reject. The capsule stars preview the live value.
+**Swipe-up star bar**: swiping up on the photo shows a compact vertical bar of empty stars that fill from the bottom as you drag, up to the enabled levels. A ✕ chip below it is the swipe-down reject. The bar appears beside where the swipe started: vertically centred on the touch start, 24 pt to the left of the finger (to its right when the touch starts in the left third), kept inside the stage clear of the top bar and filmstrip. It stays put for the rest of the swipe, so the finger moves along it. The grey circles in the frame mark the touch and are not drawn in the app. The capsule stars preview the live value.
 
 **Info sheet** (medium detent, read-only in the MVP)
 - Capture: time with subseconds, camera and serial, lens, exposure.
@@ -103,7 +103,7 @@ Devices:
 
 **Save failure toast**: when a mark can't be written, one glass toast says "Couldn't save the mark." with no action, and the photo goes back to the marks in its file. There is no subtitle status and no Retry. One toast per failure burst; it hides after about 6 seconds. In the frame it sits above the filmstrip so it doesn't cover the capsule; the build currently draws it at the bottom edge over the capsule (see the note in `decisions-log.md`).
 
-**Swipe star bar: cleared step (proposal, #125, not reviewed)**: a quick swipe down from a rated photo now stops at 0 before Reject. The proposal shows three stops on a 3★ photo: A start (no chip), B cleared (all stars empty, the chip slot shows `star.slash` in `text/secondary`), C reject (the chip fills in `reject` with a white ✕ and the stars dim). The bar stays fixed at the right edge (#134). Waiting on the designer.
+**Swipe star bar: cleared step (proposal, #125, not reviewed)**: a quick swipe down from a rated photo now stops at 0 before Reject. The proposal shows three stops on a 3★ photo: A start (no chip), B cleared (all stars empty, the chip slot shows `star.slash` in `text/secondary`), C reject (the chip fills in `reject` with a white ✕ and the stars dim). The bar sits beside the touch start, as in the swipe-up frame. Waiting on the designer.
 
 **100% zoom**: the capsule, filmstrip, Info and Undo hide. The subtitle shows "100%", and a small "100%" chip fades out.
 
