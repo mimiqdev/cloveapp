@@ -93,6 +93,7 @@ extension View {
                             browsing.back()
                         } label: {
                             Label(backTitle, systemImage: "chevron.left")
+                                .labelStyle(.titleAndIcon)
                         }
                         .accessibilityLabel("Back")
                         .accessibilityIdentifier("clove.nav.back")

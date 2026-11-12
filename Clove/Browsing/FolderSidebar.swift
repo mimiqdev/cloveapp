@@ -5,6 +5,7 @@ import SwiftUI
 struct FolderSidebar: View {
     let browsing: BrowsingModel
     @Environment(SettingsStore.self) private var store
+    @Environment(\.cloveTheme) private var theme
 
     private var counts: SidebarCounts { browsing.sidebarCounts }
     private static let ratings = (1...5).compactMap { Rating(rawValue: $0) }
@@ -116,12 +117,12 @@ struct FolderSidebar: View {
                 Spacer()
                 Text(count.formatted()).font(.caption)
                     .foregroundStyle(
-                        selected ? Color.white.opacity(0.8) : Color.clove.text.secondary)
+                        selected ? Color.white.opacity(0.8) : theme.tokens.secondaryText.color)
             }
-            .foregroundStyle(selected ? Color.white : Color.clove.text.primary)
+            .foregroundStyle(selected ? Color.white : theme.tokens.primaryText.color)
             .contentShape(Rectangle())
         }
-        .listRowBackground(selected ? Color.clove.accent : Color.clear)
+        .listRowBackground(selected ? theme.tokens.accent.color : Color.clear)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("clove.sidebar.\(identifier)")
     }

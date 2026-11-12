@@ -26,6 +26,7 @@ struct BrowsingHeader<Subtitle: View, Tools: View>: View {
                     if let backTitle {
                         Button(action: back) {
                             Label(backTitle, systemImage: "chevron.left")
+                                .labelStyle(.titleAndIcon)
                                 .lineLimit(1)
                                 .frame(maxWidth: 160, alignment: .leading)
                                 .frame(height: 40)
