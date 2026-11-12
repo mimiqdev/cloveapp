@@ -20,19 +20,34 @@ struct LabelPicker: View {
     /// Applies a label, or clears it with nil (PRD Marking rules).
     let onPick: (LabelColour?) -> Void
 
+    /// The rail presents the same dots in a column, without the capsule's glass surround.
+    var axis: Axis = .horizontal
+    var isNeutral = false
+
     /// None, then red, yellow, green, blue and purple (components.md).
     static let defaultLabels: [LabelColour?] =
         [nil] + LabelColour.allCases.filter { !$0.isExtended }
 
     var body: some View {
-        HStack(spacing: 8) {
+        if axis == .horizontal {
+            dots
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .cloveGlass(in: Capsule())
+        } else {
+            dots
+        }
+    }
+
+    private var dots: some View {
+        let layout =
+            axis == .horizontal
+            ? AnyLayout(HStackLayout(spacing: 8)) : AnyLayout(VStackLayout(spacing: 0))
+        return layout {
             ForEach(labels.indices, id: \.self) { index in
                 dot(labels[index])
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .cloveGlass(in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
     }
@@ -44,7 +59,8 @@ struct LabelPicker: View {
         } label: {
             ZStack {
                 if let label {
-                    Circle().fill(Color.clove.label.colour(for: label))
+                    Circle().fill(
+                        isNeutral ? Color.clove.rating.off : Color.clove.label.colour(for: label))
                 } else {
                     Image(systemName: "circle.slash")
                         .font(.title3)
@@ -66,6 +82,7 @@ struct LabelPicker: View {
         .accessibilityLabel(label.map { "Label, \($0.rawValue)" } ?? "No label")
         .accessibilityAddTraits(label == selection ? .isSelected : [])
         .accessibilityIdentifier("\(identifier).\(label?.rawValue.lowercased() ?? "none")")
+        .help(label.map { "Label, \($0.rawValue)" } ?? "No label")
     }
 }
 

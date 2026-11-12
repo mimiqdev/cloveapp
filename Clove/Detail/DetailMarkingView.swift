@@ -154,6 +154,8 @@ struct DetailMarkingView: View {
 
     private var displayMarks: PhotoMarks { photo.marks }
 
+    private var usesRail: Bool { horizontalSizeClass == .regular }
+
     private var detailLayout: some View {
         VStack(spacing: 0) {
             BrowsingHeader(
@@ -173,10 +175,12 @@ struct DetailMarkingView: View {
             } tools: {
                 if chromeIsVisible {
                     GlassIconButton(
-                        label: "Info", symbol: "info.circle", identifier: "clove.detail.info"
+                        label: "Info", symbol: "info.circle", size: usesRail ? .pad : .phone,
+                        identifier: "clove.detail.info"
                     ) { showsInformation = true }
                     GlassIconButton(
                         label: "Undo", symbol: "arrow.uturn.backward",
+                        size: usesRail ? .pad : .phone,
                         identifier: "clove.detail.undo",
                         action: {
                             actions.markingSwipeBegan(); browsing.undoLastMark()
@@ -186,39 +190,18 @@ struct DetailMarkingView: View {
             }
             FolderSaveBanner(
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
-            previewArea
-                .overlay(alignment: .bottom) {
-                    if chromeIsVisible {
-                        VStack(spacing: 8) {
-                            DetailFilmstrip(
-                                photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                                open: actions.openPhoto,
-                                groups: browsing.groups, finishingAction: finishingAction)
-                            DetailMarkCapsule(
-                                marks: displayMarks, settings: settings,
-                                previewRating: swipeFeedback.rating,
-                                rate: { rate($0) }, label: { choose($0) },
-                                toggleReject: { toggleReject() }
-                            )
-                            .disabled(!browsing.canMark)
-                            .padding(.horizontal, 16)
-                        }
-                        .padding(.bottom, 8)
-                        .onGeometryChange(for: CGFloat.self) {
-                            $0.size.height
-                        } action: {
-                            controlsHeight = $0
-                        }
-                        .transition(.opacity)
-                    } else if showsZoomChip && scale > DetailFitScale.tolerance {
-                        Text(zoomName)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Color.clove.text.primary)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .cloveGlass(in: Capsule())
-                            .padding(.bottom, 12)
-                    }
+            HStack(spacing: 0) {
+                photoStage
+                if usesRail {
+                    DetailMarkRail(
+                        marks: displayMarks, settings: settings,
+                        previewRating: swipeFeedback.rating,
+                        rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
+                        toggleReject: { toggleReject() }, markingBegan: actions.markingSwipeBegan
+                    )
+                    .disabled(!browsing.canMark)
                 }
+            }
         }
         .background(Color.clove.bg.stage)
         .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
@@ -232,6 +215,44 @@ struct DetailMarkingView: View {
         .sheet(isPresented: $showsInformation) {
             PhotoInformationSheet(browsing: browsing, photo: photo)
         }
+    }
+
+    private var photoStage: some View {
+        previewArea
+            .overlay(alignment: .bottom) {
+                if chromeIsVisible {
+                    VStack(spacing: 8) {
+                        DetailFilmstrip(
+                            photos: order, current: photo.id, thumbnails: browsing.thumbnails,
+                            open: actions.openPhoto,
+                            groups: browsing.groups, finishingAction: finishingAction)
+                        if !usesRail {
+                            DetailMarkCapsule(
+                                marks: displayMarks, settings: settings,
+                                previewRating: swipeFeedback.rating,
+                                rate: { rate($0) }, label: { choose($0) },
+                                toggleReject: { toggleReject() }
+                            )
+                            .disabled(!browsing.canMark)
+                            .padding(.horizontal, 16)
+                        }
+                    }
+                    .padding(.bottom, 8)
+                    .onGeometryChange(for: CGFloat.self) {
+                        $0.size.height
+                    } action: {
+                        controlsHeight = $0
+                    }
+                    .transition(.opacity)
+                } else if showsZoomChip && scale > DetailFitScale.tolerance {
+                    Text(zoomName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.clove.text.primary)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .cloveGlass(in: Capsule())
+                        .padding(.bottom, 12)
+                }
+            }
     }
 
     private var finishingAction: PillAction? {
@@ -717,8 +738,13 @@ struct DetailMarkingView: View {
     // MARK: - Marking
 
     /// One rating tap, resolved by C13's rating-bar rule (PRD Marking rules).
-    private func rate(_ rating: Rating) {
-        apply(rules.result(forRating: rating, marks: browsing.shownMarks(for: photo.id)))
+    private func rate(_ rating: Rating, togglesCurrent: Bool = true) {
+        let marks = browsing.shownMarks(for: photo.id)
+        // The rail resolves tap-to-clear itself and a drag commits its final value directly.
+        apply(
+            togglesCurrent
+                ? rules.result(forRating: rating, marks: marks)
+                : rules.result(for: .rating(rating), marks: marks))
     }
 
     /// One label choice, resolved by C13's label rule (PRD Marking rules).

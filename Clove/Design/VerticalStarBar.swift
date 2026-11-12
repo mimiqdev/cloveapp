@@ -40,6 +40,9 @@ struct VerticalStarBar: View {
     /// Rejects the photo, the same as a swipe down (PRD Marking rules, interactions.md).
     let onReject: () -> Void
 
+    /// Touching the bar cancels the previous mark's pending auto-advance.
+    var onBegin: () -> Void = {}
+
     /// The value the drag is showing, or nil when no drag has run since the last commit.
     @State private var preview: Rating?
 
@@ -72,11 +75,17 @@ struct VerticalStarBar: View {
     private var pill: some View {
         GeometryReader { proxy in
             VerticalStarBarStars(
-                rating: shownRating, enabledRatings: enabledRatings, size: size
+                rating: shownRating, enabledRatings: enabledRatings, size: size,
+                identifier: identifier,
+                onRate: size == .pad
+                    ? { level in
+                        onCommit(level == rating ? .unrated : level)
+                    } : nil
             )
             .frame(width: proxy.size.width, height: proxy.size.height)
             .contentShape(RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
-            .gesture(
+            // One gesture owns physical taps and drags; the buttons also support VoiceOver.
+            .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .updating($isDragging) { _, state, _ in
                         state = true
@@ -91,15 +100,18 @@ struct VerticalStarBar: View {
                     }
             )
             .onChange(of: isDragging) { _, dragging in
-                guard !dragging else { return }
-                // A cancelled gesture ends without `onEnded`, so clear what it previewed.
-                preview = nil
-                movedPastTapSlop = false
+                if dragging {
+                    onBegin()
+                } else {
+                    // A cancelled gesture ends without `onEnded`, so clear what it previewed.
+                    preview = nil
+                    movedPastTapSlop = false
+                }
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Rating")
-            .accessibilityValue(accessibilityValue)
-            .accessibilityAdjustableAction(adjustRating)
+            .modifier(
+                StarBarAccessibility(
+                    individualStars: size == .pad, value: accessibilityValue,
+                    adjust: adjustRating))
         }
         .frame(width: metrics.width, height: metrics.height)
         .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
@@ -229,20 +241,60 @@ private struct VerticalStarBarStars: View {
     let rating: Rating
     let enabledRatings: EnabledRatings
     let size: ControlSize
+    var identifier = "clove.mark.starBar"
+    var onRate: ((Rating) -> Void)?
 
     var body: some View {
         let metrics = VerticalStarBarMetrics(size: size)
         VStack(spacing: metrics.gap) {
             ForEach(EnabledRatings.all.levels.reversed(), id: \.rawValue) { level in
                 let filled = level <= rating
-                Image(systemName: filled ? "star.fill" : "star")
-                    .font(.title3)
-                    .foregroundStyle(filled ? Color.clove.rating.on : Color.clove.rating.off)
-                    .opacity(enabledRatings.contains(level) ? 1 : 0.35)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                let label = "\(level.starCount ?? 0) stars"
+                if let onRate {
+                    Button {
+                        onRate(level)
+                    } label: {
+                        star(filled: filled, level: level)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!enabledRatings.contains(level) && level != rating)
+                    .accessibilityLabel(label)
+                    .accessibilityAddTraits(level == rating ? .isSelected : [])
+                    .accessibilityIdentifier("\(identifier).\(level.rawValue)")
+                    .help(label)
+                } else {
+                    star(filled: filled, level: level)
+                }
             }
         }
         .padding(metrics.padding)
+    }
+
+    private func star(filled: Bool, level: Rating) -> some View {
+        Image(systemName: filled ? "star.fill" : "star")
+            .font(.title3)
+            .foregroundStyle(filled ? Color.clove.rating.on : Color.clove.rating.off)
+            .opacity(enabledRatings.contains(level) ? 1 : 0.35)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct StarBarAccessibility: ViewModifier {
+    let individualStars: Bool
+    let value: String
+    let adjust: (AccessibilityAdjustmentDirection) -> Void
+
+    func body(content: Content) -> some View {
+        if individualStars {
+            content.accessibilityElement(children: .contain)
+        } else {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Rating")
+                .accessibilityValue(value)
+                .accessibilityAdjustableAction(adjust)
+        }
     }
 }
 

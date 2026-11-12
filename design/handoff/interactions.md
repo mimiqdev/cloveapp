@@ -58,7 +58,8 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 ## iPad
 
 - The sidebar is the filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
-- Detail has a right rail: tap or drag the vertical star bar, Reject, label dots.
+- Detail has a right rail instead of the capsule: tap or drag the vertical star bar, tap Reject, or tap a label dot. Tapping the current rating or label clears it. The rail never hides; single tap and zoom hide the filmstrip, Reject N unmarked pill and top bar buttons while the stage keeps its size.
+- Swipe marking stays on the photo as on iPhone: swipe up to rate with live feedback in the rail's stars, and swipe down to toggle Reject.
 - Full keyboard support as above **(proposed)**. Pointer hover shows the rail's tooltips.
 
 ## Duo cover (folded)
