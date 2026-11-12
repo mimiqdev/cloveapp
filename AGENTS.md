@@ -98,14 +98,16 @@ XcodeGen. Every task is listed here.
   ([#146](https://github.com/mimiqdev/cloveapp/issues/146)). Locally they run
   in parallel as before.
 - **`verify`** is the last job, which passes only when every other job
-  passed. Merges don't wait for it, except for the changes listed under
-  "Merge" in `docs/AGENT-WORKFLOW.md`. A failed nightly run becomes an issue
+  passed. No merge waits for the full suite or any simulator test
+  (`docs/AGENT-WORKFLOW.md`, "Merge"). A failed nightly run becomes an issue
   and is fixed next.
 - No secrets, no signing, read-only `contents` permission, `pull_request` only.
   On failure the logs and `.xcresult` bundles are uploaded for 7 days; they hold
   only build and test output.
 - To run the full suite on a pull request merged with today's `main`, run the
   workflow by hand with its number: `gh workflow run verify.yml -f pr=<number>`.
+  A manual run uses `main`'s workflow file. To test a pull request's own
+  change to `verify.yml`, add `--ref <branch>`.
 - Only GitHub's own actions are used. Any other action needs a decision record
   in `docs/decisions/` and a full commit SHA pin.
 

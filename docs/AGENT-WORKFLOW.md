@@ -101,7 +101,7 @@ The supervisor squash-merges every pull request once review and verification pas
 
 Clove is early, so the merge gate is light: the review, the worker's `mise run check`, and a compile of the branch merged with the current `main`. Don't wait for the full CI run, and don't re-run anything because `main` moved. CI runs a quick check on every pull request and the whole suite nightly on `main`. A failure there becomes an issue and is fixed next.
 
-Run the full suite by hand (`gh workflow run verify.yml -f pr=<number>`) and wait for it to pass only when a change touches how marks are written, the XMP format, `project.yml`, CI, or the release script.
+No merge waits for the full suite or for any simulator test, including changes to marks, XMP, file moves, `project.yml`, CI or the release script. The logic that writes and moves the person's files, marks and XMP lives in `CloveCore`, and its tests run in every pull request's quick check. The app unit and UI tests run nightly. Run the full suite by hand only to investigate a failure.
 
 The product owner is involved only for decisions that are theirs to make:
 
