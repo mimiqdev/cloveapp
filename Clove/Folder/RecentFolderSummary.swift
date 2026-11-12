@@ -8,6 +8,8 @@ enum RecentFolderSummary {
         FolderDisplayLocation.name(path: recent.pathSummary)
     }
 
+    /// Reads the device idiom, so it runs on the main actor.
+    @MainActor
     static func location(for recent: RecentFolder) -> String {
         FolderDisplayLocation.text(
             path: recent.pathSummary, volumeName: recent.volumeName, mediaType: recent.mediaType,
