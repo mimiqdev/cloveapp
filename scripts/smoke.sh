@@ -50,13 +50,15 @@ if [ -z "${CLOVE_SIM_DEVICE_TYPE:-}" ]; then
             -only-testing:CloveUITests/CloveFlowTests/testDuo*)
                 if xcrun simctl list runtimes --json | python3 -c '
 import json, sys
+selected_runtime = sys.argv[1]
 available = any(
     runtime.get("isAvailable")
+    and (not selected_runtime or runtime["identifier"] == selected_runtime)
     and any(device["name"] == "iPhone Duo" for device in runtime.get("supportedDeviceTypes", []))
     for runtime in json.load(sys.stdin)["runtimes"]
 )
 sys.exit(0 if available else 1)
-'; then
+' "${CLOVE_SIM_RUNTIME:-}"; then
                     device_type="iPhone Duo"
                 fi
                 break

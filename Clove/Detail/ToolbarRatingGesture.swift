@@ -67,10 +67,15 @@ struct ToolbarRatingGesture: UIViewRepresentable {
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch
         ) -> Bool {
-            guard input.canMark, let window,
-                let button = ratingControl(in: window)
-            else { return false }
-            return button.point(inside: touch.location(in: button), with: nil)
+            guard input.canMark else { return false }
+            // Follow UIKit's actual touch target. A modal overlay can cover the button's
+            // coordinates without belonging to that control.
+            var target = touch.view
+            while let view = target {
+                if view.accessibilityIdentifier == "clove.duo.rating" { return true }
+                target = view.superview
+            }
+            return false
         }
 
         @objc private func track(_ pan: UIPanGestureRecognizer) {
@@ -100,14 +105,5 @@ struct ToolbarRatingGesture: UIViewRepresentable {
             return input.enabledRatings.levels.last { ($0.starCount ?? 0) <= value } ?? .unrated
         }
 
-        private func ratingControl(in view: UIView) -> UIView? {
-            if view.accessibilityIdentifier == "clove.duo.rating", !view.isHidden {
-                return view
-            }
-            for child in view.subviews.reversed() {
-                if let match = ratingControl(in: child) { return match }
-            }
-            return nil
-        }
     }
 }
