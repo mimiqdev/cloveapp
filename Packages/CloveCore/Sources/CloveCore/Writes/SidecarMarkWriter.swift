@@ -34,6 +34,12 @@ public struct SidecarWriteResult: Hashable, Sendable {
 /// disk, rule 3; G1 Sidecar naming). Each write's read-modify-write runs without suspension
 /// inside the actor, so two concurrent requests cannot lose one another's field.
 public actor SidecarMarkWriter {
+    // A complete read-modify-write stays serialized, including when file I/O blocks.
+    private nonisolated let queue = DispatchSerialQueue(label: "Clove.SidecarMarkWriter")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
+
     /// The injectable file seam, so tests can fail any step (G1 Safe writes).
     private let fileSystem: any MarkWriteFileSystem
     /// The production codec; pure and shareable (PRD P0-07).

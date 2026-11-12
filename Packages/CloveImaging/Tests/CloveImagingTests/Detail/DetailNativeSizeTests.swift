@@ -10,7 +10,10 @@ import Testing
 /// The fixture tests compare the size with the pixels the photo's own route produces, so the two
 /// cannot drift apart: `nativeRAW` for a RAW-primary photo and `fullRaster` for a JPEG-primary one.
 @Suite(.serialized, .enabled(if: DetailFixtures.hasFormats))
-struct DetailNativeSizeFixtureTests {
+actor DetailNativeSizeFixtureTests {
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.NativeSizeFixtures")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     /// The RAW extensions the fixture set holds; every one must answer the size its render uses.
     private static let rawExtensions: Set<String> = [
         "cr3", "nef", "arw", "raf", "orf", "rw2", "dng",
@@ -301,7 +304,10 @@ struct DetailNativeSizeFixtureTests {
 /// per-photo fallback that keeps a preview from answering 100% (PRD P0-04; G1 "Preview, detail
 /// (I2)").
 @Suite(.serialized)
-struct DetailNativeSizeTests {
+actor DetailNativeSizeTests {
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.NativeSize")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     @Test func aPortraitJpegHeaderIsOrientedLikeItsFullRaster() async throws {
         let directory = try DetailTestDirectory()
         defer { directory.remove() }

@@ -274,18 +274,20 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     let double = WriteFileSystemDouble()
     let set = try makeScannedSet(folder: makeFolderIdentity(), root: folder.url, stem: "MMQ05184")
     let sidecar = folder.file("MMQ05184.xmp")
-    let reached = DispatchSemaphore(value: 0)
+    let (reached, entry) = AsyncStream<Void>.makeStream()
+    var entries = reached.makeAsyncIterator()
     let release = DispatchSemaphore(value: 0)
+    defer { release.signal() }
     // Hold the first write after staging, so the next two requests arrive while it runs.
     double.beforeOperation = { record in
         guard record.step == .replace, record.url == sidecar, record.count == 1 else { return }
-        reached.signal()
+        entry.yield(())
         _ = release.wait(timeout: .now() + 10)
     }
     let queue = makeQueue(folder, double)
 
     async let first = queue.apply(.rating(three), to: set)
-    #expect(waitForTestSignal(reached))
+    await entries.next()
     async let second = queue.apply(.label(green), to: set)
     async let third = queue.apply(.rating(.rejected), to: set)
     try await Task.sleep(for: .milliseconds(150))
@@ -316,17 +318,19 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
         folder: identity, root: folder.url, stem: "MMQ05184",
         sidecar: .ambiguous([existing, appended]))
     let sidecar = folder.file("MMQ05184.xmp")
-    let reached = DispatchSemaphore(value: 0)
+    let (reached, entry) = AsyncStream<Void>.makeStream()
+    var entries = reached.makeAsyncIterator()
     let release = DispatchSemaphore(value: 0)
+    defer { release.signal() }
     double.beforeOperation = { record in
         guard record.step == .replace, record.url == sidecar, record.count == 1 else { return }
-        reached.signal()
+        entry.yield(())
         _ = release.wait(timeout: .now() + 10)
     }
     let queue = makeQueue(folder, double)
 
     async let firstChange = queue.apply(.rating(three), to: first)
-    #expect(waitForTestSignal(reached))
+    await entries.next()
     async let secondChange = queue.apply(.label(green), to: rescanned)
     try await Task.sleep(for: .milliseconds(150))
     release.signal()

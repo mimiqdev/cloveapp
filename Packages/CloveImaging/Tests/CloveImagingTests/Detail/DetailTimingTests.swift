@@ -7,7 +7,11 @@ import Testing
 /// focus checks, p95 ≤ 2 s". Nothing here gates: the numbers are printed for the pull
 /// request and nothing asserts on them.
 @Suite(.serialized, .enabled(if: DetailFixtures.hasFormats))
-struct DetailTimingTests {
+actor DetailTimingTests {
+    // Size timings call the synchronous decoder directly, so keep the suite off the pool.
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.DetailTimings")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     private static let rawExtensions: Set<String> = [
         "cr3", "nef", "arw", "raf", "orf", "rw2", "dng",
     ]

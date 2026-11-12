@@ -1,4 +1,5 @@
 import CoreGraphics
+import Dispatch
 
 /// Reads the size a photo's 100% means, from the route its pixels come from (PRD P0-04;
 /// G1 "Preview, detail (I2)").
@@ -13,6 +14,17 @@ protocol DetailNativeSizeReading: Sendable {
     ///   - reference: The photo's RAW when it has one, otherwise its JPEG primary.
     ///   - isRAW: Whether `reference` is the photo's RAW.
     func nativeSize(of reference: DetailSource, isRAW: Bool) -> CGSize?
+}
+
+extension DetailNativeSizeReading {
+    /// ImageIO and RAW size discovery may block; a detached task still uses the cooperative pool.
+    func readNativeSize(of reference: DetailSource, isRAW: Bool) async -> CGSize? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: nativeSize(of: reference, isRAW: isRAW))
+            }
+        }
+    }
 }
 
 /// The system readers: the RAW decoder for a RAW, the ImageIO header otherwise (PRD P0-04).

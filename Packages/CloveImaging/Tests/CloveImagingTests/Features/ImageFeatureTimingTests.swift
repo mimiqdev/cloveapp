@@ -8,7 +8,11 @@ import Testing
 /// medians (3.25 ms Vision, 0.225 ms dHash, 7.47 ms preview read on an iPhone 17 Pro Max).
 /// Nothing here gates: the numbers are printed for the pull request and nothing asserts on them.
 @Suite(.serialized, .enabled(if: FeatureFixtures.hasFormats))
-struct ImageFeatureTimingTests {
+actor ImageFeatureTimingTests {
+    // Measure synchronous framework calls on Dispatch, excluding executor queue time.
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.FeatureTimings")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     private static let samples = 3
 
     private struct Timings {

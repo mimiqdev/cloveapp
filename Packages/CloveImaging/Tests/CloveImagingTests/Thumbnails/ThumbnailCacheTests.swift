@@ -3,7 +3,10 @@ import Testing
 
 @testable import CloveImaging
 
-struct ThumbnailCacheTests {
+actor ThumbnailCacheTests {
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.ThumbnailCacheStorage")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     @Test func memoryAndPersistentDiskHitsPreserveRouteAndDimensions() throws {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }

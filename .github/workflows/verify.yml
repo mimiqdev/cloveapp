@@ -87,14 +87,12 @@ jobs:
         run: mise run fixtures-sets 2>&1 | tee .build/ci-logs/fixtures-sets.log
       - name: mise run lint
         run: mise run lint 2>&1 | tee .build/ci-logs/lint.log
-      # The package tests run serially: in parallel on this 3-core runner, tests that
-      # block on semaphores starve the cooperative thread pool (issue #146).
       - name: mise run test-core
         timeout-minutes: 15
-        run: mise run test-core --no-parallel 2>&1 | tee .build/ci-logs/test-core.log
+        run: mise run test-core 2>&1 | tee .build/ci-logs/test-core.log
       - name: mise run test-imaging
         timeout-minutes: 15
-        run: mise run test-imaging --no-parallel 2>&1 | tee .build/ci-logs/test-imaging.log
+        run: mise run test-imaging 2>&1 | tee .build/ci-logs/test-imaging.log
       - name: Upload logs
         if: failure()
         uses: actions/upload-artifact@v7
