@@ -19,14 +19,14 @@ import Foundation
 /// - **Results.** Moved sets leave the grid and failed sets stay in place.
 ///
 /// The actor holds the runs Undo can restore and the progress streams. File work uses the
-/// injected ``RejectMoveFileSystem``, which has no delete or copy operation at all.
+/// injected ``PhotoFileSystem``, which has no delete or copy operation at all.
 public actor RejectMover {
     /// The injectable file operations every move goes through (PRD P0-10).
     ///
     /// Not `private` because the undo lane in `RejectMoveUndo.swift` adds its calls in an
     /// extension in another file; both directions use the same seam, so one injected failure
     /// covers the whole loop.
-    let fileSystem: any RejectMoveFileSystem
+    let fileSystem: any PhotoFileSystem
     /// The confirmation-plan builder and the whole-request preconditions (PRD P0-10).
     private let planner: RejectMovePlanner
     /// C4's write queue: drain, the per-set mark-change check and the stored-Reject removal.
@@ -51,7 +51,7 @@ public actor RejectMover {
     /// nothing reaches real photos or the app's Application Support container.
     public init(
         markQueue: MarkWriteQueue,
-        fileSystem: any RejectMoveFileSystem = FoundationRejectMoveFileSystem()
+        fileSystem: any PhotoFileSystem = FoundationPhotoFileSystem()
     ) {
         self.markQueue = markQueue
         self.fileSystem = fileSystem
@@ -135,209 +135,35 @@ public actor RejectMover {
         }
     }
 
-    /// Moves one set as a unit and confirms every file (G1 decision 5, PRD P0-10).
+    /// Moves through the shared exclusive move and per-set rollback implementation.
     private func move(_ plan: RejectMoveSetPlan) async -> RejectMoveOutcome {
-        var sizes: [URL: Int] = [:]
-        do {
-            for file in plan.files {
-                guard let size = try fileSystem.fileSize(at: file.source) else {
-                    return .failed(
-                        RejectMoveFailedSet(
-                            identity: plan.identity,
-                            failure: RejectMoveFailure(
-                                reason: .locationUnavailable,
-                                message: "\(file.source.lastPathComponent) is no longer there."),
-                            files: plan.files))
-                }
-                sizes[file.source] = size
-            }
-        } catch {
-            return .failed(
-                RejectMoveFailedSet(
-                    identity: plan.identity, failure: RejectMoveFailure(classifying: error),
-                    files: plan.files))
-        }
-        // PRD P0-10: same volume only, compared before any folder is created. A volume that
-        // reports no identifier cannot be compared, so the exclusive rename's EXDEV remains
-        // the authority rather than a guess.
-        let volumes = volumeIdentifiers(of: plan)
-        if let source = volumes.source, let destination = volumes.destination,
-            source != destination
-        {
-            return .failed(
-                RejectMoveFailedSet(
-                    identity: plan.identity,
-                    failure: RejectMoveFailure(
-                        reason: .differentVolume,
-                        message: "The rejects folder is on a different volume."),
-                    files: plan.files))
-        }
-        do {
-            try fileSystem.createDirectory(plan.destinationFolder)
-        } catch {
-            return .failed(
-                RejectMoveFailedSet(
-                    identity: plan.identity, failure: RejectMoveFailure(classifying: error),
-                    files: plan.files))
-        }
-
-        var moved: [RejectMoveFilePlan] = []
-        var failure: RejectMoveFailure?
-        for file in plan.files {
-            do {
-                try fileSystem.moveExclusively(from: file.source, to: file.destination)
-                moved.append(file)
-            } catch {
-                failure = RejectMoveFailure(classifying: error)
-                break
-            }
-        }
-        if failure == nil {
-            failure = confirm(plan, sizes: sizes)
-        }
-        guard let failure else {
+        let files = plan.files.map { PhotoFileMove(source: $0.source, destination: $0.destination) }
+        switch PhotoSetFileMover(fileSystem: fileSystem).move(files, to: plan.destinationFolder) {
+        case .moved:
             return await confirmed(plan)
-        }
-        return rollBack(plan, moved: moved, failure: failure)
-    }
-
-    /// Reads both volumes for the same-volume check (PRD P0-10).
-    private func volumeIdentifiers(of plan: RejectMoveSetPlan) -> (
-        source: String?, destination: String?
-    ) {
-        guard let primary = plan.files.first?.source else { return (nil, nil) }
-        let source = try? fileSystem.volumeIdentifier(of: primary.deletingLastPathComponent())
-        let destination = try? fileSystem.volumeIdentifier(of: plan.destinationFolder)
-        return (source, destination)
-    }
-
-    /// Checks the confirmed state of every file: source gone, destination present, same size.
-    ///
-    /// G1 decision 5 and PRD P0-08 confirm the move itself, not the rename's return code. A
-    /// mismatch is ``RejectMoveFailureReason/notConfirmed`` and rolls the set back, so an
-    /// unconfirmed move is never reported as moved.
-    private func confirm(_ plan: RejectMoveSetPlan, sizes: [URL: Int]) -> RejectMoveFailure? {
-        for file in plan.files {
-            do {
-                if try fileSystem.exists(at: file.source) {
-                    return RejectMoveFailure(
-                        reason: .notConfirmed,
-                        message: "\(file.source.lastPathComponent) is still at its source.")
+        case .failed(let error):
+            return .failed(
+                RejectMoveFailedSet(
+                    identity: plan.identity, failure: RejectMoveFailure(classifying: error),
+                    files: plan.files))
+        case .split(let error, let rollbackFailures, let locations):
+            let files = zip(plan.files, locations).map { file, location in
+                let value: RejectMoveFileLocation.Location
+                switch location.location {
+                case .source: value = .source
+                case .destination: value = .destination
+                case .missing: value = .missing
+                case .unknown: value = .unknown
                 }
-                guard let size = try fileSystem.fileSize(at: file.destination) else {
-                    return RejectMoveFailure(
-                        reason: .notConfirmed,
-                        message: "\(file.destination.lastPathComponent) is not at its destination.")
-                }
-                if let expected = sizes[file.source], size != expected {
-                    return RejectMoveFailure(
-                        reason: .notConfirmed,
-                        message:
-                            "\(file.destination.lastPathComponent) changed size during the move.")
-                }
-            } catch {
-                return RejectMoveFailure(classifying: error)
+                return RejectMoveFileLocation(
+                    role: file.role, source: file.source, destination: file.destination,
+                    location: value)
             }
-        }
-        return nil
-    }
-
-    /// Moves every earlier file back, then reports the set as failed or split (PRD P0-10).
-    ///
-    /// PRD P0-10 keeps a set a unit: a failure after some files moved restores those files. Each
-    /// move back is itself an exclusive rename, so a file that appeared at the source in the
-    /// meantime is not overwritten. If any move back or its check fails, the set is split and
-    /// every file's actual location is reported instead of a guessed one.
-    private func rollBack(
-        _ plan: RejectMoveSetPlan, moved: [RejectMoveFilePlan], failure: RejectMoveFailure
-    ) -> RejectMoveOutcome {
-        var rollbackFailures: [RejectMoveFailure] = []
-        for file in moved.reversed() {
-            do {
-                try fileSystem.moveExclusively(from: file.destination, to: file.source)
-            } catch {
-                rollbackFailures.append(RejectMoveFailure(classifying: error))
-            }
-        }
-        let restored = moved.reduce(into: Set<URL>()) { $0.insert($1.source) }
-        for file in plan.files {
-            let atSource: Bool
-            do {
-                atSource = try fileSystem.exists(at: file.source)
-            } catch {
-                // A check that could not run is not proof the file moved back, so it counts as
-                // a rollback this set cannot confirm (PRD P0-10).
-                rollbackFailures.append(RejectMoveFailure(classifying: error))
-                continue
-            }
-            guard atSource else {
-                rollbackFailures.append(
-                    RejectMoveFailure(
-                        reason: .notConfirmed,
-                        message: "\(file.source.lastPathComponent) is not back at its source."))
-                continue
-            }
-            guard restored.contains(file.source) else { continue }
-            do {
-                if try fileSystem.exists(at: file.destination) {
-                    rollbackFailures.append(
-                        RejectMoveFailure(
-                            reason: .notConfirmed,
-                            message:
-                                "\(file.destination.lastPathComponent) is still at its destination."
-                        ))
-                }
-            } catch {
-                rollbackFailures.append(RejectMoveFailure(classifying: error))
-            }
-        }
-        guard rollbackFailures.isEmpty else {
             return .split(
                 RejectMoveSplitSet(
-                    identity: plan.identity, failure: failure,
-                    rollbackFailures: rollbackFailures,
-                    files: locations(of: plan.files, moved: Set(moved))))
-        }
-        return .failed(
-            RejectMoveFailedSet(identity: plan.identity, failure: failure, files: plan.files))
-    }
-
-    /// Reports every file's actual location after a failed move back (PRD P0-10).
-    ///
-    /// A moved file is looked for at the destination first and a file that never moved at its
-    /// source first, so a stale copy can never be mistaken for the file. A check that throws is
-    /// reported as ``RejectMoveFileLocation/Location/unknown`` rather than as a lost file.
-    private func locations(
-        of files: [RejectMoveFilePlan], moved: Set<RejectMoveFilePlan>
-    ) -> [RejectMoveFileLocation] {
-        files.map { file in
-            let atDestination = try? fileSystem.exists(at: file.destination)
-            let atSource = try? fileSystem.exists(at: file.source)
-            let location = location(
-                source: atSource, destination: atDestination,
-                prefersDestination: moved.contains(file))
-            return RejectMoveFileLocation(
-                role: file.role, source: file.source, destination: file.destination,
-                location: location)
-        }
-    }
-
-    /// Chooses one file's location from the two checks, or ``RejectMoveFileLocation``'s
-    /// unknown and missing cases when neither answers (PRD P0-10).
-    private func location(
-        source: Bool?, destination: Bool?, prefersDestination: Bool
-    ) -> RejectMoveFileLocation.Location {
-        let first = prefersDestination ? destination : source
-        let second = prefersDestination ? source : destination
-        let firstLocation: RejectMoveFileLocation.Location =
-            prefersDestination ? .destination : .source
-        let secondLocation: RejectMoveFileLocation.Location =
-            prefersDestination ? .source : .destination
-        switch (first, second) {
-        case (true, _): return firstLocation
-        case (false, true), (nil, true): return secondLocation
-        case (false, false): return .missing
-        case (false, nil), (nil, false), (nil, nil): return .unknown
+                    identity: plan.identity, failure: RejectMoveFailure(classifying: error),
+                    rollbackFailures: rollbackFailures.map { RejectMoveFailure(classifying: $0) },
+                    files: files))
         }
     }
 

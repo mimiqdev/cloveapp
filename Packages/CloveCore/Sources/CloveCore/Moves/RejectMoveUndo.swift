@@ -70,12 +70,12 @@ final class RejectMoveUndoRun {
 /// duplicate one across volumes (PRD P0-10).
 struct RejectMoveUndoRunner: Sendable {
     /// The seam the move used, shared so one injected failure covers both directions.
-    private let fileSystem: any RejectMoveFileSystem
+    private let fileSystem: any PhotoFileSystem
     /// C4's queue, the only writer of a stored mark (G1 decisions 2 and 6).
     private let markQueue: MarkWriteQueue
 
     /// Creates the runner over the mover's seam and queue (PRD P0-10).
-    init(fileSystem: any RejectMoveFileSystem, markQueue: MarkWriteQueue) {
+    init(fileSystem: any PhotoFileSystem, markQueue: MarkWriteQueue) {
         self.fileSystem = fileSystem
         self.markQueue = markQueue
     }

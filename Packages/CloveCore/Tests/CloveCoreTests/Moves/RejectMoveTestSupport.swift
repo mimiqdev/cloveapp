@@ -87,11 +87,11 @@ struct MoveTestFolder {
         var paths: [String] = []
         // The enumerator spells a temporary folder `/private/var/...`, so both sides are
         // resolved before one is subtracted from the other.
-        let rootPath = RejectMovePath.canonical(url)
+        let rootPath = PhotoFilePath.canonical(url)
         for case let entry as URL in enumerator {
             let values = try? entry.resourceValues(forKeys: [.isRegularFileKey])
             guard values?.isRegularFile == true else { continue }
-            let path = RejectMovePath.canonical(entry)
+            let path = PhotoFilePath.canonical(entry)
             paths.append(String(path.dropFirst(rootPath.count + 1)))
         }
         return paths.sorted()
@@ -106,8 +106,8 @@ struct MoveTestFolder {
 
 /// `url`'s path relative to the opened folder, for assertions on a destination.
 func relativePath(of url: URL, in folder: MoveTestFolder) -> String {
-    let rootPath = RejectMovePath.canonical(folder.url)
-    let path = RejectMovePath.canonical(url)
+    let rootPath = PhotoFilePath.canonical(folder.url)
+    let path = PhotoFilePath.canonical(url)
     guard path.hasPrefix(rootPath) else { return path }
     return String(path.dropFirst(rootPath.count + 1))
 }
@@ -131,7 +131,7 @@ func eventually(
 /// One call the move lane made into the file seam.
 struct MoveFileSystemRecord: Sendable, Hashable {
     /// The seam operation that ran.
-    let step: RejectMoveFileSystemDouble.Step
+    let step: PhotoFileSystemDouble.Step
     /// The URL the operation addressed.
     let url: URL
     /// The 1-based count of this operation on this URL, for ordered hooks.
@@ -144,11 +144,13 @@ struct MoveFileSystemRecord: Sendable, Hashable {
 /// the plan and the move, and fail the move back after some files of a set already moved. Every
 /// call is recorded so a test can also prove which URLs were touched, and no operation in the
 /// seam can delete or copy a file (the protocol has none).
-final class RejectMoveFileSystemDouble: RejectMoveFileSystem, @unchecked Sendable {
+final class PhotoFileSystemDouble: PhotoFileSystem, @unchecked Sendable {
     /// The seam operations a test can fail or observe (PRD P0-10).
     enum Step: String, CaseIterable, Sendable {
         case fileSize
         case exists
+        case contentsOfDirectory
+        case creationDate
         case volumeIdentifier
         case isReadOnlyVolume
         case createDirectory
@@ -163,7 +165,7 @@ final class RejectMoveFileSystemDouble: RejectMoveFileSystem, @unchecked Sendabl
     }
 
     /// The real operations, so passing tests exercise the production path.
-    private let backing: any RejectMoveFileSystem
+    private let backing: any PhotoFileSystem
     /// Guards the records, injections, hook and overrides below.
     private let lock = NSLock()
     private var records: [MoveFileSystemRecord] = []
@@ -173,7 +175,7 @@ final class RejectMoveFileSystemDouble: RejectMoveFileSystem, @unchecked Sendabl
     private var readOnly = false
 
     /// Creates the double over the production file system unless a test supplies another.
-    init(backing: any RejectMoveFileSystem = FoundationRejectMoveFileSystem()) {
+    init(backing: any PhotoFileSystem = FoundationPhotoFileSystem()) {
         self.backing = backing
     }
 
@@ -276,6 +278,16 @@ final class RejectMoveFileSystemDouble: RejectMoveFileSystem, @unchecked Sendabl
     func exists(at url: URL) throws -> Bool {
         _ = try prepare(.exists, url)
         return try backing.exists(at: url)
+    }
+
+    func contentsOfDirectory(at url: URL) throws -> [URL] {
+        _ = try prepare(.contentsOfDirectory, url)
+        return try backing.contentsOfDirectory(at: url)
+    }
+
+    func creationDate(at url: URL) throws -> Date? {
+        _ = try prepare(.creationDate, url)
+        return try backing.creationDate(at: url)
     }
 
     /// Reports the volume through the seam, or the test's override (PRD P0-10).
@@ -487,7 +499,7 @@ struct MoveFixture {
     /// The opened folder and Clove storage.
     let folder: MoveTestFolder
     /// The move seam, with recording and failure injection.
-    let fileSystem: RejectMoveFileSystemDouble
+    let fileSystem: PhotoFileSystemDouble
     /// C4's mark seam, with failure and blocking hooks.
     let markFileSystem: MoveMarkFileSystem
     /// C4's write queue over the injectable store.
@@ -500,7 +512,7 @@ struct MoveFixture {
     /// Creates the folders and wires the mover to the doubles.
     init(rejectsFolderName: String = "_Rejected", enabled: Bool = true) throws {
         folder = try MoveTestFolder()
-        fileSystem = RejectMoveFileSystemDouble()
+        fileSystem = PhotoFileSystemDouble()
         markFileSystem = MoveMarkFileSystem()
         queue = MarkWriteQueue(storeDirectory: folder.storage, fileSystem: markFileSystem)
         mover = RejectMover(markQueue: queue, fileSystem: fileSystem)

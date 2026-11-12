@@ -85,18 +85,34 @@ public struct RejectMoveFailure: Error, Hashable, Sendable, CustomStringConverti
     /// `unknown` would hide the two situations PRD P0-10 names. Everything else is C4's
     /// ``MarkWriteFailure`` reason, so both lanes report one vocabulary (G1 decision 5).
     public init(classifying error: any Error) {
+        if let moveError = error as? PhotoSetMoveError {
+            switch moveError {
+            case .missingSource(let url):
+                self.init(
+                    reason: .locationUnavailable,
+                    message: "\(url.lastPathComponent) is no longer there.")
+            case .differentVolume:
+                self.init(
+                    reason: .differentVolume, message: "The destination is on a different volume.")
+            case .notConfirmed(let message):
+                self.init(reason: .notConfirmed, message: message)
+            }
+            return
+        }
         let chain = MarkWriteErrorEntry.chain(of: error)
-        self.errorChain = chain
-        self.message = chain.first?.message ?? "The photo set couldn't be moved."
+        let reason: RejectMoveFailureReason
         if chain.contains(NSPOSIXErrorDomain, Int(EXDEV)) {
-            self.reason = .differentVolume
+            reason = .differentVolume
         } else if chain.contains(NSPOSIXErrorDomain, Int(EEXIST))
             || chain.contains(NSCocoaErrorDomain, NSFileWriteFileExistsError)
         {
-            self.reason = .conflict
+            reason = .conflict
         } else {
-            self.reason = RejectMoveFailureReason(MarkWriteFailure(classifying: error).reason)
+            reason = RejectMoveFailureReason(MarkWriteFailure(classifying: error).reason)
         }
+        self.init(
+            reason: reason, message: chain.first?.message ?? "The photo set couldn't be moved.",
+            errorChain: chain)
     }
 
     /// A one-line diagnostic for logs, matching S1's requirement to retain the exact error.
