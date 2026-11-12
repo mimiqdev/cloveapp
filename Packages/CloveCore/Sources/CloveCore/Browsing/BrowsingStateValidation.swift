@@ -54,6 +54,11 @@ extension BrowsingState {
             state.currentPhoto = nil
         }
         state.selection.formIntersection(contents.photos)
+        if case .subfolder(let path) = state.filter,
+            !contents.photos.contains(where: { $0.relativeFolderPath == path })
+        {
+            state.filter = .all
+        }
 
         switch state.route {
         case .entry, .grid, .settings:

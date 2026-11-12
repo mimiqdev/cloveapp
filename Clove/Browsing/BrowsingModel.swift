@@ -70,6 +70,26 @@ final class BrowsingModel {
     /// Label filtering is a presentation filter over the same ordered photos.
     var labelFilter: LabelColour?
 
+    /// Sidebar and regular-width navigation use the same name for the active filter.
+    var filterTitle: String {
+        if let labelFilter { return labelFilter.rawValue }
+        switch state.filter {
+        case .all: return "All"
+        case .unmarked: return "Unmarked"
+        case .rejected: return "Rejected"
+        case .ratedAtLeast(let rating): return "★\(rating.starCount ?? 0)+"
+        case .subfolder(let path): return path
+        }
+    }
+
+    var folderSource: String? {
+        recents.first { $0.identity == state.folder }.map { RecentFolderSummary.location(for: $0) }
+    }
+
+    var sidebarCounts: SidebarCounts {
+        SidebarCounts(photos: storedPhotos.filter { !$0.time.isPending })
+    }
+
     /// All placed photos, used for the filter menu's counts.
     var allPlacedPhotos: [GridPhoto] {
         PhotoOrdering(photos: storedPhotos).photos(order: state.order, matching: .all)

@@ -7,6 +7,7 @@ struct GridScreen: View {
     let browsing: BrowsingModel
     let thumbnails: any GridThumbnailSource
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(SettingsStore.self) private var store
     @State private var moveSheet: MoveSheetRoute?
     @State private var isPickingEmptyFolder = false
@@ -31,6 +32,11 @@ struct GridScreen: View {
     }
 
     private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }
+    private var isRegular: Bool { horizontalSizeClass == .regular }
+    private var showsMoveRejects: Bool {
+        store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
+            && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
+    }
 
     private var cells: [GridCellItem] {
         GridDisplay(
@@ -71,9 +77,7 @@ struct GridScreen: View {
         }
         .background(Color.clove.bg.canvas)
         .overlay(alignment: .bottomTrailing) {
-            if store.settings.moveRejectsEnabled, browsing.rejectedPhotoCount > 0,
-                !browsing.isFolderOpening, !browsing.isMovingRejects, !isSelecting
-            {
+            if !isRegular, showsMoveRejects {
                 MoveRejectsButton(identifier: "clove.grid.moveRejects") {
                     moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
                 }
@@ -121,7 +125,39 @@ struct GridScreen: View {
         .accessibilityIdentifier("clove.grid")
     }
 
-    private var header: some View {
+    @ViewBuilder private var header: some View {
+        if isRegular {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(
+                        isSelecting
+                            ? "\(browsing.state.selection.count.formatted()) selected"
+                            : browsing.filterTitle
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .accessibilityIdentifier(
+                        isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
+                    HStack(spacing: 0) {
+                        Text(subtitle).lineLimit(1)
+                        SaveStatusIndicator(
+                            browsing: browsing, identifierPrefix: "clove.grid.saveState")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.clove.text.secondary)
+                }
+                Spacer(minLength: 0)
+                headerTools
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 64)
+            .foregroundStyle(Color.clove.text.primary)
+        } else {
+            compactHeader
+        }
+    }
+
+    private var compactHeader: some View {
         BrowsingHeader(
             title: isSelecting
                 ? "\(browsing.state.selection.count.formatted()) selected" : browsing.folderTitle,
@@ -134,27 +170,42 @@ struct GridScreen: View {
                     browsing: browsing, identifierPrefix: "clove.grid.saveState")
             }
         } tools: {
-            if isSelecting {
-                Menu {
-                    Button("Select all") { browsing.selectAllVisible(cells) }
-                        .accessibilityIdentifier("clove.grid.batch.selectAll")
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .foregroundStyle(Color.clove.text.primary)
-                        .frame(width: 44, height: 44)
-                        .cloveGlass(in: Circle())
+            headerTools
+        }
+    }
+
+    @ViewBuilder private var headerTools: some View {
+        if isSelecting {
+            Menu {
+                Button("Select all") { browsing.selectAllVisible(cells) }
+                    .accessibilityIdentifier("clove.grid.batch.selectAll")
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(Color.clove.text.primary)
+                    .frame(width: isRegular ? 40 : 44, height: isRegular ? 40 : 44)
+                    .cloveGlass(in: Circle())
+            }
+            .accessibilityLabel("Selection options")
+            .accessibilityIdentifier("clove.grid.selectionOptions")
+            Button("Done") {
+                browsing.clearSelection()
+                selectsEmpty = false
+            }
+            .foregroundStyle(Color.clove.accent)
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+            .cloveGlass(in: Capsule())
+            .accessibilityIdentifier("clove.grid.batch.done")
+        } else {
+            if isRegular {
+                if showsMoveRejects {
+                    GlassIconButton(
+                        label: "Move rejects", symbol: "tray.and.arrow.down", size: .pad,
+                        identifier: "clove.grid.moveRejects"
+                    ) {
+                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                    }
                 }
-                .accessibilityLabel("Selection options")
-                .accessibilityIdentifier("clove.grid.selectionOptions")
-                Button("Done") {
-                    browsing.clearSelection()
-                    selectsEmpty = false
-                }
-                .foregroundStyle(Color.clove.accent)
-                .padding(.horizontal, 16)
-                .frame(height: 44)
-                .cloveGlass(in: Capsule())
-                .accessibilityIdentifier("clove.grid.batch.done")
             } else {
                 GlassIconButton(
                     label: "Filter", symbol: "line.3.horizontal.decrease", isActive: hasFilter,
@@ -163,8 +214,8 @@ struct GridScreen: View {
                 .popover(isPresented: $showsFilters, arrowEdge: .top) {
                     filterMenu.presentationCompactAdaptation(.popover)
                 }
-                moreMenu
             }
+            moreMenu
         }
     }
 
@@ -190,7 +241,7 @@ struct GridScreen: View {
             }
             Button("Select") { selectsEmpty = true }
                 .accessibilityIdentifier("clove.grid.select")
-            if store.settings.similarGroupsEnabled {
+            if !isRegular, store.settings.similarGroupsEnabled {
                 Button("Find similar shots again") { Task { await browsing.runGroupingAgain() } }
                     .accessibilityIdentifier("clove.grid.grouping.runAgain")
             }
@@ -202,7 +253,7 @@ struct GridScreen: View {
             Image(systemName: "ellipsis")
                 .font(.title3)
                 .foregroundStyle(Color.clove.text.primary)
-                .frame(width: 44, height: 44)
+                .frame(width: isRegular ? 40 : 44, height: isRegular ? 40 : 44)
                 .cloveGlass(in: Circle())
         }
         .accessibilityLabel("More")
@@ -264,8 +315,12 @@ struct GridScreen: View {
                     .frame(width: 16)
                 Text(name)
                 Spacer()
-                Text(browsing.allPlacedPhotos.filter { filter.matches($0.marks) }.count.formatted())
-                    .foregroundStyle(Color.clove.text.secondary)
+                Text(
+                    browsing.allPlacedPhotos.filter {
+                        filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
+                    }.count.formatted()
+                )
+                .foregroundStyle(Color.clove.text.secondary)
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 40)
@@ -293,12 +348,14 @@ struct GridScreen: View {
             return "Finding similar shots…"
         }
         let count = browsing.photos.count.formatted()
+        if isRegular { return "\(count) photos" }
         if let label = browsing.labelFilter { return "\(label.rawValue) · \(count)" }
         switch browsing.state.filter {
         case .all: return "\(count) photos"
         case .unmarked: return "Unmarked · \(count)"
         case .rejected: return "Rejected · \(count)"
         case .ratedAtLeast(let rating): return "Rating ≥ \(rating.starCount ?? 0) · \(count)"
+        case .subfolder(let path): return "\(path) · \(count)"
         }
     }
 

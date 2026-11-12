@@ -208,7 +208,8 @@ public struct MarkingInputRules: Hashable, Sendable {
         case .nextUnmarkedPhoto:
             guard
                 let next = photos.dropFirst(index + 1).first(where: {
-                    PhotoFilter.unmarked.matches($0.marks)
+                    PhotoFilter.unmarked.matches(
+                        $0.marks, relativeFolderPath: $0.id.relativeFolderPath)
                 })
             else { return stay }
             return AutoAdvancePlan(target: .nextUnmarkedPhoto(next.id), markedPhoto: photo)

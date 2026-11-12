@@ -73,6 +73,7 @@ struct DetailMarkingView: View {
     /// Where an edge tap and a mark go, in the screen's own order (PRD P0-04; PRD P0-12).
     let actions: DetailMarkingActions
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.displayScale) private var displayScale
     @State private var hidesChrome = false
     @State private var windowID = UUID()
@@ -158,6 +159,7 @@ struct DetailMarkingView: View {
             BrowsingHeader(
                 title: photo.fileName,
                 titleIdentifier: "clove.detail.fileName",
+                backTitle: horizontalSizeClass == .regular ? browsing.filterTitle : nil,
                 back: { browsing.back() }
             ) {
                 HStack(spacing: 0) {

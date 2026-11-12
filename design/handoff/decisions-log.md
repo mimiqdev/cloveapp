@@ -4,6 +4,8 @@ Figma: https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Nativ
 
 Working rule: the PRD is a guide, not the source of truth. Design decisions here can override it.
 
+iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail layout (supervisor, 2026-11-12, issue #150).
+
 ## Detail shows rejects at full brightness with a corner glyph (owner, 2026-11-12)
 
 Detail keeps rejected photos at full brightness so the person can judge them. A small `xmark` in a filled `reject` circle stays in the stage's top-trailing corner during zoom and pan, including with chrome hidden. It is decorative, ignores taps and adds no status word. VoiceOver includes "Rejected" in the photo label. Grid, filmstrip and Move Rejects quick grid thumbnails keep dimming rejects without badges. This supersedes the detail dimming rule and the `03-detail-rejected` frame on this point.

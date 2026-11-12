@@ -109,7 +109,10 @@ struct GroupPhotoNavigationTests {
             GridPhoto(id: $0, fileName: $0.stem, time: .pending, marks: marks[$0] ?? PhotoMarks())
         }
         let filter = PhotoFilter.ratedAtLeast(groupCullingRating(3))
-        let visible = Set(photos.filter { filter.matches($0.marks) }.map(\.id))
+        let visible = Set(
+            photos.filter {
+                filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
+            }.map(\.id))
         let published = BrowsingGroup(id: group.id, members: members)
         let shown = published.visible(in: visible)
         #expect(shown.members == [members[0]])
