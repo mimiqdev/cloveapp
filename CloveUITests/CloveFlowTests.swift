@@ -605,9 +605,13 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.filter").tap()
         element(app, "clove.grid.filter.unmarked").tap()
         element(app, "clove.grid.group.burst-2678").tap()
-        element(app, "clove.detail.capsule.label").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        label.tap()
         element(app, "clove.detail.labels.green").tap()
-        XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(label.label, "Label, Green")
+        // A label choice keeps this title. A predicate wait can time out taking its snapshot
+        // under load even when the title is already correct (#166).
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02678.ARW")
         XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
     }
 
