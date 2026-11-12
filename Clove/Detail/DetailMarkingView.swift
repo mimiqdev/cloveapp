@@ -32,11 +32,11 @@ struct DetailMarkingActions {
 /// One photo's preview and marking controls: the HUD, the zoomable preview with its edge taps
 /// and marking swipes, and the states that must not look like a loaded image (PRD P0-04, P0-06).
 ///
-/// Every input — the swipe gesture, the HUD's rating bar, a label and the Reject toggle —
-/// resolves through C13's ``MarkingInputRules`` and then asks the screen to write it and start
-/// its auto-advance (PRD In-group culling, P0-06, PRD Auto-advance). The screen supplies the order
-/// an edge tap moves through using ``DetailMarkingActions``. Navigating within the same group
-/// preserves zoom and position; leaving follows the detail setting.
+/// Every input — the swipe gesture, the HUD's rating bar, a label, the Reject toggle and the
+/// hardware keys — resolves through C13's ``MarkingInputRules`` and then asks the screen to write
+/// it and start its auto-advance (PRD In-group culling, P0-06, PRD Auto-advance). The screen
+/// supplies the order an edge tap moves through using ``DetailMarkingActions``. Navigating within
+/// the same group preserves zoom and position; leaving follows the detail setting.
 ///
 /// The selected display mode controls fit and zoom together. A held screen RAW
 /// appears immediately; otherwise the camera preview fills the screen-render wait.
@@ -137,8 +137,20 @@ struct DetailMarkingView: View {
     /// The rating or Reject badge the marking swipe draws near the finger (PRD P0-06).
     @State private var swipeFeedback = DetailSwipeFeedback()
 
+    /// Whether the view holds the keyboard focus its hardware keys arrive through (PRD P0-06).
+    @FocusState private var hasKeyFocus: Bool
+
     var body: some View {
         detailLayout
+            .focusable()
+            .focusEffectDisabled()
+            .focused($hasKeyFocus)
+            .onKeyPress { press in
+                guard let key = MarkingKey(press) else { return .ignored }
+                markKey(key)
+                return .handled
+            }
+            .onAppear { hasKeyFocus = true }
             .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
                 await loadPreview(for: photo)
             }
@@ -182,9 +194,7 @@ struct DetailMarkingView: View {
                         label: "Undo", symbol: "arrow.uturn.backward",
                         size: usesRail ? .pad : .phone,
                         identifier: "clove.detail.undo",
-                        action: {
-                            actions.markingSwipeBegan(); browsing.undoLastMark()
-                        }
+                        action: undo
                     ).disabled(!browsing.canUndoMark)
                 }
             }
@@ -737,6 +747,20 @@ struct DetailMarkingView: View {
 
     // MARK: - Marking
 
+    /// One hardware key from the PRD keyboard table, resolved by C13's key rule (PRD P0-06).
+    ///
+    /// The key reads the marks the rail and the capsule act on, so a disabled level or a key that
+    /// would change nothing is the same no-input the rules already report for them.
+    private func markKey(_ key: MarkingKey) {
+        apply(rules.result(for: key, marks: browsing.shownMarks(for: photo.id)))
+    }
+
+    /// Undoes the last mark, which the top bar's Undo and `⌘Z` share (PRD Undo row).
+    private func undo() {
+        actions.markingSwipeBegan()
+        browsing.undoLastMark()
+    }
+
     /// One rating tap, resolved by C13's rating-bar rule (PRD Marking rules).
     private func rate(_ rating: Rating, togglesCurrent: Bool = true) {
         let marks = browsing.shownMarks(for: photo.id)
@@ -782,9 +806,9 @@ struct DetailMarkingView: View {
     /// Applies one resolved marking input and asks the screen to start the advance it asks for
     /// (PRD Auto-advance).
     ///
-    /// The gesture, the HUD bar, a label and the Reject toggle all come through here, so the mark
-    /// path is one function and P2's keyboard can call the same one. A result that changes nothing
-    /// writes nothing and advances nothing (PRD P0-06 acceptance).
+    /// The gesture, the HUD bar, a label, the Reject toggle and the keyboard all come through
+    /// here, so the mark path is one function. A result that changes nothing writes nothing and
+    /// advances nothing (PRD P0-06 acceptance).
     private func apply(_ result: MarkingResult) {
         switch result {
         case .mark(let change, let kind):
@@ -797,8 +821,9 @@ struct DetailMarkingView: View {
             actions.step(-1)
         case .nextPhoto:
             actions.step(1)
-        case .undo, .noChange:
-            // C5's undo reaches the screen through U8; a no-change result does nothing.
+        case .undo:
+            undo()
+        case .noChange:
             break
         }
     }
