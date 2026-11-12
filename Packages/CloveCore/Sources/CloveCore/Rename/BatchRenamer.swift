@@ -2,6 +2,8 @@ import Foundation
 
 /// Executes a confirmed batch in order, stopping at the first file or mark-store failure.
 /// The caller rescans after the result. Nothing is retried, persisted or added to undo.
+/// If rekeying fails after a confirmed file move, stored marks stay under the previous key.
+/// The result reports the failure and counts the files as moved; no recovery is attempted.
 public actor BatchRenamer {
     private let fileSystem: any PhotoFileSystem
     private let store: CloveMarkStore
@@ -34,6 +36,65 @@ public actor BatchRenamer {
         var working = plan.rows.filter { !$0.isNoOp }.map { WorkingSet(row: $0) }
         var renamedCount = 0
         var failure: BatchRenameFailure?
+        var replacedSets: [RenameReplacement] = []
+        if case .folder = plan.destination, let first = plan.rows.first {
+            let folder = first.files[0].destination.deletingLastPathComponent()
+            do {
+                for row in plan.rows {
+                    let source = try? fileSystem.volumeIdentifier(
+                        of: row.item.set.photoSet.primary.url.deletingLastPathComponent())
+                    let destination = try? fileSystem.volumeIdentifier(of: folder)
+                    if let source, let destination, source != destination {
+                        throw PhotoSetMoveError.differentVolume
+                    }
+                }
+                try fileSystem.createDirectory(folder)
+            } catch {
+                return finish(
+                    plan, renamedCount: 0, replacedSets: [], temporarySets: [],
+                    failure: BatchRenameFailure(
+                        identity: first.id, error: error, files: [],
+                        context: "The destination could not be prepared: "))
+            }
+        }
+        for replacement in plan.rows.compactMap(\.replacement) {
+            publish(.replacementStarted(replacement.identity))
+            let files = replacement.files.map {
+                PhotoFileMove(source: $0.source, destination: $0.destination)
+            }
+            let folder = files[0].destination.deletingLastPathComponent()
+            let context = "Existing \(replacement.stem) could not be moved to the rejects folder: "
+            let move = PhotoSetFileMover(fileSystem: fileSystem).move(files, to: folder)
+            if let failure = Self.moveFailure(
+                move, files: files,
+                identity: replacement.identity, context: context)
+            {
+                return finish(
+                    plan, renamedCount: 0, replacedSets: replacedSets,
+                    temporarySets: [], failure: failure)
+            }
+            replacedSets.append(replacement)
+            if !files.contains(where: { PhotoFile(url: $0.source)?.format == .raw }) {
+                let destination = PhotoIdentity(
+                    folderID: replacement.identity.folderID,
+                    relativeFolderPath: replacement.rejectsRelativeFolder,
+                    stem: files[0].destination.deletingPathExtension().lastPathComponent)
+                do {
+                    try await store.rekey(from: replacement.identity, to: destination)
+                } catch {
+                    return finish(
+                        plan, renamedCount: 0, replacedSets: replacedSets,
+                        temporarySets: [],
+                        failure: BatchRenameFailure(
+                            identity: replacement.identity, error: error,
+                            files: files.map { Self.location($0, at: .destination) },
+                            context:
+                                "Existing \(replacement.stem) moved, but its stored marks remain under the old key: "
+                        ))
+                }
+            }
+            publish(.replacementFinished(replacement))
+        }
         let passes: [RenamePass] =
             plan.requiresTemporaryNames ? [.temporary, .finalName] : [.finalName]
         let temporaryID = String(UUID().uuidString.prefix(12))
@@ -99,7 +160,8 @@ public actor BatchRenamer {
                         } catch {
                             failure = BatchRenameFailure(
                                 identity: row.id, error: error,
-                                files: files.map { Self.location($0, at: .destination) })
+                                files: files.map { Self.location($0, at: .destination) },
+                                context: "Files moved, but stored marks remain under the old key: ")
                             break passLoop
                         }
                     }
@@ -116,10 +178,47 @@ public actor BatchRenamer {
             guard !files.isEmpty else { return nil }
             return TemporaryRenameSet(identity: set.row.id, stem: stem, files: files)
         }
+        return finish(
+            plan, renamedCount: renamedCount, replacedSets: replacedSets,
+            temporarySets: temporarySets, failure: failure)
+    }
+
+    private func finish(
+        _ plan: BatchRenamePlan, renamedCount: Int, replacedSets: [RenameReplacement],
+        temporarySets: [TemporaryRenameSet], failure: BatchRenameFailure?
+    ) -> BatchRenameResult {
         let result = BatchRenameResult(
-            renamedCount: renamedCount, failure: failure, temporarySets: temporarySets)
+            renamedCount: renamedCount, replacedSets: replacedSets, destination: plan.destination,
+            failure: failure, temporarySets: temporarySets)
         publish(.finished(result))
         return result
+    }
+
+    private static func moveFailure(
+        _ result: PhotoSetFileMoveResult, files: [PhotoFileMove], identity: PhotoIdentity,
+        context: String
+    ) -> BatchRenameFailure? {
+        switch result {
+        case .moved: return nil
+        case .failed(let error):
+            return BatchRenameFailure(
+                identity: identity, error: error,
+                files: files.map { location($0, at: .source) }, context: context)
+        case .split(let error, let rollbackFailures, let locations):
+            let reported = locations.map { value in
+                let state: RenameFileLocation.Location
+                switch value.location {
+                case .source: state = .source
+                case .destination: state = .destination
+                case .missing: state = .missing
+                case .unknown: state = .unknown
+                }
+                return location(value.file, at: state)
+            }
+            return BatchRenameFailure(
+                identity: identity, error: error,
+                rollbackFailures: rollbackFailures, files: reported, context: context)
+        }
     }
 
     public func progressUpdates() -> AsyncStream<BatchRenameProgress> {

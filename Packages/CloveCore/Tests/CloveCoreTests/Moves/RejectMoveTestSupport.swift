@@ -150,6 +150,7 @@ final class PhotoFileSystemDouble: PhotoFileSystem, @unchecked Sendable {
         case fileSize
         case exists
         case contentsOfDirectory
+        case isDirectory
         case creationDate
         case volumeIdentifier
         case isReadOnlyVolume
@@ -283,6 +284,11 @@ final class PhotoFileSystemDouble: PhotoFileSystem, @unchecked Sendable {
     func contentsOfDirectory(at url: URL) throws -> [URL] {
         _ = try prepare(.contentsOfDirectory, url)
         return try backing.contentsOfDirectory(at: url)
+    }
+
+    func isDirectory(at url: URL) throws -> Bool {
+        _ = try prepare(.isDirectory, url)
+        return try backing.isDirectory(at: url)
     }
 
     func creationDate(at url: URL) throws -> Date? {

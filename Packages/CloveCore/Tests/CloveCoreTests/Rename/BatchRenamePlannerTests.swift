@@ -38,20 +38,22 @@ struct BatchRenamePlannerTests {
         #expect(!unchanged.requiresTemporaryNames)
     }
 
-    @Test func outsideTargetRefusesEverySetBeforeAnyWrite() async throws {
+    @Test func outsideTargetIsAReplacementWithoutAnyWriteDuringPlanning() throws {
         let fixture = try RenameFixture()
         defer { fixture.cleanup() }
         let item = try fixture.item("source")
         try fixture.folder.write("outside", to: "001.arw")
         let plan = fixture.plan([item])
-        #expect(!plan.canRename)
+        #expect(plan.canRename)
+        #expect(plan.replacementCount == 1)
+        let replacement = try #require(plan.rows[0].replacement)
+        #expect(replacement.stem == "001")
+        #expect(PhotoFilePath.matches(replacement.files[0].source, fixture.folder.file("001.arw")))
         #expect(
-            plan.rows[0].problems.contains { problem in
-                guard case .targetExists(let url) = problem else { return false }
-                return PhotoFilePath.matches(url, fixture.folder.file("001.arw"))
-            })
-        await #expect(throws: BatchRenameRefusal.self) { try await fixture.renamer.rename(plan) }
+            PhotoFilePath.matches(
+                replacement.files[0].destination, fixture.folder.file("_Rejected/001.arw")))
         #expect(fixture.fileSystem.count(of: .move) == 0)
+        #expect(fixture.fileSystem.count(of: .createDirectory) == 0)
         #expect(fixture.folder.contents(of: "001.arw") == Data("outside".utf8))
     }
 
@@ -61,12 +63,9 @@ struct BatchRenamePlannerTests {
         let item = try fixture.item("source")
         try fixture.folder.write("outside JPEG", to: "001.JPG")
         let plan = fixture.plan([item])
-        #expect(!plan.canRename)
-        #expect(
-            plan.rows[0].problems.contains { problem in
-                guard case .targetExists(let url) = problem else { return false }
-                return PhotoFilePath.matches(url, fixture.folder.file("001.JPG"))
-            })
+        #expect(plan.canRename)
+        #expect(plan.replacementCount == 1)
+        #expect(plan.rows[0].replacement?.files.first?.source.lastPathComponent == "001.JPG")
     }
 
     @Test(arguments: [

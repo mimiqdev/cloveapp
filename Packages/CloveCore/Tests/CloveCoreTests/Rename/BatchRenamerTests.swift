@@ -115,22 +115,23 @@ struct BatchRenamerTests {
         }
     }
 
-    @Test func namedDestinationCollisionRefusesWholeBatch() async throws {
+    @Test func namedDestinationReplacementPreservesExistingSet() async throws {
         let fixture = try RenameFixture()
         defer { fixture.cleanup() }
         let first = try fixture.item("first", path: "one")
         let second = try fixture.item("second", path: "two")
         try fixture.folder.write("outside", to: "Selects/002.ARW")
         let plan = fixture.plan([first, second], destination: .folder("Selects"))
-        #expect(!plan.canRename)
-        #expect(
-            plan.rows[1].problems.contains { problem in
-                guard case .targetExists(let url) = problem else { return false }
-                return PhotoFilePath.matches(url, fixture.folder.file("Selects/002.ARW"))
-            })
-        await #expect(throws: BatchRenameRefusal.self) { try await fixture.renamer.rename(plan) }
-        #expect(fixture.fileSystem.count(of: .move) == 0)
-        #expect(fixture.folder.exists("one/first.ARW"))
+        #expect(plan.canRename)
+        #expect(plan.replacementCount == 1)
+        let result = try await fixture.renamer.rename(plan)
+        #expect(result.failure == nil)
+        #expect(result.renamedCount == 2)
+        #expect(result.replacementCount == 1)
+        #expect(result.replacedSets[0].stem == "002")
+        #expect(fixture.folder.contents(of: "Selects/_Rejected/002.ARW") == Data("outside".utf8))
+        #expect(fixture.folder.exists("Selects/001.ARW"))
+        #expect(fixture.folder.exists("Selects/002.ARW"))
     }
 
     @Test func destinationBatchCollisionTemporariesStayInEachOriginalFolder() async throws {
@@ -273,15 +274,11 @@ struct BatchRenamerTests {
         #expect(result.renamedCount == 0)
     }
 
-    @Test func changedFactsRefuseBeforeMovingAndExclusiveRenameSurvivesRace() async throws {
+    @Test func exclusiveRenameSurvivesATargetAppearingAfterPlanning() async throws {
         let fixture = try RenameFixture()
         defer { fixture.cleanup() }
         let item = try fixture.item("source")
         let plan = fixture.plan([item])
-        try fixture.folder.write("outside", to: "001.ARW")
-        await #expect(throws: BatchRenameRefusal.self) { try await fixture.renamer.rename(plan) }
-        #expect(fixture.fileSystem.count(of: .move) == 0)
-        try FileManager.default.removeItem(at: fixture.folder.file("001.ARW"))
         fixture.fileSystem.beforeOperation = { record in
             if record.step == .move, record.url.lastPathComponent == "001.ARW" {
                 try? Data("raced".utf8).write(to: record.url)
@@ -303,7 +300,8 @@ struct BatchRenamerTests {
         }
         let result = try await fixture.renamer.rename(
             fixture.plan([item], destination: .folder("Selects")))
-        #expect(result.failure?.message == "The destination is on a different volume.")
+        #expect(
+            result.failure?.message.contains("The destination is on a different volume.") == true)
         #expect(fixture.fileSystem.count(of: .move) == 0)
         #expect(fixture.fileSystem.count(of: .createDirectory) == 0)
         #expect(fixture.folder.exists("source.ARW"))
@@ -324,6 +322,9 @@ struct BatchRenamerTests {
         #expect(fixture.folder.exists("001.JPG"))
         #expect(fixture.folder.exists("second.JPG"))
         #expect(!fixture.folder.exists("002.JPG"))
+        #expect(result.failure?.message.contains("stored marks remain under the old key") == true)
+        #expect(try await fixture.store.marks(for: first.set.id)?.rating == Rating(rawValue: 5))
+        #expect(try await fixture.store.marks(for: fixture.identity("001")) == nil)
     }
 
     @Test func progressReportsEachPassAndFinalResult() async throws {

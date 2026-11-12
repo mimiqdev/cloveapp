@@ -110,6 +110,8 @@ public actor CloveMarkStore {
     /// The caller drains `MarkWriteQueue` and prevents new writes during the rename. Both
     /// identities belong to the same opened folder; relative subfolders may differ. Moving
     /// within one storage file is atomic. An unmarked source clears a stale destination entry.
+    /// If this write fails after the caller moved the files, the marks stay under the old key;
+    /// the renamer reports that failure and stops, without retries or recovery.
     public func rekey(from source: PhotoIdentity, to destination: PhotoIdentity) throws {
         guard source.folderID == destination.folderID else {
             throw CloveMarkStoreError.differentFolderIdentities

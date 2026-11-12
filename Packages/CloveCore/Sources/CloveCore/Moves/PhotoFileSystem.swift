@@ -27,6 +27,9 @@ public protocol PhotoFileSystem: Sendable {
     /// Entries in one folder, preserving spelling for case-insensitive collision checks.
     func contentsOfDirectory(at url: URL) throws -> [URL]
 
+    /// Whether an existing entry is a directory, for destination preflight.
+    func isDirectory(at url: URL) throws -> Bool
+
     /// The primary file's creation time when no capture wall time is available.
     func creationDate(at url: URL) throws -> Date?
 
@@ -97,6 +100,10 @@ public struct FoundationPhotoFileSystem: PhotoFileSystem {
     public func contentsOfDirectory(at url: URL) throws -> [URL] {
         try FileManager.default.contentsOfDirectory(
             at: url, includingPropertiesForKeys: nil)
+    }
+
+    public func isDirectory(at url: URL) throws -> Bool {
+        try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
     }
 
     public func creationDate(at url: URL) throws -> Date? {
@@ -178,7 +185,7 @@ enum PhotoFilePath {
 /// inserted before the file's last extension and the same suffix is applied to every file of
 /// the set, so the primary, its JPEG/HIF companions and the `.xmp` still pair by stem after the
 /// move (G1 decision 5). The spelling around it is untouched, including the extension's case.
-enum RejectMoveNaming {
+enum PhotoFileMoveNaming {
     /// The file name as it is for attempt 0, or with `-attempt` before its extension.
     ///
     /// A sidecar uses the replaced-extension form G1's Sidecar naming row requires, so

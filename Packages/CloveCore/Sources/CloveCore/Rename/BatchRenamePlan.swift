@@ -43,17 +43,20 @@ public struct BatchRenameRequest: Hashable, Sendable {
     public let items: [RenameItem]
     public let template: RenameTemplate
     public let destination: RenameDestination
+    public let rejectsFolderName: RejectsFolderName
     /// File creation dates use the device's zone; capture wall dates never change zones.
     public let timeZone: TimeZone
 
     public init(
         rootURL: URL, items: [RenameItem], template: RenameTemplate = RenameTemplate(),
-        destination: RenameDestination = .inPlace, timeZone: TimeZone = .current
+        destination: RenameDestination = .inPlace, timeZone: TimeZone = .current,
+        rejectsFolderName: RejectsFolderName = .defaultFolderName
     ) {
         self.rootURL = rootURL
         self.items = items
         self.template = template
         self.destination = destination
+        self.rejectsFolderName = rejectsFolderName
         self.timeZone = timeZone
     }
 }
@@ -64,7 +67,8 @@ public enum RenameProblem: Hashable, Sendable {
     case invalidSequence
     case sequenceOverflow
     case dateUnavailable
-    case targetExists(URL)
+    case destinationIsFile(URL)
+    case rejectsDestination(String)
     case duplicateTarget(URL)
     case duplicateSource(PhotoIdentity)
     case ambiguousSidecar([URL])
@@ -77,6 +81,14 @@ public struct RenameFile: Hashable, Sendable {
     public let destination: URL
 }
 
+/// An existing set that will be preserved in its own folder's rejects folder.
+public struct RenameReplacement: Hashable, Sendable {
+    public let identity: PhotoIdentity
+    public let stem: String
+    public let files: [RenameFile]
+    public let rejectsRelativeFolder: String
+}
+
 public struct BatchRenameRow: Hashable, Sendable, Identifiable {
     public let item: RenameItem
     public let oldStem: String
@@ -84,6 +96,7 @@ public struct BatchRenameRow: Hashable, Sendable, Identifiable {
     public let destinationRelativeFolder: String
     public let files: [RenameFile]
     public internal(set) var problems: [RenameProblem]
+    public internal(set) var replacement: RenameReplacement? = nil
     public let isNoOp: Bool
     public var id: PhotoIdentity { item.set.id }
 }
@@ -93,6 +106,9 @@ public struct BatchRenamePlan: Hashable, Sendable {
     public let request: BatchRenameRequest
     public let rows: [BatchRenameRow]
     public let requiresTemporaryNames: Bool
+    /// Uses an existing destination folder's actual on-disk spelling.
+    public let destination: RenameDestination
+    public var replacementCount: Int { rows.compactMap(\.replacement).count }
     public var canRename: Bool { rows.allSatisfy { $0.problems.isEmpty } }
 }
 

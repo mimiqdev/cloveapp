@@ -28,12 +28,13 @@ struct RenameFixture {
 
     func plan(
         _ items: [RenameItem], template: RenameTemplate = RenameTemplate(),
-        destination: RenameDestination = .inPlace, timeZone: TimeZone = .gmt
+        destination: RenameDestination = .inPlace, timeZone: TimeZone = .gmt,
+        rejectsFolderName: RejectsFolderName = .defaultFolderName
     ) -> BatchRenamePlan {
         BatchRenamePlanner(fileSystem: fileSystem).plan(
             for: BatchRenameRequest(
                 rootURL: folder.url, items: items, template: template,
-                destination: destination, timeZone: timeZone))
+                destination: destination, timeZone: timeZone, rejectsFolderName: rejectsFolderName))
     }
 
     func identity(_ stem: String, path: String = "") -> PhotoIdentity {

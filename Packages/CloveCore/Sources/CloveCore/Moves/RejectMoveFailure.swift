@@ -93,7 +93,8 @@ public struct RejectMoveFailure: Error, Hashable, Sendable, CustomStringConverti
                     message: "\(url.lastPathComponent) is no longer there.")
             case .differentVolume:
                 self.init(
-                    reason: .differentVolume, message: "The destination is on a different volume.")
+                    reason: .differentVolume,
+                    message: "The rejects folder is on a different volume.")
             case .notConfirmed(let message):
                 self.init(reason: .notConfirmed, message: message)
             }

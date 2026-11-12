@@ -140,13 +140,13 @@ struct PhotoSetFileMover: Sendable {
 struct PhotoSetFileCollector {
     let fileSystem: any PhotoFileSystem
 
-    func members(of set: ScannedPhotoSet) throws -> [URL] {
+    func members(of set: ScannedPhotoSet) -> [URL] {
         var members = set.photoSet.imageFiles.map(\.url)
         var sidecar = set.sidecar.resolvedURL ?? set.photoSet.sidecarURL
         if sidecar == nil, case .absent = set.sidecar, set.photoSet.primary.format == .raw {
             let proposed = set.photoSet.primary.url.deletingPathExtension()
                 .appendingPathExtension("xmp")
-            if try fileSystem.exists(at: proposed) { sidecar = proposed }
+            if (try? fileSystem.exists(at: proposed)) == true { sidecar = proposed }
         }
         if let sidecar, !members.contains(sidecar) { members.append(sidecar) }
         return members

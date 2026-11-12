@@ -9,8 +9,11 @@ public struct BatchRenamePlanner: Sendable {
     }
 
     public func plan(for request: BatchRenameRequest) -> BatchRenamePlan {
+        let (destination, destinationProblems) = resolveDestination(for: request)
         var rows = request.items.enumerated().map { index, item in
-            row(for: item, index: index, request: request)
+            row(
+                for: item, index: index, request: request, destination: destination,
+                destinationProblems: destinationProblems)
         }
         let sourceCounts = Dictionary(grouping: rows.indices, by: { rows[$0].id })
         for indices in sourceCounts.values where indices.count > 1 {
@@ -27,7 +30,8 @@ public struct BatchRenamePlanner: Sendable {
         var directories: [String: [String: [URL]]] = [:]
         var directoryErrors: [String: String] = [:]
         for index in rows.indices {
-            for file in rows[index].files {
+            guard let file = rows[index].files.first else { continue }
+            do {
                 let folder = file.destination.deletingLastPathComponent()
                 let folderKey = PhotoFilePath.canonical(folder)
                 if directories[folderKey] == nil, directoryErrors[folderKey] == nil {
@@ -50,21 +54,17 @@ public struct BatchRenamePlanner: Sendable {
                 }
                 let existingTargets =
                     directories[folderKey]?[rows[index].newStem.lowercased()] ?? []
-                for existing in existingTargets {
-                    // Another image or sidecar would join the renamed set. Unrelated files
-                    // with other extensions do not participate in photo sets.
-                    guard
-                        PhotoFile(url: existing) != nil
-                            || existing.pathExtension.lowercased() == "xmp"
-                            || Self.key(existing) == Self.key(file.destination)
-                    else { continue }
-                    if !sources.contains(PhotoFilePath.canonical(existing)) {
-                        let problem = RenameProblem.targetExists(existing)
-                        if !rows[index].problems.contains(problem) {
-                            rows[index].problems.append(problem)
-                        }
-                    }
+                let replacedFiles = existingTargets.filter { existing in
+                    !sources.contains(PhotoFilePath.canonical(existing))
+                        && (PhotoFile(url: existing) != nil
+                            || existing.pathExtension.lowercased() == "xmp")
                 }
+                if !replacedFiles.isEmpty {
+                    rows[index].replacement = try RenameReplacementPlanner(fileSystem: fileSystem)
+                        .plan(files: replacedFiles, row: rows[index], request: request)
+                }
+            } catch {
+                rows[index].problems.append(.fileSystem(String(describing: error)))
             }
         }
         let needsTemporary = rows.filter { !$0.isNoOp }.contains { row in
@@ -73,7 +73,8 @@ public struct BatchRenamePlanner: Sendable {
                 Self.stemKey(folder: destination.deletingLastPathComponent(), stem: row.newStem))
         }
         return BatchRenamePlan(
-            request: request, rows: rows, requiresTemporaryNames: needsTemporary)
+            request: request, rows: rows, requiresTemporaryNames: needsTemporary,
+            destination: destination)
     }
 
     /// Kept separate so duplicate detection can also be tested with adversarial target facts.
@@ -97,7 +98,8 @@ public struct BatchRenamePlanner: Sendable {
     }
 
     private func row(
-        for item: RenameItem, index: Int, request: BatchRenameRequest
+        for item: RenameItem, index: Int, request: BatchRenameRequest,
+        destination: RenameDestination, destinationProblems: [RenameProblem]
     ) -> BatchRenameRow {
         let set = item.set
         let primary = set.photoSet.primary.url
@@ -107,10 +109,10 @@ public struct BatchRenamePlanner: Sendable {
             relativeFolder.isEmpty
             ? request.rootURL
             : request.rootURL.appendingPathComponent(relativeFolder, isDirectory: true)
-        var problems: [RenameProblem] = []
+        var problems = destinationProblems
         let destinationFolder: URL
         let destinationRelativeFolder: String
-        switch request.destination {
+        switch destination {
         case .inPlace:
             destinationFolder = sourceFolder
             destinationRelativeFolder = relativeFolder
@@ -128,12 +130,7 @@ public struct BatchRenamePlanner: Sendable {
         if case .ambiguous(let candidates) = set.sidecar {
             problems.append(.ambiguousSidecar(candidates))
         }
-        var members: [URL] = []
-        do {
-            members = try PhotoSetFileCollector(fileSystem: fileSystem).members(of: set)
-        } catch {
-            problems.append(.fileSystem(String(describing: error)))
-        }
+        let members = PhotoSetFileCollector(fileSystem: fileSystem).members(of: set)
         if members.contains(where: {
             !PhotoFilePath.matches($0.deletingLastPathComponent(), sourceFolder)
         }) {
@@ -180,6 +177,28 @@ public struct BatchRenamePlanner: Sendable {
                 String(describing: $0) < String(describing: $1)
             },
             isNoOp: noOp)
+    }
+
+    private func resolveDestination(for request: BatchRenameRequest)
+        -> (RenameDestination, [RenameProblem])
+    {
+        guard case .folder(let name) = request.destination else { return (.inPlace, []) }
+        var problems = Self.nameProblems(name)
+        if name.caseInsensitiveCompare(request.rejectsFolderName.rawValue) == .orderedSame {
+            problems.append(.rejectsDestination(name))
+        }
+        guard problems.isEmpty else { return (request.destination, problems) }
+        do {
+            if let existing = try fileSystem.child(named: name, in: request.rootURL) {
+                if try !fileSystem.isDirectory(at: existing) {
+                    problems.append(.destinationIsFile(existing))
+                }
+                return (.folder(existing.lastPathComponent), problems)
+            }
+        } catch {
+            problems.append(.fileSystem(String(describing: error)))
+        }
+        return (request.destination, problems)
     }
 
     static func nameProblems(_ name: String) -> [RenameProblem] {

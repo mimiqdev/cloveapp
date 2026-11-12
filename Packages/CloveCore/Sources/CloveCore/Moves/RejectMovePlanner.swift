@@ -83,54 +83,38 @@ public struct RejectMovePlanner: Sendable {
             relativeFolderPath.isEmpty
             ? destinationURL
             : destinationURL.appendingPathComponent(relativeFolderPath, isDirectory: true)
-        let sources: [(role: RejectMoveFileRole, url: URL)]
+        let sources = PhotoSetFileCollector(fileSystem: fileSystem).members(of: set)
+
+        guard !sources.isEmpty else {
+            return .refused(identity: identity, refusal: .outsideOpenedFolder)
+        }
         do {
-            sources = try PhotoSetFileCollector(fileSystem: fileSystem).members(of: set).map {
-                url in
-                let role: RejectMoveFileRole
-                if url == set.photoSet.primary.url {
-                    role = .primary
-                } else if url == set.photoSet.jpegCompanion?.url {
-                    role = .jpegCompanion
-                } else if url == set.photoSet.heifCompanion?.url {
-                    role = .heifCompanion
-                } else {
-                    role = .sidecar
+            if let moves = try PhotoSetFileMovePlanner(fileSystem: fileSystem).plan(
+                sources: sources, folder: folder, maximumSuffixAttempts: Self.maximumSuffixAttempts)
+            {
+                let files = moves.map { move in
+                    let role: RejectMoveFileRole
+                    if move.source == set.photoSet.primary.url {
+                        role = .primary
+                    } else if move.source == set.photoSet.jpegCompanion?.url {
+                        role = .jpegCompanion
+                    } else if move.source == set.photoSet.heifCompanion?.url {
+                        role = .heifCompanion
+                    } else {
+                        role = .sidecar
+                    }
+                    return RejectMoveFilePlan(
+                        role: role, source: move.source, destination: move.destination)
                 }
-                return (role, url)
+                return .ready(
+                    RejectMoveSetPlan(
+                        identity: identity, relativeFolderPath: relativeFolderPath,
+                        destinationFolder: folder, files: files))
             }
         } catch {
             return .refused(
                 identity: identity,
                 refusal: .destinationCheckFailed(RejectMoveFailure(classifying: error)))
-        }
-        guard !sources.isEmpty else {
-            return .refused(identity: identity, refusal: .outsideOpenedFolder)
-        }
-        // PRD P0-10: one suffix for the whole set, so a RAW, its companions and its XMP still
-        // pair by stem after the move. The first attempt is the untouched name.
-        var attempt = 0
-        while attempt <= Self.maximumSuffixAttempts {
-            let files = sources.map { member in
-                RejectMoveFilePlan(
-                    role: member.role,
-                    source: member.url,
-                    destination: folder.appendingPathComponent(
-                        RejectMoveNaming.suffixed(member.url.lastPathComponent, attempt: attempt)))
-            }
-            do {
-                if try files.allSatisfy({ try fileSystem.exists(at: $0.destination) == false }) {
-                    return .ready(
-                        RejectMoveSetPlan(
-                            identity: identity, relativeFolderPath: relativeFolderPath,
-                            destinationFolder: folder, files: files))
-                }
-            } catch {
-                return .refused(
-                    identity: identity,
-                    refusal: .destinationCheckFailed(RejectMoveFailure(classifying: error)))
-            }
-            attempt += 1
         }
         return .refused(
             identity: identity,
