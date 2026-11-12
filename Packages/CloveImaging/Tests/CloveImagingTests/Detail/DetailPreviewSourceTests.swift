@@ -314,13 +314,15 @@ struct DetailPreviewSourceTests {
 
     @Test func cacheServesTheSecondRequestFromMemory() async throws {
         let cache = DetailCache()
-        let pipeline = pipeline(cache)
+        let gate = DetailReadGate()
+        let pipeline = DetailPipeline(cache: cache, reader: GatedDetailReader(gate: gate))
         let request = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"))
         _ = try availableDetail(try await pipeline.preview(for: request))
         #expect(cache.imageCount >= 1)
-        let start = ContinuousClock.now
+        #expect(await gate.previewPaths.count == 1)
         _ = try availableDetail(try await pipeline.preview(for: request))
-        #expect(ContinuousClock.now - start < .milliseconds(200))
+        // Cache reuse is a source-read guarantee, independent of the host's CPU load.
+        #expect(await gate.previewPaths.count == 1)
         #expect(cache.imageCount == 1)
     }
 }

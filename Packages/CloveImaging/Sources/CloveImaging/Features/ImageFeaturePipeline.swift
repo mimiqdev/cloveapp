@@ -37,7 +37,7 @@ private final class FeatureJobCancellation: Sendable {
 ///
 /// G1 "Grouping (C9/I3)" and "Scheduling and cache" set the rules this type keeps:
 ///
-/// - Low priority: work runs on detached `.utility` tasks with at most two workers, so the grid
+/// - Low priority: work runs on Dispatch-backed `.utility` tasks with at most two workers, so the grid
 ///   and detail pipelines keep the CPU. It never uses their workers; it only shares I1's preview
 ///   cache when the app passes one.
 /// - ``pause()`` stops starting work for user interaction or memory pressure and ``resume()``
@@ -267,7 +267,7 @@ public actor ImageFeaturePipeline {
         let previews = previews
         let extractor = extractor
         let visionRevision = visionRevision
-        Task.detached(priority: .utility) {
+        Task.detached(executorPreference: ImageWorkExecutor.utility, priority: .utility) {
             let outcome = await Self.perform(
                 job, cache: cache, previews: previews, extractor: extractor,
                 visionRevision: visionRevision)

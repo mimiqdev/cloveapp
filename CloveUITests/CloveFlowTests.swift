@@ -514,6 +514,51 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testContinuousMarkingSwipeClearsRejectsAndLowersStars() {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
+        for _ in 0..<5 {
+            if advance.isHittable { break }
+            app.swipeUp()
+        }
+        if advance.value as? String == "1" {
+            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                .withOffset(CGVector(dx: -50, dy: 0)).tap()
+        }
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), advance))
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let stars = element(app, "clove.detail.capsule.stars.3")
+        stars.tap()
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35))
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 90)),
+            withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+        element(app, "clove.detail.undo").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 210)),
+            withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Rejected"), capsule))
+        element(app, "clove.detail.undo").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 135)),
+            withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "1 star"), capsule))
+        XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
+    }
+
+    @MainActor
     func testRejectedDetailGlyphWithChromeShownAndHidden() throws {
         for theme in ["light", "dark"] {
             let app = launchSample()
@@ -649,9 +694,13 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.filter").tap()
         element(app, "clove.grid.filter.unmarked").tap()
         element(app, "clove.grid.group.burst-2678").tap()
-        element(app, "clove.detail.capsule.label").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        label.tap()
         element(app, "clove.detail.labels.green").tap()
-        XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(label.label, "Label, Green")
+        // A label choice keeps this title. A predicate wait can time out taking its snapshot
+        // under load even when the title is already correct (#166).
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02678.ARW")
         XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
     }
 

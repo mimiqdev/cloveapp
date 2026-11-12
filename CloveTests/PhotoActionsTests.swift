@@ -75,6 +75,37 @@ struct PhotoActionsTests {
         await model.drainActions()
     }
 
+    @Test func continuousSwipeWritesAndUndoesOncePerRelease() async throws {
+        let library = ControlledPhotoLibrary()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let photo = try #require(model.photos.first)
+        model.openPhoto(photo.id)
+        let three = try #require(Rating(rawValue: 3))
+        model.apply(.rating(three), to: photo.id)
+        await model.drainActions()
+        let writesBefore = library.writes.count
+        var advances = 0
+        let detail = markingView(model, photo: photo, advanced: { advances += 1 })
+        var session = MarkingSwipeSession(startingRating: three)
+        session.update(travel: -10, elapsed: 0.1)
+        session.update(travel: -240, elapsed: 1)
+        session.update(travel: 120, elapsed: 2)
+        session.update(travel: -120, elapsed: 3)
+        #expect(model.shownMarks(for: photo.id).rating == three)
+        #expect(library.writes.count == writesBefore)
+        session.release(travel: -120, elapsed: 3.1)
+        detail.applyMarkingSwipe(session.rating)
+        #expect(model.shownMarks(for: photo.id).rating.rawValue == 1)
+        #expect(advances == 1)
+        await model.drainActions()
+        #expect(library.writes.count == writesBefore + 1)
+        model.undoLastMark()
+        #expect(model.shownMarks(for: photo.id).rating == three)
+        #expect(!model.canUndoMark)
+        await model.drainActions()
+    }
+
     @Test func aTapShowsImmediatelyAndTwoQuickMarksWriteInOrder() async throws {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
@@ -216,8 +247,8 @@ struct PhotoActionsTests {
         try await waitUntil { model.folderLocationLoss != nil }
         var advances = 0
         let detail = markingView(model, photo: photo, advanced: { advances += 1 })
-        detail.applyMarkingSwipe(.rating(travel: 100))
-        detail.applyMarkingSwipe(.reject(travel: 100))
+        detail.applyMarkingSwipe(.unrated)
+        detail.applyMarkingSwipe(.rejected)
         #expect(!model.canMark)
         #expect(advances == 0)
         #expect(library.writes.isEmpty)
@@ -244,7 +275,7 @@ struct PhotoActionsTests {
         model.openPhoto(photo.id)
         var advances = 0
         let detail = markingView(model, photo: photo, advanced: { advances += 1 })
-        detail.applyMarkingSwipe(.rating(travel: 100))
+        detail.applyMarkingSwipe(.rejected)
         #expect(!model.canMark)
         #expect(advances == 0)
         library.holdsMove = false

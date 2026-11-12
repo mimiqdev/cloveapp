@@ -1,64 +1,138 @@
-/// Which marking swipe a one-finger drag on the detail preview has become (PRD Detail gestures).
-///
-/// PRD Detail gestures gives the fit view two vertical swipes: up rates by distance and down
-/// rejects. The view asks ``MarkingSwipeRules`` once, as the drag is about to begin, and the
-/// answer says whether the drag is a marking swipe at all or is left unclaimed.
-public enum MarkingSwipe: Hashable, Sendable {
-    /// Swiping up: rate by distance (PRD Rating by swipe distance).
-    case rating
-
-    /// Swiping down: Reject (PRD Detail gestures).
-    case reject
-}
-
-/// The drag that begins a marking swipe, and the drags that must not (PRD Detail gestures).
-///
-/// A marking swipe shares the preview with the other gestures PRD Detail gestures lists: the
-/// horizontal swipe the PRD gives navigation, the edge single taps and the centre double tap, and
-/// the scroll view's own pinch and pan. The taps need no help, because a pan never begins without
-/// movement. A drag begins a marking swipe only when it is vertical enough, so a more horizontal
-/// drag is left unclaimed for the navigation the PRD lists (Clove navigates with edge taps and the
-/// filmstrip today).
-///
-/// PRD Detail gestures turns vertical marking swipes off while zoomed, where a one-finger drag
-/// pans instead, and PRD Gesture-related settings can turn marking gestures off entirely. Both
-/// answer nil here rather than at the call site, so the view asks one question and keeps no
-/// marking rule of its own.
+/// Starting values for continuous marking, in points and seconds on every device.
+/// Tune these on an iPhone; release has no momentum and holding never changes the stage.
 public struct MarkingSwipeRules: Hashable, Sendable {
-    /// The minimum ratio of vertical to horizontal travel for a marking swipe.
-    ///
-    /// The launch value of 1 is the 45° split: a drag whose vertical travel is at least its
-    /// horizontal travel is a marking swipe, and anything flatter is left unclaimed. It is a
-    /// starting value, tunable with the other gesture distances.
-    public var verticalToHorizontalRatio: Double
-
-    /// The launch starting value: a drag as steep as 45° begins a marking swipe.
+    public static let stepDistance: Double = 60
+    public static let quickClearDistance: Double = 60
+    public static let quickRejectDistance: Double = 180
+    public static let velocityWindow: Double = 0.1
+    public static let quickDownVelocity: Double = 500
     public static let standard = MarkingSwipeRules()
 
-    /// Creates the direction split; the default is the launch starting value.
+    /// The initial axis split only; reversing vertically never changes the claimed axis.
+    public var verticalToHorizontalRatio: Double
+
     public init(verticalToHorizontalRatio: Double = 1) {
         self.verticalToHorizontalRatio = verticalToHorizontalRatio
     }
 
-    /// The marking swipe a drag has become, or nil when it must not start one.
-    ///
-    /// The travel is measured from touch-down in points, with up positive to match
-    /// ``SwipeRatingSession`` and ``RejectSwipeSession``; the caller negates UIKit's downward y.
-    /// A drag begins a marking swipe when marking gestures are on, the view is at fit, and the
-    /// vertical travel is at least ``verticalToHorizontalRatio`` times the horizontal travel.
-    /// The result is the direction only: how far the finger is decides the step, which is the
-    /// session's job (PRD Rating by swipe distance).
-    public func swipe(
-        horizontalTravel: Double,
-        verticalTravel: Double,
-        isZoomed: Bool,
-        gesturesEnabled: Bool
-    ) -> MarkingSwipe? {
-        guard gesturesEnabled, !isZoomed else { return nil }
-        let vertical = abs(verticalTravel)
-        guard vertical > 0, vertical >= abs(horizontalTravel) * verticalToHorizontalRatio else {
-            return nil
+    public func beginsSwipe(
+        horizontalTravel: Double, verticalTravel: Double, isZoomed: Bool, gesturesEnabled: Bool
+    ) -> Bool {
+        gesturesEnabled && !isZoomed && abs(verticalTravel) > 0
+            && abs(verticalTravel) >= abs(horizontalTravel) * verticalToHorizontalRatio
+    }
+}
+
+/// One crossed boundary, in travel order, including boundaries skipped by a touch sample.
+public struct MarkingStageCrossing: Hashable, Sendable {
+    public let rating: Rating
+    public let haptic: Haptic
+
+    public enum Haptic: Hashable, Sendable {
+        case step
+        case clear
+        case reject
+    }
+}
+
+/// One continuous vertical drag. Travel is measured from touch-down, with up positive.
+///
+/// The first approximately 100 ms select the mode once. Before then the preview stays at the
+/// starting value. A release inside that window selects the mode from the available samples.
+/// The session only previews; its owner commits `rating` once at release or discards on cancel.
+public struct MarkingSwipeSession: Hashable, Sendable {
+    public enum Mode: Hashable, Sendable {
+        case slow
+        case quickDown
+    }
+
+    public let startingRating: Rating
+    public let enabledRatings: EnabledRatings
+    public private(set) var mode: Mode?
+    public private(set) var rating: Rating
+    private var stage: Int?
+    private var initialTravel: Double = 0
+    private var initialElapsed: Double = 0
+
+    public init(startingRating: Rating, enabledRatings: EnabledRatings = .all) {
+        self.startingRating = startingRating
+        self.enabledRatings = enabledRatings
+        self.rating = startingRating
+    }
+
+    /// Classifies once using the average vertical velocity at the start of the drag, then follows
+    /// position only. A quick upward start and a downward start on Reject use the slow ladder.
+    @discardableResult
+    public mutating func update(travel: Double, elapsed: Double) -> [MarkingStageCrossing] {
+        if mode == nil {
+            let window = MarkingSwipeRules.velocityWindow
+            guard elapsed >= window else {
+                initialTravel = travel
+                initialElapsed = elapsed
+                return []
+            }
+            // Interpolate the sample at the window boundary, so a late callback cannot make
+            // acceleration after the window (or a hold) change the initial classification.
+            let fraction = (window - initialElapsed) / (elapsed - initialElapsed)
+            let windowTravel = initialTravel + (travel - initialTravel) * fraction
+            chooseMode(travel: windowTravel, elapsed: window)
         }
-        return verticalTravel > 0 ? .rating : .reject
+        return move(to: travel)
+    }
+
+    /// Resolves a very short swipe too; otherwise release uses the already chosen mode.
+    @discardableResult
+    public mutating func release(travel: Double, elapsed: Double) -> [MarkingStageCrossing] {
+        if mode == nil && elapsed < MarkingSwipeRules.velocityWindow {
+            chooseMode(travel: travel, elapsed: elapsed)
+        }
+        return update(travel: travel, elapsed: elapsed)
+    }
+
+    private mutating func chooseMode(travel: Double, elapsed: Double) {
+        mode =
+            startingRating != .rejected && elapsed > 0
+                && -travel / elapsed >= MarkingSwipeRules.quickDownVelocity ? .quickDown : .slow
+    }
+
+    private mutating func move(to travel: Double) -> [MarkingStageCrossing] {
+        let ladder: [Rating]
+        let initialStage: Int
+        let next: Int
+        if mode == .quickDown {
+            ladder = [startingRating, .unrated, .rejected]
+            initialStage = 0
+            if -travel >= MarkingSwipeRules.quickRejectDistance {
+                next = 2
+            } else if -travel >= MarkingSwipeRules.quickClearDistance
+                || ((stage ?? 0) > 0 && travel < 0)
+            {
+                // Once clear is reached, returning past the original touch cancels it.
+                next = 1
+            } else {
+                next = 0
+            }
+        } else {
+            // A disabled current value remains an anchor, so returning to the start restores
+            // it. Away from the anchor only enabled stars (plus 0 and Reject) can be reached.
+            ladder = Array(Set([.rejected, .unrated, startingRating] + enabledRatings.levels))
+                .sorted()
+            initialStage = ladder.prefix { $0 < startingRating }.count
+            let steps = Int(min(abs(travel) / MarkingSwipeRules.stepDistance, Double(ladder.count)))
+            next = min(max(initialStage + (travel >= 0 ? steps : -steps), 0), ladder.count - 1)
+        }
+        let previous = stage ?? initialStage
+        let direction = next >= previous ? 1 : -1
+        let crossed = stride(from: previous + direction, through: next, by: direction).map {
+            index in
+            let value = ladder[index]
+            let haptic: MarkingStageCrossing.Haptic =
+                mode == .quickDown && index > 0
+                ? (index == 1 ? .clear : .reject) : .step
+            return MarkingStageCrossing(rating: value, haptic: haptic)
+        }
+        stage = next
+        rating = ladder[next]
+        return crossed
     }
 }

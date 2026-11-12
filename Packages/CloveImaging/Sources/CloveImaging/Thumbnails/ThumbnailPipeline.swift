@@ -134,7 +134,11 @@ public actor ThumbnailPipeline {
             active.insert(id)
             let cache = cache
             let decode = decode
-            Task.detached(priority: job.priority == .visible ? .userInitiated : .utility) {
+            Task.detached(
+                executorPreference: job.priority == .visible
+                    ? ImageWorkExecutor.userInitiated : ImageWorkExecutor.utility,
+                priority: job.priority == .visible ? .userInitiated : .utility
+            ) {
                 let result: ThumbnailResult
                 if job.cancellation.isCancelled {
                     result = .unavailable(.noUsablePreview)
