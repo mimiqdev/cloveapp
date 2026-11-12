@@ -14,7 +14,6 @@ struct BrowsingLayoutTests {
         model.setFilter(.subfolder(photo.relativeFolderPath))
         model.toggleSelection(photo)
         model.openPhoto(photo)
-        let saved = model.state
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let host = UIHostingController(
@@ -24,13 +23,20 @@ struct BrowsingLayoutTests {
         window.isHidden = false
         defer { window.isHidden = true }
 
-        for width in [UIUserInterfaceSizeClass.regular, .compact, .regular] {
-            host.traitOverrides.horizontalSizeClass = width
-            host.view.setNeedsLayout()
-            host.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(100))
-            #expect(model.state == saved)
-            #expect(model.filterTitle == photo.relativeFolderPath)
+        for route in [BrowserRoute.detail, .settings] {
+            if route == .settings {
+                model.back()
+                model.showSettings()
+            }
+            let saved = model.state
+            for width in [UIUserInterfaceSizeClass.regular, .compact, .regular] {
+                host.traitOverrides.horizontalSizeClass = width
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(100))
+                #expect(model.state == saved)
+                #expect(model.filterTitle == photo.relativeFolderPath)
+            }
         }
         model.back()
         #expect(model.state.route == .grid)

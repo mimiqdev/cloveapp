@@ -1011,7 +1011,16 @@ final class BrowsingModel {
             } else {
                 thumbnails = library.thumbnails
                 detailImages = library.detailImages
-                state = saved.restored(from: .available(library.contents)).state
+                if case .subfolder = saved.filter {
+                    state = saved
+                    pendingRestore = PendingBrowsingRestore(saved: saved, shown: state)
+                    resolvePendingRestore(scanFinished: hasFinishedScan)
+                } else {
+                    state = saved.restored(from: .available(library.contents)).state
+                }
+                if saved.route == .settings, saved.folder == library.folder {
+                    settingsReturnRoute = .grid
+                }
             }
         case nil:
             let restored = saved.restored(from: .available(library.contents))
@@ -1065,6 +1074,11 @@ final class BrowsingModel {
             finishedScanFor = library.folder
             refresh()
             resolvePendingRestore(scanFinished: true)
+            if case .subfolder(let path) = state.filter,
+                !storedPhotos.contains(where: { $0.id.relativeFolderPath == path })
+            {
+                state.filter = .all
+            }
             await reloadRecents()
         case .locationLost(let folder, let loss, let generation):
             // A buffered loss can arrive after another folder opened, or after the same folder
@@ -1098,11 +1112,6 @@ final class BrowsingModel {
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
         refresh()
-        if case .subfolder(let path) = state.filter,
-            !storedPhotos.contains(where: { $0.id.relativeFolderPath == path })
-        {
-            state.filter = .all
-        }
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change. Detail takes the source bound to the same folder.
         thumbnails = library.thumbnails
