@@ -408,7 +408,9 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
         XCTAssertTrue(String(describing: element(app, "clove.detail.capsule").value).contains("4"))
         for (side, horizontalStart, nextPhoto) in [
-            ("right", 0.8, "MMQ02681.ARW"), ("left-third", 0.2, "MMQ02682.ARW"),
+            ("right", 0.8, "MMQ02681.ARW"),
+            // Finishing the sample group advances to the following standalone photo.
+            ("left-third", 0.2, "MMQ02680.ARW"),
         ] {
             let start = preview.coordinate(
                 withNormalizedOffset: CGVector(dx: horizontalStart, dy: 0.5))
