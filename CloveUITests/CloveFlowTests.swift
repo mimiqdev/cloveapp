@@ -167,7 +167,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(rail.isHittable)
         XCTAssertEqual(preview.frame, stageFrame)
         centre.doubleTap()
-        XCTAssertTrue(strip.exists)
+        // The fit that restores the chrome lands after the double tap returns (#203).
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         reject.tap()
         XCTAssertEqual(reject.label, "Rejected")
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
@@ -433,14 +434,19 @@ final class CloveFlowTests: XCTestCase {
         centre.tap()
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         centre.doubleTap()
-        XCTAssertTrue(info.exists)
+        // The fit animation restores the chrome after the double tap returns, so this reads
+        // the observed state instead of asserting one immediate snapshot.
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
         // The centre single tap waits for the double-tap recognizer to fail, after tap returns.
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         element(app, "clove.detail.capsule.stars.4").tap()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        // A mark waits out the advance pause before the file name changes. On a loaded runner
+        // one accessibility query can consume most of a short window while the app is already
+        // correct (#203), so this boundary keeps the 10-second budget the browsing flow uses.
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName, timeout: 10))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertTrue(String(describing: capsule.value).contains("4"))
@@ -456,7 +462,9 @@ final class CloveFlowTests: XCTestCase {
             start.press(
                 forDuration: 0.1, thenDragTo: end, withVelocity: .slow,
                 thenHoldForDuration: 2)
-            XCTAssertTrue(waitForLabel(nextPhoto, fileName))
+            // The swipe's mark advances after the pause; the marking gesture leaves the runner
+            // busiest, so this wait keeps the same 10-second advance budget as above (#203).
+            XCTAssertTrue(waitForLabel(nextPhoto, fileName, timeout: 10))
             XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
         }
     }
@@ -1169,8 +1177,10 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    func waitForLabel(_ label: String, _ target: XCUIElement) -> Bool {
-        wait(NSPredicate(format: "label == %@", label), target)
+    func waitForLabel(
+        _ label: String, _ target: XCUIElement, timeout: TimeInterval = 5
+    ) -> Bool {
+        wait(NSPredicate(format: "label == %@", label), target, timeout: timeout)
     }
 
     @MainActor
