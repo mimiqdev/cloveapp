@@ -131,7 +131,7 @@ struct PhotoActionsTests {
         await model.drainActions()
         #expect(library.rereads == [photo])
         #expect(model.shownMarks(for: photo) == disk)
-        #expect(model.isSaveFailureToastVisible)
+        #expect(model.failureToastMessage == BrowsingModel.saveFailureToastMessage)
         #expect(BrowsingModel.saveFailureToastMessage == "Couldn't save the mark.")
         model.apply(.rating(.rejected), to: photo)
         await model.drainActions()
@@ -153,17 +153,17 @@ struct PhotoActionsTests {
         await model.drainActions()
         #expect(model.shownMarks(for: a).rating == .unrated)
         #expect(model.shownMarks(for: b).rating == three)
-        #expect(model.isSaveFailureToastVisible)
-        #expect(model.saveFailureToastBurst == 1)
+        #expect(model.failureToastMessage == BrowsingModel.saveFailureToastMessage)
+        #expect(model.failureToastBurst == 1)
         library.failNext = [a]
         model.apply(.label(ColourLabel(colour: .red)), to: a)
         await model.drainActions()
-        #expect(model.saveFailureToastBurst == 1)
-        model.dismissSaveFailureToast()
+        #expect(model.failureToastBurst == 1)
+        model.dismissFailureToast()
         library.failNext = [a]
         model.apply(.label(ColourLabel(colour: .blue)), to: a)
         await model.drainActions()
-        #expect(model.saveFailureToastBurst == 2)
+        #expect(model.failureToastBurst == 2)
     }
 
     @Test func leavingWithAHeldWriteShowsEntryWithoutWaiting() async throws {
@@ -202,7 +202,7 @@ struct PhotoActionsTests {
         library.heldPhoto = nil
         await model.drainActions()
         #expect(library.writes.map(\.photo) == [a])
-        #expect(!model.isSaveFailureToastVisible)
+        #expect(model.failureToastMessage == nil)
     }
 
     @Test func disconnectedSwipesCannotMarkOrAdvanceAndReopenUsesFreshDiskMarks() async throws {
@@ -277,6 +277,10 @@ struct PhotoActionsTests {
             }
         } else {
             #expect(try results.first?.get().movedIdentities == [library.identity("c")])
+            let completed = try #require(model.lastRejectMove)
+            #expect(completed.canUndo)
+            #expect(model.isRejectMoveToastVisible)
+            #expect(!model.canUndoRejectMove(completed))
         }
     }
 
@@ -351,6 +355,7 @@ struct PhotoActionsTests {
         model.runRejectMove(plan, kept: [kept]) { _ in }
         await model.drainActions()
         let completed = try #require(model.lastRejectMove)
+        #expect(model.canUndoRejectMove(completed))
         #expect(model.shownMarks(for: kept).rating == .unrated)
         #expect(!model.photos.contains { $0.id == moved })
         model.undoRejectMove(completed)
