@@ -52,24 +52,27 @@ public struct ThumbnailPreviewReader: ImageFeaturePreviewReading {
     }
 
     public func preview(for request: ThumbnailRequest) async -> ImageFeaturePreviewRead {
-        if let sharedCache {
-            switch sharedCache.result(for: request) {
+        await withTaskExecutorPreference(ImageWorkExecutor.utility) {
+            if let sharedCache {
+                switch sharedCache.result(for: request) {
+                case .available(let thumbnail):
+                    return .preview(
+                        ImageFeaturePreview(image: thumbnail.image, route: thumbnail.route))
+                case .unavailable(let reason):
+                    // I1 remembers a preview it could not use, so this photo is not read again.
+                    return .unavailable(reason)
+                case nil:
+                    break
+                }
+            }
+            let extracted = ThumbnailExtractor().extract(request)
+            switch extracted {
             case .available(let thumbnail):
+                if let sharedCache { try? sharedCache.store(extracted, for: request) }
                 return .preview(ImageFeaturePreview(image: thumbnail.image, route: thumbnail.route))
             case .unavailable(let reason):
-                // I1 remembers a preview it could not use, so this photo is not read again.
                 return .unavailable(reason)
-            case nil:
-                break
             }
-        }
-        let extracted = ThumbnailExtractor().extract(request)
-        switch extracted {
-        case .available(let thumbnail):
-            if let sharedCache { try? sharedCache.store(extracted, for: request) }
-            return .preview(ImageFeaturePreview(image: thumbnail.image, route: thumbnail.route))
-        case .unavailable(let reason):
-            return .unavailable(reason)
         }
     }
 }

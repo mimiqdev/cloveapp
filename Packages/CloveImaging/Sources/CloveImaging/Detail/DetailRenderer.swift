@@ -27,7 +27,8 @@ protocol DetailReading: Sendable {
 /// Each read opens a fresh source. CIContext supports concurrent use and stores no
 /// per-request state; the pipeline serializes all full-image and RAW work.
 final class DetailRenderer: DetailReading, @unchecked Sendable {
-    private let context = CIContext(options: [.cacheIntermediates: false])
+    // Lazily initialized by the first rendering job on the Dispatch executor.
+    private static let context = CIContext(options: [.cacheIntermediates: false])
     /// G1 "Preview, detail (I2)": the embedded preview is requested at about 2000 px.
     ///
     /// This is a cap, not a guarantee: the owner's A1 II exposes 1616 px and the ARW
@@ -37,55 +38,68 @@ final class DetailRenderer: DetailReading, @unchecked Sendable {
     static let maximumRasterPixels = DetailPixelLimit.maximumEdge
 
     func read(_ step: DetailPreviewStep, displayPixels: Int) async -> DetailReadOutcome {
-        switch step {
-        case .embedded(let source):
-            return embedded(source)
-        case .displayRaster(let source):
-            return raster(source, maxPixels: min(displayPixels, Self.maximumRasterPixels))
+        await withTaskExecutorPreference(ImageWorkExecutor.current) {
+            switch step {
+            case .embedded(let source):
+                return embedded(source)
+            case .displayRaster(let source):
+                return raster(source, maxPixels: min(displayPixels, Self.maximumRasterPixels))
+            }
         }
     }
 
     /// Full camera pixels for a JPEG or HIF. RAW files never enter this route.
     func fullRaster(_ source: DetailSource) async -> DetailReadOutcome {
-        autoreleasepool {
-            guard
-                let imageSource = CGImageSourceCreateWithURL(
-                    source.url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
-            else { return .cannotOpen }
-            guard Self.containerType(imageSource) != nil else { return .cannotOpen }
-            let properties =
-                CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any]
-            let width = properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
-            let height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
-            let pixels = max(width, height)
-            guard pixels > 0 else { return .noUsablePreview }
-            guard let type = Self.containerType(imageSource), !type.conforms(to: .rawImage) else {
-                return .noUsablePreview
+        await withTaskExecutorPreference(ImageWorkExecutor.current) {
+            autoreleasepool {
+                guard
+                    let imageSource = CGImageSourceCreateWithURL(
+                        source.url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+                else { return .cannotOpen }
+                guard Self.containerType(imageSource) != nil else { return .cannotOpen }
+                let properties =
+                    CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any]
+                let width = properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
+                let height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
+                let pixels = max(width, height)
+                guard pixels > 0 else { return .noUsablePreview }
+                guard let type = Self.containerType(imageSource), !type.conforms(to: .rawImage)
+                else {
+                    return .noUsablePreview
+                }
+                if pixels > Self.maximumRasterPixels {
+                    return raster(
+                        source, maxPixels: Self.maximumRasterPixels, imageSource: imageSource)
+                }
+                guard
+                    let image = CGImageSourceCreateImageAtIndex(
+                        imageSource, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+                    ),
+                    let data = image.dataProvider?.data, CFDataGetLength(data) > 0
+                else { return .noUsablePreview }
+                let orientation = properties?[kCGImagePropertyOrientation] as? Int ?? 1
+                guard orientation != 1 else { return .image(image) }
+                let oriented = CIImage(cgImage: image).oriented(
+                    forExifOrientation: Int32(orientation))
+                guard let transformed = Self.context.createCGImage(oriented, from: oriented.extent)
+                else {
+                    return .noUsablePreview
+                }
+                return .image(transformed)
             }
-            if pixels > Self.maximumRasterPixels {
-                return raster(source, maxPixels: Self.maximumRasterPixels, imageSource: imageSource)
-            }
-            guard
-                let image = CGImageSourceCreateImageAtIndex(
-                    imageSource, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
-                let data = image.dataProvider?.data, CFDataGetLength(data) > 0
-            else { return .noUsablePreview }
-            let orientation = properties?[kCGImagePropertyOrientation] as? Int ?? 1
-            guard orientation != 1 else { return .image(image) }
-            let oriented = CIImage(cgImage: image).oriented(forExifOrientation: Int32(orientation))
-            guard let transformed = context.createCGImage(oriented, from: oriented.extent) else {
-                return .noUsablePreview
-            }
-            return .image(transformed)
         }
     }
 
     func nativeRAW(_ source: DetailSource) async -> CGImage? {
-        raw(source, longEdge: nil)
+        await withTaskExecutorPreference(ImageWorkExecutor.current) {
+            raw(source, longEdge: nil)
+        }
     }
 
     func screenRAW(_ source: DetailSource, longEdge: Int) async -> CGImage? {
-        raw(source, longEdge: longEdge)
+        await withTaskExecutorPreference(ImageWorkExecutor.current) {
+            raw(source, longEdge: longEdge)
+        }
     }
 
     /// Decode-time scaling, with draft explicitly off. CIRAWFilter applies orientation.
@@ -100,7 +114,7 @@ final class DetailRenderer: DetailReading, @unchecked Sendable {
             filter.isDraftModeEnabled = false
             guard let output = filter.outputImage else { return nil }
             guard
-                let image = context.createCGImage(
+                let image = Self.context.createCGImage(
                     output, from: output.extent, format: .RGBA8,
                     colorSpace: CGColorSpace(name: CGColorSpace.sRGB)),
                 image.width > 0, image.height > 0,

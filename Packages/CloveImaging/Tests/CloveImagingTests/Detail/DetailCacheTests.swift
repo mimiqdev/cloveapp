@@ -29,7 +29,10 @@ private struct NativeHeldProbe: DetailReading {
 
 /// Compressed detail images share a budget; one native image is held separately.
 @Suite(.serialized)
-struct DetailCacheTests {
+actor DetailCacheTests {
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.DetailCache")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     private func image(_ source: URL, width: Int, height: Int) throws -> DetailImage {
         DetailImage(
             image: try makeDetailImage(width: width, height: height),

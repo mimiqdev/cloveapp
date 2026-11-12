@@ -50,7 +50,37 @@ private final class ThumbnailCacheOperation<Value: Sendable>: Sendable {
     }
 }
 
-struct ThumbnailCacheConcurrencyTests {
+actor ThumbnailCacheConcurrencyTests {
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.ThumbnailCache")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
+    // Keep this test on the cooperative pool so it catches a worker that blocks that pool.
+    @Test nonisolated func closingDuringCacheStoreKeepsCooperativeTasksRunningAndDrainsTheStore()
+        async throws
+    {
+        try await Task(priority: .userInitiated) {
+            let directory = try ThumbnailTestDirectory()
+            defer { directory.remove() }
+            let request = try thumbnailRequest(directory.image())
+            let gate = ThumbnailIOGate()
+            let cache = try ThumbnailCache(
+                directory: directory.url.appendingPathComponent("cache"), configuration: .init(),
+                beforeCommit: { _ in gate.pauseIfArmed() })
+            let pipeline = ThumbnailPipeline(cache: cache)
+            gate.arm()
+            defer { gate.release() }
+            let requestTask = Task { try await pipeline.thumbnail(for: request) }
+            await gate.waitForEntry()
+            let closing = Task { await pipeline.close() }
+            await expectCancelled(requestTask)
+            #expect(await pipeline.activeCount == 1)
+            gate.release()
+            await closing.value
+            #expect(await pipeline.activeCount == 0)
+            #expect(cache.result(for: request) != nil)
+        }.value
+    }
+
     @Test func pausedStoreAllowsUnrelatedMemoryAndDiskHits() async throws {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }

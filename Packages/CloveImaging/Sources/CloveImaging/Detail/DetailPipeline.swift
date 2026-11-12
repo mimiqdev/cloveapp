@@ -212,7 +212,9 @@ public actor DetailPipeline {
             latest[consumer] = id
             let cache = cache
             let sizes = sizes
-            let hit = await Task.detached(priority: .userInitiated) {
+            let hit = await Task.detached(
+                executorPreference: ImageWorkExecutor.userInitiated, priority: .userInitiated
+            ) {
                 if priority == .prefetch {
                     return (
                         Self.hasCached(request, effort: effort, cache: cache), nil as DetailResult?
@@ -289,7 +291,11 @@ public actor DetailPipeline {
         let cache = cache
         let reader = reader
         let sizes = sizes
-        Task.detached(priority: job.priority == .visible ? .userInitiated : .utility) {
+        Task.detached(
+            executorPreference: job.priority == .visible
+                ? ImageWorkExecutor.userInitiated : ImageWorkExecutor.utility,
+            priority: job.priority == .visible ? .userInitiated : .utility
+        ) {
             let result = await Self.perform(job, cache: cache, reader: reader, sizes: sizes)
             await self.complete(id, result: result)
         }
