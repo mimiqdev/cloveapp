@@ -22,6 +22,7 @@ struct DetailScreen: View {
 
     /// The pixels to show, normally the open folder's source from the browsing model.
     private let images: any DetailImageSource
+    var duo: DuoDetailLayout?
 
     /// The app-wide settings, read live so a change on the settings screen applies the next time
     /// this screen draws (PRD Gesture-related settings).
@@ -38,9 +39,13 @@ struct DetailScreen: View {
     /// `images` exists for previews and tests; the app uses the browsing model's source for the
     /// open folder. Settings come from the app-wide ``SettingsStore`` in the environment, so this
     /// screen reads no storage of its own and one source of settings serves every screen.
-    init(browsing: BrowsingModel, images: (any DetailImageSource)? = nil) {
+    init(
+        browsing: BrowsingModel, images: (any DetailImageSource)? = nil,
+        duo: DuoDetailLayout? = nil
+    ) {
         self.browsing = browsing
         self.images = images ?? browsing.detailImages
+        self.duo = duo
     }
 
     var body: some View {
@@ -75,7 +80,8 @@ struct DetailScreen: View {
             images: images,
             displayMode: store.photoDisplayMode,
             order: browsing.photos,
-            actions: actions)
+            actions: actions,
+            duo: duo)
     }
 
     /// What the marking view asks this screen to do: write a mark, advance after it, and move

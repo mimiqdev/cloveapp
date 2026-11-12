@@ -72,6 +72,7 @@ struct DetailMarkingView: View {
 
     /// Where an edge tap and a mark go, in the screen's own order (PRD P0-04; PRD P0-12).
     let actions: DetailMarkingActions
+    var duo: DuoDetailLayout?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.displayScale) private var displayScale
@@ -154,9 +155,106 @@ struct DetailMarkingView: View {
 
     private var displayMarks: PhotoMarks { photo.marks }
 
-    private var usesRail: Bool { horizontalSizeClass == .regular }
+    private var usesRail: Bool { horizontalSizeClass == .regular && duo == nil }
 
     private var detailLayout: some View {
+        Group {
+            if let duo {
+                expandedLayout(duo)
+            } else {
+                standardLayout
+            }
+        }
+        .background(Color.clove.bg.stage)
+        .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
+        .task(id: scale > DetailFitScale.tolerance) {
+            showsZoomChip = scale > DetailFitScale.tolerance
+            guard showsZoomChip else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            showsZoomChip = false
+        }
+        .sheet(isPresented: $showsInformation) {
+            PhotoInformationSheet(browsing: browsing, photo: photo)
+        }
+    }
+
+    private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
+        HStack(spacing: 0) {
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    if duo.split.wrappedValue == .focus {
+                        duo.grid
+                            .frame(
+                                width: (geometry.size.width - 8)
+                                    * CGFloat(duo.split.wrappedValue.gridFraction))
+                        DuoDivider(
+                            split: duo.split, contentWidth: geometry.size.width,
+                            back: { browsing.back() })
+                    }
+                    VStack(spacing: 0) {
+                        if duo.split.wrappedValue == .photoOnly {
+                            VStack(spacing: 2) {
+                                Text(photo.fileName)
+                                    .font(.subheadline.weight(.semibold))
+                                    .accessibilityIdentifier("clove.detail.fileName")
+                                Text(detailSubtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(Color.clove.text.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 64)
+                        }
+                        FolderSaveBanner(
+                            browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
+                        previewArea
+                        if duo.split.wrappedValue == .photoOnly && chromeIsVisible {
+                            DetailFilmstrip(
+                                photos: order, current: photo.id, thumbnails: browsing.thumbnails,
+                                open: actions.openPhoto,
+                                groups: browsing.groups, finishingAction: finishingAction
+                            )
+                            .padding(.vertical, 8)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(
+                        duo.split.wrappedValue == .focus ? "clove.duo.focus" : "clove.duo.photoOnly"
+                    )
+                }
+            }
+            DuoDock(
+                back: { browsing.back() },
+                undo: {
+                    actions.markingSwipeBegan()
+                    browsing.undoLastMark()
+                }, canUndo: browsing.canUndoMark
+            ) {
+                duo.tools
+                GlassIconButton(
+                    label: "Info", symbol: "info.circle", size: .duo, showsGlass: false,
+                    identifier: "clove.detail.info"
+                ) { showsInformation = true }
+            } marks: {
+                DuoMarkControls(
+                    marks: displayMarks, settings: settings,
+                    previewRating: swipeFeedback.rating,
+                    rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
+                    toggleReject: { toggleReject() }, markingBegan: actions.markingSwipeBegan
+                )
+                .disabled(!browsing.canMark)
+                .id(photo.id)
+            } bottom: {
+                duo.bottom
+            }
+        }
+        .overlayPreferenceValue(DuoDockPickerKey.self) { pickers in
+            if let picker = pickers.first { DuoDockPickerOverlay(picker: picker) }
+        }
+    }
+
+    private var standardLayout: some View {
         VStack(spacing: 0) {
             BrowsingHeader(
                 title: photo.fileName,
@@ -202,18 +300,6 @@ struct DetailMarkingView: View {
                     .disabled(!browsing.canMark)
                 }
             }
-        }
-        .background(Color.clove.bg.stage)
-        .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
-        .task(id: scale > DetailFitScale.tolerance) {
-            showsZoomChip = scale > DetailFitScale.tolerance
-            guard showsZoomChip else { return }
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
-            showsZoomChip = false
-        }
-        .sheet(isPresented: $showsInformation) {
-            PhotoInformationSheet(browsing: browsing, photo: photo)
         }
     }
 

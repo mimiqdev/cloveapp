@@ -13,6 +13,9 @@ struct GridScreen: View {
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
     @State private var selectsEmpty = false
+    @State private var split = DuoSplit.focus
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
 
     private enum MoveSheetRoute: Identifiable {
         case flow(MoveRejectsFlow)
@@ -32,7 +35,9 @@ struct GridScreen: View {
     }
 
     private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }
-    private var isRegular: Bool { horizontalSizeClass == .regular }
+    private var isRegular: Bool { horizontalSizeClass == .regular && !isDuoExpanded }
+    private var usesDock: Bool { isDuoExpanded || isDuoCover }
+    private var controlSize: ControlSize { usesDock ? .duo : (isRegular ? .pad : .phone) }
     private var showsMoveRejects: Bool {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
             && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
@@ -47,8 +52,94 @@ struct GridScreen: View {
     }
 
     var body: some View {
+        surface
+            .background(Color.clove.bg.canvas)
+            .onChange(of: browsing.state.route) { _, route in
+                if route != .detail { split = .focus }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !isRegular, !usesDock, showsMoveRejects {
+                    MoveRejectsButton(identifier: "clove.grid.moveRejects") {
+                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                    }
+                    .padding(16)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isSelecting {
+                    GridBatchBar(browsing: browsing, cells: cells)
+                        .disabled(!browsing.canMark)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let message = browsing.failureToastMessage {
+                    Toast(message: message, identifier: "clove.save.toast")
+                        .padding(.horizontal)
+                        .padding(.bottom, 12)
+                } else if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible
+                {
+                    MoveRejectsToast(browsing: browsing, completed: completed) {
+                        moveSheet = .details(completed)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+                }
+            }
+            .task(id: browsing.rejectMoveToastAttempt) {
+                guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
+                try? await Task.sleep(for: .seconds(6))
+                guard !Task.isCancelled else { return }
+                browsing.dismissRejectMoveToast()
+            }
+            .sheet(item: $moveSheet) { route in
+                switch route {
+                case .flow(let flow): MoveRejectsSheet(flow: flow)
+                case .details(let completed):
+                    MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
+                }
+            }
+            .folderPicker(isPresented: $isPickingEmptyFolder) { url in
+                await browsing.openPickedFolder(url)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("clove.grid")
+    }
+
+    @ViewBuilder private var surface: some View {
+        if isDuoExpanded, browsing.state.route == .detail {
+            DetailScreen(
+                browsing: browsing,
+                duo: DuoDetailLayout(
+                    split: $split, grid: AnyView(grid), tools: AnyView(headerTools),
+                    bottom: AnyView(dockBottom)))
+        } else if usesDock {
+            HStack(spacing: 0) {
+                grid
+                if isDuoCover {
+                    coverRail
+                } else {
+                    DuoDock(
+                        back: { browsing.back() }, undo: { browsing.undoLastMark() },
+                        canUndo: browsing.canUndoMark, showsMarks: false
+                    ) {
+                        headerTools
+                    } marks: {
+                        EmptyView()
+                    } bottom: {
+                        dockBottom
+                    }
+                }
+            }
+        } else {
+            grid
+        }
+    }
+
+    private var grid: some View {
         VStack(spacing: 0) {
-            header
+            if !(isDuoExpanded && browsing.state.route == .detail) { header }
             if let progress = browsing.readingProgress {
                 ProgressLine(
                     progress: progress.total > 0
@@ -68,6 +159,7 @@ struct GridScreen: View {
                     placeholderCount: browsing.readingProgress.map {
                         $0.total == 0 ? 9 : max($0.total - $0.read, 0)
                     } ?? 0,
+                    columnCount: isDuoExpanded ? (browsing.state.route == .detail ? 2 : 6) : nil,
                     openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },
                     toggleSelection: { browsing.toggleSelection(of: $0) }
@@ -76,63 +168,45 @@ struct GridScreen: View {
             }
         }
         .background(Color.clove.bg.canvas)
-        .overlay(alignment: .bottomTrailing) {
-            if !isRegular, showsMoveRejects {
-                MoveRejectsButton(identifier: "clove.grid.moveRejects") {
-                    moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
-                }
-                .padding(16)
+    }
+
+    private var dockBottom: some View {
+        Group {
+            if showsMoveRejects {
+                GlassIconButton(
+                    label: "Move rejects", symbol: "tray.and.arrow.down", size: .duo,
+                    showsGlass: false, identifier: "clove.grid.moveRejects"
+                ) { moveSheet = .flow(MoveRejectsFlow(browsing: browsing)) }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if isSelecting {
-                GridBatchBar(browsing: browsing, cells: cells)
-                    .disabled(!browsing.canMark)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+    }
+
+    private var coverRail: some View {
+        VStack(spacing: 14) {
+            GlassIconButton(
+                label: "Back", symbol: "chevron.left", size: .duo,
+                identifier: "clove.nav.back", action: { browsing.back() })
+            if showsMoveRejects {
+                GlassIconButton(
+                    label: "Move rejects", symbol: "tray.and.arrow.down", size: .duo,
+                    identifier: "clove.grid.moveRejects"
+                ) { moveSheet = .flow(MoveRejectsFlow(browsing: browsing)) }
             }
+            Spacer()
+            filterButton
         }
-        .overlay(alignment: .bottom) {
-            if let message = browsing.failureToastMessage {
-                Toast(message: message, identifier: "clove.save.toast")
-                    .padding(.horizontal)
-                    .padding(.bottom, 12)
-            } else if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible {
-                MoveRejectsToast(browsing: browsing, completed: completed) {
-                    moveSheet = .details(completed)
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 12)
-            }
-        }
-        .task(id: browsing.rejectMoveToastAttempt) {
-            guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
-            try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled else { return }
-            browsing.dismissRejectMoveToast()
-        }
-        .sheet(item: $moveSheet) { route in
-            switch route {
-            case .flow(let flow): MoveRejectsSheet(flow: flow)
-            case .details(let completed):
-                MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
-            }
-        }
-        .folderPicker(isPresented: $isPickingEmptyFolder) { url in
-            await browsing.openPickedFolder(url)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.grid")
+        .padding(.vertical, 16)
+        .frame(width: 64)
     }
 
     @ViewBuilder private var header: some View {
-        if isRegular {
+        if isRegular || usesDock {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(
                         isSelecting
                             ? "\(browsing.state.selection.count.formatted()) selected"
-                            : browsing.filterTitle
+                            : (usesDock ? browsing.folderTitle : browsing.filterTitle)
                     )
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
@@ -147,7 +221,11 @@ struct GridScreen: View {
                     .foregroundStyle(Color.clove.text.secondary)
                 }
                 Spacer(minLength: 0)
-                headerTools
+                if isDuoCover {
+                    if isSelecting { headerTools } else { moreMenu }
+                } else if !usesDock {
+                    headerTools
+                }
             }
             .padding(.horizontal, 16)
             .frame(height: 64)
@@ -187,10 +265,13 @@ struct GridScreen: View {
             }
             .accessibilityLabel("Selection options")
             .accessibilityIdentifier("clove.grid.selectionOptions")
-            Button("Done") {
+            Button {
                 browsing.clearSelection()
                 selectsEmpty = false
+            } label: {
+                if usesDock { Image(systemName: "checkmark") } else { Text("Done") }
             }
+            .accessibilityLabel("Done")
             .foregroundStyle(Color.clove.accent)
             .padding(.horizontal, 16)
             .frame(height: 44)
@@ -207,15 +288,19 @@ struct GridScreen: View {
                     }
                 }
             } else {
-                GlassIconButton(
-                    label: "Filter", symbol: "line.3.horizontal.decrease", isActive: hasFilter,
-                    identifier: "clove.grid.filter"
-                ) { showsFilters.toggle() }
-                .popover(isPresented: $showsFilters, arrowEdge: .top) {
-                    filterMenu.presentationCompactAdaptation(.popover)
-                }
+                filterButton
             }
             moreMenu
+        }
+    }
+
+    private var filterButton: some View {
+        GlassIconButton(
+            label: "Filter", symbol: "line.3.horizontal.decrease", isActive: hasFilter,
+            size: controlSize, showsGlass: !isDuoExpanded, identifier: "clove.grid.filter"
+        ) { showsFilters.toggle() }
+        .popover(isPresented: $showsFilters, arrowEdge: usesDock ? .trailing : .top) {
+            filterMenu.presentationCompactAdaptation(.popover)
         }
     }
 
@@ -239,8 +324,11 @@ struct GridScreen: View {
                 }
                 .accessibilityIdentifier("clove.grid.order.fileName")
             }
-            Button("Select") { selectsEmpty = true }
-                .accessibilityIdentifier("clove.grid.select")
+            Button("Select") {
+                if isDuoExpanded && browsing.state.route == .detail { browsing.back() }
+                selectsEmpty = true
+            }
+            .accessibilityIdentifier("clove.grid.select")
             if !isRegular, store.settings.similarGroupsEnabled {
                 Button("Find similar shots again") { Task { await browsing.runGroupingAgain() } }
                     .accessibilityIdentifier("clove.grid.grouping.runAgain")
@@ -253,8 +341,11 @@ struct GridScreen: View {
             Image(systemName: "ellipsis")
                 .font(.title3)
                 .foregroundStyle(Color.clove.text.primary)
-                .frame(width: isRegular ? 40 : 44, height: isRegular ? 40 : 44)
-                .cloveGlass(in: Circle())
+                .frame(
+                    width: usesDock ? 36 : (isRegular ? 40 : 44),
+                    height: usesDock ? 36 : (isRegular ? 40 : 44)
+                )
+                .cloveGlass(in: Circle(), isEnabled: !isDuoExpanded)
         }
         .accessibilityLabel("More")
         .accessibilityIdentifier("clove.grid.more")

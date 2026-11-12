@@ -884,6 +884,124 @@ final class CloveFlowTests: XCTestCase {
         capture("grid-opening-before-first-photo")
     }
 
+    /// The installed runtime cannot create a Duo, so this uses a regular-width logical
+    /// viewport on a phone. The same production routing and mark actions handle the flow.
+    @MainActor
+    func testDuoGridFocusDockMarkAndPhotoOnly() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .phone)
+        continueAfterFailure = false
+        let app = launchSample(["CLOVE_TEST_DUO_VIEWPORT": "expanded"])
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        openLibrary(app)
+        prepareDuo(app)
+        exerciseDuo(app)
+    }
+
+    @MainActor
+    private func prepareDuo(_ app: XCUIApplication) {
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
+        for _ in 0..<6 {
+            if advance.isHittable { break }
+            app.swipeUp()
+        }
+        if advance.value as? String == "1" {
+            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                .withOffset(CGVector(dx: -advance.frame.height * 0.8, dy: 0)).tap()
+        }
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), advance))
+        element(app, "clove.nav.back").tap()
+    }
+
+    @MainActor
+    private func exerciseDuo(_ app: XCUIApplication) {
+        XCTAssertFalse(element(app, "clove.sidebar").exists)
+        XCTAssertFalse(element(app, "clove.duo.marks").exists)
+        capture("duo-grid")
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let focus = element(app, "clove.duo.focus")
+        XCTAssertTrue(focus.waitForExistence(timeout: 5))
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertFalse(element(app, "clove.detail.rail").exists)
+        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
+        let grid = app.collectionViews.firstMatch
+        XCTAssertEqual(
+            grid.frame.width / (grid.frame.width + focus.frame.width), 0.3, accuracy: 0.02)
+        let marks = element(app, "clove.duo.marks")
+        XCTAssertGreaterThanOrEqual(marks.frame.minX, preview.frame.maxX)
+        capture("duo-focus")
+        element(app, "clove.duo.rating").tap()
+        let stars = element(app, "clove.duo.stars")
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        stars.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), marks))
+        let rating = element(app, "clove.duo.rating")
+        let ratingStart = rating.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        ratingStart.press(
+            forDuration: 0.1,
+            thenDragTo: ratingStart.withOffset(CGVector(dx: 0, dy: -rating.frame.height * 1.25)))
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "5 stars"), marks))
+        element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), marks))
+        rating.tap()
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        capture("duo-stars")
+        element(app, "clove.duo.label").tap()
+        XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
+        capture("duo-labels")
+        element(app, "clove.duo.labels.green").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS[c] %@", "green"), marks))
+        let divider = element(app, "clove.duo.divider")
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(
+            forDuration: 0.1,
+            thenDragTo: grid.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)))
+        XCTAssertTrue(element(app, "clove.duo.photoOnly").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
+        XCTAssertTrue(element(app, "clove.detail.fileName").exists)
+        capture("duo-photo-only")
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.marks").exists)
+    }
+
+    /// Screenshot-only pass on a simulator named Clove duo; no full flow suite is run.
+    @MainActor
+    func testCaptureDuoLayoutsWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_DUO"] == "1")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let app = launchSample()
+            defer { app.terminate() }
+            XCUIDevice.shared.orientation = .landscapeLeft
+            openLibrary(app)
+            capture("unchanged-ipad")
+            return
+        }
+        continueAfterFailure = false
+        let app = launchSample(["CLOVE_TEST_DUO_VIEWPORT": "expanded"])
+        XCUIDevice.shared.orientation = .landscapeLeft
+        openLibrary(app)
+        prepareDuo(app)
+        exerciseDuo(app)
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        let cover = launchSample(["CLOVE_TEST_DUO_VIEWPORT": "cover"])
+        openLibrary(cover)
+        capture("duo-cover")
+        cover.terminate()
+        let phone = launchSample()
+        openLibrary(phone)
+        capture("unchanged-iphone")
+        phone.terminate()
+    }
+
     @MainActor
     private func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
