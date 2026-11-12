@@ -1040,7 +1040,7 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
+    func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }
         app.launch()
@@ -1051,7 +1051,7 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func openLibrary(_ app: XCUIApplication) {
+    func openLibrary(_ app: XCUIApplication) {
         let open = element(app, "clove.entry.openFolder")
         if open.exists { open.tap() }
         if element(app, "clove.detail").exists { element(app, "clove.nav.back").tap() }
@@ -1070,12 +1070,12 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+    func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
     @MainActor
-    private func waitForLabel(_ label: String, _ target: XCUIElement) -> Bool {
+    func waitForLabel(_ label: String, _ target: XCUIElement) -> Bool {
         wait(NSPredicate(format: "label == %@", label), target)
     }
 
@@ -1085,14 +1085,14 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func wait(_ predicate: NSPredicate, _ target: XCUIElement) -> Bool {
+    func wait(_ predicate: NSPredicate, _ target: XCUIElement) -> Bool {
         XCTWaiter.wait(
             for: [XCTNSPredicateExpectation(predicate: predicate, object: target)], timeout: 5)
             == .completed
     }
 
     @MainActor
-    private func capture(_ name: String) {
+    func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
