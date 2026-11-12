@@ -75,6 +75,7 @@ struct DetailMarkingView: View {
     var duo: DuoDetailLayout?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.displayScale) private var displayScale
     @State private var hidesChrome = false
     @State private var windowID = UUID()
@@ -84,6 +85,8 @@ struct DetailMarkingView: View {
     @State private var keepsPosition = false
     @State private var isLoadingFit = false
     @State private var showsInformation = false
+    @State private var showsToolbarStars = false
+    @State private var toolbarDragRating: Rating?
     @State private var showsZoomChip = false
     @State private var controlsHeight: CGFloat = 0
 
@@ -152,6 +155,10 @@ struct DetailMarkingView: View {
                 return .handled
             }
             .onAppear { hasKeyFocus = true }
+            .onChange(of: photo.id) { _, _ in
+                showsToolbarStars = false
+                toolbarDragRating = nil
+            }
             .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
                 await loadPreview(for: photo)
             }
@@ -173,6 +180,8 @@ struct DetailMarkingView: View {
         Group {
             if let duo {
                 expandedLayout(duo)
+            } else if usesSystemToolbar, #available(iOS 27.1, *) {
+                nativeStandardLayout
             } else {
                 standardLayout
             }
@@ -191,106 +200,151 @@ struct DetailMarkingView: View {
         }
     }
 
-    private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
-        HStack(spacing: 0) {
-            GeometryReader { geometry in
-                HStack(spacing: 0) {
-                    if duo.split.wrappedValue == .focus {
-                        duo.grid
-                            .frame(
-                                width: (geometry.size.width - 8)
-                                    * CGFloat(duo.split.wrappedValue.gridFraction))
-                        DuoDivider(
-                            split: duo.split, contentWidth: geometry.size.width,
-                            back: { browsing.back() })
+    @available(iOS 27.1, *)
+    private var nativeStandardLayout: some View {
+        standardLayout
+            .toolbar {
+                BrowsingToolbar(
+                    back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
+                    showsUndo: chromeIsVisible
+                ) {
+                    if chromeIsVisible {
+                        Button("Info", systemImage: "info.circle") { showsInformation = true }
+                            .accessibilityIdentifier("clove.detail.info")
                     }
-                    VStack(spacing: 0) {
-                        if duo.split.wrappedValue == .photoOnly {
-                            VStack(spacing: 2) {
-                                Text(photo.fileName)
-                                    .font(.subheadline.weight(.semibold))
-                                    .accessibilityIdentifier("clove.detail.fileName")
-                                Text(detailSubtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(Color.clove.text.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 64)
-                        }
-                        FolderSaveBanner(
-                            browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
-                        previewArea
-                        if duo.split.wrappedValue == .photoOnly && chromeIsVisible {
-                            DetailFilmstrip(
-                                photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                                open: actions.openPhoto,
-                                groups: browsing.groups, finishingAction: finishingAction
-                            )
-                            .padding(.vertical, 8)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier(
-                        duo.split.wrappedValue == .focus ? "clove.duo.focus" : "clove.duo.photoOnly"
-                    )
+                } marks: {
+                    Optional<ToolbarItem<Void, EmptyView>>.none
+                } bottom: {
+                    EmptyView()
+                }
+                ToolbarItem(placement: .principal) { detailToolbarTitle }
+                    .axisBehavior(.horizontalOnly)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var detailToolbarTitle: some View {
+        VStack(spacing: 0) {
+            Text(photo.fileName)
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("clove.detail.fileName")
+            HStack(spacing: 0) {
+                Text(detailSubtitle).accessibilityIdentifier("clove.detail.zoom")
+                if scale <= DetailFitScale.tolerance {
+                    SaveStatusIndicator(
+                        browsing: browsing, identifierPrefix: "clove.detail.saveState")
                 }
             }
-            DuoDock(
-                back: { browsing.back() },
-                undo: undo, canUndo: browsing.canUndoMark
-            ) {
-                duo.tools
-                GlassIconButton(
-                    label: "Info", symbol: "info.circle", size: .duo, showsGlass: false,
-                    identifier: "clove.detail.info"
-                ) { showsInformation = true }
-            } marks: {
-                DuoMarkControls(
-                    marks: displayMarks, settings: settings,
-                    previewRating: swipeFeedback.rating,
-                    rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
-                    toggleReject: { toggleReject() }, markingBegan: actions.markingSwipeBegan
-                )
-                .disabled(!browsing.canMark)
-                .id(photo.id)
-            } bottom: {
-                duo.bottom
+            .font(.caption)
+        }
+    }
+
+    @ViewBuilder private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
+        if #available(iOS 27.1, *) {
+            Group {
+                if duo.showsGrid && duo.split.wrappedValue == .focus {
+                    PhotoArrangement(grid: duo.grid, split: duo.split, back: { browsing.back() }) {
+                        duoPhotoPane(showsFilmstrip: false)
+                    }
+                } else {
+                    duoPhotoPane(showsFilmstrip: true)
+                }
+            }
+            .toolbar {
+                BrowsingToolbar(
+                    back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark
+                ) {
+                    duo.filter
+                    duo.more
+                    Button("Info", systemImage: "info.circle") { showsInformation = true }
+                        .accessibilityIdentifier("clove.detail.info")
+                } marks: {
+                    DuoMarkControls(
+                        photoID: photo.id, marks: displayMarks, settings: settings,
+                        previewRating: swipeFeedback.rating, canMark: browsing.canMark,
+                        showsStars: $showsToolbarStars, dragRating: $toolbarDragRating,
+                        rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
+                        toggleReject: { toggleReject() }, markingBegan: actions.markingSwipeBegan)
+                } bottom: {
+                    duo.bottom
+                }
+                if !duo.showsGrid || duo.split.wrappedValue == .photoOnly {
+                    ToolbarItem(placement: .principal) { detailToolbarTitle }
+                        .axisBehavior(.horizontalOnly)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarVerticalBehavior(.automatic)
+            .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
+            .background {
+                ToolbarRatingGesture(
+                    rating: displayMarks.rating, enabledRatings: settings.enabledRatings,
+                    canMark: browsing.canMark, began: actions.markingSwipeBegan,
+                    preview: {
+                        toolbarDragRating = $0
+                        showsToolbarStars = true
+                    },
+                    commit: {
+                        rate($0, togglesCurrent: false)
+                        toolbarDragRating = nil
+                        showsToolbarStars = false
+                    },
+                    cancel: {
+                        toolbarDragRating = nil
+                        showsToolbarStars = false
+                    })
             }
         }
-        .overlayPreferenceValue(DuoDockPickerKey.self) { pickers in
-            if let picker = pickers.first { DuoDockPickerOverlay(picker: picker) }
+    }
+
+    @available(iOS 27.1, *)
+    private func duoPhotoPane(showsFilmstrip: Bool) -> some View {
+        VStack(spacing: 0) {
+            FolderSaveBanner(
+                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
+            previewArea
+            if showsFilmstrip && chromeIsVisible {
+                DetailFilmstrip(
+                    photos: order, current: photo.id, thumbnails: browsing.thumbnails,
+                    open: actions.openPhoto,
+                    groups: browsing.groups, finishingAction: finishingAction)
+            }
         }
+        .contentMargins(for: .container, edges: .horizontal)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(showsFilmstrip ? "clove.duo.photoOnly" : "clove.duo.focus")
     }
 
     private var standardLayout: some View {
         VStack(spacing: 0) {
-            BrowsingHeader(
-                title: photo.fileName,
-                titleIdentifier: "clove.detail.fileName",
-                backTitle: horizontalSizeClass == .regular ? browsing.filterTitle : nil,
-                back: { browsing.back() }
-            ) {
-                HStack(spacing: 0) {
-                    Text(detailSubtitle)
-                        .accessibilityIdentifier("clove.detail.zoom")
-                    if scale <= DetailFitScale.tolerance {
-                        SaveStatusIndicator(
-                            browsing: browsing, identifierPrefix: "clove.detail.saveState")
+            if !usesSystemToolbar {
+                BrowsingHeader(
+                    title: photo.fileName,
+                    titleIdentifier: "clove.detail.fileName",
+                    backTitle: horizontalSizeClass == .regular ? browsing.filterTitle : nil,
+                    back: { browsing.back() }
+                ) {
+                    HStack(spacing: 0) {
+                        Text(detailSubtitle)
+                            .accessibilityIdentifier("clove.detail.zoom")
+                        if scale <= DetailFitScale.tolerance {
+                            SaveStatusIndicator(
+                                browsing: browsing, identifierPrefix: "clove.detail.saveState")
+                        }
                     }
-                }
-            } tools: {
-                if chromeIsVisible {
-                    GlassIconButton(
-                        label: "Info", symbol: "info.circle", size: usesRail ? .pad : .phone,
-                        identifier: "clove.detail.info"
-                    ) { showsInformation = true }
-                    GlassIconButton(
-                        label: "Undo", symbol: "arrow.uturn.backward",
-                        size: usesRail ? .pad : .phone,
-                        identifier: "clove.detail.undo",
-                        action: undo
-                    ).disabled(!browsing.canUndoMark)
+                } tools: {
+                    if chromeIsVisible {
+                        GlassIconButton(
+                            label: "Info", symbol: "info.circle", size: usesRail ? .pad : .phone,
+                            identifier: "clove.detail.info"
+                        ) { showsInformation = true }
+                        GlassIconButton(
+                            label: "Undo", symbol: "arrow.uturn.backward",
+                            size: usesRail ? .pad : .phone,
+                            identifier: "clove.detail.undo",
+                            action: undo
+                        ).disabled(!browsing.canUndoMark)
+                    }
                 }
             }
             FolderSaveBanner(

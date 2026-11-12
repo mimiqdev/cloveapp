@@ -11,7 +11,59 @@ This is **part 1 of #18**. The Duo device session is deferred. This report does
 not establish physical hinge avoidance or cover ↔ inner continuity, and leaves
 G1's choice open. Production layouts P3/P4 are outside this spike.
 
-## What was tested
+## SDK inventory correction and Duo simulator readiness (2026-11-12)
+
+The original search below missed the iOS 27.1 layout APIs because it searched
+for hinge/fold names. Its conclusion that no public hinge rectangle exists was
+wrong. `GeometryProxy.reservedRegions(kind: .division)` and
+`UIView.reservedRegions(kind:)` report the fold's frame and margins. Occlusion
+regions report areas such as the camera. Only active regions are returned by
+default; `.includeInactive` also exposes the inactive fold when fully open.
+`ArrangementView` with `.split` adapts its panes to these regions.
+
+The system also exposes `toolbarVerticalEdge` / `verticalBarEdge`, ordinary
+vertical toolbar items with `axisBehavior`, vertical compression/behavior, and
+container content margins. Use these system signals and containers for Duo
+layout; do not infer Duo from phone idiom plus regular size classes or draw a
+second bar beside the status column. Every new API remains guarded for iOS 27.1;
+the app's deployment target stays iOS 18.
+
+On the Mac mini with Xcode 27.2 (27B52), the default iOS 27.2 simulator build
+**24B8117 explicitly excludes `iPhone19,4`** in its runtime profile. Apple also
+ships a separate Duo runtime, **24B91016s**, in the same download catalog:
+
+```sh
+xcodebuild -downloadPlatform iOS -buildVersion 24B91016s
+xcrun simctl create "Clove readiness <tag>" \
+  com.apple.CoreSimulator.SimDeviceType.iPhone-Duo \
+  com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4
+xcrun simctl bootstatus <owned-device-udid> -b
+```
+
+A fresh owned Duo **created and reached the `Booted` device state** on 24B91016s,
+and a native SwiftUI probe rendered its toolbar in the cover's system status
+column. `bootstatus -b` returned zero while its terminal progress said **Data
+Migration Failed**. The detailed log explains this result: all 35 migration
+plugins completed successfully, with zero crashes, watchdog failures, or plugins
+returning failure. Apple's progress UI logged `Unsupported screen class -1`,
+then reported a migration progress window incident. The OS booted and ran apps;
+this progress-UI diagnostic is not a Clove data migration or evidence of an
+unusable simulator. Owned devices were shut down and deleted, and the runtime
+was retained. These are simulator findings, not physical-device results.
+
+Apple documents Closed, Partially Open, Open, and an Option-drag angle slider in
+Device Hub. This headless Mini session cannot launch its GUI (`OSLaunchdErrorDomain
+125: Domain does not support specified action`), so no open/half-fold pose result
+is claimed from that session. `simctl` screen power controls alone do not change
+the physical pose.
+
+Sources: [Apple runtime catalog](https://devimages-cdn.apple.com/downloads/xcode/simulators/index2.dvtdownloadableindex),
+[component installation](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components),
+[Device Hub pose controls](https://developer.apple.com/documentation/xcode/interacting-with-your-app-in-device-hub),
+[preparing for Duo](https://developer.apple.com/documentation/technologyoverviews/preparing-your-app-for-iphone-duo),
+[ArrangementView](https://developer.apple.com/documentation/swiftui/arrangementview).
+
+## What was tested in the original part 1 run
 
 - Xcode **27.2**, build **27B52**, iPhoneOS and iPhoneSimulator SDK **27.2**.
 - Installed simulator runtime: **iOS 27.0 (24A434)**.
@@ -44,6 +96,11 @@ rg -n -i 'hinge|foldable|foldposture|foldstate' \
 | `UIHingeInteraction`, `UIHingeInteraction.Update.hinge` | `UIKit.framework/Headers/UIHingeInteraction.h:15–70`; same availability as `UIHinge` | Attach interaction to a view. Handler delivers initial state and subsequent hinge/hierarchy updates. `hinge == nil` means no hinge in that hierarchy; it does **not** mean closed. `isEnabled` controls delivery; disabled updates are not queued. |
 | `DeviceHinge`, `DeviceHinge.Status`, `DeviceHingeContext.hinge` | `SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64e-apple-ios.swiftinterface:16798–16831`; `@available(anyAppleOS 27.1, *)` | SwiftUI equivalent: `status`, `angle: Angle`, optional hinge context. Status has `closed`, `partiallyOpen`, `fullyOpen`; treat future status values as unknown. No hinge rectangle. |
 | `View.onHingeChange(isEnabled:_:)` | Same interface, lines 24303–24305; `@available(anyAppleOS 27.1, *)` | Old/new `DeviceHingeContext` callback. UIKit interaction is used in this probe to get its documented initial update and sample the attached window in the same place. |
+| `GeometryProxy.reservedRegions(kind:options:layoutDirectionBehavior:)`, `UIView.reservedRegions(kind:options:)` | `SwiftUICore` Swift interface and `UIKit.framework/Headers/UIViewReservedRegion.h`, `UIView.h`; iOS **27.1** | Division frames and margins describe the fold; occlusion frames describe cameras and similar obstructions. Query `.includeInactive` when the inactive region is needed. |
+| `EnvironmentValues.toolbarVerticalEdge`, `UITraitCollection.verticalBarEdge` | `SwiftUICore` Swift interface; `UIKit.framework/Headers/UIVerticalBarEdge.h`; iOS **27.1** | The system's preferred vertical bar edge, even while the bar is hidden; nil/unspecified where no vertical bar is used. |
+| `ToolbarContent.axisBehavior`, `toolbarVerticalCompressionBehavior`, `toolbarVerticalBehavior` | `SwiftUI` Swift interface; `UIBarButtonItem.h`, `UINavigationItem.h`; iOS **27.1** | Ordinary toolbar items adapt between horizontal and vertical bars. The system owns spacing, chrome, overflow and safe areas. |
+| `ArrangementView`, `.split`, `splitArrangementLayoutRatio`, `splitArrangementLayoutSize`, `splitArrangementAxis` | `SwiftUICore` Swift interface; `UISplitArrangement.h`, `UIArrangementViewController.h`; iOS **27.1** | System pane sizing and adaptation to reserved regions. This is a layout container, not a navigation or drag-to-collapse API. |
+| `contentMargins(for: .container)`, `GeometryProxy.contentMargins(for:)` | `SwiftUICore` Swift interface; related UIKit layout regions in `UIViewLayoutRegion.h`; iOS **27.1** | System container margins, including asymmetric margins near vertical bars. |
 | `UIWindowScene.effectiveGeometry` | `UIKit.framework/Headers/UIWindowScene.h:34`; iOS **16.0** | Current effective scene geometry. Geometry does not identify a fold posture. |
 | `UIWindowSceneGeometry.coordinateSpace` | `UIKit.framework/Headers/UIWindowSceneGeometry.h:36`; iOS **26.0** | Actual scene coordinate-space bounds. On older OS versions the probe uses `UIWindowScene.coordinateSpace` (iOS 13, deprecated from 26). |
 | `UIWindowSceneGeometry.interfaceOrientation` | Same header, class available iOS **16.0** | Scene interface orientation, rather than physical device orientation. `isInteractivelyResizing` is iOS **26.0**. Neither is a hinge signal. |
@@ -64,12 +121,12 @@ Apple documentation, cross-checked with SDK declarations:
   [GeometryReader](https://developer.apple.com/documentation/swiftui/geometryreader),
   [SceneStorage](https://developer.apple.com/documentation/swiftui/scenestorage).
 
-The framework-wide search found hinge-observation APIs in UIKit and SwiftUICore;
-no additional public fold/posture framework or hinge rectangle was found.
-CoreMotion attitude is not a hinge angle. Neither documented API provides a
-physical hinge rectangle, so there is **no reported rectangle to draw**. The
-probe says so explicitly rather than drawing an assumed center seam. That
-leaves physical hinge exclusion an open device question.
+The original hinge-name search found the observation APIs but missed reserved
+regions. `UIHinge` and `DeviceHinge` themselves expose status and angle, while
+reserved-region APIs separately expose division and occlusion frames. CoreMotion
+attitude is not a hinge angle. The existing Lab probe records status and angle;
+it does not yet record reserved regions. Physical-device alignment still needs
+a device run, but there is a public reported rectangle to use.
 
 ## Data
 
@@ -170,11 +227,13 @@ checklist, start a new run and increment once. **Write S7 report** snapshots the
 
 ## Conclusion
 
-SDK 27.2 exposes public hinge **status and angle from iOS 27.1**, in both UIKit
-and SwiftUI. It does not expose a hinge rectangle. The installed 27.0 runtime
-cannot create the Duo simulator, so neither Duo scene continuity nor physical
-hinge exclusion is settled in part 1. Geometry adaptation and explicit state
-restoration remain necessary regardless of hinge API availability.
+SDK 27.2 exposes public hinge **status and angle from iOS 27.1**, together with
+reserved division/occlusion frames, system vertical toolbars, split arrangements,
+and container margins. The original 27.0 runtime could not create Duo; the
+separate 27.2 Duo build 24B91016s creates it, boots the OS, and runs a native
+cover probe. Its startup progress-UI diagnostic is explained above.
+Physical-device scene continuity and fold alignment remain device questions.
+Navigation and selection must remain outside layout branches.
 
 ## Recommendation and options for G1
 
@@ -188,9 +247,9 @@ proposal for U1/P3/P4, not their implementation.
 
 | Option | Minimum SDK / runtime | Cost and unresolved evidence |
 | --- | --- | --- |
-| Geometry plus public hinge observation (recommended, pending device data) | Verified build SDK **27.2**; hinge declarations introduced **27.1**, runtime **27.1+**. Guard APIs to retain the existing **iOS 18** deployment target. | Best available posture signal; no public rectangle. Need device evidence of safe-region behavior and a reliable exclusion strategy before promising half-fold controls avoid the hinge. |
+| System vertical bars, split arrangements, reserved regions and public hinge observation | Build SDK **27.2**; new layout and hinge declarations introduced **27.1**, runtime **27.1+**. Guard APIs to retain the existing **iOS 18** deployment target. | The system reports fold frames and owns bar placement and arrangement sizing. Physical-device evidence is still needed for fold alignment and scene continuity. |
 | Geometry only | Existing iOS 18 baseline; `effectiveGeometry` is 16+, its coordinate space is 26+ with the older scene-coordinate-space fallback below 26. | Works on iOS 27.0 and older devices. Size classes and aspect ratio alone cannot establish posture or physical hinge location. Cannot certify the half-fold requirement from this spike. |
-| Require a newer Duo runtime/SDK before completing P3 | Exact compatible simulator runtime remains unverified; hinge minimum runtime is 27.1. | Enables direct hinge testing, but a newer OS does not imply a rectangle API. Re-run part 2 first; any scope or support-policy change belongs to G1/product owner. |
+| Use the separate Duo simulator runtime | iOS **27.2 build 24B91016s**, runtime identifier `com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`; creation, OS boot and native cover rendering verified on the Mini; the progress-UI diagnostic is explained above. | The general 24B8117 runtime excludes Duo. Device Hub supplies supported pose controls; a GUI session is needed to use them. |
 
 Availability supports a theoretical minimum SDK of 27.1 for hinge symbols; only
 **Xcode 27.2 / SDK 27.2 was compiled here**. No increase to the project's minimum
@@ -205,12 +264,12 @@ midpoint. No decision record or PRD change is made here.
 - Does cover ↔ inner retain the scene session and State, recreate a view while
   restoring SceneStorage, or create a new scene? Compare IDs and counters in
   the returned JSON; a counter alone cannot distinguish these cases.
-- Does half-folding give safe regions that let P3 keep all controls clear of
-  the physical hinge? There is no rectangle in the inspected API. If the
-  device supplies neither safe regions nor another documented mechanism,
-  bring that evidence to G1 before declaring P0-14 feasible or changing it.
-- A compatible Duo simulator runtime is needed to repeat fold/screen-switch
-  automation. Installing it is not part of this worker's brief.
+- On real hardware, do the reported division frames and margins align with the
+  physical fold across poses? Use reserved regions and system arrangements;
+  the original Lab probe's status/angle-only report cannot answer this.
+- Repeat open/half-fold/screen-switch checks using Device Hub's pose controls.
+  The compatible Duo runtime is installed; creation, OS boot and native cover
+  rendering are verified on the Mini.
 
 ### Deferred device checklist (about 2–3 minutes)
 
@@ -226,7 +285,8 @@ remain pending until this run is returned.
    update when geometry changes; check that both counters remain **1**.
 3. Half-fold to about 90°; choose **Half-fold 90°**. On iOS 27.1+, inspect the
    reported status/angle if provided. Note if no hinge callback arrives. There
-   is no rectangle overlay because the public API reports no rectangle.
+   is no rectangle overlay in this original status/angle-only Lab probe; the
+   production layout APIs separately provide reserved-region frames.
 4. Rotate while half-folded; choose **Rotated**. Expect interface orientation
    and/or available geometry to follow the supported orientation. Check both
    counters and note any visible controls crossing the physical hinge.
