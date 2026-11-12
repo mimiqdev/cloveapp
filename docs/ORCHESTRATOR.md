@@ -47,10 +47,10 @@ Machine notes:
 
 A delegate names the destination explicitly. Compact `delegate_task`
 example for the Mac mini; the model value is a placeholder, picked from the
-live catalog (next section). `isolation: "worktree"` assumes the
-destination supports delegated worktree isolation — check its capabilities
-first; if it does not, omit it and report the constraint ("Starting work"
-below).
+live catalog (next section). This example requires delegated worktree
+isolation on the destination. If that capability is unavailable, do not
+submit this example with isolation omitted: report the constraint and follow
+the host's supported checkout-binding rules.
 
 ```json
 {
@@ -96,9 +96,9 @@ up anything the stopped run left, such as simulators or watchers.
 
 ## Starting work
 
-- Subordinate work — an implementation task, a review, a focused check —
-  goes through `delegate_task`, with `isolation: "worktree"` when the
-  destination supports it.
+- Follow the host's native-versus-T3 delegation rules. When T3 delegation
+  is appropriate, use `delegate_task` for subordinate implementation,
+  review, or focused checks, with `isolation: "worktree"` when supported.
 - If delegated isolation is not supported for a destination, stop and
   report the capability constraint precisely. Never fall back to the shared
   root checkout silently, never create a checkout with shell `git`
