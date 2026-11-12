@@ -35,5 +35,7 @@ gitignored; never commit a team ID.
 
 For conventions, the task table, and agent rules, see [AGENTS.md](AGENTS.md).
 The development process is in [docs/AGENT-WORKFLOW.md](docs/AGENT-WORKFLOW.md),
-and the plan and product requirements are in [docs/DEV-PLAN.md](docs/DEV-PLAN.md)
-and [docs/PRD.en.md](docs/PRD.en.md).
+and routing and T3 Code usage for the orchestrator is in
+[docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md). The plan and product
+requirements are in [docs/DEV-PLAN.md](docs/DEV-PLAN.md) and
+[docs/PRD.en.md](docs/PRD.en.md).
