@@ -111,10 +111,6 @@ final class FolderLibrarySession: FolderLibrary {
     /// The groups grouping last published for the open folder (PRD P0-11).
     private var publishedGroups: [BrowsingGroup] = []
 
-    /// Whether grouping published at all for the open folder, even with no groups, so a saved
-    /// group view knows the wait is over (PRD P0-14).
-    private var hasPublishedGroups = false
-
     /// The folder's detail pipeline, closed before its scope is released (PRD P0-04).
     private var detailPipeline: DetailPipeline?
 
@@ -251,7 +247,6 @@ final class FolderLibrarySession: FolderLibrary {
         folder = Self.noFolder
         store = FolderPhotos()
         publishedGroups = []
-        hasPublishedGroups = false
         thumbnailSource = nil
         detailSource = nil
         publish(.photos([]))
@@ -378,7 +373,7 @@ final class FolderLibrarySession: FolderLibrary {
         }
         store.remove(moved)
         publish(.photos([]))
-        await startGrouping(generation: scanGeneration)
+        await startGrouping()
         return result
     }
 
@@ -403,7 +398,7 @@ final class FolderLibrarySession: FolderLibrary {
         // The files are already back, so a failed reread must not turn the Undo into a failure.
         try? await rereadMarks(for: result.restored.map(\.identity))
         publish(.photos([]))
-        await startGrouping(generation: scanGeneration)
+        await startGrouping()
         return result
     }
 
@@ -641,7 +636,6 @@ final class FolderLibrarySession: FolderLibrary {
         movedPhotoRecords = [:]
         rejectMover = RejectMover(markQueue: stores.writes)
         publishedGroups = []
-        hasPublishedGroups = false
         publish(.scanStarted)
         publish(.photos([]))
         // PRD How marks reach disk, rule 1: Reject and standalone marks are read when the folder
@@ -698,7 +692,6 @@ final class FolderLibrarySession: FolderLibrary {
         movedRejectIdentities = []
         movedPhotoRecords = [:]
         publishedGroups = []
-        hasPublishedGroups = false
         if let grouping {
             self.grouping = nil
             // Grouping's 400 px preview reads run under the folder's scope too, so the folder
@@ -859,7 +852,7 @@ final class FolderLibrarySession: FolderLibrary {
         prepareEntryPreviews()
         await recordEntryProgress(lastViewed: lastViewedPhoto)
         await reloadRecents()
-        await startGrouping(generation: generation)
+        await startGrouping()
         // The folder can be replaced while grouping runs above, so the report is re-checked
         // against the generation it belongs to before it reaches the model.
         guard generation == scanGeneration else { return }
@@ -869,7 +862,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// Reports a scan that could not run as partial, without recording a count (PRD P0-01).
     private func failedScan(generation: Int) async {
         guard generation == scanGeneration else { return }
-        await startGrouping(generation: generation)
+        await startGrouping()
         guard generation == scanGeneration else { return }
         publish(
             .scanFinished(
@@ -995,22 +988,15 @@ final class FolderLibrarySession: FolderLibrary {
             })
     }
 
-    /// Runs grouping's time stage for the open folder and publishes its result (PRD P0-11).
+    /// Runs grouping's time stage for the open folder (PRD P0-11).
     ///
-    /// The first publication always lands, even with no groups, before the scan reports itself
-    /// finished: a saved group view waits for it instead of dropping its place on every launch
-    /// (PRD P0-14). A folder that could not build grouping publishes an empty result here too.
-    /// The pass suspends, so the generation is re-checked before anything reaches the model: a
-    /// folder replaced meanwhile must publish neither its groups nor its empty result.
-    private func startGrouping(generation: Int) async {
-        let photos = store.groupingPhotos
-        let revision = groupingRevision()
-        if let grouping {
-            await grouping.begin(
-                photos: photos, revision: revision, enabled: similarGroupsEnabled())
-        }
-        guard generation == scanGeneration else { return }
-        if !hasPublishedGroups { publishGroups([]) }
+    /// The result arrives through grouping's own publication, which re-checks the open it
+    /// belongs to before anything reaches the model.
+    private func startGrouping() async {
+        guard let grouping else { return }
+        await grouping.begin(
+            photos: store.groupingPhotos, revision: groupingRevision(),
+            enabled: similarGroupsEnabled())
     }
 
     /// The group cache's token for the folder as the scan found it (PRD Similar groups rules).
@@ -1025,13 +1011,11 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Publishes grouping's groups for the open folder (PRD P0-11).
     ///
-    /// The first publication of a folder always lands, because a saved group view waits for it
-    /// (PRD P0-14); a later publication only lands when it changed something, so refinement and
-    /// Run again do not repaint an unchanged grid.
+    /// A publication only lands when it changed something, so refinement and Run again do not
+    /// repaint an unchanged grid.
     private func publishGroups(_ groups: [BrowsingGroup]) {
-        guard groups != publishedGroups || !hasPublishedGroups else { return }
+        guard groups != publishedGroups else { return }
         publishedGroups = groups
-        hasPublishedGroups = true
         publish(.groups(groups))
     }
 
@@ -1218,8 +1202,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// background as it does on open; the group keys stay put through C9's ancestry, so the grid
     /// does not move the photo the user is looking at.
     func runGroupingAgain() async {
-        guard let grouping, hasPublishedGroups else { return }
-        await grouping.runAgain(photos: store.groupingPhotos)
+        await grouping?.runAgain(photos: store.groupingPhotos)
     }
 
     /// Applies C12's similar-groups setting to the open folder (PRD P0-11).
@@ -1227,10 +1210,9 @@ final class FolderLibrarySession: FolderLibrary {
     /// Off publishes no groups and stops feature work; on publishes the cached or time-only
     /// result at once and refines again. The settings store keeps and persists the value; this
     /// only applies it to the folder that is open, and ``similarGroupsEnabled`` reads the store
-    /// again when the next folder opens. Grouping that has not started yet needs nothing: its
-    /// time stage reads the store when the scan finishes, so a change during the scan is covered.
+    /// again when the next folder opens. A change during the scan changes nothing: grouping
+    /// reads the store when it starts after the scan finishes.
     func setSimilarGroupsEnabled(_ enabled: Bool) async {
-        guard hasPublishedGroups else { return }
         await grouping?.setEnabled(enabled, photos: store.groupingPhotos)
     }
 
