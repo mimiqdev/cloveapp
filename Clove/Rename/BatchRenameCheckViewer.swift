@@ -9,9 +9,7 @@ struct BatchRenameCheckViewer: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
     @State private var current: PhotoIdentity?
-    @State private var shown: DetailImage?
-    @State private var placeholder: CGImage?
-    @State private var unavailable = false
+    @State private var pixels: RenameCheckImages
     @State private var scale: CGFloat = 1
     @State private var size: CGSize = .zero
     @State private var command: DetailZoomCommand?
@@ -22,7 +20,14 @@ struct BatchRenameCheckViewer: View {
     private var identity: PhotoIdentity { current ?? initialPhoto }
     private var index: Int { flow.order.firstIndex { $0.id == identity } ?? 0 }
     private var photo: GridPhoto { flow.order[index] }
-    private var images: any DetailImageSource { flow.browsing.detailImages }
+    private var shown: DetailImage? { pixels.shown }
+    private var placeholder: CGImage? { pixels.placeholder }
+
+    init(flow: BatchRenameFlow, initialPhoto: PhotoIdentity) {
+        self.flow = flow
+        self.initialPhoto = initialPhoto
+        _pixels = State(initialValue: RenameCheckImages(source: flow.browsing.detailImages))
+    }
     private var rules: MarkingInputRules {
         var settings = AppSettings()
         settings.gesturesEnabled = false
@@ -57,7 +62,7 @@ struct BatchRenameCheckViewer: View {
             .accessibilityAction(named: "Previous photo") { step(-1) }
             .accessibilityAction(named: "Next photo") { step(1) }
             .overlay {
-                if unavailable {
+                if pixels.unavailable {
                     Text("No preview available").foregroundStyle(Color.clove.text.secondary)
                 }
             }
@@ -69,23 +74,13 @@ struct BatchRenameCheckViewer: View {
         }
         .foregroundStyle(Color.clove.text.primary)
         .background(Color.clove.bg.stage)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.rename.viewer")
         .task(id: identity) { await load() }
-        .task(id: scale > DetailFitScale.tolerance) {
-            guard scale > DetailFitScale.tolerance else { return }
-            let requested = identity
-            if case .image(let image) = await images.image(
-                for: requested, request: window.request(need: .fullResolution)),
-                !Task.isCancelled, requested == identity
-            {
-                shown = image
-            }
+        .onChange(of: scale > DetailFitScale.tolerance) { _, zoomed in
+            pixels.setZoomed(zoomed)
         }
-        .onDisappear {
-            shown = nil
-            placeholder = nil
-            Task { await images.leave(window: windowID) }
-        }
+        .onDisappear { pixels.close() }
     }
 
     private var window: DetailPhotoWindow {
@@ -99,32 +94,10 @@ struct BatchRenameCheckViewer: View {
     }
 
     private func load() async {
-        let window = window
-        shown = nil
-        placeholder = nil
-        unavailable = false
         scale = 1
         commandID += 1
         command = DetailZoomCommand(id: commandID, kind: .fit)
-        placeholder = await images.placeholder(
-            for: window.current.photo, gridThumbnails: flow.browsing.thumbnails)
-        guard !Task.isCancelled else { return }
-        await images.prepare(window)
-        let outcome = await images.image(for: window.current.photo, request: window.request())
-        guard !Task.isCancelled else { return }
-        if case .image(let image) = outcome {
-            shown = image
-        } else {
-            unavailable = placeholder == nil
-        }
-        if case .image(let image) = await images.image(
-            for: window.current.photo, request: window.request(need: .screenRender)),
-            !Task.isCancelled
-        {
-            shown = image
-        }
-        guard !Task.isCancelled else { return }
-        await images.prefetch(window, renderAhead: true)
+        await pixels.load(window, thumbnails: flow.browsing.thumbnails)
     }
 
     private func step(_ offset: Int) {

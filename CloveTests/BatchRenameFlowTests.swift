@@ -1,4 +1,6 @@
 import CloveCore
+import CloveImaging
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -121,6 +123,43 @@ struct BatchRenameFlowTests {
             FileManager.default.fileExists(
                 atPath: fixture.photos.appendingPathComponent("a.jpg").path))
         await fixture.library.closeFolder()
+    }
+
+    @Test func aRescanFailureIsReportedAlongsideTheCompletedRename() async throws {
+        let library = HeldRenameLibrary()
+        library.failsRescan = true
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        browsing.toggleSelection(try #require(browsing.photos.first?.id))
+        let flow = BatchRenameFlow(browsing: browsing)
+        flow.options.prefix = "Rescan_"
+        await flow.prepare(rejectsFolderName: .defaultFolderName)
+        await flow.rename {}
+        let completed = try #require(browsing.completedRename)
+        #expect(completed.message == "Renamed 1 photos")
+        #expect(completed.detail == RenameFlowError.rescanFailed.localizedDescription)
+        #expect(completed.hasDetails)
+        #expect(!browsing.canUndoMark)
+    }
+
+    @Test func zoomDuringADelayedFitReadFinishesWithNativePixels() async throws {
+        let source = try DelayedRenameImages()
+        let pixels = RenameCheckImages(source: source)
+        let identity = try #require(TestLibrary.sample.photos.first?.id)
+        let window = DetailPhotoWindow(
+            id: UUID(), current: DetailNeighbour(photo: identity, position: 0),
+            neighbours: [], direction: 1, mode: .rawFirst, screenPixels: 1000)
+        let loading = Task { await pixels.load(window, thumbnails: SampleGridThumbnails()) }
+        for _ in 0..<100 where source.releaseScreen == nil { await Task.yield() }
+        #expect(source.releaseScreen != nil)
+        pixels.setZoomed(true)
+        #expect(source.needs == [.preview, .screenRender])
+        source.releaseScreen?.resume()
+        source.releaseScreen = nil
+        await loading.value
+        #expect(source.needs == [.preview, .screenRender, .fullResolution])
+        #expect(pixels.shown?.quality == .nativeRAW)
+        pixels.close()
     }
 
     @Test func confirmationWaitsForQueuedWritesAndBlocksAnotherRun() async throws {
@@ -269,6 +308,7 @@ private final class HeldRenameLibrary: FolderLibrary {
     let sample = TestLibrary.sample
     var releaseWrite: CheckedContinuation<Void, Never>?
     var events: [String] = []
+    var failsRescan = false
     var folder: FolderIdentity { sample.folder }
     var photos: [GridPhoto] { sample.photos }
     var groups: [BrowsingGroup] { [] }
@@ -297,6 +337,41 @@ private final class HeldRenameLibrary: FolderLibrary {
     }
     func rescanAfterRename() async throws {
         events.append("rescan")
+        if failsRescan { throw RenameFlowError.rescanFailed }
         try await sample.rescanAfterRename()
+    }
+}
+
+@MainActor
+private final class DelayedRenameImages: DetailImageSource {
+    var releaseScreen: CheckedContinuation<Void, Never>?
+    var needs: [DetailPixelRequest.Need] = []
+    let image: CGImage
+
+    init() throws {
+        let context = try #require(
+            CGContext(
+                data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        image = try #require(context.makeImage())
+    }
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    { image }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        needs.append(request.need)
+        if request.need == .screenRender { await withCheckedContinuation { releaseScreen = $0 } }
+        return .image(
+            DetailImage(
+                image: image,
+                source: DetailSource(
+                    url: URL(fileURLWithPath: "/synthetic.ARW"),
+                    revision: ThumbnailRevision(size: 0, modificationTime: .distantPast)),
+                quality: request.need == .fullResolution
+                    ? .nativeRAW : request.need == .preview ? .preview : .screenRAW,
+                hasRAW: true, fullResolutionSize: CGSize(width: 6000, height: 4000)))
     }
 }

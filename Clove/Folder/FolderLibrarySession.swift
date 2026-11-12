@@ -478,6 +478,7 @@ final class FolderLibrarySession: FolderLibrary {
             await reopen(recent) == nil
         else { throw RenameFlowError.rescanFailed }
         await scanTask?.value
+        guard completedScanStatus == .complete else { throw RenameFlowError.rescanFailed }
     }
 
     // MARK: - Entry

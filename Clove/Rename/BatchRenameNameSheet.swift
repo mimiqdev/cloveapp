@@ -35,6 +35,7 @@ struct BatchRenameNameSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(flow.isRunning ? .hidden : .visible)
         .interactiveDismissDisabled(flow.isRunning)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.rename.nameSheet")
         .task(id: flow.options) {
             await flow.prepare(rejectsFolderName: store.settings.rejectsFolderName)

@@ -15,6 +15,9 @@ final class CloveFlowTests: XCTestCase {
         let first = element(app, "clove.rename.tile.mmq02678")
         third.press(forDuration: 0.7, thenDragTo: first)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Position 1 of 3"), third))
+        // Ending a drag above the grid must release the lifted tile and leave it tappable.
+        third.press(forDuration: 0.7, thenDragTo: element(app, "clove.rename.cancel"))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Position 1 of 3"), third))
         capture("rename-order-\(renameDevice)")
         third.tap()
         XCTAssertTrue(element(app, "clove.rename.viewer").waitForExistence(timeout: 5))
@@ -62,7 +65,9 @@ final class CloveFlowTests: XCTestCase {
         prefix.typeText("Test_")
         app.staticTexts["Rename 3 photos"].tap()
         XCTAssertTrue(element(app, "clove.rename.replacementCount").waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Replaces a file with this name"].exists)
+        XCTAssertTrue(
+            element(app, "clove.rename.preview.mmq02678").label.contains(
+                "Replaces a file with this name"))
         let problem = element(app, "clove.rename.preview.mmq02680")
         if !problem.isHittable { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(problem.label.contains("More than one sidecar matches this photo."))
