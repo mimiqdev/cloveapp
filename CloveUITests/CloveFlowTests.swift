@@ -5,6 +5,65 @@ import XCTest
 ///
 /// `mise run ui-flows` runs them; the smoke test is `CloveSmokeTests`.
 final class CloveFlowTests: XCTestCase {
+    /// Run on a throwaway iPad with CLOVE_SIM_DEVICE_TYPE; the default iPhone gate skips it.
+    @MainActor
+    func testIPadSidebarFiltersAndFullScreenDetail() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        let sidebar = element(app, "clove.sidebar")
+        XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.grid.filter").exists)
+        let title = element(app, "clove.grid.title")
+        XCTAssertEqual(title.label, "All")
+        let move = element(app, "clove.grid.moveRejects")
+        XCTAssertTrue(move.exists)
+        XCTAssertLessThan(abs(move.frame.midY - title.frame.midY), 40)
+        XCTAssertEqual(move.frame.width, 40, accuracy: 1)
+        XCTAssertFalse(app.staticTexts["Analyzed"].exists)
+        for theme in ["light", "dark"] {
+            element(app, "clove.grid.more").tap()
+            app.buttons["Settings"].tap()
+            XCTAssertFalse(sidebar.exists)
+            chooseTheme(theme, app)
+            let back = element(app, "clove.nav.back")
+            XCTAssertEqual(back.label, "Back")
+            back.tap()
+            XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+            capture("ipad-sidebar-grid-\(theme)")
+        }
+        element(app, "clove.sidebar.rejected").tap()
+        XCTAssertTrue(waitForLabel("Rejected", title))
+        XCTAssertTrue(element(app, "clove.sidebar.rejected").isSelected)
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02680").exists)
+        let rejected = element(app, "clove.grid.photo.mmq02679")
+        XCTAssertTrue(rejected.waitForExistence(timeout: 5))
+        rejected.tap()
+        let detail = element(app, "clove.detail")
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        XCTAssertFalse(sidebar.exists)
+        XCTAssertFalse(element(app, "clove.grid").exists)
+        XCTAssertGreaterThan(detail.frame.width, app.frame.width * 0.95)
+        let back = element(app, "clove.nav.back")
+        XCTAssertEqual(back.label, "Back")
+        capture("ipad-detail-rejected-back")
+        back.tap()
+        XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.label, "Rejected")
+        XCTAssertTrue(element(app, "clove.sidebar.rejected").isSelected)
+        element(app, "clove.sidebar.folder.DCIM/101CAM").tap()
+        XCTAssertTrue(waitForLabel("DCIM/101CAM", title))
+        XCTAssertFalse(rejected.exists)
+        element(app, "clove.sidebar.label.red").tap()
+        XCTAssertTrue(waitForLabel("Red", title))
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 5))
+        element(app, "clove.sidebar.all").tap()
+        XCTAssertTrue(waitForLabel("All", title))
+    }
+
     @MainActor
     func testGridAndDetailControls() {
         let app = launchSample()

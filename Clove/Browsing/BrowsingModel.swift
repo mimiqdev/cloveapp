@@ -70,6 +70,24 @@ final class BrowsingModel {
     /// Label filtering is a presentation filter over the same ordered photos.
     var labelFilter: LabelColour?
 
+    /// Sidebar and regular-width navigation use the same name for the active filter.
+    var filterTitle: String {
+        if let labelFilter { return labelFilter.rawValue }
+        switch state.filter {
+        case .all: return "All"
+        case .unmarked: return "Unmarked"
+        case .rejected: return "Rejected"
+        case .ratedAtLeast(let rating): return "★\(rating.starCount ?? 0)+"
+        case .subfolder(let path): return path.isEmpty ? folderTitle : path
+        }
+    }
+
+    var folderSource: String? {
+        recents.first { $0.identity == state.folder }.map { RecentFolderSummary.location(for: $0) }
+    }
+
+    var sidebarCounts: SidebarCounts { SidebarCounts(photos: allPlacedPhotos) }
+
     /// All placed photos, used for the filter menu's counts.
     var allPlacedPhotos: [GridPhoto] {
         PhotoOrdering(photos: storedPhotos).photos(order: state.order, matching: .all)
@@ -1080,6 +1098,11 @@ final class BrowsingModel {
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
         refresh()
+        if case .subfolder(let path) = state.filter,
+            !storedPhotos.contains(where: { $0.id.relativeFolderPath == path })
+        {
+            state.filter = .all
+        }
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change. Detail takes the source bound to the same folder.
         thumbnails = library.thumbnails

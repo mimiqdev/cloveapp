@@ -1,31 +1,37 @@
 import CloveCore
 import SwiftUI
 
-/// The browsing shell: one browsing state, drawn by whichever layout the available width allows
-/// (PRD P0-13, P0-14, G1 fold-state row).
-///
-/// Compact width shows one screen at a time behind a back button; regular width shows the grid
-/// beside detail. Both read the same ``BrowsingModel``, so a fold, an
-/// unfold or a resize changes only which layout draws the state (G1 fold-state row). The choice
-/// reads the width class the view is handed, never a device name or model.
+/// One browsing state across widths: sidebar and grid at regular width, one screen at compact
+/// width. Detail and Settings occupy the whole window, preserving the model's current filter.
 struct BrowseShell: View {
-    /// The scene's browsing state and the operations the screens perform on it.
     let browsing: BrowsingModel
-
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    private var isRegular: Bool { horizontalSizeClass == .regular }
+
     var body: some View {
-        Group {
-            if usesSplitLayout {
-                splitLayout
-            } else {
-                compactLayout
+        NavigationStack {
+            Group {
+                if isRegular, browsing.state.route == .grid {
+                    NavigationSplitView {
+                        FolderSidebar(browsing: browsing)
+                            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+                            .toolbar(.hidden, for: .navigationBar)
+                    } detail: {
+                        GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+                            .toolbar(.hidden, for: .navigationBar)
+                    }
+                    .navigationSplitViewStyle(.balanced)
+                } else {
+                    screen(for: browsing.state.route)
+                }
             }
+            .browsingChrome(
+                title: title, browsing: browsing,
+                backTitle: isRegular && browsing.state.folder != nil ? browsing.filterTitle : nil)
         }
         .overlay(alignment: .bottom) {
-            if !usesSplitLayout, browsing.state.route == .detail,
-                browsing.isSaveFailureToastVisible
-            {
+            if browsing.state.route == .detail, browsing.isSaveFailureToastVisible {
                 Toast(
                     message: BrowsingModel.saveFailureToastMessage,
                     identifier: "clove.save.toast"
@@ -42,49 +48,6 @@ struct BrowseShell: View {
         }
     }
 
-    /// Compact width: one screen at a time (PRD single-screen iPhone).
-    private var compactLayout: some View {
-        NavigationStack {
-            screen(for: browsing.state.route)
-                .browsingChrome(title: title, browsing: browsing)
-        }
-    }
-
-    /// Regular width: the grid with detail (PRD iPad and Duo inner screen).
-    ///
-    /// Entry and settings keep one column, because they have no second pane to fill.
-    private var splitLayout: some View {
-        NavigationStack {
-            Group {
-                if browsing.state.route == .entry || browsing.state.route == .settings {
-                    screen(for: browsing.state.route)
-                } else {
-                    HStack(spacing: 0) {
-                        GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
-                            .frame(minWidth: 320, idealWidth: 420, maxWidth: 560)
-                        Divider()
-                        detailColumn
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                }
-            }
-            .browsingChrome(title: title, browsing: browsing)
-        }
-    }
-
-    /// The wide layout's second pane: detail, or what a tap opens.
-    @ViewBuilder
-    private var detailColumn: some View {
-        switch browsing.state.route {
-        case .detail:
-            DetailScreen(browsing: browsing)
-        default:
-            ContentUnavailableView(
-                "No photo", systemImage: "photo", description: Text("Choose a photo in the grid."))
-        }
-    }
-
-    /// One screen for a route (PRD P0-13).
     @ViewBuilder
     private func screen(for route: BrowserRoute) -> some View {
         switch route {
@@ -99,31 +62,21 @@ struct BrowseShell: View {
         }
     }
 
-    /// The title the route's screen shows.
     private var title: String {
         switch browsing.state.route {
-        case .entry:
-            "Clove"
-        case .grid:
-            "Photos"
-        case .detail:
-            browsing.currentPhoto?.fileName ?? "Photo"
-        case .settings:
-            "Settings"
+        case .entry: "Clove"
+        case .grid: "Photos"
+        case .detail: browsing.currentPhoto?.fileName ?? "Photo"
+        case .settings: "Settings"
         }
     }
-
-    /// Whether the available width fits the grid beside the detail (G1 fold-state row).
-    ///
-    /// A half-folded or narrow window is compact and a wide one splits. P3 adds the half-folded
-    /// Duo's hinge avoidance on top of this decision, without moving any state out of the model.
-    private var usesSplitLayout: Bool { horizontalSizeClass == .regular }
 }
 
 extension View {
-    /// Shared navigation for browsing, with Entry's own header and Settings' Done action
-    /// (PRD P0-13; handoff Entry and Settings).
-    func browsingChrome(title: String, browsing: BrowsingModel) -> some View {
+    /// Entry owns its header; regular-width Settings returns to the named grid filter.
+    func browsingChrome(title: String, browsing: BrowsingModel, backTitle: String? = nil)
+        -> some View
+    {
         self
             .navigationTitle(
                 browsing.state.route == .grid || browsing.state.route == .detail ? "" : title
@@ -134,8 +87,19 @@ extension View {
                 for: .navigationBar
             )
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if browsing.state.route == .settings, let backTitle {
+                        Button {
+                            browsing.back()
+                        } label: {
+                            Label(backTitle, systemImage: "chevron.left")
+                        }
+                        .accessibilityLabel("Back")
+                        .accessibilityIdentifier("clove.nav.back")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if browsing.state.route == .settings {
+                    if browsing.state.route == .settings, backTitle == nil {
                         Button("Done") { browsing.back() }
                             .accessibilityIdentifier("clove.nav.back")
                     } else if browsing.state.route == .entry {

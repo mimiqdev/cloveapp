@@ -4,7 +4,7 @@ import UIKit
 
 /// The grid's collection view, wrapped for SwiftUI (PRD Grid, P0-03, P0-11).
 ///
-/// A compositional layout draws three columns at compact width and five at regular width, taken
+/// A compositional layout draws three columns at compact width and adaptive columns at regular width, taken
 /// from the width the view is handed and never from a device check (PRD Grid). A diffable data
 /// source tracks each cell by its stable ``GridCellItem/ID``, so a scan batch, a filter or a
 /// group refinement moves cells rather than rebuilding the grid.
@@ -99,18 +99,27 @@ struct GridCollectionView: UIViewRepresentable {
         for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
             ofKind: UICollectionView.elementKindSectionFooter)
         {
-            let columns = context.environment.horizontalSizeClass == .regular ? 5 : 3
+            let columns = Self.columns(
+                width: collectionView.bounds.width,
+                regular: context.environment.horizontalSizeClass == .regular)
             footer.configure(
                 count: placeholderCount, columns: columns, theme: context.environment.cloveTheme)
         }
     }
 
-    /// Three columns at compact width, five at regular width, from a square-ish cell (PRD Grid).
+    /// About six square tiles beside the sidebar on an 11-inch iPad in landscape.
+    private static func columns(width: CGFloat, regular: Bool) -> Int {
+        regular ? max(1, Int((width + 1.5) / (140 + 1.5))) : 3
+    }
+
+    /// Compact keeps three columns; regular width fits tiles at a minimum of 140 points.
     private static func makeLayout(placeholderCount: @escaping () -> Int)
         -> UICollectionViewCompositionalLayout
     {
         UICollectionViewCompositionalLayout { _, environment in
-            let columns = environment.traitCollection.horizontalSizeClass == .regular ? 5 : 3
+            let columns = columns(
+                width: environment.container.effectiveContentSize.width,
+                regular: environment.traitCollection.horizontalSizeClass == .regular)
             let spacing: CGFloat = 1.5
             let side =
                 (environment.container.effectiveContentSize.width - CGFloat(columns - 1) * spacing)
@@ -223,7 +232,9 @@ extension GridCollectionView {
                 let footer = view.dequeueReusableSupplementaryView(
                     ofKind: kind, withReuseIdentifier: "placeholders", for: indexPath)
                 if let footer = footer as? GridPlaceholderFooter {
-                    let columns = view.traitCollection.horizontalSizeClass == .regular ? 5 : 3
+                    let columns = GridCollectionView.columns(
+                        width: view.bounds.width,
+                        regular: view.traitCollection.horizontalSizeClass == .regular)
                     footer.configure(
                         count: self.placeholderCount, columns: columns, theme: self.theme)
                 }
