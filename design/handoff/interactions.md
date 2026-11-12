@@ -80,9 +80,10 @@ Photo only ──Back──▶ Grid
 ```
 
 - The divider snaps only to **30/70** or **photo only**. It never rests at 50/50 or on the fold.
-- **The dock** (right column, top to bottom): Back; Filter, "…", Info; ★ rating, Reject, Label (only while a photo is open); Undo, Move Rejects. There are no buttons over the grid or the photo.
-- **★ button**: tap and slide up or down to change the rating. A vertical star bar opens to the left of the dock and fills from the bottom; release commits. A tap without sliding opens the bar **(proposed)**.
-- **Label circle**: tap it to open a horizontal color row beside the dock, with the current color ringed. Picking closes it.
+- **The dock** (right column, top to bottom): Back; Filter, "…", Info; Undo, Move Rejects. There are no buttons over the grid or the photo.
+- **Marking capsule** (owner change, #200): Reject, the stars and the label circle form one horizontal marking capsule in its own reserved layout row beneath the right-hand photo, inside the photo pane. The stars work as in the iPhone capsule: tap to rate, tap the current rating to clear. The label circle opens the color picker above the capsule. Marking never competes with system island/status activity for toolbar space, and there are no marking items in the side toolbar. The cover keeps its compact dock controls.
+- **Fit containment** (#199): in expanded Duo the fitted photo stays stationary while a horizontal drag is in progress; the swipe still commits navigation on release. Photo pixels never draw over the divider or the left grid, including during transitions. Zoomed panning stays inside the pane and returning to fit centers the photo.
+- **Group members** (owner change, #198): while the photo on screen belongs to a group, the left pane shows that group's member thumbnails (in grid order, respecting the filter) with the current member ringed, instead of the collapsed stack. Tapping a member changes the preview and its marks; navigation and auto-advance keep the current member visible. Back — or navigating out of the group — returns to the folder grid with its browsing position.
 - In photo focus, tapping a grid tile changes the photo, and the swipe gestures on the photo work as on iPhone.
 
 ## Duo half fold (MVP behavior)

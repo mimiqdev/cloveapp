@@ -183,15 +183,16 @@ The iPad frames were drawn before the sidebar (#170) and the detail rail (#174) 
 - **The right dock** is a vertical column shared with the status bar, made of glass capsules from top to bottom:
   1. **Back**, on its own, at the top under the status bar.
   2. **View tools**: Filter, "…", Info.
-  3. **Marks**, only while a photo is open: one star button showing the rating ("★ 2"), the reject circle, and one label circle showing the current color.
-  4. **Bottom**: Undo, Move Rejects.
+  3. **Bottom**: Undo, Move Rejects.
   The capsules are centered under the signal icon. The grid and photo have no buttons over them.
+- **Marking capsule** (owner change, #200): while a photo is open, Reject, the stars and the label circle sit in one horizontal marking capsule in its own reserved row beneath the right-hand photo, inside the photo pane — not in the side toolbar, so system island/status activity cannot push marking into overflow or cover the image. The stars rate and clear like the iPhone capsule; the label circle opens the color picker above the capsule. The cover keeps its compact dock controls.
+- **Group members** (owner change, #198): while the photo on screen belongs to a group, the left pane shows the group's member thumbnails with the current member ringed, in place of the collapsed stack; Back returns to the folder grid.
+- **Fit containment** (#199): the fitted photo never drags over the divider or left grid; it stays stationary during a fit drag, and the pane clips its pixels.
 - **Grid (default)**: a full-width 6-column grid. The dock shows Back, view tools and the bottom capsule.
 - **Photo focus 30/70**: tapping a photo splits the screen into the grid (30%) and the photo (70%). An 8 pt gutter with a hairline and a drag handle separates them. The split is never at 50/50 and never on the fold.
 - **Photo only**: sliding the divider all the way left gives an iPad-style detail: a full-width photo, the filename and counter centered at the top, and the filmstrip (with collapsed group stacks) at the bottom.
-- **Dock star bar**: sliding on the star button opens a vertical star bar to the left of the dock. It fills from the bottom, and the button shows the live value.
-- **Rejected**: the dock's reject circle is filled, the star button and label circle go neutral, and the corner glyph sits in the photo pane's top-trailing corner. Nothing on the Duo shows a save dot or "Saved".
-- **Dock label picker**: tapping the label circle opens a horizontal row of colors (none, red, yellow, green, blue, purple) beside it, with the current color ringed.
+- **Rejected**: the capsule's reject circle is filled, the stars and label circle go neutral, and the corner glyph sits in the photo pane's top-trailing corner. Nothing on the Duo shows a save dot or "Saved".
+- **Cover dock pickers** (cover only after #200): sliding on the dock's star button opens a vertical star bar to the left of the dock, filling from the bottom with the live value on the button. Tapping the dock's label circle opens a horizontal row of colors (none, red, yellow, green, blue, purple) beside it, with the current color ringed.
 
 ## 10 Duo half fold (quick refresh; the dedicated layout is 1.1)
 

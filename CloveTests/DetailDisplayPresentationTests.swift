@@ -498,6 +498,31 @@ struct DetailDisplayPresentationTests {
         #expect(image.image?.cgImage === replacement)
     }
 
+    /// The expanded Duo's fit drag commits navigation without sliding the photo (#199).
+    @Test func confinedFitNavigationKeepsThePhotoStationaryAndStillNavigates() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.keepsFitStationary = true
+        preview.hasNext = true
+        preview.setImage(try testPixels(gray: 0))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        var navigations = 0
+        preview.onEdgeTap = { _ in navigations += 1 }
+        // The pane boundary clips whatever a drag or transition would draw outside it.
+        #expect(preview.clipsToBounds)
+        let pan = DetailTestPan()
+        pan.travel = CGPoint(x: -15, y: 0)
+        try #require(preview.gestureRecognizerShouldBegin(pan))
+        preview.handleMarkingPan(pan)
+        pan.sampleState = .changed
+        pan.travel = CGPoint(x: -180, y: 0)
+        preview.handleMarkingPan(pan)
+        #expect(scroll.transform == .identity)
+        pan.sampleState = .ended
+        preview.handleMarkingPan(pan)
+        #expect(navigations == 1)
+        #expect(scroll.transform == .identity)
+    }
+
     /// A tap that begins while zoomed must never reach chrome, even when the double tap that
     /// returns the view to fit is delivered before it (#131).
     @Test func chromeTapIsLiveOnlyAtFit() throws {

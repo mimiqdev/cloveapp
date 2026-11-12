@@ -76,6 +76,7 @@ struct DetailMarkingView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.displayScale) private var displayScale
     @State private var hidesChrome = false
     @State private var windowID = UUID()
@@ -259,12 +260,20 @@ struct DetailMarkingView: View {
                     Button("Info", systemImage: "info.circle") { showsInformation = true }
                         .accessibilityIdentifier("clove.detail.info")
                 } marks: {
-                    DuoMarkControls(
-                        photoID: photo.id, marks: displayMarks, settings: settings,
-                        previewRating: swipeFeedback.rating, canMark: browsing.canMark,
-                        showsStars: $showsToolbarStars, dragRating: $toolbarDragRating,
-                        rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
-                        toggleReject: { toggleReject() }, markingBegan: actions.markingSwipeBegan)
+                    // Expanded Duo marks live in the capsule row beneath the photo, so
+                    // system status activity cannot push them into overflow (#200). The
+                    // cover keeps the compact dock controls.
+                    if isDuoExpanded {
+                        Optional<ToolbarItem<Void, EmptyView>>.none
+                    } else {
+                        DuoMarkControls(
+                            photoID: photo.id, marks: displayMarks, settings: settings,
+                            previewRating: swipeFeedback.rating, canMark: browsing.canMark,
+                            showsStars: $showsToolbarStars, dragRating: $toolbarDragRating,
+                            rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
+                            toggleReject: { toggleReject() },
+                            markingBegan: actions.markingSwipeBegan)
+                    }
                 } bottom: {
                     duo.bottom
                 }
@@ -277,22 +286,24 @@ struct DetailMarkingView: View {
             .toolbarVerticalBehavior(.automatic)
             .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
             .background {
-                ToolbarRatingGesture(
-                    rating: displayMarks.rating, enabledRatings: settings.enabledRatings,
-                    canMark: browsing.canMark, began: actions.markingSwipeBegan,
-                    preview: {
-                        toolbarDragRating = $0
-                        showsToolbarStars = true
-                    },
-                    commit: {
-                        rate($0, togglesCurrent: false)
-                        toolbarDragRating = nil
-                        showsToolbarStars = false
-                    },
-                    cancel: {
-                        toolbarDragRating = nil
-                        showsToolbarStars = false
-                    })
+                if !isDuoExpanded {
+                    ToolbarRatingGesture(
+                        rating: displayMarks.rating, enabledRatings: settings.enabledRatings,
+                        canMark: browsing.canMark, began: actions.markingSwipeBegan,
+                        preview: {
+                            toolbarDragRating = $0
+                            showsToolbarStars = true
+                        },
+                        commit: {
+                            rate($0, togglesCurrent: false)
+                            toolbarDragRating = nil
+                            showsToolbarStars = false
+                        },
+                        cancel: {
+                            toolbarDragRating = nil
+                            showsToolbarStars = false
+                        })
+                }
             }
         }
     }
@@ -303,6 +314,21 @@ struct DetailMarkingView: View {
             FolderSaveBanner(
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             previewArea
+            // The marking capsule gets its own reserved row beneath the fitted photo,
+            // never over the image and never in the system side toolbar (#200).
+            if isDuoExpanded && chromeIsVisible {
+                DetailMarkCapsule(
+                    marks: displayMarks, settings: settings,
+                    previewRating: swipeFeedback.rating,
+                    rate: { rate($0) }, label: { choose($0) },
+                    toggleReject: { toggleReject() },
+                    identifier: "clove.duo.capsule", labelPickerIdentifier: "clove.duo.labels"
+                )
+                .disabled(!browsing.canMark)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .transition(.opacity)
+            }
             if showsFilmstrip && chromeIsVisible {
                 DetailFilmstrip(
                     photos: order, current: photo.id, thumbnails: browsing.thumbnails,
@@ -447,7 +473,8 @@ struct DetailMarkingView: View {
             onSwipeBegin: { actions.markingSwipeBegan() },
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
-            probe: probe
+            probe: probe,
+            keepsFitStationary: isDuoExpanded
         )
         .accessibilityLabel(
             displayMarks.isRejected ? "\(photo.fileName), Rejected" : photo.fileName

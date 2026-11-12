@@ -136,9 +136,17 @@ struct DetailZoomView: UIViewRepresentable {
     /// (PRD In-group culling, synchronized zoom).
     var probe: DetailZoomProbe?
 
+    /// Whether the fitted photo stays still while a horizontal drag is in progress.
+    ///
+    /// The expanded Duo's split places another pane beside the preview, so the navigation
+    /// drag's slide must not carry the fitted photo over the divider (#199). The gesture
+    /// still commits navigation on release; the iPhone, iPad and cover keep the slide.
+    var keepsFitStationary = false
+
     func makeUIView(context: Context) -> DetailZoomContainerView {
         let view = DetailZoomContainerView()
         probe?.container = view
+        view.keepsFitStationary = keepsFitStationary
         view.onZoomChange = onZoomChange
         view.onEdgeTap = onEdgeTap
         view.onDoubleTap = onDoubleTap
@@ -153,6 +161,7 @@ struct DetailZoomView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: DetailZoomContainerView, context: Context) {
+        view.keepsFitStationary = keepsFitStationary
         view.onZoomChange = onZoomChange
         view.onEdgeTap = onEdgeTap
         view.onDoubleTap = onDoubleTap
@@ -225,9 +234,16 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         didSet { updateGestureAvailability() }
     }
 
+    /// The fitted photo stays still during a navigation drag where a pane boundary must
+    /// not be crossed (#199); navigation still commits on release.
+    var keepsFitStationary = false
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        // The pane boundary is a hard edge: no drag, zoom or transition may draw photo
+        // pixels over the neighbouring grid or divider (#199).
+        clipsToBounds = true
         scrollView.delegate = self
         scrollView.minimumZoomScale = 1
         scrollView.maximumZoomScale = 1
@@ -543,6 +559,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             fallthrough
         case .changed:
             scrollView.layer.removeAllAnimations()
+            guard !keepsFitStationary else { break }
             let offset = NavigationSwipeRules.offset(
                 travel: travel, width: Double(bounds.width),
                 hasPrevious: hasPrevious, hasNext: hasNext)

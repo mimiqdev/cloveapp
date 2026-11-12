@@ -152,7 +152,7 @@ struct GridScreen: View {
                 DetailScreen(
                     browsing: browsing,
                     duo: DuoDetailLayout(
-                        split: $split, grid: AnyView(grid), filter: AnyView(filterButton),
+                        split: $split, grid: AnyView(duoLeftPane), filter: AnyView(filterButton),
                         more: AnyView(moreMenu), bottom: AnyView(dockBottom),
                         showsGrid: isDuoExpanded))
             } else {
@@ -197,6 +197,41 @@ struct GridScreen: View {
         } else {
             grid
         }
+    }
+
+    /// The expanded Duo's left pane: while the photo on screen belongs to a group, its
+    /// members fill the pane with the current one ringed, so the person can compare and
+    /// pick members without closing the preview (#198). Anything else keeps the folder
+    /// grid, and Back or navigating out of the group returns to it with its position.
+    @ViewBuilder private var duoLeftPane: some View {
+        let members = duoGroupMembers
+        if members.isEmpty {
+            grid
+        } else {
+            GridCollectionView(
+                items: GridDisplay(photos: members, groups: [], groupsEnabled: false).cells,
+                currentPhoto: browsing.state.currentPhoto,
+                groups: [], shownPhotos: Set(members.map(\.id)),
+                selection: [], thumbnails: thumbnails,
+                columnCount: 2, highlightsCurrentPhoto: true,
+                openPhoto: { browsing.openPhoto($0) },
+                // Browsing only: selection and group stacks belong to the folder grid.
+                openGroup: { _ in },
+                beginSelection: { _ in }, toggleSelection: { _ in }
+            )
+            .background(Color.clove.bg.canvas)
+            .ignoresSafeArea(.container, edges: .bottom)
+            .accessibilityIdentifier("clove.duo.groupMembers")
+        }
+    }
+
+    /// The shown members of the current photo's group, in the grid's order and filter.
+    private var duoGroupMembers: [GridPhoto] {
+        guard isDuoExpanded, browsing.state.route == .detail,
+            let group = browsing.currentGroup
+        else { return [] }
+        let members = Set(group.members)
+        return browsing.photos.filter { members.contains($0.id) }
     }
 
     private var grid: some View {
