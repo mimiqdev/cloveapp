@@ -67,16 +67,12 @@ Counts and companion text remain visible. Only access problems add a subtitle in
 
 Show one toast per failure burst, above the bottom edge in the Move rejects toast position. Hide it after about six seconds. Announce `save.toast.failed` with VoiceOver, including for partial batch failures. Re-read failed photos and display their file's marks. Drive loss uses the error banner instead.
 
-## Group review
+## Groups in detail
 | Key | String |
 |---|---|
-| group.title | Group · {n} photos |
-| group.subtitle | {n} undecided |
 | group.rejectRest | Reject {n} unmarked |
-| group.continue | Continue → |
-| group.more.undecided | Undecided only |
 
-Keep the group count visible without a save indicator.
+The pill sits centred in its own row above the filmstrip. Hide it with chrome, while marking is off, or when nothing remains to reject. Nothing replaces it.
 
 ## Move Rejects
 | Key | String |

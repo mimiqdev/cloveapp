@@ -1,5 +1,3 @@
-import Foundation
-
 /// What to do with a saved scene that is waiting for its folder's scan (PRD P0-02, P0-14).
 public enum PendingBrowsingRestoreDecision: Hashable, Sendable {
     /// The folder now holds every photo the saved state names, so the saved state is validated
@@ -20,7 +18,7 @@ public enum PendingBrowsingRestoreDecision: Hashable, Sendable {
 /// A launch reopens the saved folder's grid at once, because a large RAW folder's metadata read
 /// can take a while and entry must not wait for it. The saved state cannot be validated at that
 /// moment: U1's ``BrowsingState/restored(from:)`` drops a photo the folder does not hold yet, so
-/// validating early would drop the saved photo, selection and group place on every launch.
+/// validating early would drop the saved photo and selection on every launch.
 ///
 /// The pending state therefore applies once the folder holds every photo it names, and always
 /// once the scan has finished, because a photo that is gone by then has to fall back the way U1
@@ -29,13 +27,6 @@ public enum PendingBrowsingRestoreDecision: Hashable, Sendable {
 /// restored folder, another folder opened, or a folder that stopped answering drops it, so a
 /// restore can never overwrite what the user did after the launch. The decision is pure: it reads
 /// no file and changes nothing.
-///
-/// A saved group view has one more input: grouping names its groups after the scan, so the saved
-/// group key cannot be checked until grouping published its first result (PRD P0-11, PRD Similar
-/// groups steps 2–3). A saved group view therefore waits for that publication instead of dropping
-/// just because it has not arrived yet; the folder library publishes the time stage — or an empty
-/// result when grouping is off — before it reports the scan finished, so the wait ends with the
-/// scan.
 public struct PendingBrowsingRestore: Hashable, Sendable {
     /// The state read back from the scene's storage.
     public let saved: BrowsingState
@@ -55,35 +46,24 @@ public struct PendingBrowsingRestore: Hashable, Sendable {
     ///
     /// A state that differs from ``shown`` means the user navigated, another folder replaced the
     /// saved one, or the session ended; the pending state is dropped rather than applied late.
-    /// Before the scan finishes, the saved photo, selection and group-view photo all have to be
-    /// present, because validating earlier would drop them. Once it has finished — a partial scan
-    /// included — the saved state is validated either way, so a photo that moved or disappeared
-    /// takes U1's fallback (the detail route returns to the grid, the selection drops the missing
-    /// photo, the group view drops or moves) instead of waiting for a photo that will never come.
-    ///
-    /// - Parameter groupsPublished: whether grouping has published a result for this folder at
-    ///   all. A saved group view whose photo the folder holds waits until it has, because the
-    ///   group key it names arrives with that result (PRD P0-11, PRD P0-14).
+    /// Before the scan finishes, the saved photo and selection all have to be present, because
+    /// validating earlier would drop them. Once it has finished — a partial scan included — the
+    /// saved state is validated either way, so a photo that moved or disappeared takes U1's
+    /// fallback (the detail route returns to the grid, the selection drops the missing photo)
+    /// instead of waiting for a photo that will never come.
     public func decision(
-        current: BrowsingState, contents: FolderContents, scanFinished: Bool,
-        groupsPublished: Bool
+        current: BrowsingState, contents: FolderContents, scanFinished: Bool
     ) -> PendingBrowsingRestoreDecision {
         guard current == shown, contents.folder == saved.folder else { return .drop }
         guard scanFinished || namedPhotos.isSubset(of: Set(contents.photos)) else { return .wait }
-        if let position = saved.groupPosition, contents.photos.contains(position.photo),
-            !groupsPublished, contents.group(with: position.group) == nil
-        {
-            return .wait
-        }
         return .apply(saved.restored(from: .available(contents)))
     }
 
-    /// The photos the saved state points at: its current photo, its selection and its group
-    /// view's photo (PRD P0-09, P0-12, P0-14).
+    /// The photos the saved state points at: its current photo and its selection
+    /// (PRD P0-09, P0-14).
     private var namedPhotos: Set<PhotoIdentity> {
         var photos = saved.selection
         if let photo = saved.currentPhoto { photos.insert(photo) }
-        if let photo = saved.groupPosition?.photo { photos.insert(photo) }
         return photos
     }
 }

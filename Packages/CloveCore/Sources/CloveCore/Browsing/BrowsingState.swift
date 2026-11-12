@@ -2,8 +2,7 @@
 ///
 /// G1's fold-state row decides the shape: layout follows the available geometry, so this value
 /// holds no view, column, stack or device fact. A compact stack and a split layout both read it,
-/// which is why switching between them keeps the same folder, photo, filter, selection and group
-/// view (PRD P0-14, G1 fold-state row).
+/// which is why switching between them keeps the same folder, photo, filter and selection.
 ///
 /// The value is the saved unit, never the authority. A folder changes between launches, so
 /// ``BrowsingState/restored(from:)`` narrows a saved state to what the folder holds now before
@@ -41,19 +40,16 @@ public struct BrowsingState: Hashable, Sendable, Codable {
     /// (PRD P0-09, P0-14).
     public var selection: Set<PhotoIdentity>
 
-    /// The group view's place: its group and the photo inside it (PRD P0-12, P0-14).
-    public var groupPosition: BrowsingGroupPosition?
-
     /// The destination the browser shows (PRD P0-13).
     public var route: BrowserRoute
 
     /// Whether the route shows the folder's photos, which needs the folder those photos belong
     /// to (PRD P0-13).
     ///
-    /// A restored scene uses this to tell a grid, detail or group route, which has to wait for
+    /// A restored scene uses this to tell a grid or detail route, which has to wait for
     /// the folder to deliver its photos, from entry or settings, which need none.
     public var showsPhotos: Bool {
-        route == .grid || route == .detail || route == .group
+        route == .grid || route == .detail
     }
 
     /// Collects every part PRD P0-14 preserves, with the launch defaults.
@@ -63,7 +59,6 @@ public struct BrowsingState: Hashable, Sendable, Codable {
         filter: PhotoFilter = .all,
         order: PhotoOrder = .captureTime,
         selection: Set<PhotoIdentity> = [],
-        groupPosition: BrowsingGroupPosition? = nil,
         route: BrowserRoute = .entry
     ) {
         self.folder = folder
@@ -71,26 +66,6 @@ public struct BrowsingState: Hashable, Sendable, Codable {
         self.filter = filter
         self.order = order
         self.selection = selection
-        self.groupPosition = groupPosition
         self.route = route
-    }
-}
-
-/// The group view's place during in-group culling (PRD P0-12, P0-14).
-///
-/// Both halves are needed to come back to the same frame of the same group. The group key is
-/// stable across refinement and Run again (see ``GroupID``), so a restored placeholder can tell
-/// a still-published group from one that split or disappeared.
-public struct BrowsingGroupPosition: Hashable, Sendable {
-    /// The stable group key the view was showing (PRD P0-11).
-    public var group: GroupID
-
-    /// The photo the group view was showing; a member of `group` in a valid state (PRD P0-12).
-    public var photo: PhotoIdentity
-
-    /// Pairs one group with the photo the view is on (PRD P0-12).
-    public init(group: GroupID, photo: PhotoIdentity) {
-        self.group = group
-        self.photo = photo
     }
 }

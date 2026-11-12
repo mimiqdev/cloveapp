@@ -354,9 +354,10 @@ extension CloveFlowTests {
             fourStars.waitForExistence(timeout: 10), "The detail view had no rating buttons")
         fourStars.tap()
 
-        // Only a written mark starts the default next-photo advance, and it follows the pause
-        // (PRD Auto-advance), so the move is the proof the bar's mark was admitted; the grid
-        // reads the rating back below, and the swipe's save state is read in `rateBySwiping`.
+        // Group auto-advance skips the already rejected member. Select it explicitly for the
+        // swipe checks below, which replace its existing Reject with stars.
+        waitForFileName("MMQ02681.ARW", in: app)
+        element(in: app, "clove.detail.filmstrip.mmq02679").tap()
         waitForFileName("MMQ02679.ARW", in: app)
     }
 
@@ -368,12 +369,11 @@ extension CloveFlowTests {
 
         drag(preview, byPointsX: 0, y: -150)
 
-        // The mark is written on release and the default auto-advance follows after 0.3 s.
-        waitForFileName("MMQ02680.ARW", in: app)
+        // The mark advances to the group's remaining unmarked member.
+        waitForFileName("MMQ02681.ARW", in: app)
 
-        // Back to the rated photo: the release position decided the rating, two steps up, and the
-        // write it admitted is confirmed on screen (PRD P0-08).
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
+        // Return to the rated member through the expanded group.
+        element(in: app, "clove.detail.filmstrip.mmq02679").tap()
         waitForFileName("MMQ02679.ARW", in: app)
         let marks = element(in: app, "clove.detail.marks")
         let twoStars = expectation(
@@ -390,8 +390,10 @@ extension CloveFlowTests {
 
         drag(preview, byPointsX: 0, y: 130)
 
-        // Reject is a written mark, so the default auto-advance moves on after the pause; the
-        // grid check below reads the confirmed Reject back from the photo.
+        // Reject also advances within the group. An edge tap then returns to the interleaved
+        // single photo for the general filmstrip and navigation checks.
+        waitForFileName("MMQ02681.ARW", in: app)
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
         waitForFileName("MMQ02680.ARW", in: app)
     }
 
@@ -417,8 +419,7 @@ extension CloveFlowTests {
         XCTAssertTrue(stack.waitForExistence(timeout: 5), "The filmstrip did not stack the group")
         stack.tap()
         waitForFileName("MMQ02678.ARW", in: app)
-        XCTAssertFalse(
-            element(in: app, "clove.group").exists, "The filmstrip stack opened group review")
+        XCTAssertTrue(element(in: app, "clove.detail").exists)
         let member = element(in: app, "clove.detail.filmstrip.mmq02679")
         XCTAssertTrue(
             member.waitForExistence(timeout: 5), "The group did not expand in the filmstrip")

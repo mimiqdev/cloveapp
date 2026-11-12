@@ -1,8 +1,5 @@
 /// The shared culling definition: a rating, colour label or Reject decides a photo.
 extension PhotoMarks {
-    /// Undecided and unmarked mean the same thing in group review and navigation.
-    public var isUndecided: Bool { isUnmarked }
-
     /// Only photos with no rating, label or Reject may be rejected by the finishing action.
     public var isUnmarked: Bool { rating == .unrated && label.isClear && !isRejected }
 

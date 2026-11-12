@@ -20,6 +20,10 @@ This supersedes the save glyphs and save-failure behavior below. Photos, XMP sid
 
 When the drive disconnects, stop the action and write queues and drop the folder's pending and failed marks and their status. Show the photos' last-read marks and the existing disconnected banner. Marking stays off until Reopen. Reopen reads the XMP sidecars fresh; no unfinished edits, retries or conflict state carry across the open. The XMP and photo are the source of truth.
 
+## Groups in detail (owner decision, 2026-11-12)
+
+No group view: detail with an expanded group; Reject N unmarked pill above the strip (owner, 2026-11-12). A grid stack opens the first unmarked member, or the first member if all are marked. Zoom and position stay synced within the group. Auto-advance visits unmarked members, then leaves a finished group for the first photo after it in grid order. The sidebar and saved group routes are deleted without migration. This supersedes the group-screen decisions below.
+
 ## Filmstrip group tap (owner decision, 2026-11-11)
 
 In detail, tapping a collapsed group in the filmstrip jumps to the group's first photo, and the group expands in place on its tint. It no longer opens group review, which replaced the whole filmstrip with the group's photos. Group review opens from the grid's group stack.

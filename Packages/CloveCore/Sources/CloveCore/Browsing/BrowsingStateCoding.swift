@@ -64,7 +64,6 @@ private struct EncodedBrowsingState: Codable {
     var filter: EncodedFilter
     var order: String
     var selection: [EncodedPhoto]
-    var groupPosition: EncodedGroupPosition?
     var route: String
 
     init(_ state: BrowsingState) {
@@ -77,7 +76,6 @@ private struct EncodedBrowsingState: Codable {
         selection = state.selection
             .map(EncodedPhoto.init)
             .sorted { ($0.folder, $0.path, $0.stem) < ($1.folder, $1.path, $1.stem) }
-        groupPosition = state.groupPosition.map(EncodedGroupPosition.init)
         route = state.route.encodedSpelling
     }
 
@@ -94,7 +92,6 @@ private struct EncodedBrowsingState: Codable {
             filter: filter,
             order: order,
             selection: Set(selection.map(\.photo)),
-            groupPosition: groupPosition?.position,
             route: route)
     }
 }
@@ -114,21 +111,6 @@ private struct EncodedPhoto: Codable, Hashable {
     var photo: PhotoIdentity {
         PhotoIdentity(
             folderID: FolderIdentity(rawValue: folder), relativeFolderPath: path, stem: stem)
-    }
-}
-
-/// The group view's place in the stored form (PRD P0-12).
-private struct EncodedGroupPosition: Codable {
-    var group: String
-    var photo: EncodedPhoto
-
-    init(_ position: BrowsingGroupPosition) {
-        group = position.group.rawValue
-        photo = EncodedPhoto(position.photo)
-    }
-
-    var position: BrowsingGroupPosition {
-        BrowsingGroupPosition(group: GroupID(rawValue: group), photo: photo.photo)
     }
 }
 
@@ -193,7 +175,6 @@ private extension BrowserRoute {
         case .entry: "entry"
         case .grid: "grid"
         case .detail: "detail"
-        case .group: "group"
         case .settings: "settings"
         }
     }
@@ -203,7 +184,6 @@ private extension BrowserRoute {
         case "entry": self = .entry
         case "grid": self = .grid
         case "detail": self = .detail
-        case "group": self = .group
         case "settings": self = .settings
         default: return nil
         }

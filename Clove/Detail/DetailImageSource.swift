@@ -55,7 +55,7 @@ struct DetailPhotoWindow: Hashable, Sendable {
     }
 }
 
-/// The shared detail/group view asks only for photo identities and display needs.
+/// Detail asks only for photo identities and display needs.
 /// Folder reads remain admitted through the folder session; the test library
 /// generates its own pixels. Leaving cancels work and releases the full image.
 @MainActor

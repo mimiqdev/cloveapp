@@ -84,7 +84,7 @@ Open a folder or reopen it from Recents → browse, filter, and sort the grid �
 | P0-09 | Long-press the grid to enter multi-select, then write ratings, labels, or Reject in batches. |
 | P0-10 | Move rejects: after user confirmation, move rejected photo sets as one unit, including RAW, JPEG and/or HIF companions, and the matching XMP, into `_Rejected` under the opened folder, preserving the subfolder structure. Never delete or overwrite any file. The user can keep individual rejects in the confirmation, and the move can be undone. The folder name can be changed, or the feature turned off, in Settings. |
 | P0-11 | Similar groups: group photos automatically by capture time and visual similarity when a folder opens, and always offer Run again. Grouping itself never writes marks. It can be turned off. |
-| P0-12 | In-group culling: synchronized zoom for comparison, progressive elimination, and one finishing action, Reject N unmarked. It never rejects a photo that already has a rating or color label. |
+| P0-12 | In-group culling in detail: an expanded filmstrip group, synchronized zoom and position, group auto-advance, and a Reject N unmarked pill above the strip. It protects rated, labeled and rejected photos. |
 | P0-13 | Deliver the single-photo culling flow on both iPhone and iPad. Two-photo comparison on iPad is not in launch scope. |
 | P0-14 | iPhone Duo: use a compact cover-screen layout. Default to a split grid and detail view on the inner screen. Controls must not cross the hinge when half-folded. Preserve the folder, current photo, filters, selection, and write status across folding, unfolding, and window resizing. Overlay and a dedicated half-fold layout move to 1.1. |
 | P0-15 | Use system components with light and dark appearances that follow the system. Ratings use system orange. Reject uses system red. Color labels follow Lightroom color meanings. |
@@ -135,7 +135,7 @@ The behavior below follows the product and UI conclusions and the revisions abov
 - Top filters are All, Unmarked, Rejected, and N stars or higher.
 - Similar-group display:
   - Expanded, the default: show every photo, with each group outlined in blue and labeled with its count.
-  - Collapsed: show one cover cell per group with its count. Tapping it opens the group view.
+  - Collapsed: show one cover cell per group with its count. Tapping it opens detail on the group's first unmarked photo, or its first photo when all are marked.
   - Expanded is the default because grouping refines in the background, which adds and removes cells in the collapsed view. In either mode, refinement must not move the photo the user is looking at.
 - Open detail or similar groups from the grid.
 - Long-press to enter multi-select, then write in batches.
@@ -210,7 +210,7 @@ Auto-advance (Settings):
 - After marking: stay, next photo (default), or next unmarked photo.
 - Marks that trigger advance: ratings and Reject by default. Color labels do not trigger it by default.
 - Pause about 0.3 seconds after marking so the user sees the mark take effect, then advance.
-- In a group view, advance to the next undecided photo in the group. Group-completion behavior is described under In-group culling.
+- Inside a group in detail, advance to the next unmarked member, wrapping within the group. When none is left, including after Reject N unmarked, advance to the first photo after the group in grid order.
 
 Gesture-related settings: gestures on or off, enabled ratings, auto-advance, marks that trigger advance, double-tap behavior (zoom, the default, or off), and keep zoom while navigating (on by default in groups, off in regular detail).
 
@@ -235,33 +235,14 @@ Rules:
 
 ### In-group culling
 
-A burst may contain dozens of photos that differ only in focus, expression, or moment. The group view is built around comparing details, narrowing candidates, and finishing in one action.
+A burst is culled in the same detail view as any other photo. Its group expands in place in the grid-order filmstrip; other groups remain stacked. There is no separate group screen or sidebar.
 
-Layout:
-
-- iPhone: large preview on top, the group's filmstrip below.
-- iPad and Duo inner screen: large preview with a sidebar grid of the group.
-- Every photo shows its rating or Reject state. The top shows Undecided N / M total. Undecided means no rating and no Reject.
-
-Comparison and elimination:
-
-- Synchronized zoom: after zooming into an area in a group, navigating keeps the same zoom level and position. Always on in groups, with no toggle.
-- Rejected photos are dimmed in the filmstrip. With Undecided only on, navigation skips rejected and rated photos.
-- After marking, advance to the next undecided photo in the group.
-
-Finishing action:
-
-| Action | Result |
-| --- | --- |
-| Reject N unmarked | Reject every photo in the group that has no rating, no color label, and no Reject. Shown once any photo in the group is rated or labeled. To keep one photo and reject the rest, rate it, then use this action. |
-
-- It never rejects a photo that already has a rating or color label.
-- It follows batch-write rules for success and failure, and it can be undone as one step.
-
-Group completion:
-
-- Definition: every photo in the group is rated or rejected, or the user ran a finishing action.
-- Setting, After a group is complete: stay in the group, or go to the next group (default). Going to the next group skips completed groups.
+- Moving between members of the same group keeps zoom level and position. Leaving that group follows the detail keep-zoom setting.
+- Rejected thumbnails stay dimmed. Manual navigation follows grid order.
+- With auto-advance on, a triggering mark moves to the next unmarked member, wrapping within the group. When none remains, it moves to the first photo after the group in grid order, including after Reject N unmarked. At the end of the grid it stays.
+- The **Reject N unmarked** pill sits centred in its own row above the filmstrip. It appears only when the visible group has both a rated or labeled photo and an unmarked photo. It rejects only visible photos with no rating, label or Reject.
+- The pill hides when marking is off, when nothing is left to reject, and with the chrome. It never replaces itself with another action or overlaps the capsule or swipe star bar.
+- The action follows batch-write failure rules and undoes as one step. Undo returns to the photo shown when the pill was tapped; undo after a single-photo auto-advance returns to the marked photo.
 
 ### Move rejects
 
@@ -400,10 +381,10 @@ These manual tests determine whether launch meets product requirements. They are
 | P0-09 | Long-press, select multiple photos, and rate them in a batch. Force some writes to fail. Report Saved N photos. M photos couldn't be saved. Successful items stay saved and failed items can be retried separately. |
 | P0-10 | Reject several photos, including RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets across multiple subfolders, then run Move rejects. The confirmation shows the correct count. Afterward, every set's RAW, JPEG and/or HIF companions, and XMP are in the matching subfolders under `_Rejected`, no file was deleted or overwritten, and the photos no longer appear in the grid. A moved RAW set's sidecar holds the rating −1. Forced name collisions add a suffix, and forced partial failures report Moved N photos. M photos couldn't be moved. Running it on a read-only location shows the view-only message. A photo kept in the confirmation stays in place with its rating set to 0. Undo after the move returns every moved file to its original path and writes Reject (−1) again. |
 | P0-11 | Opening a folder with bursts starts grouping automatically: groups appear by time first, then refine, and Run again is available. The photo being viewed does not jump during grouping. Grouping separates by model and serial when present, falling back to model when serial is missing; two same-model bodies shooting the same scene at the same moment are unsupported. Photos with only fallback file times are excluded. Starting values are a gap below 2 seconds and a split above Vision distance 0.5. All XMP is unchanged before and after grouping. Turning similar groups off hides entry points and blue outlines while the main flow still works. |
-| P0-12 | In a group of 20 or more photos: zooming into an area keeps the same position while navigating. Undecided only skips marked photos. Reject N unmarked rejects only photos with no rating, label, or Reject; photos that already had ratings or labels are not rejected. A completed group advances to the next group according to settings. Reject N unmarked can be undone as one step. |
+| P0-12 | A stack opens detail on its first unmarked photo with its filmstrip group expanded. In a group of 20 or more photos, navigation keeps zoom and position. The pill rejects only unmarked photos and undoes as one step, returning to the photo shown at submission. Auto-advance visits unmarked members, then the first photo after the group in grid order. |
 | P0-13 | Complete the flow on both iPhone and iPad: open folder → grid → mark in detail → cull a group → move rejects → quit and reopen with marks intact. |
-| P0-14 | Open and mark on the Duo cover screen. Unfold and retain the same folder, photo, marks, and group-view position, with grid and detail split by default. Half-folded filters, marking controls, and bottom bar never cross the hinge. |
-| P0-15 | Switching system appearance updates entry, grid, detail, similar groups, the group view, and all Duo postures between light and dark. |
+| P0-14 | Open and mark on the Duo cover screen. Unfold and retain the same folder, photo, marks, and expanded filmstrip group in detail, with grid and detail split by default. Half-folded filters, marking controls, and bottom bar never cross the hinge. |
+| P0-15 | Switching system appearance updates entry, grid, detail with expanded filmstrip groups, similar groups, and all Duo postures between light and dark. |
 
 Additional interoperability acceptance: alternate between Clove and Photo Mechanic or Lightroom on the same RAW folder. Each reads the other's XMP ratings and labels.
 

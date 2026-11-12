@@ -7,16 +7,15 @@ import SwiftUI
 ///
 /// The screen keeps no browsing state of its own. The current photo, the grid's order and filter,
 /// the marks and the pixels all come from ``BrowsingModel`` and the open folder's
-/// ``DetailImageSource``; the preview, its zoom and the marking controls are ``DetailMarkingView``,
-/// which the group view draws too, so both screens mark through one path. This screen supplies
-/// what is its own: the grid's order an edge tap moves through, the filmstrip below the preview,
-/// and the auto-advance that follows a written mark in that order (PRD Auto-advance).
+/// ``DetailImageSource``; the preview, its zoom and the marking controls are ``DetailMarkingView``.
+/// This screen supplies the grid's order an edge tap moves through, the expandable filmstrip,
+/// and the auto-advance that follows a written mark (PRD Auto-advance; PRD In-group culling).
 ///
 /// Settings come from the app-wide ``SettingsStore`` in the environment, so a change on the
 /// settings screen applies the next time this screen draws; the screen reads no storage itself
 /// (PRD Gesture-related settings).
 ///
-/// The handoff's capsule and filmstrip float over the stage. Undo retains its existing wiring.
+/// The handoff's capsule and filmstrip float over the stage. Undo uses the model's action snapshot.
 struct DetailScreen: View {
     /// The scene's browsing state and the operations this screen performs on it.
     let browsing: BrowsingModel
@@ -75,7 +74,6 @@ struct DetailScreen: View {
             settings: settings,
             images: images,
             displayMode: store.photoDisplayMode,
-            zoomPolicy: .detail(settings),
             order: browsing.photos,
             actions: actions)
     }
@@ -88,7 +86,21 @@ struct DetailScreen: View {
             marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
             step: { offset in showPhoto(offset: offset) },
             markingSwipeBegan: { autoAdvance.cancel() },
-            openPhoto: { openPhoto($0) })
+            openPhoto: { openPhoto($0) },
+            finishGroup: { plan in
+                guard browsing.canMark else { return }
+                autoAdvance.cancel()
+                guard let group = browsing.currentGroup else { return }
+                let navigation = GroupPhotoNavigation(group: group)
+                let next = navigation.photoAfterGroup(
+                    orderedPhotos: browsing.allPlacedPhotos, groups: browsing.groups,
+                    visiblePhotos: Set(browsing.photos.map(\.id)))
+                let advance = rules.autoAdvancePlan(
+                    after: .reject, from: plan.currentPhoto, photos: browsing.photos,
+                    group: next.map(GroupAdvance.nextUndecidedPhoto) ?? .complete)
+                browsing.runGroupFinishing(plan)
+                schedule(advance)
+            })
     }
 
     // MARK: - Navigation
@@ -115,13 +127,25 @@ struct DetailScreen: View {
     /// Starts the pause-then-advance one written mark asks for (PRD Auto-advance).
     ///
     /// C13 decides where to go from the grid's current order and filter, so a filtered grid only
-    /// offers the photos it shows, and the plan carries the marked photo so undo can return there
-    /// (PRD Undo row). Every plan is recorded, including the one that stays, so undo always reads
-    /// the photo of the mark it undid. The group view resolves the same plan with the group's next
-    /// undecided photo instead of the grid's next one (PRD In-group culling).
+    /// offers the photos it shows. Plan navigation before a mark can remove the current photo
+    /// from that filter. Inside a group, visit its visible unmarked members first, then leave for
+    /// the first visible photo after the group (PRD In-group culling). The model records the
+    /// marked photo and its edits together so Undo can return there (PRD Undo row).
     private func startAutoAdvance(after kind: MarkKind, from photo: GridPhoto) {
-        let plan = rules.autoAdvancePlan(after: kind, from: photo.id, photos: browsing.photos)
-        browsing.recordAutoAdvance(plan)
+        let group = browsing.currentGroup.map { group in
+            let navigation = GroupPhotoNavigation(group: group)
+            let marks = Dictionary(
+                uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) })
+            return navigation.advance(
+                after: photo.id, marks: marks, orderedPhotos: browsing.allPlacedPhotos,
+                groups: browsing.groups, visiblePhotos: Set(browsing.photos.map(\.id)))
+        }
+        let plan = rules.autoAdvancePlan(
+            after: kind, from: photo.id, photos: browsing.photos, group: group)
+        schedule(plan)
+    }
+
+    private func schedule(_ plan: AutoAdvancePlan) {
         autoAdvance.schedule(plan) { target in
             switch target {
             case .stay:

@@ -754,7 +754,7 @@ final class TestLibrary: FolderLibrary {
             drainDelay: drainDelay)
     }
 
-    /// Two bursts from the sample, so the grid offers a group view (PRD P0-11).
+    /// Two bursts from the sample, so the grid offers stacks (PRD P0-11).
     ///
     /// The first burst skips 2680: the UI test's group flow and its batch flow run in one launch
     /// and the batch flow forces one stem-0 photo to fail its first write, so the two flows must

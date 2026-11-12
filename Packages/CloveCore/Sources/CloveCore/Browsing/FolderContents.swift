@@ -7,10 +7,10 @@ public struct BrowsingGroup: Identifiable, Hashable, Sendable {
     /// The stable group key that survives refinement and Run again (PRD P0-11).
     public let id: GroupID
 
-    /// Members in the group view's order; a published group holds at least two (PRD P0-11).
+    /// Members in capture order; a published group holds at least two (PRD P0-11).
     public let members: [PhotoIdentity]
 
-    /// Describes one group by its key and members, in the order the group view shows them.
+    /// Describes one group by its key and members, in capture order.
     public init(id: GroupID, members: [PhotoIdentity]) {
         self.id = id
         self.members = members
@@ -50,24 +50,6 @@ public struct FolderContents: Hashable, Sendable {
         groups.first { $0.members.contains(photo) }
     }
 
-    /// The group-view place the folder can still show, or nil when it can show none.
-    ///
-    /// PRD P0-14 keeps the group-view position across a fold or a relaunch, and PRD P0-11 lets
-    /// grouping refine between them. The saved photo must still exist in the folder, because
-    /// grouping can publish a group that has not caught up with a rescan. The saved group wins
-    /// while it still holds that photo; otherwise the group that holds it now is used, so the view
-    /// stays on the same photo; when neither exists the position is dropped and the caller
-    /// returns to the grid.
-    public func position(for saved: BrowsingGroupPosition) -> BrowsingGroupPosition? {
-        guard photos.contains(saved.photo) else { return nil }
-        if let group = group(with: saved.group), group.members.contains(saved.photo) {
-            return saved
-        }
-        if let group = group(containing: saved.photo) {
-            return BrowsingGroupPosition(group: group.id, photo: saved.photo)
-        }
-        return nil
-    }
 }
 
 /// The saved folder as a launch finds it: readable, or with the reason it did not open

@@ -247,16 +247,12 @@ struct DesignGalleryScreen: View {
         }
     }
 
-    /// The pill action in both tones (components.md).
+    /// The group finishing pill (components.md).
     private var pillActions: some View {
         section("Pill action") {
-            HStack(spacing: 12) {
-                PillAction(
-                    title: "Reject 6 unmarked", tone: .reject,
-                    identifier: "clove.design.gallery.pill.reject", action: {})
-                PillAction(
-                    title: "Continue →", tone: .accent, identifier: "clove.pillAction", action: {})
-            }
+            PillAction(
+                title: "Reject 6 unmarked",
+                identifier: "clove.design.gallery.pill.reject", action: {})
         }
     }
 

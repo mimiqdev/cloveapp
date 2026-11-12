@@ -2,14 +2,14 @@ import CloveCore
 import SwiftUI
 
 /// Grid-order filmstrip. The current group expands on a quiet tint; other groups stay stacked.
-/// Tapping a stack jumps to the group's first photo, so the group expands in place; detail never
-/// leaves for group review from here.
+/// Tapping a stack jumps to the group's first photo; the group expands in place.
 struct DetailFilmstrip: View {
     let photos: [GridPhoto]
     let current: PhotoIdentity?
     let thumbnails: any GridThumbnailSource
     let open: (PhotoIdentity) -> Void
     var groups: [BrowsingGroup] = []
+    var finishingAction: PillAction?
 
     private struct Entry: Identifiable {
         let id: PhotoIdentity
@@ -37,9 +37,18 @@ struct DetailFilmstrip: View {
     }
 
     var body: some View {
+        VStack(spacing: 6) {
+            if let finishingAction { finishingAction }
+            strip
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clove.detail.filmstrip")
+    }
+
+    private var strip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 8) {
+                LazyHStack(alignment: .bottom, spacing: 8) {
                     ForEach(entries) { entry in
                         if entry.expands {
                             HStack(spacing: 3) {
@@ -50,6 +59,8 @@ struct DetailFilmstrip: View {
                                 RoundedRectangle(cornerRadius: 9)
                                     .fill(Color.clove.group).opacity(0.25)
                             }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
                         } else if let group = entry.group, let photo = entry.photos.first {
                             Button {
                                 open(photo.id)
@@ -83,8 +94,6 @@ struct DetailFilmstrip: View {
             }
         }
         .frame(height: 70)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.detail.filmstrip")
     }
 
     private func frame(_ photo: GridPhoto) -> some View {

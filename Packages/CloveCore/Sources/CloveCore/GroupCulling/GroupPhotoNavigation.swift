@@ -1,86 +1,65 @@
 /// Moving through one group's photos, in the group's member order (PRD In-group culling;
 /// PRD P0-12).
 ///
-/// The group view keeps zoom and position while navigating (PRD In-group culling, comparison
-/// and elimination), so navigation is a pure question: which member comes next? Every call
-/// takes the marks read now, so a caller never navigates by a stale copy, and nothing here
-/// writes a mark. A photo that is not a member has no place in the order, so every answer for
-/// it is `nil`.
-///
-/// With Undecided only on, a plain next or previous skips every rated, labelled or rejected photo
-/// (PRD In-group culling, comparison and elimination). After marking, the group view asks for
-/// the next undecided photo, which searches forward and then wraps to the start, and returns
-/// `nil` when no other member is undecided (PRD In-group culling, comparison and elimination).
+/// Navigation is a pure question: which visible member comes next? Every call takes the marks
+/// read now, so a caller never navigates by a stale copy, and nothing here writes a mark.
+/// The next unmarked search wraps once and returns nil when no other visible member is unmarked.
+/// A photo that is not a member has no place in the order, so its next unmarked answer is nil.
+/// Once no unmarked member remains, auto-advance follows the next visible grid cell.
 public struct GroupPhotoNavigation: Hashable, Sendable {
     /// The group whose member order navigation follows (PRD Similar groups step 1).
     public let group: SimilarGroup
 
-    /// Whether the group view's Undecided only switch is on (PRD In-group culling).
-    public var undecidedOnly: Bool
-
-    /// Builds the navigation for one group and the current Undecided only state.
-    public init(group: SimilarGroup, undecidedOnly: Bool = false) {
+    /// Builds navigation for one published group.
+    public init(group: SimilarGroup) {
         self.group = group
-        self.undecidedOnly = undecidedOnly
     }
 
-    /// The next member after `photo`, or `nil` at the group's end.
+    /// The next visible unmarked member, wrapping once and excluding the photo just marked.
     ///
-    /// With ``undecidedOnly`` on, rated, labelled and rejected members are skipped and the search
-    /// stops at the end instead of wrapping (PRD In-group culling, comparison and elimination).
-    public func nextPhoto(
-        after photo: PhotoIdentity,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) -> PhotoIdentity? {
-        guard let index = group.members.firstIndex(of: photo) else { return nil }
-        for candidate in group.members[(index + 1)...] {
-            if !undecidedOnly || marksOf(candidate, marks).isUndecided { return candidate }
-        }
-        return nil
-    }
-
-    /// The member before `photo`, or `nil` at the group's start.
-    ///
-    /// With ``undecidedOnly`` on, rated, labelled and rejected members are skipped and the search
-    /// stops at the start instead of wrapping (PRD In-group culling, comparison and
-    /// elimination).
-    public func previousPhoto(
-        before photo: PhotoIdentity,
-        marks: [PhotoIdentity: PhotoMarks]
-    ) -> PhotoIdentity? {
-        guard let index = group.members.firstIndex(of: photo) else { return nil }
-        for offset in stride(from: index - 1, through: 0, by: -1) {
-            let candidate = group.members[offset]
-            if !undecidedOnly || marksOf(candidate, marks).isUndecided { return candidate }
-        }
-        return nil
-    }
-
-    /// The next undecided member after `photo`, wrapping to the group's start.
-    ///
-    /// This is the photo the group view shows after a mark is written (PRD In-group culling,
-    /// comparison and elimination; PRD P0-12): rated, labelled and rejected members are skipped, the
-    /// search continues from the start after the last member, and `nil` means no other member
-    /// is undecided. The current photo is never its own answer, because advancing must move.
+    /// This is the photo detail shows after a mark is written (PRD In-group culling,
+    /// comparison and elimination; PRD P0-12): rated, labelled and rejected members are skipped,
+    /// the search continues from the start after the last member, and nil means no other visible
+    /// member is unmarked. The current photo is never its own answer, because advancing must move.
     public func nextUndecidedPhoto(
         after photo: PhotoIdentity,
-        marks: [PhotoIdentity: PhotoMarks]
+        marks: [PhotoIdentity: PhotoMarks], visiblePhotos: Set<PhotoIdentity>
     ) -> PhotoIdentity? {
         guard let index = group.members.firstIndex(of: photo) else { return nil }
-        for candidate in group.members[(index + 1)...] where marksOf(candidate, marks).isUndecided {
-            return candidate
+        return (group.members.dropFirst(index + 1) + group.members.prefix(index)).first {
+            visiblePhotos.contains($0) && (marks[$0] ?? PhotoMarks()).isUnmarked
         }
-        for candidate in group.members[..<index] where marksOf(candidate, marks).isUndecided {
-            return candidate
-        }
-        return nil
     }
 
-    /// The marks read for one member; a member without an entry is unmarked (PRD P0-05).
-    private func marksOf(
-        _ photo: PhotoIdentity,
-        _ marks: [PhotoIdentity: PhotoMarks]
-    ) -> PhotoMarks {
-        marks[photo] ?? PhotoMarks()
+    /// Resolve a mark's group destination before its photo can disappear from a live filter.
+    public func advance(
+        after photo: PhotoIdentity, marks: [PhotoIdentity: PhotoMarks],
+        orderedPhotos: [GridPhoto], groups: [BrowsingGroup], visiblePhotos: Set<PhotoIdentity>
+    ) -> GroupAdvance {
+        let next =
+            nextUndecidedPhoto(after: photo, marks: marks, visiblePhotos: visiblePhotos)
+            ?? photoAfterGroup(
+                orderedPhotos: orderedPhotos, groups: groups, visiblePhotos: visiblePhotos)
+        return next.map(GroupAdvance.nextUndecidedPhoto) ?? .complete
+    }
+
+    /// Leaves the group's collapsed grid cell, including singles interleaved with its members.
+    /// The full order anchors the search when marking hides the group from a live filter.
+    public func photoAfterGroup(
+        orderedPhotos: [GridPhoto], groups: [BrowsingGroup], visiblePhotos: Set<PhotoIdentity>
+    ) -> PhotoIdentity? {
+        let cells = GridDisplay(
+            photos: orderedPhotos.filter { visiblePhotos.contains($0.id) },
+            groups: groups, display: .collapsed
+        ).cells
+        if let index = cells.firstIndex(where: { $0.group?.id == group.id }) {
+            return cells.dropFirst(index + 1).first?.photo.id
+        }
+        let members = Set(group.members)
+        guard let index = orderedPhotos.firstIndex(where: { members.contains($0.id) }) else {
+            return nil
+        }
+        let later = Set(orderedPhotos.dropFirst(index + 1).map(\.id))
+        return cells.first { later.contains($0.photo.id) }?.photo.id
     }
 }
