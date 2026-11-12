@@ -43,15 +43,6 @@ struct BrowseShell: View {
                     .navigationBarBackButtonHidden()
             }
         }
-        .overlay(alignment: .bottom) {
-            if browsing.state.route == .detail, !isDuoExpanded,
-                let message = browsing.failureToastMessage
-            {
-                Toast(message: message, identifier: "clove.save.toast")
-                    .padding(.horizontal)
-                    .padding(.bottom, 12)
-            }
-        }
         .task(id: browsing.failureToastBurst) {
             guard browsing.failureToastMessage != nil else { return }
             try? await Task.sleep(for: .seconds(6))
@@ -126,10 +117,14 @@ extension View {
     {
         self
             .navigationTitle(
-                browsing.state.route == .grid || browsing.state.route == .detail ? "" : title
+                browsing.state.route == .grid
+                    || browsing.state.route == .detail
+                    || browsing.state.route == .entry ? "" : title
             )
             .toolbar(
-                !usesSystemBar && (browsing.state.route == .grid || browsing.state.route == .detail)
+                !usesSystemBar
+                    && (browsing.state.route == .grid || browsing.state.route == .detail
+                        || browsing.state.route == .entry)
                     ? .hidden : .visible,
                 for: .navigationBar
             )
@@ -152,15 +147,9 @@ extension View {
                         Button("Done") { browsing.back() }
                             .accessibilityIdentifier("clove.nav.back")
                     }
-                } else if browsing.state.route == .entry {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        GlassIconButton(
-                            label: "Settings", symbol: "gearshape", identifier: "clove.nav.settings"
-                        ) {
-                            browsing.showSettings()
-                        }
-                    }
                 }
+                // Entry owns its header (screens.md §01): its own large title and gear,
+                // so no toolbar item is added there.
             }
     }
 }

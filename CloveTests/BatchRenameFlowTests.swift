@@ -136,7 +136,7 @@ struct BatchRenameFlowTests {
         await flow.prepare(rejectsFolderName: .defaultFolderName)
         await flow.rename {}
         let completed = try #require(browsing.completedRename)
-        #expect(completed.message == "Renamed 1 photos")
+        #expect(completed.message == "Renamed 1 photo")
         #expect(completed.detail == RenameFlowError.rescanFailed.localizedDescription)
         #expect(completed.hasDetails)
         #expect(!browsing.canUndoMark)

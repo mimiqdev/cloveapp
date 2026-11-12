@@ -150,9 +150,11 @@ struct CompletedBatchRename {
     var rescanFailure: String?
 
     var message: String {
-        result.failure == nil
-            ? "Renamed \(result.renamedCount) photos"
-            : "Renamed \(result.renamedCount) of \(plan.rows.count)"
+        if result.failure == nil {
+            return result.renamedCount == 1
+                ? "Renamed 1 photo" : "Renamed \(result.renamedCount) photos"
+        }
+        return "Renamed \(result.renamedCount) of \(plan.rows.count)"
     }
     var detail: String? { result.failure?.message ?? rescanFailure }
     var hasDetails: Bool {

@@ -206,7 +206,7 @@ struct EntryScreen: View {
                     Text(RecentFolderSummary.name(for: recent)).font(.subheadline.weight(.semibold))
                     Text(
                         reconnect
-                            ? "Not connected" : RecentFolderSummary.location(for: recent)
+                            ? "Drive not connected" : RecentFolderSummary.location(for: recent)
                     )
                     .font(.caption).foregroundStyle(Color.clove.text.secondary)
                     if let failure = browsing.recentFailure(for: recent.id), !reconnect {

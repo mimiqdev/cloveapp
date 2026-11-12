@@ -90,7 +90,9 @@ struct GridScreen: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if let message = browsing.failureToastMessage {
+                if !(usesDock && browsing.state.route == .detail),
+                    let message = browsing.failureToastMessage
+                {
                     Toast(message: message, identifier: "clove.save.toast")
                         .padding(.horizontal)
                         .padding(.bottom, 12)

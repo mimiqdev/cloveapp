@@ -23,10 +23,7 @@ struct PhotoInformationSheet: View {
                             row("Folder", information.relativeFolder)
                         }
                         if let size = sizeText(information.image) { row("Size", size) }
-                        row(
-                            "Marks",
-                            MarkSummary.text(for: photo.marks) + " · "
-                                + (information.usesSidecar ? "XMP sidecar" : "Clove only"))
+                        row("Marks", "", trailing: marksTrailing(information))
                     }
                     .listRowBackground(theme.tokens.card.color)
                 }
@@ -87,14 +84,51 @@ struct PhotoInformationSheet: View {
     }
 
     private func row(_ name: String, _ value: String) -> some View {
+        row(name, value, trailing: nil)
+    }
+
+    private func row(
+        _ name: String, _ value: String, trailing marks: (spacing: CGFloat, content: Text)?
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(name)
             Spacer(minLength: 8)
-            Text(value).foregroundStyle(Color.clove.text.secondary).multilineTextAlignment(
-                .trailing)
+            if let marks {
+                HStack(spacing: marks.spacing) {
+                    marks.content
+                    Text("·").foregroundStyle(Color.clove.text.secondary)
+                    Text(
+                        information?.usesSidecar == true ? "XMP sidecar" : "Clove only"
+                    )
+                    .foregroundStyle(Color.clove.text.secondary)
+                }
+            } else {
+                Text(value).foregroundStyle(Color.clove.text.secondary).multilineTextAlignment(
+                    .trailing)
+            }
         }
         .font(.subheadline)
         .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+    }
+
+    /// The frame's marks column: filled stars in `rating/on`, the label as its colour name, and
+    /// Reject as ✕ glyphs (handoff screens.md §03 Info sheet, screens/03-detail-info-sheet.png).
+    private func marksTrailing(_ information: PhotoInformation) -> (spacing: CGFloat, content: Text)
+    {
+        var parts: [String] = []
+        if let stars = photo.marks.rating.starCount {
+            parts.append(String(repeating: "★", count: stars))
+        }
+        if let colour = photo.marks.label.colour {
+            parts.append(colour.rawValue)
+        } else if !photo.marks.label.isClear {
+            parts.append(photo.marks.label.rawValue)
+        }
+        if photo.marks.isRejected {
+            parts.append("✕")
+        }
+        let text = parts.isEmpty ? Text("Unmarked") : Text(parts.joined(separator: " · "))
+        return (6, text.foregroundStyle(Color.clove.rating.on))
     }
 
     private func takenText(_ image: ImageInformation) -> String? {
