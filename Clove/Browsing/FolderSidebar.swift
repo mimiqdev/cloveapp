@@ -7,10 +7,10 @@ struct FolderSidebar: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
 
-    private var counts: SidebarCounts { browsing.sidebarCounts }
     private static let ratings = (1...5).compactMap { Rating(rawValue: $0) }
 
     var body: some View {
+        let counts = browsing.sidebarCounts
         List {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
