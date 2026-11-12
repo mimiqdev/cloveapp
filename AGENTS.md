@@ -87,14 +87,14 @@ XcodeGen. Every task is listed here.
   some CloveCore tests time out and CloveImaging hangs
   ([#146](https://github.com/mimiqdev/cloveapp/issues/146)). Locally they run
   in parallel as before.
-- The check to require is **`verify`**: the last job, which passes only when
-  every other job passed.
+- **`verify`** is the last job, which passes only when every other job
+  passed. Merges don't wait for it, except for the changes listed under
+  "Merge" in `docs/AGENT-WORKFLOW.md`.
 - No secrets, no signing, read-only `contents` permission, `pull_request` only.
   On failure the logs and `.xcresult` bundles are uploaded for 7 days; they hold
   only build and test output.
-- A pull request is ready when CI is green on its latest push. To re-check a
-  pull request against today's `main`, run the workflow by hand with its number:
-  `gh workflow run verify.yml -f pr=<number>`.
+- To re-check a pull request against today's `main`, run the workflow by hand
+  with its number: `gh workflow run verify.yml -f pr=<number>`.
 - Only GitHub's own actions are used. Any other action needs a decision record
   in `docs/decisions/` and a full commit SHA pin.
 
