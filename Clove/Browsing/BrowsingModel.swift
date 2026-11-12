@@ -130,11 +130,18 @@ final class BrowsingModel {
     private var markUndo: (photo: PhotoIdentity, edits: [DesiredMarkEdit])?
     private(set) var lastMoveUndo: Result<RejectMoveUndoResult, any Error>?
 
+    /// The copy for a mark whose write failed, and for marks a sidecar would not give up
+    /// (copy.md `save.toast.failed` and `read.toast.failed`).
     static let saveFailureToastMessage = "Couldn't save the mark."
-    private(set) var isSaveFailureToastVisible = false
-    private(set) var saveFailureToastBurst = 0
+    static let readFailureToastMessage = "Couldn't read some marks."
 
-    func dismissSaveFailureToast() { isSaveFailureToastVisible = false }
+    /// The failure toast's copy, or nil while no toast shows.
+    private(set) var failureToastMessage: String?
+
+    /// Each shown failure toast restarts its timer.
+    private(set) var failureToastBurst = 0
+
+    func dismissFailureToast() { failureToastMessage = nil }
 
     /// Whether this scene has already read its saved state, so a later appearance never
     /// overwrites what the user has done since.
@@ -574,15 +581,21 @@ final class BrowsingModel {
         lastRejectMove = CompletedRejectMove(
             result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
             folder: folder, openGeneration: openGeneration)
-        isSaveFailureToastVisible = false
+        dismissFailureToast()
         isRejectMoveToastVisible = true
         rejectMoveToastAttempt += 1
     }
 
+    /// Whether the move's toast offers Undo now: the run still belongs to this open folder and
+    /// marking is possible, so the tap does what it says (PRD P0-10).
+    func canUndoRejectMove(_ completed: CompletedRejectMove) -> Bool {
+        canMark && completed.canUndo && completed.folder == state.folder
+            && completed.openGeneration == openGeneration
+    }
+
     /// The toast restores the completed move and the exact marks its staged keeps left behind.
     func undoRejectMove(_ completed: CompletedRejectMove) {
-        guard canMark,
-            completed.folder == state.folder, completed.openGeneration == openGeneration,
+        guard canUndoRejectMove(completed),
             let photo = completed.keptIdentities.first ?? completed.result.movedIdentities.first
         else { return }
         let kept = (keptEditsByMove[completed.id] ?? []).compactMap {
@@ -802,12 +815,14 @@ final class BrowsingModel {
                 entry, currentMarks: current, restoring: edits)
             finishPendingMarks(edits)
             refresh()
-            if result.restored.contains(where: { !$0.isRejectStored }) { showSaveFailureToast() }
+            if result.restored.contains(where: { !$0.isRejectStored }) {
+                showFailureToast(Self.saveFailureToastMessage)
+            }
             lastMoveUndo = .success(result)
         } catch {
             finishPendingMarks(edits)
             refresh()
-            showSaveFailureToast()
+            showFailureToast(Self.saveFailureToastMessage)
             lastMoveUndo = .failure(error)
         }
     }
@@ -834,16 +849,17 @@ final class BrowsingModel {
         if !failed.isEmpty { try? await library.rereadMarks(for: failed) }
         finishPendingMarks(edits)
         refresh()
-        if !failed.isEmpty { showSaveFailureToast() }
+        if !failed.isEmpty { showFailureToast(Self.saveFailureToastMessage) }
         return result
     }
 
-    private func showSaveFailureToast() {
-        guard folderLocationLoss == nil, !isSaveFailureToastVisible else { return }
-        saveFailureToastBurst += 1
-        isSaveFailureToastVisible = true
+    /// Says one failure once, unless the folder itself is gone and its banner explains why.
+    private func showFailureToast(_ message: String) {
+        guard folderLocationLoss == nil, failureToastMessage == nil else { return }
+        failureToastBurst += 1
+        failureToastMessage = message
         isRejectMoveToastVisible = false
-        UIAccessibility.post(notification: .announcement, argument: Self.saveFailureToastMessage)
+        UIAccessibility.post(notification: .announcement, argument: message)
     }
 
     /// The situation the open folder's own loss explains, or nil while it is reachable
@@ -860,7 +876,7 @@ final class BrowsingModel {
         recordUndo(for: nil)
         desiredMarks.removeAll()
         storedPhotos = confirmedPhotos
-        dismissSaveFailureToast()
+        dismissFailureToast()
         for entry in dropped {
             moveCompletions.removeValue(forKey: entry.id)?(.failure(RejectMoveRefusal.disabled))
         }
@@ -946,7 +962,7 @@ final class BrowsingModel {
         photoIndices = [:]
         desiredMarks.removeAll()
         recordUndo(for: nil)
-        dismissSaveFailureToast()
+        dismissFailureToast()
         groups = []
         thumbnails = library.thumbnails
         detailImages = library.detailImages
@@ -1069,7 +1085,7 @@ final class BrowsingModel {
             refresh()
             resolvePendingRestore(scanFinished: false)
         case .markReadFailed:
-            showSaveFailureToast()
+            showFailureToast(Self.readFailureToastMessage)
         case .scanFinished:
             finishedScanFor = library.folder
             refresh()
@@ -1127,7 +1143,7 @@ final class BrowsingModel {
             shownGeneration = library.openGeneration
             desiredMarks.removeAll()
             recordUndo(for: nil)
-            dismissSaveFailureToast()
+            dismissFailureToast()
         }
         confirmedPhotos = library.photos
         photoIndices = Dictionary(
@@ -1178,5 +1194,6 @@ struct CompletedRejectMove: Sendable, Identifiable {
     /// The run's id, so the grid can key the toast on it (PRD P0-10).
     var id: RejectMoveBatchID { result.id }
 
+    /// Whether the run left photos to undo, before the folder's own state is considered.
     var canUndo: Bool { !keptIdentities.isEmpty || !result.movedIdentities.isEmpty }
 }

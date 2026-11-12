@@ -34,20 +34,17 @@ struct BrowseShell: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if browsing.state.route == .detail, browsing.isSaveFailureToastVisible {
-                Toast(
-                    message: BrowsingModel.saveFailureToastMessage,
-                    identifier: "clove.save.toast"
-                )
-                .padding(.horizontal)
-                .padding(.bottom, 12)
+            if browsing.state.route == .detail, let message = browsing.failureToastMessage {
+                Toast(message: message, identifier: "clove.save.toast")
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
             }
         }
-        .task(id: browsing.saveFailureToastBurst) {
-            guard browsing.isSaveFailureToastVisible else { return }
+        .task(id: browsing.failureToastBurst) {
+            guard browsing.failureToastMessage != nil else { return }
             try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
-            browsing.dismissSaveFailureToast()
+            browsing.dismissFailureToast()
         }
     }
 
