@@ -8,6 +8,16 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Figma frames synced to the build (2026-11-12)
+
+The frames on the "Clove · MVP design" page now match the app on main at `7470617` (owner's implementation notes, 2026-11-12). The 10 Nov versions of every removed or redrawn frame are on the Archive page under "Superseded · 10 Nov handoff".
+
+- **Removed:** Batch result (02), Group done (04) and Leaving with unsaved marks (12).
+- **Redrawn:** every subtitle without a save dot, Saved, Saving or loading word; Rejected (03) with the photo at full brightness and the 22 pt corner glyph; Save failed (03) as the "Couldn't save the mark." toast; the Info sheet without its save status line; the three group frames (04) as normal detail with the group expanded in the filmstrip and the pill above it; the Couldn't move sheet (05) with the new subtitle and Done only; Not connected and View only (12) as `externaldrive.badge.xmark` and `lock.fill`.
+- **iPad (provisional, #152 and #163):** the sidebar has no Skipped row and no Analyzed word, shows only ratings and labels that have photos, and has a regroup glyph button on the Similar groups row. The grid title is the selected row's name. Detail shows a rail hover tooltip.
+- **New frames:** read failure toast (02), iPad Locations with a subfolder selected, iPad detail rejected, Duo expanded photo focus rejected, and a proposal for the swipe star bar's cleared step (#125), which is open for the designer.
+- **Open:** the save failure toast. The frame puts it above the filmstrip so it doesn't cover the mark capsule; the build draws it at the bottom edge, over the capsule. One of the two should change.
+
 ## Detail shows rejects at full brightness with a corner glyph (owner, 2026-11-12)
 
 Detail keeps rejected photos at full brightness so the person can judge them. A small `xmark` in a filled `reject` circle stays in the stage's top-trailing corner during zoom and pan, including with chrome hidden. It is decorative, ignores taps and adds no status word. VoiceOver includes "Rejected" in the photo label. Grid, filmstrip and Move Rejects quick grid thumbnails keep dimming rejects without badges. This supersedes the detail dimming rule and the `03-detail-rejected` frame on this point.

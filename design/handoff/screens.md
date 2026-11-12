@@ -47,13 +47,13 @@ Devices:
 | [Default](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=159-1596) · [png](screens/02-grid-default.png) | 159:1596 |
 | [Filter menu](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=159-2251) · [png](screens/02-grid-filter-menu-unmarked-active.png) | 159:2251 |
 | [Select mode](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2767) · [png](screens/02-grid-select-mode-batch-capsule.png) | 176:2767 |
-| [Batch result](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-3424) · [png](screens/02-grid-batch-result-partial-failure.png) | 176:3424 |
+| [Read failure toast](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-3739) · [png](screens/02-grid-read-failure-toast.png) | 243:3739 |
 | [Opening 1: reading](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=211-1741) · [png](screens/02-grid-opening-1-reading-photos.png) | 211:1741 |
 | [Opening 2: grouping](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=211-2332) · [png](screens/02-grid-opening-2-finding-similar-shots.png) | 211:2332 |
 | ["…" menu and no-preview tile](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=213-1422) · [png](screens/02-grid-more-menu-no-preview-tile.png) | 213:1422 |
 
 **Default**
-- The top bar has Back, the folder title, the subtitle "1,284 photos · ● Saved", then the **Filter** and **"…"** icon buttons. There is no filter bar, status row or bottom toolbar.
+- The top bar has Back, the folder title, the subtitle "1,284 photos", then the **Filter** and **"…"** icon buttons. There is no filter bar, status row or bottom toolbar.
 - A **group** of similar shots is one stacked tile with a count badge in `group`. Tapping it opens detail on the first unmarked member, or the first member if all are marked, with the filmstrip group expanded. A single photo opens detail.
 - A **rejected** photo is dimmed (`opacity/rejected`) with no ✕ badge. The rating badge and label dot stay. The RAW+JPEG badge is only in Info.
 - **Move Rejects** is a 48 pt round glass icon button (a tray with a down arrow) at the bottom right. It has no count and shows only when rejects exist. It always opens the confirm sheet first.
@@ -62,7 +62,7 @@ Devices:
 
 **Select mode**: the title becomes "7 selected" and **Done** replaces Filter, "…" and Move Rejects. Selected tiles get the standard blue check, the only place a check is used. The same mark capsule as detail appears and applies to the whole selection.
 
-**Batch result**: a toast above the capsule says "Saved 5 · 2 failed · Retry".
+**Read failure toast**: when a sidecar can't be read while a folder opens, one glass toast at the bottom (the Move Rejects toast position) says "Couldn't read some marks." It has no action and hides after about 6 seconds. There is no save status anywhere: no Saved dot, no Saving pulse, no batch result toast. A failed batch mark shows the save failure toast below.
 
 **Opening a folder.** There is no blocking screen. The grid shows straight away.
 - Stage 1, reading: the subtitle is "412 of 1,284", a 2 pt line under the toolbar fills in `accent`, unread cells are plain placeholders, and there are no stacks yet. Existing XMP marks appear as they are read.
@@ -80,13 +80,14 @@ Devices:
 | [Label popover](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=154-1653) · [png](screens/03-detail-label-popover-open.png) | 154:1653 |
 | [Swipe-up star bar](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=154-1968) · [png](screens/03-detail-swipe-up-star-bar.png) | 154:1968 |
 | [Info sheet](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=157-1584) · [png](screens/03-detail-info-sheet.png) | 157:1584 |
-| [Rejected](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2070) · [png](screens/03-detail-rejected.png) | 176:2070 |
-| [Save failed](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2301) · [png](screens/03-detail-save-failed.png) | 176:2301 |
+| [Rejected (corner glyph)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2070) · [png](screens/03-detail-rejected.png) | 176:2070 |
+| [Save failure toast](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2301) · [png](screens/03-detail-save-failure-toast.png) | 176:2301 |
 | [100% zoom](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2532) · [png](screens/03-detail-100pct-zoom-chrome-hidden.png) | 176:2532 |
+| [Swipe star bar: cleared step (proposal, #125)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=244-1984) · [png](screens/03-detail-swipe-star-bar-cleared-step-proposal.png) | 244:1984 |
 
 **Default**
 - The photo sits on `bg/stage`.
-- The top bar has Back, the filename as the title, and the subtitle "1 / 11 · + JPG · ● Saved". On the right are **Info (ⓘ)** and **Undo**.
+- The top bar has Back, the filename as the title, and the subtitle "1 / 11 · + JPG" (no loading or save label). On the right are **Info (ⓘ)** and **Undo**.
 - Marks appear **once**, in the floating glass **mark capsule** above the home indicator. Left to right: the reject circle, 5 stars, and the label circle.
 - The **filmstrip** floats just above the capsule. Both fade out while zoomed, and tapping the photo toggles them.
 
@@ -96,35 +97,35 @@ Devices:
 
 **Info sheet** (medium detent, read-only in the MVP)
 - Capture: time with subseconds, camera and serial, lens, exposure.
-- File: folder, size, RAW+JPEG pairing, marks and where they are stored (XMP), and save status.
+- File: folder, size, RAW+JPEG pairing, and marks and where they are stored (XMP). There is no save status line.
 
 **Rejected**: the capsule's reject circle is filled and the stars and label go neutral. The photo stays at full brightness. A 22 pt `xmark` in a filled `reject` circle sits in the stage's top-trailing corner, inset 8 pt inside the safe area. It stays fixed during zoom and pan and remains visible with the chrome hidden. It ignores taps; VoiceOver includes "Rejected" in the photo's label and skips the decorative glyph. Rejected has no subtitle word.
 
-The `03-detail-rejected` frame is out of date on the photo dimming and missing corner glyph. Follow this behavior specification.
+**Save failure toast**: when a mark can't be written, one glass toast says "Couldn't save the mark." with no action, and the photo goes back to the marks in its file. There is no subtitle status and no Retry. One toast per failure burst; it hides after about 6 seconds. In the frame it sits above the filmstrip so it doesn't cover the capsule; the build currently draws it at the bottom edge over the capsule (see the note in `decisions-log.md`).
 
-**Save failed**: the subtitle is "1 / 11 · ● Save failed · Retry", in `status/failed`, and Retry is tappable. The marks stay as set.
+**Swipe star bar: cleared step (proposal, #125, not reviewed)**: a quick swipe down from a rated photo now stops at 0 before Reject. The proposal shows three stops on a 3★ photo: A start (no chip), B cleared (all stars empty, the chip slot shows `star.slash` in `text/secondary`), C reject (the chip fills in `reject` with a white ✕ and the stars dim). The bar stays fixed at the right edge (#134). Waiting on the designer.
 
 **100% zoom**: the capsule, filmstrip, Info and Undo hide. The subtitle shows "100%", and a small "100%" chip fades out.
 
 In every filmstrip, rejected thumbnails are dimmed and have no badge.
 
-## 04 Groups in detail (old frames out of date)
+## 04 Groups in detail
 
-The frames below predate the owner decision of 2026-11-12 and are out of date. Group culling now uses the detail screen with its group expanded in place.
+There is no group review screen. A stack opens the normal detail screen with its group expanded in the filmstrip. There is no group header, no undecided count, no Continue → and no "Undecided only" menu.
 
 | State | Node |
 |---|---|
-| [In progress (iPhone)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=173-1950) · [png](screens/04-group-in-progress-iphone.png) | 173:1950 |
-| [Group done (iPhone)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=173-2193) · [png](screens/04-group-group-done-iphone.png) | 173:2193 |
-| [iPad](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2931) · [png](screens/04-group-ipad.png) | 214:2931 |
-| [Duo expanded](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-3214) · [png](screens/04-group-duo-expanded.png) | 214:3214 |
+| [iPhone](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=173-1950) · [png](screens/04-groups-in-detail-iphone.png) | 173:1950 |
+| [iPad (provisional)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2931) · [png](screens/04-groups-in-detail-ipad.png) | 214:2931 |
+| [Duo expanded (photo only)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-3214) · [png](screens/04-groups-in-detail-duo-expanded.png) | 214:3214 |
 
 - A grid stack opens detail at its first unmarked member, or its first member when all are marked. The ordinary detail header and controls remain.
 - The current group expands in the grid-order filmstrip; rejected thumbnails are dimmed and rated ones show stars.
 - Zoom and pan stay synced within the group. Leaving it follows the detail setting.
 - **Reject N unmarked** is a pill centred in its own row above the strip. It requires a rated or labeled visible member and at least one unmarked visible member, and never touches existing marks or hidden photos. Undo restores the action together and returns to the photo shown at submission.
 - The pill hides with chrome or when marking is off, and disappears when nothing remains to reject. It stays clear of the capsule and swipe star bar.
-- Auto-advance visits unmarked members, then the first photo after the group in grid order. No group sidebar remains; iPad and Duo detail layouts are separate work.
+- Auto-advance visits unmarked members, then the first photo after the group in grid order. No group sidebar remains.
+- On iPad and Duo the pill sits centred at the bottom of the photo stage, above the filmstrip, never under the rail or dock.
 
 ## 05 Move Rejects
 
@@ -140,17 +141,28 @@ The frames below predate the owner decision of 2026-11-12 and are out of date. G
 - **Quick grid**: tapping the stack expands the sheet into a 4-column grid of the rejects, all dimmed. Tapping a photo keeps it: it returns to full brightness with no badge, and the button updates to "41 of 42 will move" / "Move 41". Keeping clears that photo's reject flag, but only when Move is tapped; cancelling the sheet discards the keeps. Undo restores both the move and the flags.
 - **Done**: the moved photos leave the grid, and a glass toast says "Moved 42 to _Rejected" with **Undo**.
 - **Partial failure**: the toast says "Moved 40 to _Rejected", then "2 couldn't be moved" in `reject`, with **Details**.
-- **Details sheet**: the title is "2 photos couldn't be moved" and the subtitle is "They stay rejected in Clove. Nothing was deleted." There is one row per photo set, with a thumbnail, the file name and the reason in `reject`, then **Done** and **Try again**.
+- **Details sheet**: the title is "2 photos couldn't be moved" and the subtitle is "They stay rejected in place. Nothing was deleted." There is one row per photo set, with a thumbnail, the file name and the reason in `reject`, then one **Done** button. There is no Try again.
 
 ## 06–07 iPad
 
 | State | Node |
 |---|---|
-| [Grid](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-1836) · [png](screens/06-ipad-grid.png) | 166:1836 |
-| [Detail](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-2591) · [png](screens/06-ipad-detail.png) | 166:2591 |
+| [Grid (provisional)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-1836) · [png](screens/06-ipad-grid.png) | 166:1836 |
+| [Grid: Locations, subfolder selected (provisional)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-1957) · [png](screens/06-ipad-grid-locations-subfolder.png) | 243:1957 |
+| [Detail (provisional)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-2591) · [png](screens/06-ipad-detail.png) | 166:2591 |
+| [Detail: rejected (provisional)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-2691) · [png](screens/06-ipad-detail-rejected.png) | 243:2691 |
 
-- **Grid**: the sidebar is the filter (All, photo-bearing subfolders, Unmarked, Rejected, ratings, labels), so there is no Filter button. Locations appears only when photos occupy more than one folder. There is no `_Rejected · Skipped` row. Similar groups shows a count and a small regroup glyph, replaced by progress while grouping runs, with no "Analyzed" word. The top right has Move Rejects and "…", as 40 pt glass icon buttons. Move Rejects is never at the bottom right on iPad. The selected filter names the grid, with the photo count below it. Stacks and dimmed rejects work as on iPhone. Detail and Settings open full screen with a back button named after the current filter, such as "‹ All" or "‹ Unmarked". The old grid-beside-detail layout is removed.
-- **Detail**: the 96 pt right rail replaces the capsule and has a vertical 5-star bar that fills from the bottom, the reject circle, and the label dots. The rail never hides: a single tap or zoom hides the filmstrip, the Reject N unmarked pill and the top bar buttons, while the stage keeps its size. Swipe marking stays on the photo, with the rail's stars previewing the live rating. Info and Undo are 40 pt glass buttons in the top bar. There is no sync-zoom control, no "Saved" label and no keyboard hints.
+The iPad frames were drawn before the sidebar (#170) and the detail rail (#174) were built. Where a frame disagrees with the build, the build wins.
+
+- **Sidebar**, top to bottom, a plain list with one selected row:
+  - **Header**: the folder name and the source line ("External SSD · T7 Shield"), with no save word.
+  - **Locations**: "All" with the photo count, then one row per subfolder that holds photos (`DCIM/100CANON`). The section appears only when photos occupy more than one folder. `_Rejected` isn't listed and there is no "Skipped" row.
+  - **Filters**: Unmarked, Rejected, then one "★n+" row for each rating that has photos.
+  - **Color labels**: one row per label in use, with its dot, name and count. Hidden when no photo has a label.
+  - **Similar groups**: one row, "86 groups", with a small regroup glyph button (Find similar shots again). A spinner replaces the button while grouping runs. There is no "Analyzed" word. Hidden when similar groups are off.
+- **Grid**: the title is the selected sidebar row's name ("All", "Unmarked", "Red", "DCIM/100CANON") and the subtitle is the count ("1,284 photos"). There is no Filter button. The top right has Move Rejects (only when rejects exist) and "…", as 40 × 40 glass icon buttons. Move Rejects is never at the bottom right on iPad. Stacks and dimmed rejects work as on iPhone.
+- **Detail** and Settings open full screen with a back button named after the selected row, such as "‹ All" or "‹ Unmarked". The old grid-beside-detail layout is removed. A 96 pt right rail replaces the capsule. It sits beside the stage, never over it, and never hides: a single tap or zoom hides the filmstrip, the Reject N unmarked pill and the top bar buttons, while the stage keeps its size. Top to bottom: a vertical 5-star bar that fills from the bottom (tap, or drag and release), a hairline, the reject circle, a hairline, and the five label dots, tapped directly with no popover. The current label has a ring. Tapping the current rating or label clears it. Each rail control has a hover tooltip with its VoiceOver label (the frame shows "Reject"). Info and Undo are 40 × 40 in the top bar. Swipe marking on the photo still works; the rail stars show the live value. There are no keyboard hints.
+- **Rejected**: the rail's reject circle is filled, the stars and dots go neutral, and the corner glyph sits in the stage's top-trailing corner, left of the rail.
 - **Filmstrip** (at the bottom, following grid order): every group except the current one is collapsed into one stacked tile with a count badge in `group`. The current group is expanded in place on a tint of `group` at 25% layer opacity, with no outline. The current frame has a thin ring in `text/primary`.
 
 ## 08–09 Duo
@@ -160,11 +172,12 @@ The frames below predate the owner decision of 2026-11-12 and are out of date. G
 | [Cover](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=167-1856) · [png](screens/08-duo-cover-folded-outer-screen.png) | 167:1856 |
 | [Expanded: grid (default)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=167-2521) · [png](screens/08-duo-expanded-grid-default-full-width.png) | 167:2521 |
 | [Expanded: photo focus 30/70](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=196-1119) · [png](screens/08-duo-expanded-photo-focus-30-70.png) | 196:1119 |
+| [Expanded: photo focus, rejected](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-2960) · [png](screens/08-duo-expanded-photo-focus-rejected.png) | 243:2960 |
 | [Expanded: photo only](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=197-1161) · [png](screens/08-duo-expanded-photo-only.png) | 197:1161 |
 | [Expanded: dock star bar](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=217-2575) · [png](screens/08-duo-expanded-dock-star-bar-sliding.png) | 217:2575 |
 | [Expanded: dock label picker](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=217-3348) · [png](screens/08-duo-expanded-dock-label-picker.png) | 217:3348 |
 
-**Cover**: the same grid as iPhone. The side rail holds Filter instead of Groups, and Move Rejects sits just under the status bar and Back. Select is in "…".
+**Cover**: the same grid as iPhone, with no save status. Detail on the cover is iPhone detail, including the reject corner glyph. The side rail holds Filter instead of Groups, and Move Rejects sits just under the status bar and Back. Select is in "…".
 
 **Expanded** (landscape, unfolded). The rules follow Apple's Duo guidance:
 - **The right dock** is a vertical column shared with the status bar, made of glass capsules from top to bottom:
@@ -177,6 +190,7 @@ The frames below predate the owner decision of 2026-11-12 and are out of date. G
 - **Photo focus 30/70**: tapping a photo splits the screen into the grid (30%) and the photo (70%). An 8 pt gutter with a hairline and a drag handle separates them. The split is never at 50/50 and never on the fold.
 - **Photo only**: sliding the divider all the way left gives an iPad-style detail: a full-width photo, the filename and counter centered at the top, and the filmstrip (with collapsed group stacks) at the bottom.
 - **Dock star bar**: sliding on the star button opens a vertical star bar to the left of the dock. It fills from the bottom, and the button shows the live value.
+- **Rejected**: the dock's reject circle is filled, the star button and label circle go neutral, and the corner glyph sits in the photo pane's top-trailing corner. Nothing on the Duo shows a save dot or "Saved".
 - **Dock label picker**: tapping the label circle opens a horizontal row of colors (none, red, yellow, green, blue, purple) beside it, with the current color ringed.
 
 ## 10 Duo half fold (quick refresh; the dedicated layout is 1.1)
@@ -205,11 +219,10 @@ The frames below predate the owner decision of 2026-11-12 and are out of date. G
 |---|---|
 | [Drive disconnected](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-1484) · [png](screens/12-errors-drive-disconnected.png) | 214:1484 |
 | [Lost access](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2083) · [png](screens/12-errors-lost-access.png) | 214:2083 |
-| [Leaving with unsaved marks](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2682) · [png](screens/12-errors-leaving-with-unsaved-marks.png) | 214:2682 |
 
-- **Drive disconnected**: the grid dims, the subtitle reads "Not connected" (never "Saved"), and a glass banner says "The drive disconnected. Reconnect it, then reopen this folder." with **Reopen**.
-- **Lost access**: the same pattern. The subtitle reads "View only", and the banner says "Access to this folder is no longer available." with **Open**.
-- **Leaving with unsaved marks**: an alert says "Some marks haven't finished saving." with **Leave anyway** (destructive, in red) and **Wait** (the primary action).
+- **Drive disconnected**: the grid dims, the subtitle keeps the count and adds the `externaldrive.badge.xmark` glyph (VoiceOver: "Not connected"), and a glass banner says "The drive disconnected. Reconnect it, then reopen this folder." with **Reopen**.
+- **Lost access**: the same pattern. The subtitle adds the `lock.fill` glyph (VoiceOver: "View only"), and the banner says "Access to this folder is no longer available." with **Open**.
+- There is no "Leaving with unsaved marks" alert. Leaving never waits on saves.
 
 ## Not designed (build with system defaults, or ask)
 

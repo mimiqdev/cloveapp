@@ -1,7 +1,7 @@
 {
   "fileKey": "xJcgQ7FziNyPM7UToZvkmq",
   "page": "Clove · MVP design (0:1)",
-  "note": "Each frame holds the Light and Dark versions side by side. `screenshot` is a 1x PNG of the whole frame in screens/.",
+  "note": "Each frame holds the Light and Dark versions side by side. `screenshot` is a 1x PNG of the whole frame in screens/. Frames updated on 12 Nov 2026 to match the app on main (7470617); superseded frames are on the Archive page under \"Superseded · 10 Nov handoff\".",
   "frames": [
     {
       "section": "themes",
@@ -78,11 +78,11 @@
     {
       "section": "grid",
       "row": "02 Grid",
-      "name": "Batch result (partial failure)",
-      "nodeId": "176:3424",
-      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-3424",
+      "name": "Read failure toast",
+      "nodeId": "243:3739",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-3739",
       "device": "iphone",
-      "screenshot": "screens/02-grid-batch-result-partial-failure.png"
+      "screenshot": "screens/02-grid-read-failure-toast.png"
     },
     {
       "section": "grid",
@@ -150,7 +150,7 @@
     {
       "section": "detail",
       "row": "03 Detail",
-      "name": "Rejected",
+      "name": "Rejected (corner glyph)",
       "nodeId": "176:2070",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2070",
       "device": "iphone",
@@ -159,11 +159,11 @@
     {
       "section": "detail",
       "row": "03 Detail",
-      "name": "Save failed",
+      "name": "Save failure toast",
       "nodeId": "176:2301",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=176-2301",
       "device": "iphone",
-      "screenshot": "screens/03-detail-save-failed.png"
+      "screenshot": "screens/03-detail-save-failure-toast.png"
     },
     {
       "section": "detail",
@@ -175,40 +175,40 @@
       "screenshot": "screens/03-detail-100pct-zoom-chrome-hidden.png"
     },
     {
+      "section": "detail",
+      "row": "03 Detail",
+      "name": "Swipe star bar: cleared step (proposal, #125)",
+      "nodeId": "244:1984",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=244-1984",
+      "device": "iphone",
+      "screenshot": "screens/03-detail-swipe-star-bar-cleared-step-proposal.png"
+    },
+    {
       "section": "group",
-      "row": "04 Groups in detail (old frames out of date)",
-      "name": "In progress (iPhone)",
+      "row": "04 Groups in detail",
+      "name": "Stack opened in detail (iPhone)",
       "nodeId": "173:1950",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=173-1950",
       "device": "iphone",
-      "screenshot": "screens/04-group-in-progress-iphone.png"
+      "screenshot": "screens/04-groups-in-detail-iphone.png"
     },
     {
       "section": "group",
-      "row": "04 Groups in detail (old frames out of date)",
-      "name": "Group done (iPhone)",
-      "nodeId": "173:2193",
-      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=173-2193",
-      "device": "iphone",
-      "screenshot": "screens/04-group-group-done-iphone.png"
-    },
-    {
-      "section": "group",
-      "row": "04 Groups in detail (old frames out of date)",
-      "name": "iPad",
+      "row": "04 Groups in detail",
+      "name": "Stack opened in detail (iPad, provisional)",
       "nodeId": "214:2931",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2931",
       "device": "ipad",
-      "screenshot": "screens/04-group-ipad.png"
+      "screenshot": "screens/04-groups-in-detail-ipad.png"
     },
     {
       "section": "group",
-      "row": "04 Groups in detail (old frames out of date)",
-      "name": "Duo expanded",
+      "row": "04 Groups in detail",
+      "name": "Stack opened in detail (Duo expanded, photo only)",
       "nodeId": "214:3214",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-3214",
       "device": "duo-expanded",
-      "screenshot": "screens/04-group-duo-expanded.png"
+      "screenshot": "screens/04-groups-in-detail-duo-expanded.png"
     },
     {
       "section": "move",
@@ -258,7 +258,7 @@
     {
       "section": "ipad",
       "row": "06–07 iPad",
-      "name": "Grid",
+      "name": "Grid with sidebar (provisional)",
       "nodeId": "166:1836",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-1836",
       "device": "ipad",
@@ -267,11 +267,29 @@
     {
       "section": "ipad",
       "row": "06–07 iPad",
-      "name": "Detail",
+      "name": "Grid: Locations, subfolder selected (provisional)",
+      "nodeId": "243:1957",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-1957",
+      "device": "ipad",
+      "screenshot": "screens/06-ipad-grid-locations-subfolder.png"
+    },
+    {
+      "section": "ipad",
+      "row": "06–07 iPad",
+      "name": "Detail with right rail (provisional)",
       "nodeId": "166:2591",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=166-2591",
       "device": "ipad",
       "screenshot": "screens/06-ipad-detail.png"
+    },
+    {
+      "section": "ipad",
+      "row": "06–07 iPad",
+      "name": "Detail: rejected (corner glyph, provisional)",
+      "nodeId": "243:2691",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-2691",
+      "device": "ipad",
+      "screenshot": "screens/06-ipad-detail-rejected.png"
     },
     {
       "section": "duo",
@@ -299,6 +317,15 @@
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=196-1119",
       "device": "duo-expanded",
       "screenshot": "screens/08-duo-expanded-photo-focus-30-70.png"
+    },
+    {
+      "section": "duo",
+      "row": "08–09 Duo",
+      "name": "Expanded: photo focus, rejected (corner glyph)",
+      "nodeId": "243:2960",
+      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=243-2960",
+      "device": "duo-expanded",
+      "screenshot": "screens/08-duo-expanded-photo-focus-rejected.png"
     },
     {
       "section": "duo",
@@ -348,7 +375,7 @@
     {
       "section": "errors",
       "row": "12 Errors",
-      "name": "Drive disconnected",
+      "name": "Drive disconnected (subtitle glyph)",
       "nodeId": "214:1484",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-1484",
       "device": "iphone",
@@ -357,20 +384,11 @@
     {
       "section": "errors",
       "row": "12 Errors",
-      "name": "Lost access",
+      "name": "Lost access (subtitle glyph)",
       "nodeId": "214:2083",
       "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2083",
       "device": "iphone",
       "screenshot": "screens/12-errors-lost-access.png"
-    },
-    {
-      "section": "errors",
-      "row": "12 Errors",
-      "name": "Leaving with unsaved marks",
-      "nodeId": "214:2682",
-      "url": "https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-2682",
-      "device": "iphone",
-      "screenshot": "screens/12-errors-leaving-with-unsaved-marks.png"
     }
   ]
 }

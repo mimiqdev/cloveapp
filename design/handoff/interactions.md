@@ -5,7 +5,7 @@ Items tagged **(proposed)** were not reviewed in the design. They are sensible d
 ## Core model
 
 - A **mark** is a rating and a label (none or one of 5 colors). The rating can be −1, which is Reject, so a photo is never rated and rejected at once: rejecting replaces the stars, and undoing restores them. Marks are written to the photo's XMP sidecar, in the folder where the photos live; a standalone JPEG/HIF keeps its rating and label in Clove. Nothing is imported or copied.
-- Every mark appears at once and saves in user action order. A pending mark is shown until its write finishes; otherwise the files supply the marks. There is no save status. Only folder access problems appear in the subtitle: "Not connected" or "View only".
+- Every mark appears at once and saves in user action order. A pending mark is shown until its write finishes; otherwise the files supply the marks. There is no save status. Only folder access problems appear in the subtitle, as a glyph (`externaldrive.badge.xmark` or `lock.fill`); "Not connected" and "View only" are its VoiceOver labels.
 - **Undo** (top bar, or the Duo dock) reverts the last mark change, a "Reject N unmarked", or a Move Rejects. It is a stack and works across photos.
 - **Reject never deletes.** Rejected photos stay in place (dimmed in the grid and filmstrip; full brightness with a corner glyph in detail) until the person runs Move Rejects, which moves them to `_Rejected/` inside the same folder.
 
@@ -31,7 +31,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 | Grid | "…" ▶ Select | Select mode: tap tiles to toggle, then use the capsule to mark all of them. Done exits. |
 | Detail | Swipe left or right | Next or previous photo in grid order (filtered order when a filter is on). |
 | Detail | **Swipe up** and hold | Shows the vertical star bar. Dragging up fills stars from the bottom; release commits. The capsule stars preview the live value. |
-| Detail | **Swipe down** | Reject (the ✕ chip under the star bar). Swiping down again on a rejected photo clears the reject. |
+| Detail | **Swipe down** | Reject (the ✕ chip under the star bar). Coming with #125: a quick swipe down first clears the rating to 0, then rejects; see the proposal frame `03-detail-swipe-star-bar-cleared-step-proposal`. |
 | Detail | Tap the capsule's reject, stars or label | Sets the mark directly. Tapping the current star value clears it. The label opens the picker, and picking closes it. |
 | Detail | Single tap on the photo | Hides or shows the chrome (capsule, filmstrip, top bar buttons). |
 | Detail | Double-tap or pinch | 100% zoom at the tapped point. The chrome hides. Double-tap again to fit. |
@@ -57,7 +57,8 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 ## iPad
 
-- The sidebar is the filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
+- The sidebar is the filter. Selecting a row sets the grid's filter and title, and clears any other sidebar filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
+- Tapping a photo opens detail full screen; "‹ All" (the selected row's name) goes back with the same filter.
 - Detail has a right rail instead of the capsule: tap or drag the vertical star bar, tap Reject, or tap a label dot. Tapping the current rating or label clears it. The rail never hides; single tap and zoom hide the filmstrip, Reject N unmarked pill and top bar buttons while the stage keeps its size.
 - Swipe marking stays on the photo as on iPhone: swipe up to rate with live feedback in the rail's stars, and swipe down to toggle Reject.
 - Full keyboard support as above **(proposed)**. Pointer hover shows the rail's tooltips.

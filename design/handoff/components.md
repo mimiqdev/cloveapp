@@ -23,7 +23,8 @@ All floating controls use one glass material:
 | **Label picker** | Above the capsule (iPhone); beside the dock (Duo) | A glass capsule of 6 dots: none, red, yellow, green, blue, purple (`label/*`). The current one is ringed. Picking closes it. |
 | **Vertical star bar (swipe-up)** | iPhone detail on swipe up; Duo dock on slide | A narrow glass pill of 5 stars stacked vertically that **fill from the bottom** while dragging, plus a ✕ chip below it for the swipe-down reject. iPad rail version: 43 × 174, radius 22, padding 10, gap 6, tap or drag. |
 | **Duo dock** | Duo expanded, right edge | A vertical column under the status bar, centered on the signal icon. Back alone (36 circle), then 41 pt wide capsules (radius 20, padding 2/4, gap 2): **view tools** (Filter, "…", Info), **marks** (★ value button 36 × 48 showing "★ 2", Reject 32, Label 36; only while a photo is open), **bottom** (Undo, Move Rejects). |
-| **iPad rail** | iPad detail, right, 96 wide | The vertical star bar, a hairline, the Reject circle (40), and the label dots, top aligned with padding 18 and gap 10. |
+| **iPad rail** | iPad detail, right, 96 wide | The vertical star bar, a hairline, the Reject circle (40), and the label dots, top aligned with padding 18 and gap 10. It sits beside the stage and never hides. Label dots are tapped directly (no popover); the current one has a ring. Each control has a hover tooltip (`.help`) with its VoiceOver label: a small `surface/card` pill, radius 6, 12 pt text, to the left of the control. |
+| **iPad sidebar** | iPad grid, left, 280 wide | Folder name and source, then Locations (only with subfolders), Filters (Unmarked, Rejected, one ★n+ row per rating that has photos), Color labels (only labels in use) and Similar groups (one row with a regroup glyph button; a spinner while grouping). One selected row in `accent`. Counts trail each row. |
 | **Split divider** | Duo expanded, photo focus | An 8 pt gutter with a hairline in `separator` and a small centered drag handle. Snap points: 30/70 and photo only. Never 50/50. |
 
 ## Grid
@@ -43,7 +44,7 @@ All floating controls use one glass material:
 |---|---|
 | **Photo stage** | The photo is aspect fit on `bg/stage`. It is never tinted or dimmed, including when rejected. Double-tap zooms to 100%. |
 | **Detail reject glyph** | A white `xmark` in a 22 pt filled `reject` circle, inset 8 pt in the stage's top-trailing corner inside the safe area. Shown only for rejected photos. Fixed while zooming or panning and visible with chrome hidden. Decorative and ignores taps. VoiceOver reads "Rejected" in the photo label, with no separate glyph element. |
-| **Nav title and subtitle** | The filename (or folder name), with a subtitle built from counts and companion segments joined by " · ". Only folder access problems add an indicator: Not connected or View only. |
+| **Nav title and subtitle** | The filename (or folder name), with a subtitle built from counts and companion segments joined by " · ". Only folder access problems add an indicator: the `externaldrive.badge.xmark` or `lock.fill` glyph in `text/secondary` after the count, with "Not connected" or "View only" as its VoiceOver label. No save dot, Saved, Saving or loading word. |
 | **Filmstrip** | Thumbnails 54 × 60 with a gap of 8. Follows grid order. **Other groups** are collapsed to one stacked thumbnail with a count badge (radius 8, `group`). The **current group** is expanded in place on a rounded rectangle (radius 9, padding 3, gap 3) of `group` at **25% layer opacity**, with no outline. The **current frame** has a 1.5–2 pt ring in `text/primary` (radius 5). Rejected thumbnails are dimmed. The Reject N unmarked pill sits centred in its own row above the strip, with space clear of the capsule and swipe star bar. |
 | **100% chip** | A small glass pill reading "100%", fading out after about 1 s. |
 | **Info sheet** | System sheet at the medium detent, with grouped list sections Capture and File. |
@@ -53,12 +54,12 @@ All floating controls use one glass material:
 | Component | Spec |
 |---|---|
 | **Progress line** | 2 pt high, full width under the toolbar. Fills in `accent` while reading and in `group` while grouping. Hidden when done. |
-| **Toast** | A glass pill, 358 × 55, radius 26, padding 18/8, gap 12. Text on the left (with an optional second line in `reject`) and a button on the right (Undo or Details, a 72 × 38 capsule in `accent`). Sits above the capsule or the Move Rejects button. Auto-hides after about 6 s; Undo stays available in the top bar. |
+| **Toast** | A glass pill, 358 × 55, radius 26, padding 18/8, gap 12. Text on the left (with an optional second line in `reject`) and a button on the right (Undo or Details, a 72 × 38 capsule in `accent`). Sits above the capsule or the Move Rejects button. Auto-hides after about 6 s; Undo stays available in the top bar. **Failure toast** variant: one line, no button: "Couldn't save the mark." or "Couldn't read some marks." In detail it sits above the filmstrip. |
 | **Banner** (errors) | A glass card pinned under the toolbar, with the message, then one button (Reopen or Open). The grid behind it is dimmed. |
 | **Alert** | A system alert. The destructive option is red, and the safe option is bold. |
 | **Pill action** (detail) | A glass capsule centred in its own row above the filmstrip: "Reject 6 unmarked" (text in `reject`). Requires both a rated or labeled visible member and an unmarked visible member. Hides with chrome, when marking is off, or when no unmarked photos remain; nothing replaces it. |
 | **Move Rejects sheet** | A small detent. A fanned stack of 3–4 reject thumbnails (tap to expand into a 4-column quick grid), the title, a one-line explanation, and a full-width **Move** button in `accent`. |
-| **Couldn't move sheet** | A list sheet with rows of a thumbnail, file name and reason (in `reject`), then **Done** and **Try again**. |
+| **Couldn't move sheet** | A list sheet with rows of a thumbnail, file name and reason (in `reject`), then one full-width **Done**. No Try again. |
 
 ## Entry and Settings
 
