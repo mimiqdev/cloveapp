@@ -50,11 +50,13 @@ jobs:
           persist-credentials: false
       - name: Merge main
         run: scripts/ci/merge-main.sh
-      # The commands behind `mise run test-fixtures` and `mise run test-release`.
+      # Logic-only script tests do not need Xcode or a simulator.
       - name: Fixture tooling tests
         run: /usr/bin/python3 scripts/test_fixtures.py
       - name: Release script tests
         run: /usr/bin/python3 scripts/test_release_testflight.py
+      - name: Simulator runner tests
+        run: /usr/bin/python3 scripts/test_smoke.py
 
   packages:
     name: Lint and package tests
