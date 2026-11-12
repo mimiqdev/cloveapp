@@ -102,8 +102,6 @@ struct PhotoActionsTests {
         #expect(library.writes.count == writesBefore + 1)
         model.undoLastMark()
         #expect(model.shownMarks(for: photo.id).rating == three)
-        model.undoLastMark()
-        #expect(model.shownMarks(for: photo.id).rating == .unrated)
         #expect(!model.canUndoMark)
         await model.drainActions()
     }

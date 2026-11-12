@@ -155,7 +155,7 @@ Marking rules:
 | --- | --- |
 | Rating from 0 to 5 | Tap a rating in the rating bar. Tap the same rating again to clear it. A star rating on a rejected photo replaces −1 with those stars. Only enabled ratings appear. |
 | Color label | Red, yellow, green, blue, purple, and Clear by default. Settings can enable extended colors, orange and pink, matching Capture One. Use fixed English names in XMP, regardless of system language. |
-| Reject | The rating −1. Swiping down, the HUD's Reject, or `↓` replaces the photo's stars with −1; turning Reject off leaves the photo unrated. The color label stays independent. Reject does not delete the original. |
+| Reject | The rating −1. Reaching Reject in the marking swipe, the HUD's Reject, or `↓` replaces the photo's stars with −1; turning Reject off leaves the photo unrated. The color label stays independent. Reject does not delete the original. |
 | Undo | Uses the system undo mechanism: a toolbar Undo button, ⌘Z on an external keyboard, and the iOS three-finger undo gestures. Undoing after auto-advance returns to the photo whose mark was undone. Undo also covers Reject N unmarked and Move rejects, each as one step. |
 | Save status | Writing…, Saved, or Write failed for XMP writes; Saved only after read-back confirmation. Confirm reject moves before showing success. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Offer Retry after failure. |
 

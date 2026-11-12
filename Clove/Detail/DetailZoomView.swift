@@ -187,6 +187,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// One preview session for either direction, discarded on cancel.
     private var markingSession: MarkingSwipeSession?
     private var markingStartTime: TimeInterval = 0
+    private var markingTouchStart: CGPoint = .zero
     private var velocitySample: Task<Void, Never>?
     var currentRating: Rating = .unrated
 
@@ -422,6 +423,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     // MARK: - Marking swipe
 
+    /// UIPan translation starts at recognition, losing more distance on a fast swipe. Capture
+    /// touch-down so the continuous ladder always measures the full travel from the same origin.
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool
+    {
+        if recognizer === markingPan { markingTouchStart = touch.location(in: self) }
+        return true
+    }
+
     /// Locks the dominant axis once. Later samples cannot switch between navigation and marking.
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
         if recognizer === edgeTap {
@@ -465,13 +474,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             handleNavigationPan(pan)
             return
         }
-        let travel = -Double(pan.translation(in: self).y)
+        let travel = Double(markingTouchStart.y - pan.location(in: self).y)
         switch pan.state {
         case .began:
-            beginMarkingSwipe(
-                at: CGPoint(
-                    x: pan.location(in: self).x - pan.translation(in: self).x,
-                    y: pan.location(in: self).y - pan.translation(in: self).y))
+            beginMarkingSwipe(at: markingTouchStart)
             updateMarkingSwipe(travel: travel)
         case .changed:
             updateMarkingSwipe(travel: travel)
@@ -502,7 +508,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 try await Task.sleep(for: .seconds(MarkingSwipeRules.velocityWindow))
             } catch { return }
             guard let self else { return }
-            self.updateMarkingSwipe(travel: -Double(self.markingPan.translation(in: self).y))
+            self.updateMarkingSwipe(
+                travel: Double(self.markingTouchStart.y - self.markingPan.location(in: self).y))
         }
     }
 
