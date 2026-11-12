@@ -14,7 +14,7 @@ struct MoveRejectsToast: View {
             message: copy.message,
             detail: [copy.failureMessage, copy.skippedMessage].compactMap { $0 }
                 .joined(separator: " ").nilIfEmpty,
-            actionTitle: completed.canUndo ? "Undo" : nil,
+            actionTitle: browsing.canUndoRejectMove(completed) ? "Undo" : nil,
             secondaryActionTitle: copy.showsDetails ? "Details" : nil,
             onSecondaryAction: showDetails,
             identifier: "clove.moves.toast",

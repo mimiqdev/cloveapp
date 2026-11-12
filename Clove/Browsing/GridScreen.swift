@@ -89,13 +89,10 @@ struct GridScreen: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if browsing.isSaveFailureToastVisible {
-                Toast(
-                    message: BrowsingModel.saveFailureToastMessage,
-                    identifier: "clove.save.toast"
-                )
-                .padding(.horizontal)
-                .padding(.bottom, 12)
+            if let message = browsing.failureToastMessage {
+                Toast(message: message, identifier: "clove.save.toast")
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
             } else if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible {
                 MoveRejectsToast(browsing: browsing, completed: completed) {
                     moveSheet = .details(completed)
