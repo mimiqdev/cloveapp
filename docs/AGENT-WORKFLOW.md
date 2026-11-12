@@ -51,7 +51,7 @@ At most **three workers run at once**, limited by the Mac's internal disk (simul
 - Commit in small steps. Push the branch and open a pull request from the [template](../.github/pull_request_template.md), titled `[<ID>] <summary>` and containing `Closes #<issue>`.
 - On every change and fix round, run `mise run check`: generate, lint, the `CloveCore` and `CloveImaging` tests, and one build of Clove for testing. It boots no simulator; the app unit tests and UI tests run nightly in CI.
 - Add the matching task when a change reaches further:
-  - a change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab`;
+  - a change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab` (and `mise run build-lab` for app code): CI does not cover the lab, so these are its only checks;
   - a change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`, and a change to the release script adds `mise run test-release`;
   - a change to a UI flow, or a new or changed app or UI test, runs only those tests with `scripts/smoke.sh flows -only-testing:<test>` (or `smoke` for `CloveTests`), not the whole suite.
 - Workers don't run `mise run verify` and don't wait for CI. At the end, after merging the latest `main`, run `mise run check` once, plus the tests for what you changed, and paste the results. CI runs a quick check on every push to the pull request (`.github/workflows/verify.yml`); link the run in the report.

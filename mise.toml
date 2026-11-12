@@ -102,7 +102,7 @@ mise run test-imaging
 mise run build-tests
 """
 
-# .github/workflows/verify.yml re-lists these steps as CI jobs; change both together.
+# .github/workflows/verify.yml re-lists the non-lab steps as CI jobs; change both together.
 [tasks.verify]
 description = "The full gate: everything check runs, plus the fixture, release and lab tests, the CloveLab build and the UI flow tests"
 run = """
