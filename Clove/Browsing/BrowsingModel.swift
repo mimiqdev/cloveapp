@@ -78,7 +78,7 @@ final class BrowsingModel {
         case .unmarked: return "Unmarked"
         case .rejected: return "Rejected"
         case .ratedAtLeast(let rating): return "★\(rating.starCount ?? 0)+"
-        case .subfolder(let path): return path.isEmpty ? folderTitle : path
+        case .subfolder(let path): return path
         }
     }
 
@@ -86,7 +86,9 @@ final class BrowsingModel {
         recents.first { $0.identity == state.folder }.map { RecentFolderSummary.location(for: $0) }
     }
 
-    var sidebarCounts: SidebarCounts { SidebarCounts(photos: allPlacedPhotos) }
+    var sidebarCounts: SidebarCounts {
+        SidebarCounts(photos: storedPhotos.filter { !$0.time.isPending })
+    }
 
     /// All placed photos, used for the filter menu's counts.
     var allPlacedPhotos: [GridPhoto] {
@@ -1027,16 +1029,7 @@ final class BrowsingModel {
             } else {
                 thumbnails = library.thumbnails
                 detailImages = library.detailImages
-                if case .subfolder = saved.filter {
-                    state = saved
-                    pendingRestore = PendingBrowsingRestore(saved: saved, shown: state)
-                    resolvePendingRestore(scanFinished: hasFinishedScan)
-                } else {
-                    state = saved.restored(from: .available(library.contents)).state
-                }
-                if saved.route == .settings, saved.folder == library.folder {
-                    settingsReturnRoute = .grid
-                }
+                state = saved.restored(from: .available(library.contents)).state
             }
         case nil:
             let restored = saved.restored(from: .available(library.contents))
@@ -1090,11 +1083,6 @@ final class BrowsingModel {
             finishedScanFor = library.folder
             refresh()
             resolvePendingRestore(scanFinished: true)
-            if case .subfolder(let path) = state.filter,
-                !storedPhotos.contains(where: { $0.id.relativeFolderPath == path })
-            {
-                state.filter = .all
-            }
             await reloadRecents()
         case .locationLost(let folder, let loss, let generation):
             // A buffered loss can arrive after another folder opened, or after the same folder

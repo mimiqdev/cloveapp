@@ -315,8 +315,12 @@ struct GridScreen: View {
                     .frame(width: 16)
                 Text(name)
                 Spacer()
-                Text(browsing.allPlacedPhotos.filter { filter.matches($0.marks) }.count.formatted())
-                    .foregroundStyle(Color.clove.text.secondary)
+                Text(
+                    browsing.allPlacedPhotos.filter {
+                        filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
+                    }.count.formatted()
+                )
+                .foregroundStyle(Color.clove.text.secondary)
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 40)

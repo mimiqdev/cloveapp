@@ -18,7 +18,7 @@ public enum PhotoFilter: Hashable, Sendable {
     public static let ratedAtLeastHidesRejected = true
 
     /// Whether these marks pass the filter (PRD P0-03). The ordering time is never consulted.
-    public func matches(_ marks: PhotoMarks, relativeFolderPath: String? = nil) -> Bool {
+    public func matches(_ marks: PhotoMarks, relativeFolderPath: String) -> Bool {
         switch self {
         case .subfolder(let path):
             return relativeFolderPath == path

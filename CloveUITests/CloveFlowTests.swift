@@ -14,10 +14,16 @@ final class CloveFlowTests: XCTestCase {
             app.terminate()
             XCUIDevice.shared.orientation = .portrait
         }
-        XCUIDevice.shared.orientation = .landscapeLeft
+        XCUIDevice.shared.orientation = .portrait
         openLibrary(app)
         let sidebar = element(app, "clove.sidebar")
         XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertTrue(sidebar.isHittable)
+        XCTAssertTrue(element(app, "clove.sidebar.rejected").isHittable)
+        XCTAssertTrue(element(app, "clove.nav.back").isHittable)
+        capture("ipad-sidebar-grid-portrait")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(sidebar.isHittable)
         XCTAssertFalse(element(app, "clove.grid.filter").exists)
         let title = element(app, "clove.grid.title")
         XCTAssertEqual(title.label, "All")

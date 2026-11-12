@@ -30,7 +30,10 @@ public struct SidebarCounts: Equatable, Sendable {
         for photo in photos {
             if photo.marks.isUnmarked { unmarked += 1 }
             if photo.marks.isRejected { rejected += 1 }
-            for level in levels where PhotoFilter.ratedAtLeast(level).matches(photo.marks) {
+            for level in levels
+            where PhotoFilter.ratedAtLeast(level).matches(
+                photo.marks, relativeFolderPath: photo.id.relativeFolderPath)
+            {
                 ratings[level, default: 0] += 1
             }
             if let colour = photo.marks.label.colour { labels[colour, default: 0] += 1 }

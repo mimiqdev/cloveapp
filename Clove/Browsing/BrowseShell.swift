@@ -68,7 +68,7 @@ struct BrowseShell: View {
 
     /// The outer stack pushes destinations over both columns and keeps the grid's viewport alive.
     private var folderLayout: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
             FolderSidebar(browsing: browsing)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
                 .toolbar(.hidden, for: .navigationBar)
