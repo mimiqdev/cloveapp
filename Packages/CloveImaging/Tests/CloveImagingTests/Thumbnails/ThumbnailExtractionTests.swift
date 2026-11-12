@@ -6,7 +6,10 @@ import UniformTypeIdentifiers
 @testable import CloveImaging
 
 @Suite(.serialized)
-struct ThumbnailExtractionTests {
+actor ThumbnailExtractionTests {
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.ThumbnailExtraction")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     @Test func rasterFallbackAndOrientation() throws {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }

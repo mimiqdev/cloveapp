@@ -1,8 +1,9 @@
 name: Verify
 
 # Pull requests get a quick check: lint, the CloveCore and CloveImaging tests, and a
-# build of Clove for testing. The full suite (CloveLab, the app unit, smoke and flow
-# tests on a simulator) runs nightly on main and on every manual run.
+# build of Clove for testing. The full suite (the app unit, smoke and flow tests on a
+# simulator) runs nightly on main and on every manual run. Clove Lab is tested and
+# built locally only, when lab code changes.
 on:
   pull_request:
     branches: [main]
@@ -35,7 +36,7 @@ env:
   # 'true' for the nightly and manual runs, 'false' for the quick pull request check.
   FULL: ${{ github.event_name != 'pull_request' }}
 
-# The full run re-lists the steps of `mise run verify` in mise.toml; change both together.
+# The full run re-lists the non-lab steps of `mise run verify` in mise.toml; change both together.
 jobs:
   scripts:
     name: Python script tests
@@ -56,7 +57,7 @@ jobs:
         run: /usr/bin/python3 scripts/test_release_testflight.py
 
   packages:
-    name: Lint, package tests and CloveLab build
+    name: Lint and package tests
     runs-on: xcode-27
     timeout-minutes: 45
     env:
@@ -86,24 +87,12 @@ jobs:
         run: mise run fixtures-sets 2>&1 | tee .build/ci-logs/fixtures-sets.log
       - name: mise run lint
         run: mise run lint 2>&1 | tee .build/ci-logs/lint.log
-      # The package tests run serially: in parallel on this 3-core runner, tests that
-      # block on semaphores starve the cooperative thread pool (issue #146).
       - name: mise run test-core
         timeout-minutes: 15
-        run: mise run test-core --no-parallel 2>&1 | tee .build/ci-logs/test-core.log
+        run: mise run test-core 2>&1 | tee .build/ci-logs/test-core.log
       - name: mise run test-imaging
         timeout-minutes: 15
-        run: mise run test-imaging --no-parallel 2>&1 | tee .build/ci-logs/test-imaging.log
-      - name: mise run test-lab
-        if: env.FULL == 'true'
-        timeout-minutes: 15
-        run: mise run test-lab --no-parallel 2>&1 | tee .build/ci-logs/test-lab.log
-      - name: mise run generate
-        if: env.FULL == 'true'
-        run: mise run generate 2>&1 | tee .build/ci-logs/generate.log
-      - name: mise run build-lab
-        if: env.FULL == 'true'
-        run: mise run build-lab 2>&1 | tee .build/ci-logs/build-lab.log
+        run: mise run test-imaging 2>&1 | tee .build/ci-logs/test-imaging.log
       - name: Upload logs
         if: failure()
         uses: actions/upload-artifact@v7

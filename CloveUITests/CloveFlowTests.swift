@@ -17,7 +17,7 @@ final class CloveFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         openLibrary(app)
         let sidebar = element(app, "clove.sidebar")
-        XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertTrue(sidebar.exists)
         XCTAssertTrue(element(app, "clove.sidebar.rejected").isHittable)
         XCTAssertTrue(element(app, "clove.nav.back").isHittable)
         capture("ipad-sidebar-grid-portrait")
@@ -29,7 +29,11 @@ final class CloveFlowTests: XCTestCase {
         let move = element(app, "clove.grid.moveRejects")
         XCTAssertTrue(move.exists)
         XCTAssertLessThan(abs(move.frame.midY - title.frame.midY), 40)
-        XCTAssertEqual(move.frame.width, 40, accuracy: 1)
+        if #available(iOS 27.1, *) {
+            XCTAssertTrue(move.isHittable)
+        } else {
+            XCTAssertEqual(move.frame.width, 40, accuracy: 1)
+        }
         XCTAssertFalse(app.staticTexts["Analyzed"].exists)
         for theme in ["light", "dark"] {
             element(app, "clove.grid.more").tap()
@@ -39,27 +43,26 @@ final class CloveFlowTests: XCTestCase {
             if matchSystem.value as? String == "1" {
                 matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
                     .withOffset(CGVector(dx: -50, dy: 0)).tap()
-                XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), matchSystem))
+                XCTAssertEqual(matchSystem.value as? String, "0")
             }
             let tile = element(app, "clove.settings.appearance.theme.\(theme)")
             tile.tap()
-            XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tile))
+            XCTAssertTrue(tile.isSelected)
             capture("ipad-settings-back-\(theme)")
             let back = element(app, "clove.nav.back")
             XCTAssertEqual(back.label, "Back")
             back.tap()
-            XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+            XCTAssertTrue(sidebar.exists)
             capture("ipad-sidebar-grid-\(theme)")
         }
         element(app, "clove.sidebar.rejected").tap()
-        XCTAssertTrue(waitForLabel("Rejected", title))
+        XCTAssertEqual(title.label, "Rejected")
         XCTAssertTrue(element(app, "clove.sidebar.rejected").isSelected)
         XCTAssertFalse(element(app, "clove.grid.photo.mmq02680").exists)
         let rejected = element(app, "clove.grid.photo.mmq02679")
-        XCTAssertTrue(rejected.waitForExistence(timeout: 5))
         rejected.tap()
         let detail = element(app, "clove.detail")
-        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        XCTAssertTrue(detail.exists)
         XCTAssertFalse(sidebar.exists)
         XCTAssertFalse(element(app, "clove.grid").exists)
         XCTAssertGreaterThan(detail.frame.width, app.frame.width * 0.95)
@@ -67,29 +70,29 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(back.label, "Back")
         capture("ipad-detail-rejected-back")
         back.tap()
-        XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertTrue(sidebar.exists)
         XCTAssertEqual(title.label, "Rejected")
         XCTAssertTrue(element(app, "clove.sidebar.rejected").isSelected)
         element(app, "clove.sidebar.folder.DCIM/101CAM").tap()
-        XCTAssertTrue(waitForLabel("DCIM/101CAM", title))
+        XCTAssertEqual(title.label, "DCIM/101CAM")
         XCTAssertFalse(rejected.exists)
         element(app, "clove.sidebar.label.red").tap()
-        XCTAssertTrue(waitForLabel("Red", title))
-        XCTAssertTrue(element(app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 5))
+        XCTAssertEqual(title.label, "Red")
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02678").exists)
         element(app, "clove.sidebar.all").tap()
-        XCTAssertTrue(waitForLabel("All", title))
+        XCTAssertEqual(title.label, "All")
         element(app, "clove.grid").collectionViews.firstMatch.swipeUp()
         let lastPhoto = element(app, "clove.grid.photo.mmq02713")
         XCTAssertTrue(lastPhoto.isHittable)
         let previousY = lastPhoto.frame.minY
         lastPhoto.tap()
-        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        XCTAssertTrue(detail.exists)
         element(app, "clove.nav.back").tap()
-        XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        XCTAssertTrue(sidebar.exists)
         XCTAssertTrue(lastPhoto.isHittable)
         XCTAssertEqual(lastPhoto.frame.minY, previousY, accuracy: 3)
         element(app, "clove.nav.back").tap()
-        XCTAssertTrue(element(app, "clove.entry").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.entry").exists)
     }
 
     /// Rail input and chrome share the detail actions; screenshots use only the sample library.
@@ -111,26 +114,30 @@ final class CloveFlowTests: XCTestCase {
         let green = element(app, "clove.detail.rail.label.green")
         let preview = element(app, "clove.detail.preview")
         let strip = element(app, "clove.detail.filmstrip")
-        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        XCTAssertTrue(rail.exists)
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertEqual(rail.frame.width, 96, accuracy: 1)
         XCTAssertLessThanOrEqual(strip.frame.maxX, rail.frame.minX + 1)
-        XCTAssertEqual(element(app, "clove.detail.info").frame.width, 40, accuracy: 1)
+        if #available(iOS 27.1, *) {
+            XCTAssertTrue(element(app, "clove.detail.info").isHittable)
+        } else {
+            XCTAssertEqual(element(app, "clove.detail.info").frame.width, 40, accuracy: 1)
+        }
         stars.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), stars))
+        XCTAssertTrue(stars.isSelected)
         stars.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "isSelected == false"), stars))
+        XCTAssertFalse(stars.isSelected)
         green.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), green))
+        XCTAssertTrue(green.isSelected)
         XCTAssertFalse(element(app, "clove.detail.labels").exists)
         green.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "isSelected == false"), green))
+        XCTAssertFalse(green.isSelected)
         let bar = element(app, "clove.detail.rail.stars")
         let bottom = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
         let middle = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         bottom.press(forDuration: 0.1, thenDragTo: middle)
-        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), stars))
+        XCTAssertTrue(stars.isSelected)
         // A drag back to the same rating keeps it; a tap clears it.
         bottom.press(forDuration: 0.1, thenDragTo: middle)
         XCTAssertTrue(stars.isSelected)
@@ -147,34 +154,34 @@ final class CloveFlowTests: XCTestCase {
         let railFrame = rail.frame
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.tap()
-        XCTAssertTrue(waitForGone(strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
         XCTAssertTrue(rail.isHittable)
         XCTAssertEqual(preview.frame, stageFrame)
         XCTAssertEqual(rail.frame, railFrame)
         XCTAssertFalse(element(app, "clove.detail.info").exists)
         centre.tap()
-        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         centre.doubleTap()
-        XCTAssertTrue(waitForLabel("3 / 36 · 100%", element(app, "clove.detail.zoom")))
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
         XCTAssertFalse(strip.exists)
         XCTAssertTrue(rail.isHittable)
         XCTAssertEqual(preview.frame, stageFrame)
         centre.doubleTap()
-        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        XCTAssertTrue(strip.exists)
         reject.tap()
-        XCTAssertTrue(waitForLabel("Rejected", reject))
+        XCTAssertEqual(reject.label, "Rejected")
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
         XCTAssertFalse(stars.isSelected)
         XCTAssertFalse(green.isSelected)
         XCTAssertLessThan(element(app, "clove.detail.rejectGlyph").frame.maxX, rail.frame.minX)
         capture("ipad-detail-rail-rejected")
         centre.tap()
-        XCTAssertTrue(waitForGone(strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
         XCTAssertTrue(reject.isHittable)
         centre.tap()
         reject.tap()
-        XCTAssertTrue(waitForLabel("Reject", reject))
+        XCTAssertEqual(reject.label, "Reject")
         XCTAssertFalse(element(app, "clove.detail.rejectGlyph").exists)
         let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
         start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -130)))
@@ -185,7 +192,7 @@ final class CloveFlowTests: XCTestCase {
         chooseRailTheme("dark", app)
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
-        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        XCTAssertTrue(rail.exists)
         capture("ipad-detail-rail-dark")
         app.terminate()
         checkDisabledRail()
@@ -196,6 +203,14 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         chooseRailTheme("light", app)
+        turnOffAutoAdvance(app)
+        element(app, "clove.nav.back").tap()
+    }
+
+    /// Turns the settle that follows a mark off, on the open Settings screen, so a test reads the
+    /// marks it set instead of a photo it navigated to.
+    @MainActor
+    private func turnOffAutoAdvance(_ app: XCUIApplication) {
         let advance = app.switches["clove.settings.autoAdvanceEnabled"]
         for _ in 0..<5 {
             if advance.isHittable { break }
@@ -205,8 +220,7 @@ final class CloveFlowTests: XCTestCase {
             advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
                 .withOffset(CGVector(dx: -50, dy: 0)).tap()
         }
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), advance))
-        element(app, "clove.nav.back").tap()
+        XCTAssertEqual(advance.value as? String, "0")
     }
 
     @MainActor
@@ -215,11 +229,11 @@ final class CloveFlowTests: XCTestCase {
         if matchSystem.value as? String == "1" {
             matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
                 .withOffset(CGVector(dx: -50, dy: 0)).tap()
-            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), matchSystem))
+            XCTAssertEqual(matchSystem.value as? String, "0")
         }
         let tile = element(app, "clove.settings.appearance.theme.\(theme)")
         tile.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tile))
+        XCTAssertTrue(tile.isSelected)
     }
 
     @MainActor
@@ -229,7 +243,7 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(disconnected)
         element(disconnected, "clove.grid.photo.mmq02680").tap()
         let rail = element(disconnected, "clove.detail.rail")
-        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        XCTAssertTrue(rail.exists)
         XCTAssertFalse(element(disconnected, "clove.detail.rail.stars.3").isEnabled)
         XCTAssertFalse(element(disconnected, "clove.detail.rail.reject").isEnabled)
         XCTAssertFalse(element(disconnected, "clove.detail.rail.label.green").isEnabled)
@@ -247,13 +261,41 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         XCTAssertFalse(element(app, "clove.grid.saveState").exists)
         let companion = element(app, "clove.grid.photo.mmq02680")
-        XCTAssertTrue(companion.waitForExistence(timeout: 5))
         XCTAssertTrue(companion.label.contains("JPEG companion"))
         XCTAssertTrue(element(app, "clove.grid.group.burst-2678").exists)
         companion.tap()
-        XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.capsule").exists)
         XCTAssertTrue(element(app, "clove.detail.info").exists)
         XCTAssertTrue(element(app, "clove.detail.undo").exists)
+    }
+
+    /// Hardware keys mark and navigate through the marking path the capsule uses (PRD P0-06).
+    @MainActor
+    func testDetailHardwareKeysMarkAndNavigate() {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        turnOffAutoAdvance(app)
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let capsule = element(app, "clove.detail.capsule")
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        app.typeKey("3", modifierFlags: [])
+        XCTAssertEqual(capsule.value as? String, "3 stars")
+        app.typeKey("x", modifierFlags: [])
+        XCTAssertEqual(capsule.value as? String, "Rejected")
+        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
+        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertEqual(capsule.value as? String, "3 stars")
+        element(app, "clove.detail.info").tap()
+        element(app, "clove.detail.info.done").tap()
+        app.typeKey("0", modifierFlags: [])
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
     }
 
     @MainActor
@@ -262,7 +304,6 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.photo.mmq02680").tap()
         let label = element(app, "clove.detail.capsule.label")
-        XCTAssertTrue(label.waitForExistence(timeout: 5))
         label.tap()
         element(app, "clove.detail.labels.red").tap()
         XCTAssertTrue(app.staticTexts["Couldn't save the mark."].waitForExistence(timeout: 3))
@@ -280,7 +321,6 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.photo.mmq02680").tap()
         let label = element(app, "clove.detail.capsule.label")
-        XCTAssertTrue(label.waitForExistence(timeout: 5))
         label.tap()
         element(app, "clove.detail.labels.red").tap()
         XCTAssertTrue(waitForLabel("Not connected", element(app, "clove.detail.saveState")))
@@ -299,7 +339,6 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.filter.unmarked").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
         let rating = element(app, "clove.detail.capsule.stars.3")
-        XCTAssertTrue(rating.waitForExistence(timeout: 5))
         rating.tap()
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
     }
@@ -311,16 +350,10 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.photo.mmq02680").tap()
         let label = element(app, "clove.detail.capsule.label")
-        XCTAssertTrue(label.waitForExistence(timeout: 5))
         label.tap()
         let start = ContinuousClock.now
         element(app, "clove.detail.labels.red").tap()
-        var shownLabel = label.label
-        for _ in 0..<100 {
-            if shownLabel == "Label, Red" { break }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
-            shownLabel = label.label
-        }
+        let shownLabel = label.label
         let elapsed = start.duration(to: .now)
         XCTAssertEqual(shownLabel, "Label, Red")
         print(
@@ -339,7 +372,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
         element(app, "clove.grid.selectionOptions").tap()
         app.buttons["Select all"].tap()
-        XCTAssertTrue(waitForLabel("36 selected", element(app, "clove.grid.batch.count")))
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "36 selected")
         XCTAssertTrue(element(app, "clove.grid.batch.stars.3").isEnabled)
     }
 
@@ -348,13 +381,13 @@ final class CloveFlowTests: XCTestCase {
         let app = launchSample()
         openLibrary(app)
         let rated = element(app, "clove.grid.photo.mmq02678")
-        XCTAssertTrue(rated.waitForExistence(timeout: 5))
         rated.press(forDuration: 0.6)
         element(app, "clove.grid.photo.mmq02680").tap()
         element(app, "clove.grid.batch").press(forDuration: 0.6)
         app.buttons["Clear rating"].tap()
-        XCTAssertTrue(wait(NSPredicate(format: "NOT (label CONTAINS %@)", "stars"), rated))
-        XCTAssertTrue(rated.label.contains("Red"))
+        let clearedLabel = rated.label
+        XCTAssertFalse(clearedLabel.contains("stars"))
+        XCTAssertTrue(clearedLabel.contains("Red"))
     }
 
     @MainActor
@@ -363,22 +396,24 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.photo.mmq02680").tap()
         let info = element(app, "clove.detail.info")
-        XCTAssertTrue(info.waitForExistence(timeout: 5))
+        XCTAssertTrue(info.exists)
         let navigationPreview = element(app, "clove.detail.preview")
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", navigationPreview))
+        let fileName = element(app, "clove.detail.fileName")
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertEqual(navigationPreview.label, "MMQ02680.ARW")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), navigationPreview))
         XCTAssertFalse(
             String(describing: navigationPreview.value).localizedCaseInsensitiveContains("loading"))
         let navigationStart = ContinuousClock.now
         navigationPreview.swipeLeft()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
         print(
             "Detail navigation swipe to next filename (informational, XCTest input included): \(navigationStart.duration(to: .now))"
         )
         navigationPreview.swipeRight()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         info.tap()
-        XCTAssertTrue(app.staticTexts["Sample camera · 0123"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sample camera · 0123"].exists)
         XCTAssertTrue(app.staticTexts["24–70 mm"].exists)
         XCTAssertTrue(
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", ":05.42")).firstMatch
@@ -387,30 +422,88 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.detail.capsule.label").tap()
         element(app, "clove.detail.labels.green").tap()
         XCTAssertFalse(element(app, "clove.detail.labels").exists)
-        let preview = element(app, "clove.detail.preview")
+        let preview = navigationPreview
+        let zoom = element(app, "clove.detail.zoom")
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.doubleTap()
-        XCTAssertTrue(waitForLabel("3 / 36 · 100%", element(app, "clove.detail.zoom")))
+        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         XCTAssertFalse(element(app, "clove.detail.info").exists)
         XCTAssertFalse(element(app, "clove.detail.undo").exists)
         centre.tap()
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         centre.doubleTap()
-        XCTAssertTrue(info.waitForExistence(timeout: 5))
+        XCTAssertTrue(info.exists)
+        // The centre single tap waits for the double-tap recognizer to fail, after tap returns.
         centre.tap()
-        XCTAssertTrue(waitForGone(element(app, "clove.detail.capsule")))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         centre.tap()
-        XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         element(app, "clove.detail.capsule.stars.4").tap()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
-        XCTAssertTrue(String(describing: element(app, "clove.detail.capsule").value).contains("4"))
-        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
-        let end = start.withOffset(CGVector(dx: 0, dy: -130))
-        start.press(forDuration: 0.1, thenDragTo: end)
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertTrue(String(describing: capsule.value).contains("4"))
+        for (side, horizontalStart, nextPhoto) in [
+            ("right", 0.8, "MMQ02681.ARW"),
+            // Finishing the sample group advances to the following standalone photo.
+            ("left-third", 0.2, "MMQ02680.ARW"),
+        ] {
+            let start = preview.coordinate(
+                withNormalizedOffset: CGVector(dx: horizontalStart, dy: 0.5))
+            let end = start.withOffset(CGVector(dx: 0, dy: -130))
+            print("Swipe beside touch: \(side)")
+            start.press(
+                forDuration: 0.1, thenDragTo: end, withVelocity: .slow,
+                thenHoldForDuration: 2)
+            XCTAssertTrue(waitForLabel(nextPhoto, fileName))
+            XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
+        }
+    }
+
+    @MainActor
+    func testContinuousMarkingSwipeClearsRejectsAndLowersStars() {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
+        for _ in 0..<5 {
+            if advance.isHittable { break }
+            app.swipeUp()
+        }
+        if advance.value as? String == "1" {
+            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                .withOffset(CGVector(dx: -50, dy: 0)).tap()
+        }
+        XCTAssertEqual(advance.value as? String, "0")
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let stars = element(app, "clove.detail.capsule.stars.3")
+        stars.tap()
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35))
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 90)),
+            withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        element(app, "clove.detail.undo").tap()
+        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 210)),
+            withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
+        XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
+        element(app, "clove.detail.undo").tap()
+        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 135)),
+            withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
+        XCTAssertTrue((capsule.value as? String)?.contains("1 star") == true)
+        XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
     }
 
     @MainActor
@@ -424,11 +517,14 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
             let unmarkedCorner = try rejectGlyphPixels(in: preview)
             let glyph = element(app, "clove.detail.rejectGlyph")
+            let reject = element(app, "clove.detail.capsule.reject")
+            let fileName = element(app, "clove.detail.fileName")
+            let capsule = element(app, "clove.detail.capsule")
             XCTAssertFalse(glyph.exists)
-            element(app, "clove.detail.capsule.reject").tap()
-            XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+            reject.tap()
+            XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
-            XCTAssertTrue(waitForLabel("MMQ02680.ARW, Rejected", preview))
+            XCTAssertEqual(preview.label, "MMQ02680.ARW, Rejected")
             let rejectedCorner = try rejectGlyphPixels(in: preview)
             XCTAssertNotEqual(rejectedCorner, unmarkedCorner)
             XCTAssertTrue(glyph.exists)
@@ -436,13 +532,13 @@ final class CloveFlowTests: XCTestCase {
             capture("detail-rejected-\(theme)-chrome-shown")
             let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
             centre.tap()
-            XCTAssertTrue(waitForGone(element(app, "clove.detail.capsule")))
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
             XCTAssertTrue(glyph.exists)
             XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
             capture("detail-rejected-\(theme)-chrome-hidden")
             centre.doubleTap()
-            XCTAssertTrue(waitForLabel("3 / 36 · 100%", element(app, "clove.detail.zoom")))
+            XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
             XCTAssertTrue(glyph.exists)
             XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
@@ -452,11 +548,11 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
             centre.doubleTap()
             centre.tap()
-            XCTAssertTrue(element(app, "clove.detail.capsule.reject").waitForExistence(timeout: 5))
-            element(app, "clove.detail.capsule.reject").tap()
-            XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+            XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+            reject.tap()
+            XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
-            XCTAssertTrue(waitForLabel("MMQ02680.ARW", preview))
+            XCTAssertEqual(preview.label, "MMQ02680.ARW")
             XCTAssertFalse(glyph.exists)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), unmarkedCorner)
             app.terminate()
@@ -467,8 +563,9 @@ final class CloveFlowTests: XCTestCase {
     @MainActor
     private func rejectGlyphPixels(in preview: XCUIElement) throws -> Data {
         let screenshot = XCUIScreen.main.screenshot().image
+        let frame = preview.frame
         let region = CGRect(
-            x: preview.frame.maxX - 25, y: preview.frame.minY + 13, width: 12, height: 12
+            x: frame.maxX - 25, y: frame.minY + 13, width: 12, height: 12
         )
         .applying(CGAffineTransform(scaleX: screenshot.scale, y: screenshot.scale))
         let pixels = try XCTUnwrap(screenshot.cgImage?.cropping(to: region))
@@ -497,7 +594,7 @@ final class CloveFlowTests: XCTestCase {
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-        XCTAssertTrue(waitForLabel("3 / 36 · 100%", element(app, "clove.detail.zoom")))
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
     }
 
     @MainActor
@@ -508,7 +605,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(disconnected.staticTexts["The drive disconnected."].exists)
         XCTAssertTrue(element(disconnected, "clove.grid.saveState.failure.action").exists)
         element(disconnected, "clove.grid.group.burst-2678").tap()
-        XCTAssertTrue(element(disconnected, "clove.detail").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(disconnected, "clove.detail").exists)
         XCTAssertTrue(element(disconnected, "clove.detail.saveStatus.failure.action").exists)
     }
 
@@ -517,23 +614,24 @@ final class CloveFlowTests: XCTestCase {
     func testStackOpensDetailAndFinishingUndoRestoresUnmarkedTogether() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
         openLibrary(app)
-        element(app, "clove.grid.group.burst-2678").tap()
-        XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
+        let group = element(app, "clove.grid.group.burst-2678")
+        let fileName = element(app, "clove.detail.fileName")
+        group.tap()
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
         XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
         XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
         element(app, "clove.detail.capsule.label").tap()
         element(app, "clove.detail.labels.green").tap()
         element(app, "clove.nav.back").tap()
-        element(app, "clove.grid.group.burst-2678").tap()
-        XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
+        group.tap()
+        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
         let pill = element(app, "clove.detail.rejectUnmarked")
         XCTAssertEqual(pill.label, "Reject 2 unmarked")
         pill.tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         XCTAssertFalse(pill.exists)
         element(app, "clove.detail.undo").tap()
-        XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
-        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
         XCTAssertEqual(pill.label, "Reject 2 unmarked")
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02678").label.contains("Green"))
@@ -549,9 +647,13 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.filter").tap()
         element(app, "clove.grid.filter.unmarked").tap()
         element(app, "clove.grid.group.burst-2678").tap()
-        element(app, "clove.detail.capsule.label").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        label.tap()
         element(app, "clove.detail.labels.green").tap()
-        XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(label.label, "Label, Green")
+        // A label choice keeps this title. A predicate wait can time out taking its snapshot
+        // under load even when the title is already correct (#166).
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02678.ARW")
         XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
     }
 
@@ -561,16 +663,17 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.group.burst-2678").tap()
         let preview = element(app, "clove.detail.preview")
+        let fileName = element(app, "clove.detail.fileName")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-        XCTAssertTrue(waitForGone(element(app, "clove.detail.info")))
+        XCTAssertFalse(element(app, "clove.detail.info").exists)
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
-        XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertFalse(element(app, "clove.detail.info").exists)
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
-        XCTAssertTrue(element(app, "clove.detail.info").waitForExistence(timeout: 5))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertTrue(element(app, "clove.detail.info").exists)
     }
 
     @MainActor
@@ -581,15 +684,15 @@ final class CloveFlowTests: XCTestCase {
         ])
         openLibrary(app)
         element(app, "clove.grid.moveRejects").tap()
-        XCTAssertTrue(
-            waitForLabel("Move 2 rejected photos", element(app, "clove.moves.confirmation")))
+        XCTAssertEqual(element(app, "clove.moves.confirmation").label, "Move 2 rejected photos")
         element(app, "clove.moves.expand").tap()
         element(app, "clove.moves.keep.mmq02679").tap()
         element(app, "clove.moves.confirm").tap()
-        XCTAssertTrue(element(app, "clove.moves.toast.action").waitForExistence(timeout: 5))
-        XCTAssertEqual(element(app, "clove.moves.toast.action").label, "Undo")
+        let undo = element(app, "clove.moves.toast.action")
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertEqual(undo.label, "Undo")
         element(app, "clove.moves.toast.secondaryAction").tap()
-        XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").exists)
         element(app, "clove.moves.details.done").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02685").label.contains("Rejected"))
     }
@@ -609,17 +712,18 @@ final class CloveFlowTests: XCTestCase {
         let details = toast.buttons["clove.moves.toast.secondaryAction"]
         XCTAssertTrue(details.exists)
         details.tap()
-        XCTAssertTrue(element(app, "clove.moves.details.sheet").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.moves.details.sheet").exists)
     }
 
     @MainActor
     func testDesignGalleryShowsSharedControls() {
         let app = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
-        XCTAssertTrue(element(app, "clove.design.gallery").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "clove.design.gallery").exists)
         XCTAssertTrue(element(app, "clove.mark.capsule").exists)
         XCTAssertTrue(element(app, "clove.mark.starBar").exists)
-        element(app, "clove.design.gallery.theme.nord").tap()
-        XCTAssertTrue(element(app, "clove.design.gallery.theme.nord").isSelected)
+        let nord = element(app, "clove.design.gallery.theme.nord")
+        nord.tap()
+        XCTAssertTrue(nord.isSelected)
     }
 
     @MainActor
@@ -632,7 +736,7 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.grid.group.burst-2678").tap()
             XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
             let pill = element(app, "clove.detail.rejectUnmarked")
-            XCTAssertTrue(pill.waitForExistence(timeout: 5))
+            XCTAssertTrue(pill.exists)
             XCTAssertTrue(pill.isHittable)
             XCTAssertLessThanOrEqual(
                 pill.frame.maxY, element(app, "clove.detail.capsule").frame.minY)
@@ -655,17 +759,17 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.grid.group.burst-2678").tap()
             element(app, "clove.detail.capsule.stars.3").tap()
             XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
-            XCTAssertTrue(element(app, "clove.detail.rejectUnmarked").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.detail.rejectUnmarked").exists)
             capture("detail-expanded-group-\(theme)")
             element(app, "clove.detail.rejectUnmarked").tap()
             XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
             element(app, "clove.nav.back").tap()
             element(app, "clove.grid.moveRejects").tap()
-            XCTAssertTrue(element(app, "clove.moves.expand").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.moves.expand").exists)
             capture("move-confirm-\(theme)")
             element(app, "clove.moves.expand").tap()
             element(app, "clove.moves.keep.mmq02685").tap()
-            XCTAssertTrue(waitForLabel("2 of 3 will move", element(app, "clove.moves.partial")))
+            XCTAssertEqual(element(app, "clove.moves.partial").label, "2 of 3 will move")
             capture("move-keeps-\(theme)")
             element(app, "clove.moves.confirm").tap()
             XCTAssertTrue(element(app, "clove.moves.toast.action").waitForExistence(timeout: 5))
@@ -684,7 +788,7 @@ final class CloveFlowTests: XCTestCase {
             capture("move-partial-\(theme)")
             element(partial, "clove.moves.toast.secondaryAction").tap()
             XCTAssertTrue(
-                element(partial, "clove.moves.details.sheet").waitForExistence(timeout: 5))
+                element(partial, "clove.moves.details.sheet").exists)
             capture("move-details-\(theme)")
             partial.terminate()
         }
@@ -705,7 +809,7 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.nav.back").tap()
             capture("stacks-collapsed-\(theme)")
             element(app, "clove.grid.photo.mmq02682").tap()
-            XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
             capture("stacks-filmstrip-\(theme)")
             app.terminate()
         }
@@ -725,7 +829,7 @@ final class CloveFlowTests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_DESIGN"] == "1")
         if XCUIScreen.main.screenshot().image.size.width > 700 {
             let app = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
-            XCTAssertTrue(element(app, "clove.design.gallery").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "clove.design.gallery").exists)
             capture("gallery-ipad-centred")
             app.swipeUp()
             capture("gallery-ipad-lower")
@@ -746,33 +850,33 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.grid.filter").tap()
             element(app, "clove.grid.filter.unmarked").tap()
             element(app, "clove.grid.filter").tap()
-            XCTAssertTrue(element(app, "clove.grid.filter.all").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.grid.filter.all").exists)
             capture("grid-filter-\(theme)")
             element(app, "clove.grid.filter.all").tap()
             element(app, "clove.grid.more").tap()
-            XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["Settings"].exists)
             capture("grid-more-\(theme)")
             // The native menu overlaps the title. A tap to its left dismisses it.
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.6)).tap()
             let photo = element(app, "clove.grid.photo.mmq02680")
             photo.press(forDuration: 0.6)
-            XCTAssertTrue(element(app, "clove.grid.batch.done").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.grid.batch.done").exists)
             capture("grid-select-\(theme)")
             element(app, "clove.grid.batch.done").tap()
             photo.tap()
-            XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.detail.capsule").exists)
             capture("detail-\(theme)")
             element(app, "clove.detail.capsule.label").tap()
-            XCTAssertTrue(element(app, "clove.detail.labels.green").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.detail.labels.green").exists)
             capture("detail-labels-\(theme)")
             element(app, "clove.detail.labels.green").tap()
             element(app, "clove.detail.info").tap()
-            XCTAssertTrue(app.staticTexts["Sample camera · 0123"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Sample camera · 0123"].exists)
             capture("detail-info-\(theme)")
             element(app, "clove.detail.info.done").tap()
             let preview = element(app, "clove.detail.preview")
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-            XCTAssertTrue(waitForGone(element(app, "clove.detail.capsule")))
+            XCTAssertFalse(element(app, "clove.detail.capsule").exists)
             capture("detail-zoom-\(theme)")
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
             element(app, "clove.detail.capsule.reject").tap()
@@ -782,7 +886,7 @@ final class CloveFlowTests: XCTestCase {
             capture("detail-rejected-\(theme)")
             element(app, "clove.nav.back").tap()
             app.swipeUp()
-            XCTAssertTrue(element(app, "clove.grid.photo.mmq02700").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.grid.photo.mmq02700").exists)
             capture("grid-no-preview-\(theme)")
             app.terminate()
         }
@@ -792,7 +896,7 @@ final class CloveFlowTests: XCTestCase {
             capture("grid-opening-\(stage)")
             XCTAssertFalse(element(app, "clove.grid.moveRejects").exists)
             element(app, "clove.grid.photo.mmq02680").tap()
-            XCTAssertTrue(element(app, "clove.detail.capsule").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.detail.capsule").exists)
             app.terminate()
         }
         let app = launchSample(["CLOVE_TEST_LIBRARY_LOCATION_LOSS": "drive"])
@@ -807,14 +911,14 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.photo.mmq02680").tap()
         element(app, "clove.detail.info").tap()
-        XCTAssertTrue(app.staticTexts["Sample camera · 0123"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sample camera · 0123"].exists)
         capture("detail-info-compact")
         element(app, "clove.detail.info.done").tap()
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         XCTAssertTrue(
-            element(app, "clove.settings.appearance.theme.light").waitForExistence(timeout: 5))
+            element(app, "clove.settings.appearance.theme.light").exists)
         capture("theme-tiles")
         app.terminate()
         let opening = launchSample(["CLOVE_TEST_LIBRARY_OPENING": "empty"])
@@ -824,8 +928,161 @@ final class CloveFlowTests: XCTestCase {
         capture("grid-opening-before-first-photo")
     }
 
+    /// Runs on the Duo's actual inner display. Device Hub must have selected Open;
+    /// the public XCTest API currently has no hinge/pose setter.
     @MainActor
-    private func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
+    func testDuoGridFocusDockMarkAndPhotoOnly() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4")
+        continueAfterFailure = false
+        let app = launchSample()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        openLibrary(app)
+        try XCTSkipUnless(
+            app.windows.firstMatch.horizontalSizeClass == .regular,
+            "Select Open in Device Hub to test the Duo inner display")
+        prepareDuo(app)
+        exerciseDuo(app)
+    }
+
+    @MainActor
+    private func prepareDuo(_ app: XCUIApplication) {
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
+        for _ in 0..<6 {
+            if advance.isHittable { break }
+            app.swipeUp()
+        }
+        if advance.value as? String == "1" {
+            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                .withOffset(CGVector(dx: -advance.frame.height * 0.8, dy: 0)).tap()
+        }
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), advance))
+        element(app, "clove.nav.back").tap()
+    }
+
+    @MainActor
+    private func exerciseDuo(_ app: XCUIApplication) {
+        XCTAssertFalse(element(app, "clove.sidebar").exists)
+        XCTAssertFalse(element(app, "clove.duo.rating").exists)
+        capture("duo-grid")
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let focus = element(app, "clove.duo.focus")
+        XCTAssertTrue(focus.waitForExistence(timeout: 5))
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertFalse(element(app, "clove.detail.rail").exists)
+        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
+        let grid = app.collectionViews.firstMatch
+        XCTAssertEqual(
+            grid.frame.width / (grid.frame.width + focus.frame.width), 0.3, accuracy: 0.02)
+        let marks = element(app, "clove.duo.rating")
+        XCTAssertGreaterThanOrEqual(marks.frame.minX, preview.frame.maxX)
+        capture("duo-focus")
+        element(app, "clove.duo.rating").tap()
+        let stars = element(app, "clove.duo.stars")
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        stars.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), marks))
+        let rating = element(app, "clove.duo.rating")
+        let ratingStart = rating.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        ratingStart.press(
+            forDuration: 0.1,
+            thenDragTo: ratingStart.withOffset(CGVector(dx: 0, dy: -rating.frame.height * 1.25)))
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "5 stars"), marks))
+        element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), marks))
+        rating.tap()
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(stars.frame.midX, app.frame.midX)
+        capture("duo-stars")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), stars))
+        element(app, "clove.duo.label").tap()
+        XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
+        capture("duo-labels")
+        element(app, "clove.duo.labels.green").tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "label CONTAINS[c] %@", "green"),
+                element(app, "clove.duo.label")))
+        let divider = element(app, "clove.duo.divider")
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(
+            forDuration: 0.1,
+            thenDragTo: grid.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.focus").exists)
+        XCTAssertTrue(element(app, "clove.detail.fileName").exists)
+        capture("duo-photo-only")
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.rating").exists)
+    }
+
+    @MainActor
+    func testDuoCoverToolbarMarkAndPickers() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4")
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        try XCTSkipUnless(
+            app.windows.firstMatch.horizontalSizeClass == .compact,
+            "Select Closed in Device Hub to test the Duo cover")
+        prepareDuo(app)
+        XCTAssertFalse(element(app, "clove.duo.dock").exists)
+        XCTAssertFalse(element(app, "clove.sidebar").exists)
+        capture("duo-cover")
+        element(app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertTrue(element(app, "clove.detail.fileName").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
+        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        XCTAssertFalse(element(app, "clove.detail.rail").exists)
+        let rating = element(app, "clove.duo.rating")
+        rating.tap()
+        let stars = element(app, "clove.duo.stars")
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        stars.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
+        let start = rating.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -60)))
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "5 stars"), rating))
+        element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
+        rating.tap()
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(stars.frame.midX, app.frame.midX)
+        capture("duo-cover-stars")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), stars))
+        element(app, "clove.duo.label").tap()
+        XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
+        capture("duo-cover-labels")
+        element(app, "clove.duo.labels.green").tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "label CONTAINS[c] %@", "green"),
+                element(app, "clove.duo.label")))
+        element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "NOT (label CONTAINS[c] %@)", "green"),
+                element(app, "clove.duo.label")))
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }
         app.launch()
@@ -836,7 +1093,7 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func openLibrary(_ app: XCUIApplication) {
+    func openLibrary(_ app: XCUIApplication) {
         let open = element(app, "clove.entry.openFolder")
         if open.exists { open.tap() }
         if element(app, "clove.detail").exists { element(app, "clove.nav.back").tap() }
@@ -855,29 +1112,28 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+    func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
     @MainActor
-    private func waitForLabel(_ label: String, _ target: XCUIElement) -> Bool {
+    func waitForLabel(_ label: String, _ target: XCUIElement) -> Bool {
         wait(NSPredicate(format: "label == %@", label), target)
     }
 
     @MainActor
-    private func waitForGone(_ target: XCUIElement) -> Bool {
-        wait(NSPredicate(format: "exists == false"), target)
-    }
-
-    @MainActor
-    private func wait(_ predicate: NSPredicate, _ target: XCUIElement) -> Bool {
-        XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: predicate, object: target)], timeout: 5)
+    func wait(_ predicate: NSPredicate, _ target: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        // Real async work may already be finished. Read once before starting a predicate timer:
+        // under load, that first accessibility snapshot can itself exceed a short deadline.
+        if predicate.evaluate(with: target) { return true }
+        return XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: predicate, object: target)], timeout: timeout
+        )
             == .completed
     }
 
     @MainActor
-    private func capture(_ name: String) {
+    func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways

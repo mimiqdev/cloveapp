@@ -522,6 +522,74 @@ final class BrowsingModel {
         submit(.batch(edits))
     }
 
+    // MARK: - Batch rename
+
+    private(set) var isRenaming = false
+    private(set) var completedRename: CompletedBatchRename?
+    private(set) var renameToastAttempt = 0
+    private(set) var isRenameToastVisible = false
+
+    func dismissRenameToast() { isRenameToastVisible = false }
+
+    func planBatchRename(
+        order: [PhotoIdentity], template: RenameTemplate, destination: RenameDestination,
+        rejectsFolderName: RejectsFolderName
+    ) async throws -> BatchRenamePlan {
+        guard canMark else { throw RenameFlowError.unavailable }
+        return try await library.planBatchRename(
+            order: order, template: template, destination: destination,
+            rejectsFolderName: rejectsFolderName)
+    }
+
+    func runBatchRename(
+        _ plan: BatchRenamePlan,
+        progress: @escaping @MainActor @Sendable (BatchRenameProgress) -> Void
+    ) async throws {
+        guard canMark else { throw RenameFlowError.unavailable }
+        isRenaming = true
+        defer { isRenaming = false }
+        let folder = state.folder
+        let generation = openGeneration
+        let current = state.currentPhoto
+        await drainActions()
+        await library.drainWrites()
+        guard folder == state.folder, generation == openGeneration,
+            folderLocationLoss == nil, !hasLeftFolder
+        else { throw RenameFlowError.folderChanged }
+        let result = try await library.runBatchRename(plan, progress: progress)
+        var completed = CompletedBatchRename(plan: plan, result: result)
+        // Files changed even on partial failure. No undo entry may retain their old paths.
+        markUndo = nil
+        lastRejectMove = nil
+        keptEditsByMove = [:]
+        dismissRejectMoveToast()
+        desiredMarks.removeAll()
+        clearSelection()
+        do { try await library.rescanAfterRename() } catch {
+            completed.rescanFailure = RenameFlowError.rescanFailed.localizedDescription
+        }
+        refresh()
+        thumbnails = library.thumbnails
+        detailImages = library.detailImages
+        if let current {
+            let renamed = completed.newIdentity(for: current)
+            if photoIndices[renamed] != nil {
+                state.currentPhoto = renamed
+                library.setEntryResumePhoto(renamed)
+            }
+        }
+        // A subfolder filter would hide photos just moved into the destination folder.
+        if case .folder = result.destination, case .subfolder = state.filter {
+            state.filter = .all
+        }
+        state.route = .grid
+        completedRename = completed
+        dismissFailureToast()
+        renameToastAttempt += 1
+        isRenameToastVisible = true
+        UIAccessibility.post(notification: .announcement, argument: completed.message)
+    }
+
     // MARK: - Move rejects
 
     /// How many photos the open folder holds with Reject set (PRD P0-10).
@@ -640,7 +708,8 @@ final class BrowsingModel {
 
     /// Inputs check admission before planning auto-advance as well as before submitting a mark.
     var canMark: Bool {
-        !isMovingRejects && !isChangingFolder && !hasLeftFolder && folderLocationLoss == nil
+        !isRenaming && !isMovingRejects && !isChangingFolder && !hasLeftFolder
+            && folderLocationLoss == nil
     }
 
     /// Shows the requested mark and submits its write before returning to the input handler.
@@ -946,6 +1015,8 @@ final class BrowsingModel {
     /// the actual XMP and Clove-stored marks. The filter and order survive, because they describe
     /// the grid rather than the folder that closed.
     private func showEntryAfterLeaving() {
+        completedRename = nil
+        isRenameToastVisible = false
         state.folder = nil
         state.currentPhoto = nil
         state.selection = []
@@ -1104,6 +1175,8 @@ final class BrowsingModel {
     /// real open or reopen reads it (PRD P0-02). A real open clears the loss itself.
     private func showOpenFolder() {
         hasLeftFolder = false
+        completedRename = nil
+        isRenameToastVisible = false
         state.folder = library.folder
         clearRecentFailureForOpenFolder()
         state.currentPhoto = nil

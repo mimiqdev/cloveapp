@@ -42,6 +42,30 @@ fi
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "nogit")
 tag="${CLOVE_SIM_TAG:-$(printf '%s-%s' "$branch" "$$" | sed 's/[^A-Za-z0-9._-]/-/g')}"
 device_type="${CLOVE_SIM_DEVICE_TYPE:-iPhone 17 Pro}"
+# Targeted Duo flows use real Duo hardware emulation when its runtime is installed.
+# The rest of the flow suite keeps its normal phone destination.
+if [ -z "${CLOVE_SIM_DEVICE_TYPE:-}" ]; then
+    for argument in "$@"; do
+        case "$argument" in
+            -only-testing:CloveUITests/CloveFlowTests/testDuo*)
+                if xcrun simctl list runtimes --json | python3 -c '
+import json, sys
+selected_runtime = sys.argv[1]
+available = any(
+    runtime.get("isAvailable")
+    and (not selected_runtime or runtime["identifier"] == selected_runtime)
+    and any(device["name"] == "iPhone Duo" for device in runtime.get("supportedDeviceTypes", []))
+    for runtime in json.load(sys.stdin)["runtimes"]
+)
+sys.exit(0 if available else 1)
+' "${CLOVE_SIM_RUNTIME:-}"; then
+                    device_type="iPhone Duo"
+                fi
+                break
+                ;;
+        esac
+    done
+fi
 
 if [ -n "${CLOVE_SIM_RUNTIME:-}" ]; then
     runtime="$CLOVE_SIM_RUNTIME"
@@ -110,6 +134,7 @@ done
 max_attempts="${CLOVE_SMOKE_ATTEMPTS:-4}"
 attempt=1
 while [ "$attempt" -le "$max_attempts" ]; do
+    xcrun simctl list devices | grep 'Clove ' || true
     echo "Creating simulator 'Clove $suite $tag' ($device_type, $runtime), attempt $attempt"
     udid=$(xcrun simctl create "Clove $suite $tag" "$device_type" "$runtime")
 
@@ -122,6 +147,7 @@ while [ "$attempt" -le "$max_attempts" ]; do
     xcodebuild test-without-building \
         -project Clove.xcodeproj \
         -scheme Clove \
+        -parallel-testing-enabled NO \
         "${test_targets[@]}" \
         -destination "id=$udid" \
         -derivedDataPath .build/DerivedData.noindex 2>&1 | tee "$log"

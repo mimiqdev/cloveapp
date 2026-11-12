@@ -28,10 +28,9 @@ extension CloveFlowTests {
         setAppearanceMatchSystem(in: app, on: false)
 
         let nord = app.buttons["clove.settings.appearance.theme.nord"]
-        XCTAssertTrue(nord.waitForExistence(timeout: 10), "The theme picker had no Nord tile")
+        XCTAssertTrue(nord.exists, "The theme picker had no Nord tile")
         nord.tap()
-        XCTAssertTrue(
-            waitForSelection(of: nord, timeout: 5), "Nord did not become the chosen theme")
+        XCTAssertTrue(nord.isSelected, "Nord did not become the chosen theme")
 
         app.terminate()
         app.launch()
@@ -41,12 +40,9 @@ extension CloveFlowTests {
             "The relaunched Clove did not appear")
         openSettings(in: app)
         let storedMatchSystem = app.switches["clove.settings.appearance.matchSystem"]
+        XCTAssertEqual(storedMatchSystem.value as? String, "0", "The relaunch lost Match system")
         XCTAssertTrue(
-            waitForValue("0", of: storedMatchSystem, timeout: 10),
-            "The relaunch lost Match system")
-        XCTAssertTrue(
-            waitForSelection(
-                of: app.buttons["clove.settings.appearance.theme.nord"], timeout: 10),
+            app.buttons["clove.settings.appearance.theme.nord"].isSelected,
             "The relaunch lost the chosen theme")
     }
 
@@ -60,35 +56,23 @@ extension CloveFlowTests {
         // The glass toolbar and Entry both expose this identifier.
         let settings = app.descendants(matching: .any).matching(identifier: "clove.nav.settings")
             .firstMatch
-        guard settings.waitForExistence(timeout: 10) else { return }
+        guard settings.exists else { return }
         settings.tap()
         let toggle = app.switches["clove.settings.appearance.matchSystem"]
-        guard toggle.waitForExistence(timeout: 10) else { return }
+        guard toggle.exists else { return }
 
         // Matching off first, so choosing Light applies instead of being ignored.
         if toggle.value as? String == "1" {
             toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-            waitForSwitch(toggle, value: "0", timeout: 5)
+            XCTAssertEqual(toggle.value as? String, "0")
         }
         let light = app.buttons["clove.settings.appearance.theme.light"]
-        if light.waitForExistence(timeout: 5) {
+        if light.exists {
             light.tap()
         }
         if toggle.value as? String == "0" {
             toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-            waitForSwitch(toggle, value: "1", timeout: 5)
-        }
-    }
-
-    /// Waits until a switch reports a value, with a bounded poll.
-    @MainActor
-    private static func waitForSwitch(
-        _ toggle: XCUIElement, value: String, timeout: TimeInterval
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if toggle.value as? String == value { return }
-            Thread.sleep(forTimeInterval: 0.05)
+            XCTAssertEqual(toggle.value as? String, "1")
         }
     }
 
@@ -100,9 +84,8 @@ extension CloveFlowTests {
     private func setAppearanceMatchSystem(in app: XCUIApplication, on: Bool) {
         let toggle = app.switches["clove.settings.appearance.matchSystem"]
         XCTAssertTrue(
-            toggle.waitForExistence(timeout: 10), "Settings had no Match system switch")
-        for _ in 0..<2 {
-            if switchValue(toggle) == (on ? "1" : "0") { return }
+            toggle.exists, "Settings had no Match system switch")
+        if switchValue(toggle) != (on ? "1" : "0") {
             toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
         }
         XCTAssertEqual(
@@ -110,29 +93,20 @@ extension CloveFlowTests {
             "Match system did not turn \(on ? "on" : "off")")
     }
 
-    /// Waits until an element reports that it is selected, with a bounded timeout.
-    @MainActor
-    private func waitForSelection(of element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "isSelected == true"), object: element)
-        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
-    }
-
     /// The opt-in design captures use the same switch handling as the restored appearance test.
     @MainActor
     func chooseTheme(_ theme: String, _ app: XCUIApplication) {
         setAppearanceMatchSystem(in: app, on: false)
         let tile = element(in: app, "clove.settings.appearance.theme.\(theme)")
-        XCTAssertTrue(tile.waitForExistence(timeout: 5))
         tile.tap()
-        XCTAssertTrue(waitForSelection(of: tile, timeout: 5))
+        XCTAssertTrue(tile.isSelected)
     }
 
     /// The browsing path through the real controls, from Entry to the grid, detail, the
     /// filmstrip and the settings that change the grid.
     ///
     /// Steps other tests cover are not repeated here:
-    /// - the group view's finishing actions: `testGroupFinishingContinueAndMoveUndo`,
+    /// - the group's finishing actions: `testStackOpensDetailAndFinishingUndoRestoresUnmarkedTogether`,
     ///   `undecidedCountsLabelOnlyRatedRejectedAndUnmarkedPhotos`,
     ///   `rejectingUnmarkedFinishesAGroupWithOnlyALabelledKeep`;
     /// - a batch rating with a failed write: `testSaveFailureShowsToastAndTheFilesMarks`,
@@ -141,7 +115,7 @@ extension CloveFlowTests {
     /// - the Rejected filter: `rejectedShowsRejectedPhotosOnly`;
     /// - Move rejects with a keep and a failure:
     ///   `testMoveRejectsConfirmsAndReportsFilesLeftInPlace`,
-    ///   `testGroupFinishingContinueAndMoveUndo`, `RejectMoveCopyTests`.
+    ///   `RejectMoveCopyTests`.
     @MainActor @objc
     func testBrowsingFlowFromEntryToSettings() {
         let app = XCUIApplication()
@@ -177,7 +151,7 @@ extension CloveFlowTests {
     @MainActor
     private func back(in app: XCUIApplication) {
         let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "The screen had no back button")
+        XCTAssertTrue(back.exists, "The screen had no back button")
         back.tap()
     }
 
@@ -191,21 +165,21 @@ extension CloveFlowTests {
 
     @MainActor
     private func checkEntryAndSettings(in app: XCUIApplication) {
-        XCTAssertTrue(element(in: app, "clove.entry.openFolder").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app, "clove.entry.openFolder").exists)
         XCTAssertTrue(
             app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "96, Done")).firstMatch
-                .waitForExistence(timeout: 5))
+                .exists)
         XCTAssertTrue(
             app.buttons.matching(
                 NSPredicate(format: "label CONTAINS %@", "Not connected, Reconnect")
-            ).firstMatch.waitForExistence(timeout: 5))
+            ).firstMatch.exists)
         attachScreenshot(named: "entry-resume")
         element(in: app, "clove.nav.settings").tap()
         XCTAssertTrue(
-            element(in: app, "clove.settings.section.appearance").waitForExistence(timeout: 5))
+            element(in: app, "clove.settings.section.appearance").exists)
         XCTAssertTrue(
-            element(in: app, "clove.settings.section.culling").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(in: app, "clove.settings.section.move").waitForExistence(timeout: 5))
+            element(in: app, "clove.settings.section.culling").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.section.move").exists)
         attachScreenshot(named: "settings-sections")
         back(in: app)
     }
@@ -213,9 +187,9 @@ extension CloveFlowTests {
     @MainActor
     private func openTestLibrary(in app: XCUIApplication) {
         let open = element(in: app, "clove.entry.openFolder")
-        XCTAssertTrue(open.waitForExistence(timeout: 10), "Entry did not offer the test library")
+        XCTAssertTrue(open.exists, "Entry did not offer the test library")
         open.tap()
-        if element(in: app, "clove.detail").waitForExistence(timeout: 2) { back(in: app) }
+        if element(in: app, "clove.detail").exists { back(in: app) }
         XCTAssertTrue(
             element(in: app, "clove.grid").waitForExistence(timeout: 10),
             "The grid did not appear after opening the folder"
@@ -225,22 +199,21 @@ extension CloveFlowTests {
     @MainActor
     private func checkGridOverlays(in app: XCUIApplication) {
         let rated = element(in: app, "clove.grid.photo.mmq02678")
-        XCTAssertTrue(rated.waitForExistence(timeout: 10), "The grid did not show its first cell")
-        XCTAssertTrue(rated.label.contains("MMQ02678.ARW"), "The cell lost its file name")
-        XCTAssertTrue(
-            rated.label.contains("5 stars"), "The cell lost its rating: \(rated.label)")
-        XCTAssertTrue(rated.label.contains("Red"), "The cell lost its colour dot: \(rated.label)")
+        let ratedLabel = rated.label
+        XCTAssertTrue(ratedLabel.contains("MMQ02678.ARW"), "The cell lost its file name")
+        XCTAssertTrue(ratedLabel.contains("5 stars"), "The cell lost its rating: \(ratedLabel)")
+        XCTAssertTrue(ratedLabel.contains("Red"), "The cell lost its colour dot: \(ratedLabel)")
 
         let rejected = element(in: app, "clove.grid.photo.mmq02679")
-        XCTAssertTrue(rejected.exists, "The grid did not show the second cell")
+        let rejectedLabel = rejected.label
         XCTAssertTrue(
-            rejected.label.contains("Rejected"), "The cell lost its Reject flag: \(rejected.label)")
+            rejectedLabel.contains("Rejected"), "The cell lost its Reject flag: \(rejectedLabel)")
 
         let companion = element(in: app, "clove.grid.photo.mmq02680")
-        XCTAssertTrue(companion.exists, "The grid did not show the third cell")
+        let companionLabel = companion.label
         XCTAssertTrue(
-            companion.label.contains("JPEG companion"),
-            "The cell lost its companion badge: \(companion.label)")
+            companionLabel.contains("JPEG companion"),
+            "The cell lost its companion badge: \(companionLabel)")
     }
 
     @MainActor
@@ -252,27 +225,15 @@ extension CloveFlowTests {
     }
 
     @MainActor
-    private func waitForValue(
-        _ value: String, of element: XCUIElement, timeout: TimeInterval
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if element.value as? String == value { return true }
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        return element.value as? String == value
-    }
-
-    @MainActor
     private func selectMenuItem(
         in app: XCUIApplication, _ control: String, item: String
     ) {
         let menu = element(in: app, control == "clove.grid.grouping" ? "clove.grid.more" : control)
-        XCTAssertTrue(menu.waitForExistence(timeout: 10), "The grid did not show \(control)")
+        XCTAssertTrue(menu.exists, "The grid did not show \(control)")
         menu.tap()
         let choice = app.buttons[item]
         XCTAssertTrue(
-            choice.waitForExistence(timeout: 10), "The menu did not offer \(item)")
+            choice.exists, "The menu did not offer \(item)")
         choice.tap()
     }
 
@@ -285,7 +246,7 @@ extension CloveFlowTests {
 
         let preview = element(in: app, "clove.detail.preview")
         XCTAssertTrue(
-            waitForValue("Loaded", of: preview, timeout: 10),
+            wait(NSPredicate(format: "value == %@", "Loaded"), preview, timeout: 10),
             "The detail preview did not load")
         let milliseconds = Date().timeIntervalSince(started) * 1000
         print("DETAIL_FIRST_PREVIEW_MS=\(Int(milliseconds.rounded()))")
@@ -295,14 +256,12 @@ extension CloveFlowTests {
 
         let fileName = element(in: app, "clove.detail.fileName")
         XCTAssertTrue(
-            fileName.waitForExistence(timeout: 10), "The detail view did not show the file name")
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+            fileName.label == "MMQ02678.ARW", "The detail view did not show the file name")
 
-        let marks = element(in: app, "clove.detail.marks")
-        XCTAssertTrue(marks.exists, "The detail view did not show the photo's marks")
+        let marks = element(in: app, "clove.detail.capsule").value as? String
         XCTAssertTrue(
-            (marks.value as? String)?.contains("5 stars") == true,
-            "The detail view did not show the saved rating: \(String(describing: marks.value))"
+            marks?.contains("5 stars") == true,
+            "The detail view did not show the saved rating: \(String(describing: marks))"
         )
     }
 
@@ -310,35 +269,27 @@ extension CloveFlowTests {
     private func checkDoubleTapZoom(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
         let zoom = element(in: app, "clove.detail.zoom")
-        XCTAssertTrue(zoom.waitForExistence(timeout: 10), "The detail view had no zoom state")
         let fitLabel = zoom.label
+        XCTAssertFalse(fitLabel.isEmpty, "The detail view had no zoom state")
         XCTAssertFalse(fitLabel.contains("%"), "The detail view did not open at fit")
 
         preview.doubleTap()
-        let full = expectation(
-            for: NSPredicate(format: "label ENDSWITH %@", "100%"), evaluatedWith: zoom)
-        wait(for: [full], timeout: 10)
+        XCTAssertTrue(zoom.label.hasSuffix("100%"))
 
         preview.doubleTap()
-        let fit = expectation(
-            for: NSPredicate(format: "label == %@", fitLabel), evaluatedWith: zoom)
-        wait(for: [fit], timeout: 10)
+        XCTAssertEqual(zoom.label, fitLabel)
 
         // A pinch still zooms, and while zoomed a one-finger drag pans instead of marking
         // (PRD Detail gestures: vertical marking swipes are disabled while zoomed).
-        let marks = element(in: app, "clove.detail.marks")
+        let marks = element(in: app, "clove.detail.capsule")
         let marksAtFit = marks.value as? String
         preview.pinch(withScale: 2, velocity: 1)
-        let pinched = expectation(
-            for: NSPredicate(format: "label != %@", fitLabel), evaluatedWith: zoom)
-        wait(for: [pinched], timeout: 10)
+        XCTAssertNotEqual(zoom.label, fitLabel)
 
         drag(preview, byPointsX: 0, y: -150)
 
         preview.doubleTap()
-        let backToFit = expectation(
-            for: NSPredicate(format: "label == %@", fitLabel), evaluatedWith: zoom)
-        wait(for: [backToFit], timeout: 10)
+        XCTAssertEqual(zoom.label, fitLabel)
 
         // A zoomed drag that marked would change the marks, and a write would show its own save
         // state or move the detail on, so what both read here stays as it was at fit.
@@ -349,52 +300,52 @@ extension CloveFlowTests {
 
     @MainActor
     private func markThePhoto(in app: XCUIApplication) {
-        let fourStars = element(in: app, "clove.detail.rate.4")
+        let fourStars = element(in: app, "clove.detail.capsule.stars.4")
         XCTAssertTrue(
-            fourStars.waitForExistence(timeout: 10), "The detail view had no rating buttons")
+            fourStars.exists, "The detail view had no rating buttons")
         fourStars.tap()
 
         // Group auto-advance skips the already rejected member. Select it explicitly for the
         // swipe checks below, which replace its existing Reject with stars.
         waitForFileName("MMQ02681.ARW", in: app)
         element(in: app, "clove.detail.filmstrip.mmq02679").tap()
-        waitForFileName("MMQ02679.ARW", in: app)
+        XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02679.ARW")
     }
 
     @MainActor
     private func rateBySwiping(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
-        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The detail view had no preview")
-        waitForFileName("MMQ02679.ARW", in: app)
+        let fileName = element(in: app, "clove.detail.fileName")
+        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
 
-        drag(preview, byPointsX: 0, y: -150)
+        // From Reject, three 60 pt ladder steps reach two stars (Reject → clear → 1 → 2).
+        drag(preview, byPointsX: 0, y: -210)
 
         // The mark advances to the group's remaining unmarked member.
         waitForFileName("MMQ02681.ARW", in: app)
 
         // Return to the rated member through the expanded group.
         element(in: app, "clove.detail.filmstrip.mmq02679").tap()
-        waitForFileName("MMQ02679.ARW", in: app)
-        let marks = element(in: app, "clove.detail.marks")
-        let twoStars = expectation(
-            for: NSPredicate(format: "value CONTAINS %@", "2 stars"), evaluatedWith: marks)
-        wait(for: [twoStars], timeout: 10)
+        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
+        let marks = element(in: app, "clove.detail.capsule")
+        XCTAssertTrue((marks.value as? String)?.contains("2 stars") == true)
 
     }
 
     @MainActor
     private func rejectBySwiping(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
-        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The detail view had no preview")
-        waitForFileName("MMQ02679.ARW", in: app)
+        let fileName = element(in: app, "clove.detail.fileName")
+        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
 
-        drag(preview, byPointsX: 0, y: 130)
+        // Cross both the quick Reject threshold and all three slow steps from two stars.
+        drag(preview, byPointsX: 0, y: 210)
 
         // Reject also advances within the group. An edge tap then returns to the interleaved
         // single photo for the general filmstrip and navigation checks.
         waitForFileName("MMQ02681.ARW", in: app)
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
-        waitForFileName("MMQ02680.ARW", in: app)
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
     }
 
     @MainActor
@@ -406,65 +357,58 @@ extension CloveFlowTests {
     @MainActor
     private func waitForFileName(_ name: String, in app: XCUIApplication) {
         let fileName = element(in: app, "clove.detail.fileName")
-        let shown = expectation(
-            for: NSPredicate(format: "label == %@", name), evaluatedWith: fileName)
-        wait(for: [shown], timeout: 10)
+        XCTAssertTrue(wait(NSPredicate(format: "label == %@", name), fileName, timeout: 10))
     }
 
     @MainActor
     private func expandGroupFromFilmstrip(in app: XCUIApplication) {
         // MMQ02680 is outside the group, so the filmstrip shows the group as one stack.
-        waitForFileName("MMQ02680.ARW", in: app)
+        XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02680.ARW")
         let stack = element(in: app, "clove.detail.filmstrip.group.burst-2678")
-        XCTAssertTrue(stack.waitForExistence(timeout: 5), "The filmstrip did not stack the group")
         stack.tap()
-        waitForFileName("MMQ02678.ARW", in: app)
+        XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02678.ARW")
         XCTAssertTrue(element(in: app, "clove.detail").exists)
         let member = element(in: app, "clove.detail.filmstrip.mmq02679")
         XCTAssertTrue(
-            member.waitForExistence(timeout: 5), "The group did not expand in the filmstrip")
+            member.exists, "The group did not expand in the filmstrip")
         let back = element(in: app, "clove.detail.filmstrip.mmq02680")
-        XCTAssertTrue(back.waitForExistence(timeout: 5), "The filmstrip lost the next photo")
+        XCTAssertTrue(back.exists, "The filmstrip lost the next photo")
         back.tap()
     }
 
     @MainActor
     private func advanceByEdgeTap(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
-        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The detail view had no preview")
-        waitForFileName("MMQ02680.ARW", in: app)
+        let fileName = element(in: app, "clove.detail.fileName")
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         // The outer 18% on each side navigates; 94% is inside the right zone on any width.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
-        waitForFileName("MMQ02681.ARW", in: app)
+        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
     }
 
     @MainActor
     private func returnToGrid(in app: XCUIApplication) {
         let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "The detail view had no back button")
+        XCTAssertTrue(back.exists, "The detail view had no back button")
         back.tap()
         let row = element(in: app, "clove.grid.photo.mmq02678")
-        XCTAssertTrue(row.waitForExistence(timeout: 10), "Back did not return to the grid")
+        let rowLabel = row.label
         XCTAssertTrue(
-            row.label.contains("4 stars"),
-            "The grid did not show the rating the bar wrote: \(row.label)"
+            rowLabel.contains("4 stars"),
+            "The grid did not show the rating the bar wrote: \(rowLabel)"
         )
 
         let swiped = element(in: app, "clove.grid.photo.mmq02679")
-        XCTAssertTrue(swiped.exists, "The grid did not show the swiped photo")
+        let swipedLabel = swiped.label
         XCTAssertTrue(
-            swiped.label.contains("Rejected"),
-            "The grid did not show the Reject the swipe wrote: \(swiped.label)"
+            swipedLabel.contains("Rejected"),
+            "The grid did not show the Reject the swipe wrote: \(swipedLabel)"
         )
         // Reject is rating −1, so swipe down replaced the swipe up's stars.
         XCTAssertFalse(
-            swiped.label.contains("2 stars"),
-            "A rejected photo kept its stars: \(swiped.label)"
-        )
+            swipedLabel.contains("2 stars"), "A rejected photo kept its stars: \(swipedLabel)")
         XCTAssertFalse(
-            swiped.label.contains("-1"),
-            "A rejected photo read its rating: \(swiped.label)"
-        )
+            swipedLabel.contains("-1"), "A rejected photo read its rating: \(swipedLabel)")
     }
 
     @MainActor
@@ -474,10 +418,10 @@ extension CloveFlowTests {
             return
         }
         let settings = element(in: app, "clove.nav.settings")
-        XCTAssertTrue(settings.waitForExistence(timeout: 10), "The group view had no settings item")
+        XCTAssertTrue(settings.exists, "The screen had no settings item")
         settings.tap()
         XCTAssertTrue(
-            element(in: app, "clove.settings").waitForExistence(timeout: 10),
+            element(in: app, "clove.settings").exists,
             "Settings did not appear"
         )
     }
@@ -487,12 +431,12 @@ extension CloveFlowTests {
         setGridGroupDisplay(in: app, to: "Collapsed")
 
         let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "Settings had no back button")
+        XCTAssertTrue(back.exists, "Settings had no back button")
         back.tap()
 
         let cover = element(in: app, "clove.grid.group.burst-2678")
         XCTAssertTrue(
-            cover.waitForExistence(timeout: 10), "The collapsed grid showed no group cover")
+            cover.exists, "The collapsed grid showed no group cover")
         XCTAssertEqual(
             cover.label, "Similar group of 3 photos", "The cover lost its group's count")
         XCTAssertFalse(
@@ -506,10 +450,12 @@ extension CloveFlowTests {
         setGridGroupDisplay(in: app, to: "Expanded")
 
         let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "Settings had no back button")
+        XCTAssertTrue(back.exists, "Settings had no back button")
         back.tap()
+        // Changing the layout preserves the held photo, which can put the first member offscreen.
+        element(in: app, "clove.grid").collectionViews.firstMatch.swipeDown()
         XCTAssertTrue(
-            element(in: app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 10),
+            element(in: app, "clove.grid.photo.mmq02678").exists,
             "The expanded grid did not show a group member as its own cell")
     }
 
@@ -519,7 +465,7 @@ extension CloveFlowTests {
         setSimilarGroups(in: app, on: false)
         backToGrid(in: app)
         XCTAssertFalse(
-            element(in: app, "clove.grid.group.burst-2678").waitForExistence(timeout: 3),
+            element(in: app, "clove.grid.group.burst-2678").exists,
             "Turning similar groups off left the grid's similar group")
         XCTAssertFalse(
             groupingActionIsVisible(in: app), "Turning similar groups off left Run again")
@@ -527,6 +473,7 @@ extension CloveFlowTests {
         openSettingsFromGrid(in: app)
         setSimilarGroups(in: app, on: true)
         backToGrid(in: app)
+        element(in: app, "clove.grid").collectionViews.firstMatch.swipeDown()
         XCTAssertTrue(
             element(in: app, "clove.grid.group.burst-2678").waitForExistence(timeout: 10),
             "Turning similar groups back on did not restore the grid's similar group")
@@ -548,7 +495,7 @@ extension CloveFlowTests {
         element(in: app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         XCTAssertTrue(
-            element(in: app, "clove.settings").waitForExistence(timeout: 10),
+            element(in: app, "clove.settings").exists,
             "Settings did not appear"
         )
     }
@@ -558,16 +505,13 @@ extension CloveFlowTests {
         let toggle = element(in: app, "clove.settings.similarGroupsEnabled")
         let window = app.windows.firstMatch.frame
         for _ in 0..<8 {
-            if toggle.exists && toggle.isHittable, toggle.frame.maxY < window.maxY - 120 {
-                break
-            }
+            if toggle.isHittable, toggle.frame.maxY < window.maxY - 120 { break }
             app.swipeUp()
         }
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "Settings had no similar-groups switch")
+        XCTAssertTrue(toggle.exists, "Settings had no similar-groups switch")
         // A SwiftUI row toggle only flips on its switch, which sits at the trailing edge; a tap
         // in the middle of the row lands on the label.
-        for _ in 0..<2 {
-            if switchValue(toggle) == (on ? "1" : "0") { return }
+        if switchValue(toggle) != (on ? "1" : "0") {
             toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
         }
         XCTAssertEqual(
@@ -583,10 +527,9 @@ extension CloveFlowTests {
     @MainActor
     private func backToGrid(in app: XCUIApplication) {
         let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "Settings had no back button")
         back.tap()
         XCTAssertTrue(
-            element(in: app, "clove.grid").waitForExistence(timeout: 10),
+            element(in: app, "clove.grid").exists,
             "Back did not return to the grid"
         )
     }
@@ -597,7 +540,7 @@ extension CloveFlowTests {
         XCTAssertTrue(picker.exists, "Settings had no grid display control")
         let option = picker.buttons[name]
         XCTAssertTrue(
-            option.waitForExistence(timeout: 10),
+            option.exists,
             "The grid display control offered no \(name) option")
         option.tap()
     }
@@ -608,7 +551,7 @@ extension CloveFlowTests {
     ) -> XCUIElement {
         let control = element(in: app, identifier)
         for _ in 0..<swipes {
-            if control.exists && control.isHittable { return control }
+            if control.isHittable { return control }
             if scrollsUp { app.swipeUp() } else { app.swipeDown() }
         }
         return control
@@ -616,17 +559,7 @@ extension CloveFlowTests {
 
     @MainActor
     private func element(in app: XCUIApplication, _ identifier: String) -> XCUIElement {
-        let direct = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-        if identifier.hasPrefix("clove.detail.rate."), !direct.exists {
-            return app.descendants(matching: .any).matching(
-                identifier: identifier.replacingOccurrences(of: ".rate.", with: ".capsule.stars.")
-            ).firstMatch
-        }
-        if identifier == "clove.detail.marks", !direct.exists {
-            return app.descendants(matching: .any).matching(identifier: "clove.detail.capsule")
-                .firstMatch
-        }
-        return direct
+        element(app, identifier)
     }
 
     @MainActor
@@ -634,45 +567,39 @@ extension CloveFlowTests {
         let first = element(in: app, "clove.grid.photo.mmq02681")
         XCTAssertTrue(first.waitForExistence(timeout: 10), "The grid did not show the first photo")
         first.press(forDuration: 1)
-        element(in: app, "clove.grid.photo.mmq02689").tap()
+        let second = element(in: app, "clove.grid.photo.mmq02689")
+        second.tap()
 
         let count = element(in: app, "clove.grid.batch.count")
-        let two = expectation(
-            for: NSPredicate(format: "label == %@", "2 selected"), evaluatedWith: count)
-        wait(for: [two], timeout: 10)
+        XCTAssertEqual(count.label, "2 selected")
 
         element(in: app, "clove.grid.batch.reject").tap()
-        let rejected = expectation(
-            for: NSPredicate(format: "label CONTAINS %@", "Rejected"), evaluatedWith: first)
-        wait(for: [rejected], timeout: 10)
+        XCTAssertTrue(first.label.contains("Rejected"))
         XCTAssertTrue(
-            element(in: app, "clove.grid.photo.mmq02689").label.contains("Rejected"),
-            "The batch did not reject the second photo")
+            second.label.contains("Rejected"), "The batch did not reject the second photo")
 
         element(in: app, "clove.grid.batch.done").tap()
-        let gone = expectation(
-            for: NSPredicate(format: "exists == false"), evaluatedWith: count)
-        wait(for: [gone], timeout: 10)
+        XCTAssertFalse(count.exists)
     }
 
     @MainActor
     private func checkMoveRejectsSetting(in app: XCUIApplication) {
         XCTAssertTrue(
-            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 10),
+            element(in: app, "clove.grid.moveRejects").exists,
             "The grid did not offer Move rejects with rejected photos in the folder")
 
         openSettingsFromGrid(in: app)
         setMoveRejects(in: app, on: false)
         backToGrid(in: app)
         XCTAssertFalse(
-            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 3),
+            element(in: app, "clove.grid.moveRejects").exists,
             "Turning Move rejects off left its grid action")
 
         openSettingsFromGrid(in: app)
         setMoveRejects(in: app, on: true)
         backToGrid(in: app)
         XCTAssertTrue(
-            element(in: app, "clove.grid.moveRejects").waitForExistence(timeout: 10),
+            element(in: app, "clove.grid.moveRejects").exists,
             "Turning Move rejects back on did not restore its grid action")
     }
 
@@ -680,8 +607,7 @@ extension CloveFlowTests {
     private func setMoveRejects(in app: XCUIApplication, on: Bool) {
         let toggle = scrollToSettingsControl("clove.settings.moveRejectsEnabled", in: app)
         XCTAssertTrue(toggle.exists, "Settings had no Move rejects switch")
-        for _ in 0..<2 {
-            if switchValue(toggle) == (on ? "1" : "0") { return }
+        if switchValue(toggle) != (on ? "1" : "0") {
             toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
         }
         XCTAssertEqual(

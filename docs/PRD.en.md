@@ -78,7 +78,7 @@ Open a folder or reopen it from Recents → browse, filter, and sort the grid �
 | P0-03 | Grid: prefer embedded previews in files for thumbnails. Smooth scrolling takes priority over immediately decoding full RAW images. Sort by capture time with subseconds by default, falling back to file creation time, then modification time; never show temporary filename order first. Photos using file times are not grouped. Filename order remains an option. Filters: All, Unmarked, Rejected, and N stars or higher. |
 | P0-04 | Detail: full-width preview, pinch zoom and double-tap to 100% for focus inspection, previous and next navigation, a filmstrip, and always-visible current marks. |
 | P0-05 | Marks: ratings from 0 to 5, color labels, and Reject as the rating −1. Rejecting a photo replaces its stars, clearing Reject leaves it unrated, and the color label stays independent. A RAW set's rating, Reject included, is written to its shared XMP sidecar; a standalone JPEG/HIF keeps its marks in Clove. Reject is not deletion. Undo is available, and undoing a Reject restores the stars it replaced. |
-| P0-06 | Gestures and keyboard: swipe up to rate by distance, swipe down to reject, choose which rating levels are enabled, external-keyboard shortcuts, and auto-advance after marking. |
+| P0-06 | Gestures and keyboard: one continuous relative marking swipe; slow up raises and down lowers through stars, clear and Reject; quick down clears then rejects by distance. Choose enabled star levels, external-keyboard shortcuts, and auto-advance after marking. |
 | P0-07 | XMP reads, writes, and interoperability cover ratings, which carry Reject as −1, and color labels only. Read existing XMP when opening a folder. An `xmp:Rating` of −1 shows the photo as rejected; another value outside 0–5, such as `6` or `-2`, reads as unrated and keeps its bytes. RAW files, including standalone DNG, use one sidecar per photo set; JPEG/HIF companions are never changed. Preserve unknown information written by other apps as far as possible. Lightroom, Capture One, and Photo Mechanic must read Clove's XMP ratings and color labels. Standalone JPEG/HIF get no sidecar: read embedded marks and keep new marks, Reject included, in Clove, visibly Saved in Clove only. In-file JPEG writing is a later feature; HIF/HEIC in-file writing stays out. |
 | P0-08 | Marks show immediately in detail, the grid, filters, and counts, while writes run in user action order. The photos, XMP sidecars and Clove's standalone JPEG/HIF mark store are the truth. A connected write failure shows one toast, “Couldn't save the mark.”, re-reads that photo and displays its file's marks. Keep only pending marks; clear them when the write finishes either way. Keep no per-photo save status or retry. On disconnect, drop queued writes and pending marks, show the banner and disable marking until Reopen reads the files. Leaving has no prompt; admitted writes may finish in the background. Move Rejects reports how many did not move, keeps Undo and shows the files on disk. |
 | P0-09 | Long-press the grid to enter multi-select, then write ratings, labels, or Reject in batches. |
@@ -155,7 +155,7 @@ Marking rules:
 | --- | --- |
 | Rating from 0 to 5 | Tap a rating in the rating bar. Tap the same rating again to clear it. A star rating on a rejected photo replaces −1 with those stars. Only enabled ratings appear. |
 | Color label | Red, yellow, green, blue, purple, and Clear by default. Settings can enable extended colors, orange and pink, matching Capture One. Use fixed English names in XMP, regardless of system language. |
-| Reject | The rating −1. Swiping down, the HUD's Reject, or `↓` replaces the photo's stars with −1; turning Reject off leaves the photo unrated. The color label stays independent. Reject does not delete the original. |
+| Reject | The rating −1. Reaching Reject in the marking swipe, the HUD's Reject, or `↓` replaces the photo's stars with −1; turning Reject off leaves the photo unrated. The color label stays independent. Reject does not delete the original. |
 | Undo | Uses the system undo mechanism: a toolbar Undo button, ⌘Z on an external keyboard, and the iOS three-finger undo gestures. Undoing after auto-advance returns to the photo whose mark was undone. Undo also covers Reject N unmarked and Move rejects, each as one step. |
 | Save status | Writing…, Saved, or Write failed for XMP writes; Saved only after read-back confirmation. Confirm reject moves before showing success. Standalone JPEG/HIF marks show Saved in Clove only after confirmed app storage. Offer Retry after failure. |
 
@@ -169,8 +169,8 @@ Detail gestures:
 
 | State | Action | Result |
 | --- | --- | --- |
-| Fit | Swipe up, by distance | Rate. On a rejected photo the stars replace Reject; the ladder never produces −1. |
-| Fit | Swipe down | Reject |
+| Fit | Slow vertical drag | Relative slider from the current rating: up raises, down lowers through enabled stars, 0 and −1. Reverse across the start to change direction. |
+| Fit | Quick swipe down | Short clears to 0; further travel reaches −1 (Reject). Reverse to 0, then past the start to cancel. Quick up uses the slow slider. |
 | Fit | Swipe left or right, or tap an edge | Navigate |
 | Fit | Double-tap the center area | Zoom to 100% around the tapped point |
 | Zoomed | One-finger drag | Pan. Vertical marking swipes are disabled while zoomed. |
@@ -181,16 +181,17 @@ Detail gestures:
 
 Rating by swipe distance:
 
-- Each rating step corresponds to a fixed swipe distance, initially about 60 pt and subject to tuning. Steps do not scale with screen height, so iPhone and iPad feel the same.
-- While swiping, show the current rating near the finger and play a light haptic at each step boundary. Swiping back lowers the rating.
-- The release position decides the rating, not the velocity. A short flick gives the lowest step.
-- Returning to the starting point before release writes nothing.
-- Gestures never clear a rating. Clear it with the rating bar or the `0` key.
+- A slow drag starts at the photo's current rating and moves one step per 60 pt over enabled stars, 0 (clear), and −1 (Reject). Each crossing, in either direction, gives a light haptic. From unrated, one step down rejects; from Reject, up steps through 0 to the lowest enabled star.
+- Slow or quick is decided once from the average vertical velocity in the first approximately 100 ms (starting threshold: 500 pt/s downward). Quick upward starts use the slow slider. A very short swipe uses the available initial window at release; the mode never changes midway.
+- A quick downward swipe has only the starting rating, 0 and −1 as stops: 60 pt reaches clear with a medium haptic; 180 pt reaches Reject with a heavier haptic. Reversing from Reject returns to clear, and moving up past the start restores the original rating. On unrated, the clear stop changes nothing; on Reject, down cannot lower further and up uses the slow slider. Holding never rejects.
+- The star bar stays beside the original touch, as placed at touch-down. Show the live stars, an empty bar for clear, and the ✕ chip immediately at Reject. Use glyphs only; VoiceOver names the stages.
+- Release commits exactly the preview as one undo change, leaving the label untouched. No momentum after release. Returning to the starting value writes nothing; a system cancellation writes nothing.
+- Distances, the velocity window and threshold, and light/medium/heavy haptic strengths are named starting values to tune on an iPhone.
 
 Enabled rating levels (Settings):
 
 - The user chooses which ratings may be applied. All of 1 through 5 are enabled by default.
-- Swipe steps map, in order, to the enabled ratings. With only 1 through 3 enabled, there are three steps. With 1, 3, and 5 enabled, one step gives 1 star and two steps give 3 stars.
+- Slow swipe steps follow the enabled ratings in order, relative to the current rating. With 1, 3 and 5 enabled, up from 1 reaches 3 then 5; down from 3 reaches 1, 0, then Reject. A disabled current rating remains the starting anchor and is restored when returning to the start; other disabled stars are skipped.
 - The rating bar and keyboard accept only enabled ratings.
 - This setting affects input only, not display or filtering. 4- and 5-star ratings written by other apps still display and are never rewritten.
 
@@ -375,7 +376,7 @@ These manual tests determine whether launch meets product requirements. They are
 | P0-03 | Scroll a RAW folder with embedded previews and use its thumbnails to browse. Unreadable files have explicit states. A folder shot with two bodies sorts correctly by capture time with subseconds, using creation time then modification time when capture time is missing; fallback photos are not grouped. No temporary filename order appears first, and the user can switch to filename order. Each of the four filters shows only matching photos. |
 | P0-04 | In detail, pinch to zoom, or double-tap to 100% and double-tap back to fit. Edge taps navigate to previous and next photos, including while zoomed, without perceptible delay. Current ratings, Reject, and labels are visible away from the hand. |
 | P0-05 | Apply ratings, labels, and Reject, where Reject is the rating −1 and replaces the stars. Clearing Reject leaves the photo unrated. Original bytes remain unchanged. RAW ratings, Reject included, create or update the shared sidecar; standalone JPEG/HIF marks stay in Clove without a sidecar. Tapping the same rating in the rating bar clears it. Rejected originals remain in place. Undo restores the previous mark, including the stars a Reject replaced, and undoing after auto-advance returns to that photo. |
-| P0-06 | Swiping up different distances produces different ratings, with the current step visible and a haptic at each step. Returning to the start before release writes nothing. With only 1 through 3 enabled, the maximum applied rating is 3 and existing 5-star ratings still display. Keys work as listed. Auto-advance follows settings, and labels do not trigger it by default. |
+| P0-06 | Slow drags step relative to −1, 0, 1, 3 and 5 starting ratings in both directions, including across the start, skipping disabled stars. Quick short down from 3 clears; quick long down rejects; slow down two steps gives 1. Preview and haptics track every crossing; release commits one undo change, preserving labels. Reverse past the start cancels a quick swipe. Existing disabled ratings still display. Keys and auto-advance follow settings. |
 | P0-07 | Clove displays ratings and labels previously written by Lightroom, Capture One, or Photo Mechanic, and reads `xmp:Rating="-1"` as Rejected. Those apps read Clove's XMP ratings and labels for RAW sets. Each RAW set, including a RAW+JPEG+HIF triple, has one XMP; standalone DNG uses a sidecar too. Other preexisting XMP information survives the write, including an out-of-range rating such as `6` or `-2`, which reads as unrated, and companions remain unchanged. Reject is written as the standard rating −1, with no Clove namespace. Standalone JPEG/HIF embedded marks are read; new marks, Reject included, create no sidecar or in-file change and show Saved in Clove only. |
 | P0-08 | Hold a write and verify its mark appears immediately; make two quick marks and verify write order. Force a connected failure and verify one “Couldn't save the mark.” toast, a fresh file read and the file's marks on screen. Verify no save subtitle, failure marker, retry or leave prompt. Disconnect through a real folder session and verify queued marks are dropped, marking stays disabled until Reopen, and Reopen reads fresh sidecars. A partial Move Rejects result reports the unmoved count with Undo and shows what remains on disk. |
 | P0-09 | Long-press, select multiple photos, and rate them in a batch. Force some writes to fail. Report Saved N photos. M photos couldn't be saved. Successful items stay saved and failed items can be retried separately. |

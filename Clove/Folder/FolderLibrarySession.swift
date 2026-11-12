@@ -23,6 +23,7 @@ final class FolderLibrarySession: FolderLibrary {
 
         /// C9's per-folder group cache in Clove's own storage (PRD Similar groups rules).
         let groups: SimilarGroupsCache
+        var renamer: BatchRenamer? = nil
 
         /// Prepares the stores below Application Support (PRD P0-02, P0-08, P0-11).
         ///
@@ -32,10 +33,12 @@ final class FolderLibrarySession: FolderLibrary {
             let store = try RecentFolderStore.applicationSupport()
             let marksDirectory = try CloveMarkStore.applicationSupportDirectory()
             let groupsDirectory = try SimilarGroupsCache.applicationSupportDirectory()
+            let marks = CloveMarkStore(directory: marksDirectory)
             return Stores(
                 access: FolderAccess(store: store),
-                writes: MarkWriteQueue(storeDirectory: marksDirectory),
-                groups: SimilarGroupsCache(directory: groupsDirectory))
+                writes: MarkWriteQueue(store: marks),
+                groups: SimilarGroupsCache(directory: groupsDirectory),
+                renamer: BatchRenamer(store: marks))
         }
     }
 
@@ -406,6 +409,76 @@ final class FolderLibrarySession: FolderLibrary {
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress> {
         guard let mover = rejectMover else { return AsyncStream { $0.finish() } }
         return await mover.progressUpdates()
+    }
+
+    // MARK: - Batch rename
+
+    func planBatchRename(
+        order: [PhotoIdentity], template: RenameTemplate, destination: RenameDestination,
+        rejectsFolderName: RejectsFolderName
+    ) async throws -> BatchRenamePlan {
+        guard let session = openSession,
+            case .success(let stores) = await resolvedStores(), let renamer = stores.renamer
+        else { throw RenameFlowError.unavailable }
+        let sets = try order.map { identity in
+            guard let set = store.scannedSet(for: identity) else {
+                throw RenameFlowError.photoMissing
+            }
+            return set
+        }
+        return try await session.withAdmittedWork {
+            var items: [RenameItem] = []
+            for set in sets {
+                try Task.checkCancellation()
+                let wallTime =
+                    template.includesCaptureDate
+                    ? ImageInformationReader().read(url: set.photoSet.primary.url)?
+                        .captureWallTime
+                    : nil
+                items.append(RenameItem(set: set, captureWallTime: wallTime))
+            }
+            try Task.checkCancellation()
+            return await renamer.plan(
+                for: BatchRenameRequest(
+                    rootURL: session.rootURL, items: items, template: template,
+                    destination: destination, rejectsFolderName: rejectsFolderName))
+        }
+    }
+
+    func runBatchRename(
+        _ plan: BatchRenamePlan,
+        progress: @escaping @MainActor @Sendable (BatchRenameProgress) -> Void
+    ) async throws -> BatchRenameResult {
+        guard let session = openSession,
+            case .success(let stores) = await resolvedStores(), let renamer = stores.renamer,
+            plan.request.rootURL == session.rootURL
+        else { throw RenameFlowError.unavailable }
+        return try await session.withAdmittedWork {
+            let updates = await renamer.progressUpdates()
+            let observer = Task { @MainActor in
+                for await update in updates {
+                    progress(update)
+                    if case .finished = update { return }
+                }
+            }
+            do {
+                let result = try await renamer.rename(plan)
+                await observer.value
+                return result
+            } catch {
+                observer.cancel()
+                throw error
+            }
+        }
+    }
+
+    func rescanAfterRename() async throws {
+        await reloadRecents()
+        guard let recent = recents.first(where: { $0.identity == folder }),
+            await reopen(recent) == nil
+        else { throw RenameFlowError.rescanFailed }
+        await scanTask?.value
+        guard completedScanStatus == .complete else { throw RenameFlowError.rescanFailed }
     }
 
     // MARK: - Entry

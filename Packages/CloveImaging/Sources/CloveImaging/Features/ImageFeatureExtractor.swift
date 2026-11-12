@@ -13,18 +13,20 @@ struct ImageFeatureExtractor: Sendable {
     private let hashes = DifferenceHashReader()
 
     func features(from image: CGImage) async -> ImageFeatures {
-        let hash = hashes.hash(of: image)
-        guard session.permitsAttempt else {
-            // The session already gave up: no attempt, no retry loop, and the reason is kept.
-            return ImageFeatures(differenceHash: hash, visionFailure: session.lastFailure)
-        }
-        switch await prints.featurePrint(of: image) {
-        case .success(let print):
-            session.recordSuccess()
-            return ImageFeatures(print: print, differenceHash: hash)
-        case .failure(let failure):
-            session.recordFailure(failure)
-            return ImageFeatures(differenceHash: hash, visionFailure: failure)
+        await withTaskExecutorPreference(ImageWorkExecutor.utility) {
+            let hash = hashes.hash(of: image)
+            guard session.permitsAttempt else {
+                // The session already gave up: no attempt, no retry loop, and the reason is kept.
+                return ImageFeatures(differenceHash: hash, visionFailure: session.lastFailure)
+            }
+            switch await prints.featurePrint(of: image) {
+            case .success(let print):
+                session.recordSuccess()
+                return ImageFeatures(print: print, differenceHash: hash)
+            case .failure(let failure):
+                session.recordFailure(failure)
+                return ImageFeatures(differenceHash: hash, visionFailure: failure)
+            }
         }
     }
 }

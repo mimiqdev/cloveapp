@@ -34,15 +34,6 @@ public struct EnabledRatings: Hashable, Sendable {
         sortedLevels.contains(rating)
     }
 
-    /// The rating a 1-based swipe step applies, or nil before the first step.
-    ///
-    /// Steps past the last enabled level keep the highest one, so the longest swipe never
-    /// exceeds the configured maximum (PRD Rating by swipe distance and P0-06 acceptance).
-    public func rating(forSwipeStep step: Int) -> Rating? {
-        guard step > 0 else { return nil }
-        return sortedLevels[min(step, sortedLevels.count) - 1]
-    }
-
     /// The next enabled level above `rating`, for the `↑` key (PRD Gestures and keyboard).
     ///
     /// Zero raises to the lowest enabled level. At the highest enabled level there is no next

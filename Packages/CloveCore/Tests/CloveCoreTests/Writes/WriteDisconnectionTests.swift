@@ -9,18 +9,19 @@ struct WriteDisconnectionTests {
         defer { folder.remove() }
         let set = try makeScannedSet(folder: makeFolderIdentity(), root: folder.url, stem: "photo")
         let fileSystem = WriteFileSystemDouble()
-        let entered = DispatchSemaphore(value: 0)
+        let (entered, entry) = AsyncStream<Void>.makeStream()
+        var entries = entered.makeAsyncIterator()
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
         fileSystem.beforeOperation = { record in
             if record.step == .synchronize {
-                entered.signal()
+                entry.yield(())
                 _ = release.wait(timeout: .now() + 5)
             }
         }
         let queue = MarkWriteQueue(storeDirectory: folder.file("store"), fileSystem: fileSystem)
         let active = Task { await queue.apply(.label(ColourLabel(colour: .red)), to: set) }
-        #expect(waitForTestSignal(entered))
+        await entries.next()
         let waiting = Task { await queue.apply(.rating(.rejected), to: set) }
         try await Task.sleep(for: .milliseconds(150))
         await queue.discardChanges(in: set.id.folderID)

@@ -39,6 +39,10 @@ targets:
     deploymentTarget: "18.0"
     sources:
       - path: Clove
+        excludes:
+          - PrivacyInfo.xcprivacy
+      - path: Clove/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: CloveCore
       - package: CloveImaging
@@ -62,8 +66,6 @@ targets:
     sources:
       - path: CloveLab
     dependencies:
-      - package: CloveCore
-      - package: CloveImaging
       # Only Clove Lab links the spike harness; the Clove app must not.
       - package: CloveLabKit
     # Report JSON appears in Files under "On My iPhone › Clove Lab".

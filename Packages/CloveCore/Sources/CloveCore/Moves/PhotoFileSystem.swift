@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Every file-system operation a rejects move performs, injectable so a test can fail any step.
+/// File operations for moving and renaming photo sets, injectable so tests can fail any step.
 ///
 /// G1 decision 5 and PRD P0-10 fix the shape of the move: one photo set is renamed into the
 /// rejects folder on the same volume, and per-file confirmation decides success. The seam
@@ -11,7 +11,7 @@ import Foundation
 ///
 /// Tests fail folder creation, the exclusive rename, `EXDEV`, `EACCES`, `EROFS`, `ENOSPC` and
 /// `ENOENT`, and the move back that follows a partial set (PRD P0-10, "Failure and recovery").
-public protocol RejectMoveFileSystem: Sendable {
+public protocol PhotoFileSystem: Sendable {
     /// The file's size in bytes, or `nil` when nothing exists at `url`.
     ///
     /// G1 decision 5's confirmation compares the destination's size with the source's size
@@ -23,6 +23,15 @@ public protocol RejectMoveFileSystem: Sendable {
     /// PRD P0-10's plan checks a destination name before choosing a suffix, and the confirmed
     /// move checks that the source is gone (G1 decision 5).
     func exists(at url: URL) throws -> Bool
+
+    /// Entries in one folder, preserving spelling for case-insensitive collision checks.
+    func contentsOfDirectory(at url: URL) throws -> [URL]
+
+    /// Whether an existing entry is a directory, for destination preflight.
+    func isDirectory(at url: URL) throws -> Bool
+
+    /// The primary file's creation time when no capture wall time is available.
+    func creationDate(at url: URL) throws -> Date?
 
     /// The identifier of the volume holding `url`, or `nil` when the system reports none.
     ///
@@ -60,7 +69,7 @@ public protocol RejectMoveFileSystem: Sendable {
 /// existence use `attributesOfItem`, and the move is `renamex_np(2)` with `RENAME_EXCL` so an
 /// existing destination is refused with `EEXIST` and a different volume with `EXDEV`. The
 /// implementation imports `Darwin` for both Apple platforms and uses no private API.
-public struct FoundationRejectMoveFileSystem: RejectMoveFileSystem {
+public struct FoundationPhotoFileSystem: PhotoFileSystem {
     /// Creates the production file system; it holds no state and can be shared.
     public init() {}
 
@@ -86,6 +95,19 @@ public struct FoundationRejectMoveFileSystem: RejectMoveFileSystem {
             if isMissingFileError(error) { return false }
             throw error
         }
+    }
+
+    public func contentsOfDirectory(at url: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: nil)
+    }
+
+    public func isDirectory(at url: URL) throws -> Bool {
+        try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+    }
+
+    public func creationDate(at url: URL) throws -> Date? {
+        try url.resourceValues(forKeys: [.creationDateKey]).creationDate
     }
 
     /// Reads the volume's UUID through the nearest existing ancestor of `url`.
@@ -143,7 +165,7 @@ public struct FoundationRejectMoveFileSystem: RejectMoveFileSystem {
 /// standardized paths and never the raw spelling. The spelling the caller supplied is still
 /// what the destination is built from, so file names and extension case stay exactly as they
 /// are on disk (PRD P0-10).
-enum RejectMovePath {
+enum PhotoFilePath {
     /// The resolved path without a trailing slash.
     static func canonical(_ url: URL) -> String {
         var path = url.resolvingSymlinksInPath().standardizedFileURL.path(percentEncoded: false)
@@ -163,7 +185,7 @@ enum RejectMovePath {
 /// inserted before the file's last extension and the same suffix is applied to every file of
 /// the set, so the primary, its JPEG/HIF companions and the `.xmp` still pair by stem after the
 /// move (G1 decision 5). The spelling around it is untouched, including the extension's case.
-enum RejectMoveNaming {
+enum PhotoFileMoveNaming {
     /// The file name as it is for attempt 0, or with `-attempt` before its extension.
     ///
     /// A sidecar uses the replaced-extension form G1's Sidecar naming row requires, so

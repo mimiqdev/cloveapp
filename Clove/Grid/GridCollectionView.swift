@@ -45,6 +45,8 @@ struct GridCollectionView: UIViewRepresentable {
 
     var isSelectingEmpty = false
     var placeholderCount = 0
+    /// Duo uses six columns in the grid and two beside a focused photo.
+    var columnCount: Int?
 
     /// Opens one photo's detail (PRD Grid, P0-03). A single tap never waits for a second one.
     let openPhoto: (PhotoIdentity) -> Void
@@ -69,9 +71,9 @@ struct GridCollectionView: UIViewRepresentable {
         let coordinator = context.coordinator
         let collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: Self.makeLayout(placeholderCount: { [weak coordinator] in
-                coordinator?.placeholderCount ?? 0
-            }))
+            collectionViewLayout: Self.makeLayout(
+                placeholderCount: { [weak coordinator] in coordinator?.placeholderCount ?? 0 },
+                columnCount: { [weak coordinator] in coordinator?.columnCount }))
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = context.coordinator
@@ -81,8 +83,11 @@ struct GridCollectionView: UIViewRepresentable {
     }
 
     func updateUIView(_ collectionView: UICollectionView, context: Context) {
-        if context.coordinator.placeholderCount != placeholderCount {
+        if context.coordinator.placeholderCount != placeholderCount
+            || context.coordinator.columnCount != columnCount
+        {
             context.coordinator.placeholderCount = placeholderCount
+            context.coordinator.columnCount = columnCount
             collectionView.collectionViewLayout.invalidateLayout()
         }
         context.coordinator.thumbnails = thumbnails
@@ -99,9 +104,11 @@ struct GridCollectionView: UIViewRepresentable {
         for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
             ofKind: UICollectionView.elementKindSectionFooter)
         {
-            let columns = Self.columns(
-                width: collectionView.bounds.width,
-                regular: context.environment.horizontalSizeClass == .regular)
+            let columns =
+                columnCount
+                ?? Self.columns(
+                    width: collectionView.bounds.width,
+                    regular: context.environment.horizontalSizeClass == .regular)
             footer.configure(
                 count: placeholderCount, columns: columns, theme: context.environment.cloveTheme)
         }
@@ -113,13 +120,17 @@ struct GridCollectionView: UIViewRepresentable {
     }
 
     /// Compact keeps three columns; regular width fits tiles at a minimum of 140 points.
-    private static func makeLayout(placeholderCount: @escaping () -> Int)
+    private static func makeLayout(
+        placeholderCount: @escaping () -> Int, columnCount: @escaping () -> Int?
+    )
         -> UICollectionViewCompositionalLayout
     {
         UICollectionViewCompositionalLayout { _, environment in
-            let columns = columns(
-                width: environment.container.effectiveContentSize.width,
-                regular: environment.traitCollection.horizontalSizeClass == .regular)
+            let columns =
+                columnCount()
+                ?? columns(
+                    width: environment.container.effectiveContentSize.width,
+                    regular: environment.traitCollection.horizontalSizeClass == .regular)
             let spacing: CGFloat = 1.5
             let side =
                 (environment.container.effectiveContentSize.width - CGFloat(columns - 1) * spacing)
@@ -183,6 +194,7 @@ extension GridCollectionView {
         private var theme = CloveTheme.light
         private var isSelectingEmpty = false
         var placeholderCount = 0
+        var columnCount: Int?
 
         init(
             thumbnails: any GridThumbnailSource,
@@ -232,9 +244,11 @@ extension GridCollectionView {
                 let footer = view.dequeueReusableSupplementaryView(
                     ofKind: kind, withReuseIdentifier: "placeholders", for: indexPath)
                 if let footer = footer as? GridPlaceholderFooter {
-                    let columns = GridCollectionView.columns(
-                        width: view.bounds.width,
-                        regular: view.traitCollection.horizontalSizeClass == .regular)
+                    let columns =
+                        self.columnCount
+                        ?? GridCollectionView.columns(
+                            width: view.bounds.width,
+                            regular: view.traitCollection.horizontalSizeClass == .regular)
                     footer.configure(
                         count: self.placeholderCount, columns: columns, theme: self.theme)
                 }

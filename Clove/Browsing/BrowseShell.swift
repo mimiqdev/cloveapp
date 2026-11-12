@@ -7,7 +7,15 @@ struct BrowseShell: View {
     let browsing: BrowsingModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    private var isRegular: Bool { horizontalSizeClass == .regular }
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
+
+    private var usesVerticalBar: Bool { isDuoExpanded || isDuoCover }
+
+    private var isRegular: Bool {
+        horizontalSizeClass == .regular && !isDuoExpanded
+    }
 
     var body: some View {
         NavigationStack(path: navigationPath) {
@@ -22,11 +30,13 @@ struct BrowseShell: View {
                     EntryScreen(browsing: browsing)
                 }
             }
-            .browsingChrome(title: title, browsing: browsing)
+            .browsingChrome(
+                title: title, browsing: browsing, usesSystemBar: usesSystemToolbar && !isRegular
+            )
             .navigationDestination(for: BrowserRoute.self) { route in
                 screen(for: route)
                     .browsingChrome(
-                        title: title, browsing: browsing,
+                        title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
                         backTitle: isRegular && browsing.state.folder != nil
                             ? browsing.filterTitle : nil
                     )
@@ -34,7 +44,9 @@ struct BrowseShell: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if browsing.state.route == .detail, let message = browsing.failureToastMessage {
+            if browsing.state.route == .detail, !isDuoExpanded,
+                let message = browsing.failureToastMessage
+            {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal)
                     .padding(.bottom, 12)
@@ -53,7 +65,8 @@ struct BrowseShell: View {
         Binding(
             get: {
                 switch browsing.state.route {
-                case .detail, .settings: [browsing.state.route]
+                case .detail: usesVerticalBar ? [] : [.detail]
+                case .settings: [.settings]
                 case .entry, .grid: []
                 }
             },
@@ -74,7 +87,7 @@ struct BrowseShell: View {
                 .toolbar(.hidden, for: .navigationBar)
         } detail: {
             GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
-                .toolbar(.hidden, for: .navigationBar)
+                .toolbar(usesSystemToolbar ? .visible : .hidden, for: .navigationBar)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -105,7 +118,10 @@ struct BrowseShell: View {
 
 extension View {
     /// Entry owns its header; regular-width Settings returns to the named grid filter.
-    func browsingChrome(title: String, browsing: BrowsingModel, backTitle: String? = nil)
+    func browsingChrome(
+        title: String, browsing: BrowsingModel, usesSystemBar: Bool = false,
+        backTitle: String? = nil
+    )
         -> some View
     {
         self
@@ -113,13 +129,13 @@ extension View {
                 browsing.state.route == .grid || browsing.state.route == .detail ? "" : title
             )
             .toolbar(
-                browsing.state.route == .grid || browsing.state.route == .detail
+                !usesSystemBar && (browsing.state.route == .grid || browsing.state.route == .detail)
                     ? .hidden : .visible,
                 for: .navigationBar
             )
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if browsing.state.route == .settings, let backTitle {
+                if browsing.state.route == .settings, let backTitle {
+                    ToolbarItem(placement: .topBarLeading) {
                         Button {
                             browsing.back()
                         } label: {
@@ -131,12 +147,13 @@ extension View {
                         .accessibilityLabel("Back")
                         .accessibilityIdentifier("clove.nav.back")
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if browsing.state.route == .settings, backTitle == nil {
+                } else if browsing.state.route == .settings {
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { browsing.back() }
                             .accessibilityIdentifier("clove.nav.back")
-                    } else if browsing.state.route == .entry {
+                    }
+                } else if browsing.state.route == .entry {
+                    ToolbarItem(placement: .topBarTrailing) {
                         GlassIconButton(
                             label: "Settings", symbol: "gearshape", identifier: "clove.nav.settings"
                         ) {
