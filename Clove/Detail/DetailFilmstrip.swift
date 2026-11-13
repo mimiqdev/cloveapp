@@ -1,8 +1,8 @@
 import CloveCore
 import SwiftUI
 
-/// Grid-order filmstrip. The current group expands on a quiet tint; other groups stay stacked.
-/// Tapping a stack jumps to the group's first photo; the group expands in place.
+/// Grid-order filmstrip. The current group expands on a quiet neutral surface; other groups stay
+/// stacked. Tapping a stack jumps to the group's first photo; the group expands in place.
 struct DetailFilmstrip: View {
     let photos: [GridPhoto]
     let current: PhotoIdentity?
@@ -56,8 +56,10 @@ struct DetailFilmstrip: View {
                             }
                             .padding(3)
                             .background {
+                                // The group's extent, not its selection: the neutral token at 12%,
+                                // on the background shape alone (owner decision, 2026-11-13, #226).
                                 RoundedRectangle(cornerRadius: 9)
-                                    .fill(Color.clove.group).opacity(0.25)
+                                    .fill(Color.clove.text.primary).opacity(0.12)
                             }
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
@@ -72,7 +74,9 @@ struct DetailFilmstrip: View {
                                 }
                                 .frame(width: 54, height: 64)
                                 .overlay(alignment: .topTrailing) {
-                                    GroupCountBadge(count: group.members.count).padding(2)
+                                    GroupCountBadge(
+                                        count: group.members.count, presentation: .filmstrip
+                                    ).padding(2)
                                 }
                             }
                             .buttonStyle(.plain)
