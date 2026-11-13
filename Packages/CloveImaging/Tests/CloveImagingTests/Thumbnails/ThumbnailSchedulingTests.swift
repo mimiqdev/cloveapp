@@ -5,6 +5,7 @@ import Testing
 
 private actor ThumbnailDecodeGate {
     private var waiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private let entries = AsyncStream<Int>.makeStream()
     private(set) var started: [Int] = []
     private(set) var maximum = 0
     private(set) var didClose = false
@@ -15,14 +16,20 @@ private actor ThumbnailDecodeGate {
         await withCheckedContinuation { continuation in
             waiters[request.targetPixels] = continuation
             maximum = max(maximum, waiters.count)
+            entries.continuation.yield(request.targetPixels)
         }
         return .unavailable(.noUsablePreview)
     }
 
     func finish(_ pixels: Int) { waiters.removeValue(forKey: pixels)?.resume() }
+
+    func waitForStart(_ pixels: Int) async throws {
+        var iterator = entries.stream.makeAsyncIterator()
+        try #require(await iterator.next() == pixels, "Decoder entries must follow priority order")
+    }
 }
 
-struct ThumbnailSchedulingTests {
+@Suite(.imageWork) struct ThumbnailSchedulingTests {
     private func request(_ base: ThumbnailRequest, _ pixels: Int) -> ThumbnailRequest {
         ThumbnailRequest(
             source: base.source, revision: base.revision, targetPixels: pixels,
@@ -71,7 +78,7 @@ struct ThumbnailSchedulingTests {
         #expect(await gate.started.count == workers)
     }
 
-    @Test func queuedCancellationNeverEntersDecoder() async throws {
+    @Test(.timeLimit(.minutes(1))) func queuedCancellationNeverEntersDecoder() async throws {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let base = try thumbnailRequest(directory.image())
@@ -80,7 +87,7 @@ struct ThumbnailSchedulingTests {
             cache: try directory.cache(memory: 0, disk: 0), workers: 1,
             decode: { await gate.decode($0) })
         let active = Task { try await pipeline.thumbnail(for: request(base, 1)) }
-        try await eventually { await gate.started == [1] }
+        try await gate.waitForStart(1)
         let queued = Task { try await pipeline.thumbnail(for: request(base, 2)) }
         try await eventually { await pipeline.queuedCount == 1 }
         queued.cancel()
@@ -118,7 +125,9 @@ struct ThumbnailSchedulingTests {
         #expect(await gate.maximum == 1)
     }
 
-    @Test func visibleWorkDisplacesPrefetchAndQueueHasHardLimit() async throws {
+    @Test(.timeLimit(.minutes(1))) func visibleWorkDisplacesPrefetchAndQueueHasHardLimit()
+        async throws
+    {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let base = try thumbnailRequest(directory.image())
@@ -127,7 +136,7 @@ struct ThumbnailSchedulingTests {
             cache: try directory.cache(memory: 0, disk: 0), workers: 1,
             queueLimit: 2, decode: { await gate.decode($0) })
         let active = Task { try await pipeline.thumbnail(for: request(base, 1)) }
-        try await eventually { await gate.started == [1] }
+        try await gate.waitForStart(1)
         let prefetch = Task {
             try await pipeline.thumbnail(for: request(base, 2), priority: .prefetch)
         }
@@ -145,10 +154,12 @@ struct ThumbnailSchedulingTests {
         #expect(await pipeline.queuedCount == 2)
         await gate.finish(1)
         _ = try await active.value
-        try await eventually { await gate.started == [1, 5] }
+        try await gate.waitForStart(5)
+        #expect(await gate.started == [1, 5])
         await gate.finish(5)
         _ = try await visible.value
-        try await eventually { await gate.started == [1, 5, 2] }
+        try await gate.waitForStart(2)
+        #expect(await gate.started == [1, 5, 2])
         await gate.finish(2)
         _ = try await prefetch.value
     }

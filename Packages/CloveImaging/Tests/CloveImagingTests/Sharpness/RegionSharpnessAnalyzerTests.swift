@@ -52,7 +52,7 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
     ImageProperties(["{ExifAux}": ["AFInfo": values]])
 }
 
-@Suite struct RegionSharpnessAnalyzerTests {
+@Suite(.imageWork) struct RegionSharpnessAnalyzerTests {
     let sharpImage = SharpnessScene.checkerboard(width: 256, height: 256, cell: 4)
     let previewImage = SharpnessScene.flat(width: 800, height: 600)
 
