@@ -831,31 +831,46 @@ final class CloveFlowTests: XCTestCase {
 
     /// Opt-in visual evidence for the neutral group badge and the expanded filmstrip surface.
     ///
-    /// The sample's first group is widened to three digits for the run, so the captures show two-
-    /// and three-digit counts on bright and dimmed photos, and the current group's surface in the
-    /// filmstrip. Nothing is asserted about colour: the images are for a person to compare.
+    /// The sample's first group is widened to two and to three digits for the run, so the
+    /// captures show both counts on bright and dimmed photos, and the current group's surface in
+    /// the filmstrip. Nothing is asserted about colour: the images are for a person to compare.
+    /// The filter lives in the toolbar on iPhone and in the sidebar on iPad, so both are used.
     @MainActor
     func testCaptureGroupBadgeReferencesWhenRequested() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["CLOVE_CAPTURE_GROUP_BADGES"] == "1")
-        for theme in ["light", "dark", "nord"] {
-            let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_COUNT": "123"])
-            openLibrary(app)
-            applyComparisonTheme(theme, app)
-            capture("group-badge-grid-\(theme)")
-            element(app, "clove.grid.filter").tap()
-            element(app, "clove.grid.filter.rejected").tap()
-            capture("group-badge-grid-rejected-\(theme)")
-            element(app, "clove.grid.filter").tap()
-            element(app, "clove.grid.filter.all").tap()
-            element(app, "clove.grid.photo.mmq02682").tap()
-            XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
-            capture("group-badge-filmstrip-\(theme)")
-            element(app, "clove.detail.filmstrip.group.burst-2678").tap()
-            XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
-            XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
-            capture("group-badge-filmstrip-expanded-\(theme)")
-            app.terminate()
+        for count in ["12", "123"] {
+            for theme in ["light", "dark", "nord"] {
+                let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_COUNT": count])
+                openLibrary(app)
+                applyComparisonTheme(theme, app)
+                capture("group-badge-\(count)-grid-\(theme)")
+                let toolbarFilter = element(app, "clove.grid.filter")
+                if toolbarFilter.exists {
+                    toolbarFilter.tap()
+                    element(app, "clove.grid.filter.rejected").tap()
+                } else {
+                    element(app, "clove.sidebar.rejected").tap()
+                }
+                capture("group-badge-\(count)-grid-rejected-\(theme)")
+                if toolbarFilter.exists {
+                    toolbarFilter.tap()
+                    element(app, "clove.grid.filter.all").tap()
+                } else {
+                    element(app, "clove.sidebar.all").tap()
+                }
+                element(app, "clove.grid.photo.mmq02682").tap()
+                XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
+                capture("group-badge-\(count)-filmstrip-\(theme)")
+                element(app, "clove.detail.filmstrip.group.burst-2678").tap()
+                XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
+                XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+                capture("group-badge-\(count)-filmstrip-expanded-\(theme)")
+                // Leave detail before terminating, so the next launch restores the grid.
+                element(app, "clove.nav.back").tap()
+                XCTAssertTrue(element(app, "clove.grid.more").waitForExistence(timeout: 5))
+                app.terminate()
+            }
         }
     }
 
