@@ -8,6 +8,16 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Neutral group count badges and filmstrip surfaces (owner, 2026-11-13, #226)
+
+Saturated blue group counts read as notifications and pull attention away from the photos, and a blue wash behind the expanded filmstrip group distracts from the thumbnails. Both now use restrained neutral treatments in every theme. This supersedes the `group` colour on count badges and `group` at 25% behind an expanded filmstrip group, including #225's styling sentence; #225's expansion and navigation behaviour is unchanged.
+
+- **Group count badge** (grid stacks on iPhone, iPad and the Duo cover, the Duo's group members, and every filmstrip stack): a compact rounded rectangle filled with black at 56%, the count in white at 94% at system Medium, 11 pt with radius 4 in a grid and 9 pt with radius 3 in the filmstrip. No coloured fill, border or shadow. Badges are photo overlays, so they are deliberately invariant across themes; the anchors, padding, count text and accessibility labels stay as they are.
+- **Expanded filmstrip group**: the rounded background shape (radius 9) is `text/primary` at 12% layer opacity, so it follows the theme's Light or Dark text colour. The opacity is on that shape alone; the container and photo thumbnails are never tinted. The current photo keeps its own `text/primary` ring, so the group's extent and the selection stay distinguishable.
+- Photo pixels, Reject dimming, the bottom marking row (#204), fit containment (#199), group membership, expansion, navigation and marks are unchanged.
+
+The `group` token keeps its per-theme values and is not recoloured or removed: the progress line while grouping is its remaining use in the app. The older "Filmstrip" notes below that assigned the token to count badges and to the 25% surface are recorded there as superseded.
+
 ## Batch rename: select, order, rename; a name in use is replaced, not refused (owner, 2026-11-12, #173)
 
 Batch rename is select, order, rename, with no undo (#176). A target name already used by a file outside the batch shows a warning, and Rename replaces it, instead of forcing the person to choose another name (owner, 2026-11-12). The replaced file set moves to `_Rejected`, so nothing is deleted (owner, 2026-11-12). #175 and #176 are updated to match. Names that can't exist (invalid characters, over 255 bytes, duplicates within the batch) still block.
@@ -182,8 +192,8 @@ Figma: revised frames sit to the right of the original 03 Photo Detail row (defa
 - The dock is grouped into glass capsules: Back on its own at the top, then a view-tools capsule (Filter, "…", Info), a marks capsule (star rating, reject circle, label), and a bottom capsule (Undo, Move Rejects). The marks capsule only shows when a photo is open.
 
 ## Filmstrip (iPad detail, Duo Photo only)
-- The filmstrip follows the grid. Other groups are collapsed into one stacked tile with a count badge. The current group is expanded in place on a muted accent tint (decided: option C), using the new theme token "group" at 25%, with no outline. The current frame has a thin ring in the primary text color. The "group" token (Color.clove.group) defaults to each theme's accent and should also drive the grid group outline. Note: Figma ignores opacity on a variable-bound paint, so tints use a layer with layer opacity.
-- "group" token applied: the count badges on group stacks (in every grid and the filmstrip) and the Duo half-fold group outlines now use Color.clove.group. In the revised grids, a group shows as a stack with a group-colored count badge, which ties it to the tinted expanded group in the filmstrip.
+- The filmstrip follows the grid. Other groups are collapsed into one stacked tile with a count badge. The current group is expanded in place on a muted tint (decided: option C), with no outline. The current frame has a thin ring in the primary text color. **Superseded (owner, 2026-11-13, #226):** the surface is `text/primary` at 12% layer opacity, not `group` at 25%; it adapts to the theme. Figma ignores opacity on a variable-bound paint, so any tint uses a layer with layer opacity.
+- **Superseded (owner, 2026-11-13, #226):** the count badges on group stacks (in every grid and the filmstrip) and the Duo half-fold group outlines originally used `Color.clove.group`. Count badges now use the invariant black 56% / white 94% overlay, and the progress line while grouping is `group`'s remaining use.
 
 ## Opening a folder (scanning and grouping)
 - Opening has no blocking screen. The grid shows straight away and fills in as photos are read.
