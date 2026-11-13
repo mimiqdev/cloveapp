@@ -123,19 +123,27 @@ enum BrowsingPerformanceScan {
         let watch = Stopwatch()
         var firstPhotos: Double?
         var sets: [ScannedPhotoSet] = []
-        for try await batch in scan {
-            for item in batch.items {
-                guard case .photo(let set) = item else { continue }
-                if firstPhotos == nil { firstPhotos = watch.milliseconds }
-                sets.append(set)
+        do {
+            for try await batch in scan {
+                for item in batch.items {
+                    guard case .photo(let set) = item else { continue }
+                    if firstPhotos == nil { firstPhotos = watch.milliseconds }
+                    sets.append(set)
+                }
             }
+            let summary = try await scan.summary()
+            guard let firstPhotos else {
+                throw BrowsingPerformanceError.noPhotos
+            }
+            return ScanPass(
+                firstPhotos: firstPhotos, total: watch.milliseconds, sets: sets, summary: summary)
+        } catch {
+            // Ending iteration only signals cancellation. Await the producer before the
+            // caller releases the folder's security scope.
+            scan.cancel()
+            _ = try? await scan.summary()
+            throw error
         }
-        let summary = try await scan.summary()
-        guard let firstPhotos else {
-            throw BrowsingPerformanceError.noPhotos
-        }
-        return ScanPass(
-            firstPhotos: firstPhotos, total: watch.milliseconds, sets: sets, summary: summary)
     }
 
     private static func groupingPhoto(

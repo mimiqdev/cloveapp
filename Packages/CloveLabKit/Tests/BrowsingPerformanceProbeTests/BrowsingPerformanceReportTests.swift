@@ -61,6 +61,8 @@ import Testing
         "fileCount": 4_000,
         "definitionSHA256": String(repeating: "a", count: 64),
         "sources": ["source-b": "bbb", "source-a": "aaa"],
+        "recipes": [:],
+        "generated": ["recipe--source.jpg": "ccc"],
     ]
     let data = try JSONSerialization.data(withJSONObject: document)
     try data.write(to: folder.appendingPathComponent(".clove-fixture.json"))
@@ -69,6 +71,8 @@ import Testing
     #expect(identity.set == "browsing-2000")
     #expect(identity.fileCount == 4_000)
     #expect(identity.sourceDigestJSON == #"{"source-a":"aaa","source-b":"bbb"}"#)
+    #expect(identity.recipeJSON == "{}")
+    #expect(identity.generatedDigestJSON == #"{"recipe--source.jpg":"ccc"}"#)
 }
 
 @Test func browsingReportUsesTheNormalLabSchema() throws {

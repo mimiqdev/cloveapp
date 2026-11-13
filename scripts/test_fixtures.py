@@ -374,6 +374,42 @@ class SetTests(unittest.TestCase):
                 with open(os.path.join(self.output, "demo", path), "rb") as handle:
                     self.assertEqual(b"raw bytes", handle.read())
 
+    def test_repeat_one_replaces_the_index(self):
+        document = self.document(
+            [{"to": "IMG_{index}.CR3", "from": "sample-file", "repeat": 1}]
+        )
+        self.build(document)
+        self.assertEqual(["IMG_0001.CR3"], self.listing())
+
+    def test_identity_records_recipe_and_generated_bytes(self):
+        document = {
+            "sets": [
+                {
+                    "name": "demo",
+                    "identity": True,
+                    "entries": [
+                        {
+                            "to": "IMG.JPG",
+                            "from": "sample-file",
+                            "recipe": "jpeg-from-raw",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        def generate(recipe, source, destination):
+            with open(destination, "wb") as handle:
+                handle.write(b"generated jpeg")
+
+        self.build(document, generate=generate)
+        identity = fx.load_json(os.path.join(self.output, "demo", ".clove-fixture.json"))
+        self.assertEqual("sips", identity["recipes"]["jpeg-from-raw"]["tool"])
+        self.assertEqual(
+            {"jpeg-from-raw--sample-file.jpg": hashlib.sha256(b"generated jpeg").hexdigest()},
+            identity["generated"],
+        )
+
     def test_rejects_a_repeat_without_an_indexed_destination(self):
         document = self.document(
             [{"to": "IMG.CR3", "from": "sample-file", "repeat": 2}]

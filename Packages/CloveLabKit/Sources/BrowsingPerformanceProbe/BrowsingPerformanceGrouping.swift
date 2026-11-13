@@ -11,23 +11,21 @@ enum BrowsingPerformanceGrouping {
     ) async throws {
         let candidates = GroupingFeatureCandidates.photos(in: photos)
         let setsByIdentity = Dictionary(uniqueKeysWithValues: sets.map { ($0.id, $0) })
-        let requests = try candidates.map { photo -> ImageFeatureRequest in
-            guard let set = setsByIdentity[photo.id] else {
-                throw BrowsingPerformanceError.noPhotos
-            }
-            let source = set.photoSet.primary.url
-            return ImageFeatureRequest(
-                source: source, revision: try ThumbnailRevision.read(from: source),
-                locationIdentity: BrowsingPerformanceScan.folderID.rawValue)
-        }
-        let photoByRequest = Dictionary(uniqueKeysWithValues: zip(requests, candidates.map(\.id)))
         report.value(
             "grouping-candidates", value: Double(candidates.count), unit: "count",
             tags: ["photoCount": String(photos.count)])
+
+        // A separate diagnostic measures per-photo work without folder-wide queueing.
+        let latencyRequests = try requests(for: candidates, sets: setsByIdentity)
         try await measureFeatureLatency(
-            requests: Array(requests.prefix(configuration.featureSampleLimit)),
+            requests: Array(latencyRequests.prefix(configuration.featureSampleLimit)),
             cacheRoot: cacheRoot, report: &report)
 
+        // The total starts before the candidate revision reads, matching the production
+        // analysis pass. The one-at-a-time diagnostic above is not part of this total.
+        let totalWatch = Stopwatch()
+        let requests = try requests(for: candidates, sets: setsByIdentity)
+        let photoByRequest = Dictionary(uniqueKeysWithValues: zip(requests, candidates.map(\.id)))
         let similarity = PhotoFeatureSimilarity<ImageFeatures> { left, right in
             switch left.distance(to: right) {
             case .visionPrint(let distance)?: .vision(distance: Float(distance))
@@ -39,11 +37,9 @@ enum BrowsingPerformanceGrouping {
             directory: cacheRoot.appendingPathComponent("groups", isDirectory: true))
         let grouping = SimilarGrouping(similarity: similarity, cache: groupCache)
         let revision = GroupingInputRevision.scanned(sets, feature: "preview:400|feature:2")
-        let totalWatch = Stopwatch()
         let timeWatch = Stopwatch()
         await grouping.run(photos: photos, revision: revision, reuseCache: true)
-        let timeMilliseconds = timeWatch.milliseconds
-        report.distribution("grouping-time-stage", cache: "cold", samples: [timeMilliseconds])
+        report.distribution("grouping-time-stage", cache: "cold", samples: [timeWatch.milliseconds])
 
         await similarity.start(photos: candidates.map(\.id))
         let featureResult = try await runFeatures(
@@ -71,12 +67,24 @@ enum BrowsingPerformanceGrouping {
             tags: ["cache": "cold", "analysis": coldGroups.analysis.description])
         report.context["visionStatus"] = featureResult.visionStatus
 
-        // Diagnostic disk-warm feature pass. A warm app open normally uses the finished group
-        // cache below and does not request these features again.
+        // Production still starts its analysis pass on a warm open: it rereads candidate
+        // revisions, performs feature-cache lookups, and calls refine even when the group cache
+        // is authoritative. Include all of that work in the warm total.
+        let warmTotalWatch = Stopwatch()
+        let warmGrouping = SimilarGrouping(similarity: similarity, cache: groupCache)
+        let warmTimeWatch = Stopwatch()
+        await warmGrouping.run(photos: photos, revision: revision, reuseCache: true)
+        report.distribution(
+            "grouping-time-stage", cache: "warm", samples: [warmTimeWatch.milliseconds])
+        let warmGroups = await warmGrouping.current
+        let warmRequests = try Self.requests(for: candidates, sets: setsByIdentity)
+        let warmPhotoByRequest = Dictionary(
+            uniqueKeysWithValues: zip(warmRequests, candidates.map(\.id)))
+        await similarity.start(photos: candidates.map(\.id))
         let diskFeatures = try await runFeatures(
-            requests: requests, directory: cacheRoot.appendingPathComponent("features-cold"),
+            requests: warmRequests, directory: cacheRoot.appendingPathComponent("features-cold"),
             thumbnailDirectory: cacheRoot.appendingPathComponent("feature-thumbnails-cold"),
-            memoryBytes: 0, similarity: nil, photoByRequest: photoByRequest)
+            memoryBytes: 0, similarity: similarity, photoByRequest: warmPhotoByRequest)
         report.distribution(
             "grouping-feature-completion", cache: "disk", samples: diskFeatures.samples,
             failureCount: diskFeatures.failures.values.reduce(0, +))
@@ -85,14 +93,10 @@ enum BrowsingPerformanceGrouping {
         report.value(
             "grouping-feature-throughput", value: diskFeatures.throughput, unit: "photos/s",
             tags: ["cache": "disk", "sampleCount": String(diskFeatures.samples.count)])
+        await warmGrouping.refine()
+        report.distribution(
+            "grouping-total", cache: "warm", samples: [warmTotalWatch.milliseconds])
 
-        let warmGrouping = SimilarGrouping(similarity: similarity, cache: groupCache)
-        let warmWatch = Stopwatch()
-        await warmGrouping.run(photos: photos, revision: revision, reuseCache: true)
-        let warmMilliseconds = warmWatch.milliseconds
-        let warmGroups = await warmGrouping.current
-        report.distribution("grouping-time-stage", cache: "warm", samples: [warmMilliseconds])
-        report.distribution("grouping-total", cache: "warm", samples: [warmMilliseconds])
         let warmCacheHit = candidates.count > 1 && warmGroups.analysis == .analyzed
         report.value(
             "grouping-cache-hit", value: warmCacheHit ? 1 : 0, unit: "count",
@@ -101,6 +105,18 @@ enum BrowsingPerformanceGrouping {
             report.unavailable(
                 "grouping-cache-hit", cache: "warm",
                 reason: "The persisted analyzed grouping was not available on the warm run.")
+        }
+    }
+
+    private static func requests(
+        for candidates: [GroupingPhoto], sets: [PhotoIdentity: ScannedPhotoSet]
+    ) throws -> [ImageFeatureRequest] {
+        try candidates.map { photo in
+            guard let set = sets[photo.id] else { throw BrowsingPerformanceError.noPhotos }
+            let source = set.photoSet.primary.url
+            return ImageFeatureRequest(
+                source: source, revision: try ThumbnailRevision.read(from: source),
+                locationIdentity: BrowsingPerformanceScan.folderID.rawValue)
         }
     }
 

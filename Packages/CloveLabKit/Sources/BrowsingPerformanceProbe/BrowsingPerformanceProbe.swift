@@ -81,13 +81,13 @@ public enum BrowsingPerformanceProbe {
         report.notes = [
             "Measurement only. No target pass or physical-device result is inferred from another host.",
             "Cold means fresh Lab-owned cache directories and first touch in this run. iOS/macOS OS caches are not flushed; this is not a reboot-cold measurement.",
-            "Disk-warm thumbnail and feature passes recreate the production caches with zero memory capacity over the cold run's disk entries. Warm detail uses its in-memory cache. Warm grouping uses the finished group cache and normally does no feature work.",
+            "Disk-warm thumbnail and feature passes recreate the production caches with zero memory capacity over the cold run's disk entries. Warm detail uses its in-memory cache. Warm grouping includes group-cache loading, candidate revision reads, feature-cache lookups and refinement; cache hits avoid image recomputation.",
             "Percentiles are nearest-rank over successful samples. Each statistic and sample count carries the cache state; failures and unavailable stages have separate entries.",
             "Thumbnail latency includes bounded queueing behind at most \(configuration.thumbnailInFlight) in-flight requests. Throughput counts materialized successful previews over the whole pass.",
-            "First detail preview uses the production raw-first request at \(configuration.displayPixels) display pixels. RAW focus cancels the first native render after 100 ms and measures the production close drain, then measures a second native render in a fresh pipeline. The combined distribution adds those two measured spans only when cancellation was observed.",
+            "First detail preview uses the production raw-first request at \(configuration.displayPixels) display pixels. RAW focus waits for native render admission, cancels it and measures the production close drain, then measures a second native render in a fresh pipeline. The combined distribution adds those two measured spans only when admission and cancellation were observed.",
             "Memory is process RSS sampled every 5 ms. Peaks are cumulative lower bounds, not per-stage or per-allocation attribution.",
             "The generated set repeats pinned sources under unique paths. Shared capture metadata and pixels provide repeatable load, not realistic burst-grouping accuracy evidence.",
-            "The measured folder and its photo files are never modified. Lab caches use a temporary directory removed after the run.",
+            "No photo, companion or XMP is modified. Lab caches use a temporary directory removed after the run; normal export adds only the JSON report beside the tested photos.",
         ]
 
         do {
@@ -95,6 +95,8 @@ public enum BrowsingPerformanceProbe {
             report.context["fixtureSet"] = identity.set
             report.context["fixtureDefinitionSHA256"] = identity.definitionSHA256
             report.context["fixtureSourceSHA256"] = identity.sourceDigestJSON
+            report.context["fixtureRecipes"] = identity.recipeJSON
+            report.context["fixtureGeneratedSHA256"] = identity.generatedDigestJSON
             report.context["fixtureDeclaredFileCount"] = String(identity.fileCount)
         } catch {
             report.unavailable(
@@ -159,9 +161,12 @@ public enum BrowsingPerformanceProbe {
                 try record(error, stage: "thumbnails", report: &report)
                 report.unavailable(
                     "detail-preview",
-                    reason: "The temporary measurement cache could not be prepared.")
+                    reason:
+                        "Skipped after thumbnail measurement failed: \(String(describing: error))")
                 report.unavailable(
-                    "grouping", reason: "The temporary measurement cache could not be prepared.")
+                    "grouping",
+                    reason:
+                        "Skipped after thumbnail measurement failed: \(String(describing: error))")
             }
         } else {
             report.unavailable(

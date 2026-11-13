@@ -46,6 +46,30 @@ func smallRealFolderProducesEveryCurrentPipelineStage() async throws {
         })
     #expect(
         report.measurements.contains {
+            $0.name == "raw-focus-cancel-observed" && $0.value == 1
+        })
+    #expect(
+        report.measurements.contains {
+            $0.name == "raw-focus-cancel-drain" && $0.tags["statistic"] == "p95"
+        })
+    let warmTotal = report.measurements.first {
+        $0.name == "grouping-total" && $0.tags["cache"] == "warm"
+            && $0.tags["statistic"] == "p95"
+    }?.value
+    let warmTimeStage = report.measurements.first {
+        $0.name == "grouping-time-stage" && $0.tags["cache"] == "warm"
+            && $0.tags["statistic"] == "p95"
+    }?.value
+    let total = try #require(warmTotal)
+    let timeStage = try #require(warmTimeStage)
+    #expect(total >= timeStage)
+    #expect(
+        report.measurements.contains {
+            $0.name == "grouping-feature-completion-sample-count"
+                && $0.tags["cache"] == "disk" && $0.value == 4
+        })
+    #expect(
+        report.measurements.contains {
             $0.name == "metric-unavailable" && $0.tags["stage"] == "fixture-identity"
         })
     #expect(

@@ -373,11 +373,11 @@ def _expand_item(item, where):
     """Expand an optional repeat count into unique, four-digit indexed paths."""
     if not isinstance(item, dict):
         raise FixtureError("%s must be an object" % where)
-    repeat = item.get("repeat", 1)
+    if "repeat" not in item:
+        return [item]
+    repeat = item["repeat"]
     if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat <= 0:
         raise FixtureError("%s needs a positive integer 'repeat'" % where)
-    if repeat == 1:
-        return [item]
     destination = item.get("to")
     if not isinstance(destination, str) or "{index}" not in destination:
         raise FixtureError("%s with 'repeat' needs '{index}' in 'to'" % where)
@@ -545,12 +545,17 @@ def resolve_sets(document, entries, recipes, files_directory, xmp_directory, gen
         if identity:
             canonical = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode("utf-8")
             sources = {}
+            recipes_used = {}
             for entry in resolved_entries:
                 if "sourceID" in entry:
                     sources[entry["sourceID"]] = entry["sourceSHA256"]
+                if entry["kind"] == "generate":
+                    recipe = entry["recipe"]
+                    recipes_used[recipe["id"]] = recipe
             resolved_spec["identity"] = {
                 "definitionSHA256": hashlib.sha256(canonical).hexdigest(),
                 "sources": sources,
+                "recipes": recipes_used,
             }
         resolved.append(resolved_spec)
 
@@ -575,6 +580,7 @@ def build_sets(resolved_sets, directory, copy=None, generate=None, log=print):
         elif os.path.exists(target):
             os.remove(target)
         os.makedirs(target)
+        generated_identities = {}
 
         for entry in spec["entries"]:
             destination = os.path.join(target, entry["to"])
@@ -616,6 +622,8 @@ def build_sets(resolved_sets, directory, copy=None, generate=None, log=print):
                     os.makedirs(os.path.dirname(cached), exist_ok=True)
                     log("generating %s from %s" % (os.path.basename(cached), entry["path"]))
                     generate(entry["recipe"], entry["path"], cached)
+                if spec.get("identity") and cached not in generated_identities:
+                    generated_identities[cached] = sha256_file(cached)
                 if entry.get("hardlink"):
                     try:
                         os.link(cached, destination)
@@ -633,6 +641,11 @@ def build_sets(resolved_sets, directory, copy=None, generate=None, log=print):
                 "fileCount": len(spec["entries"]),
                 "definitionSHA256": spec["identity"]["definitionSHA256"],
                 "sources": spec["identity"]["sources"],
+                "recipes": spec["identity"]["recipes"],
+                "generated": {
+                    os.path.basename(path): digest
+                    for path, digest in sorted(generated_identities.items())
+                },
             }
             identity_path = os.path.join(target, ".clove-fixture.json")
             with open(identity_path, "w", encoding="utf-8", newline="\n") as handle:

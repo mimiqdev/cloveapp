@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "comment": "Standard test folders built by scripts/make-fixture-sets. Each set folder is deleted and recreated on every run. Entry keys: 'from' copies a manifest download (add 'recipe' to generate from it instead), 'fromXmp' copies a hand-written sidecar from fixtures/xmp/, 'text' writes an inline text stub, 'hex' writes inline bytes from a hex string (used for AppleDouble stubs, so no binary is committed). A positive 'repeat' expands '{index}' in 'to' to four-digit paths and uses hard links when the cache and set share a supporting filesystem. 'identity': true writes a hidden .clove-fixture.json with the definition digest and pinned source hashes.",
+  "comment": "Standard test folders built by scripts/make-fixture-sets. Each set folder is deleted and recreated on every run. Entry keys: 'from' copies a manifest download (add 'recipe' to generate from it instead), 'fromXmp' copies a hand-written sidecar from fixtures/xmp/, 'text' writes an inline text stub, 'hex' writes inline bytes from a hex string (used for AppleDouble stubs, so no binary is committed). A positive 'repeat' expands '{index}' in 'to' to four-digit paths and uses hard links when the cache and set share a supporting filesystem. 'identity': true writes a hidden .clove-fixture.json with the definition digest, pinned source hashes, recipe definitions, and generated-file hashes.",
   "sets": [
     {
       "name": "card-basic",

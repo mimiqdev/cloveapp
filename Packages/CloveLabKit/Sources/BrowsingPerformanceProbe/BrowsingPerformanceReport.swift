@@ -1,6 +1,15 @@
 import Foundation
 import LabSupport
 
+struct FixtureRecipe: Codable, Sendable {
+    let id: String
+    let format: String
+    let `extension`: String
+    let tool: String
+    let args: [String]
+    let notes: String
+}
+
 /// Identity written by `make-fixture-sets` beside a generated measurement folder.
 struct FixtureIdentity: Decodable, Sendable {
     let schemaVersion: Int
@@ -8,14 +17,20 @@ struct FixtureIdentity: Decodable, Sendable {
     let fileCount: Int
     let definitionSHA256: String
     let sources: [String: String]
+    let recipes: [String: FixtureRecipe]
+    let generated: [String: String]
 
     static func read(from folder: URL) throws -> FixtureIdentity {
         let url = folder.appendingPathComponent(".clove-fixture.json")
         return try JSONDecoder().decode(FixtureIdentity.self, from: Data(contentsOf: url))
     }
 
-    var sourceDigestJSON: String {
-        guard let data = try? JSONEncoder.sorted.encode(sources) else { return "{}" }
+    var sourceDigestJSON: String { sortedJSON(sources) }
+    var recipeJSON: String { sortedJSON(recipes) }
+    var generatedDigestJSON: String { sortedJSON(generated) }
+
+    private func sortedJSON<T: Encodable>(_ value: T) -> String {
+        guard let data = try? JSONEncoder.sorted.encode(value) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }
 }

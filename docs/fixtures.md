@@ -180,8 +180,9 @@ entries use hard links when possible, then fall back to copies.
 
 Set `"identity": true` on a set to write `.clove-fixture.json`. The hidden file
 contains the canonical set-definition SHA-256, every referenced manifest
-source's pinned SHA-256, and the expanded file count. Clove Lab reads this file
-for fixture identity and validates the production scan's file count.
+source's pinned SHA-256, recipe definitions, generated-file SHA-256 values, and
+the expanded file count. Clove Lab reads this file for fixture identity and
+validates the production scan's file count.
 
 ## Rules
 

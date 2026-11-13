@@ -33,8 +33,9 @@ copy without links needs about 20 GiB. Repeated files share capture metadata
 and pixels, so this set measures load, not burst-grouping accuracy.
 
 The hidden `.clove-fixture.json` records the set name, definition SHA-256,
-source SHA-256 values, and declared file count. The report checks the declared
-count against the production scan. No fixture binary enters git.
+source SHA-256 values, recipe definitions, generated-companion SHA-256 values,
+and declared file count. The report checks the declared count against the
+production scan. No fixture binary enters git.
 
 ## Run the owner checklist on the iPhone
 
@@ -56,9 +57,10 @@ under [#29](https://github.com/mimiqdev/cloveapp/issues/29).
    [#219](https://github.com/mimiqdev/cloveapp/issues/219). Include the
    TestFlight build number and iOS version if they are not clear in the report.
 
-Regenerate the Mac fixture set to delete old reports and recreate an identical
-folder. Do not run the measurement in the Mac cache while another task is
-rebuilding that set.
+Regenerate the Mac fixture set to delete old reports and recreate the same
+defined folder. The identity records any generated-companion differences. Do
+not run the measurement in the Mac cache while another task is rebuilding that
+set.
 
 ## Read the JSON report
 
@@ -71,7 +73,9 @@ identities. Tagged measurements add these facts:
 - `cache` is `cold`, `disk`, or `warm`. Cold means fresh Lab-owned caches and
   first touch in that run. The flow cannot flush OS caches or simulate a
   reboot. Disk passes disable the memory tier over the cold run's disk files.
-  Warm detail uses memory, and warm grouping uses the finished group cache.
+  Warm detail uses memory. Warm grouping includes group-cache loading,
+  candidate revision reads, feature-cache lookups, and refinement. Cache hits
+  avoid image recomputation.
 - `<stage>-failure-count` and `<stage>-failure-reason` record unsuccessful
   observations. `metric-unavailable` explains a metric that the flow cannot
   produce. The 25 standalone HEIC files currently return `noUsablePreview` in
@@ -81,9 +85,10 @@ identities. Tagged measurements add these facts:
 - `feature-read-and-compute` times one-at-a-time production feature requests,
   including preview reading, Vision, dHash, and cache publication.
   `grouping-feature-completion` includes folder-wide queueing.
-- `raw-focus-cancel-drain` measures `DetailPipeline.close()` after cancellation.
-  `raw-focus-including-cancel` adds that drain to a second native RAW render in
-  a fresh pipeline. Only observed cancellations enter those distributions.
+- `raw-focus-cancel-drain` waits for native render admission, cancels it, and
+  measures `DetailPipeline.close()`. `raw-focus-including-cancel` adds that
+  drain to a second native RAW render in a fresh pipeline. Only observed
+  admission and cancellation enter those distributions.
 - `memory-peak` is process RSS sampled every 5 ms. It is a cumulative lower
   bound, not per-stage allocation attribution.
 - `grid-scroll-presentation` is unavailable. Lab drives the production

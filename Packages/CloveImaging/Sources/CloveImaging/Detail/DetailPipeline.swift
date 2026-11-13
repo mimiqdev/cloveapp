@@ -196,7 +196,10 @@ public actor DetailPipeline {
 
     var queuedCount: Int { queue.count }
     var activeCount: Int { active.count }
-    var activeRenderCount: Int { active.values.filter { $0 == .render }.count }
+
+    /// Number of full-image renders admitted to the single render lane.
+    /// A caller measuring cancellation can wait for admission instead of guessing with a timer.
+    public var activeRenderCount: Int { active.values.filter { $0 == .render }.count }
 
     private func enqueue(
         _ request: DetailRequest, consumer: UUID, effort: Effort,

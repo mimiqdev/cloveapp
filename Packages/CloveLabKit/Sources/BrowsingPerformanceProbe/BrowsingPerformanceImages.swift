@@ -120,8 +120,14 @@ enum BrowsingPerformanceImages {
                 set: rawSets[index + 1], configuration: configuration, native: true)
             let firstPipeline = DetailPipeline()
             let firstTask = Task { try await firstPipeline.image(for: first) }
+            let admissionWatch = Stopwatch()
+            var nativeStarted = false
             do {
-                try await Task.sleep(for: .milliseconds(100))
+                while !nativeStarted && admissionWatch.seconds < 5 {
+                    try Task.checkCancellation()
+                    nativeStarted = await firstPipeline.activeRenderCount > 0
+                    if !nativeStarted { await Task.yield() }
+                }
             } catch {
                 firstTask.cancel()
                 await firstPipeline.close()
@@ -154,10 +160,10 @@ enum BrowsingPerformanceImages {
                 } catch {
                     // A failed first render did not establish a cancelled-render wait.
                 }
-                if secondSucceeded && firstWasCancelled {
+                if secondSucceeded && nativeStarted && firstWasCancelled {
                     cancelDrain.append(drainMilliseconds)
                     includingCancel.append(drainMilliseconds + elapsed)
-                } else if !firstWasCancelled {
+                } else if !nativeStarted || !firstWasCancelled {
                     cancelNotObserved += 1
                 }
 
@@ -194,13 +200,12 @@ enum BrowsingPerformanceImages {
             report.failureReasons(
                 "raw-focus-including-cancel", cache: "cold",
                 reasons: [
-                    "First render completed or failed before cancellation was observed":
-                        cancelNotObserved
+                    "Native render admission or cancellation was not observed": cancelNotObserved
                 ])
         }
         report.value(
             "raw-focus-cancel-observed", value: Double(includingCancel.count), unit: "count",
-            tags: ["attempted": String(pairsMeasured), "cancelSignalDelayMs": "100"])
+            tags: ["attempted": String(pairsMeasured), "trigger": "activeRenderCount>0"])
     }
 
     private static func thumbnailRun(
