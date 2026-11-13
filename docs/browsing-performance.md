@@ -132,8 +132,8 @@ the owner checklist. These are measurements, not pass claims.
 | Peak process RSS | No numeric G1 target | 717,570,048 bytes (684.3 MiB) | 5 ms samples | Pending |
 | Grid scrolling | Q3 names the stage | Unavailable in the package-only Lab flow | 0 | Pending |
 
-The scan covers 4,000 image files paired into 2,000 photos. Cold thumbnail,
-detail, and feature counts exclude the 25 standalone HEIC failures described in
-the JSON. The first-detail sample has 10 additional attempts with the same
-`noUsablePreview` reason. The cold grouping run computes features for 1,975
-photos and produces three groups. Its duration is not a burst-accuracy result.
+The scan covers 4,000 image files paired into 2,000 photos. The thumbnail and
+grouping passes each record 25 standalone HEIC failures with `noUsablePreview`.
+The 24 first-detail attempts record 10 failures and 14 successes for the same
+reason. The cold grouping run computes features for 1,975 photos and produces
+three groups. Its duration is not a burst-accuracy result.

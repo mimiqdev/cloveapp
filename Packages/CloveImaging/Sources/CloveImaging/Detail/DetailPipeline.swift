@@ -7,6 +7,12 @@ public enum DetailPipelineError: Error, Sendable {
     case closed
 }
 
+private final class NativeRAWRenderCounter: Sendable {
+    private let count = Mutex<UInt64>(0)
+    var value: UInt64 { count.withLock { $0 } }
+    func increment() { count.withLock { $0 += 1 } }
+}
+
 /// Cancellation closes admission synchronously, before the cancellation actor hop.
 private final class DetailCancellation: Sendable {
     private struct State {
@@ -198,14 +204,12 @@ public actor DetailPipeline {
     var activeCount: Int { active.count }
     var activeRenderCount: Int { active.values.filter { $0 == .render }.count }
 
-    /// Native RAW renders started in this pipeline session. The counter advances
-    /// immediately before the renderer call, so a measurement never infers native
-    /// entry from a queue delay or from the broader render lane.
-    public private(set) var nativeRAWRenderCount: UInt64 = 0
+    private let nativeRAWCounter = NativeRAWRenderCounter()
 
-    private func noteNativeRAWRenderStart() {
-        nativeRAWRenderCount += 1
-    }
+    /// Native RAW renders started in this pipeline session. The lock-protected counter
+    /// advances synchronously immediately before the renderer call, without an actor hop
+    /// that could admit a render after cancellation.
+    public var nativeRAWRenderCount: UInt64 { nativeRAWCounter.value }
 
     private func enqueue(
         _ request: DetailRequest, consumer: UUID, effort: Effort,
@@ -300,6 +304,7 @@ public actor DetailPipeline {
         let cache = cache
         let reader = reader
         let sizes = sizes
+        let nativeRAWCounter = nativeRAWCounter
         Task.detached(
             executorPreference: job.priority == .visible
                 ? ImageWorkExecutor.userInitiated : ImageWorkExecutor.utility,
@@ -307,7 +312,7 @@ public actor DetailPipeline {
         ) {
             let result = await Self.perform(
                 job, cache: cache, reader: reader, sizes: sizes,
-                nativeRAWStarted: { await self.noteNativeRAWRenderStart() })
+                nativeRAWStarted: nativeRAWCounter.increment)
             await self.complete(id, result: result)
         }
     }
@@ -424,7 +429,7 @@ public actor DetailPipeline {
     private nonisolated static func perform(
         _ job: Job, cache: DetailCache,
         reader: any DetailReading, sizes: any DetailNativeSizeReading,
-        nativeRAWStarted: @Sendable () async -> Void
+        nativeRAWStarted: @Sendable () -> Void
     ) async -> DetailResult? {
         let request = job.request
         if job.priority == .prefetch, hasCached(request, effort: job.effort, cache: cache) {
@@ -533,7 +538,7 @@ public actor DetailPipeline {
             if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-            await nativeRAWStarted()
+            nativeRAWStarted()
             guard let pixels = await reader.nativeRAW(raw) else {
                 return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
                     ?? missing(failures)

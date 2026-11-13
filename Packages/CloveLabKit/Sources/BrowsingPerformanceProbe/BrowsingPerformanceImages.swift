@@ -109,6 +109,7 @@ enum BrowsingPerformanceImages {
         var cancelDrain: [Double] = []
         var warm: [Double] = []
         var failures: [String: Int] = [:]
+        var combinedFailures: [String: Int] = [:]
         var cancelNotObserved = 0
         var pairsMeasured = 0
         for index in stride(from: 0, to: rawSets.count - 1, by: 2) {
@@ -162,11 +163,19 @@ enum BrowsingPerformanceImages {
                 } catch {
                     // A failed first render did not establish a cancelled-render wait.
                 }
-                if secondSucceeded && nativeStarted && firstWasCancelled {
+                if nativeStarted && firstWasCancelled {
+                    // The first render's drain is valid independently of the next render.
                     cancelDrain.append(drainMilliseconds)
-                    includingCancel.append(drainMilliseconds + elapsed)
-                } else if !nativeStarted || !firstWasCancelled {
+                    if secondSucceeded {
+                        includingCancel.append(drainMilliseconds + elapsed)
+                    } else {
+                        combinedFailures[
+                            "Second native render: \(failureReason(result))", default: 0] += 1
+                    }
+                } else {
                     cancelNotObserved += 1
+                    combinedFailures[
+                        "Native render admission or cancellation was not observed", default: 0] += 1
                 }
 
                 if secondSucceeded {
@@ -194,19 +203,23 @@ enum BrowsingPerformanceImages {
             failureCount: failures.values.reduce(0, +))
         report.failureReasons("raw-focus", cache: "cold", reasons: failures)
         report.distribution("raw-focus", cache: "warm", samples: warm)
-        report.distribution("raw-focus-cancel-drain", cache: "cold", samples: cancelDrain)
         report.distribution(
-            "raw-focus-including-cancel", cache: "cold", samples: includingCancel,
+            "raw-focus-cancel-drain", cache: "cold", samples: cancelDrain,
             failureCount: cancelNotObserved)
         if cancelNotObserved > 0 {
             report.failureReasons(
-                "raw-focus-including-cancel", cache: "cold",
+                "raw-focus-cancel-drain", cache: "cold",
                 reasons: [
                     "Native render admission or cancellation was not observed": cancelNotObserved
                 ])
         }
+        report.distribution(
+            "raw-focus-including-cancel", cache: "cold", samples: includingCancel,
+            failureCount: combinedFailures.values.reduce(0, +))
+        report.failureReasons(
+            "raw-focus-including-cancel", cache: "cold", reasons: combinedFailures)
         report.value(
-            "raw-focus-cancel-observed", value: Double(includingCancel.count), unit: "count",
+            "raw-focus-cancel-observed", value: Double(cancelDrain.count), unit: "count",
             tags: ["attempted": String(pairsMeasured), "trigger": "nativeRAWRenderCount"])
     }
 
