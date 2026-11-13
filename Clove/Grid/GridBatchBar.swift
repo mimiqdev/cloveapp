@@ -1,37 +1,27 @@
 import CloveCore
 import SwiftUI
 
-/// The same floating capsule as detail, applying one mark to the visible selection.
+/// The same shared marking family as detail, applying one mark to the visible selection.
 /// Write failures are reported once by the shared toast.
 struct GridBatchBar: View {
     let browsing: BrowsingModel
     let cells: [GridCellItem]
     @Environment(SettingsStore.self) private var store
-    @State private var showsLabels = false
 
     var body: some View {
-        MarkCapsule(
+        MarkingToolbar(
             rating: isRejected ? .unrated : commonRating,
             // Batch Reject is main's set-only action. Keep it unselected so it never
             // advertises a toggle that the existing batch operation cannot perform.
-            label: isRejected ? nil : commonLabel, isRejected: false,
-            enabledRatings: store.settings.enabledRatings, identifier: "clove.grid.batch",
+            label: isRejected ? nil : batchLabelState.selection, isRejected: false,
+            enabledRatings: store.settings.enabledRatings,
+            identifier: "clove.grid.batch", labelPickerIdentifier: "clove.grid.batch.labels",
+            // A mixed batch never highlights one sample photo's value (#227, #229).
+            isMixed: batchLabelState.isMixed,
+            allowsTapCurrentToClear: false,
             onRate: { apply(.rating($0)) }, onReject: { apply(.reject) },
-            onLabel: { showsLabels.toggle() }
+            onLabel: { apply(.label($0.map { ColourLabel(colour: $0) } ?? .clear)) }
         )
-        .overlay(alignment: .bottomTrailing) {
-            if showsLabels {
-                LabelPicker(
-                    selection: commonLabel,
-                    labels: [nil] + store.settings.availableLabels.map { Optional($0) },
-                    identifier: "clove.grid.batch.labels"
-                ) { colour in
-                    apply(.label(colour.map { ColourLabel(colour: $0) } ?? .clear))
-                    showsLabels = false
-                }
-                .offset(y: -66)
-            }
-        }
         .contextMenu {
             Button("Clear rating") { apply(.rating(.unrated)) }
                 .accessibilityIdentifier("clove.grid.batch.clearRating")
@@ -52,11 +42,12 @@ struct GridBatchBar: View {
         return first
     }
 
-    private var commonLabel: LabelColour? {
-        guard let first = browsing.batchTargets.first?.marks.label,
-            browsing.batchTargets.allSatisfy({ $0.marks.label == first })
-        else { return nil }
-        return first.colour
+    private var batchLabelState: (selection: LabelColour?, isMixed: Bool) {
+        guard let first = browsing.batchTargets.first?.marks.label else {
+            return (nil, false)
+        }
+        let allSame = browsing.batchTargets.allSatisfy { $0.marks.label == first }
+        return allSame ? (first.colour, false) : (nil, true)
     }
 
     private func apply(_ action: BatchMarkAction) {

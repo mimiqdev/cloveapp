@@ -30,6 +30,7 @@ struct DesignGalleryScreen: View {
 
     /// Sample ratings and labels for the states below.
     private let threeStars = (Rating(rawValue: 3) ?? .unrated)
+    private let fiveStars = (Rating(rawValue: 5) ?? .unrated)
 
     /// A 4★ from another app, which still shows when 4 is turned off for input (PRD Enabled
     /// rating levels).
@@ -52,8 +53,10 @@ struct DesignGalleryScreen: View {
                         glassButtons
                         moveRejects
                         markCapsule
-                        marks
+                        ratingValues
+                        railColumn
                         starBar
+                        ratingPicker
                         labelPicker
                         toast
                         banner
@@ -73,6 +76,7 @@ struct DesignGalleryScreen: View {
                 .toolbarColorScheme(theme.appearance.colorScheme, for: .navigationBar)
             }
         }
+        .tapPickerContainer()
         .environment(\.cloveTheme, theme)
         .environment(\.colorScheme, theme.appearance.colorScheme)
         .preferredColorScheme(theme.appearance.colorScheme)
@@ -146,53 +150,75 @@ struct DesignGalleryScreen: View {
         }
     }
 
-    /// The mark capsule with no marks, with marks and with Reject on (components.md).
+    /// The shared marking toolbar with no marks, with marks, with Reject on, and with disabled
+    /// input levels (components.md).
     private var markCapsule: some View {
-        section("Mark capsule") {
+        section("Marking toolbar") {
             VStack(spacing: 12) {
-                MarkCapsule(
+                MarkingToolbar(
                     rating: .unrated, label: nil, isRejected: false,
-                    identifier: "clove.design.gallery.capsule.unmarked",
-                    onRate: noRate, onReject: {}, onLabel: {})
-                MarkCapsule(
+                    identifier: "clove.mark.toolbar",
+                    onRate: noRate, onReject: {}, onLabel: { _ in })
+                MarkingToolbar(
                     rating: threeStars, label: .blue, isRejected: false,
-                    identifier: "clove.mark.capsule", onRate: noRate, onReject: {}, onLabel: {})
-                MarkCapsule(
+                    identifier: "clove.design.gallery.toolbar.blue",
+                    onRate: noRate, onReject: {}, onLabel: { _ in })
+                MarkingToolbar(
                     rating: .rejected, label: .red, isRejected: true,
-                    identifier: "clove.design.gallery.capsule.rejected",
-                    onRate: noRate, onReject: {}, onLabel: {})
-                MarkCapsule(
+                    identifier: "clove.design.gallery.toolbar.rejected",
+                    onRate: noRate, onReject: {}, onLabel: { _ in })
+                MarkingToolbar(
                     rating: fourStars, label: .green, isRejected: false,
                     enabledRatings: oddRatings,
-                    identifier: "clove.design.gallery.capsule.disabledLevels",
-                    onRate: noRate, onReject: {}, onLabel: {})
+                    identifier: "clove.design.gallery.toolbar.disabledLevels",
+                    onRate: noRate, onReject: {}, onLabel: { _ in })
+                MarkingToolbar(
+                    rating: threeStars, label: .green, isRejected: false,
+                    identifier: "clove.design.gallery.toolbar.blue",
+                    onRate: noRate, onReject: {}, onLabel: { _ in })
             }
         }
     }
 
-    /// The Reject circle, the stars and the label circle on their own (components.md).
-    private var marks: some View {
-        section("Reject, stars and label") {
-            HStack(spacing: 16) {
-                RejectCircle(
-                    isRejected: false, identifier: "clove.design.gallery.reject.off", onToggle: {})
-                RejectCircle(
-                    isRejected: true, identifier: "clove.design.gallery.reject.on", onToggle: {})
-                StarRow(
-                    rating: threeStars, identifier: "clove.design.gallery.stars", onRate: noRate)
-                StarRow(
-                    rating: fourStars, enabledRatings: oddRatings,
-                    identifier: "clove.design.gallery.stars.disabledLevels", onRate: noRate)
-                LabelCircle(label: nil, identifier: "clove.design.gallery.label.none", onTap: {})
-                LabelCircle(
-                    label: .green, identifier: "clove.design.gallery.label.green", onTap: {})
+    /// The rail's column: the ladder and the shared Reject and Label actions it composes
+    /// (components.md).
+    private var railColumn: some View {
+        section("Rail column") {
+            VStack(spacing: 10) {
+                VerticalStarBar(
+                    rating: threeStars, size: .pad, showsRejectChip: false,
+                    identifier: "clove.design.gallery.rail.stars",
+                    onPreview: noRate, onCommit: noRate, onReject: {})
+                MarkRejectAction(isRejected: true, identifier: "clove.design.gallery.rail.reject") {
+                }
+                .frame(width: 48, height: 40)
+                MarkLabelAction(
+                    label: .green, identifier: "clove.design.gallery.rail.label",
+                    onPick: { _ in }
+                )
+                .frame(width: 48, height: 40)
             }
         }
     }
 
-    /// The vertical star bar at the iPhone and iPad sizes (components.md).
+    /// Every rating value the toolbar's action shows, 0–5 (components.md).
+    private var ratingValues: some View {
+        section("Rating values") {
+            VStack(spacing: 12) {
+                ForEach(0...5, id: \.self) { value in
+                    MarkingToolbar(
+                        rating: Rating(rawValue: value) ?? .unrated, label: nil, isRejected: false,
+                        identifier: "clove.design.gallery.toolbar.value.\(value)",
+                        onRate: noRate, onReject: {}, onLabel: { _ in })
+                }
+            }
+        }
+    }
+
+    /// The quick-rating ladder at the iPhone and iPad sizes, and the display stages the swipe
+    /// feedback draws (components.md).
     private var starBar: some View {
-        section("Vertical star bar") {
+        section("Quick-rating ladder") {
             HStack(alignment: .top, spacing: 16) {
                 VerticalStarBar(
                     rating: threeStars, identifier: "clove.mark.starBar",
@@ -205,19 +231,66 @@ struct DesignGalleryScreen: View {
                     rating: fourStars, enabledRatings: oddRatings,
                     identifier: "clove.design.gallery.starBar.disabledLevels",
                     onPreview: noRate, onCommit: noRate, onReject: {})
+                VerticalStarBarDisplay(rating: .unrated)
+                VerticalStarBarDisplay(rating: .rejected, isReject: true)
             }
         }
     }
 
-    /// The label picker with the five default labels and with the extended ones (components.md).
+    /// The shared tap-rating picker across values, disabled levels, mixed and vertical orientation.
+    private var ratingPicker: some View {
+        section("Tap rating picker") {
+            VStack(alignment: .leading, spacing: 12) {
+                RatingPicker(
+                    selection: .unrated,
+                    identifier: "clove.design.gallery.ratingPicker.unrated", onPick: noRate)
+                RatingPicker(
+                    selection: threeStars,
+                    identifier: "clove.mark.ratingPicker", onPick: noRate)
+                RatingPicker(
+                    selection: fiveStars,
+                    identifier: "clove.design.gallery.ratingPicker.five", onPick: noRate)
+                RatingPicker(
+                    selection: .rejected,
+                    identifier: "clove.design.gallery.ratingPicker.rejected", onPick: noRate)
+                RatingPicker(
+                    selection: fourStars, enabledRatings: oddRatings,
+                    identifier: "clove.design.gallery.ratingPicker.disabledLevels", onPick: noRate)
+                RatingPicker(
+                    selection: .unrated, isMixed: true,
+                    identifier: "clove.design.gallery.ratingPicker.mixed", onPick: noRate)
+                HStack(alignment: .top, spacing: 16) {
+                    RatingPicker(
+                        selection: .unrated, axis: .vertical,
+                        identifier: "clove.design.gallery.ratingPicker.vertical.unrated",
+                        onPick: noRate)
+                    RatingPicker(
+                        selection: threeStars, axis: .vertical,
+                        identifier: "clove.design.gallery.ratingPicker.vertical", onPick: noRate)
+                }
+            }
+        }
+    }
+
+    /// The label picker with default labels, mixed/none states, extended labels and vertical layout.
     private var labelPicker: some View {
         section("Label picker") {
             VStack(alignment: .leading, spacing: 12) {
                 LabelPicker(
                     selection: .green, identifier: "clove.mark.labelPicker", onPick: { _ in })
                 LabelPicker(
+                    selection: nil, identifier: "clove.design.gallery.labelPicker.none",
+                    onPick: { _ in })
+                LabelPicker(
+                    selection: nil, isMixed: true,
+                    identifier: "clove.design.gallery.labelPicker.mixed", onPick: { _ in })
+                LabelPicker(
                     selection: .orange, labels: [nil] + LabelColour.allCases,
                     identifier: "clove.design.gallery.labelPicker.extended", onPick: { _ in })
+                LabelPicker(
+                    selection: .blue,
+                    identifier: "clove.design.gallery.labelPicker.vertical",
+                    onPick: { _ in }, axis: .vertical)
             }
         }
     }

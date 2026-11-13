@@ -17,6 +17,10 @@ struct FilmstripGroupFold {
 
 /// Grid-order filmstrip. The current group expands on a quiet neutral surface; other groups stay
 /// stacked. Tapping a stack jumps to the group's first photo; the group expands in place.
+///
+/// In expanded Duo photo-only, `markingWidth` reserves the bottom-right marking area beside the
+/// strip (#227): the strip's viewport narrows by that much, so thumbnails never scroll under the
+/// marking toolbar beside it.
 struct DetailFilmstrip: View {
     let photos: [GridPhoto]
     let current: PhotoIdentity?
@@ -24,7 +28,13 @@ struct DetailFilmstrip: View {
     let open: (PhotoIdentity) -> Void
     var groups: [BrowsingGroup] = []
     var finishingAction: PillAction?
+    /// The Duo's photo-only detail only: folding leaves the photo open and the strip shows the
+    /// group's stack instead of its members (owner decision, #225).
     var groupFold: FilmstripGroupFold?
+
+    /// The width the layout reserves beside the strip's trailing edge for the marking area, or
+    /// nil for the full width (#227).
+    var markingWidth: CGFloat? = nil
 
     private struct Entry: Identifiable {
         let id: PhotoIdentity
@@ -89,10 +99,10 @@ struct DetailFilmstrip: View {
                             }
                             .padding(3)
                             .background {
-                                // The group's extent, not its selection: the neutral token at 12%,
-                                // on the background shape alone (owner decision, 2026-11-13, #226).
-                                RoundedRectangle(cornerRadius: 9)
-                                    .fill(Color.clove.text.primary).opacity(0.12)
+                                // The group's extent, not its selection: the neutral token at
+                                // 12%, on the background shape alone (owner decision,
+                                // 2026-11-13, #226).
+                                ExpandedGroupSurface(cornerRadius: 9)
                             }
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
@@ -131,6 +141,7 @@ struct DetailFilmstrip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
             }
+            .padding(.trailing, markingWidth ?? 0)
             .onChange(of: current, initial: true) { _, photo in
                 guard let photo else { return }
                 withAnimation { proxy.scrollTo(photo, anchor: .center) }

@@ -65,14 +65,14 @@ struct EntryScreen: View {
                     Button {
                         isPickingFolder = true
                     } label: {
-                        Label("Open folder", systemImage: "folder")
+                        // Text-only: no folder or plus glyph (owner decision, 2026-11-13, #227).
+                        Text("Open folder")
                             .font(.headline)
-                            .foregroundStyle(Color.clove.accent)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 15)
-                            .cloveGlass(in: Capsule())
+                            .frame(width: 168, height: 48)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
                     .accessibilityIdentifier("clove.entry.pickFolder")
                     .padding(.vertical, 12)
                 }
@@ -222,9 +222,8 @@ struct EntryScreen: View {
                 if reconnect {
                     Text("Reconnect")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.clove.accent)
                         .padding(.horizontal, 10).padding(.vertical, 7)
-                        .cloveGlass(in: Capsule())
+                        .background(Color.clove.surface.card, in: Capsule())
                         .accessibilityIdentifier("clove.entry.reconnect")
                 } else {
                     VStack(alignment: .trailing, spacing: 3) {

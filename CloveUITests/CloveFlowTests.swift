@@ -64,7 +64,9 @@ final class CloveFlowTests: XCTestCase {
         let detail = element(app, "clove.detail")
         XCTAssertTrue(detail.exists)
         XCTAssertFalse(sidebar.exists)
-        XCTAssertFalse(element(app, "clove.grid").exists)
+        // The push that covers the grid animates; read the settled state instead of one
+        // snapshot taken mid-transition (#203's observed-state pattern).
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), element(app, "clove.grid")))
         XCTAssertGreaterThan(detail.frame.width, app.frame.width * 0.95)
         let back = element(app, "clove.nav.back")
         XCTAssertEqual(back.label, "Back")
@@ -128,11 +130,13 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(stars.isSelected)
         stars.tap()
         XCTAssertFalse(stars.isSelected)
+        // The rail embeds the shared picker's unglassed column: dots are tapped directly
+        // (#229), and tapping the current colour again clears it.
         green.tap()
         XCTAssertTrue(green.isSelected)
-        XCTAssertFalse(element(app, "clove.detail.labels").exists)
         green.tap()
         XCTAssertFalse(green.isSelected)
+        green.tap()
         let bar = element(app, "clove.detail.rail.stars")
         let bottom = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
         let middle = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -143,7 +147,6 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(stars.isSelected)
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: -6)))
         XCTAssertTrue(stars.isSelected)
-        green.tap()
         capture("ipad-detail-rail-light")
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(stars.isSelected)
@@ -173,6 +176,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(reject.label, "Rejected")
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
         XCTAssertFalse(stars.isSelected)
+        // Reject neutralises the rail's dots; the ladder keeps no selection.
         XCTAssertFalse(green.isSelected)
         XCTAssertLessThan(element(app, "clove.detail.rejectGlyph").frame.maxX, rail.frame.minX)
         capture("ipad-detail-rail-rejected")
@@ -247,7 +251,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(rail.exists)
         XCTAssertFalse(element(disconnected, "clove.detail.rail.stars.3").isEnabled)
         XCTAssertFalse(element(disconnected, "clove.detail.rail.reject").isEnabled)
-        XCTAssertFalse(element(disconnected, "clove.detail.rail.label.green").isEnabled)
+        XCTAssertFalse(element(disconnected, "clove.detail.rail.label").isEnabled)
         let marks = rail.value as? String
         let bar = element(disconnected, "clove.detail.rail.stars")
         bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).press(
@@ -345,8 +349,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.filter").tap()
         element(app, "clove.grid.filter.unmarked").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
-        let rating = element(app, "clove.detail.capsule.stars.3")
-        rating.tap()
+        rate(3, in: app)
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
     }
 
@@ -380,7 +383,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.selectionOptions").tap()
         app.buttons["Select all"].tap()
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "36 selected")
-        XCTAssertTrue(element(app, "clove.grid.batch.stars.3").isEnabled)
+        XCTAssertTrue(element(app, "clove.grid.batch.rating").isEnabled)
     }
 
     @MainActor
@@ -448,7 +451,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
-        element(app, "clove.detail.capsule.stars.4").tap()
+        rate(4, in: app)
         // A mark waits out the advance pause before the file name changes. On a loaded runner
         // one accessibility query can consume most of a short window while the app is already
         // correct (#203), so this boundary keeps the 10-second budget the browsing flow uses.
@@ -496,8 +499,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.photo.mmq02680").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        let stars = element(app, "clove.detail.capsule.stars.3")
-        stars.tap()
+        rate(3, in: app)
         let capsule = element(app, "clove.detail.capsule")
         XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
         let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35))
@@ -733,7 +735,7 @@ final class CloveFlowTests: XCTestCase {
     func testDesignGalleryShowsSharedControls() {
         let app = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
         XCTAssertTrue(element(app, "clove.design.gallery").exists)
-        XCTAssertTrue(element(app, "clove.mark.capsule").exists)
+        XCTAssertTrue(element(app, "clove.mark.toolbar").exists)
         XCTAssertTrue(element(app, "clove.mark.starBar").exists)
         let nord = element(app, "clove.design.gallery.theme.nord")
         nord.tap()
@@ -771,7 +773,7 @@ final class CloveFlowTests: XCTestCase {
             openLibrary(app)
             applyComparisonTheme(theme, app)
             element(app, "clove.grid.group.burst-2678").tap()
-            element(app, "clove.detail.capsule.stars.3").tap()
+            rate(3, in: app)
             XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
             XCTAssertTrue(element(app, "clove.detail.rejectUnmarked").exists)
             capture("detail-expanded-group-\(theme)")
@@ -880,6 +882,79 @@ final class CloveFlowTests: XCTestCase {
         app.buttons["Settings"].tap()
         chooseTheme(theme, app)
         element(app, "clove.nav.back").tap()
+    }
+
+    /// Opt-in visual evidence for the shared marking family: every rating value, clear versus
+    /// Reject, labeled-unrated, the ladder and label picker, and both Entry states, in Light,
+    /// Dark and one alternate theme (#227).
+    @MainActor
+    func testCaptureMarkingControlsWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_MARKING"] == "1")
+        for theme in ["light", "dark", "nord"] {
+            let app = launchSample()
+            defer { app.terminate() }
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            // Keep each rated photo on screen, so the captures show the value it carries.
+            element(app, "clove.grid.more").tap()
+            app.buttons["Settings"].tap()
+            turnOffAutoAdvance(app)
+            element(app, "clove.nav.back").tap()
+            element(app, "clove.grid.photo.mmq02680").tap()
+            let capsule = element(app, "clove.detail.capsule")
+            capture("marking-unrated-\(theme)")
+            for value in 1...5 {
+                rate(value, in: app)
+                XCTAssertTrue(
+                    wait(NSPredicate(format: "value CONTAINS %@", "\(value) star"), capsule))
+                capture("marking-\(value)star-\(theme)")
+            }
+            // Clear via tap-current, then label an unrated photo: label and rating stay
+            // independent.
+            rate(5, in: app)
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+            capture("marking-cleared-\(theme)")
+            element(app, "clove.detail.capsule.label").tap()
+            XCTAssertTrue(element(app, "clove.detail.labels.blue").waitForExistence(timeout: 5))
+            capture("marking-label-picker-\(theme)")
+            element(app, "clove.detail.labels.blue").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Blue"), capsule))
+            capture("marking-labeled-unrated-\(theme)")
+            // Reject keeps the label in the file but reads Rejected; the corner glyph shows.
+            element(app, "clove.detail.capsule.reject").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Rejected"), capsule))
+            XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
+            capture("marking-rejected-\(theme)")
+            // The ladder itself, opened from the rating action.
+            element(app, "clove.detail.capsule.rating").tap()
+            XCTAssertTrue(
+                element(app, "clove.detail.capsule.stars").waitForExistence(timeout: 5))
+            capture("marking-ladder-\(theme)")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
+            // Mixed batch state in select mode.
+            element(app, "clove.nav.back").tap()
+            let rated = element(app, "clove.grid.photo.mmq02678")
+            rated.press(forDuration: 0.6)
+            element(app, "clove.grid.photo.mmq02680").tap()
+            capture("marking-mixed-batch-\(theme)")
+            element(app, "clove.grid.batch.rating").tap()
+            XCTAssertTrue(
+                element(app, "clove.grid.batch.stars.3").waitForExistence(timeout: 5))
+            capture("marking-batch-ladder-\(theme)")
+            element(app, "clove.grid.batch.done").tap()
+            // Entry's two states: resume with a legible Reconnect is covered by the sample's
+            // reconnect variant; the plain resume and Open folder button show here.
+            element(app, "clove.nav.back").tap()
+            capture("marking-entry-resume-\(theme)")
+        }
+        // The disconnected-row Reconnect chip stays legible on its neutral capsule; the
+        // sample's third recent is a missing drive. The first-launch state has no sample
+        // lever, so its Open folder button is covered by the design gallery and flows.
+        let entry = launchSample()
+        XCTAssertTrue(
+            element(entry, "clove.entry.reconnect").waitForExistence(timeout: 5))
+        capture("marking-entry-reconnect")
+        entry.terminate()
     }
 
     /// Explicit screenshot run only. The normal flow run skips this comparison matrix.
@@ -1051,14 +1126,14 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.duo.reject").exists)
         XCTAssertFalse(element(app, "clove.duo.label").exists)
         capture("duo-focus")
-        element(app, "clove.duo.capsule.stars.3").tap()
+        rate(3, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
-        element(app, "clove.duo.capsule.stars.5").tap()
+        rate(5, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "5 stars"), capsule))
         element(app, "clove.duo.undo").tap()
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
         // Tapping the current rating clears it; Undo restores it.
-        element(app, "clove.duo.capsule.stars.3").tap()
+        rate(3, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
         element(app, "clove.duo.undo").tap()
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
@@ -1147,7 +1222,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(first.isSelected)
         XCTAssertTrue(before.exists && after.exists)
         let capsule = element(app, "clove.duo.capsule")
-        element(app, "clove.duo.capsule.stars.4").tap()
+        rate(4, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "4 stars"), capsule))
         XCTAssertTrue(third.label.contains("4 stars"))
         // Photo only keeps the same photo, the folder-order counter and the folder-order strip.
@@ -1215,7 +1290,9 @@ final class CloveFlowTests: XCTestCase {
         rating.tap()
         let stars = element(app, "clove.duo.stars")
         XCTAssertTrue(stars.waitForExistence(timeout: 5))
-        stars.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertGreaterThan(stars.frame.height, stars.frame.width)
+        XCTAssertTrue(element(app, "clove.duo.stars.clear").exists)
+        element(app, "clove.duo.stars.3").tap()
         XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
         let start = rating.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -60)))
@@ -1229,17 +1306,40 @@ final class CloveFlowTests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), stars))
         element(app, "clove.duo.label").tap()
+        let labels = element(app, "clove.duo.labels")
         XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(labels.frame.height, labels.frame.width)
         capture("duo-cover-labels")
         element(app, "clove.duo.labels.green").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "label CONTAINS[c] %@", "green"),
                 element(app, "clove.duo.label")))
+        // Explicit Clear in RatingPicker clears stars while preserving the green label.
+        rating.tap()
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        element(app, "clove.duo.stars.clear").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "0 stars"), rating))
+        XCTAssertTrue(
+            element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
+        // Undo is single-step: it restores 3 stars while keeping the green label.
         element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
+        XCTAssertTrue(
+            element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
+        // Clearing the label via None keeps 3 stars, and Undo restores the green label.
+        element(app, "clove.duo.label").tap()
+        XCTAssertTrue(element(app, "clove.duo.labels.none").waitForExistence(timeout: 5))
+        element(app, "clove.duo.labels.none").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "NOT (label CONTAINS[c] %@)", "green"),
+                element(app, "clove.duo.label")))
+        XCTAssertTrue(rating.label.contains("3 stars"))
+        element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "label CONTAINS[c] %@", "green"),
                 element(app, "clove.duo.label")))
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
@@ -1308,6 +1408,156 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testTapPickersSelectionClearDismissAndOrientation() {
+        let app = launchSample()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .portrait
+        openLibrary(app)
+
+        // Turn off auto-advance so clearing and labelling stay on the same photo.
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        turnOffAutoAdvance(app)
+        element(app, "clove.nav.back").tap()
+
+        // 1. Detail tap color picker (iPhone): horizontal geometry, outside-tap dismissal, select, clear, landscape.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            element(app, "clove.grid.photo.mmq02680").tap()
+            let labelButton = element(app, "clove.detail.capsule.label")
+            let capsule = element(app, "clove.detail.capsule")
+            XCTAssertTrue(labelButton.waitForExistence(timeout: 5))
+            rate(3, in: app)
+            XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+
+            labelButton.tap()
+            let picker = element(app, "clove.detail.labels")
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            XCTAssertGreaterThan(picker.frame.width, picker.frame.height)
+            XCTAssertGreaterThanOrEqual(picker.frame.width, 280)
+            XCTAssertGreaterThanOrEqual(picker.frame.height, 48)
+            XCTAssertLessThanOrEqual(picker.frame.maxX, app.frame.maxX)
+
+            // Outside tap dismisses without toggling chrome or changing marks.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.3)).tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCTAssertTrue(capsule.exists)
+            XCTAssertEqual(labelButton.label, "Label")
+
+            // Pick green, verify selection ring / state, then clear via None while keeping 3 stars.
+            labelButton.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            element(app, "clove.detail.labels.green").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCTAssertEqual(labelButton.label, "Label, Green")
+
+            labelButton.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.detail.labels.green").isSelected)
+            element(app, "clove.detail.labels.none").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCTAssertEqual(labelButton.label, "Label")
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "3 stars"), capsule))
+
+            // Rotate to landscape: floating picker stays inside safe bounds and dismisses on outside tap.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            labelButton.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(picker.frame.minX, 0)
+            XCTAssertLessThanOrEqual(picker.frame.maxX, app.frame.maxX)
+            XCTAssertGreaterThanOrEqual(picker.frame.minY, 0)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.25)).tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCUIDevice.shared.orientation = .portrait
+
+            element(app, "clove.nav.back").tap()
+        }
+
+        // 2. Mixed batch selection: mixed labels must NOT highlight None, and outside tap dismisses.
+        let ratedAndRed = element(app, "clove.grid.photo.mmq02678")
+        XCTAssertTrue(ratedAndRed.waitForExistence(timeout: 5))
+        ratedAndRed.press(forDuration: 0.6)
+        element(app, "clove.grid.photo.mmq02680").tap()
+
+        element(app, "clove.grid.batch.label").tap()
+        let batchPicker = element(app, "clove.grid.batch.labels")
+        XCTAssertTrue(batchPicker.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.grid.batch.labels.none").isSelected)
+        XCTAssertFalse(element(app, "clove.grid.batch.labels.red").isSelected)
+        element(app, "clove.grid").coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.3))
+            .tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
+
+        element(app, "clove.grid.batch.label").tap()
+        XCTAssertTrue(batchPicker.waitForExistence(timeout: 5))
+        element(app, "clove.grid.batch.labels.none").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
+        XCTAssertFalse(ratedAndRed.label.contains("Red"))
+        XCTAssertTrue(ratedAndRed.label.contains("5 stars"))
+    }
+
+    @MainActor
+    func testCaptureTapPickerReferencesWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_TAP_PICKERS"] == "1")
+        defer { XCUIDevice.shared.orientation = .portrait }
+
+        // 1. Design gallery across Light, Dark, and Nord (values 0–5, rejected, disabled, mixed, vertical, all labels).
+        let gallery = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
+        for theme in ["light", "dark", "nord"] {
+            element(gallery, "clove.design.gallery.theme.\(theme)").tap()
+            let scroll = gallery.scrollViews.firstMatch
+            let ratingAnchor = element(gallery, "clove.mark.ratingPicker")
+            for _ in 0..<4 where !ratingAnchor.isHittable { scroll.swipeUp() }
+            capture("gallery-tap-pickers-rating-\(theme)")
+            let labelAnchor = element(gallery, "clove.design.gallery.labelPicker.vertical")
+            for _ in 0..<4 where !labelAnchor.isHittable { scroll.swipeUp() }
+            capture("gallery-tap-pickers-label-\(theme)")
+            for _ in 0..<6 where !element(gallery, "clove.design.gallery.theme.\(theme)").isHittable
+            {
+                scroll.swipeDown()
+            }
+        }
+        gallery.terminate()
+
+        // 2. Detail + Mixed Batch on real screen (Light, Dark, Portrait & Landscape).
+        for theme in ["light", "dark"] {
+            let app = launchSample()
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            if theme == "light" {
+                let rated = element(app, "clove.grid.photo.mmq02678")
+                rated.press(forDuration: 0.6)
+                element(app, "clove.grid.photo.mmq02680").tap()
+                element(app, "clove.grid.batch.label").tap()
+                XCTAssertTrue(element(app, "clove.grid.batch.labels").waitForExistence(timeout: 5))
+                capture("grid-batch-labels-mixed-\(theme)")
+                element(app, "clove.grid").coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.65, dy: 0.3)
+                )
+                .tap()
+                element(app, "clove.grid.batch.done").tap()
+            }
+            element(app, "clove.grid.photo.mmq02680").tap()
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                element(app, "clove.detail.capsule.label").tap()
+                XCTAssertTrue(element(app, "clove.detail.labels").waitForExistence(timeout: 5))
+                capture("detail-labels-portrait-\(theme)")
+                if theme == "light" {
+                    XCUIDevice.shared.orientation = .landscapeLeft
+                    XCTAssertTrue(element(app, "clove.detail.labels").waitForExistence(timeout: 5))
+                    capture("detail-labels-landscape-\(theme)")
+                    XCUIDevice.shared.orientation = .portrait
+                }
+            } else {
+                capture("ipad-rail-\(theme)")
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }
@@ -1347,6 +1597,16 @@ final class CloveFlowTests: XCTestCase {
         _ label: String, _ target: XCUIElement, timeout: TimeInterval = 5
     ) -> Bool {
         wait(NSPredicate(format: "label == %@", label), target, timeout: timeout)
+    }
+
+    /// Opens the marking toolbar's rating ladder and taps a level: the compact toolbar's rating
+    /// action is a popover trigger, so tests reach the stars through it (#227).
+    @MainActor
+    func rate(_ level: Int, toolbar: String = "clove.detail.capsule", in app: XCUIApplication) {
+        element(app, "\(toolbar).rating").tap()
+        let star = element(app, "\(toolbar).stars.\(level)")
+        XCTAssertTrue(star.waitForExistence(timeout: 5), "the rating ladder did not open")
+        star.tap()
     }
 
     @MainActor

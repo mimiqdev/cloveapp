@@ -91,6 +91,7 @@ struct DetailMarkingView: View {
     @State private var toolbarDragRating: Rating?
     @State private var showsZoomChip = false
     @State private var controlsHeight: CGFloat = 0
+    @State private var tapPickerDismissToken = 0
     @State private var focusRegionState = DetailFocusRegionState()
     @State private var focusAnalysisID = UUID()
 
@@ -278,7 +279,7 @@ struct DetailMarkingView: View {
                             showsStars: $showsToolbarStars, dragRating: $toolbarDragRating,
                             rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
                             toggleReject: { toggleReject() },
-                            markingBegan: actions.markingSwipeBegan)
+                            markingBegan: beginMarkingGesture)
                     }
                 } bottom: {
                     duo.bottom
@@ -295,7 +296,7 @@ struct DetailMarkingView: View {
                 if !isDuoExpanded {
                     ToolbarRatingGesture(
                         rating: displayMarks.rating, enabledRatings: settings.enabledRatings,
-                        canMark: browsing.canMark, began: actions.markingSwipeBegan,
+                        canMark: browsing.canMark, began: beginMarkingGesture,
                         preview: {
                             toolbarDragRating = $0
                             showsToolbarStars = true
@@ -326,30 +327,30 @@ struct DetailMarkingView: View {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal, 16)
             }
-            // The marking capsule gets its own reserved row beneath the fitted photo,
-            // never over the image and never in the system side toolbar (#200).
-            if isDuoExpanded && chromeIsVisible {
-                DetailMarkCapsule(
-                    marks: displayMarks, settings: settings,
-                    previewRating: swipeFeedback.rating,
-                    rate: { rate($0) }, label: { choose($0) },
-                    toggleReject: { toggleReject() },
-                    identifier: "clove.duo.capsule", labelPickerIdentifier: "clove.duo.labels"
-                )
-                .disabled(!browsing.canMark)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .transition(.opacity)
-            }
+            // The marking toolbar gets its own reserved bottom-right area beside the narrowed
+            // filmstrip, never over the image and never in the system side toolbar (#200, #227).
+            // The two regions share the photo stage's background, so no contrasting sidebar slab
+            // divides them.
             if showsFilmstrip && chromeIsVisible {
-                DetailFilmstrip(
-                    photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                    open: actions.openPhoto,
-                    groups: browsing.groups, finishingAction: finishingAction,
-                    groupFold: groupFold)
+                HStack(alignment: .bottom, spacing: 0) {
+                    DetailFilmstrip(
+                        photos: order, current: photo.id, thumbnails: browsing.thumbnails,
+                        open: actions.openPhoto,
+                        groups: browsing.groups, finishingAction: finishingAction,
+                        groupFold: groupFold,
+                        markingWidth: isDuoExpanded ? Self.duoMarkingAreaWidth : nil)
+                    if isDuoExpanded {
+                        duoMarkingToolbar
+                    }
+                }
+            } else if isDuoExpanded && chromeIsVisible {
+                duoMarkingToolbar
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
         }
         .contentMargins(for: .container, edges: .horizontal)
+        .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.photoOnly" : "clove.duo.focus")
     }
@@ -366,6 +367,32 @@ struct DetailMarkingView: View {
             },
             unfold: { folded.wrappedValue = nil })
     }
+
+    /// The shared marking family in the reserved bottom-right marking area beside the filmstrip
+    /// (#227). It never overlaps the filmstrip or the fitted photo.
+    @ViewBuilder private var duoMarkingToolbar: some View {
+        if chromeIsVisible {
+            MarkingToolbar(
+                rating: swipeFeedback.rating
+                    ?? (displayMarks.isRejected ? .unrated : displayMarks.rating),
+                label: displayMarks.isRejected ? nil : displayMarks.label.colour,
+                isRejected: displayMarks.isRejected,
+                enabledRatings: settings.enabledRatings,
+                labels: [nil] + settings.availableLabels.map { Optional($0) },
+                identifier: "clove.duo.capsule", labelPickerIdentifier: "clove.duo.labels",
+                onRate: { rate($0) }, onReject: { toggleReject() },
+                onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
+                onBegin: actions.markingSwipeBegan
+            )
+            .disabled(!browsing.canMark)
+            .accessibilityValue(MarkSummary.text(for: displayMarks))
+            .transition(.opacity)
+        }
+    }
+
+    /// The width the filmstrip reserves for the bottom-right marking area beside it: the shared
+    /// marking toolbar's 168 pt frame plus its surrounding padding (#227).
+    private static let duoMarkingAreaWidth: CGFloat = 168 + 32
 
     private var standardLayout: some View {
         VStack(spacing: 0) {
@@ -408,12 +435,13 @@ struct DetailMarkingView: View {
                         marks: displayMarks, settings: settings,
                         previewRating: swipeFeedback.rating,
                         rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
-                        toggleReject: { toggleReject() }, markingBegan: actions.markingSwipeBegan
+                        toggleReject: { toggleReject() }, markingBegan: beginMarkingGesture
                     )
                     .disabled(!browsing.canMark)
                 }
             }
         }
+        .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
     }
 
     private var photoStage: some View {
@@ -434,13 +462,25 @@ struct DetailMarkingView: View {
                                 open: actions.openPhoto,
                                 groups: browsing.groups, finishingAction: finishingAction)
                             if !usesRail {
-                                DetailMarkCapsule(
-                                    marks: displayMarks, settings: settings,
-                                    previewRating: swipeFeedback.rating,
-                                    rate: { rate($0) }, label: { choose($0) },
-                                    toggleReject: { toggleReject() }
+                                MarkingToolbar(
+                                    rating: swipeFeedback.rating
+                                        ?? (displayMarks.isRejected
+                                            ? .unrated : displayMarks.rating),
+                                    label: displayMarks.isRejected
+                                        ? nil : displayMarks.label.colour,
+                                    isRejected: displayMarks.isRejected,
+                                    enabledRatings: settings.enabledRatings,
+                                    labels: [nil] + settings.availableLabels.map { Optional($0) },
+                                    identifier: "clove.detail.capsule",
+                                    labelPickerIdentifier: "clove.detail.labels",
+                                    onRate: { rate($0) }, onReject: { toggleReject() },
+                                    onLabel: {
+                                        choose($0.map { ColourLabel(colour: $0) } ?? .clear)
+                                    },
+                                    onBegin: actions.markingSwipeBegan
                                 )
                                 .disabled(!browsing.canMark)
+                                .accessibilityValue(MarkSummary.text(for: displayMarks))
                                 .padding(.horizontal, 16)
                             }
                         }
@@ -505,7 +545,7 @@ struct DetailMarkingView: View {
             onEdgeTap: { navigate($0) },
             onDoubleTap: { doubleTap(at: $0) },
             onMarkingSwipe: { applyMarkingSwipe($0) },
-            onSwipeBegin: { actions.markingSwipeBegan() },
+            onSwipeBegin: { beginMarkingGesture() },
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
@@ -536,7 +576,7 @@ struct DetailMarkingView: View {
         .overlay(alignment: .topLeading) { limitationNote }
         .overlay(alignment: .topTrailing) {
             if displayMarks.isRejected {
-                Image(systemName: "xmark")
+                Image(systemName: "flag.slash.fill")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 22, height: 22)
@@ -1011,12 +1051,18 @@ struct DetailMarkingView: View {
     /// The key reads the marks the rail and the capsule act on, so a disabled level or a key that
     /// would change nothing is the same no-input the rules already report for them.
     private func markKey(_ key: MarkingKey) {
+        tapPickerDismissToken += 1
         apply(rules.result(for: key, marks: browsing.shownMarks(for: photo.id)))
+    }
+
+    private func beginMarkingGesture() {
+        tapPickerDismissToken += 1
+        actions.markingSwipeBegan()
     }
 
     /// Undoes the last mark from the top bar, Duo dock or `⌘Z` (PRD Undo row).
     private func undo() {
-        actions.markingSwipeBegan()
+        beginMarkingGesture()
         browsing.undoLastMark()
     }
 
@@ -1086,6 +1132,15 @@ struct DetailMarkingView: View {
         return MarkingInputRules(settings: inputSettings)
     }
 
+    private var tapPickerDismissTrigger: DetailTapPickerDismissTrigger {
+        DetailTapPickerDismissTrigger(
+            photoID: photo.id,
+            canMark: browsing.canMark,
+            chromeIsVisible: chromeIsVisible,
+            showsInformation: showsInformation,
+            dismissToken: tapPickerDismissToken)
+    }
+
     // MARK: - Geometry
 
     /// The image's long edge in device pixels at a scale, which is what I2 compares with the
@@ -1151,6 +1206,14 @@ struct DetailMarkingView: View {
             "Preview only — full resolution is unavailable."
         }
     }
+}
+
+private struct DetailTapPickerDismissTrigger: Equatable {
+    let photoID: PhotoIdentity
+    let canMark: Bool
+    let chromeIsVisible: Bool
+    let showsInformation: Bool
+    let dismissToken: Int
 }
 
 /// Filtering a group can change neighbours without changing its current photo.
