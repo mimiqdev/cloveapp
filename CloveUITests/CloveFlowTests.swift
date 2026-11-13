@@ -130,17 +130,13 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(stars.isSelected)
         stars.tap()
         XCTAssertFalse(stars.isSelected)
-        // The rail's label action opens the shared picker in its popover; the rail's dot
-        // mirrors the choice, and picking the same colour again clears it (#227).
-        let labelAction = element(app, "clove.detail.rail.label")
-        labelAction.tap()
-        XCTAssertTrue(green.waitForExistence(timeout: 5))
+        // The rail embeds the shared picker's unglassed column: dots are tapped directly
+        // (#229), and tapping the current colour again clears it.
         green.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS[c] %@", "green"), labelAction))
-        // Picking the current colour again clears it; the write path is the rule C13 tests
-        // cover, so the rail check reads the mirrored dot instead of reopening the popover,
-        // which SwiftUI will not re-present while the first dismissal animates.
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), green))
+        XCTAssertTrue(green.isSelected)
+        green.tap()
+        XCTAssertFalse(green.isSelected)
+        green.tap()
         let bar = element(app, "clove.detail.rail.stars")
         let bottom = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
         let middle = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -154,7 +150,7 @@ final class CloveFlowTests: XCTestCase {
         capture("ipad-detail-rail-light")
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(stars.isSelected)
-        XCTAssertTrue(String(describing: rail.value).contains("Green"))
+        XCTAssertTrue(green.isSelected)
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         XCUIDevice.shared.orientation = .landscapeLeft
         let stageFrame = preview.frame
@@ -180,8 +176,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(reject.label, "Rejected")
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
         XCTAssertFalse(stars.isSelected)
-        // Reject clears the label the dot mirrors, so the action reads plain Label again.
-        XCTAssertEqual(element(app, "clove.detail.rail.label").label, "Label")
+        // Reject neutralises the rail's dots; the ladder keeps no selection.
+        XCTAssertFalse(green.isSelected)
         XCTAssertLessThan(element(app, "clove.detail.rejectGlyph").frame.maxX, rail.frame.minX)
         capture("ipad-detail-rail-rejected")
         centre.tap()
@@ -1380,7 +1376,7 @@ final class CloveFlowTests: XCTestCase {
             let labelButton = element(app, "clove.detail.capsule.label")
             let capsule = element(app, "clove.detail.capsule")
             XCTAssertTrue(labelButton.waitForExistence(timeout: 5))
-            element(app, "clove.detail.capsule.stars.3").tap()
+            rate(3, in: app)
             XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
 
             labelButton.tap()
