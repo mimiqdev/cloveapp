@@ -269,7 +269,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(companion.label.contains("JPEG companion"))
         XCTAssertTrue(element(app, "clove.grid.group.burst-2678").exists)
         companion.tap()
-        XCTAssertTrue(element(app, "clove.detail.capsule").exists)
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(capsule.exists)
+        XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
+        XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
         XCTAssertTrue(element(app, "clove.detail.info").exists)
         XCTAssertTrue(element(app, "clove.detail.undo").exists)
     }
@@ -1121,7 +1124,10 @@ final class CloveFlowTests: XCTestCase {
         // the side toolbar carries no duplicate marking items.
         let capsule = element(app, "clove.duo.capsule")
         XCTAssertTrue(capsule.exists)
+        XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
+        XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
         XCTAssertGreaterThanOrEqual(capsule.frame.minY, preview.frame.maxY)
+        XCTAssertEqual(capsule.frame.maxX, focus.frame.maxX - 16, accuracy: 1)
         XCTAssertFalse(element(app, "clove.duo.rating").exists)
         XCTAssertFalse(element(app, "clove.duo.reject").exists)
         XCTAssertFalse(element(app, "clove.duo.label").exists)
@@ -1151,11 +1157,14 @@ final class CloveFlowTests: XCTestCase {
         start.press(
             forDuration: 0.1,
             thenDragTo: grid.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)))
-        XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+        let filmstrip = element(app, "clove.detail.filmstrip")
+        XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.duo.focus").exists)
         XCTAssertTrue(element(app, "clove.detail.fileName").exists)
-        // The capsule keeps its row beneath the photo in photo only, above the filmstrip.
+        // In photo only, the capsule stays beneath the photo and beside the narrowed filmstrip.
         XCTAssertGreaterThanOrEqual(capsule.frame.minY, preview.frame.maxY)
+        XCTAssertGreaterThan(capsule.frame.midX, element(app, "clove.duo.photoOnly").frame.midX)
+        XCTAssertLessThanOrEqual(filmstrip.frame.maxX, capsule.frame.minX + 1)
         capture("duo-photo-only")
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
