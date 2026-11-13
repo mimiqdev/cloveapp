@@ -82,16 +82,15 @@ public final class RegionSharpnessResultStore: Sendable {
         }
         state.withLock { state in
             state.tick &+= 1
-            guard
-                state.entries.removeValue(forKey: record.key) != nil
-                    || state.entries.count < capacity
-            else { return }
-            state.entries[record.key] = Entry(record: record, access: state.tick)
-            while state.entries.count > capacity,
+            // A repeated store replaces its own entry; a new key makes room by evicting
+            // the least recently used entry first.
+            _ = state.entries.removeValue(forKey: record.key)
+            while state.entries.count >= capacity,
                 let oldest = state.entries.min(by: { $0.value.access < $1.value.access })?.key
             {
                 state.entries.removeValue(forKey: oldest)
             }
+            state.entries[record.key] = Entry(record: record, access: state.tick)
         }
     }
 

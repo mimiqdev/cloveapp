@@ -380,11 +380,17 @@ private func until(
             await scheduler.snapshot().queuedByPriority[.folder] ?? 0 >= 19
         }
 
-        // The current photo's acquisition runs while twenty folder photos wait: the
-        // acquisition budget (1) is held by the current photo, not by background work.
-        let snapshot = await scheduler.snapshot()
-        #expect(snapshot.stages[.pixelAcquisition]!.active == 1)
-        #expect(snapshot.stages[.pixelAcquisition]!.queued == 0)
+        // The acquisition budget (1) is held by the current photo: it entered the read
+        // (parked on the gate) while no background photo has entered one. Background jobs
+        // may queue for the slot — queueing is free — but entering is bounded.
+        try await until("the current photo enters its acquisition") {
+            reader.highResolutionCounts["now.arw"] ?? 0 >= 1
+        }
+        #expect(reader.highResolutionCounts["now.arw"] == 1)
+        #expect(
+            Set(reader.highResolutionCounts.keys) == ["now.arw"],
+            "no background photo entered an acquisition while the current one holds the budget")
+        #expect(reader.peakHighResolution <= 1)
         // And the detector budget (1) likewise belongs to the current photo.
         #expect(detector.parked == 1)
 
