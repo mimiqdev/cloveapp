@@ -134,6 +134,20 @@ public struct RegionSharpnessEvidence: Sendable {
     public let region: NormalizedRegion
     public let score: RegionSharpnessScore?
     public let unavailableBecause: RegionScoreUnavailable?
+
+    public init(
+        kind: SharpnessRegionKind,
+        groupIndex: Int?,
+        region: NormalizedRegion,
+        score: RegionSharpnessScore?,
+        unavailableBecause: RegionScoreUnavailable?
+    ) {
+        self.kind = kind
+        self.groupIndex = groupIndex
+        self.region = region
+        self.score = score
+        self.unavailableBecause = unavailableBecause
+    }
 }
 
 /// What one analysis path concluded when it produced no regions at all.

@@ -106,7 +106,13 @@ public actor DetailPipeline {
         guard !closed, !Task.isCancelled else { return }
         if let generation, generation != navigationGeneration { return }
         cache.navigate(to: current)
-        for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
+        for job in Array(jobs.values) where !isRunningScreen(job) {
+            // Analysis for the newly opened photo and revision belongs to this arrival. Only
+            // obsolete analysis is cancelled; interactive reads keep the existing navigation
+            // cancellation rule.
+            if job.priority == .analysis && Self.samePhoto(job.request, current) { continue }
+            cancel(job.id)
+        }
         latest = latest.filter { jobs[$0.value] != nil }
     }
 
@@ -115,7 +121,9 @@ public actor DetailPipeline {
     public func beginNavigation(_ generation: UInt64) {
         guard !closed, generation > navigationGeneration else { return }
         navigationGeneration = generation
-        for job in Array(jobs.values) where !isRunningScreen(job) { cancel(job.id) }
+        for job in Array(jobs.values) where !isRunningScreen(job) && job.priority != .analysis {
+            cancel(job.id)
+        }
         latest = latest.filter { jobs[$0.value] != nil }
     }
 
@@ -151,6 +159,30 @@ public actor DetailPipeline {
             let result = try await enqueue(
                 request, consumer: consumer, effort: .best, priority: .visible)
         else { preconditionFailure("A visible detail request must return a result") }
+        return result
+    }
+
+    /// Bounded preview pixels for face/eye analysis. Analysis never uses the native render
+    /// route for detection, and its background admission cannot displace interactive reads.
+    public func analysisPreview(
+        for request: DetailRequest, consumer: UUID = UUID()
+    ) async throws -> DetailResult {
+        guard
+            let result = try await enqueue(
+                request, consumer: consumer, effort: .previewOnly, priority: .analysis)
+        else { preconditionFailure("An admitted analysis request must return a result") }
+        return result
+    }
+
+    /// The one native acquisition shared by a photo's analysis regions. Queued visible
+    /// fit/zoom work takes precedence over this background route.
+    public func analysisImage(
+        for request: DetailRequest, consumer: UUID = UUID()
+    ) async throws -> DetailResult {
+        guard
+            let result = try await enqueue(
+                request, consumer: consumer, effort: .best, priority: .analysis)
+        else { preconditionFailure("An admitted analysis request must return a result") }
         return result
     }
 
@@ -243,7 +275,8 @@ public actor DetailPipeline {
             return try await withCheckedThrowingContinuation { continuation in
                 if queue.count >= queueLimit {
                     if priority == .visible,
-                        let victim = queue.last(where: { jobs[$0]?.priority == .prefetch })
+                        let victim = queue.last(where: { jobs[$0]?.priority == .analysis })
+                            ?? queue.last(where: { jobs[$0]?.priority == .prefetch })
                     {
                         cancel(victim)
                     } else {
@@ -252,7 +285,10 @@ public actor DetailPipeline {
                     }
                 }
                 if effort != .previewOnly && priority == .visible {
-                    for queued in queue where jobs[queued]?.lane == .render { cancel(queued) }
+                    for queued in queue
+                    where jobs[queued]?.lane == .render && jobs[queued]?.priority != .analysis {
+                        cancel(queued)
+                    }
                 }
                 jobs[id] = Job(
                     id: id, consumer: consumer, request: request, effort: effort,
@@ -269,6 +305,14 @@ public actor DetailPipeline {
 
     private func isRunningScreen(_ job: Job) -> Bool {
         active[job.id] == .render && job.effort == .screen && job.request.raw != nil
+    }
+
+    private nonisolated static func samePhoto(
+        _ first: DetailRequest, _ second: DetailRequest
+    ) -> Bool {
+        let firstSource = first.raw ?? first.jpeg ?? first.heif
+        let secondSource = second.raw ?? second.jpeg ?? second.heif
+        return firstSource == secondSource
     }
 
     private func cancel(_ id: UUID, preservingRunningScreen: Bool = false) {

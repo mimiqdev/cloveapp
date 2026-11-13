@@ -143,10 +143,21 @@ struct DetailZoomView: UIViewRepresentable {
     /// still commits navigation on release; the iPhone, iPad and cover keep the slide.
     var keepsFitStationary = false
 
+    /// Advisory analysis rectangles in the same displayed-image space as the preview.
+    var focusRegions: [DetailFocusRegion] = []
+    var focusRegionColours = DetailFocusRegionColours(
+        autofocus: .systemYellow, face: .systemGreen, eye: .systemCyan,
+        unavailable: .secondaryLabel)
+    var onFocusRegionTap: (DetailFocusRegion) -> Void = { _ in }
+    var previewAccessibilityLabel = "Detail preview"
+
     func makeUIView(context: Context) -> DetailZoomContainerView {
         let view = DetailZoomContainerView()
         probe?.container = view
         view.keepsFitStationary = keepsFitStationary
+        view.focusRegionColours = focusRegionColours
+        view.onFocusRegionTap = onFocusRegionTap
+        view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
         view.onZoomChange = onZoomChange
         view.onEdgeTap = onEdgeTap
         view.onDoubleTap = onDoubleTap
@@ -162,6 +173,9 @@ struct DetailZoomView: UIViewRepresentable {
 
     func updateUIView(_ view: DetailZoomContainerView, context: Context) {
         view.keepsFitStationary = keepsFitStationary
+        view.focusRegionColours = focusRegionColours
+        view.onFocusRegionTap = onFocusRegionTap
+        view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
         view.onZoomChange = onZoomChange
         view.onEdgeTap = onEdgeTap
         view.onDoubleTap = onDoubleTap
@@ -176,6 +190,7 @@ struct DetailZoomView: UIViewRepresentable {
         // The image goes in before the command, so a 100% command for new pixels uses the new
         // pixel size and a quality change never needs a second pass.
         view.setImage(image, fullResolutionPixels: fullResolutionPixels)
+        view.setFocusRegions(focusRegions)
         if let command { view.apply(command) }
     }
 }
@@ -186,6 +201,10 @@ struct DetailZoomView: UIViewRepresentable {
 final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
+    private let previewAccessibilityView = UIView()
+    private var focusRegionControls: [DetailFocusRegionControl] = []
+    private var focusRegions: [DetailFocusRegion] = []
+    private var renderedFocusRegionColours: DetailFocusRegionColours?
     private let edgeTap = UITapGestureRecognizer()
     private let centreDoubleTap = UITapGestureRecognizer()
     private let centreChromeTap = UITapGestureRecognizer()
@@ -218,6 +237,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private var isApplyingCommand = false
 
     var onZoomChange: ((CGFloat) -> Void)?
+    var onFocusRegionTap: ((DetailFocusRegion) -> Void)?
+    var focusRegionColours = DetailFocusRegionColours(
+        autofocus: .systemYellow, face: .systemGreen, eye: .systemCyan,
+        unavailable: .secondaryLabel)
     var onEdgeTap: ((DetailEdgeZone) -> Void)?
     var onDoubleTap: ((UnitPoint) -> Void)?
     var onMarkingSwipe: ((Rating) -> Void)?
@@ -252,10 +275,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         scrollView.decelerationRate = .fast
         scrollView.contentInsetAdjustmentBehavior = .never
         imageView.contentMode = .scaleAspectFit
+        imageView.isUserInteractionEnabled = true
         scrollView.addSubview(imageView)
         addSubview(scrollView)
+        previewAccessibilityView.isUserInteractionEnabled = false
+        addSubview(previewAccessibilityView)
 
         edgeTap.delegate = self
+        centreDoubleTap.delegate = self
         centreChromeTap.delegate = self
         edgeTap.addTarget(self, action: #selector(handleEdgeTap))
         centreDoubleTap.numberOfTapsRequired = 2
@@ -274,16 +301,20 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         markingPan.addTarget(self, action: #selector(handleMarkingPan))
         addGestureRecognizer(markingPan)
 
-        isAccessibilityElement = true
-        accessibilityIdentifier = "clove.detail.preview"
-        accessibilityLabel = "Detail preview"
-        accessibilityTraits = .image
-        accessibilityValue = "Loading"
-        accessibilityCustomActions = [
+        // The preview and its region buttons are sibling accessibility elements. Making the
+        // container itself the element would hide every region from VoiceOver.
+        isAccessibilityElement = false
+        previewAccessibilityView.isAccessibilityElement = true
+        previewAccessibilityView.accessibilityIdentifier = "clove.detail.preview"
+        previewAccessibilityView.accessibilityLabel = "Detail preview"
+        previewAccessibilityView.accessibilityTraits = .image
+        previewAccessibilityView.accessibilityValue = "Loading"
+        previewAccessibilityView.accessibilityCustomActions = [
             UIAccessibilityCustomAction(
                 name: "Show or hide controls", target: self,
                 selector: #selector(toggleChromeFromAccessibility))
         ]
+        accessibilityElements = [previewAccessibilityView]
         updateGestureAvailability()
     }
 
@@ -336,7 +367,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         shownPixels = pixels.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
         self.fullResolutionPixels = fullResolution
         updateMaximumZoom()
-        accessibilityValue = pixels == nil ? "Loading" : "Loaded"
+        updatePreviewAccessibility()
+        layoutFocusRegions()
         if let kept, Self.aspectDiffers(previousPixels, shownPixels) {
             isApplyingCommand = true
             zoom(to: kept.scale, around: kept.anchor)
@@ -411,28 +443,27 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         scrollView.setZoomScale(1, animated: false)
         scrollView.frame = bounds
         imageView.frame = bounds
+        previewAccessibilityView.frame = bounds
         scrollView.contentSize = bounds.size
+        layoutFocusRegions()
         updateMaximumZoom()
         if previous != .zero, previousScale > 1 {
             zoom(to: previousScale, around: .centre)
         }
         isApplyingCommand = false
         updateGestureAvailability()
+        updatePreviewAccessibility()
     }
 
     // MARK: - UIScrollViewDelegate
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
-    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
-        markingPan.isEnabled = false
-        markingPan.isEnabled = true
-    }
-
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         // The zoom level decides whether a one-finger drag pans or marks, so the split follows
         // every pinch, including one the screen did not ask for (PRD Detail gestures).
         updateGestureAvailability()
+        updatePreviewAccessibility()
         guard !isApplyingCommand else { return }
         onZoomChange?(scrollView.zoomScale)
     }
@@ -444,6 +475,18 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool
     {
         if recognizer === markingPan { markingTouchStart = touch.location(in: self) }
+        var touched = touch.view
+        while let view = touched {
+            if view is DetailFocusRegionControl {
+                // A region owns a single tap, not a drag: the shared pan still resolves
+                // vertical marking and horizontal navigation from its existing rules. Only
+                // double-tap-to-fit and that pan may start over a region.
+                return recognizer === markingPan
+                    || (recognizer === centreDoubleTap
+                        && scrollView.zoomScale > DetailFitScale.tolerance)
+            }
+            touched = view.superview
+        }
         return true
     }
 
@@ -598,26 +641,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return true
     }
 
-    @objc private func handleChromeTap() {
-        guard !UIAccessibility.isVoiceOverRunning,
-            DetailZoom.edgeZone(for: centreChromeTap.location(in: self), in: bounds.size) == .centre
-        else { return }
-        onEdgeTap?(.centre)
-    }
-
-    @objc private func handleEdgeTap() {
-        let zone = DetailZoom.edgeZone(for: edgeTap.location(in: self), in: bounds.size)
-        guard zone != .centre else { return }
-        onEdgeTap?(zone)
-    }
-
-    @objc private func handleDoubleTap() {
-        let location = centreDoubleTap.location(in: self)
-        // The edge keeps single taps only, so a double tap there never changes the zoom.
-        guard DetailZoom.edgeZone(for: location, in: bounds.size) == .centre else { return }
-        onDoubleTap?(imageAnchor(of: location))
-    }
-
     // MARK: - Geometry
 
     /// Zooms to a scale and centres the image point, clamped to the image (PRD P0-04).
@@ -667,5 +690,89 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             nativePixels: fullResolutionPixels, shownPixels: shownPixels, viewSize: bounds.size,
             screenScale: traitCollection.displayScale)
         scrollView.maximumZoomScale = max(scale, scrollView.zoomScale)
+    }
+}
+
+/// Focus-region placement is an extension so the zoom container's gesture implementation stays
+/// small. `private` access remains file-scoped across this extension.
+@MainActor
+extension DetailZoomContainerView {
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        markingPan.isEnabled = false
+        markingPan.isEnabled = true
+    }
+
+    @objc private func handleChromeTap() {
+        guard !UIAccessibility.isVoiceOverRunning,
+            DetailZoom.edgeZone(for: centreChromeTap.location(in: self), in: bounds.size) == .centre
+        else { return }
+        onEdgeTap?(.centre)
+    }
+
+    @objc private func handleEdgeTap() {
+        let zone = DetailZoom.edgeZone(for: edgeTap.location(in: self), in: bounds.size)
+        guard zone != .centre else { return }
+        onEdgeTap?(zone)
+    }
+
+    @objc private func handleDoubleTap() {
+        let location = centreDoubleTap.location(in: self)
+        // The edge keeps single taps only, so a double tap there never changes the zoom.
+        guard DetailZoom.edgeZone(for: location, in: bounds.size) == .centre else { return }
+        onDoubleTap?(imageAnchor(of: location))
+    }
+
+    func setPreviewAccessibilityLabel(_ label: String) {
+        previewAccessibilityView.accessibilityLabel = label
+    }
+
+    func setFocusRegions(_ regions: [DetailFocusRegion]) {
+        guard regions != focusRegions || renderedFocusRegionColours != focusRegionColours
+        else { return }
+        focusRegions = regions
+        renderedFocusRegionColours = focusRegionColours
+        for control in focusRegionControls { control.removeFromSuperview() }
+        focusRegionControls = regions.map { region in
+            let control = DetailFocusRegionControl(
+                region: region, colours: focusRegionColours)
+            control.addTarget(
+                self, action: #selector(handleFocusRegionTap(_:)), for: .touchUpInside)
+            imageView.addSubview(control)
+            return control
+        }
+        accessibilityElements = [previewAccessibilityView] + focusRegionControls
+        layoutFocusRegions()
+    }
+
+    @objc private func handleFocusRegionTap(_ control: DetailFocusRegionControl) {
+        guard control.region.isActionable else { return }
+        onFocusRegionTap?(control.region)
+    }
+
+    private func layoutFocusRegions() {
+        let fitted = DetailZoom.fittedSize(
+            imagePixels: shownPixels, viewSize: imageView.bounds.size)
+        let fittedRect = CGRect(
+            x: (imageView.bounds.width - fitted.width) / 2,
+            y: (imageView.bounds.height - fitted.height) / 2,
+            width: fitted.width, height: fitted.height)
+        for control in focusRegionControls {
+            control.place(actualRect: control.region.rect(in: fittedRect))
+        }
+    }
+
+    private func updatePreviewAccessibility() {
+        guard imageView.image != nil else {
+            previewAccessibilityView.accessibilityValue = "Loading"
+            return
+        }
+        guard let snapshot = zoomSnapshot else {
+            previewAccessibilityView.accessibilityValue = "Loaded"
+            return
+        }
+        let percentX = Int((snapshot.anchor.x * 100).rounded())
+        let percentY = Int((snapshot.anchor.y * 100).rounded())
+        previewAccessibilityView.accessibilityValue =
+            "Loaded, centred at \(percentX)%, \(percentY)% of the photo"
     }
 }

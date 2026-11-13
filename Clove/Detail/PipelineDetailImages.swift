@@ -8,10 +8,14 @@ import Foundation
 struct DetailWorkAdmission: Sendable {
     let image: @Sendable (@Sendable () async -> DetailImageOutcome) async -> DetailImageOutcome
     let prefetch: @Sendable (@Sendable () async -> Void) async -> Void
+    let sharpness:
+        @Sendable (@Sendable () async -> RegionSharpnessAnalysis?) async
+            -> RegionSharpnessAnalysis?
 }
 
 extension DetailWorkAdmission {
-    static let direct = DetailWorkAdmission(image: { await $0() }, prefetch: { await $0() })
+    static let direct = DetailWorkAdmission(
+        image: { await $0() }, prefetch: { await $0() }, sharpness: { await $0() })
 }
 
 @MainActor
@@ -21,6 +25,8 @@ final class PipelineDetailImages: DetailImageSource {
     private let set: @MainActor (PhotoIdentity) -> PhotoSet?
     private let admitted: DetailWorkAdmission
     private let consumer = UUID()
+    private let regionScheduler: RegionSharpnessScheduler
+    private var knownRegionRequests: [PhotoIdentity: RegionSharpnessRequest] = [:]
     private var activeWindow: DetailPhotoWindow?
     private var navigationGeneration: UInt64 = 0
 
@@ -28,12 +34,18 @@ final class PipelineDetailImages: DetailImageSource {
         pipeline: DetailPipeline,
         thumbnails: ThumbnailCache? = nil,
         set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
-        admitted: DetailWorkAdmission = .direct
+        admitted: DetailWorkAdmission = .direct,
+        regionScheduler: RegionSharpnessScheduler? = nil
     ) {
         self.pipeline = pipeline
         self.thumbnails = thumbnails
         self.set = set
         self.admitted = admitted
+        self.regionScheduler =
+            regionScheduler
+            ?? RegionSharpnessScheduler(
+                analyzer: RegionSharpnessAnalyzer(
+                    reader: DetailRegionSharpnessReading(details: pipeline)))
     }
 
     /// Reads the shared grid cache directly, without entering the grid work queue.
@@ -159,16 +171,77 @@ private struct PhotoSources: Sendable {
     }
 
     func request(for request: DetailPixelRequest) -> DetailRequest? {
-        let raw = raw.flatMap { try? DetailSource.read($0) }
-        let jpeg = jpeg.flatMap { try? DetailSource.read($0) }
-        let heif = heif.flatMap { try? DetailSource.read($0) }
-        guard raw != nil || jpeg != nil || heif != nil else { return nil }
+        let sources = readSources()
+        guard sources.raw != nil || sources.jpeg != nil || sources.heif != nil else { return nil }
         return DetailRequest(
-            raw: raw, jpeg: jpeg, heif: heif,
+            raw: sources.raw, jpeg: sources.jpeg, heif: sources.heif,
             displayPixels: request.displayPixels,
             wantsNativeResolution: request.need == .fullResolution,
             locationIdentity: locationIdentity,
             mode: request.mode == .rawFirst ? .rawFirst : .cameraPreviewFirst,
             screenPixels: request.screenPixels)
+    }
+
+    func regionRequest() -> RegionSharpnessRequest? {
+        let sources = readSources()
+        guard sources.raw != nil || sources.jpeg != nil || sources.heif != nil else { return nil }
+        return RegionSharpnessRequest(
+            raw: sources.raw, jpeg: sources.jpeg, heif: sources.heif,
+            locationIdentity: locationIdentity)
+    }
+
+    private func readSources() -> (raw: DetailSource?, jpeg: DetailSource?, heif: DetailSource?) {
+        (
+            raw.flatMap { try? DetailSource.read($0) },
+            jpeg.flatMap { try? DetailSource.read($0) },
+            heif.flatMap { try? DetailSource.read($0) }
+        )
+    }
+}
+
+extension PipelineDetailImages: DetailRegionSharpnessSource {
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        guard let current = regionRequest(for: photo) else { return nil }
+        let groupPairs = group.compactMap { identity in
+            regionRequest(for: identity).map { (identity, $0) }
+        }
+        let nearbyPairs = nearby.compactMap { identity in
+            regionRequest(for: identity).map { (identity, $0) }
+        }
+        let groupRequests = groupPairs.map(\.1)
+        let nearbyRequests = nearbyPairs.map(\.1)
+        for (identity, request) in [(photo, current)] + groupPairs + nearbyPairs {
+            if let previous = knownRegionRequests[identity], previous != request {
+                await regionScheduler.invalidate(sources: previous.fileURLs)
+            }
+            knownRegionRequests[identity] = request
+        }
+        return await admitted.sharpness { [regionScheduler] in
+            guard !Task.isCancelled else { return nil }
+            // Cancel analyses outside this detail window before admitting more work. A nearby
+            // job that becomes current stays shared, including its stored early-AF answer.
+            await regionScheduler.focus(
+                current: current, group: groupRequests, nearby: nearbyRequests,
+                cancellingObsolete: true)
+            guard !Task.isCancelled else { return nil }
+            async let analysis = regionScheduler.analyzeCurrent(
+                current, onAutofocus: onAutofocus)
+            await regionScheduler.submit(groupRequests, priority: .group)
+            await regionScheduler.submit(nearbyRequests, priority: .nearby)
+            return await analysis
+        }
+    }
+
+    func closeRegionAnalysis() async {
+        await regionScheduler.close()
+    }
+
+    private func regionRequest(for photo: PhotoIdentity) -> RegionSharpnessRequest? {
+        sources(for: photo)?.regionRequest()
     }
 }
