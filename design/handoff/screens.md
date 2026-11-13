@@ -87,7 +87,8 @@ Devices:
 
 **Default**
 - The photo sits on `bg/stage`.
-- The top bar has Back, the filename as the title, and the subtitle "1 / 11 · + JPG" (no loading or save label). On the right are **Info (ⓘ)** and **Undo**.
+- The top bar has Back and the **Focus regions** (`viewfinder`) toggle on the leading side, the filename as the title, and the subtitle "1 / 11 · + JPG" (no loading or save label). On the right are **Info (ⓘ)** and **Undo**.
+- Focus overlays draw camera AF rectangles, four-corner face fallbacks, or one small square eye marker per person without fill; pending or unavailable status appears in a compact glass pill at the top edge of the stage when chrome and overlays are visible.
 - Marks appear **once**, in the shared **marking toolbar** (168 × 48) above the home indicator: the `flag.slash` Reject action, the star+value rating action, and the label circle (owner decision, 2026-11-13, #227).
 - The **filmstrip** floats just above the marking toolbar. Both fade out while zoomed, and tapping the photo toggles them.
 
@@ -105,7 +106,7 @@ Devices:
 
 **Swipe star bar: cleared step (proposal, #125, not reviewed)**: a quick swipe down from a rated photo now stops at 0 before Reject. The proposal shows three stops on a 3★ photo: A start (no chip), B cleared (all stars empty, the chip slot shows `star.slash` in `text/secondary`), C reject (the chip fills in `reject` with a white ✕ and the stars dim). The bar sits beside the touch start, as in the swipe-up frame. Waiting on the designer.
 
-**100% zoom**: the marking toolbar, filmstrip, Info and Undo hide. The subtitle shows "100%", and a small "100%" chip fades out.
+**100% zoom**: the marking toolbar, filmstrip, Info and Undo hide. The subtitle shows "100%", and a small "100%" chip fades out. Tapping an actionable focus region centres native 100% zoom on that region and highlights only that marker in `accent` until returning to fit.
 
 In every filmstrip, rejected thumbnails are dimmed and have no badge.
 
@@ -141,7 +142,7 @@ There is no group review screen. A stack opens the normal detail screen with its
 - **Quick grid**: tapping the stack expands the sheet into a 4-column grid of the rejects, all dimmed. Tapping a photo keeps it: it returns to full brightness with no badge, and the button updates to "41 of 42 will move" / "Move 41". Keeping clears that photo's reject flag, but only when Move is tapped; cancelling the sheet discards the keeps. Undo restores both the move and the flags.
 - **Done**: the moved photos leave the grid, and a glass toast says "Moved 42 to _Rejected" with **Undo**.
 - **Partial failure**: the toast says "Moved 40 to _Rejected", then "2 couldn't be moved" in `reject`, with **Details**.
-- **Details sheet**: the title is "2 photos couldn't be moved" and the subtitle is "They stay rejected in place. Nothing was deleted." There is one row per photo set, with a thumbnail, the file name and the reason in `reject`, then one **Done** button. There is no Try again.
+- **Details sheet**: the title is "2 photos couldn't be moved" and the subtitle is "They stay rejected in place. Nothing was deleted." There is one row per photo set, with a thumbnail, file name and the reason in `reject`, then one **Done** button. There is no Try again.
 
 ## 06–07 iPad
 
@@ -161,7 +162,7 @@ The iPad frames were drawn before the sidebar (#170) and the detail rail (#174) 
   - **Color labels**: one row per label in use, with its dot, name and count. Hidden when no photo has a label.
   - **Similar groups**: one row, "86 groups", with a small regroup glyph button (Find similar shots again). A spinner replaces the button while grouping runs. There is no "Analyzed" word. Hidden when similar groups are off.
 - **Grid**: the title is the selected sidebar row's name ("All", "Unmarked", "Red", "DCIM/100CANON") and the subtitle is the count ("1,284 photos"). There is no Filter button. The top right has Move Rejects (only when rejects exist) and "…", as 40 × 40 glass icon buttons. Move Rejects is never at the bottom right on iPad. Stacks and dimmed rejects work as on iPhone.
-- **Detail** and Settings open full screen with a back button named after the selected row, such as "‹ All" or "‹ Unmarked". The old grid-beside-detail layout is removed. A 96 pt right rail replaces the toolbar. It sits beside the stage, never over it, and never hides: a single tap or zoom hides the filmstrip, the Reject N unmarked pill and the top bar buttons, while the stage keeps its size. Top to bottom: the quick-rating ladder (43 × 174) that fills from the bottom (tap, or drag and release), a hairline, and the marking family's shared Reject (`flag.slash`) and Label actions stacked below (owner decision, 2026-11-13, #227); the label action opens the shared picker in its popover. Tapping the current rating clears it. Each rail control has a hover tooltip with its VoiceOver label (the frame shows "Reject"). Info and Undo are 40 × 40 in the top bar. Swipe marking on the photo still works; the rail ladder shows the live value. There are no keyboard hints.
+- **Detail** and Settings open full screen with a back button named after the selected row, such as "‹ All" or "‹ Unmarked", alongside the **Focus regions** (`viewfinder`) toggle. The old grid-beside-detail layout is removed. A 96 pt right rail replaces the toolbar. It sits beside the stage, never over it, and never hides: a single tap or zoom hides the filmstrip, the Reject N unmarked pill and the top bar buttons, while the stage keeps its size. Top to bottom: the quick-rating ladder (43 × 174) that fills from the bottom (tap, or drag and release), a hairline, and the marking family's shared Reject (`flag.slash`) and Label actions stacked below (owner decision, 2026-11-13, #227); the label action opens the shared picker in its popover. Tapping the current rating clears it. Each rail control has a hover tooltip with its VoiceOver label (the frame shows "Reject"). Info and Undo are 40 × 40 in the top bar. Swipe marking on the photo still works; the rail ladder shows the live value. There are no keyboard hints.
 - **Rejected**: the rail's Reject action fills (`flag.slash.fill` in `reject`), the ladder and label action go neutral, and the corner glyph sits in the stage's top-trailing corner, left of the rail.
 - **Filmstrip** (at the bottom, following grid order): every group except the current one is collapsed into one stacked tile with the neutral count badge. The current group is expanded in place on `text/primary` at 12% layer opacity, with no outline. The current frame has a thin ring in `text/primary`.
 
@@ -177,12 +178,12 @@ The iPad frames were drawn before the sidebar (#170) and the detail rail (#174) 
 | [Expanded: dock star bar](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=217-2575) · [png](screens/08-duo-expanded-dock-star-bar-sliding.png) | 217:2575 |
 | [Expanded: dock label picker](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=217-3348) · [png](screens/08-duo-expanded-dock-label-picker.png) | 217:3348 |
 
-**Cover**: the same grid as iPhone, with no save status. Detail on the cover is iPhone detail, including the reject corner glyph. The side rail holds Filter instead of Groups, and Move Rejects sits just under the status bar and Back. Select is in "…".
+**Cover**: the same grid as iPhone, with no save status. Detail on the cover is iPhone detail (including the `viewfinder` toggle in the right action rail and the reject corner glyph). The side rail holds Filter instead of Groups, and Move Rejects sits just under the status bar and Back. Select is in "…".
 
 **Expanded** (landscape, unfolded). The rules follow Apple's Duo guidance:
 - **The right dock** is a vertical column shared with the status bar, made of glass capsules from top to bottom:
   1. **Back**, on its own, at the top under the status bar.
-  2. **View tools**: Filter, "…", Info.
+  2. **View tools**: Filter, "…", **Focus regions** (`viewfinder`, in detail), Info.
   3. **Bottom**: Undo, Move Rejects.
   The capsules are centered under the signal icon. The grid and photo have no buttons over them.
 - **Marking toolbar** (owner changes, #200 and #227): while a photo is open, the shared 168 × 48 marking toolbar sits beneath the right-hand photo, inside the photo pane, in a reserved bottom-right marking area beside the filmstrip — not in the side toolbar, so system island/status activity cannot push marking into overflow or cover the image. In photo only, the filmstrip's viewport narrows so its thumbnails never scroll under the toolbar; the two regions share the photo stage's background, with no contrasting sidebar slab behind the toolbar region. The rating action opens the shared quick-rating ladder; the label action opens the color picker. The cover keeps its compact dock controls.

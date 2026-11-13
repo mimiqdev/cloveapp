@@ -1,13 +1,32 @@
 import SwiftUI
 
 /// The handoff's compact navigation title and subtitle, between Back and the view tools.
-struct BrowsingHeader<Subtitle: View, Tools: View>: View {
+struct BrowsingHeader<Subtitle: View, LeadingTools: View, Tools: View>: View {
     let title: String
     var titleIdentifier = "clove.browsing.title"
     var backTitle: String? = nil
     let back: () -> Void
     @ViewBuilder let subtitle: () -> Subtitle
+    @ViewBuilder let leadingTools: () -> LeadingTools
     @ViewBuilder let tools: () -> Tools
+
+    init(
+        title: String,
+        titleIdentifier: String = "clove.browsing.title",
+        backTitle: String? = nil,
+        back: @escaping () -> Void,
+        @ViewBuilder subtitle: @escaping () -> Subtitle,
+        @ViewBuilder leadingTools: @escaping () -> LeadingTools = { EmptyView() },
+        @ViewBuilder tools: @escaping () -> Tools
+    ) {
+        self.title = title
+        self.titleIdentifier = titleIdentifier
+        self.backTitle = backTitle
+        self.back = back
+        self.subtitle = subtitle
+        self.leadingTools = leadingTools
+        self.tools = tools
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -40,6 +59,7 @@ struct BrowsingHeader<Subtitle: View, Tools: View>: View {
                             label: "Back", symbol: "chevron.left", identifier: "clove.nav.back",
                             action: back)
                     }
+                    leadingTools()
                     Spacer(minLength: 0)
                     tools()
                 }

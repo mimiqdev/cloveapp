@@ -94,6 +94,7 @@ struct DetailMarkingView: View {
     @State private var tapPickerDismissToken = 0
     @State private var focusRegionState = DetailFocusRegionState()
     @State private var focusAnalysisID = UUID()
+    @State private var inspectedFocusRegionID: String?
 
     /// Detail pixels on screen; the grid thumbnail stands in until these arrive.
     @State private var shown: DetailImage?
@@ -163,6 +164,7 @@ struct DetailMarkingView: View {
             .onChange(of: photo.id) { _, _ in
                 showsToolbarStars = false
                 toolbarDragRating = nil
+                inspectedFocusRegionID = nil
             }
             .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
                 await loadPreview(for: photo)
@@ -216,6 +218,8 @@ struct DetailMarkingView: View {
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
                     showsUndo: chromeIsVisible
                 ) {
+                    focusRegionsToggle
+                } tools: {
                     if chromeIsVisible {
                         Button("Info", systemImage: "info.circle") { showsInformation = true }
                             .accessibilityIdentifier("clove.detail.info")
@@ -229,6 +233,33 @@ struct DetailMarkingView: View {
                     .axisBehavior(.horizontalOnly)
             }
             .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder private var focusRegionsToggle: some View {
+        if usesSystemToolbar {
+            Button {
+                browsing.showsFocusRegions.toggle()
+            } label: {
+                Image(systemName: "viewfinder")
+                    .foregroundStyle(
+                        browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
+            }
+            .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
+            .accessibilityLabel("Focus regions")
+            .accessibilityValue(browsing.showsFocusRegions ? "On" : "Off")
+            .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
+            .accessibilityIdentifier("clove.detail.focusToggle")
+        } else {
+            GlassIconButton(
+                label: "Focus regions",
+                symbol: "viewfinder",
+                isActive: browsing.showsFocusRegions,
+                size: usesRail ? .pad : .phone,
+                identifier: "clove.detail.focusToggle"
+            ) {
+                browsing.showsFocusRegions.toggle()
+            }
+        }
     }
 
     private var detailToolbarTitle: some View {
@@ -262,8 +293,11 @@ struct DetailMarkingView: View {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark
                 ) {
-                    duo.filter
-                    duo.more
+                    if duo.showsGrid {
+                        duo.filter
+                        duo.more
+                    }
+                    focusRegionsToggle
                     Button("Info", systemImage: "info.circle") { showsInformation = true }
                         .accessibilityIdentifier("clove.detail.info")
                 } marks: {
@@ -282,7 +316,9 @@ struct DetailMarkingView: View {
                             markingBegan: beginMarkingGesture)
                     }
                 } bottom: {
-                    duo.bottom
+                    if duo.showsGrid {
+                        duo.bottom
+                    }
                 }
                 if !duo.showsGrid || duo.split.wrappedValue == .photoOnly {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
@@ -398,6 +434,8 @@ struct DetailMarkingView: View {
                                 browsing: browsing, identifierPrefix: "clove.detail.saveState")
                         }
                     }
+                } leadingTools: {
+                    focusRegionsToggle
                 } tools: {
                     if chromeIsVisible {
                         GlassIconButton(
@@ -537,12 +575,17 @@ struct DetailMarkingView: View {
             hasNext: navigationAvailability.next,
             probe: probe,
             keepsFitStationary: isDuoExpanded,
-            focusRegions: shown == nil ? [] : focusRegionState.regions,
+            focusRegions: shown == nil
+                ? []
+                : focusRegionState.regions(
+                    visible: browsing.showsFocusRegions,
+                    inspectedRegionID: inspectedFocusRegionID),
+            inspectedFocusRegionID: inspectedFocusRegionID,
             focusRegionColours: DetailFocusRegionColours(
-                autofocus: UIColor(theme.tokens.accent.color),
-                face: UIColor(theme.tokens.saved.color),
-                eye: UIColor(theme.tokens.labelBlue.color),
-                unavailable: UIColor(theme.tokens.secondaryText.color)),
+                normal: UIColor(theme.tokens.focusOutline.color),
+                contrastEdge: UIColor(theme.tokens.focusEdge.color),
+                selected: UIColor(theme.tokens.accent.color),
+                unavailable: UIColor(theme.tokens.focusOutline.color.opacity(0.58))),
             onFocusRegionTap: { focusRegionTapped($0) },
             previewAccessibilityLabel: displayMarks.isRejected
                 ? "\(photo.fileName), Rejected" : photo.fileName
@@ -607,7 +650,7 @@ struct DetailMarkingView: View {
 
     /// Advisory progress and explicit unavailable answers live in the existing floating chrome.
     @ViewBuilder private var focusRegionStatus: some View {
-        if chromeIsVisible, let status = focusRegionState.status {
+        if chromeIsVisible, browsing.showsFocusRegions, let status = focusRegionState.status {
             Text(status)
                 .font(.caption)
                 .foregroundStyle(Color.clove.text.primary)
@@ -895,6 +938,9 @@ struct DetailMarkingView: View {
     /// stale render anyway (G1 "Scheduling and cache").
     private func zoomChanged(_ value: CGFloat) {
         scale = value
+        if value <= DetailFitScale.tolerance {
+            inspectedFocusRegionID = nil
+        }
         if abs(value - commandedScale) > 0.01 {
             zoomMode = .manual
         }
@@ -930,10 +976,12 @@ struct DetailMarkingView: View {
     private func doubleTap(at anchor: UnitPoint) {
         guard settings.doubleTap == .zoom else { return }
         guard scale <= DetailFitScale.tolerance else {
+            inspectedFocusRegionID = nil
             zoomMode = .fit
             setZoom(.fit)
             return
         }
+        inspectedFocusRegionID = nil
         inspectFullResolution(at: anchor)
     }
 
@@ -941,6 +989,7 @@ struct DetailMarkingView: View {
     /// double-tap setting. It neither resolves a marking input nor calls a navigation action.
     private func focusRegionTapped(_ region: DetailFocusRegion) {
         guard region.isActionable else { return }
+        inspectedFocusRegionID = region.id
         inspectFullResolution(at: region.centre)
     }
 

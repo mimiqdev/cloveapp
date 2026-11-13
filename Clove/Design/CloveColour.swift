@@ -107,6 +107,9 @@ struct CloveColours {
 
     /// `Color.clove.group`.
     var group: CloveColour { CloveColour(.group) }
+
+    /// `Color.clove.focus.*`.
+    var focus: CloveFocusColours { CloveFocusColours() }
 }
 
 /// `Color.clove.bg.*`: the app background and the area around a photo (tokens.md).
@@ -155,6 +158,15 @@ struct CloveStatusColours {
 
     /// Save and move failures.
     var failed: CloveColour { CloveColour(.failed) }
+}
+
+/// `Color.clove.focus.*`: camera-style focus overlay outline and contrast edge (`tokens.md`).
+struct CloveFocusColours {
+    /// Normal focus frame outline.
+    var outline: CloveColour { CloveColour(.focusOutline) }
+
+    /// Subtle dark contrast edge behind focus overlay outlines.
+    var edge: CloveColour { CloveColour(.focusEdge) }
 }
 
 /// `Color.clove.label.*`: the five colour labels with a token, and the two extended ones, which
