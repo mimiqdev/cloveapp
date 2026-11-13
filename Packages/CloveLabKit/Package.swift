@@ -14,6 +14,7 @@ let probeModules = [
     "ScanProbe",
     "FoldStateProbe",
     "RAWDisplayProbe",
+    "BrowsingPerformanceProbe",
 ]
 
 /// Extra target dependencies for probes that reuse another probe's measurement code.
@@ -21,9 +22,20 @@ let extraDependencies: [String: [String]] = [
     "RAWDisplayProbe": ["PreviewProbe"]
 ]
 
+/// Production packages measured directly by the current-app browsing flow.
+let productionDependencies: [String: [Target.Dependency]] = [
+    "BrowsingPerformanceProbe": [
+        .product(name: "CloveCore", package: "CloveCore"),
+        .product(name: "CloveImaging", package: "CloveImaging"),
+    ]
+]
+
 let probeTargets: [Target] = probeModules.map { module in
     let extras = (extraDependencies[module] ?? []).map { Target.Dependency.target(name: $0) }
-    return .target(name: module, dependencies: [.target(name: "LabSupport")] + extras)
+    return .target(
+        name: module,
+        dependencies: [.target(name: "LabSupport")] + extras
+            + (productionDependencies[module] ?? []))
 }
 
 let probeTestTargets: [Target] = probeModules.map { module in
@@ -39,6 +51,10 @@ let package = Package(
     ],
     products: [
         .library(name: "CloveLabKit", targets: ["LabSupport"] + probeModules)
+    ],
+    dependencies: [
+        .package(path: "../CloveCore"),
+        .package(path: "../CloveImaging"),
     ],
     targets: [
         .target(name: "LabSupport"),
