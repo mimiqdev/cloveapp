@@ -91,6 +91,7 @@ struct DetailMarkingView: View {
     @State private var toolbarDragRating: Rating?
     @State private var showsZoomChip = false
     @State private var controlsHeight: CGFloat = 0
+    @State private var tapPickerDismissToken = 0
     @State private var focusRegionState = DetailFocusRegionState()
     @State private var focusAnalysisID = UUID()
 
@@ -278,7 +279,7 @@ struct DetailMarkingView: View {
                             showsStars: $showsToolbarStars, dragRating: $toolbarDragRating,
                             rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
                             toggleReject: { toggleReject() },
-                            markingBegan: actions.markingSwipeBegan)
+                            markingBegan: beginMarkingGesture)
                     }
                 } bottom: {
                     duo.bottom
@@ -295,7 +296,7 @@ struct DetailMarkingView: View {
                 if !isDuoExpanded {
                     ToolbarRatingGesture(
                         rating: displayMarks.rating, enabledRatings: settings.enabledRatings,
-                        canMark: browsing.canMark, began: actions.markingSwipeBegan,
+                        canMark: browsing.canMark, began: beginMarkingGesture,
                         preview: {
                             toolbarDragRating = $0
                             showsToolbarStars = true
@@ -349,6 +350,7 @@ struct DetailMarkingView: View {
             }
         }
         .contentMargins(for: .container, edges: .horizontal)
+        .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.photoOnly" : "clove.duo.focus")
     }
@@ -394,12 +396,13 @@ struct DetailMarkingView: View {
                         marks: displayMarks, settings: settings,
                         previewRating: swipeFeedback.rating,
                         rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
-                        toggleReject: { toggleReject() }, markingBegan: actions.markingSwipeBegan
+                        toggleReject: { toggleReject() }, markingBegan: beginMarkingGesture
                     )
                     .disabled(!browsing.canMark)
                 }
             }
         }
+        .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
     }
 
     private var photoStage: some View {
@@ -491,7 +494,7 @@ struct DetailMarkingView: View {
             onEdgeTap: { navigate($0) },
             onDoubleTap: { doubleTap(at: $0) },
             onMarkingSwipe: { applyMarkingSwipe($0) },
-            onSwipeBegin: { actions.markingSwipeBegan() },
+            onSwipeBegin: { beginMarkingGesture() },
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
@@ -997,12 +1000,18 @@ struct DetailMarkingView: View {
     /// The key reads the marks the rail and the capsule act on, so a disabled level or a key that
     /// would change nothing is the same no-input the rules already report for them.
     private func markKey(_ key: MarkingKey) {
+        tapPickerDismissToken += 1
         apply(rules.result(for: key, marks: browsing.shownMarks(for: photo.id)))
+    }
+
+    private func beginMarkingGesture() {
+        tapPickerDismissToken += 1
+        actions.markingSwipeBegan()
     }
 
     /// Undoes the last mark from the top bar, Duo dock or `⌘Z` (PRD Undo row).
     private func undo() {
-        actions.markingSwipeBegan()
+        beginMarkingGesture()
         browsing.undoLastMark()
     }
 
@@ -1072,6 +1081,15 @@ struct DetailMarkingView: View {
         return MarkingInputRules(settings: inputSettings)
     }
 
+    private var tapPickerDismissTrigger: DetailTapPickerDismissTrigger {
+        DetailTapPickerDismissTrigger(
+            photoID: photo.id,
+            canMark: browsing.canMark,
+            chromeIsVisible: chromeIsVisible,
+            showsInformation: showsInformation,
+            dismissToken: tapPickerDismissToken)
+    }
+
     // MARK: - Geometry
 
     /// The image's long edge in device pixels at a scale, which is what I2 compares with the
@@ -1137,6 +1155,14 @@ struct DetailMarkingView: View {
             "Preview only — full resolution is unavailable."
         }
     }
+}
+
+private struct DetailTapPickerDismissTrigger: Equatable {
+    let photoID: PhotoIdentity
+    let canMark: Bool
+    let chromeIsVisible: Bool
+    let showsInformation: Bool
+    let dismissToken: Int
 }
 
 /// Filtering a group can change neighbours without changing its current photo.
