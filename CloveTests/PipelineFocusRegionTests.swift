@@ -148,6 +148,47 @@ struct PipelineFocusRegionTests {
         _ = await analysis.value
     }
 
+    @Test func laterManualRenderingDoesNotCancelQueuedCurrentAnalysis() async throws {
+        let fixture = try PipelinePhotoFixture()
+        defer { fixture.remove() }
+        let first = try fixture.photo("first.jpg")
+        let second = try fixture.photo("second.jpg")
+        let environment = makeEnvironment(photos: [first, second])
+        defer { Task { await environment.finish() } }
+        let request = environment.fullResolutionRequest()
+        let initial = Task {
+            await environment.source.image(for: second.id, request: request)
+        }
+        try await pipelineEventually {
+            await environment.reads.fullRasterPaths.count == 1
+        }
+        let analysis = Task {
+            await environment.source.analyzeRegions(for: first.id, group: [], nearby: []) { _ in }
+        }
+        try await pipelineEventually {
+            await environment.pipeline.queuedCount == 1
+        }
+        let manual = Task {
+            await environment.source.image(for: first.id, request: request)
+        }
+        try await pipelineEventually {
+            await environment.pipeline.queuedCount == 2
+        }
+        await environment.reads.releaseFullRasters()
+        guard case .image = await manual.value else {
+            Issue.record("Queued analysis prevented the interactive render")
+            return
+        }
+        _ = await initial.value
+        let result = try #require(await analysis.value)
+        #expect(result.acquisitionFailure == nil)
+        guard case .regions(let regions) = result.autofocus else {
+            Issue.record("Expected scored AF after interactive rendering")
+            return
+        }
+        #expect(regions.first?.score != nil)
+    }
+
     @Test func cancelledViewerNeverReceivesAFWhenItsSharedAcquisitionFinishes() async throws {
         let fixture = try PipelinePhotoFixture()
         defer { fixture.remove() }

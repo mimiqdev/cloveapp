@@ -285,7 +285,10 @@ public actor DetailPipeline {
                     }
                 }
                 if effort != .previewOnly && priority == .visible {
-                    for queued in queue where jobs[queued]?.lane == .render { cancel(queued) }
+                    for queued in queue
+                    where jobs[queued]?.lane == .render && jobs[queued]?.priority != .analysis {
+                        cancel(queued)
+                    }
                 }
                 jobs[id] = Job(
                     id: id, consumer: consumer, request: request, effort: effort,
