@@ -345,6 +345,7 @@ struct DetailMarkingView: View {
                 }
             } else if isDuoExpanded && chromeIsVisible {
                 duoMarkingToolbar
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
             }
