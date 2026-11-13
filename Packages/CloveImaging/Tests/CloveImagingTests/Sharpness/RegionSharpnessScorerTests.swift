@@ -58,7 +58,7 @@ enum SharpnessScene {
     }
 }
 
-@Suite struct RegionSharpnessScorerTests {
+@Suite(.imageWork) struct RegionSharpnessScorerTests {
     let scorer = RegionSharpnessScorer()
 
     @Test func texturedRegionScoresHigherThanFlatRegion() throws {

@@ -339,6 +339,84 @@ class SetTests(unittest.TestCase):
             open(os.path.join(self.output, "demo/DCIM/100CANON/._IMG_0001.CR3"), "rb").read(),
         )
 
+    def test_repeat_expands_paths_and_writes_fixture_identity(self):
+        document = {
+            "sets": [
+                {
+                    "name": "demo",
+                    "identity": True,
+                    "entries": [
+                        {"to": "DCIM/IMG_{index}.CR3", "from": "sample-file", "repeat": 3}
+                    ],
+                }
+            ]
+        }
+        report = self.build(document)
+        self.assertEqual([("demo", 3)], report)
+        self.assertEqual(
+            [
+                ".clove-fixture.json",
+                "DCIM/IMG_0001.CR3",
+                "DCIM/IMG_0002.CR3",
+                "DCIM/IMG_0003.CR3",
+            ],
+            self.listing(),
+        )
+        identity = fx.load_json(os.path.join(self.output, "demo", ".clove-fixture.json"))
+        self.assertEqual("demo", identity["set"])
+        self.assertEqual(3, identity["fileCount"])
+        self.assertEqual(64, len(identity["definitionSHA256"]))
+        self.assertEqual(
+            {"sample-file": self.entry["sha256"]}, identity["sources"]
+        )
+        for path in self.listing():
+            if path.endswith(".CR3"):
+                with open(os.path.join(self.output, "demo", path), "rb") as handle:
+                    self.assertEqual(b"raw bytes", handle.read())
+
+    def test_repeat_one_replaces_the_index(self):
+        document = self.document(
+            [{"to": "IMG_{index}.CR3", "from": "sample-file", "repeat": 1}]
+        )
+        self.build(document)
+        self.assertEqual(["IMG_0001.CR3"], self.listing())
+
+    def test_identity_records_recipe_and_generated_bytes(self):
+        document = {
+            "sets": [
+                {
+                    "name": "demo",
+                    "identity": True,
+                    "entries": [
+                        {
+                            "to": "IMG.JPG",
+                            "from": "sample-file",
+                            "recipe": "jpeg-from-raw",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        def generate(recipe, source, destination):
+            with open(destination, "wb") as handle:
+                handle.write(b"generated jpeg")
+
+        self.build(document, generate=generate)
+        identity = fx.load_json(os.path.join(self.output, "demo", ".clove-fixture.json"))
+        self.assertEqual("sips", identity["recipes"]["jpeg-from-raw"]["tool"])
+        self.assertEqual(
+            {"jpeg-from-raw--sample-file.jpg": hashlib.sha256(b"generated jpeg").hexdigest()},
+            identity["generated"],
+        )
+
+    def test_rejects_a_repeat_without_an_indexed_destination(self):
+        document = self.document(
+            [{"to": "IMG.CR3", "from": "sample-file", "repeat": 2}]
+        )
+        with self.assertRaises(fx.FixtureError):
+            self.resolve(document)
+
     def test_rebuild_removes_files_from_an_older_definition(self):
         document = self.document([{"to": "a.txt", "text": "one\n"}])
         self.build(document)
@@ -474,9 +552,9 @@ class CommittedFixtureTests(unittest.TestCase):
     def paths(self, name):
         return [entry["to"] for entry in self.set_named(name)["entries"]]
 
-    def test_the_four_sets_exist(self):
+    def test_the_five_sets_exist(self):
         self.assertEqual(
-            ["card-basic", "xmp-interop", "name-collision", "formats"],
+            ["card-basic", "xmp-interop", "name-collision", "browsing-2000", "formats"],
             [spec["name"] for spec in self.sets],
         )
 
@@ -551,6 +629,16 @@ class CommittedFixtureTests(unittest.TestCase):
         active = {os.path.basename(path) for path in paths if "/_Rejected/" not in path}
         self.assertTrue(rejected)
         self.assertTrue(rejected & active, "a name must collide across _Rejected")
+
+    def test_browsing_set_has_two_thousand_logical_photos(self):
+        paths = self.paths("browsing-2000")
+        self.assertEqual(4000, len(paths))
+        stems = {os.path.splitext(path)[0] for path in paths}
+        self.assertEqual(2000, len(stems))
+        self.assertEqual(1200, len([path for path in paths if path.startswith("DCIM/100SONY/") and path.endswith(".ARW")]))
+        self.assertEqual(600, len([path for path in paths if path.startswith("DCIM/101SONY/") and path.endswith(".HIF")]))
+        self.assertEqual(100, len([path for path in paths if path.startswith("DCIM/102SONY/") and path.endswith(".HIF")]))
+        self.assertTrue(self.set_named("browsing-2000")["identity"])
 
     def test_formats_set_holds_one_file_per_format(self):
         paths = self.paths("formats")
