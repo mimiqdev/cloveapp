@@ -274,8 +274,13 @@ struct GridSectionTests {
         #expect(grid.sections[1].cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id)])
         #expect(
             grid.sections[2].cells.map(\.id) == [.photo(all[2].id), .group(other.id)])
-        // The expanded members carry no badge and no cover: the run's header names the group.
-        #expect(grid.sections[1].cells.allSatisfy { $0.group == nil })
+        // The expanded members carry the group's shared surface but no count badge and no
+        // cover: the run's header names the group (#225, with the grid's surface from #227).
+        #expect(
+            grid.sections[1].cells.allSatisfy {
+                $0.group?.id == expanded.id && $0.group?.showsCount == false
+                    && $0.group?.isCover == false
+            })
         let cover = try #require(grid.sections[2].cells.last?.group)
         #expect(cover.isCover)
         #expect(cover.count == 2)

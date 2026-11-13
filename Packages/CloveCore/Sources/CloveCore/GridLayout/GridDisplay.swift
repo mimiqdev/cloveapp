@@ -108,7 +108,8 @@ extension GridDisplay {
     ///
     /// `expandedGroup` replaces one group's cover with its shown members at that same position
     /// (owner decision, 2026-11-13, #225). The members become their own run, so the split can
-    /// draw the group's header and surface around them while every other cell keeps its place.
+    /// draw the group's header and its members' shared surface around them while every other
+    /// cell keeps its place. Their marks carry no count badge: the run's header names the group.
     private static func collapsedSections(
         photos: [GridPhoto], marks: [PhotoIdentity: BrowsingGroup], expandedGroup: GroupID?
     ) -> [GridSection] {
@@ -132,7 +133,11 @@ extension GridDisplay {
             if group.id == expandedGroup {
                 members.append(
                     GridCellItem(
-                        id: .photo(photo.id), photo: photo, isDimmed: photo.marks.isRejected))
+                        id: .photo(photo.id), photo: photo,
+                        group: GridCellItem.GroupMark(
+                            id: group.id, count: group.members.count, showsCount: false,
+                            isCover: false),
+                        isDimmed: photo.marks.isRejected))
                 continue
             }
             guard covered.insert(group.id).inserted else { continue }

@@ -93,9 +93,7 @@ struct GridCollectionView: UIViewRepresentable {
             placeholderCount: { [weak coordinator] in coordinator?.placeholderCount ?? 0 },
             columnCount: { [weak coordinator] in coordinator?.columnCount },
             sectionPlans: { [weak coordinator] in coordinator?.sectionPlans ?? [] })
-        layout.register(
-            GridGroupBackground.self, forDecorationViewOfKind: GridGroupBackground.kind)
-        let collectionView = GridSurfaceCollectionView(frame: .zero, collectionViewLayout: layout)
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = context.coordinator
@@ -126,8 +124,6 @@ struct GridCollectionView: UIViewRepresentable {
             sizeClass: context.environment.horizontalSizeClass,
             theme: context.environment.cloveTheme,
             isSelectingEmpty: isSelectingEmpty)
-        let grid = collectionView as? GridSurfaceCollectionView
-        grid?.groupTint = GridGroupSurface.colour(theme: context.environment.cloveTheme)
         for case let header as GridGroupHeader in collectionView.visibleSupplementaryViews(
             ofKind: GridGroupHeader.kind) where header.theme != context.environment.cloveTheme
         {
@@ -188,7 +184,7 @@ struct GridCollectionView: UIViewRepresentable {
             section.contentInsets =
                 isGroup
                 ? NSDirectionalEdgeInsets(
-                    top: GridGroupSurface.inset, leading: 0, bottom: GridGroupSurface.inset,
+                    top: GridGroupRun.inset, leading: 0, bottom: GridGroupRun.inset,
                     trailing: 0)
                 : NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: spacing, trailing: 0)
             section.interGroupSpacing = spacing
@@ -197,12 +193,8 @@ struct GridCollectionView: UIViewRepresentable {
                     NSCollectionLayoutBoundarySupplementaryItem(
                         layoutSize: NSCollectionLayoutSize(
                             widthDimension: .fractionalWidth(1),
-                            heightDimension: .absolute(GridGroupSurface.headerHeight)),
+                            heightDimension: .absolute(GridGroupRun.headerHeight)),
                         elementKind: GridGroupHeader.kind, alignment: .top)
-                ]
-                section.decorationItems = [
-                    NSCollectionLayoutDecorationItem.background(
-                        elementKind: GridGroupBackground.kind)
                 ]
             }
             let unread = placeholderCount()
