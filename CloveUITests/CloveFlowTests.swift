@@ -829,6 +829,36 @@ final class CloveFlowTests: XCTestCase {
         }
     }
 
+    /// Opt-in visual evidence for the neutral group badge and the expanded filmstrip surface.
+    ///
+    /// The sample's first group is widened to three digits for the run, so the captures show two-
+    /// and three-digit counts on bright and dimmed photos, and the current group's surface in the
+    /// filmstrip. Nothing is asserted about colour: the images are for a person to compare.
+    @MainActor
+    func testCaptureGroupBadgeReferencesWhenRequested() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["CLOVE_CAPTURE_GROUP_BADGES"] == "1")
+        for theme in ["light", "dark", "nord"] {
+            let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_COUNT": "123"])
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            capture("group-badge-grid-\(theme)")
+            element(app, "clove.grid.filter").tap()
+            element(app, "clove.grid.filter.rejected").tap()
+            capture("group-badge-grid-rejected-\(theme)")
+            element(app, "clove.grid.filter").tap()
+            element(app, "clove.grid.filter.all").tap()
+            element(app, "clove.grid.photo.mmq02682").tap()
+            XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
+            capture("group-badge-filmstrip-\(theme)")
+            element(app, "clove.detail.filmstrip.group.burst-2678").tap()
+            XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
+            XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+            capture("group-badge-filmstrip-expanded-\(theme)")
+            app.terminate()
+        }
+    }
+
     @MainActor
     private func applyComparisonTheme(_ theme: String, _ app: XCUIApplication) {
         element(app, "clove.grid.more").tap()

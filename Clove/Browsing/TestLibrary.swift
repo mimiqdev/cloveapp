@@ -70,6 +70,13 @@ final class TestLibrary: FolderLibrary {
     /// shows the PRD's copy and recovery action without a drive or a permission.
     static let locationLossVariable = "CLOVE_TEST_LIBRARY_LOCATION_LOSS"
 
+    /// The launch environment value that widens the sample's first group to this many members.
+    ///
+    /// A screenshot of the group count badge shows two and three digits with it; the sample's
+    /// photos stay as they are, so the wider group draws only its real members while the badge
+    /// names the pinned count. Nothing is written, and no cell names a photo the sample lacks.
+    static let groupCountVariable = "CLOVE_TEST_LIBRARY_GROUP_COUNT"
+
     /// The library this launch browses: the sample when the launch value asks for it (PRD P0-13).
     static func forLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -743,6 +750,18 @@ final class TestLibrary: FolderLibrary {
                         rating: stored[index].id == group.members.first ? Self.stars(3) : .rejected)
                     : PhotoMarks()
             }
+        }
+        if let count = environment[Self.groupCountVariable].flatMap(Int.init),
+            let group = groups.first, count > group.members.count
+        {
+            let extra = (0..<(count - group.members.count)).map { index in
+                PhotoIdentity(
+                    folderID: folder, relativeFolderPath: "DCIM/100CAM",
+                    stem: String(format: "MMQ9%04d", index))
+            }
+            let wider = BrowsingGroup(id: group.id, members: group.members + extra)
+            groups = [wider] + groups.dropFirst()
+            allGroups = groups
         }
         if let opening = environment["CLOVE_TEST_LIBRARY_OPENING"] {
             if opening == "reading" || opening == "empty" {
