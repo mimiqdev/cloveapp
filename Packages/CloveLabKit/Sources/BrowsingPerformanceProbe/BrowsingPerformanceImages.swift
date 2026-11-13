@@ -121,11 +121,13 @@ enum BrowsingPerformanceImages {
             let firstPipeline = DetailPipeline()
             let firstTask = Task { try await firstPipeline.image(for: first) }
             let admissionWatch = Stopwatch()
+            let initialNativeCount = await firstPipeline.nativeRAWRenderCount
             var nativeStarted = false
             do {
                 while !nativeStarted && admissionWatch.seconds < 5 {
                     try Task.checkCancellation()
-                    nativeStarted = await firstPipeline.activeRenderCount > 0
+                    nativeStarted =
+                        await firstPipeline.nativeRAWRenderCount > initialNativeCount
                     if !nativeStarted { await Task.yield() }
                 }
             } catch {
@@ -205,7 +207,7 @@ enum BrowsingPerformanceImages {
         }
         report.value(
             "raw-focus-cancel-observed", value: Double(includingCancel.count), unit: "count",
-            tags: ["attempted": String(pairsMeasured), "trigger": "activeRenderCount>0"])
+            tags: ["attempted": String(pairsMeasured), "trigger": "nativeRAWRenderCount"])
     }
 
     private static func thumbnailRun(

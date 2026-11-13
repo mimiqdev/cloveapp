@@ -196,10 +196,16 @@ public actor DetailPipeline {
 
     var queuedCount: Int { queue.count }
     var activeCount: Int { active.count }
+    var activeRenderCount: Int { active.values.filter { $0 == .render }.count }
 
-    /// Number of full-image renders admitted to the single render lane.
-    /// A caller measuring cancellation can wait for admission instead of guessing with a timer.
-    public var activeRenderCount: Int { active.values.filter { $0 == .render }.count }
+    /// Native RAW renders started in this pipeline session. The counter advances
+    /// immediately before the renderer call, so a measurement never infers native
+    /// entry from a queue delay or from the broader render lane.
+    public private(set) var nativeRAWRenderCount: UInt64 = 0
+
+    private func noteNativeRAWRenderStart() {
+        nativeRAWRenderCount += 1
+    }
 
     private func enqueue(
         _ request: DetailRequest, consumer: UUID, effort: Effort,
@@ -299,7 +305,9 @@ public actor DetailPipeline {
                 ? ImageWorkExecutor.userInitiated : ImageWorkExecutor.utility,
             priority: job.priority == .visible ? .userInitiated : .utility
         ) {
-            let result = await Self.perform(job, cache: cache, reader: reader, sizes: sizes)
+            let result = await Self.perform(
+                job, cache: cache, reader: reader, sizes: sizes,
+                nativeRAWStarted: { await self.noteNativeRAWRenderStart() })
             await self.complete(id, result: result)
         }
     }
@@ -415,7 +423,8 @@ public actor DetailPipeline {
 
     private nonisolated static func perform(
         _ job: Job, cache: DetailCache,
-        reader: any DetailReading, sizes: any DetailNativeSizeReading
+        reader: any DetailReading, sizes: any DetailNativeSizeReading,
+        nativeRAWStarted: @Sendable () async -> Void
     ) async -> DetailResult? {
         let request = job.request
         if job.priority == .prefetch, hasCached(request, effort: job.effort, cache: cache) {
@@ -494,7 +503,9 @@ public actor DetailPipeline {
             // uses RAW, including subsequent fit requests and held-render returns.
             camera = cameraSource(request, cache: cache)
             if camera != nil {
-                return await perform(job, cache: cache, reader: reader, sizes: sizes)
+                return await perform(
+                    job, cache: cache, reader: reader, sizes: sizes,
+                    nativeRAWStarted: nativeRAWStarted)
             }
             fullSize = await fullResolutionSize(
                 for: request, previewLongEdge: best?.longEdge ?? 0,
@@ -522,6 +533,7 @@ public actor DetailPipeline {
             if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
+            await nativeRAWStarted()
             guard let pixels = await reader.nativeRAW(raw) else {
                 return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
                     ?? missing(failures)
