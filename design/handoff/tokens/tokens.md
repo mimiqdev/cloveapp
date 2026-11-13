@@ -19,7 +19,7 @@ Rules:
 | `text/primary` | Primary text and icons. | #000000 | #FFFFFF | #EDEDED | #E6C9B8 | #4C4F69 | #CDD6F4 | #ECEFF4 | #EBDBB2 |
 | `text/secondary` | Secondary text, counts, metadata. | #3C3C4399 | #EBEBF599 | #BDBDBD | #9C8576 | #6C6F85 | #A6ADC8 | #D8DEE999 | #A89984 |
 | `separator` | Hairlines and tracks. | #3C3C431F | #FFFFFF1F | #FFFFFF1A | #E6C9B81A | #4C4F691F | #CDD6F41A | #ECEFF41A | #EBDBB21A |
-| `accent` | Buttons, links, selection, progress while reading. | #007AFF | #0A84FF | #8AB4F8 | #E0A15E | #8839EF | #CBA6F7 | #88C0D0 | #83A598 |
+| `accent` | Buttons, links, selection, progress while reading. Light and Dark use the owner's warm pair (2026-11-13, #227); the other six themes keep their accents. | #8A6548 | #D4AA78 | #8AB4F8 | #E0A15E | #8839EF | #CBA6F7 | #88C0D0 | #83A598 |
 | `rating/on` | Filled stars. | #FF9500 | #FF9F0A | #E8A33D | #E0A15E | #DF8E1D | #F9E2AF | #EBCB8B | #FABD2F |
 | `rating/off` | Empty stars. | #3C3C434D | #EBEBF54D | #FFFFFF40 | #E6C9B838 | #4C4F6940 | #CDD6F438 | #D8DEE940 | #EBDBB238 |
 | `reject` | Reject circle, destructive text. Softer than the system red on purpose. | #D4574E | #E5675E | #C7665F | #C8665A | #E64553 | #EBA0AC | #BF616A | #EA6962 |

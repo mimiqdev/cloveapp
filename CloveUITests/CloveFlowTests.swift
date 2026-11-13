@@ -345,8 +345,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.filter").tap()
         element(app, "clove.grid.filter.unmarked").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
-        let rating = element(app, "clove.detail.capsule.stars.3")
-        rating.tap()
+        rate(3, in: app)
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
     }
 
@@ -380,7 +379,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.selectionOptions").tap()
         app.buttons["Select all"].tap()
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "36 selected")
-        XCTAssertTrue(element(app, "clove.grid.batch.stars.3").isEnabled)
+        XCTAssertTrue(element(app, "clove.grid.batch.rating").isEnabled)
     }
 
     @MainActor
@@ -448,7 +447,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
-        element(app, "clove.detail.capsule.stars.4").tap()
+        rate(4, in: app)
         // A mark waits out the advance pause before the file name changes. On a loaded runner
         // one accessibility query can consume most of a short window while the app is already
         // correct (#203), so this boundary keeps the 10-second budget the browsing flow uses.
@@ -496,8 +495,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.photo.mmq02680").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        let stars = element(app, "clove.detail.capsule.stars.3")
-        stars.tap()
+        rate(3, in: app)
         let capsule = element(app, "clove.detail.capsule")
         XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
         let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35))
@@ -771,7 +769,7 @@ final class CloveFlowTests: XCTestCase {
             openLibrary(app)
             applyComparisonTheme(theme, app)
             element(app, "clove.grid.group.burst-2678").tap()
-            element(app, "clove.detail.capsule.stars.3").tap()
+            rate(3, in: app)
             XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
             XCTAssertTrue(element(app, "clove.detail.rejectUnmarked").exists)
             capture("detail-expanded-group-\(theme)")
@@ -1051,14 +1049,14 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.duo.reject").exists)
         XCTAssertFalse(element(app, "clove.duo.label").exists)
         capture("duo-focus")
-        element(app, "clove.duo.capsule.stars.3").tap()
+        rate(3, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
-        element(app, "clove.duo.capsule.stars.5").tap()
+        rate(5, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "5 stars"), capsule))
         element(app, "clove.duo.undo").tap()
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
         // Tapping the current rating clears it; Undo restores it.
-        element(app, "clove.duo.capsule.stars.3").tap()
+        rate(3, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
         element(app, "clove.duo.undo").tap()
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
@@ -1126,7 +1124,7 @@ final class CloveFlowTests: XCTestCase {
         capture("duo-group-members")
         // Marking applies to the member on screen.
         let capsule = element(app, "clove.duo.capsule")
-        element(app, "clove.duo.capsule.stars.4").tap()
+        rate(4, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "4 stars"), capsule))
         XCTAssertTrue(third.label.contains("4 stars"))
         // Back returns to the folder grid with its collapsed stack.
@@ -1294,6 +1292,16 @@ final class CloveFlowTests: XCTestCase {
         _ label: String, _ target: XCUIElement, timeout: TimeInterval = 5
     ) -> Bool {
         wait(NSPredicate(format: "label == %@", label), target, timeout: timeout)
+    }
+
+    /// Opens the marking toolbar's rating ladder and taps a level: the compact toolbar's rating
+    /// action is a popover trigger, so tests reach the stars through it (#227).
+    @MainActor
+    func rate(_ level: Int, toolbar: String = "clove.detail.capsule", in app: XCUIApplication) {
+        element(app, "\(toolbar).rating").tap()
+        let star = element(app, "\(toolbar).stars.\(level)")
+        XCTAssertTrue(star.waitForExistence(timeout: 5), "the rating ladder did not open")
+        star.tap()
     }
 
     @MainActor

@@ -466,12 +466,11 @@ struct GridScreen: View {
             HStack {
                 Text("Rating ≥")
                 Spacer()
-                StarRow(rating: minimumRating, identifier: "clove.grid.filter.stars") { rating in
+                FilterStarRow(rating: minimumRating, identifier: "clove.grid.filter.stars") {
+                    rating in
                     browsing.setFilter(rating == .unrated ? .all : .ratedAtLeast(rating))
                     showsFilters = false
                 }
-                .scaleEffect(0.75, anchor: .trailing)
-                .frame(width: 126)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)

@@ -22,7 +22,6 @@ struct SettingsScreen: View {
         .scrollContentBackground(.hidden)
         .background(Color.clove.surface.sheet)
         .foregroundStyle(Color.clove.text.primary)
-        .tint(theme.tokens.accent.color)
         .navigationBarTitleDisplayMode(.large)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.settings")

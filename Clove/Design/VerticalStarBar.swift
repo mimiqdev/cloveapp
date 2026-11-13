@@ -1,20 +1,22 @@
 import CloveCore
 import SwiftUI
 
-/// The vertical star bar: a narrow glass pill of five stars that fill from the bottom, with a ✕
-/// chip below it for the swipe-down reject (`design/handoff/components.md`, Vertical star bar).
+/// The shared quick-rating ladder: a narrow native glass column of five stars that fill from the
+/// bottom (`design/handoff/components.md`, Quick-rating ladder; owner decision, 2026-11-13, #227).
 ///
-/// It opens on a swipe up in iPhone detail and on the Duo dock's star button. Dragging fills the
-/// stars from the bottom to the top and only the release commits, so the mark is written once:
-/// ``onPreview`` reports the live value while the drag runs, for the capsule's stars to mirror it,
-/// and ``onCommit`` reports the value the gesture ends on (`design/handoff/interactions.md`, iPhone
-/// Detail). A tap picks the star it lands on, and tapping the photo's current value clears it, the
-/// same rule as the capsule's stars (PRD Marking rules).
+/// It opens on a swipe up in iPhone detail, from the marking toolbar's rating action, and on the
+/// Duo cover's rating button. Dragging fills the stars from the bottom to the top and only the
+/// release commits, so the mark is written once: ``onPreview`` reports the live value while the
+/// drag runs, for the toolbar's rating action to mirror it, and ``onCommit`` reports the value
+/// the gesture ends on (`design/handoff/interactions.md`, iPhone Detail). A tap picks the star it
+/// lands on, and tapping the photo's current value clears it, the same rule as the toolbar
+/// (PRD Marking rules). The optional chip below the ladder is the swipe-down reject stage:
+/// `flag.slash` in the theme's secondary text, distinct from the `star.slash` clear stage.
 ///
 /// All five levels always show, because the enabled-ratings setting affects input only (PRD
 /// Enabled rating levels): a disabled star is dimmed, a drag settles on the nearest enabled level
-/// below it, and a tap on it does nothing. The iPad rail version is 43 × 174 with a padding of 10
-/// and a gap of 6, and leaves the chip out because the rail has its own Reject circle.
+/// below it, and a tap on it does nothing. The iPad rail's ladder keeps its own taller metrics
+/// with no chip, because the rail has its own Reject action.
 struct VerticalStarBar: View {
     /// The photo's rating.
     let rating: Rating
@@ -25,10 +27,14 @@ struct VerticalStarBar: View {
     /// The size components.md measures on the device.
     var size: ControlSize = .phone
 
-    /// Whether the ✕ chip is drawn; the iPhone and Duo bar has it, the iPad rail does not.
+    /// Whether the reject chip is drawn; the swipe ladder has it, the rail does not.
     var showsRejectChip = true
 
-    /// The identifier the screen's UI test uses.
+    /// Whether each star is its own tappable button, for the popover a marking action opens;
+    /// the swipe ladder keeps one gesture for taps and drags (components.md).
+    var selectableStars = false
+
+    /// The identifier the screen's UI test uses; each star is `"<identifier>.<n>"`.
     var identifier = "clove.mark.starBar"
 
     /// The live value while a drag runs, before release (interactions.md).
@@ -61,7 +67,7 @@ struct VerticalStarBar: View {
     private var metrics: VerticalStarBarMetrics { VerticalStarBarMetrics(size: size) }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: metrics.chipGap) {
             pill
             if showsRejectChip {
                 rejectChip
@@ -71,13 +77,13 @@ struct VerticalStarBar: View {
         .accessibilityIdentifier(identifier)
     }
 
-    /// The glass pill of stars, top to bottom from five to one (components.md).
+    /// The glass ladder of stars, top to bottom from five to one (components.md).
     private var pill: some View {
         GeometryReader { proxy in
             VerticalStarBarStars(
                 rating: shownRating, enabledRatings: enabledRatings, size: size,
                 identifier: identifier,
-                onRate: size == .pad
+                onRate: size == .pad || selectableStars
                     ? { level in
                         onCommit(level == rating ? .unrated : level)
                     } : nil
@@ -110,27 +116,33 @@ struct VerticalStarBar: View {
             }
             .modifier(
                 StarBarAccessibility(
-                    individualStars: size == .pad, value: accessibilityValue,
+                    individualStars: size == .pad || selectableStars, value: accessibilityValue,
                     adjust: adjustRating))
         }
         .frame(width: metrics.width, height: metrics.height)
         .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
     }
 
-    /// The ✕ chip the swipe down lands on (components.md): a light, thin ✕ on its own glass chip.
+    /// The reject stage the swipe down lands on (components.md): `flag.slash` on its own native
+    /// glass chip, filled in `reject` when the swipe has reached it.
     private var rejectChip: some View {
         Button(action: onReject) {
-            Image(systemName: "xmark")
-                .font(.subheadline)
-                .foregroundStyle(Color.clove.text.secondary)
-                .frame(width: 40, height: 40)
+            Image(systemName: isRejectStage ? "flag.slash.fill" : "flag.slash")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isRejectStage ? Color.clove.reject : Color.clove.text.secondary)
+                .frame(width: metrics.chip, height: metrics.chip)
                 .contentShape(Circle())
                 .cloveGlass(in: Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Reject")
         .accessibilityIdentifier("\(identifier).reject")
+        .help("Reject")
     }
+
+    /// Whether the ladder is showing the reject stage: only the display variant can, while a
+    /// swipe previews −1.
+    private var isRejectStage: Bool { shownRating == .rejected }
 
     /// Fills the bar and reports the live value while a drag runs (interactions.md).
     private func previewDrag(at y: CGFloat, in height: CGFloat) {
@@ -171,7 +183,7 @@ struct VerticalStarBar: View {
 
     /// Steps the rating from VoiceOver, since the bar is one adjustable control.
     ///
-    /// It offers no value below the lowest level: clearing is the capsule's tap rule, and stepping
+    /// It offers no value below the lowest level: clearing is the toolbar's tap rule, and stepping
     /// down from one star stays at one (PRD Marking rules).
     private func adjustRating(_ direction: AccessibilityAdjustmentDirection) {
         switch direction {
@@ -214,37 +226,46 @@ struct VerticalStarBar: View {
 }
 
 /// A read-out for photo swipes. It installs no gestures, buttons or adjustable actions.
+///
+/// The ladder mirrors the interactive bar's native glass styling, and the chip below it names the
+/// stage the swipe is on: `star.slash` in secondary text while the swipe previews clear,
+/// `flag.slash.fill` in `reject` while it previews Reject (owner decision, 2026-11-13, #227).
 struct VerticalStarBarDisplay: View {
     let rating: Rating
     var enabledRatings: EnabledRatings = .all
     var isReject = false
 
     private let metrics = VerticalStarBarMetrics(size: .phone)
-    private static let spacing: CGFloat = 10
-    private static let chipSize: CGFloat = 40
 
     /// The whole read-out, including the gap and reject chip, for stage placement.
+    var stageSize: CGSize {
+        CGSize(
+            width: metrics.width,
+            height: metrics.height + metrics.chipGap + metrics.chip)
+    }
+
+    /// The whole read-out's size for callers that cannot hold an instance; the ladder's
+    /// geometry is fixed, so it never reads the theme or the rating.
     static var size: CGSize {
-        let metrics = VerticalStarBarMetrics(size: .phone)
-        return CGSize(width: metrics.width, height: metrics.height + spacing + chipSize)
+        VerticalStarBarDisplay(rating: .unrated).stageSize
     }
 
     var body: some View {
-        VStack(spacing: Self.spacing) {
+        VStack(spacing: metrics.chipGap) {
             VerticalStarBarStars(rating: rating, enabledRatings: enabledRatings, size: .phone)
                 .frame(width: metrics.width, height: metrics.height)
                 .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius))
-            Image(systemName: "xmark")
-                .font(.subheadline)
+            Image(systemName: isReject ? "flag.slash.fill" : "star.slash")
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(isReject ? Color.clove.reject : Color.clove.text.secondary)
-                .frame(width: Self.chipSize, height: Self.chipSize)
+                .frame(width: metrics.chip, height: metrics.chip)
                 .cloveGlass(in: Circle())
         }
         .allowsHitTesting(false)
     }
 }
 
-/// Shared pixels for the interactive rail and the display-only swipe indicator.
+/// Shared pixels for the interactive ladder and the display-only swipe indicator.
 private struct VerticalStarBarStars: View {
     let rating: Rating
     let enabledRatings: EnabledRatings
@@ -252,8 +273,9 @@ private struct VerticalStarBarStars: View {
     var identifier = "clove.mark.starBar"
     var onRate: ((Rating) -> Void)?
 
+    private var metrics: VerticalStarBarMetrics { VerticalStarBarMetrics(size: size) }
+
     var body: some View {
-        let metrics = VerticalStarBarMetrics(size: size)
         VStack(spacing: metrics.gap) {
             ForEach(EnabledRatings.all.levels.reversed(), id: \.rawValue) { level in
                 let filled = level <= rating
@@ -281,13 +303,12 @@ private struct VerticalStarBarStars: View {
 
     private func star(filled: Bool, level: Rating) -> some View {
         Image(systemName: filled ? "star.fill" : "star")
-            .font(.title3)
+            .font(.system(size: metrics.symbol, weight: .semibold))
             .foregroundStyle(filled ? Color.clove.rating.on : Color.clove.rating.off)
             .opacity(enabledRatings.contains(level) ? 1 : 0.35)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
-
 private struct StarBarAccessibility: ViewModifier {
     let individualStars: Bool
     let value: String
@@ -306,45 +327,53 @@ private struct StarBarAccessibility: ViewModifier {
     }
 }
 
+/// The ladder's geometry: 48 × 204 with a 44 pt chip and about 10 pt of gap on iPhone and the
+/// Duo; the iPad rail keeps its own 43 × 174 column (components.md).
 private struct VerticalStarBarMetrics {
     let size: ControlSize
 
-    /// The pill's width: 40 on iPhone, 43 on the iPad rail (components.md).
+    /// The ladder's width: 48 on iPhone and the Duo, 43 on the iPad rail (components.md).
     var width: CGFloat {
         switch size {
-        case .phone: 40
+        case .phone, .duo: 48
         case .pad: 43
-        case .duo: 40
         }
     }
 
-    /// The pill's height: five rows of 30 with a gap of 6 and a padding of 10; the iPad rail is
-    /// 174 high with 26 pt rows (components.md).
+    /// The ladder's height: 204 with five rows of about 34, a gap of 7 and a padding of 10;
+    /// the iPad rail is 174 high (components.md).
     var height: CGFloat {
         switch size {
-        case .phone: 5 * 30 + 4 * gap + 2 * padding
+        case .phone, .duo: 204
         case .pad: 174
-        case .duo: 5 * 30 + 4 * gap + 2 * padding
         }
     }
 
-    /// The corner radius: 22 on the iPad rail, half the width on iPhone (components.md).
+    /// The corner radius: 24 on iPhone and the Duo, 22 on the iPad rail (components.md).
     var cornerRadius: CGFloat {
         switch size {
-        case .phone: width / 2
+        case .phone, .duo: 24
         case .pad: 22
-        case .duo: width / 2
         }
     }
 
-    /// The gap between the rows: 6 on the iPad rail (components.md).
-    var gap: CGFloat { 6 }
+    /// The gap between the rows (components.md).
+    var gap: CGFloat { 7 }
 
-    /// The pill's inner padding: 10 (components.md).
+    /// The ladder's inner padding (components.md).
     var padding: CGFloat { 10 }
+
+    /// The star symbol's point size (components.md).
+    var symbol: CGFloat { 15 }
+
+    /// The reject chip: 44 pt on iPhone and the Duo; the rail has none (components.md).
+    var chip: CGFloat { 44 }
+
+    /// The gap between the ladder and the chip, about 10 pt (components.md).
+    var chipGap: CGFloat { 10 }
 }
 
-#Preview("Vertical star bar") {
+#Preview("Quick-rating ladder") {
     HStack(alignment: .top, spacing: 16) {
         VerticalStarBar(
             rating: Rating(rawValue: 2) ?? .unrated, identifier: "preview.starBar",
@@ -353,6 +382,9 @@ private struct VerticalStarBarMetrics {
             rating: Rating(rawValue: 2) ?? .unrated, size: .pad, showsRejectChip: false,
             identifier: "preview.starBar.pad", onPreview: { _ in }, onCommit: { _ in },
             onReject: {})
+        VerticalStarBarDisplay(rating: Rating(rawValue: 3) ?? .unrated)
+        VerticalStarBarDisplay(rating: .unrated)
+        VerticalStarBarDisplay(rating: .rejected, isReject: true)
     }
     .padding(24)
     .background(Rectangle().fill(Color.clove.bg.canvas))

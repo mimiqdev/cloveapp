@@ -52,6 +52,9 @@ struct RootView: View {
     var body: some View {
         content
             .environment(\.cloveTheme, themeInEffect)
+            // Native controls (buttons, toggles, menus, selection) follow the Clove accent, so
+            // no generic control keeps a system-blue tint (owner decision, 2026-11-13, #227).
+            .tint(themeInEffect.tokens.accent.color)
             .preferredColorScheme(preferredColourScheme)
             .background {
                 SystemAppearanceReader { appearance in

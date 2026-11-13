@@ -156,7 +156,17 @@ private struct GridTile: View {
                     GroupCountBadge(count: group.count, presentation: .grid).padding(4)
                 }
             }
-            .background(Color.clove.surface.card)
+            .background {
+                if item.group != nil && !isCover {
+                    // An expanded group's members sit on the same neutral surface as the
+                    // filmstrip's group extent: `text/primary` at 12% on the background shape
+                    // alone, never on the photo (owner decision, 2026-11-13, #226 filmstrip,
+                    // #227 grid).
+                    Rectangle().fill(Color.clove.text.primary).opacity(0.12)
+                } else {
+                    Rectangle().fill(Color.clove.surface.card)
+                }
+            }
         }
         .overlay {
             if isCurrent {

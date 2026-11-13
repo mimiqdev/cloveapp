@@ -29,14 +29,15 @@ struct EntryEmptyState: View {
                     .padding(.top, 12)
             }
             Button(action: openFolder) {
-                Label("Open folder", systemImage: "folder")
+                // Text-only, filled with the accent, centred inside the shared 168 × 48 bounds
+                // (owner decision, 2026-11-13, #227).
+                Text("Open folder")
                     .font(.headline)
-                    .foregroundStyle(CloveTheme.dark.tokens.primaryText.color)
-                    .padding(.horizontal, 26)
-                    .padding(.vertical, 15)
-                    .background(Capsule().fill(Color.clove.accent))
+                    .frame(width: 168, height: 48)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
             .accessibilityIdentifier("clove.entry.pickFolder")
             .padding(.top, 40)
         }

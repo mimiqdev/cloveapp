@@ -307,9 +307,11 @@ extension CloveFlowTests {
 
     @MainActor
     private func markThePhoto(in app: XCUIApplication) {
+        // The compact toolbar's rating action opens the ladder the stars live in (#227).
+        element(in: app, "clove.detail.capsule.rating").tap()
         let fourStars = element(in: app, "clove.detail.capsule.stars.4")
         XCTAssertTrue(
-            fourStars.exists, "The detail view had no rating buttons")
+            fourStars.waitForExistence(timeout: 5), "the rating ladder did not open")
         fourStars.tap()
 
         // Group auto-advance skips the already rejected member. Select it explicitly for the

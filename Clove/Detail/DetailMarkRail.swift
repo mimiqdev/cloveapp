@@ -2,6 +2,10 @@ import CloveCore
 import SwiftUI
 
 /// Regular-width marking stays beside the stage, including while the photo's chrome is hidden.
+///
+/// The rail keeps its direct-manipulation quick-rating ladder, which fills from the bottom on a
+/// tap or a drag, and composes the marking family's shared Reject and Label actions below it in
+/// one glass column (owner decision, 2026-11-13, #227). No action is duplicated.
 struct DetailMarkRail: View {
     let marks: PhotoMarks
     let settings: AppSettings
@@ -20,18 +24,22 @@ struct DetailMarkRail: View {
                 onCommit: rate, onReject: toggleReject, onBegin: markingBegan)
             Rectangle()
                 .fill(Color.clove.separator)
-                .frame(height: 1)
-            RejectCircle(
-                isRejected: marks.isRejected, size: .pad,
-                identifier: "clove.detail.rail.reject", onToggle: toggleReject
+                .frame(width: 48, height: 1)
+            MarkRejectAction(
+                isRejected: marks.isRejected, identifier: "clove.detail.rail.reject",
+                onToggle: toggleReject
             )
             .help(marks.isRejected ? "Rejected" : "Reject")
-            LabelPicker(
-                selection: marks.isRejected ? nil : marks.label.colour,
+            .frame(width: 48, height: 40)
+            MarkLabelAction(
+                label: marks.isRejected ? nil : marks.label.colour,
                 labels: settings.availableLabels.map { Optional($0) },
                 identifier: "clove.detail.rail.label",
+                pickerIdentifier: "clove.detail.rail.label",
                 onPick: { label($0.map { ColourLabel(colour: $0) } ?? .clear) },
-                axis: .vertical, isNeutral: marks.isRejected)
+                onBegin: markingBegan
+            )
+            .frame(width: 48, height: 40)
             Spacer(minLength: 0)
         }
         .padding(18)
