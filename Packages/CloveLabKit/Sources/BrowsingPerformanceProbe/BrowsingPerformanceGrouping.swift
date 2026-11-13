@@ -131,24 +131,30 @@ enum BrowsingPerformanceGrouping {
         var failures: [String: Int] = [:]
         var visionCount = 0
         var hashOnlyCount = 0
-        for await result in await pipeline.run(requests) {
-            switch result.outcome {
-            case .features(let features):
-                samples.append(watch.milliseconds)
-                if features.print != nil {
-                    visionCount += 1
-                } else if features.differenceHash != nil {
-                    hashOnlyCount += 1
-                }
-                if let photo = photoByRequest[result.request] {
-                    await similarity?.settle(.features(features), for: photo)
-                }
-            case .unavailable(let reason):
-                failures[reason.rawValue, default: 0] += 1
-                if let photo = photoByRequest[result.request] {
-                    await similarity?.settle(.unavailable, for: photo)
+        do {
+            for await result in await pipeline.run(requests) {
+                try Task.checkCancellation()
+                switch result.outcome {
+                case .features(let features):
+                    samples.append(watch.milliseconds)
+                    if features.print != nil {
+                        visionCount += 1
+                    } else if features.differenceHash != nil {
+                        hashOnlyCount += 1
+                    }
+                    if let photo = photoByRequest[result.request] {
+                        await similarity?.settle(.features(features), for: photo)
+                    }
+                case .unavailable(let reason):
+                    failures[reason.rawValue, default: 0] += 1
+                    if let photo = photoByRequest[result.request] {
+                        await similarity?.settle(.unavailable, for: photo)
+                    }
                 }
             }
+        } catch {
+            await pipeline.close()
+            throw error
         }
         await pipeline.close()
         let status = await pipeline.featurePrintStatus
@@ -173,17 +179,22 @@ enum BrowsingPerformanceGrouping {
             cache: featureCache, sharedPreviewCache: thumbnailCache)
         var samples: [Double] = []
         var failures: [String: Int] = [:]
-        for request in requests {
-            try Task.checkCancellation()
-            let watch = Stopwatch()
-            guard let result = await pipeline.features(for: request) else {
-                failures["no result", default: 0] += 1
-                continue
+        do {
+            for request in requests {
+                try Task.checkCancellation()
+                let watch = Stopwatch()
+                guard let result = await pipeline.features(for: request) else {
+                    failures["no result", default: 0] += 1
+                    continue
+                }
+                switch result.outcome {
+                case .features: samples.append(watch.milliseconds)
+                case .unavailable(let reason): failures[reason.rawValue, default: 0] += 1
+                }
             }
-            switch result.outcome {
-            case .features: samples.append(watch.milliseconds)
-            case .unavailable(let reason): failures[reason.rawValue, default: 0] += 1
-            }
+        } catch {
+            await pipeline.close()
+            throw error
         }
         await pipeline.close()
         report.distribution(

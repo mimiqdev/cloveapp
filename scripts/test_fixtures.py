@@ -371,10 +371,8 @@ class SetTests(unittest.TestCase):
         )
         for path in self.listing():
             if path.endswith(".CR3"):
-                self.assertEqual(
-                    b"raw bytes",
-                    open(os.path.join(self.output, "demo", path), "rb").read(),
-                )
+                with open(os.path.join(self.output, "demo", path), "rb") as handle:
+                    self.assertEqual(b"raw bytes", handle.read())
 
     def test_rejects_a_repeat_without_an_indexed_destination(self):
         document = self.document(

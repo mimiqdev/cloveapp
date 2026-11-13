@@ -17,7 +17,7 @@ Both use only the Python standard library and run with `/usr/bin/python3`.
 
 ```sh
 mise run fixtures-fetch   # scripts/fetch-fixtures: about 165 MB, once per machine
-mise run fixtures-sets    # fetch, then scripts/make-fixture-sets: about 1 GB of set folders
+mise run fixtures-sets    # fetch, then scripts/make-fixture-sets; repeated files use hard links when possible
 mise run test-fixtures    # scripts/test_fixtures.py: logic-only tests, no network
 ```
 
@@ -44,6 +44,10 @@ next to the project.
 `files/` holds only what `fixtures/manifest.json` lists. A file that fails its
 checksum is deleted and downloaded again; if the new download still does not
 match, the run fails with a message naming the file and nothing is kept.
+
+Repeated entries use hard links when the cache and set filesystem support them,
+with a copy fallback. The `browsing-2000` set uses about 35 MB of new disk space
+in the shared APFS cache, but about 20 GiB when copied without links.
 
 ## What is downloaded, and why
 
@@ -116,6 +120,7 @@ every run, so the file list is the same every time.
 | `card-basic` | An SD-card layout with `DCIM/100CANON` and `DCIM/101CANON`: two RAW+JPG pairs with a shared base name, a standalone JPEG, HEIC and DNG, an XMP sidecar, AppleDouble `._` files, `.DS_Store` and `.Trashes/`, an unsupported `.MOV` and `.txt`, and an existing `_Rejected/` folder holding one photo. | C2 scanning and pairing, P0-01 |
 | `xmp-interop` | One RAW per sidecar style, in a folder per style: Lightroom, Capture One, Photo Mechanic, unknown namespace, orange label, pink label, rating −1, empty, empty description, malformed, and a RAW+JPG pair sharing one sidecar. | C3, S3, P0-07 |
 | `name-collision` | Active photos whose names already exist in `_Rejected`, including a RAW+JPG pair and its XMP, so Move rejects must add a suffix instead of overwriting. | C6, P0-10 |
+| `browsing-2000` | Exactly 2,000 logical photos and 4,000 image files: ARW+JPEG, ARW+HIF, ARW+JPEG+HIF, and standalone DNG, JPEG, and HEIC. Repeated sources share capture metadata and pixels for a repeatable load set. Its hidden `.clove-fixture.json` records the definition digest, source hashes, and file count. | Q3 browsing performance |
 | `formats` | One file per format, flat. | format detection, decode tests |
 
 `fixtures/xmp/README.md` explains what each hand-written sidecar tests.
@@ -165,6 +170,18 @@ larger one that does not.
   files need macOS. Downloads and sets that copy files still work elsewhere.
 - **The cache is on a disconnected drive** — point `CLOVE_FIXTURES_DIR` at a
   local folder and run both scripts again.
+
+## Repeating files and recording identity
+
+Set `"repeat": N` on a `from` entry and put `{index}` in its `to` path. The
+builder replaces the placeholder with a four-digit number starting at `0001`.
+Use the same index for companions so they form one logical photo. Repeated
+entries use hard links when possible, then fall back to copies.
+
+Set `"identity": true` on a set to write `.clove-fixture.json`. The hidden file
+contains the canonical set-definition SHA-256, every referenced manifest
+source's pinned SHA-256, and the expanded file count. Clove Lab reads this file
+for fixture identity and validates the production scan's file count.
 
 ## Rules
 

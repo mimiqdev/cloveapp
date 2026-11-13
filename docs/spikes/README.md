@@ -31,6 +31,11 @@ checklist labels, and the report JSON `spike` field and export file names.
 | S7 | `FoldState/` | `FoldStateProbe` |
 | S8 | `RAWDisplay/` | `RAWDisplayProbe` |
 
+Q3 is a measurement task, not a spike. Its code lives in
+`CloveLab/Probes/BrowsingPerformance/` and `BrowsingPerformanceProbe`, and its
+report ID and export name use `Q3`. See
+[the browsing measurement guide](../browsing-performance.md).
+
 Each module's test target is its name plus `Tests`. Shared report tooling lives
 in `LabSupport` and `LabSupportTests`.
 
@@ -113,7 +118,7 @@ Every spike writes one JSON file per run. The file name is
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `schemaVersion` | number | `1` for this schema; changes when a field does. |
-| `spike` | string | Spike identifier, `S0`–`S8`. |
+| `spike` | string | Spike identifier `S0`–`S8`, or a measurement task identifier such as `Q3`. |
 | `createdAt` | string | ISO 8601 UTC instant the report was produced. |
 | `device.modelIdentifier` | string | Hardware model, for example `iPhone18,2`. |
 | `device.systemName` | string | `iOS`. |

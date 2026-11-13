@@ -59,27 +59,32 @@ enum BrowsingPerformanceImages {
         let pipeline = DetailPipeline()
         var cold: [Double] = []
         var coldFailures: [String: Int] = [:]
-        for request in requests {
-            try Task.checkCancellation()
-            let watch = Stopwatch()
-            let result = try await pipeline.preview(for: request)
-            if decodedBytes(result) != nil {
-                cold.append(watch.milliseconds)
-            } else {
-                coldFailures[failureReason(result), default: 0] += 1
-            }
-        }
         var warm: [Double] = []
         var warmFailures: [String: Int] = [:]
-        for request in requests {
-            try Task.checkCancellation()
-            let watch = Stopwatch()
-            let result = try await pipeline.preview(for: request)
-            if decodedBytes(result) != nil {
-                warm.append(watch.milliseconds)
-            } else {
-                warmFailures[failureReason(result), default: 0] += 1
+        do {
+            for request in requests {
+                try Task.checkCancellation()
+                let watch = Stopwatch()
+                let result = try await pipeline.preview(for: request)
+                if decodedBytes(result) != nil {
+                    cold.append(watch.milliseconds)
+                } else {
+                    coldFailures[failureReason(result), default: 0] += 1
+                }
             }
+            for request in requests {
+                try Task.checkCancellation()
+                let watch = Stopwatch()
+                let result = try await pipeline.preview(for: request)
+                if decodedBytes(result) != nil {
+                    warm.append(watch.milliseconds)
+                } else {
+                    warmFailures[failureReason(result), default: 0] += 1
+                }
+            }
+        } catch {
+            await pipeline.close()
+            throw error
         }
         await pipeline.close()
         report.distribution(
@@ -115,7 +120,13 @@ enum BrowsingPerformanceImages {
                 set: rawSets[index + 1], configuration: configuration, native: true)
             let firstPipeline = DetailPipeline()
             let firstTask = Task { try await firstPipeline.image(for: first) }
-            try await Task.sleep(for: .milliseconds(100))
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+            } catch {
+                firstTask.cancel()
+                await firstPipeline.close()
+                throw error
+            }
             let drainWatch = Stopwatch()
             firstTask.cancel()
             // Closing waits for an uncancellable native read that already started. This is
@@ -124,37 +135,42 @@ enum BrowsingPerformanceImages {
             let drainMilliseconds = drainWatch.milliseconds
 
             let secondPipeline = DetailPipeline()
-            let watch = Stopwatch()
-            let result = try await secondPipeline.image(for: second)
-            let elapsed = watch.milliseconds
-            let secondSucceeded = decodedBytes(result) != nil
-            if secondSucceeded {
-                raw.append(elapsed)
-            } else {
-                failures[failureReason(result), default: 0] += 1
-            }
-
-            var firstWasCancelled = false
             do {
-                _ = try await firstTask.value
-            } catch is CancellationError {
-                firstWasCancelled = true
-            } catch {
-                // A failed first render did not establish a cancelled-render wait.
-            }
-            if secondSucceeded && firstWasCancelled {
-                cancelDrain.append(drainMilliseconds)
-                includingCancel.append(drainMilliseconds + elapsed)
-            } else if !firstWasCancelled {
-                cancelNotObserved += 1
-            }
-
-            if secondSucceeded {
-                let warmWatch = Stopwatch()
-                let cached = try await secondPipeline.image(for: second)
-                if decodedBytes(cached) != nil {
-                    warm.append(warmWatch.milliseconds)
+                let watch = Stopwatch()
+                let result = try await secondPipeline.image(for: second)
+                let elapsed = watch.milliseconds
+                let secondSucceeded = decodedBytes(result) != nil
+                if secondSucceeded {
+                    raw.append(elapsed)
+                } else {
+                    failures[failureReason(result), default: 0] += 1
                 }
+
+                var firstWasCancelled = false
+                do {
+                    _ = try await firstTask.value
+                } catch is CancellationError {
+                    firstWasCancelled = true
+                } catch {
+                    // A failed first render did not establish a cancelled-render wait.
+                }
+                if secondSucceeded && firstWasCancelled {
+                    cancelDrain.append(drainMilliseconds)
+                    includingCancel.append(drainMilliseconds + elapsed)
+                } else if !firstWasCancelled {
+                    cancelNotObserved += 1
+                }
+
+                if secondSucceeded {
+                    let warmWatch = Stopwatch()
+                    let cached = try await secondPipeline.image(for: second)
+                    if decodedBytes(cached) != nil {
+                        warm.append(warmWatch.milliseconds)
+                    }
+                }
+            } catch {
+                await secondPipeline.close()
+                throw error
             }
             await secondPipeline.close()
             pairsMeasured += 1

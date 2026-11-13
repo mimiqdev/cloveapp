@@ -22,6 +22,10 @@ public final class LabResidentSampler: @unchecked Sendable {
         timer.resume()
     }
 
+    deinit {
+        timer.cancel()
+    }
+
     /// The greatest sampled process RSS so far, in bytes.
     public var peak: UInt64 {
         sample()
