@@ -34,6 +34,9 @@ struct MarkCapsule: View {
     /// Opens the label picker (PRD Marking rules).
     let onLabel: () -> Void
 
+    /// Reports the label button's frame in ``TapPickerSpace`` for anchored floating pickers.
+    var onLabelAnchorChange: ((CGRect) -> Void)? = nil
+
     var body: some View {
         HStack(spacing: 12) {
             RejectCircle(
@@ -46,6 +49,11 @@ struct MarkCapsule: View {
             hairline
             Spacer(minLength: 0)
             LabelCircle(label: label, identifier: "\(identifier).label", onTap: onLabel)
+                .onGeometryChange(for: CGRect.self) { proxy in
+                    proxy.frame(in: .named(TapPickerSpace.name))
+                } action: { rect in
+                    onLabelAnchorChange?(rect)
+                }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

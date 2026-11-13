@@ -31,7 +31,7 @@ struct DetailMarkRail: View {
                 labels: settings.availableLabels.map { Optional($0) },
                 identifier: "clove.detail.rail.label",
                 onPick: { label($0.map { ColourLabel(colour: $0) } ?? .clear) },
-                axis: .vertical, isNeutral: marks.isRejected)
+                axis: .vertical, showsGlass: false, isNeutral: marks.isRejected)
             Spacer(minLength: 0)
         }
         .padding(18)

@@ -82,16 +82,17 @@ private struct ToolbarRatingButton: View {
             arrowEdge: verticalEdge == .leading
                 ? .leading : (verticalEdge == .trailing ? .trailing : .bottom)
         ) {
-            VerticalStarBar(
-                rating: rating, enabledRatings: settings.enabledRatings,
-                size: .duo, showsRejectChip: false, identifier: "clove.duo.stars",
-                onPreview: { dragRating = $0 },
-                onCommit: {
-                    rate($0)
-                    dragRating = nil
-                    showsStars = false
-                }, onReject: {}, onBegin: markingBegan
-            )
+            RatingPicker(
+                selection: rating,
+                enabledRatings: settings.enabledRatings,
+                allowsTapCurrentToClear: dragRating == nil,
+                axis: verticalEdge == nil ? .horizontal : .vertical,
+                identifier: "clove.duo.stars"
+            ) { chosen in
+                rate(chosen)
+                dragRating = nil
+                showsStars = false
+            }
             .presentationCompactAdaptation(.popover)
             .presentationBackgroundInteraction(.enabled)
         }
@@ -128,11 +129,13 @@ private struct ToolbarLabelButton: View {
             LabelPicker(
                 selection: marks.label.colour,
                 labels: [nil] + settings.availableLabels.map { Optional($0) },
-                identifier: "clove.duo.labels"
-            ) {
-                label($0.map { ColourLabel(colour: $0) } ?? .clear)
-                showsLabels = false
-            }
+                identifier: "clove.duo.labels",
+                onPick: {
+                    label($0.map { ColourLabel(colour: $0) } ?? .clear)
+                    showsLabels = false
+                },
+                axis: verticalEdge == nil ? .horizontal : .vertical
+            )
             .presentationCompactAdaptation(.popover)
         }
     }
