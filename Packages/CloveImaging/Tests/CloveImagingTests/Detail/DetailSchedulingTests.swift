@@ -49,11 +49,13 @@ struct DetailSchedulingTests {
         // The second render waits for the first slot: one RAW render at a time.
         #expect(await gate.nativePaths.count == 1)
         #expect(await pipeline.activeRenderCount == 1)
+        #expect(await pipeline.nativeRAWRenderCount == 1)
         await gate.release()
         try await eventually("Second RAW render enters after release") {
             await gate.nativePaths.count == 2
         }
         #expect(await gate.maximumNativeEntries == 1)
+        #expect(await pipeline.nativeRAWRenderCount == 2)
         try await letEntriesFinish(gate, natives: 2)
         _ = try await first.value
         _ = try await second.value

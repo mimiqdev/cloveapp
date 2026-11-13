@@ -1,3 +1,4 @@
+import BrowsingPerformanceProbe
 import FolderAccessProbe
 import PreviewProbe
 import RAWDisplayProbe
@@ -32,8 +33,7 @@ struct Experiment: Identifiable {
     }
 }
 
-/// The lab probe registry. All seven probes are listed from the start, so a probe
-/// never edits this file: it replaces its own screen under `CloveLab/Probes/<Topic>/`.
+/// The lab probe registry. Each probe owns a screen under `CloveLab/Probes/<Topic>/`.
 @MainActor
 enum Experiments {
     static let all: [Experiment] = [
@@ -47,5 +47,8 @@ enum Experiments {
         Experiment(ScanProbe.descriptor, topic: "Scan") { ScanView() },
         Experiment(FoldStateProbe.descriptor, topic: "Fold state") { FoldStateView() },
         Experiment(RAWDisplayProbe.descriptor, topic: "RAW display") { RAWDisplayView() },
+        Experiment(BrowsingPerformanceProbe.descriptor, topic: "Browsing performance") {
+            BrowsingPerformanceView()
+        },
     ]
 }
