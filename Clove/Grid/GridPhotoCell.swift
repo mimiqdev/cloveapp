@@ -130,7 +130,7 @@ private struct GridTile: View {
     let companions: GridCompanions
     let isUnavailable: Bool
     let isSelected: Bool
-    /// The expanded Duo's group-member pane rings the member on screen (#198).
+    /// The expanded Duo's split grid rings the member on screen (owner decision, #225).
     var isCurrent = false
     let isSelecting: Bool
     let openGroup: (GroupID) -> Void
