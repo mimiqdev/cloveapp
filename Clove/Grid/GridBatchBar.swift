@@ -13,9 +13,12 @@ struct GridBatchBar: View {
             rating: isRejected ? .unrated : commonRating,
             // Batch Reject is main's set-only action. Keep it unselected so it never
             // advertises a toggle that the existing batch operation cannot perform.
-            label: isRejected ? nil : commonLabel, isRejected: false,
+            label: isRejected ? nil : batchLabelState.selection, isRejected: false,
             enabledRatings: store.settings.enabledRatings,
             identifier: "clove.grid.batch", labelPickerIdentifier: "clove.grid.batch.labels",
+            // A mixed batch never highlights one sample photo's value (#227, #229).
+            isMixed: batchLabelState.isMixed,
+            allowsTapCurrentToClear: false,
             onRate: { apply(.rating($0)) }, onReject: { apply(.reject) },
             onLabel: { apply(.label($0.map { ColourLabel(colour: $0) } ?? .clear)) }
         )
@@ -39,11 +42,12 @@ struct GridBatchBar: View {
         return first
     }
 
-    private var commonLabel: LabelColour? {
-        guard let first = browsing.batchTargets.first?.marks.label,
-            browsing.batchTargets.allSatisfy({ $0.marks.label == first })
-        else { return nil }
-        return first.colour
+    private var batchLabelState: (selection: LabelColour?, isMixed: Bool) {
+        guard let first = browsing.batchTargets.first?.marks.label else {
+            return (nil, false)
+        }
+        let allSame = browsing.batchTargets.allSatisfy { $0.marks.label == first }
+        return allSame ? (first.colour, false) : (nil, true)
     }
 
     private func apply(_ action: BatchMarkAction) {

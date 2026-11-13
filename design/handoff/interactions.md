@@ -32,7 +32,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 | Detail | Swipe left or right | Next or previous photo in grid order (filtered order when a filter is on). |
 | Detail | **Slow vertical drag** | Relative slider from the current rating: up raises, down lowers through enabled stars, 0 and −1, one step per 60 pt with a light haptic. Reverse across the start in the same gesture. The ladder stays beside the original touch and the toolbar/rail rating preview the value; clear shows an empty ladder with `star.slash`, Reject fills the `flag.slash` chip immediately. Release commits the preview once for undo, without changing the label. |
 | Detail | **Quick swipe down** | Mode is chosen once from the first ~100 ms (starting threshold 500 pt/s downward). Three stops: starting rating, 0 at 60 pt (medium haptic), −1 at 180 pt (heavier haptic). Reverse from Reject to 0; up past the start restores the original. Unrated still passes through 0; Reject cannot lower further, and up steps −1 → 0 → enabled stars. Quick up is a slow slider. No hold or momentum. Distances and haptic strengths need device tuning. Glyphs only; stage words are VoiceOver labels. |
-| Detail | Tap the marking toolbar's reject, rating or label | Reject toggles directly. The rating action opens the quick-rating ladder: a tap picks a level, and tapping the photo's current value clears it. The label action opens the picker, and picking closes it (owner decision, 2026-11-13, #227). |
+| Detail | Tap the marking toolbar's reject, rating or label | Reject toggles directly (owner decision, 2026-11-13, #227). The rating and label actions open the shared visual tap pickers (`RatingPicker` / `LabelPicker`, #229): `star.slash` + 5 stars or `circle.slash` + color dots horizontally (`288 × 52` pt) anchored above the toolbar by default (or vertically `52 × 288` pt where space calls for it); picking applies without clearing the other mark attribute and closes, and tapping outside dismisses without toggling detail chrome. On single-photo controls, tapping the already-selected star clears the rating; batch controls clear through the picker's Clear action. |
 | Detail | Single tap on the photo | Hides or shows the chrome (marking toolbar, filmstrip, top bar buttons). |
 | Detail | Double-tap or pinch | 100% zoom at the tapped point. The chrome hides. Double-tap again to fit. |
 | Detail | Tap a filmstrip thumbnail | Jumps to that photo. Tapping a collapsed group jumps to its first photo, and the group expands in place in the filmstrip. A grid stack opens the same detail view on the first unmarked member, or the first member if all are marked. |
@@ -66,6 +66,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 ## Duo cover (folded)
 
 - The same as iPhone. Back, Filter and Move Rejects are in the side rail next to the status bar, following Apple's Duo guidance.
+- Tapping Rating or Label in the vertical side toolbar opens the shared visual `RatingPicker` (`5..1, Clear` top to bottom) or `LabelPicker` popover alongside the toolbar button; picking or tapping outside dismisses. Dragging from the Rating button still scrubs ratings directly.
 
 ## Duo expanded (unfolded, landscape)
 

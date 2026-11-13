@@ -70,18 +70,11 @@ struct GridScreen: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting {
                     VStack(spacing: 8) {
-                        Button {
+                        GridBatchRenameButton(
+                            disabled: browsing.batchTargets.isEmpty || !browsing.canMark
+                        ) {
                             renameFlow = BatchRenameFlow(browsing: browsing)
-                        } label: {
-                            Text("Rename…")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color.clove.accent)
-                                .padding(.horizontal, 20).padding(.vertical, 10)
-                                .cloveGlass(in: Capsule())
                         }
-                        .buttonStyle(.plain)
-                        .disabled(browsing.batchTargets.isEmpty || !browsing.canMark)
-                        .accessibilityIdentifier("clove.grid.batch.rename")
                         GridBatchBar(browsing: browsing, cells: cells)
                             .disabled(!browsing.canMark)
                     }
@@ -89,6 +82,7 @@ struct GridScreen: View {
                     .padding(.vertical, 8)
                 }
             }
+            .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
             .overlay(alignment: .bottom) {
                 if !(usesDock && browsing.state.route == .detail),
                     let message = browsing.failureToastMessage
@@ -579,4 +573,54 @@ struct GridScreen: View {
             browsing.openPhoto(first)
         }
     }
+
+    private var tapPickerDismissTrigger: GridTapPickerDismissTrigger {
+        GridTapPickerDismissTrigger(
+            isSelecting: isSelecting,
+            canMark: browsing.canMark,
+            isInDetail: browsing.state.route == .detail,
+            selection: browsing.state.selection,
+            filter: browsing.state.filter,
+            labelFilter: browsing.labelFilter,
+            hasBatchTargets: !browsing.batchTargets.isEmpty,
+            hasMoveSheet: moveSheet != nil,
+            hasRenameFlow: renameFlow != nil,
+            showsFilters: showsFilters)
+    }
+}
+
+private struct GridBatchRenameButton: View {
+    let disabled: Bool
+    let action: () -> Void
+    @Environment(\.tapPickerController) private var tapPicker
+
+    var body: some View {
+        let obscured = tapPicker?.isPresented == true
+        Button(action: action) {
+            Text("Rename…")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.clove.accent)
+                .padding(.horizontal, 20).padding(.vertical, 10)
+                .cloveGlass(in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(obscured ? 0 : 1)
+        .allowsHitTesting(!obscured)
+        .accessibilityHidden(obscured)
+        .accessibilityIdentifier("clove.grid.batch.rename")
+    }
+}
+
+private struct GridTapPickerDismissTrigger: Equatable {
+    let isSelecting: Bool
+    let canMark: Bool
+    let isInDetail: Bool
+    let selection: Set<PhotoIdentity>
+    let filter: PhotoFilter
+    let labelFilter: LabelColour?
+    let hasBatchTargets: Bool
+    let hasMoveSheet: Bool
+    let hasRenameFlow: Bool
+    let showsFilters: Bool
 }

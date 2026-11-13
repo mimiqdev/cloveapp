@@ -1241,7 +1241,9 @@ final class CloveFlowTests: XCTestCase {
         rating.tap()
         let stars = element(app, "clove.duo.stars")
         XCTAssertTrue(stars.waitForExistence(timeout: 5))
-        stars.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertGreaterThan(stars.frame.height, stars.frame.width)
+        XCTAssertTrue(element(app, "clove.duo.stars.clear").exists)
+        element(app, "clove.duo.stars.3").tap()
         XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
         let start = rating.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -60)))
@@ -1255,17 +1257,40 @@ final class CloveFlowTests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), stars))
         element(app, "clove.duo.label").tap()
+        let labels = element(app, "clove.duo.labels")
         XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(labels.frame.height, labels.frame.width)
         capture("duo-cover-labels")
         element(app, "clove.duo.labels.green").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "label CONTAINS[c] %@", "green"),
                 element(app, "clove.duo.label")))
+        // Explicit Clear in RatingPicker clears stars while preserving the green label.
+        rating.tap()
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        element(app, "clove.duo.stars.clear").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "0 stars"), rating))
+        XCTAssertTrue(
+            element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
+        // Undo is single-step: it restores 3 stars while keeping the green label.
         element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
+        XCTAssertTrue(
+            element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
+        // Clearing the label via None keeps 3 stars, and Undo restores the green label.
+        element(app, "clove.duo.label").tap()
+        XCTAssertTrue(element(app, "clove.duo.labels.none").waitForExistence(timeout: 5))
+        element(app, "clove.duo.labels.none").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "NOT (label CONTAINS[c] %@)", "green"),
+                element(app, "clove.duo.label")))
+        XCTAssertTrue(rating.label.contains("3 stars"))
+        element(app, "clove.duo.undo").tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "label CONTAINS[c] %@", "green"),
                 element(app, "clove.duo.label")))
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
@@ -1331,6 +1356,156 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02679.ARW")
         XCTAssertFalse(zoom.label.hasSuffix("100%"))
         capture("detail-focus-region-tiny-unavailable")
+    }
+
+    @MainActor
+    func testTapPickersSelectionClearDismissAndOrientation() {
+        let app = launchSample()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .portrait
+        openLibrary(app)
+
+        // Turn off auto-advance so clearing and labelling stay on the same photo.
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        turnOffAutoAdvance(app)
+        element(app, "clove.nav.back").tap()
+
+        // 1. Detail tap color picker (iPhone): horizontal geometry, outside-tap dismissal, select, clear, landscape.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            element(app, "clove.grid.photo.mmq02680").tap()
+            let labelButton = element(app, "clove.detail.capsule.label")
+            let capsule = element(app, "clove.detail.capsule")
+            XCTAssertTrue(labelButton.waitForExistence(timeout: 5))
+            element(app, "clove.detail.capsule.stars.3").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+
+            labelButton.tap()
+            let picker = element(app, "clove.detail.labels")
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            XCTAssertGreaterThan(picker.frame.width, picker.frame.height)
+            XCTAssertGreaterThanOrEqual(picker.frame.width, 280)
+            XCTAssertGreaterThanOrEqual(picker.frame.height, 48)
+            XCTAssertLessThanOrEqual(picker.frame.maxX, app.frame.maxX)
+
+            // Outside tap dismisses without toggling chrome or changing marks.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.3)).tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCTAssertTrue(capsule.exists)
+            XCTAssertEqual(labelButton.label, "Label")
+
+            // Pick green, verify selection ring / state, then clear via None while keeping 3 stars.
+            labelButton.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            element(app, "clove.detail.labels.green").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCTAssertEqual(labelButton.label, "Label, Green")
+
+            labelButton.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "clove.detail.labels.green").isSelected)
+            element(app, "clove.detail.labels.none").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCTAssertEqual(labelButton.label, "Label")
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "3 stars"), capsule))
+
+            // Rotate to landscape: floating picker stays inside safe bounds and dismisses on outside tap.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            labelButton.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(picker.frame.minX, 0)
+            XCTAssertLessThanOrEqual(picker.frame.maxX, app.frame.maxX)
+            XCTAssertGreaterThanOrEqual(picker.frame.minY, 0)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.25)).tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCUIDevice.shared.orientation = .portrait
+
+            element(app, "clove.nav.back").tap()
+        }
+
+        // 2. Mixed batch selection: mixed labels must NOT highlight None, and outside tap dismisses.
+        let ratedAndRed = element(app, "clove.grid.photo.mmq02678")
+        XCTAssertTrue(ratedAndRed.waitForExistence(timeout: 5))
+        ratedAndRed.press(forDuration: 0.6)
+        element(app, "clove.grid.photo.mmq02680").tap()
+
+        element(app, "clove.grid.batch.label").tap()
+        let batchPicker = element(app, "clove.grid.batch.labels")
+        XCTAssertTrue(batchPicker.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.grid.batch.labels.none").isSelected)
+        XCTAssertFalse(element(app, "clove.grid.batch.labels.red").isSelected)
+        element(app, "clove.grid").coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.3))
+            .tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
+
+        element(app, "clove.grid.batch.label").tap()
+        XCTAssertTrue(batchPicker.waitForExistence(timeout: 5))
+        element(app, "clove.grid.batch.labels.none").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
+        XCTAssertFalse(ratedAndRed.label.contains("Red"))
+        XCTAssertTrue(ratedAndRed.label.contains("5 stars"))
+    }
+
+    @MainActor
+    func testCaptureTapPickerReferencesWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_TAP_PICKERS"] == "1")
+        defer { XCUIDevice.shared.orientation = .portrait }
+
+        // 1. Design gallery across Light, Dark, and Nord (values 0–5, rejected, disabled, mixed, vertical, all labels).
+        let gallery = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
+        for theme in ["light", "dark", "nord"] {
+            element(gallery, "clove.design.gallery.theme.\(theme)").tap()
+            let scroll = gallery.scrollViews.firstMatch
+            let ratingAnchor = element(gallery, "clove.mark.ratingPicker")
+            for _ in 0..<4 where !ratingAnchor.isHittable { scroll.swipeUp() }
+            capture("gallery-tap-pickers-rating-\(theme)")
+            let labelAnchor = element(gallery, "clove.design.gallery.labelPicker.vertical")
+            for _ in 0..<4 where !labelAnchor.isHittable { scroll.swipeUp() }
+            capture("gallery-tap-pickers-label-\(theme)")
+            for _ in 0..<6 where !element(gallery, "clove.design.gallery.theme.\(theme)").isHittable
+            {
+                scroll.swipeDown()
+            }
+        }
+        gallery.terminate()
+
+        // 2. Detail + Mixed Batch on real screen (Light, Dark, Portrait & Landscape).
+        for theme in ["light", "dark"] {
+            let app = launchSample()
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            if theme == "light" {
+                let rated = element(app, "clove.grid.photo.mmq02678")
+                rated.press(forDuration: 0.6)
+                element(app, "clove.grid.photo.mmq02680").tap()
+                element(app, "clove.grid.batch.label").tap()
+                XCTAssertTrue(element(app, "clove.grid.batch.labels").waitForExistence(timeout: 5))
+                capture("grid-batch-labels-mixed-\(theme)")
+                element(app, "clove.grid").coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.65, dy: 0.3)
+                )
+                .tap()
+                element(app, "clove.grid.batch.done").tap()
+            }
+            element(app, "clove.grid.photo.mmq02680").tap()
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                element(app, "clove.detail.capsule.label").tap()
+                XCTAssertTrue(element(app, "clove.detail.labels").waitForExistence(timeout: 5))
+                capture("detail-labels-portrait-\(theme)")
+                if theme == "light" {
+                    XCUIDevice.shared.orientation = .landscapeLeft
+                    XCTAssertTrue(element(app, "clove.detail.labels").waitForExistence(timeout: 5))
+                    capture("detail-labels-landscape-\(theme)")
+                    XCUIDevice.shared.orientation = .portrait
+                }
+            } else {
+                capture("ipad-rail-\(theme)")
+            }
+            app.terminate()
+        }
     }
 
     @MainActor

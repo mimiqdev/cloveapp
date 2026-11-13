@@ -30,6 +30,7 @@ struct DesignGalleryScreen: View {
 
     /// Sample ratings and labels for the states below.
     private let threeStars = (Rating(rawValue: 3) ?? .unrated)
+    private let fiveStars = (Rating(rawValue: 5) ?? .unrated)
 
     /// A 4★ from another app, which still shows when 4 is turned off for input (PRD Enabled
     /// rating levels).
@@ -55,6 +56,7 @@ struct DesignGalleryScreen: View {
                         ratingValues
                         railColumn
                         starBar
+                        ratingPicker
                         labelPicker
                         toast
                         banner
@@ -74,6 +76,7 @@ struct DesignGalleryScreen: View {
                 .toolbarColorScheme(theme.appearance.colorScheme, for: .navigationBar)
             }
         }
+        .tapPickerContainer()
         .environment(\.cloveTheme, theme)
         .environment(\.colorScheme, theme.appearance.colorScheme)
         .preferredColorScheme(theme.appearance.colorScheme)
@@ -234,15 +237,60 @@ struct DesignGalleryScreen: View {
         }
     }
 
-    /// The label picker with the five default labels and with the extended ones (components.md).
+    /// The shared tap-rating picker across values, disabled levels, mixed and vertical orientation.
+    private var ratingPicker: some View {
+        section("Tap rating picker") {
+            VStack(alignment: .leading, spacing: 12) {
+                RatingPicker(
+                    selection: .unrated,
+                    identifier: "clove.design.gallery.ratingPicker.unrated", onPick: noRate)
+                RatingPicker(
+                    selection: threeStars,
+                    identifier: "clove.mark.ratingPicker", onPick: noRate)
+                RatingPicker(
+                    selection: fiveStars,
+                    identifier: "clove.design.gallery.ratingPicker.five", onPick: noRate)
+                RatingPicker(
+                    selection: .rejected,
+                    identifier: "clove.design.gallery.ratingPicker.rejected", onPick: noRate)
+                RatingPicker(
+                    selection: fourStars, enabledRatings: oddRatings,
+                    identifier: "clove.design.gallery.ratingPicker.disabledLevels", onPick: noRate)
+                RatingPicker(
+                    selection: .unrated, isMixed: true,
+                    identifier: "clove.design.gallery.ratingPicker.mixed", onPick: noRate)
+                HStack(alignment: .top, spacing: 16) {
+                    RatingPicker(
+                        selection: .unrated, axis: .vertical,
+                        identifier: "clove.design.gallery.ratingPicker.vertical.unrated",
+                        onPick: noRate)
+                    RatingPicker(
+                        selection: threeStars, axis: .vertical,
+                        identifier: "clove.design.gallery.ratingPicker.vertical", onPick: noRate)
+                }
+            }
+        }
+    }
+
+    /// The label picker with default labels, mixed/none states, extended labels and vertical layout.
     private var labelPicker: some View {
         section("Label picker") {
             VStack(alignment: .leading, spacing: 12) {
                 LabelPicker(
                     selection: .green, identifier: "clove.mark.labelPicker", onPick: { _ in })
                 LabelPicker(
+                    selection: nil, identifier: "clove.design.gallery.labelPicker.none",
+                    onPick: { _ in })
+                LabelPicker(
+                    selection: nil, isMixed: true,
+                    identifier: "clove.design.gallery.labelPicker.mixed", onPick: { _ in })
+                LabelPicker(
                     selection: .orange, labels: [nil] + LabelColour.allCases,
                     identifier: "clove.design.gallery.labelPicker.extended", onPick: { _ in })
+                LabelPicker(
+                    selection: .blue,
+                    identifier: "clove.design.gallery.labelPicker.vertical",
+                    onPick: { _ in }, axis: .vertical)
             }
         }
     }
