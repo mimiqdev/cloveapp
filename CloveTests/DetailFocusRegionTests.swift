@@ -51,6 +51,65 @@ struct DetailFocusRegionTests {
         #expect(control.center.y == 140)
     }
 
+    @Test func verticalMarkingSwipeBeginningOverExpandedEyeTargetStillMarks() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        preview.setImage(try testPixels(width: 3000, height: 2000))
+        let eye = makeRegion(
+            kind: .eye,
+            normalized: NormalizedRegion(x: 0.5, y: 0.5, width: 0.005, height: 0.005))
+        preview.setFocusRegions([eye])
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+        let control = try #require(findRegionControl(in: preview))
+        #expect(control.frame.width >= 44 && control.frame.height >= 44)
+        let pan = try #require(
+            preview.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        #expect(
+            preview.gestureRecognizer(
+                pan, shouldReceive: DetailRegionTouch(view: control)))
+        var marked: Rating?
+        preview.onMarkingSwipe = { marked = $0 }
+        let swipe = DetailRegionPan()
+        swipe.travel = CGPoint(x: 0, y: -15)
+        #expect(preview.gestureRecognizerShouldBegin(swipe))
+        preview.handleMarkingPan(swipe)
+        swipe.sampleState = .changed
+        swipe.travel = CGPoint(x: 0, y: -130)
+        preview.handleMarkingPan(swipe)
+        swipe.sampleState = .ended
+        preview.handleMarkingPan(swipe)
+        #expect(marked != nil)
+    }
+
+    @Test func horizontalNavigationSwipeBeginningOverARegionStillNavigates() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        preview.hasNext = true
+        preview.setImage(try testPixels(width: 3000, height: 2000))
+        preview.setFocusRegions([
+            makeRegion(normalized: NormalizedRegion(x: 0.4, y: 0.4, width: 0.2, height: 0.2))
+        ])
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+        let control = try #require(findRegionControl(in: preview))
+        let pan = try #require(
+            preview.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        #expect(
+            preview.gestureRecognizer(
+                pan, shouldReceive: DetailRegionTouch(view: control)))
+        var navigation: DetailEdgeZone?
+        preview.onEdgeTap = { navigation = $0 }
+        let swipe = DetailRegionPan()
+        swipe.travel = CGPoint(x: -15, y: 0)
+        #expect(preview.gestureRecognizerShouldBegin(swipe))
+        preview.handleMarkingPan(swipe)
+        swipe.sampleState = .changed
+        swipe.travel = CGPoint(x: -180, y: 0)
+        preview.handleMarkingPan(swipe)
+        swipe.sampleState = .ended
+        preview.handleMarkingPan(swipe)
+        #expect(navigation == .next)
+    }
+
     @Test func earlyAutofocusAppearsWhileFacesArePending() {
         let first = photo("first")
         let autofocus = RegionSharpnessPathResult.regions([makeEvidence(.cameraAutofocus)])
@@ -113,9 +172,12 @@ struct DetailFocusRegionTests {
         #expect(state.status == "Analysis unavailable")
     }
 
-    private func makeRegion(normalized: NormalizedRegion) -> DetailFocusRegion {
+    private func makeRegion(
+        kind: SharpnessRegionKind = .cameraAutofocus,
+        normalized: NormalizedRegion
+    ) -> DetailFocusRegion {
         DetailFocusRegion(
-            id: "test-region", evidence: makeEvidence(.cameraAutofocus, normalized: normalized))
+            id: "test-region", evidence: makeEvidence(kind, normalized: normalized))
     }
 
     private func makeEvidence(
@@ -160,4 +222,30 @@ struct DetailFocusRegionTests {
         }
         return nil
     }
+}
+
+private final class DetailRegionPan: UIPanGestureRecognizer {
+    var travel: CGPoint = .zero
+    var sampleState: UIGestureRecognizer.State = .began
+
+    override var state: UIGestureRecognizer.State {
+        get { sampleState }
+        set { sampleState = newValue }
+    }
+
+    override func translation(in view: UIView?) -> CGPoint { travel }
+    override func velocity(in view: UIView?) -> CGPoint { .zero }
+}
+
+private final class DetailRegionTouch: UITouch {
+    private let touchedRegion: UIView
+
+    init(view: UIView) {
+        touchedRegion = view
+        super.init()
+    }
+
+    override var view: UIView? { touchedRegion }
+
+    override func location(in view: UIView?) -> CGPoint { touchedRegion.center }
 }

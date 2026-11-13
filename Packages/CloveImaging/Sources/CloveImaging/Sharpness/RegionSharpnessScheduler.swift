@@ -1,4 +1,17 @@
 import Foundation
+import Synchronization
+
+/// Cancelling an interactive caller retires its callback while compatible background work
+/// continues for other callers. The flag closes delivery before the cancellation actor hop.
+private final class SharpnessCallbackLifetime: Sendable {
+    private let active = Mutex(true)
+
+    func end() { active.withLock { $0 = false } }
+
+    func deliver(_ body: () -> Void) {
+        active.withLock { if $0 { body() } }
+    }
+}
 
 /// Which pool a queued analysis belongs to (#216's priority order: current photo, then its
 /// burst/similar group, then nearby/prefetch, then the remaining folder).
@@ -95,9 +108,10 @@ public actor RegionSharpnessScheduler {
         let sequence: Int
         var waiters: [CheckedContinuation<RegionSharpnessAnalysis?, Never>] = []
         var task: Task<Void, Never>?
-        /// The interactive caller's early-AF callback, attached by the call that starts the
-        /// job (#215's early delivery, passed through).
-        var onAutofocus: (@Sendable (RegionSharpnessPathResult) -> Void)?
+        /// The AF answer, once produced, and every interactive joiner still waiting for it.
+        /// Background work records the answer too, so a later current photo can receive it.
+        var autofocus: RegionSharpnessPathResult?
+        var autofocusWaiters: [@Sendable (RegionSharpnessPathResult) -> Void] = []
     }
 
     private var stages: [SharpnessAnalysisStage: StageState]
@@ -163,36 +177,55 @@ public actor RegionSharpnessScheduler {
     /// without new work, an in-flight analysis is joined (and promoted), and only a new photo
     /// starts work. Returns nil when the scheduler closed or the photo was invalidated.
     ///
-    /// `onAutofocus`, when supplied and this call starts the photo's work, receives the AF
-    /// path's result before face detection is waited on — the engine's early-AF delivery
-    /// (#215) passed through the scheduler. A call that joins in-flight or cached work gets
-    /// the same AF result in the returned analysis, without an early callback.
+    /// `onAutofocus` receives the AF path before face detection completes (#215). A current
+    /// joiner gets an already-produced answer immediately or shares the eventual early
+    /// delivery; a cached revisit gets the cached AF answer. Generation checks still suppress
+    /// callbacks from dropped work.
     public func analyzeCurrent(
         _ request: RegionSharpnessRequest,
         onAutofocus: (@Sendable (RegionSharpnessPathResult) -> Void)? = nil
     ) async -> RegionSharpnessAnalysis? {
-        guard !closed else { return nil }
+        guard !closed, !Task.isCancelled else { return nil }
         let key = resultKey(for: request)
-        if let cached = results.result(for: key) { return cached }
+        if let cached = results.result(for: key) {
+            onAutofocus?(cached.autofocus)
+            return cached
+        }
         if jobs[key] == nil {
             submit(request, priority: .current)
-            jobs[key]?.onAutofocus = onAutofocus
             pump()
         }
-        return await join(key: key, priority: .current)
+        let lifetime = SharpnessCallbackLifetime()
+        defer { lifetime.end() }
+        return await withTaskCancellationHandler {
+            guard !Task.isCancelled else { return nil }
+            return await join(key: key, priority: .current) { result in
+                lifetime.deliver { onAutofocus?(result) }
+            }
+        } onCancel: {
+            lifetime.end()
+        }
     }
 
     /// Suspends until the job settles, promoting its priority when the joiner outranks it.
-    private func join(key: SharpnessResultKey, priority: SharpnessWorkPriority) async
-        -> RegionSharpnessAnalysis?
-    {
+    private func join(
+        key: SharpnessResultKey, priority: SharpnessWorkPriority,
+        onAutofocus: (@Sendable (RegionSharpnessPathResult) -> Void)?
+    ) async -> RegionSharpnessAnalysis? {
         await withCheckedContinuation { continuation in
             guard var job = jobs[key] else {
-                continuation.resume(returning: results.result(for: key))
+                let cached = results.result(for: key)
+                if let cached { onAutofocus?(cached.autofocus) }
+                continuation.resume(returning: cached)
                 return
             }
             // Joining at a higher priority promotes the shared work (#216).
             if priority < job.priority { job.priority = priority }
+            if let autofocus = job.autofocus {
+                onAutofocus?(autofocus)
+            } else if let onAutofocus {
+                job.autofocusWaiters.append(onAutofocus)
+            }
             job.waiters.append(continuation)
             jobs[key] = job
             pump()
@@ -226,19 +259,28 @@ public actor RegionSharpnessScheduler {
     public func focus(
         current: RegionSharpnessRequest,
         group: [RegionSharpnessRequest] = [],
-        nearby: [RegionSharpnessRequest] = []
+        nearby: [RegionSharpnessRequest] = [],
+        cancellingObsolete: Bool = false
     ) {
         guard !closed else { return }
         let ranked: [(RegionSharpnessRequest, SharpnessWorkPriority)] =
             [(current, .current)] + group.map { ($0, .group) } + nearby.map { ($0, .nearby) }
         let kept = Set(ranked.map { resultKey(for: $0.0) })
-        for key in jobs.keys where !kept.contains(key) {
-            // Not part of the view the person is in now: no urgency left.
-            jobs[key]?.priority = .folder
+        for key in Array(jobs.keys) where !kept.contains(key) {
+            if cancellingObsolete {
+                drop(key: key)
+            } else {
+                // Folder-wide callers may retain background work at the lowest priority.
+                jobs[key]?.priority = .folder
+            }
         }
+        var assigned: Set<SharpnessResultKey> = []
         for (request, priority) in ranked {
             let key = resultKey(for: request)
-            if var job = jobs[key], priority < job.priority {
+            // The first occurrence is the highest rank. A photo that moved from current to
+            // group/nearby must lose its old urgency even though its work remains shared.
+            guard assigned.insert(key).inserted else { continue }
+            if var job = jobs[key] {
                 job.priority = priority
                 jobs[key] = job
             }
@@ -467,22 +509,15 @@ public actor RegionSharpnessScheduler {
         guard var job = jobs[key], job.task == nil else { return }
         let analyzer = baseAnalyzer
         let request = job.request
-        let onAutofocus = job.onAutofocus
         let generation = generations[key] ?? 0
         let gate = SchedulerStageGate(key: key, scheduler: self)
         let owner = self
-        let forwarder: (@Sendable (RegionSharpnessPathResult) -> Void)?
-        if let onAutofocus {
-            // Only the generation that started this job may deliver early AF: a dropped
-            // job's in-flight callback must not reach a newer job's caller (#216).
-            forwarder = { result in
-                Task {
-                    await owner.deliverEarlyAutofocus(
-                        result, for: key, generation: generation, to: onAutofocus)
-                }
+        // Background-only jobs record AF as well: a later interactive joiner may already
+        // be waiting when it lands. Only this generation may deliver to those joiners.
+        let forwarder: (@Sendable (RegionSharpnessPathResult) -> Void) = { result in
+            Task {
+                await owner.deliverEarlyAutofocus(result, for: key, generation: generation)
             }
-        } else {
-            forwarder = nil
         }
         let task = Task.detached(priority: .utility) {
             await Self.run(
@@ -495,11 +530,14 @@ public actor RegionSharpnessScheduler {
 
     /// Forwards an early-AF callback only while its job's generation is still current.
     private func deliverEarlyAutofocus(
-        _ result: RegionSharpnessPathResult, for key: SharpnessResultKey, generation: Int,
-        to callback: @Sendable (RegionSharpnessPathResult) -> Void
+        _ result: RegionSharpnessPathResult, for key: SharpnessResultKey, generation: Int
     ) {
-        guard generations[key] == generation, jobs[key] != nil else { return }
-        callback(result)
+        guard generations[key] == generation, var job = jobs[key] else { return }
+        job.autofocus = result
+        let callbacks = job.autofocusWaiters
+        job.autofocusWaiters.removeAll()
+        jobs[key] = job
+        for callback in callbacks { callback(result) }
     }
 
     /// One job's analysis, off the actor. Stage admission and settling hop back on, each
@@ -529,6 +567,9 @@ public actor RegionSharpnessScheduler {
         if let analysis {
             results.store(
                 RegionSharpnessRecord(key: key, request: job.request, analysis: analysis))
+            // The engine's callback actor hop can race final settlement. Deliver to pending
+            // joiners here as well before resuming them, so none misses its AF answer.
+            for callback in job.autofocusWaiters { callback(analysis.autofocus) }
         }
         for waiter in job.waiters { waiter.resume(returning: analysis) }
         pump()

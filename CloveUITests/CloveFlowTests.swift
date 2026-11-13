@@ -1152,6 +1152,10 @@ final class CloveFlowTests: XCTestCase {
         let app = launchSample()
         defer { app.terminate() }
         openLibrary(app)
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        turnOffAutoAdvance(app)
+        element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02678").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
@@ -1178,7 +1182,22 @@ final class CloveFlowTests: XCTestCase {
         preview.doubleTap()
         XCTAssertFalse(zoom.label.hasSuffix("100%"))
         XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
-        element(app, "clove.detail.filmstrip.mmq02679").tap()
+
+        let eyeSwipe = eye.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        eyeSwipe.press(
+            forDuration: 0.1,
+            thenDragTo: eyeSwipe.withOffset(CGVector(dx: 0, dy: 70)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, fileName)
+        let eyeMarkValue = element(app, "clove.detail.capsule").value as? String
+        XCTAssertTrue(
+            eyeMarkValue?.contains("4 stars") == true,
+            "Marks after eye swipe: \(eyeMarkValue ?? "nil")")
+        let autofocusSwipe = autofocus.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        autofocusSwipe.press(
+            forDuration: 0.1,
+            thenDragTo: autofocusSwipe.withOffset(CGVector(dx: -160, dy: 0)))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02679.ARW")
         let tiny = element(app, "clove.detail.region.af.0")
         XCTAssertTrue(tiny.waitForExistence(timeout: 5))

@@ -459,11 +459,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
-    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
-        markingPan.isEnabled = false
-        markingPan.isEnabled = true
-    }
-
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         // The zoom level decides whether a one-finger drag pans or marks, so the split follows
         // every pinch, including one the screen did not ask for (PRD Detail gestures).
@@ -479,17 +474,19 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// touch-down so the continuous ladder always measures the full travel from the same origin.
     func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool
     {
+        if recognizer === markingPan { markingTouchStart = touch.location(in: self) }
         var touched = touch.view
         while let view = touched {
             if view is DetailFocusRegionControl {
-                // A region owns its single tap, not the existing double-tap-to-fit gesture.
-                // Navigation, chrome and marking still never receive a region's touches.
-                return recognizer === centreDoubleTap
-                    && scrollView.zoomScale > DetailFitScale.tolerance
+                // A region owns a single tap, not a drag: the shared pan still resolves
+                // vertical marking and horizontal navigation from its existing rules. Only
+                // double-tap-to-fit and that pan may start over a region.
+                return recognizer === markingPan
+                    || (recognizer === centreDoubleTap
+                        && scrollView.zoomScale > DetailFitScale.tolerance)
             }
             touched = view.superview
         }
-        if recognizer === markingPan { markingTouchStart = touch.location(in: self) }
         return true
     }
 
@@ -700,6 +697,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 /// small. `private` access remains file-scoped across this extension.
 @MainActor
 extension DetailZoomContainerView {
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        markingPan.isEnabled = false
+        markingPan.isEnabled = true
+    }
+
     @objc private func handleChromeTap() {
         guard !UIAccessibility.isVoiceOverRunning,
             DetailZoom.edgeZone(for: centreChromeTap.location(in: self), in: bounds.size) == .centre

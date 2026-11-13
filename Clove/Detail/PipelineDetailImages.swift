@@ -222,14 +222,17 @@ extension PipelineDetailImages: DetailRegionSharpnessSource {
             knownRegionRequests[identity] = request
         }
         return await admitted.sharpness { [regionScheduler] in
-            // Starting the interactive request first attaches its early-AF callback before any
-            // group work is admitted. The suspended join then lets the actor accept the rest.
+            guard !Task.isCancelled else { return nil }
+            // Cancel analyses outside this detail window before admitting more work. A nearby
+            // job that becomes current stays shared, including its stored early-AF answer.
+            await regionScheduler.focus(
+                current: current, group: groupRequests, nearby: nearbyRequests,
+                cancellingObsolete: true)
+            guard !Task.isCancelled else { return nil }
             async let analysis = regionScheduler.analyzeCurrent(
                 current, onAutofocus: onAutofocus)
             await regionScheduler.submit(groupRequests, priority: .group)
             await regionScheduler.submit(nearbyRequests, priority: .nearby)
-            await regionScheduler.focus(
-                current: current, group: groupRequests, nearby: nearbyRequests)
             return await analysis
         }
     }

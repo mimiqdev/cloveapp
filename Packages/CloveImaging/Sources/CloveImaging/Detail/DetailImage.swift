@@ -89,5 +89,6 @@ public enum DetailResult: Sendable {
 
 public enum DetailPriority: Sendable, Hashable {
     case visible
+    case analysis
     case prefetch
 }

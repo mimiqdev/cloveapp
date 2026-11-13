@@ -58,11 +58,17 @@ public struct DetailRegionSharpnessReading: RegionSharpnessReading {
             wantsNativeResolution: wantsNativeResolution,
             locationIdentity: request.locationIdentity)
         do {
-            let result = try await details.image(for: detail)
+            let result =
+                wantsNativeResolution
+                ? try await details.analysisImage(for: detail)
+                : try await details.analysisPreview(for: detail)
             guard case .available(let image) = result else {
                 return .failure(Self.failure(of: result))
             }
-            return .success(image.image)
+            if wantsNativeResolution { return .success(image.image) }
+            return await withTaskExecutorPreference(ImageWorkExecutor.current) {
+                .success(Self.boundedForDetection(image.image))
+            }
         } catch let error as DetailPipelineError {
             return .failure(Self.failure(of: error))
         } catch is CancellationError {
@@ -70,6 +76,25 @@ public struct DetailRegionSharpnessReading: RegionSharpnessReading {
         } catch {
             return .failure(.noUsablePreview)
         }
+    }
+
+    /// The pipeline keeps its camera preview for interactive reuse. Detection gets a smaller
+    /// bitmap from those same pixels, not another file decode or a different preview route.
+    private static func boundedForDetection(_ image: CGImage) -> CGImage {
+        let edge = max(image.width, image.height)
+        guard edge > RegionSharpnessAnalyzer.previewPixels else { return image }
+        let scale = CGFloat(RegionSharpnessAnalyzer.previewPixels) / CGFloat(edge)
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        guard
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
     }
 
     private static func failure(of result: DetailResult) -> RegionImageFailure {
