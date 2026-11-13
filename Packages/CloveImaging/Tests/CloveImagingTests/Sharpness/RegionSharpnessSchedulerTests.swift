@@ -11,6 +11,7 @@ import Testing
 /// decisions instead of racing real decodes. Records per-file counts and concurrency peaks.
 final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
     private let lock = Mutex(State())
+    private let acquisitions = AsyncStream<String>.makeStream()
     private struct State {
         var propertiesAnswers: [String: ImageProperties] = [:]
         var activeProperties = 0
@@ -143,12 +144,18 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
             state.activeHighResolution += 1
             state.peakHighResolution = max(state.peakHighResolution, state.activeHighResolution)
         }
+        acquisitions.continuation.yield(name)
         await reads.waitIfHeld(.highResolution)
         lock.withLock { $0.activeHighResolution -= 1 }
         return lock.withLock { state -> Result<CGImage, RegionImageFailure> in
             if let failure = state.highResolutionAnswers[name] { return failure }
             return .success(highResolution)
         }
+    }
+
+    func nextAcquisition() async throws -> String {
+        var iterator = acquisitions.stream.makeAsyncIterator()
+        return try #require(await iterator.next(), "An acquisition must enter the reader")
     }
 
     var activeHighResolutionReads: Int { lock.withLock { $0.activeHighResolution } }
@@ -164,6 +171,7 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
 /// A fake detector whose requests park on an explicit gate and record concurrency.
 final class GatedSharpnessDetector: FaceRegionDetecting, @unchecked Sendable {
     private let lock = Mutex(State())
+    private let parkedRequests = AsyncStream<Void>.makeStream()
     private struct State {
         var answers: [String: FaceDetectionOutcome] = [:]
         var count = 0
@@ -217,13 +225,22 @@ final class GatedSharpnessDetector: FaceRegionDetecting, @unchecked Sendable {
                     state.waiters.append(continuation)
                     return true
                 }
-                if !parked { continuation.resume() }
+                if parked {
+                    parkedRequests.continuation.yield(())
+                } else {
+                    continuation.resume()
+                }
             }
             lock.withLock { $0.active -= 1 }
             return lock.withLock { $0.answers["*"] ?? .faces([face]) }
         }
         lock.withLock { $0.active -= 1 }
         return lock.withLock { $0.answers["*"] ?? .faces([face]) }
+    }
+
+    func waitUntilParked() async throws {
+        var iterator = parkedRequests.stream.makeAsyncIterator()
+        try #require(await iterator.next() != nil, "Detection must enter its held gate")
     }
 
     var requestCount: Int { lock.withLock { $0.count } }
@@ -271,7 +288,7 @@ private func until(
 // MARK: - Stage-gated analysis
 
 /// The analyzer's stage gate seam: admission order and refusal, without the scheduler.
-@Suite(.serialized) struct StageGatedAnalysisTests {
+@Suite(.imageWork, .serialized) struct StageGatedAnalysisTests {
     @Test func refusedAdmissionCancelsTheAnalysis() async throws {
         final class RefusingGate: RegionSharpnessStageGate {
             func enter(_ stage: SharpnessAnalysisStage) async throws {
@@ -316,46 +333,57 @@ private func until(
         #expect(faceRegions.allSatisfy { $0.score != nil })
     }
 
-    @Test func earlyAFDeliverySurvivesStageGating() async throws {
+    @Test(.timeLimit(.minutes(1))) func earlyAFDeliverySurvivesStageGating() async throws {
         // #215's contract through the gate: the AF callback fires while detection is parked.
         let reader = GatedSharpnessReader()
         reader.setProperties(afInfoProperties(), for: "a.arw")
         reader.reads.release(.properties)
         reader.reads.release(.preview)
-        reader.reads.release(.highResolution)
+        reader.reads.hold(.highResolution)
         let detector = GatedSharpnessDetector()
         detector.hold()
+        defer {
+            reader.reads.release(.highResolution)
+            detector.releaseAll()
+        }
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
-        let delivered = Mutex<RegionSharpnessPathResult?>(nil)
+        let delivered = AsyncStream<RegionSharpnessPathResult>.makeStream()
         let task = Task {
             await scheduler.analyzeCurrent(photoRequest("a")) { early in
-                delivered.withLock { $0 = early }
+                delivered.continuation.yield(early)
             }
         }
-        // The AF result must arrive while detection is still parked (#215 through the
-        // scheduler): wait for the delivery itself, then prove the detector never finished.
-        try await until("the AF result is delivered") { delivered.withLock { $0 } != nil }
-        let stillParked = detector.parked
-        #expect(stillParked >= 1, "AF must be delivered before detection completes")
-        let early = delivered.withLock { $0 }
+        // async-let detection need not start before AF scoring. Establish its held entry
+        // before releasing acquisition, then await the callback without a latency assertion.
+        try await detector.waitUntilParked()
+        reader.reads.release(.highResolution)
+        var deliveries = delivered.stream.makeAsyncIterator()
+        let early = try #require(await deliveries.next())
+        #expect(detector.parked == 1, "AF must be delivered before detection completes")
         guard case .regions(let regions) = early else {
             Issue.record("Expected the scored AF region early")
-            detector.releaseAll()
             task.cancel()
             return
         }
         #expect(regions.first?.score != nil)
         detector.releaseAll()
         let analysis = try #require(await task.value)
-        #expect(analysis.autofocus != nil || analysis.faces != nil)
+        guard case .regions(let combinedAF) = analysis.autofocus,
+            case .regions(let faces) = analysis.faces
+        else {
+            Issue.record("Expected both scored paths after releasing detection")
+            return
+        }
+        #expect(combinedAF.map(\.score) == regions.map(\.score))
+        #expect(!faces.isEmpty && faces.allSatisfy { $0.score != nil })
         await scheduler.close()
     }
 }
 
 // MARK: - Priorities, promotion, cancellation
 
-@Suite(.serialized) struct SharpnessSchedulingPriorityTests {
+@Suite(.imageWork, .serialized) struct SharpnessSchedulingPriorityTests {
     private func makeScheduler(
         _ reader: GatedSharpnessReader, _ detector: GatedSharpnessDetector,
         scoring: Int = 2
@@ -372,7 +400,7 @@ private func until(
         }
     }
 
-    @Test func currentPhotoPreemptsQueuedBackgroundWork() async throws {
+    @Test(.timeLimit(.minutes(1))) func currentPhotoPreemptsQueuedBackgroundWork() async throws {
         let reader = GatedSharpnessReader()
         reader.setProperties(afInfoProperties(), for: "bg.arw")
         reader.setProperties(afInfoProperties(), for: "now.arw")
@@ -383,8 +411,12 @@ private func until(
         let scheduler = makeScheduler(reader, detector)
 
         // One current photo runs; the folder's photos queue behind it.
+        defer {
+            releaseEverything(reader)
+            detector.releaseAll()
+        }
         let current = Task { await scheduler.analyzeCurrent(photoRequest("now")) }
-        try await until("detection parks") { detector.parked >= 1 }
+        try await detector.waitUntilParked()
         await scheduler.submit((1...20).map { photoRequest("bg\($0)") }, priority: .folder)
         // All twenty are admitted as jobs; the metadata budget (2) holds two of them, so
         // eighteen queue without any stage slot.
@@ -395,9 +427,7 @@ private func until(
         // The acquisition budget (1) is held by the current photo: it entered the read
         // (parked on the gate) while no background photo has entered one. Background jobs
         // may queue for the slot — queueing is free — but entering is bounded.
-        try await until("the current photo enters its acquisition") {
-            reader.highResolutionCounts["now.arw"] ?? 0 >= 1
-        }
+        #expect(try await reader.nextAcquisition() == "now.arw")
         #expect(reader.highResolutionCounts["now.arw"] == 1)
         #expect(
             Set(reader.highResolutionCounts.keys) == ["now.arw"],
@@ -561,7 +591,7 @@ private func until(
 
 // MARK: - Invalidation and folder changes
 
-@Suite(.serialized) struct SharpnessInvalidationTests {
+@Suite(.imageWork, .serialized) struct SharpnessInvalidationTests {
     @Test func sourceChangeInvalidatesQueuedWorkAndStoredResults() async throws {
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
@@ -655,8 +685,10 @@ private func until(
 
 // MARK: - Budgets and buffers
 
-@Suite(.serialized) struct SharpnessBudgetTests {
-    @Test func acquisitionAndDetectionBudgetsHoldUnderSyntheticLoad() async throws {
+@Suite(.imageWork, .serialized) struct SharpnessBudgetTests {
+    @Test(.timeLimit(.minutes(1))) func acquisitionAndDetectionBudgetsHoldUnderSyntheticLoad()
+        async throws
+    {
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         reader.reads.release(.properties)
@@ -667,10 +699,9 @@ private func until(
             detectionWorkers: 1, acquisitionWorkers: 1, scoringWorkers: 2)
         // A thousand-photo folder, all at folder rank.
         await scheduler.submit((0..<1000).map { photoRequest("load\($0)") }, priority: .folder)
-        // Let a healthy amount of work run; the gates record the concurrency peaks.
-        try await until("many photos complete") {
-            reader.highResolutionCounts.values.reduce(0, +) >= 40
-        }
+        // Observe forty entries, without requiring that throughput within a wall-clock
+        // window shared with every parallel test. The gates record the concurrency peaks.
+        for _ in 0..<40 { _ = try await reader.nextAcquisition() }
         await scheduler.close()
         #expect(reader.peakHighResolution <= 1)
         #expect(detector.peakConcurrency <= 1)
@@ -767,7 +798,7 @@ private func until(
 /// never settle or answer for the newer same-key job (#2), metadata admission is bounded
 /// (#4), pause-invalidate wakes parked tasks (#5), and background submits reuse the store
 /// (#8).
-@Suite(.serialized) struct SharpnessLifecycleTests {
+@Suite(.imageWork, .serialized) struct SharpnessLifecycleTests {
     private func makeScheduler(_ reader: GatedSharpnessReader, _ detector: GatedSharpnessDetector)
         -> RegionSharpnessScheduler
     {
