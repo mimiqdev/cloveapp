@@ -369,6 +369,29 @@ def generate_file(recipe, source, destination):
 # --------------------------------------------------------------------------
 
 
+def _expand_item(item, where):
+    """Expand an optional repeat count into unique, four-digit indexed paths."""
+    if not isinstance(item, dict):
+        raise FixtureError("%s must be an object" % where)
+    repeat = item.get("repeat", 1)
+    if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat <= 0:
+        raise FixtureError("%s needs a positive integer 'repeat'" % where)
+    if repeat == 1:
+        return [item]
+    destination = item.get("to")
+    if not isinstance(destination, str) or "{index}" not in destination:
+        raise FixtureError("%s with 'repeat' needs '{index}' in 'to'" % where)
+    expanded = []
+    for index in range(1, repeat + 1):
+        copy = dict(item)
+        copy["to"] = destination.replace("{index}", "%04d" % index)
+        del copy["repeat"]
+        if "from" in item:
+            copy["hardlink"] = True
+        expanded.append(copy)
+    return expanded
+
+
 def _check_relative(path, where):
     if not isinstance(path, str) or not path.strip():
         raise FixtureError("%s has an empty path" % where)
@@ -412,9 +435,13 @@ def resolve_sets(document, entries, recipes, files_directory, xmp_directory, gen
         if not isinstance(items, list) or not items:
             raise FixtureError("%s has no entries" % where)
 
+        expanded_items = []
+        for item_index, item in enumerate(items):
+            expanded_items.extend(_expand_item(item, "%s entries[%d]" % (where, item_index)))
+
         destinations = set()
         resolved_entries = []
-        for item_index, item in enumerate(items):
+        for item_index, item in enumerate(expanded_items):
             item_where = "%s entries[%d]" % (where, item_index)
             if not isinstance(item, dict):
                 raise FixtureError("%s must be an object" % item_where)
@@ -456,6 +483,9 @@ def resolve_sets(document, entries, recipes, files_directory, xmp_directory, gen
                             "to": destination,
                             "kind": "generate",
                             "path": source_path,
+                            "sourceID": source_id,
+                            "sourceSHA256": source_entry["sha256"],
+                            "hardlink": item.get("hardlink", False),
                             "recipe": recipe,
                             "cache_path": os.path.join(
                                 generated_directory,
@@ -465,7 +495,14 @@ def resolve_sets(document, entries, recipes, files_directory, xmp_directory, gen
                     )
                 else:
                     resolved_entries.append(
-                        {"to": destination, "kind": "copy", "path": source_path}
+                        {
+                            "to": destination,
+                            "kind": "copy",
+                            "path": source_path,
+                            "sourceID": source_id,
+                            "sourceSHA256": source_entry["sha256"],
+                            "hardlink": item.get("hardlink", False),
+                        }
                     )
             elif has_xmp:
                 sidecar = item["fromXmp"]
@@ -501,7 +538,21 @@ def resolve_sets(document, entries, recipes, files_directory, xmp_directory, gen
                         {"to": destination, "kind": "bytes", "data": data}
                     )
 
-        resolved.append({"name": name, "entries": resolved_entries})
+        identity = spec.get("identity", False)
+        if not isinstance(identity, bool):
+            raise FixtureError("%s has a non-boolean 'identity'" % where)
+        resolved_spec = {"name": name, "entries": resolved_entries, "identity": None}
+        if identity:
+            canonical = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            sources = {}
+            for entry in resolved_entries:
+                if "sourceID" in entry:
+                    sources[entry["sourceID"]] = entry["sourceSHA256"]
+            resolved_spec["identity"] = {
+                "definitionSHA256": hashlib.sha256(canonical).hexdigest(),
+                "sources": sources,
+            }
+        resolved.append(resolved_spec)
 
     return resolved
 
@@ -547,7 +598,13 @@ def build_sets(resolved_sets, directory, copy=None, generate=None, log=print):
                         "missing source for %r: %s (run scripts/fetch-fixtures first)"
                         % (entry["to"], entry["path"])
                     )
-                copy(entry["path"], destination)
+                if entry.get("hardlink"):
+                    try:
+                        os.link(entry["path"], destination)
+                    except OSError:
+                        copy(entry["path"], destination)
+                else:
+                    copy(entry["path"], destination)
             elif entry["kind"] == "generate":
                 cached = entry["cache_path"]
                 if not os.path.isfile(cached) or os.path.getsize(cached) == 0:
@@ -559,9 +616,28 @@ def build_sets(resolved_sets, directory, copy=None, generate=None, log=print):
                     os.makedirs(os.path.dirname(cached), exist_ok=True)
                     log("generating %s from %s" % (os.path.basename(cached), entry["path"]))
                     generate(entry["recipe"], entry["path"], cached)
-                copy(cached, destination)
+                if entry.get("hardlink"):
+                    try:
+                        os.link(cached, destination)
+                    except OSError:
+                        copy(cached, destination)
+                else:
+                    copy(cached, destination)
             else:
                 raise FixtureError("unknown entry kind %r" % entry["kind"])
+
+        if spec.get("identity"):
+            document = {
+                "schemaVersion": 1,
+                "set": spec["name"],
+                "fileCount": len(spec["entries"]),
+                "definitionSHA256": spec["identity"]["definitionSHA256"],
+                "sources": spec["identity"]["sources"],
+            }
+            identity_path = os.path.join(target, ".clove-fixture.json")
+            with open(identity_path, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(document, handle, sort_keys=True, indent=2)
+                handle.write("\n")
 
         report.append((spec["name"], len(spec["entries"])))
 

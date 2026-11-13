@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "comment": "Standard test folders built by scripts/make-fixture-sets. Each set folder is deleted and recreated on every run. Entry keys: 'from' copies a manifest download (add 'recipe' to generate from it instead), 'fromXmp' copies a hand-written sidecar from fixtures/xmp/, 'text' writes an inline text stub, 'hex' writes inline bytes from a hex string (used for AppleDouble stubs, so no binary is committed).",
+  "comment": "Standard test folders built by scripts/make-fixture-sets. Each set folder is deleted and recreated on every run. Entry keys: 'from' copies a manifest download (add 'recipe' to generate from it instead), 'fromXmp' copies a hand-written sidecar from fixtures/xmp/, 'text' writes an inline text stub, 'hex' writes inline bytes from a hex string (used for AppleDouble stubs, so no binary is committed). A positive 'repeat' expands '{index}' in 'to' to four-digit paths and uses hard links when the cache and set share a supporting filesystem. 'identity': true writes a hidden .clove-fixture.json with the definition digest and pinned source hashes.",
   "sets": [
     {
       "name": "card-basic",
@@ -76,6 +76,23 @@
         { "to": "DCIM/100CANON/_Rejected/IMG_0003.XMP", "fromXmp": "label-orange.xmp" },
         { "to": "DCIM/101CANON/IMG_0100.RAF", "from": "fujifilm-x-s10-raf" },
         { "to": "DCIM/101CANON/_Rejected/IMG_0100.RAF", "from": "fujifilm-x-s10-raf" }
+      ]
+    },
+    {
+      "name": "browsing-2000",
+      "comment": "Exactly 2,000 logical photos and 4,000 image files for current-app browsing measurements: 1,200 ARW+JPEG sets, 600 ARW+HIF sets, 100 ARW+JPEG+HIF sets, and standalone DNG, JPEG and HEIC files. Repeated pinned sources intentionally share capture metadata and pixels; this is a repeatable load set, not a realistic burst-accuracy set.",
+      "identity": true,
+      "entries": [
+        { "to": "DCIM/100SONY/IMG_{index}.ARW", "from": "sony-ilce-7s-arw", "repeat": 1200 },
+        { "to": "DCIM/100SONY/IMG_{index}.JPG", "from": "sony-ilce-7s-arw", "recipe": "jpeg-from-raw", "repeat": 1200 },
+        { "to": "DCIM/101SONY/IMG_{index}.ARW", "from": "sony-ilce-7s-arw", "repeat": 600 },
+        { "to": "DCIM/101SONY/IMG_{index}.HIF", "from": "sony-ilce-7s-arw", "recipe": "heic-from-raw", "repeat": 600 },
+        { "to": "DCIM/102SONY/IMG_{index}.ARW", "from": "sony-ilce-7s-arw", "repeat": 100 },
+        { "to": "DCIM/102SONY/IMG_{index}.JPG", "from": "sony-ilce-7s-arw", "recipe": "jpeg-from-raw", "repeat": 100 },
+        { "to": "DCIM/102SONY/IMG_{index}.HIF", "from": "sony-ilce-7s-arw", "recipe": "heic-from-raw", "repeat": 100 },
+        { "to": "DCIM/103MISC/DNG_{index}.DNG", "from": "pentax-k-5-ii-s-dng", "repeat": 50 },
+        { "to": "DCIM/103MISC/JPEG_{index}.JPG", "from": "canon-eos-6d-jpeg", "repeat": 25 },
+        { "to": "DCIM/103MISC/HEIC_{index}.HIF", "from": "sony-ilce-7s-arw", "recipe": "heic-from-raw", "repeat": 25 }
       ]
     },
     {
