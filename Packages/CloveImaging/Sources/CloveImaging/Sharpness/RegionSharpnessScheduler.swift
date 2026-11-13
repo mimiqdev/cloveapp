@@ -318,15 +318,13 @@ public actor RegionSharpnessScheduler {
         try Task.checkCancellation()
         guard !closed, jobs[key] != nil else { throw CancellationError() }
         if jobs[key]?.admitted == false { jobs[key]?.admitted = true }
-        var state = stages[stage]!
+        guard var state = stages[stage] else { throw CancellationError() }
         guard state.activeKeys.count < state.limit, state.waiters.isEmpty else {
             waiterSequence += 1
             let sequence = waiterSequence
             try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { continuation in
-                    stages[stage]!.waiters.append(
-                        Waiter(key: key, sequence: sequence, continuation: continuation))
-                }
+                try await self.park(
+                    stage, of: key, sequence: sequence)
             } onCancel: {
                 Task { await self.refuseStage(stage, of: key, sequence: sequence) }
             }
@@ -336,13 +334,27 @@ public actor RegionSharpnessScheduler {
         stages[stage] = state
     }
 
+    /// Parks one job's stage request in the stage's queue until a slot admits it.
+    private func park(
+        _ stage: SharpnessAnalysisStage, of key: SharpnessResultKey, sequence: Int
+    ) async throws {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, any Error>) in
+            stages[stage]?.waiters.append(
+                Waiter(key: key, sequence: sequence, continuation: continuation))
+        }
+    }
+
     /// Resumes one cancelled waiter with a cancellation error and removes it from the queue.
     func refuseStage(
         _ stage: SharpnessAnalysisStage, of key: SharpnessResultKey, sequence: Int
     ) {
-        guard let index = stages[stage]!.waiters.firstIndex(where: { $0.sequence == sequence })
+        guard var state = stages[stage] else { return }
+        guard
+            let index = state.waiters.firstIndex(where: { $0.sequence == sequence })
         else { return }
-        let waiter = stages[stage]!.waiters.remove(at: index)
+        let waiter = state.waiters.remove(at: index)
+        stages[stage] = state
         waiter.continuation.resume(throwing: CancellationError())
     }
 
