@@ -75,6 +75,7 @@ struct DetailMarkingView: View {
     var duo: DuoDetailLayout?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.cloveTheme) private var theme
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.displayScale) private var displayScale
@@ -90,6 +91,8 @@ struct DetailMarkingView: View {
     @State private var toolbarDragRating: Rating?
     @State private var showsZoomChip = false
     @State private var controlsHeight: CGFloat = 0
+    @State private var focusRegionState = DetailFocusRegionState()
+    @State private var focusAnalysisID = UUID()
 
     /// Detail pixels on screen; the grid thumbnail stands in until these arrive.
     @State private var shown: DetailImage?
@@ -162,6 +165,9 @@ struct DetailMarkingView: View {
             }
             .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
                 await loadPreview(for: photo)
+            }
+            .task(id: photo.id) {
+                await loadFocusRegions(for: photo)
             }
             .onDisappear {
                 upgradeTask?.cancel()
@@ -489,12 +495,17 @@ struct DetailMarkingView: View {
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
-            keepsFitStationary: isDuoExpanded
+            keepsFitStationary: isDuoExpanded,
+            focusRegions: shown == nil ? [] : focusRegionState.regions,
+            focusRegionColours: DetailFocusRegionColours(
+                autofocus: UIColor(theme.tokens.accent.color),
+                face: UIColor(theme.tokens.saved.color),
+                eye: UIColor(theme.tokens.labelBlue.color),
+                unavailable: UIColor(theme.tokens.secondaryText.color)),
+            onFocusRegionTap: { focusRegionTapped($0) },
+            previewAccessibilityLabel: displayMarks.isRejected
+                ? "\(photo.fileName), Rejected" : photo.fileName
         )
-        .accessibilityLabel(
-            displayMarks.isRejected ? "\(photo.fileName), Rejected" : photo.fileName
-        )
-        .accessibilityValue(shown == nil ? "" : "Loaded")
         .overlay {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
@@ -507,6 +518,7 @@ struct DetailMarkingView: View {
             viewSize = size
         }
         .overlay { previewState }
+        .overlay(alignment: .top) { focusRegionStatus }
         .overlay(alignment: .topLeading) { limitationNote }
         .overlay(alignment: .topTrailing) {
             if displayMarks.isRejected {
@@ -552,6 +564,21 @@ struct DetailMarkingView: View {
         }
     }
 
+    /// Advisory progress and explicit unavailable answers live in the existing floating chrome.
+    @ViewBuilder private var focusRegionStatus: some View {
+        if chromeIsVisible, let status = focusRegionState.status {
+            Text(status)
+                .font(.caption)
+                .foregroundStyle(Color.clove.text.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .cloveGlass(in: Capsule())
+                .padding(.top, 12)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("clove.detail.focusStatus")
+        }
+    }
+
     /// The "preview only" note a failed render or a capped source must show (PRD P0-04).
     @ViewBuilder private var limitationNote: some View {
         if let limitation, shown != nil {
@@ -563,6 +590,33 @@ struct DetailMarkingView: View {
                 .padding(12)
                 .accessibilityIdentifier("clove.detail.limitation")
         }
+    }
+
+    // MARK: - Focus regions
+
+    private func loadFocusRegions(for photo: GridPhoto) async {
+        let analysisID = UUID()
+        focusAnalysisID = analysisID
+        focusRegionState.begin(for: photo.id)
+        guard let source = images as? DetailRegionSharpnessSource else {
+            focusRegionState.finish(nil, for: photo.id)
+            return
+        }
+        let group = browsing.currentGroup?.members.filter { $0 != photo.id } ?? []
+        let position = order.firstIndex(where: { $0.id == photo.id }) ?? 0
+        let nearby = [position - 1, position + 1].compactMap { index in
+            order.indices.contains(index) ? order[index].id : nil
+        }
+        let analysis = await source.analyzeRegions(
+            for: photo.id, group: group, nearby: nearby
+        ) { result in
+            Task { @MainActor in
+                guard focusAnalysisID == analysisID else { return }
+                focusRegionState.receiveAutofocus(result, for: photo.id)
+            }
+        }
+        guard !Task.isCancelled, focusAnalysisID == analysisID else { return }
+        focusRegionState.finish(analysis, for: photo.id)
     }
 
     // MARK: - Pixels
@@ -834,13 +888,24 @@ struct DetailMarkingView: View {
     /// doing nothing for good.
     private func doubleTap(at anchor: UnitPoint) {
         guard settings.doubleTap == .zoom else { return }
-        let chosen = DetailZoomAnchor(x: anchor.x, y: anchor.y)
         guard scale <= DetailFitScale.tolerance else {
             zoomMode = .fit
             setZoom(.fit)
             return
         }
+        inspectFullResolution(at: anchor)
+    }
+
+    /// A valid analysis region always enters the existing 100% inspection, independently of the
+    /// double-tap setting. It neither resolves a marking input nor calls a navigation action.
+    private func focusRegionTapped(_ region: DetailFocusRegion) {
+        guard region.isActionable else { return }
+        inspectFullResolution(at: region.centre)
+    }
+
+    private func inspectFullResolution(at anchor: UnitPoint) {
         guard let shown else { return }
+        let chosen = DetailZoomAnchor(x: anchor.x, y: anchor.y)
         zoomMode = .fullResolution(anchor: chosen, size: shown.fullResolutionPixels)
         if let target = DetailZoom.fullResolutionTarget(
             nativePixels: shown.fullResolutionPixels, shownPixels: pixelSize(shown),

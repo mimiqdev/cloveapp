@@ -229,3 +229,70 @@ final class SampleDetailImages: DetailImageSource {
         return CGFloat(value % 360) / 360
     }
 }
+
+extension SampleDetailImages: DetailRegionSharpnessSource {
+    /// Deterministic advisory regions let the generated-library UI test exercise early AF,
+    /// independent face/eye delivery, an unavailable tiny region and region-centred zoom without
+    /// adding fixture files or a second image reader to the sample.
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        let autofocus: RegionSharpnessPathResult
+        switch photo.stem {
+        case "mmq02678":
+            autofocus = .regions([
+                Self.evidence(
+                    .cameraAutofocus,
+                    region: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16))
+            ])
+        case "mmq02679":
+            autofocus = .regions([
+                RegionSharpnessEvidence(
+                    kind: .cameraAutofocus, groupIndex: nil,
+                    region: NormalizedRegion(x: 0.1, y: 0.1, width: 0.01, height: 0.01),
+                    score: nil, unavailableBecause: .regionTooSmall)
+            ])
+        default:
+            autofocus = .unavailable(.noAutofocusMetadata(Self.noMetadata))
+        }
+        onAutofocus(autofocus)
+        await Task.yield()
+        guard !Task.isCancelled else { return nil }
+        let faces: RegionSharpnessPathResult =
+            photo.stem == "mmq02678"
+            ? .regions([
+                Self.evidence(
+                    .face, group: 0,
+                    region: NormalizedRegion(x: 0.58, y: 0.2, width: 0.22, height: 0.32)),
+                Self.evidence(
+                    .eye, group: 0,
+                    region: NormalizedRegion(x: 0.625, y: 0.29, width: 0.05, height: 0.05)),
+                Self.evidence(
+                    .eye, group: 0,
+                    region: NormalizedRegion(x: 0.715, y: 0.29, width: 0.05, height: 0.05)),
+            ])
+            : .unavailable(.noFacesDetected)
+        return RegionSharpnessAnalysis(
+            autofocus: autofocus, faces: faces, acquisitionFailure: nil,
+            timings: RegionSharpnessTimings())
+    }
+
+    private static func evidence(
+        _ kind: SharpnessRegionKind,
+        group: Int? = nil,
+        region: NormalizedRegion
+    ) -> RegionSharpnessEvidence {
+        RegionSharpnessEvidence(
+            kind: kind, groupIndex: group, region: region,
+            score: RegionSharpnessScore(
+                tenengradMeanSquare: 1, sampledPixels: 64, sampledWidth: 8, sampledHeight: 8),
+            unavailableBecause: nil)
+    }
+
+    private static var noMetadata: AutofocusMetadataEvidence {
+        AutofocusMetadataEvidence(inspected: [], cameraMake: "Sample", exifOrientation: 1)
+    }
+}

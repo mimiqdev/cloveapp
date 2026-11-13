@@ -1148,6 +1148,49 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testDetailFocusRegionsCentreNativeZoom() throws {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02678").tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let autofocus = element(app, "clove.detail.region.af.0")
+        let face = element(app, "clove.detail.region.face.0-0")
+        let eye = element(app, "clove.detail.region.face.1-0")
+        XCTAssertTrue(autofocus.waitForExistence(timeout: 5))
+        XCTAssertTrue(face.waitForExistence(timeout: 5))
+        XCTAssertTrue(eye.exists)
+        capture("detail-focus-regions-fit")
+
+        let fileName = element(app, "clove.detail.fileName").label
+        let marks = element(app, "clove.detail.capsule").value as? String
+        autofocus.tap()
+        let zoom = element(app, "clove.detail.zoom")
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
+            "The region tap did not centre the existing native zoom on the AF rectangle")
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, fileName)
+        capture("detail-focus-region-native-zoom")
+
+        preview.doubleTap()
+        XCTAssertFalse(zoom.label.hasSuffix("100%"))
+        XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
+        element(app, "clove.detail.filmstrip.mmq02679").tap()
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02679.ARW")
+        let tiny = element(app, "clove.detail.region.af.0")
+        XCTAssertTrue(tiny.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value CONTAINS %@", "region too small"), tiny))
+        tiny.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02679.ARW")
+        XCTAssertFalse(zoom.label.hasSuffix("100%"))
+        capture("detail-focus-region-tiny-unavailable")
+    }
+
+    @MainActor
     func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }

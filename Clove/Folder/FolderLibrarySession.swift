@@ -777,6 +777,11 @@ final class FolderLibrarySession: FolderLibrary {
             // never released under one (G1 preview and folder-access rows).
             await pipeline.close()
         }
+        if let analysis = detailSource as? DetailRegionSharpnessSource {
+            // Analysis shares this folder's pipeline and admitted session. Close and drain it
+            // before either the pipeline or the security scope can end.
+            await analysis.closeRegionAnalysis()
+        }
         detailSource = nil
         if let pipeline = detailPipeline {
             detailPipeline = nil
@@ -1153,6 +1158,11 @@ final class FolderLibrarySession: FolderLibrary {
                 prefetch: { [weak self] work in
                     guard let self else { return }
                     await self.admittedDetailPrefetch(work, session: session, folder: folder)
+                },
+                sharpness: { [weak self] work in
+                    guard let self else { return nil }
+                    return await self.admittedDetailSharpness(
+                        work, session: session, folder: folder)
                 }))
     }
 
@@ -1171,6 +1181,16 @@ final class FolderLibrarySession: FolderLibrary {
         } catch {
             return .unavailable(.noUsablePreview)
         }
+    }
+
+    /// Runs the scheduler's shared analysis under the same folder admission as interactive reads.
+    private func admittedDetailSharpness(
+        _ work: @Sendable () async -> RegionSharpnessAnalysis?,
+        session: FolderAccessSession,
+        folder: FolderIdentity
+    ) async -> RegionSharpnessAnalysis? {
+        guard self.folder == folder else { return nil }
+        return try? await session.withAdmittedWork { await work() }
     }
 
     /// Runs neighbour prefetch inside the same session, so its reads are scoped too.
