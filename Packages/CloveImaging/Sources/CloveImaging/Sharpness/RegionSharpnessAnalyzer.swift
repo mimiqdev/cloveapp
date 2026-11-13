@@ -30,9 +30,10 @@ public struct RegionSharpnessRequest: Hashable, Sendable {
         preconditionFailure("An analysis request needs a file")
     }
 
-    /// Every file of the set, so a caller can invalidate everything touching one URL (#216).
+    /// Every file of the set, standardized, so both sides of an invalidation comparison use
+    /// the same spelling however the caller wrote the path (#216).
     public var fileURLs: [URL] {
-        [raw?.url, jpeg?.url, heif?.url].compactMap { $0 }
+        [raw?.url, jpeg?.url, heif?.url].compactMap { $0 }.map { $0.standardizedFileURL }
     }
 }
 
@@ -138,9 +139,12 @@ public struct RegionSharpnessAnalyzer: Sendable {
         _ request: RegionSharpnessRequest,
         onAutofocus: ((RegionSharpnessPathResult) -> Void)? = nil
     ) async throws -> RegionSharpnessAnalysis {
-        // Stage 1 — AF metadata. An AF answer that needs no pixels is final here, before
-        // the face path starts (#208).
+        // Stage 1 — AF metadata, admitted through its own bound so a folder-wide background
+        // submit does not fan out one ImageIO read per photo at once (#216). An AF answer
+        // that needs no pixels is final here, before the face path starts (#208).
+        try await stages.enter(.metadataRead)
         let metadata = await measure { await self.reader.properties(of: request.primaryURL) }
+        await stages.exit(.metadataRead)
         let autofocus = Self.locateAutofocus(properties: metadata.value, reader: metadataReader)
         if case .failure(let evidence) = autofocus {
             onAutofocus?(.unavailable(.noAutofocusMetadata(evidence)))
@@ -259,7 +263,7 @@ public struct RegionSharpnessAnalyzer: Sendable {
         stages: any RegionSharpnessStageGate
     ) async throws -> [RegionSharpnessEvidence] {
         try await stages.enter(.regionScoring)
-        let scored = await withTaskExecutorPreference(ImageWorkExecutor.utility) {
+        let scored = await withTaskExecutorPreference(ImageWorkExecutor.current) {
             guard let pixels else {
                 return regions.map { region in
                     region.unavailableBecause == nil

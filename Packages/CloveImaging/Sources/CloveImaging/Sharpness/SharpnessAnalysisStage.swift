@@ -4,6 +4,10 @@ import Foundation
 /// heavy work keeps its own budget and priorities are reconsidered between a photo's stages
 /// (#216).
 public enum SharpnessAnalysisStage: String, CaseIterable, Hashable, Sendable {
+    /// The primary file's ImageIO property read that locates camera-AF regions. Bounded on
+    /// its own so a folder-wide background submit does not fan out one read per photo at
+    /// once (#216's bounded budgets).
+    case metadataRead
     /// One Vision face and eye localization over the photo's preview.
     case faceDetection
     /// The single high-resolution pixel acquisition every region of the photo shares.

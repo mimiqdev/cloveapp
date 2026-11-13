@@ -95,7 +95,6 @@ public actor RegionSharpnessScheduler {
         let sequence: Int
         var waiters: [CheckedContinuation<RegionSharpnessAnalysis?, Never>] = []
         var task: Task<Void, Never>?
-        var admitted = false
         /// The interactive caller's early-AF callback, attached by the call that starts the
         /// job (#215's early delivery, passed through).
         var onAutofocus: (@Sendable (RegionSharpnessPathResult) -> Void)?
@@ -105,8 +104,14 @@ public actor RegionSharpnessScheduler {
     private var jobs: [SharpnessResultKey: Job] = [:]
     private var nextSequence = 0
     private var waiterSequence = 0
+    /// The job generation of one key: bumped on every drop, so a task that was already
+    /// running for a dropped job can never settle or publish for the job that replaced it
+    /// (#216: never publish a result for another photo or folder session).
+    private var generations: [SharpnessResultKey: Int] = [:]
     private var paused = false
-    private var pausedWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Parked-on-pause continuations keyed by job, so a cancelled job's park is resumed on
+    /// invalidate/drop instead of leaking until resume (#216).
+    private var pausedWaiters: [SharpnessResultKey: [CheckedContinuation<Void, Never>]] = [:]
     private var closed = false
 
     // MARK: - Lifecycle
@@ -145,8 +150,9 @@ public actor RegionSharpnessScheduler {
 
     // MARK: - Submitting work
 
-    /// Queues photos for background analysis. Requests already running or cached settle
-    /// immediately; an interactive priority is never lowered by a background submit.
+    /// Queues photos for background analysis. Requests already running or already cached are
+    /// not queued again; an interactive priority is never lowered by a background submit
+    /// (#216: interactive and background work share valid cached results).
     public func submit(_ requests: [RegionSharpnessRequest], priority: SharpnessWorkPriority) {
         guard !closed else { return }
         for request in requests { submit(request, priority: priority) }
@@ -195,6 +201,7 @@ public actor RegionSharpnessScheduler {
 
     private func submit(_ request: RegionSharpnessRequest, priority: SharpnessWorkPriority) {
         let key = resultKey(for: request)
+        if results.result(for: key) != nil { return }
         if var existing = jobs[key] {
             if priority < existing.priority {
                 existing.priority = priority
@@ -203,6 +210,9 @@ public actor RegionSharpnessScheduler {
             return
         }
         nextSequence += 1
+        // The job's generation is what lets an old dropped task be told apart from a newer
+        // same-key job: every submit and every drop retires the previous generation (#216).
+        generations[key] = (generations[key] ?? 0) + 1
         jobs[key] = Job(
             key: key, request: request, priority: priority, sequence: nextSequence)
     }
@@ -242,13 +252,17 @@ public actor RegionSharpnessScheduler {
     /// interaction handle (#216) — pair with ``resume()``.
     public func pause() { paused = true }
 
-    /// Continues work stopped by ``pause()``.
+    /// Continues work stopped by ``pause()``: parked tasks resume, and every stage queue
+    /// drains into its free slots, not just the jobs that were waiting on the pause itself.
     public func resume() {
         guard paused else { return }
         paused = false
         let resuming = pausedWaiters
         pausedWaiters.removeAll()
-        for waiter in resuming { waiter.resume() }
+        for waiters in resuming.values {
+            for waiter in waiters { waiter.resume() }
+        }
+        for stage in SharpnessAnalysisStage.allCases { drain(stage) }
         pump()
     }
 
@@ -258,7 +272,9 @@ public actor RegionSharpnessScheduler {
         let files = Set(sources.map { $0.standardizedFileURL })
         guard !files.isEmpty else { return }
         results.invalidate(sources: sources)
-        for (key, job) in jobs where !Set(job.request.fileURLs).isDisjoint(with: files) {
+        // Iterated over a copy: dropping mutates the same dictionary (#216).
+        for (key, request) in jobs.mapValues(\.request)
+        where !Set(request.fileURLs).isDisjoint(with: files) {
             drop(key: key)
         }
         pump()
@@ -268,9 +284,7 @@ public actor RegionSharpnessScheduler {
     /// stage entries to drain.
     public func close() async {
         closed = true
-        let parkedByPause = pausedWaiters
-        pausedWaiters.removeAll()
-        for waiter in parkedByPause { waiter.resume() }
+        for key in Array(pausedWaiters.keys) { resumePausedWaiters(of: key) }
         let running = jobs.values.compactMap(\.task)
         for key in Array(jobs.keys) { drop(key: key) }
         // Admitted stage entries exit through their own path, cancelled or not; awaiting the
@@ -279,6 +293,10 @@ public actor RegionSharpnessScheduler {
     }
 
     // MARK: - Measurement
+
+    /// How many task admissions are parked on the pause itself. Exposed for tests to observe
+    /// that invalidate/drop also ends these parks (#216).
+    var pausedAdmissionCount: Int { pausedWaiters.values.reduce(0) { $0 + $1.count } }
 
     /// Per-stage queue/active counts and recent entry durations (#216).
     public func snapshot() -> SharpnessSchedulerSnapshot {
@@ -309,15 +327,14 @@ public actor RegionSharpnessScheduler {
     ) async throws {
         while paused, !closed, jobs[key] != nil {
             try Task.checkCancellation()
-            // The continuation is appended synchronously after the condition, so a resume
-            // between the check and the park cannot be missed.
+            // Parked under the job's key, so invalidate/drop can resume (and thereby cancel)
+            // this park without waiting for resume (#216).
             await withCheckedContinuation { continuation in
-                pausedWaiters.append(continuation)
+                pausedWaiters[key, default: []].append(continuation)
             }
         }
         try Task.checkCancellation()
         guard !closed, jobs[key] != nil else { throw CancellationError() }
-        if jobs[key]?.admitted == false { jobs[key]?.admitted = true }
         guard var state = stages[stage] else { throw CancellationError() }
         guard state.activeKeys.count < state.limit, state.waiters.isEmpty else {
             waiterSequence += 1
@@ -332,6 +349,12 @@ public actor RegionSharpnessScheduler {
         }
         admit(stage, key: key, into: &state)
         stages[stage] = state
+    }
+
+    /// Resumes (and thereby ends) every pause-park of one job.
+    private func resumePausedWaiters(of key: SharpnessResultKey) {
+        let waiters = pausedWaiters.removeValue(forKey: key) ?? []
+        for waiter in waiters { waiter.resume() }
     }
 
     /// Parks one job's stage request in the stage's queue until a slot admits it.
@@ -445,32 +468,64 @@ public actor RegionSharpnessScheduler {
         let analyzer = baseAnalyzer
         let request = job.request
         let onAutofocus = job.onAutofocus
+        let generation = generations[key] ?? 0
         let gate = SchedulerStageGate(key: key, scheduler: self)
+        let owner = self
+        let forwarder: (@Sendable (RegionSharpnessPathResult) -> Void)?
+        if let onAutofocus {
+            // Only the generation that started this job may deliver early AF: a dropped
+            // job's in-flight callback must not reach a newer job's caller (#216).
+            forwarder = { result in
+                Task {
+                    await owner.deliverEarlyAutofocus(
+                        result, for: key, generation: generation, to: onAutofocus)
+                }
+            }
+        } else {
+            forwarder = nil
+        }
         let task = Task.detached(priority: .utility) {
             await Self.run(
                 analyzer: analyzer, gatedBy: gate, request: request, owner: self, key: key,
-                onAutofocus: onAutofocus)
+                generation: generation, onAutofocus: forwarder)
         }
         job.task = task
         jobs[key] = job
     }
 
-    /// One job's analysis, off the actor. Stage admission and settling hop back on.
+    /// Forwards an early-AF callback only while its job's generation is still current.
+    private func deliverEarlyAutofocus(
+        _ result: RegionSharpnessPathResult, for key: SharpnessResultKey, generation: Int,
+        to callback: @Sendable (RegionSharpnessPathResult) -> Void
+    ) {
+        guard generations[key] == generation, jobs[key] != nil else { return }
+        callback(result)
+    }
+
+    /// One job's analysis, off the actor. Stage admission and settling hop back on, each
+    /// with the generation the analysis belongs to.
     private static func run(
         analyzer: RegionSharpnessAnalyzer, gatedBy gate: SchedulerStageGate,
         request: RegionSharpnessRequest, owner: RegionSharpnessScheduler,
-        key: SharpnessResultKey, onAutofocus: (@Sendable (RegionSharpnessPathResult) -> Void)?
+        key: SharpnessResultKey, generation: Int,
+        onAutofocus: (@Sendable (RegionSharpnessPathResult) -> Void)?
     ) async {
         let analysis = try? await analyzer.gated(by: gate).analyzeGated(
             request, onAutofocus: onAutofocus)
-        await owner.settle(key: key, analysis: analysis)
+        await owner.settle(key: key, generation: generation, analysis: analysis)
     }
 
     /// Publishes one finished analysis to waiters and the store, or clears a cancelled one.
-    private func settle(key: SharpnessResultKey, analysis: RegionSharpnessAnalysis?) {
+    /// An old generation settles into nothing: its job was dropped and possibly replaced, so
+    /// the newer job owns the key's answer (#216).
+    private func settle(
+        key: SharpnessResultKey, generation: Int, analysis: RegionSharpnessAnalysis?
+    ) {
+        guard generations[key] == generation else { return }
         guard let job = jobs.removeValue(forKey: key) else {
             return  // dropped while running: nothing to publish
         }
+        generations.removeValue(forKey: key)
         if let analysis {
             results.store(
                 RegionSharpnessRecord(key: key, request: job.request, analysis: analysis))
@@ -483,6 +538,9 @@ public actor RegionSharpnessScheduler {
     /// nil.
     private func drop(key: SharpnessResultKey) {
         guard let job = jobs.removeValue(forKey: key) else { return }
+        // Any later same-key job is a new generation; this drop retires the old one.
+        generations[key] = (generations[key] ?? 0) + 1
+        resumePausedWaiters(of: key)
         job.task?.cancel()
         for waiter in job.waiters { waiter.resume(returning: nil) }
         for stage in SharpnessAnalysisStage.allCases {

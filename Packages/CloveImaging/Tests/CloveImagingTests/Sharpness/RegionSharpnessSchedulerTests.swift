@@ -13,6 +13,8 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
     private let lock = Mutex(State())
     private struct State {
         var propertiesAnswers: [String: ImageProperties] = [:]
+        var activeProperties = 0
+        var peakProperties = 0
         var previewAnswers: [String: Result<CGImage, RegionImageFailure>] = [:]
         var highResolutionAnswers: [String: Result<CGImage, RegionImageFailure>] = [:]
         var defaultProperties: ImageProperties?
@@ -101,7 +103,13 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
     }
 
     func properties(of url: URL) async -> ImageProperties? {
+        // Entry recorded before the gate parks, so a test can see a property read in flight.
+        lock.withLock { state in
+            state.activeProperties += 1
+            state.peakProperties = max(state.peakProperties, state.activeProperties)
+        }
         await reads.waitIfHeld(.properties)
+        lock.withLock { $0.activeProperties -= 1 }
         return lock.withLock { state -> ImageProperties? in
             let name = url.lastPathComponent
             state.propertiesCount[name, default: 0] += 1
@@ -144,6 +152,8 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
     }
 
     var activeHighResolutionReads: Int { lock.withLock { $0.activeHighResolution } }
+    var activePropertyReads: Int { lock.withLock { $0.activeProperties } }
+    var peakPropertyReads: Int { lock.withLock { $0.peakProperties } }
     var propertiesCounts: [String: Int] { lock.withLock { $0.propertiesCount } }
     var previewCounts: [String: Int] { lock.withLock { $0.previewCount } }
     var highResolutionCounts: [String: Int] { lock.withLock { $0.highResolutionCount } }
@@ -376,8 +386,10 @@ private func until(
         let current = Task { await scheduler.analyzeCurrent(photoRequest("now")) }
         try await until("detection parks") { detector.parked >= 1 }
         await scheduler.submit((1...20).map { photoRequest("bg\($0)") }, priority: .folder)
+        // All twenty are admitted as jobs; the metadata budget (2) holds two of them, so
+        // eighteen queue without any stage slot.
         try await until("background photos queue") {
-            await scheduler.snapshot().queuedByPriority[.folder] ?? 0 >= 19
+            await scheduler.snapshot().queuedByPriority[.folder] ?? 0 >= 18
         }
 
         // The acquisition budget (1) is held by the current photo: it entered the read
@@ -411,6 +423,8 @@ private func until(
         detector.hold()
         await reader.reads.hold(.highResolution)
         let scheduler = makeScheduler(reader, detector)
+        // Admission is held, so the queue below is exact: every photo queues, none runs.
+        await scheduler.pause()
 
         // Open 10 photos in quick succession; each was current once.
         var tasks: [Task<RegionSharpnessAnalysis?, Never>] = []
@@ -431,19 +445,21 @@ private func until(
         }
 
         // Demote everything but the last-opened photo: none of the first nine is current
-        // anymore, and their analyses must not stay ranked as current.
+        // anymore, and their analyses must not stay ranked as current. Asserted on the live
+        // priority queue, while admission is still held by the pause.
         await scheduler.focus(current: photoRequest("p9"))
         let snapshot = await scheduler.snapshot()
-        let detection = snapshot.stages[.faceDetection]!
-        // One running detection (whoever got the slot) plus queued entries that are no
-        // longer urgent — nothing beyond the one slot is running.
-        #expect(detection.active <= 1)
+        #expect(snapshot.queuedByPriority[.current] == 1, "only the view's photo stays current")
+        // All ten are queued with no stage slot (admission is paused): the other nine demote
+        // to folder rank instead of leaving an urgent backlog.
+        #expect(snapshot.queuedByPriority[.folder] == 9)
+        #expect(snapshot.queuedByPriority[.group] == nil)
 
+        await scheduler.resume()
         releaseEverything(reader)
         detector.releaseAll()
         for task in tasks { _ = await task.value }
         await scheduler.close()
-        // Every rapid-navigation waiter settled; no backlog of active stage entries remains.
         let afterClose = await scheduler.snapshot()
         for stage in SharpnessAnalysisStage.allCases {
             #expect(afterClose.stages[stage]!.active == 0)
@@ -525,19 +541,18 @@ private func until(
         detector.hold()
         await reader.reads.hold(.highResolution)
         let scheduler = makeScheduler(reader, detector)
+        await scheduler.pause()
         await scheduler.submit((0..<10).map { photoRequest("f\($0)") }, priority: .group)
-        try await until("group work queues or runs") {
-            let snapshot = await scheduler.snapshot()
-            return (snapshot.queuedByPriority[.group] ?? 0) >= 1
-                || snapshot.stages[.faceDetection]!.active >= 1
+        try await until("group work queues") {
+            await scheduler.snapshot().queuedByPriority[.group] ?? 0 == 10
         }
         await scheduler.focus(current: photoRequest("elsewhere"), group: [], nearby: [])
-        // Everything queued is now folder rank: no group-ranked backlog survives a view
-        // change that no longer mentions it.
-        try await until("group entry is taken or demoted") {
-            let detection = await scheduler.snapshot().stages[.faceDetection]!
-            return detection.active <= 1
-        }
+        // The demotion is asserted on the live queue while admission is held by the pause:
+        // no group-ranked backlog survives a view change that no longer mentions it.
+        let snapshot = await scheduler.snapshot()
+        #expect(snapshot.queuedByPriority[.group] == nil, "no group-ranked work is left")
+        #expect(snapshot.queuedByPriority[.folder] == 10, "everything demotes to folder rank")
+        await scheduler.resume()
         releaseEverything(reader)
         detector.releaseAll()
         await scheduler.close()
@@ -742,6 +757,171 @@ private func until(
             return
         }
         #expect(afRegions.first?.score != nil)
+        await scheduler.close()
+    }
+}
+
+// MARK: - Lifecycle windows (review fix round)
+
+/// The remaining lifecycle contracts: resume drains stage queues (#1), dropped generations
+/// never settle or answer for the newer same-key job (#2), metadata admission is bounded
+/// (#4), pause-invalidate wakes parked tasks (#5), and background submits reuse the store
+/// (#8).
+@Suite(.serialized) struct SharpnessLifecycleTests {
+    private func makeScheduler(_ reader: GatedSharpnessReader, _ detector: GatedSharpnessDetector)
+        -> RegionSharpnessScheduler
+    {
+        RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
+    }
+
+    @Test func resumeDrainsStageQueuesWhoseHolderExitedWhilePaused() async throws {
+        // #1: the slot holder finishes under pause; the parked job must be admitted on resume.
+        let reader = GatedSharpnessReader()
+        let detector = GatedSharpnessDetector()
+        detector.hold()
+        await reader.reads.hold(.highResolution)
+        let scheduler = makeScheduler(reader, detector)
+        let holder = Task { await scheduler.analyzeCurrent(photoRequest("holder")) }
+        let parked = Task { await scheduler.analyzeCurrent(photoRequest("parked")) }
+        try await until("the first job's detection is held and the second queues") {
+            if detector.parked < 1 { return false }
+            let snapshot = await scheduler.snapshot()
+            return snapshot.stages[.faceDetection]!.queued >= 1
+        }
+        await scheduler.pause()
+        // The holder finishes while paused: its detection slot frees, but nothing admits.
+        detector.releaseAll()
+        try await until("the holder's stage slot released under pause") {
+            await scheduler.snapshot().stages[.faceDetection]!.active == 0
+        }
+        // The parked entry is still waiting, and has not run a Vision request of its own.
+        #expect(await scheduler.snapshot().stages[.faceDetection]!.queued >= 1)
+        #expect(detector.requestCount == 1, "only the holder's detection has run so far")
+        await scheduler.resume()
+        try await until("resume admits the parked entry") { detector.requestCount >= 2 }
+        detector.releaseAll()
+        await reader.reads.release(.highResolution)
+        _ = try #require(await holder.value)
+        _ = try #require(await parked.value)
+        await scheduler.close()
+    }
+
+    @Test func droppedGenerationNeverAnswersTheNewJob() async throws {
+        // #2: invalidate a running job, then immediately ask for the same revision again.
+        // The old task must not remove, cancel or answer the new job.
+        let reader = GatedSharpnessReader()
+        reader.setProperties(afInfoProperties(), for: "again.arw")
+        let detector = GatedSharpnessDetector()
+        detector.hold()
+        await reader.reads.hold(.highResolution)
+        let scheduler = makeScheduler(reader, detector)
+
+        let oldTask = Task { await scheduler.analyzeCurrent(photoRequest("again", revision: 1)) }
+        try await until("the old analysis is in flight") {
+            reader.highResolutionCounts["again.arw"] ?? 0 >= 1
+        }
+        await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/again.arw")])
+        // Same revision requested right away: the new job must get a real answer, not the old
+        // task's cancellation.
+        let fresh = Task { await scheduler.analyzeCurrent(photoRequest("again", revision: 1)) }
+        await reader.reads.release(.highResolution)
+        detector.releaseAll()
+        let answer = try #require(await fresh.value)
+        guard case .regions(let afRegions) = answer.autofocus else {
+            Issue.record("Expected the new job's own AF regions")
+            return
+        }
+        #expect(afRegions.first?.score != nil)
+        // The dropped job's waiter was told nil by the invalidation itself.
+        let dropped = await oldTask.value
+        #expect(dropped == nil)
+        await scheduler.close()
+    }
+
+    @Test func invalidateCancelsOnlyMatchingPhotos() async throws {
+        // #3: iteration is over a copy of the keys, so dropping inside the loop is safe, and
+        // only the invalidated photo's work is dropped.
+        let reader = GatedSharpnessReader()
+        let detector = GatedSharpnessDetector()
+        detector.hold()
+        await reader.reads.hold(.highResolution)
+        let scheduler = makeScheduler(reader, detector)
+        await scheduler.submit(
+            [photoRequest("keep"), photoRequest("gone")], priority: .folder)
+        try await until("both photos have work queued or running") {
+            let snapshot = await scheduler.snapshot()
+            let waiting =
+                snapshot.queuedByPriority.values.reduce(0, +)
+                + snapshot.stages[.faceDetection]!.queued
+            return waiting >= 2
+        }
+        await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/gone.arw")])
+        detector.releaseAll()
+        await reader.reads.release(.highResolution)
+        try await until("the surviving photo is analysed") {
+            await scheduler.snapshot().stages[.faceDetection]!.finishedCount >= 1
+        }
+        await scheduler.close()
+        // The untouched photo still produced its record; the dropped one did not crash the loop.
+        #expect(reader.highResolutionCounts["keep.arw"] != nil)
+    }
+
+    @Test func metadataAdmissionIsBoundedUnderLoad() async throws {
+        // #4: a thousand-photo submit must not fan out a thousand ImageIO property reads.
+        let reader = GatedSharpnessReader()
+        let detector = GatedSharpnessDetector()
+        await reader.reads.hold(.highResolution)
+        detector.hold()
+        let scheduler = makeScheduler(reader, detector)
+        await scheduler.submit((0..<1000).map { photoRequest("load\($0)") }, priority: .folder)
+        try await until("metadata reads stay bounded") { reader.peakPropertyReads > 0 }
+        // The metadata budget is small, so concurrent property reads never exceed it.
+        #expect(reader.peakPropertyReads <= 4)
+        // Close drains the parked reads and requests too: release every gate first so close
+        // can await them, which is the point of the test.
+        detector.releaseAll()
+        await reader.reads.release(.highResolution)
+        await scheduler.close()
+    }
+
+    @Test func pausedWaitersAreCancelledByInvalidate() async throws {
+        // #5: pause first; a queued task parks in the paused-waiter set. Invalidation must
+        // resume and cancel it, not leave it parked.
+        let reader = GatedSharpnessReader()
+        let detector = GatedSharpnessDetector()
+        let scheduler = makeScheduler(reader, detector)
+        await scheduler.pause()
+        await scheduler.submit([photoRequest("victim")], priority: .folder)
+        try await until("the task is parked by pause") {
+            await scheduler.pausedAdmissionCount == 1
+        }
+        await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/victim.arw")])
+        // The dropped task's pause-park is resumed and cancelled by the invalidation itself,
+        // not left waiting for the next resume.
+        #expect(await scheduler.pausedAdmissionCount == 0)
+        // Nothing runs for the dropped photo after resume.
+        await scheduler.resume()
+        await scheduler.close()
+        #expect(reader.propertiesCounts["victim.arw"] == nil)
+        #expect(reader.previewCounts["victim.arw"] == nil)
+        #expect(reader.highResolutionCounts["victim.arw"] == nil)
+    }
+
+    @Test func backgroundSubmitSkipsPhotosWithCachedResults() async throws {
+        // #8: the cached path also applies to background submits, not just interactive reads.
+        let reader = GatedSharpnessReader()
+        let detector = GatedSharpnessDetector()
+        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
+        {
+            reader.reads.release(kind)
+        }
+        let scheduler = makeScheduler(reader, detector)
+        _ = await scheduler.analyzeCurrent(photoRequest("done"))
+        #expect(reader.propertiesCounts["done.arw"] == 1)
+        await scheduler.submit([photoRequest("done")], priority: .folder)
+        // Cached: no new property read for that photo.
+        #expect(reader.propertiesCounts["done.arw"] == 1)
         await scheduler.close()
     }
 }

@@ -17,7 +17,7 @@ public struct DetailRegionSharpnessReading: RegionSharpnessReading {
     }
 
     public func properties(of url: URL) async -> ImageProperties? {
-        await withTaskExecutorPreference(ImageWorkExecutor.utility) {
+        await withTaskExecutorPreference(ImageWorkExecutor.current) {
             autoreleasepool {
                 guard
                     let source = CGImageSourceCreateWithURL(
