@@ -1087,8 +1087,9 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.duo.capsule").exists)
     }
 
-    /// #198: a group opened in expanded Duo browses its members in the left pane, with the
-    /// current member highlighted and the preview and marks following the tap.
+    /// #225: a group opened in expanded Duo expands in place in the folder grid, so the folder's
+    /// own photos stay reachable around it. Folding the group keeps the photo, its marks and the
+    /// route; the stack reopens it, and Back returns to the full folder grid.
     @MainActor
     func testDuoExpandedGroupMembersBrowseBesideThePhoto() throws {
         try XCTSkipUnless(
@@ -1105,34 +1106,86 @@ final class CloveFlowTests: XCTestCase {
             app.windows.firstMatch.horizontalSizeClass == .regular,
             "Select Open in Device Hub to test the Duo inner display")
         prepareDuo(app)
-        element(app, "clove.grid.group.burst-2678").tap()
+        // The second burst sits between folder photos, so the split pane shows both around it.
+        element(app, "clove.grid.group.burst-2696").tap()
         XCTAssertTrue(element(app, "clove.duo.focus").waitForExistence(timeout: 5))
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        // The left pane lists the individual members, not the collapsed stack.
-        XCTAssertTrue(element(app, "clove.duo.groupMembers").exists)
-        let first = element(app, "clove.grid.photo.mmq02678")
-        let second = element(app, "clove.grid.photo.mmq02679")
-        let third = element(app, "clove.grid.photo.mmq02681")
-        XCTAssertTrue(first.exists && second.exists && third.exists)
-        XCTAssertFalse(element(app, "clove.grid.group.burst-2678").exists)
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
+        // The folder's own photos stay in the pane around the expanded group.
+        let before = element(app, "clove.grid.photo.mmq02695")
+        let after = element(app, "clove.grid.photo.mmq02699")
+        XCTAssertTrue(before.exists, "The photo before the group left the folder grid")
+        XCTAssertTrue(after.exists, "The photo after the group left the folder grid")
+        XCTAssertFalse(element(app, "clove.grid.group.burst-2696").exists)
+        let count = element(app, "clove.grid.group.count.burst-2696")
+        XCTAssertTrue(count.exists, "The expanded group has no header")
+        XCTAssertEqual(count.label, "3 photos")
+        let first = element(app, "clove.grid.photo.mmq02696")
+        let third = element(app, "clove.grid.photo.mmq02698")
         XCTAssertTrue(first.isSelected)
         XCTAssertFalse(third.isSelected)
-        // A member tap moves the preview and the highlight to that member.
+        // Folding changes the thumbnails only: the photo, its name and the route stay.
+        element(app, "clove.grid.group.fold").tap()
+        XCTAssertFalse(element(app, "clove.grid.group.count.burst-2696").exists)
+        let stack = element(app, "clove.grid.group.burst-2696")
+        XCTAssertTrue(stack.waitForExistence(timeout: 5), "Folding did not leave the group's stack")
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
+        XCTAssertTrue(before.exists && after.exists)
+        capture("duo-group-inline-grid-folded")
+        // The stack reopens the group in place, without leaving the photo.
+        stack.tap()
+        XCTAssertTrue(
+            element(app, "clove.grid.group.count.burst-2696").waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02696").isSelected)
+        capture("duo-group-inline-grid")
+        // A member tap moves the preview, the filename, the highlight and the marks.
         third.tap()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", preview))
+        XCTAssertTrue(waitForLabel("MMQ02698.ARW", preview))
         XCTAssertTrue(third.isSelected)
         XCTAssertFalse(first.isSelected)
-        capture("duo-group-members")
-        // Marking applies to the member on screen.
+        XCTAssertTrue(before.exists && after.exists)
         let capsule = element(app, "clove.duo.capsule")
         element(app, "clove.duo.capsule.stars.4").tap()
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "4 stars"), capsule))
         XCTAssertTrue(third.label.contains("4 stars"))
-        // Back returns to the folder grid with its collapsed stack.
+        // Photo only keeps the same photo, the folder-order counter and the folder-order strip.
+        let grid = app.collectionViews.firstMatch
+        let divider = element(app, "clove.duo.divider")
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(
+            forDuration: 0.1,
+            thenDragTo: grid.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
+        XCTAssertTrue(
+            element(app, "clove.detail.zoom").label.hasPrefix("21 / 36"),
+            "The counter left the folder order: \(element(app, "clove.detail.zoom").label)")
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").exists,
+            "The photo-only strip did not expand the current group")
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02695").exists)
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02699").exists)
+        capture("duo-group-photo-only")
+        // The strip folds the group to its stack without closing the photo.
+        element(app, "clove.detail.filmstrip.group.fold").tap()
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        let stripStack = element(app, "clove.detail.filmstrip.group.burst-2696")
+        XCTAssertTrue(stripStack.waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
+        capture("duo-group-photo-only-folded")
+        stripStack.tap()
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
+        // Back returns to the full folder grid with its filter and browsing position.
         element(app, "clove.nav.back").tap()
-        XCTAssertTrue(element(app, "clove.grid.group.burst-2678").waitForExistence(timeout: 5))
-        XCTAssertFalse(element(app, "clove.duo.groupMembers").exists)
+        XCTAssertTrue(element(app, "clove.grid.more").waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.grid.title").label, "Coastal light")
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02698").exists)
+        XCTAssertGreaterThanOrEqual(grid.frame.width, app.frame.width * 0.95)
+        capture("duo-group-back-to-grid")
     }
 
     /// Runs on the Duo's cover display. A Duo simulator boots in the Closed pose
