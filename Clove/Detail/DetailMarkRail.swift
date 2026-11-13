@@ -28,7 +28,8 @@ struct DetailMarkRail: View {
                 .frame(width: 48, height: 1)
             MarkRejectAction(
                 isRejected: marks.isRejected, identifier: "clove.detail.rail.reject",
-                onToggle: toggleReject)
+                onToggle: toggleReject
+            )
             .help(marks.isRejected ? "Rejected" : "Reject")
             .frame(width: 48, height: 40)
             LabelPicker(
