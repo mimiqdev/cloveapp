@@ -886,6 +886,79 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.nav.back").tap()
     }
 
+    /// Opt-in visual evidence for the shared marking family: every rating value, clear versus
+    /// Reject, labeled-unrated, the ladder and label picker, and both Entry states, in Light,
+    /// Dark and one alternate theme (#227).
+    @MainActor
+    func testCaptureMarkingControlsWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_MARKING"] == "1")
+        for theme in ["light", "dark", "nord"] {
+            let app = launchSample()
+            defer { app.terminate() }
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            // Keep each rated photo on screen, so the captures show the value it carries.
+            element(app, "clove.grid.more").tap()
+            app.buttons["Settings"].tap()
+            turnOffAutoAdvance(app)
+            element(app, "clove.nav.back").tap()
+            element(app, "clove.grid.photo.mmq02680").tap()
+            let capsule = element(app, "clove.detail.capsule")
+            capture("marking-unrated-\(theme)")
+            for value in 1...5 {
+                rate(value, in: app)
+                XCTAssertTrue(
+                    wait(NSPredicate(format: "value CONTAINS %@", "\(value) star"), capsule))
+                capture("marking-\(value)star-\(theme)")
+            }
+            // Clear via tap-current, then label an unrated photo: label and rating stay
+            // independent.
+            rate(5, in: app)
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+            capture("marking-cleared-\(theme)")
+            element(app, "clove.detail.capsule.label").tap()
+            XCTAssertTrue(element(app, "clove.detail.labels.blue").waitForExistence(timeout: 5))
+            capture("marking-label-picker-\(theme)")
+            element(app, "clove.detail.labels.blue").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Blue"), capsule))
+            capture("marking-labeled-unrated-\(theme)")
+            // Reject keeps the label in the file but reads Rejected; the corner glyph shows.
+            element(app, "clove.detail.capsule.reject").tap()
+            XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Rejected"), capsule))
+            XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
+            capture("marking-rejected-\(theme)")
+            // The ladder itself, opened from the rating action.
+            element(app, "clove.detail.capsule.rating").tap()
+            XCTAssertTrue(
+                element(app, "clove.detail.capsule.stars").waitForExistence(timeout: 5))
+            capture("marking-ladder-\(theme)")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
+            // Mixed batch state in select mode.
+            element(app, "clove.nav.back").tap()
+            let rated = element(app, "clove.grid.photo.mmq02678")
+            rated.press(forDuration: 0.6)
+            element(app, "clove.grid.photo.mmq02680").tap()
+            capture("marking-mixed-batch-\(theme)")
+            element(app, "clove.grid.batch.rating").tap()
+            XCTAssertTrue(
+                element(app, "clove.grid.batch.stars.3").waitForExistence(timeout: 5))
+            capture("marking-batch-ladder-\(theme)")
+            element(app, "clove.grid.batch.done").tap()
+            // Entry's two states: resume with a legible Reconnect is covered by the sample's
+            // reconnect variant; the plain resume and Open folder button show here.
+            element(app, "clove.nav.back").tap()
+            capture("marking-entry-resume-\(theme)")
+        }
+        // The disconnected-row Reconnect chip stays legible on its neutral capsule; the
+        // sample's third recent is a missing drive. The first-launch state has no sample
+        // lever, so its Open folder button is covered by the design gallery and flows.
+        let entry = launchSample()
+        XCTAssertTrue(
+            element(entry, "clove.entry.reconnect").waitForExistence(timeout: 5))
+        capture("marking-entry-reconnect")
+        entry.terminate()
+    }
+
     /// Explicit screenshot run only. The normal flow run skips this comparison matrix.
     @MainActor
     func testCaptureDesignReferencesWhenRequested() throws {

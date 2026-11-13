@@ -162,7 +162,7 @@ private struct GridTile: View {
                     // filmstrip's group extent: `text/primary` at 12% on the background shape
                     // alone, never on the photo (owner decision, 2026-11-13, #226 filmstrip,
                     // #227 grid).
-                    Rectangle().fill(Color.clove.text.primary).opacity(0.12)
+                    ExpandedGroupSurface(cornerRadius: 6)
                 } else {
                     Rectangle().fill(Color.clove.surface.card)
                 }

@@ -63,10 +63,10 @@ struct DetailFilmstrip: View {
                             }
                             .padding(3)
                             .background {
-                                // The group's extent, not its selection: the neutral token at 12%,
-                                // on the background shape alone (owner decision, 2026-11-13, #226).
-                                RoundedRectangle(cornerRadius: 9)
-                                    .fill(Color.clove.text.primary).opacity(0.12)
+                                // The group's extent, not its selection: the neutral token at
+                                // 12%, on the background shape alone (owner decision,
+                                // 2026-11-13, #226).
+                                ExpandedGroupSurface(cornerRadius: 9)
                             }
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
