@@ -84,7 +84,7 @@ public enum BrowsingPerformanceProbe {
             "Disk-warm thumbnail and feature passes recreate the production caches with zero memory capacity over the cold run's disk entries. Warm detail uses its in-memory cache. Warm grouping uses the finished group cache and normally does no feature work.",
             "Percentiles are nearest-rank over successful samples. Each statistic and sample count carries the cache state; failures and unavailable stages have separate entries.",
             "Thumbnail latency includes bounded queueing behind at most \(configuration.thumbnailInFlight) in-flight requests. Throughput counts materialized successful previews over the whole pass.",
-            "First detail preview uses the production raw-first request at \(configuration.displayPixels) display pixels. RAW focus requests a second native render after cancelling the first; the combined distribution includes only observed cancellations.",
+            "First detail preview uses the production raw-first request at \(configuration.displayPixels) display pixels. RAW focus cancels the first native render after 100 ms and measures the production close drain, then measures a second native render in a fresh pipeline. The combined distribution adds those two measured spans only when cancellation was observed.",
             "Memory is process RSS sampled every 5 ms. Peaks are cumulative lower bounds, not per-stage or per-allocation attribution.",
             "The generated set repeats pinned sources under unique paths. Shared capture metadata and pixels provide repeatable load, not realistic burst-grouping accuracy evidence.",
             "The measured folder and its photo files are never modified. Lab caches use a temporary directory removed after the run.",

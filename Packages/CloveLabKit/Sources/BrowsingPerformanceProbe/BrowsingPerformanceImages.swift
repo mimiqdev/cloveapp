@@ -101,6 +101,7 @@ enum BrowsingPerformanceImages {
         let rawSets = sets.filter { $0.photoSet.primary.format == .raw }
         var raw: [Double] = []
         var includingCancel: [Double] = []
+        var cancelDrain: [Double] = []
         var warm: [Double] = []
         var failures: [String: Int] = [:]
         var cancelNotObserved = 0
@@ -112,14 +113,19 @@ enum BrowsingPerformanceImages {
                 set: rawSets[index], configuration: configuration, native: true)
             let second = try detailRequest(
                 set: rawSets[index + 1], configuration: configuration, native: true)
-            let pipeline = DetailPipeline()
-            let consumer = UUID()
-            let firstTask = Task { try await pipeline.image(for: first, consumer: consumer) }
-            try await Task.sleep(for: .milliseconds(20))
+            let firstPipeline = DetailPipeline()
+            let firstTask = Task { try await firstPipeline.image(for: first) }
+            try await Task.sleep(for: .milliseconds(100))
+            let drainWatch = Stopwatch()
             firstTask.cancel()
+            // Closing waits for an uncancellable native read that already started. This is
+            // the cancelled-render drain, measured directly rather than inferred from a delay.
+            await firstPipeline.close()
+            let drainMilliseconds = drainWatch.milliseconds
 
+            let secondPipeline = DetailPipeline()
             let watch = Stopwatch()
-            let result = try await pipeline.image(for: second, consumer: consumer)
+            let result = try await secondPipeline.image(for: second)
             let elapsed = watch.milliseconds
             let secondSucceeded = decodedBytes(result) != nil
             if secondSucceeded {
@@ -137,19 +143,20 @@ enum BrowsingPerformanceImages {
                 // A failed first render did not establish a cancelled-render wait.
             }
             if secondSucceeded && firstWasCancelled {
-                includingCancel.append(elapsed)
+                cancelDrain.append(drainMilliseconds)
+                includingCancel.append(drainMilliseconds + elapsed)
             } else if !firstWasCancelled {
                 cancelNotObserved += 1
             }
 
             if secondSucceeded {
                 let warmWatch = Stopwatch()
-                let cached = try await pipeline.image(for: second, consumer: consumer)
+                let cached = try await secondPipeline.image(for: second)
                 if decodedBytes(cached) != nil {
                     warm.append(warmWatch.milliseconds)
                 }
             }
-            await pipeline.close()
+            await secondPipeline.close()
             pairsMeasured += 1
         }
         guard pairsMeasured > 0 else {
@@ -163,6 +170,7 @@ enum BrowsingPerformanceImages {
             failureCount: failures.values.reduce(0, +))
         report.failureReasons("raw-focus", cache: "cold", reasons: failures)
         report.distribution("raw-focus", cache: "warm", samples: warm)
+        report.distribution("raw-focus-cancel-drain", cache: "cold", samples: cancelDrain)
         report.distribution(
             "raw-focus-including-cancel", cache: "cold", samples: includingCancel,
             failureCount: cancelNotObserved)
@@ -176,7 +184,7 @@ enum BrowsingPerformanceImages {
         }
         report.value(
             "raw-focus-cancel-observed", value: Double(includingCancel.count), unit: "count",
-            tags: ["attempted": String(pairsMeasured), "cancelSignalDelayMs": "20"])
+            tags: ["attempted": String(pairsMeasured), "cancelSignalDelayMs": "100"])
     }
 
     private static func thumbnailRun(
