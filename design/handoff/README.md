@@ -34,7 +34,7 @@ Things to know about the frames:
 - Device bezels, iOS status bars and home indicators are drawn for context. Use the system ones.
 - Some frames still carry **hidden legacy layers** named "… · local (hidden)", "… · source …", "Segmented" or "Toolbar". Ignore anything that isn't visible in the screenshot.
 - Sample photos are placeholders.
-- A few one-off greys and the badges drawn on photos are not bound to tokens. Map them to the nearest token.
+- A few one-off greys are not bound to tokens; map them to the nearest token. The count badge drawn on a group photo is intentionally not a token (owner decision, 2026-11-13, #226).
 
 ## Design principles (apply to anything not specified)
 

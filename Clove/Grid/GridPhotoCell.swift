@@ -153,7 +153,7 @@ private struct GridTile: View {
             .overlay(alignment: .bottomTrailing) { bottomMarkers }
             .overlay(alignment: .topTrailing) {
                 if let group = item.group, isCover {
-                    GroupCountBadge(count: group.count).padding(4)
+                    GroupCountBadge(count: group.count, presentation: .grid).padding(4)
                 }
             }
             .background(Color.clove.surface.card)
@@ -177,7 +177,7 @@ private struct GridTile: View {
                 Button {
                     openGroup(group.id)
                 } label: {
-                    GroupCountBadge(count: group.count).padding(4)
+                    GroupCountBadge(count: group.count, presentation: .grid).padding(4)
                 }
                 .buttonStyle(.plain)
                 .allowsHitTesting(!isSelecting)

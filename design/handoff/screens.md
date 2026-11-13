@@ -21,7 +21,7 @@ Devices:
 |---|---|---|
 | [Theme board](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=181-2391) · [png](screens/00-themes-theme-board.png) | 181:2391 | All 8 palettes with every token. |
 | [Live demo](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=215-1878) · [png](screens/00-themes-live-demo.png) | 215:1878 | The same grid and detail in Darkroom, Mocha, Nord and Gruvbox. Use it to check a theme implementation. |
-| [Group wrapper options](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=208-1154) · [png](screens/00-themes-group-wrapper-color-options.png) | 208:1154 | An exploration. Option C (a muted accent tint) was chosen. Don't build the others. |
+| [Group wrapper options](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=208-1154) · [png](screens/00-themes-group-wrapper-color-options.png) | 208:1154 | An exploration. Option C (a tinted wrapper) was chosen; its colour is now `text/primary` at 12% (owner decision, 2026-11-13, #226). Don't build the others. |
 
 ## 01 Entry (iPhone; iPad and Duo reuse it with wider margins)
 
@@ -54,7 +54,7 @@ Devices:
 
 **Default**
 - The top bar has Back, the folder title, the subtitle "1,284 photos", then the **Filter** and **"…"** icon buttons. There is no filter bar, status row or bottom toolbar.
-- A **group** of similar shots is one stacked tile with a count badge in `group`. Tapping it opens detail on the first unmarked member, or the first member if all are marked, with the filmstrip group expanded. A single photo opens detail.
+- A **group** of similar shots is one stacked tile with the neutral count badge. Tapping it opens detail on the first unmarked member, or the first member if all are marked, with the filmstrip group expanded. A single photo opens detail.
 - A **rejected** photo is dimmed (`opacity/rejected`) with no ✕ badge. The rating badge and label dot stay. The RAW+JPEG badge is only in Info.
 - **Move Rejects** is a 48 pt round glass icon button (a tray with a down arrow) at the bottom right. It has no count and shows only when rejects exist. It always opens the confirm sheet first.
 
@@ -120,7 +120,7 @@ There is no group review screen. A stack opens the normal detail screen with its
 | [Duo expanded (photo only)](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=214-3214) · [png](screens/04-groups-in-detail-duo-expanded.png) | 214:3214 |
 
 - A grid stack opens detail at its first unmarked member, or its first member when all are marked. The ordinary detail header and controls remain.
-- The current group expands in the grid-order filmstrip; rejected thumbnails are dimmed and rated ones show stars.
+- The current group expands in the grid-order filmstrip on `text/primary` at 12%, a neutral surface distinct from the current frame's ring; rejected thumbnails are dimmed and rated ones show stars.
 - Zoom and pan stay synced within the group. Leaving it follows the detail setting.
 - **Reject N unmarked** is a pill centred in its own row above the strip. It requires a rated or labeled visible member and at least one unmarked visible member, and never touches existing marks or hidden photos. Undo restores the action together and returns to the photo shown at submission.
 - The pill hides with chrome or when marking is off, and disappears when nothing remains to reject. It stays clear of the capsule and swipe star bar.
@@ -163,7 +163,7 @@ The iPad frames were drawn before the sidebar (#170) and the detail rail (#174) 
 - **Grid**: the title is the selected sidebar row's name ("All", "Unmarked", "Red", "DCIM/100CANON") and the subtitle is the count ("1,284 photos"). There is no Filter button. The top right has Move Rejects (only when rejects exist) and "…", as 40 × 40 glass icon buttons. Move Rejects is never at the bottom right on iPad. Stacks and dimmed rejects work as on iPhone.
 - **Detail** and Settings open full screen with a back button named after the selected row, such as "‹ All" or "‹ Unmarked". The old grid-beside-detail layout is removed. A 96 pt right rail replaces the capsule. It sits beside the stage, never over it, and never hides: a single tap or zoom hides the filmstrip, the Reject N unmarked pill and the top bar buttons, while the stage keeps its size. Top to bottom: a vertical 5-star bar that fills from the bottom (tap, or drag and release), a hairline, the reject circle, a hairline, and the five label dots, tapped directly with no popover. The current label has a ring. Tapping the current rating or label clears it. Each rail control has a hover tooltip with its VoiceOver label (the frame shows "Reject"). Info and Undo are 40 × 40 in the top bar. Swipe marking on the photo still works; the rail stars show the live value. There are no keyboard hints.
 - **Rejected**: the rail's reject circle is filled, the stars and dots go neutral, and the corner glyph sits in the stage's top-trailing corner, left of the rail.
-- **Filmstrip** (at the bottom, following grid order): every group except the current one is collapsed into one stacked tile with a count badge in `group`. The current group is expanded in place on a tint of `group` at 25% layer opacity, with no outline. The current frame has a thin ring in `text/primary`.
+- **Filmstrip** (at the bottom, following grid order): every group except the current one is collapsed into one stacked tile with the neutral count badge. The current group is expanded in place on `text/primary` at 12% layer opacity, with no outline. The current frame has a thin ring in `text/primary`.
 
 ## 08–09 Duo
 

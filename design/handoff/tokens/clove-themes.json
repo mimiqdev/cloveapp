@@ -4,7 +4,8 @@
   "rules": [
     "Photos are never tinted or recolored by a theme; only chrome changes.",
     "Light and Dark follow the system when 'Match system light/dark' is on; otherwise the chosen theme applies in both.",
-    "When a token is used with extra transparency in the design (e.g. group tint at 25%), apply opacity on the layer, not by editing the token."
+    "When a token is used with extra transparency in the design (e.g. the filmstrip group surface at 12%), apply opacity on the layer, not by editing the token.",
+    "The group count badge is a photo overlay, not a token: black at 56% with the number in white at 94%, the same in every theme (owner decision, 2026-11-13, #226)."
   ],
   "themes": [
     {
@@ -331,7 +332,7 @@
     "group": {
       "type": "color",
       "swiftName": "Color.clove.group",
-      "use": "Similar groups: count badge on stacks, and a tint at 25% behind an expanded group in filmstrips."
+      "use": "Similar groups: the progress line while grouping. The count badges and the expanded filmstrip background no longer use it (owner decision, 2026-11-13, #226)."
     },
     "opacity/rejected": {
       "type": "float",
