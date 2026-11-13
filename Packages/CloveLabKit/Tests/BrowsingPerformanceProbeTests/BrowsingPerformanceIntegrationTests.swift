@@ -52,6 +52,11 @@ func smallRealFolderProducesEveryCurrentPipelineStage() async throws {
         report.measurements.contains {
             $0.name == "raw-focus-cancel-drain" && $0.tags["statistic"] == "p95"
         })
+    #expect(
+        report.measurements.contains {
+            $0.name == "raw-focus-native-results" && $0.value == 1
+                && $0.tags["quality"] == "nativeRAW"
+        })
     let warmTotal = report.measurements.first {
         $0.name == "grouping-total" && $0.tags["cache"] == "warm"
             && $0.tags["statistic"] == "p95"

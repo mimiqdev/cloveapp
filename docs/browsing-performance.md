@@ -88,7 +88,9 @@ identities. Tagged measurements add these facts:
 - `raw-focus-cancel-drain` waits for native render admission, cancels it, and
   measures `DetailPipeline.close()`. `raw-focus-including-cancel` adds that
   drain to a second native RAW render in a fresh pipeline. Only observed
-  admission and cancellation enter those distributions.
+  admission and cancellation enter those distributions. RAW-focus samples must
+  have `.nativeRAW` quality. Embedded fallbacks with `.rawRenderFailed` count as
+  failures, including warm-cache attempts.
 - `memory-peak` is process RSS sampled every 5 ms. It is a cumulative lower
   bound, not per-stage allocation attribution.
 - `grid-scroll-presentation` is unavailable. Lab drives the production

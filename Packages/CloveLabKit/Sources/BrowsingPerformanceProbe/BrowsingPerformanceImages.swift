@@ -109,6 +109,7 @@ enum BrowsingPerformanceImages {
         var cancelDrain: [Double] = []
         var warm: [Double] = []
         var failures: [String: Int] = [:]
+        var warmFailures: [String: Int] = [:]
         var combinedFailures: [String: Int] = [:]
         var cancelNotObserved = 0
         var pairsMeasured = 0
@@ -148,11 +149,11 @@ enum BrowsingPerformanceImages {
                 let watch = Stopwatch()
                 let result = try await secondPipeline.image(for: second)
                 let elapsed = watch.milliseconds
-                let secondSucceeded = decodedBytes(result) != nil
+                let secondSucceeded = nativeRAWBytes(result) != nil
                 if secondSucceeded {
                     raw.append(elapsed)
                 } else {
-                    failures[failureReason(result), default: 0] += 1
+                    failures[rawFocusFailureReason(result), default: 0] += 1
                 }
 
                 var firstWasCancelled = false
@@ -170,7 +171,8 @@ enum BrowsingPerformanceImages {
                         includingCancel.append(drainMilliseconds + elapsed)
                     } else {
                         combinedFailures[
-                            "Second native render: \(failureReason(result))", default: 0] += 1
+                            "Second native render: \(rawFocusFailureReason(result))", default: 0] +=
+                            1
                     }
                 } else {
                     cancelNotObserved += 1
@@ -181,8 +183,10 @@ enum BrowsingPerformanceImages {
                 if secondSucceeded {
                     let warmWatch = Stopwatch()
                     let cached = try await secondPipeline.image(for: second)
-                    if decodedBytes(cached) != nil {
+                    if nativeRAWBytes(cached) != nil {
                         warm.append(warmWatch.milliseconds)
+                    } else {
+                        warmFailures[rawFocusFailureReason(cached), default: 0] += 1
                     }
                 }
             } catch {
@@ -202,7 +206,13 @@ enum BrowsingPerformanceImages {
             "raw-focus", cache: "cold", samples: raw,
             failureCount: failures.values.reduce(0, +))
         report.failureReasons("raw-focus", cache: "cold", reasons: failures)
-        report.distribution("raw-focus", cache: "warm", samples: warm)
+        report.distribution(
+            "raw-focus", cache: "warm", samples: warm,
+            failureCount: warmFailures.values.reduce(0, +))
+        report.failureReasons("raw-focus", cache: "warm", reasons: warmFailures)
+        report.value(
+            "raw-focus-native-results", value: Double(raw.count), unit: "count",
+            tags: ["attempted": String(pairsMeasured), "quality": "nativeRAW"])
         report.distribution(
             "raw-focus-cancel-drain", cache: "cold", samples: cancelDrain,
             failureCount: cancelNotObserved)
@@ -338,6 +348,22 @@ enum BrowsingPerformanceImages {
     private static func failureReason(_ result: DetailResult) -> String {
         guard case .unavailable(let reason) = result else { return "No materialized pixels." }
         return reason.rawValue
+    }
+
+    private static func nativeRAWBytes(_ result: DetailResult) -> Int? {
+        guard case .available(let image) = result,
+            image.quality == .nativeRAW, image.limitation != .rawRenderFailed
+        else { return nil }
+        return decodedBytes(image.image)
+    }
+
+    private static func rawFocusFailureReason(_ result: DetailResult) -> String {
+        guard case .available(let image) = result else { return failureReason(result) }
+        if image.limitation == .rawRenderFailed { return DetailLimitation.rawRenderFailed.rawValue }
+        if image.quality != .nativeRAW {
+            return "Expected nativeRAW, got \(image.quality.rawValue)"
+        }
+        return "No materialized native RAW pixels."
     }
 
     private static func decodedBytes(_ result: DetailResult) -> Int? {
