@@ -31,7 +31,7 @@ struct DuoMarkControls: ToolbarContent {
         ToolbarItem(placement: .bottomBar) {
             Button(
                 marks.isRejected ? "Rejected" : "Reject",
-                systemImage: marks.isRejected ? "xmark.circle.fill" : "xmark.circle"
+                systemImage: marks.isRejected ? "flag.slash.fill" : "flag.slash"
             ) { toggleReject() }
             .tint(Color.clove.reject)
             .disabled(!canMark)

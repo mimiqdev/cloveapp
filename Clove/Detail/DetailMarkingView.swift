@@ -327,26 +327,25 @@ struct DetailMarkingView: View {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal, 16)
             }
-            // The marking capsule gets its own reserved row beneath the fitted photo,
-            // never over the image and never in the system side toolbar (#200).
-            if isDuoExpanded && chromeIsVisible {
-                DetailMarkCapsule(
-                    marks: displayMarks, settings: settings,
-                    previewRating: swipeFeedback.rating,
-                    rate: { rate($0) }, label: { choose($0) },
-                    toggleReject: { toggleReject() },
-                    identifier: "clove.duo.capsule", labelPickerIdentifier: "clove.duo.labels"
-                )
-                .disabled(!browsing.canMark)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .transition(.opacity)
-            }
+            // The marking toolbar gets its own reserved bottom-right area beside the narrowed
+            // filmstrip, never over the image and never in the system side toolbar (#200, #227).
+            // The two regions share the photo stage's background, so no contrasting sidebar slab
+            // divides them.
             if showsFilmstrip && chromeIsVisible {
-                DetailFilmstrip(
-                    photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                    open: actions.openPhoto,
-                    groups: browsing.groups, finishingAction: finishingAction)
+                HStack(alignment: .bottom, spacing: 0) {
+                    DetailFilmstrip(
+                        photos: order, current: photo.id, thumbnails: browsing.thumbnails,
+                        open: actions.openPhoto,
+                        groups: browsing.groups, finishingAction: finishingAction,
+                        markingWidth: isDuoExpanded ? Self.duoMarkingAreaWidth : nil)
+                    if isDuoExpanded {
+                        duoMarkingToolbar
+                    }
+                }
+            } else if isDuoExpanded && chromeIsVisible {
+                duoMarkingToolbar
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
         }
         .contentMargins(for: .container, edges: .horizontal)
@@ -354,6 +353,32 @@ struct DetailMarkingView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.photoOnly" : "clove.duo.focus")
     }
+
+    /// The shared marking family in the reserved bottom-right marking area beside the filmstrip
+    /// (#227). It never overlaps the filmstrip or the fitted photo.
+    @ViewBuilder private var duoMarkingToolbar: some View {
+        if chromeIsVisible {
+            MarkingToolbar(
+                rating: swipeFeedback.rating
+                    ?? (displayMarks.isRejected ? .unrated : displayMarks.rating),
+                label: displayMarks.isRejected ? nil : displayMarks.label.colour,
+                isRejected: displayMarks.isRejected,
+                enabledRatings: settings.enabledRatings,
+                labels: [nil] + settings.availableLabels.map { Optional($0) },
+                identifier: "clove.duo.capsule", labelPickerIdentifier: "clove.duo.labels",
+                onRate: { rate($0) }, onReject: { toggleReject() },
+                onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
+                onBegin: actions.markingSwipeBegan
+            )
+            .disabled(!browsing.canMark)
+            .accessibilityValue(MarkSummary.text(for: displayMarks))
+            .transition(.opacity)
+        }
+    }
+
+    /// The width the filmstrip reserves for the bottom-right marking area beside it: the shared
+    /// marking toolbar's 168 pt frame plus its surrounding padding (#227).
+    private static let duoMarkingAreaWidth: CGFloat = 168 + 32
 
     private var standardLayout: some View {
         VStack(spacing: 0) {
@@ -423,13 +448,25 @@ struct DetailMarkingView: View {
                                 open: actions.openPhoto,
                                 groups: browsing.groups, finishingAction: finishingAction)
                             if !usesRail {
-                                DetailMarkCapsule(
-                                    marks: displayMarks, settings: settings,
-                                    previewRating: swipeFeedback.rating,
-                                    rate: { rate($0) }, label: { choose($0) },
-                                    toggleReject: { toggleReject() }
+                                MarkingToolbar(
+                                    rating: swipeFeedback.rating
+                                        ?? (displayMarks.isRejected
+                                            ? .unrated : displayMarks.rating),
+                                    label: displayMarks.isRejected
+                                        ? nil : displayMarks.label.colour,
+                                    isRejected: displayMarks.isRejected,
+                                    enabledRatings: settings.enabledRatings,
+                                    labels: [nil] + settings.availableLabels.map { Optional($0) },
+                                    identifier: "clove.detail.capsule",
+                                    labelPickerIdentifier: "clove.detail.labels",
+                                    onRate: { rate($0) }, onReject: { toggleReject() },
+                                    onLabel: {
+                                        choose($0.map { ColourLabel(colour: $0) } ?? .clear)
+                                    },
+                                    onBegin: actions.markingSwipeBegan
                                 )
                                 .disabled(!browsing.canMark)
+                                .accessibilityValue(MarkSummary.text(for: displayMarks))
                                 .padding(.horizontal, 16)
                             }
                         }
@@ -525,7 +562,7 @@ struct DetailMarkingView: View {
         .overlay(alignment: .topLeading) { limitationNote }
         .overlay(alignment: .topTrailing) {
             if displayMarks.isRejected {
-                Image(systemName: "xmark")
+                Image(systemName: "flag.slash.fill")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 22, height: 22)

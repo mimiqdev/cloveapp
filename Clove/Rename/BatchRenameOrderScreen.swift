@@ -37,7 +37,6 @@ struct BatchRenameOrderScreen: View {
                 .padding(20)
         }
         .foregroundStyle(Color.clove.text.primary)
-        .tint(Color.clove.accent)
         .background(Color.clove.bg.canvas)
         .interactiveDismissDisabled(flow.isRunning)
         .accessibilityElement(children: .contain)

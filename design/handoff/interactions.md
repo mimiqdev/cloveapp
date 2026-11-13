@@ -28,12 +28,12 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 | Grid | Tap a tile | Opens detail; a stack starts at its first unmarked member, or its first member if all are marked. |
 | Grid | Long press **(proposed)** | A context menu: Reject, Rate, Label, Select. |
 | Grid | Filter button | Opens the filter menu. Picking an item applies it at once, and the button fills with `accent`. |
-| Grid | "…" ▶ Select | Select mode: tap tiles to toggle, then use the capsule to mark all of them. Done exits. |
+| Grid | "…" ▶ Select | Select mode: tap tiles to toggle, then use the marking toolbar to mark all of them. Done exits. |
 | Detail | Swipe left or right | Next or previous photo in grid order (filtered order when a filter is on). |
-| Detail | **Slow vertical drag** | Relative slider from the current rating: up raises, down lowers through enabled stars, 0 and −1, one step per 60 pt with a light haptic. Reverse across the start in the same gesture. The star bar stays beside the original touch and the capsule/rail stars preview the value; clear shows an empty bar, Reject shows ✕ immediately. Release commits the preview once for undo, without changing the label. |
+| Detail | **Slow vertical drag** | Relative slider from the current rating: up raises, down lowers through enabled stars, 0 and −1, one step per 60 pt with a light haptic. Reverse across the start in the same gesture. The ladder stays beside the original touch and the toolbar/rail rating preview the value; clear shows an empty ladder with `star.slash`, Reject fills the `flag.slash` chip immediately. Release commits the preview once for undo, without changing the label. |
 | Detail | **Quick swipe down** | Mode is chosen once from the first ~100 ms (starting threshold 500 pt/s downward). Three stops: starting rating, 0 at 60 pt (medium haptic), −1 at 180 pt (heavier haptic). Reverse from Reject to 0; up past the start restores the original. Unrated still passes through 0; Reject cannot lower further, and up steps −1 → 0 → enabled stars. Quick up is a slow slider. No hold or momentum. Distances and haptic strengths need device tuning. Glyphs only; stage words are VoiceOver labels. |
-| Detail | Tap the capsule's reject, stars or label | Sets the mark directly. Tapping the current star value clears it. Opening the shared visual tap picker (`RatingPicker` / `LabelPicker`) shows `star.slash` + 5 stars or `circle.slash` + color dots horizontally (`288 × 52` pt) anchored above the bar by default (or vertically `52 × 288` pt where space calls for it); picking applies without clearing the other mark attribute and closes, and tapping outside dismisses without toggling detail chrome. |
-| Detail | Single tap on the photo | Hides or shows the chrome (capsule, filmstrip, top bar buttons). |
+| Detail | Tap the marking toolbar's reject, rating or label | Reject toggles directly (owner decision, 2026-11-13, #227). The rating and label actions open the shared visual tap pickers (`RatingPicker` / `LabelPicker`, #229): `star.slash` + 5 stars or `circle.slash` + color dots horizontally (`288 × 52` pt) anchored above the toolbar by default (or vertically `52 × 288` pt where space calls for it); picking applies without clearing the other mark attribute and closes, and tapping outside dismisses without toggling detail chrome. On single-photo controls, tapping the already-selected star clears the rating; batch controls clear through the picker's Clear action. |
+| Detail | Single tap on the photo | Hides or shows the chrome (marking toolbar, filmstrip, top bar buttons). |
 | Detail | Double-tap or pinch | 100% zoom at the tapped point. The chrome hides. Double-tap again to fit. |
 | Detail | Tap a filmstrip thumbnail | Jumps to that photo. Tapping a collapsed group jumps to its first photo, and the group expands in place in the filmstrip. A grid stack opens the same detail view on the first unmarked member, or the first member if all are marked. |
 | Detail | ⓘ | Opens the Info sheet (medium detent). |
@@ -45,7 +45,7 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 - A stack opens detail on the first unmarked photo, or the first photo when all are marked. Its filmstrip group expands in place; the filename, Info and marking controls stay the same.
 - Zoom and pan stay synced between photos of the same group. Leaving the group follows the detail keep-zoom setting.
 - "Reject 6 unmarked" sits centred in its own row above the filmstrip, once the visible group has both a rated or labeled photo and an unmarked photo. It rejects only visible photos with no rating, label or Reject. Undo restores the whole action and returns to the photo shown when it was tapped.
-- The pill hides when nothing remains to reject, when marking is off, and with the chrome. Nothing replaces it. It stays clear of the mark capsule and swipe star bar.
+- The pill hides when nothing remains to reject, when marking is off, and with the chrome. Nothing replaces it. It stays clear of the marking toolbar and swipe ladder.
 - With auto-advance on, a triggering mark moves to the next unmarked member, wrapping once. Once the group has no unmarked members, including after the pill, it moves to the first photo after the group in grid order. At the end it stays.
 
 ## Move Rejects
@@ -59,8 +59,8 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 - The sidebar is the filter. Selecting a row sets the grid's filter and title, and clears any other sidebar filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
 - Tapping a photo opens detail full screen; "‹ All" (the selected row's name) goes back with the same filter.
-- Detail has a right rail instead of the capsule: tap or drag the vertical star bar, tap Reject, or tap a label dot. Tapping the current rating or label clears it. The rail never hides; single tap and zoom hide the filmstrip, Reject N unmarked pill and top bar buttons while the stage keeps its size.
-- Swipe marking stays on the photo as on iPhone: slow vertical drags use the relative slider with live feedback in the rail's stars; quick down clears then rejects by distance. A downward swipe on Reject leaves it rejected; up steps through 0 to enabled stars.
+- Detail has a right rail instead of the toolbar: tap or drag the quick-rating ladder, tap the shared Reject action, or open the label picker from the label action. Tapping the current rating clears it. The rail never hides; single tap and zoom hide the filmstrip, Reject N unmarked pill and top bar buttons while the stage keeps its size.
+- Swipe marking stays on the photo as on iPhone: slow vertical drags use the relative slider with live feedback in the rail's ladder; quick down clears then rejects by distance. A downward swipe on Reject leaves it rejected; up steps through 0 to enabled stars.
 - Full keyboard support as above **(proposed)**. Pointer hover shows the rail's tooltips.
 
 ## Duo cover (folded)
@@ -82,14 +82,14 @@ Photo only ──Back──▶ Grid
 
 - The divider snaps only to **30/70** or **photo only**. It never rests at 50/50 or on the fold.
 - **The dock** (right column, top to bottom): Back; Filter, "…", Info; Undo, Move Rejects. There are no buttons over the grid or the photo.
-- **Marking capsule** (owner change, #200): Reject, the stars and the label circle form one horizontal marking capsule in its own reserved layout row beneath the right-hand photo, inside the photo pane. The stars work as in the iPhone capsule: tap to rate, tap the current rating to clear. The label circle opens the color picker above the capsule. Marking never competes with system island/status activity for toolbar space, and there are no marking items in the side toolbar. The cover keeps its compact dock controls.
+- **Marking toolbar** (owner changes, #200 and #227): the shared 168 × 48 marking toolbar sits in a reserved bottom-right marking area beside the filmstrip, beneath the right-hand photo, inside the photo pane. In photo only the filmstrip narrows so nothing scrolls under it; the toolbar region shares the photo stage's background. The rating action opens the quick-rating ladder; the label action opens the color picker. Marking never competes with system island/status activity for toolbar space, and there are no marking items in the side toolbar. The cover keeps its compact dock controls.
 - **Fit containment** (#199): in expanded Duo the fitted photo stays stationary while a horizontal drag is in progress; the swipe still commits navigation on release. Photo pixels never draw over the divider or the left grid, including during transitions. Zoomed panning stays inside the pane and returning to fit centers the photo.
 - **Group members** (owner change, #198): while the photo on screen belongs to a group, the left pane shows that group's member thumbnails (in grid order, respecting the filter) with the current member ringed, instead of the collapsed stack. Tapping a member changes the preview and its marks; navigation and auto-advance keep the current member visible. Back — or navigating out of the group — returns to the folder grid with its browsing position.
 - In photo focus, tapping a grid tile changes the photo, and the swipe gestures on the photo work as on iPhone.
 
 ## Duo half fold (MVP behavior)
 
-- The photo is on the top half, and the controls, grid and capsule are on the bottom half. Nothing is interactive on the top half except swiping the photo and double-tap zoom.
+- The photo is on the top half, and the controls, grid and marking toolbar are on the bottom half. Nothing is interactive on the top half except swiping the photo and double-tap zoom.
 - The dedicated half-fold layout is planned for 1.1.
 
 ## Opening a folder

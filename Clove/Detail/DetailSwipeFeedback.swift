@@ -54,7 +54,6 @@ struct DetailSwipeFeedbackBadge: View {
             }
         }
     }
-
     static func position(
         in size: CGSize, startLocation: CGPoint, controlsHeight: CGFloat, chromeIsVisible: Bool
     ) -> CGPoint {

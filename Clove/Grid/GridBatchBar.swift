@@ -1,49 +1,27 @@
 import CloveCore
 import SwiftUI
 
-/// The same floating capsule as detail, applying one mark to the visible selection.
+/// The same shared marking family as detail, applying one mark to the visible selection.
 /// Write failures are reported once by the shared toast.
 struct GridBatchBar: View {
     let browsing: BrowsingModel
     let cells: [GridCellItem]
     @Environment(SettingsStore.self) private var store
-    @Environment(\.tapPickerController) private var tapPicker
-    @State private var labelAnchor: CGRect = .zero
-    @State private var fallbackShowsLabels = false
 
     var body: some View {
-        let labels: [LabelColour?] = [nil] + store.settings.availableLabels.map { Optional($0) }
-        let labelState = batchLabelState
-        MarkCapsule(
+        MarkingToolbar(
             rating: isRejected ? .unrated : commonRating,
             // Batch Reject is main's set-only action. Keep it unselected so it never
             // advertises a toggle that the existing batch operation cannot perform.
-            label: isRejected ? nil : labelState.selection, isRejected: false,
-            enabledRatings: store.settings.enabledRatings, identifier: "clove.grid.batch",
-            onRate: {
-                tapPicker?.dismiss()
-                fallbackShowsLabels = false
-                apply(.rating($0))
-            },
-            onReject: {
-                tapPicker?.dismiss()
-                fallbackShowsLabels = false
-                apply(.reject)
-            },
-            onLabel: { toggleLabelPicker(labels: labels, labelState: labelState) },
-            onLabelAnchorChange: { rect in
-                labelAnchor = rect
-                tapPicker?.updateAnchor(id: "clove.grid.batch.labels", anchor: rect)
-            }
+            label: isRejected ? nil : batchLabelState.selection, isRejected: false,
+            enabledRatings: store.settings.enabledRatings,
+            identifier: "clove.grid.batch", labelPickerIdentifier: "clove.grid.batch.labels",
+            // A mixed batch never highlights one sample photo's value (#227, #229).
+            isMixed: batchLabelState.isMixed,
+            allowsTapCurrentToClear: false,
+            onRate: { apply(.rating($0)) }, onReject: { apply(.reject) },
+            onLabel: { apply(.label($0.map { ColourLabel(colour: $0) } ?? .clear)) }
         )
-        .overlay(alignment: .bottomTrailing) {
-            if tapPicker == nil, fallbackShowsLabels {
-                labelPickerView(labels: labels, labelState: labelState, axis: .horizontal) {
-                    fallbackShowsLabels = false
-                }
-                .offset(y: -66)
-            }
-        }
         .contextMenu {
             Button("Clear rating") { apply(.rating(.unrated)) }
                 .accessibilityIdentifier("clove.grid.batch.clearRating")
@@ -51,42 +29,6 @@ struct GridBatchBar: View {
                 .accessibilityIdentifier("clove.grid.batch.selectAll")
         }
         .disabled(browsing.batchTargets.isEmpty || !browsing.canMark)
-    }
-
-    private func toggleLabelPicker(
-        labels: [LabelColour?], labelState: (selection: LabelColour?, isMixed: Bool)
-    ) {
-        guard let tapPicker else {
-            fallbackShowsLabels.toggle()
-            return
-        }
-        tapPicker.toggle(
-            id: "clove.grid.batch.labels",
-            anchor: labelAnchor,
-            horizontalSize: LabelPicker.preferredSize(for: .horizontal, count: labels.count),
-            verticalSize: LabelPicker.preferredSize(for: .vertical, count: labels.count),
-            preferredEdge: .top
-        ) { axis, dismiss in
-            labelPickerView(labels: labels, labelState: labelState, axis: axis, dismiss: dismiss)
-        }
-    }
-
-    private func labelPickerView(
-        labels: [LabelColour?],
-        labelState: (selection: LabelColour?, isMixed: Bool),
-        axis: Axis,
-        dismiss: @escaping () -> Void
-    ) -> some View {
-        LabelPicker(
-            selection: labelState.selection,
-            isMixed: labelState.isMixed,
-            labels: labels,
-            identifier: "clove.grid.batch.labels",
-            onPick: { colour in
-                apply(.label(colour.map { ColourLabel(colour: $0) } ?? .clear))
-                dismiss()
-            },
-            axis: axis)
     }
 
     private var isRejected: Bool {

@@ -38,7 +38,6 @@ struct MoveRejectsSheet: View {
         case .moving(let finished, let total):
             VStack(spacing: 16) {
                 ProgressView(value: Double(finished), total: Double(max(total, 1)))
-                    .tint(Color.clove.accent)
                 Text(
                     total == 0
                         ? "Clearing kept rejects"

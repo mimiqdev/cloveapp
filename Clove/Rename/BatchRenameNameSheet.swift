@@ -29,7 +29,6 @@ struct BatchRenameNameSheet: View {
         }
         .padding(20)
         .foregroundStyle(Color.clove.text.primary)
-        .tint(Color.clove.accent)
         .background(Color.clove.surface.sheet)
         .presentationBackground(Color.clove.surface.sheet)
         .presentationDetents([.large])
