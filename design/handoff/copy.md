@@ -45,8 +45,9 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | detail.zoom | 100% |
 | info.section.capture | Capture |
 | info.section.file | File |
-| a11y.reject / a11y.rejected | Reject / Rejected |
-| a11y.rating | {n} stars |
+| a11y.reject / a11y.rejected | Reject / Rejected (the marking toolbar's flag action; `flag.slash` / `flag.slash.fill`, owner decision 2026-11-13, #227) |
+| a11y.rating | Rating / {n} stars / Unrated (the toolbar's rating action value) |
+| a11y.clearRating | Clear rating (the swipe ladder's `star.slash` stage) |
 | a11y.label | Label, {color} |
 | a11y.info / a11y.undo | Info / Undo |
 
