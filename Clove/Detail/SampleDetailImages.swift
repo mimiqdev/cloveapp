@@ -255,15 +255,28 @@ extension SampleDetailImages: DetailRegionSharpnessSource {
                     region: NormalizedRegion(x: 0.1, y: 0.1, width: 0.01, height: 0.01),
                     score: nil, unavailableBecause: .regionTooSmall)
             ])
+        case "mmq02683":
+            autofocus = .regions([
+                Self.evidence(
+                    .cameraAutofocus,
+                    region: NormalizedRegion(x: 0.25, y: 0.28, width: 0.08, height: 0.08))
+            ])
+        case "mmq02684":
+            autofocus = .regions([
+                Self.evidence(
+                    .cameraAutofocus,
+                    region: NormalizedRegion(x: 0.20, y: 0.24, width: 0.12, height: 0.14))
+            ])
         default:
             autofocus = .unavailable(.noAutofocusMetadata(Self.noMetadata))
         }
         onAutofocus(autofocus)
         await Task.yield()
         guard !Task.isCancelled else { return nil }
-        let faces: RegionSharpnessPathResult =
-            photo.stem == "mmq02678"
-            ? .regions([
+        let faces: RegionSharpnessPathResult
+        switch photo.stem {
+        case "mmq02678":
+            faces = .regions([
                 Self.evidence(
                     .face, group: 0,
                     region: NormalizedRegion(x: 0.58, y: 0.2, width: 0.22, height: 0.32)),
@@ -274,7 +287,36 @@ extension SampleDetailImages: DetailRegionSharpnessSource {
                     .eye, group: 0,
                     region: NormalizedRegion(x: 0.715, y: 0.29, width: 0.05, height: 0.05)),
             ])
-            : .unavailable(.noFacesDetected)
+        case "mmq02683":
+            faces = .regions([
+                Self.evidence(
+                    .face, group: 0,
+                    region: NormalizedRegion(x: 0.22, y: 0.20, width: 0.22, height: 0.34)),
+                Self.evidence(
+                    .eye, group: 0,
+                    region: NormalizedRegion(x: 0.265, y: 0.295, width: 0.05, height: 0.05)),
+                Self.evidence(
+                    .eye, group: 0,
+                    region: NormalizedRegion(x: 0.355, y: 0.295, width: 0.05, height: 0.05)),
+                Self.evidence(
+                    .face, group: 1,
+                    region: NormalizedRegion(x: 0.60, y: 0.22, width: 0.22, height: 0.34)),
+                Self.evidence(
+                    .eye, group: 1,
+                    region: NormalizedRegion(x: 0.645, y: 0.315, width: 0.05, height: 0.05)),
+                Self.evidence(
+                    .eye, group: 1,
+                    region: NormalizedRegion(x: 0.735, y: 0.315, width: 0.05, height: 0.05)),
+            ])
+        case "mmq02684":
+            faces = .regions([
+                Self.evidence(
+                    .face, group: 0,
+                    region: NormalizedRegion(x: 0.56, y: 0.22, width: 0.24, height: 0.36))
+            ])
+        default:
+            faces = .unavailable(.noFacesDetected)
+        }
         return RegionSharpnessAnalysis(
             autofocus: autofocus, faces: faces, acquisitionFailure: nil,
             timings: RegionSharpnessTimings())

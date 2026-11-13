@@ -50,6 +50,9 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | a11y.clearRating | Clear rating (the swipe ladder's `star.slash` stage) |
 | a11y.label | Label, {color} |
 | a11y.info / a11y.undo | Info / Undo |
+| a11y.focusToggle | Focus regions (value: On / Off) |
+| a11y.focusRegion.* | Autofocus region / Face region / Eye region |
+| detail.focus.status | Analyzing focus regions… / Analyzing faces… / No AF metadata / No faces / Tiny focus region unavailable / Focus region unavailable / Analysis unavailable |
 
 ## Folder access accessibility
 

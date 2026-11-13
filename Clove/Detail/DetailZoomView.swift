@@ -145,9 +145,10 @@ struct DetailZoomView: UIViewRepresentable {
 
     /// Advisory analysis rectangles in the same displayed-image space as the preview.
     var focusRegions: [DetailFocusRegion] = []
+    var inspectedFocusRegionID: String?
     var focusRegionColours = DetailFocusRegionColours(
-        autofocus: .systemYellow, face: .systemGreen, eye: .systemCyan,
-        unavailable: .secondaryLabel)
+        normal: .white, contrastEdge: UIColor.black.withAlphaComponent(0.45),
+        selected: .systemBrown, unavailable: UIColor.white.withAlphaComponent(0.58))
     var onFocusRegionTap: (DetailFocusRegion) -> Void = { _ in }
     var previewAccessibilityLabel = "Detail preview"
 
@@ -190,7 +191,7 @@ struct DetailZoomView: UIViewRepresentable {
         // The image goes in before the command, so a 100% command for new pixels uses the new
         // pixel size and a quality change never needs a second pass.
         view.setImage(image, fullResolutionPixels: fullResolutionPixels)
-        view.setFocusRegions(focusRegions)
+        view.setFocusRegions(focusRegions, inspectedRegionID: inspectedFocusRegionID)
         if let command { view.apply(command) }
     }
 }
@@ -200,10 +201,11 @@ struct DetailZoomView: UIViewRepresentable {
 @MainActor
 final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let scrollView = UIScrollView()
-    private let imageView = UIImageView()
+    private let imageView = DetailZoomImageView()
     private let previewAccessibilityView = UIView()
     private var focusRegionControls: [DetailFocusRegionControl] = []
     private var focusRegions: [DetailFocusRegion] = []
+    private var inspectedFocusRegionID: String?
     private var renderedFocusRegionColours: DetailFocusRegionColours?
     private let edgeTap = UITapGestureRecognizer()
     private let centreDoubleTap = UITapGestureRecognizer()
@@ -239,8 +241,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     var onZoomChange: ((CGFloat) -> Void)?
     var onFocusRegionTap: ((DetailFocusRegion) -> Void)?
     var focusRegionColours = DetailFocusRegionColours(
-        autofocus: .systemYellow, face: .systemGreen, eye: .systemCyan,
-        unavailable: .secondaryLabel)
+        normal: .white, contrastEdge: UIColor.black.withAlphaComponent(0.45),
+        selected: .systemBrown, unavailable: UIColor.white.withAlphaComponent(0.58))
     var onEdgeTap: ((DetailEdgeZone) -> Void)?
     var onDoubleTap: ((UnitPoint) -> Void)?
     var onMarkingSwipe: ((Rating) -> Void)?
@@ -426,6 +428,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         case .scale(let scale, let anchor):
             zoom(to: scale, around: DetailZoomAnchor(x: anchor.x, y: anchor.y))
         }
+        layoutFocusRegions()
         // A programmatic zoom is the same handoff as a pinch, whether or not the delegate fires.
         updateGestureAvailability()
     }
@@ -445,11 +448,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         imageView.frame = bounds
         previewAccessibilityView.frame = bounds
         scrollView.contentSize = bounds.size
-        layoutFocusRegions()
         updateMaximumZoom()
         if previous != .zero, previousScale > 1 {
             zoom(to: previousScale, around: .centre)
         }
+        layoutFocusRegions()
         isApplyingCommand = false
         updateGestureAvailability()
         updatePreviewAccessibility()
@@ -462,6 +465,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         // The zoom level decides whether a one-finger drag pans or marks, so the split follows
         // every pinch, including one the screen did not ask for (PRD Detail gestures).
+        layoutFocusRegions()
         updateGestureAvailability()
         updatePreviewAccessibility()
         guard !isApplyingCommand else { return }
@@ -726,10 +730,17 @@ extension DetailZoomContainerView {
         previewAccessibilityView.accessibilityLabel = label
     }
 
-    func setFocusRegions(_ regions: [DetailFocusRegion]) {
-        guard regions != focusRegions || renderedFocusRegionColours != focusRegionColours
-        else { return }
+    func setFocusRegions(_ regions: [DetailFocusRegion], inspectedRegionID: String? = nil) {
+        let inspectedChanged = inspectedFocusRegionID != inspectedRegionID
+        if regions == focusRegions && renderedFocusRegionColours == focusRegionColours {
+            if inspectedChanged {
+                inspectedFocusRegionID = inspectedRegionID
+                layoutFocusRegions()
+            }
+            return
+        }
         focusRegions = regions
+        inspectedFocusRegionID = inspectedRegionID
         renderedFocusRegionColours = focusRegionColours
         for control in focusRegionControls { control.removeFromSuperview() }
         focusRegionControls = regions.map { region in
@@ -756,8 +767,12 @@ extension DetailZoomContainerView {
             x: (imageView.bounds.width - fitted.width) / 2,
             y: (imageView.bounds.height - fitted.height) / 2,
             width: fitted.width, height: fitted.height)
+        let zoomScale = scrollView.zoomScale
         for control in focusRegionControls {
-            control.place(actualRect: control.region.rect(in: fittedRect))
+            control.place(
+                actualRect: control.region.rect(in: fittedRect),
+                zoomScale: zoomScale,
+                isSelected: control.region.id == inspectedFocusRegionID)
         }
     }
 
@@ -774,5 +789,49 @@ extension DetailZoomContainerView {
         let percentY = Int((snapshot.anchor.y * 100).rounded())
         previewAccessibilityView.accessibilityValue =
             "Loaded, centred at \(percentX)%, \(percentY)% of the photo"
+    }
+}
+
+/// Keeps region controls as direct subviews of the `UIImageView` while resolving touches among
+/// overlapping 44 pt expanded targets deterministically.
+@MainActor
+private final class DetailZoomImageView: UIImageView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let controls = subviews.compactMap { $0 as? DetailFocusRegionControl }.filter { control in
+            !control.isHidden && control.alpha > 0.01 && control.isUserInteractionEnabled
+                && control.point(inside: control.convert(point, from: self), with: event)
+        }
+        guard !controls.isEmpty else { return super.hitTest(point, with: event) }
+        let actionable = controls.filter { $0.region.isActionable }
+        let candidates = actionable.isEmpty ? controls : actionable
+        return candidates.min { lhs, rhs in
+            Self.controlPrecedes(lhs, rhs, at: point)
+        }
+    }
+
+    private static func controlPrecedes(
+        _ lhs: DetailFocusRegionControl, _ rhs: DetailFocusRegionControl, at point: CGPoint
+    ) -> Bool {
+        let lhsInVisual = lhs.visualFrameInSuperview.contains(point)
+        let rhsInVisual = rhs.visualFrameInSuperview.contains(point)
+        if lhsInVisual != rhsInVisual { return lhsInVisual }
+
+        let lhsDistance = hypot(point.x - lhs.center.x, point.y - lhs.center.y)
+        let rhsDistance = hypot(point.x - rhs.center.x, point.y - rhs.center.y)
+        if abs(lhsDistance - rhsDistance) > 0.5 { return lhsDistance < rhsDistance }
+
+        let lhsPriority = kindPriority(lhs.region.kind)
+        let rhsPriority = kindPriority(rhs.region.kind)
+        if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+
+        return lhs.region.id < rhs.region.id
+    }
+
+    private static func kindPriority(_ kind: DetailFocusRegionKind) -> Int {
+        switch kind {
+        case .autofocus: 0
+        case .eye: 1
+        case .face: 2
+        }
     }
 }

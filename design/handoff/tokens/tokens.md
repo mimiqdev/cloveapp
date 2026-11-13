@@ -31,6 +31,8 @@ Rules:
 | `label/blue` | Color label blue. | #007AFF | #0A84FF | #5A8FD8 | #6F86A8 | #1E66F5 | #89B4FA | #81A1C1 | #83A598 |
 | `label/purple` | Color label purple. | #AF52DE | #BF5AF2 | #A374C9 | #9A7AA8 | #8839EF | #CBA6F7 | #B48EAD | #D3869B |
 | `group` | Similar groups: the progress line while grouping. The count badges and the expanded group backgrounds no longer use it (owner decisions, 2026-11-13, #226 and #227). | #007AFF | #0A84FF | #8AB4F8 | #E0A15E | #8839EF | #CBA6F7 | #88C0D0 | #83A598 |
+| `focus/outline` | Camera-style focus overlay normal outline (1.25 pt white, invariant over photos; selected inspection uses `accent` at 1.5 pt). | #FFFFFF | #FFFFFF | #FFFFFF | #FFFFFF | #FFFFFF | #FFFFFF | #FFFFFF | #FFFFFF |
+| `focus/edge` | Subtle dark contrast edge behind camera-style focus overlay outlines. | #00000073 | #00000073 | #00000073 | #00000073 | #00000073 | #00000073 | #00000073 | #00000073 |
 | `opacity/rejected` | Opacity of a rejected photo in the grid and strips. | 0.28 | 0.3 | 0.35 | 0.3 | 0.28 | 0.3 | 0.3 | 0.3 |
 
 Swift names (as set in Figma code syntax): `Color.clove.<group>.<name>`, for example `Color.clove.bg.canvas` and `Color.clove.rating.on`. `opacity/rejected` is a number, not a color.

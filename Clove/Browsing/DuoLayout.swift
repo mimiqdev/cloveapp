@@ -51,24 +51,55 @@ struct DuoDetailLayout {
 /// One set of semantic toolbar groups for both axes. The navigation container owns
 /// placement, chrome, spacing, overflow, and safe areas, including the cover's camera.
 @available(iOS 27.1, *)
-struct BrowsingToolbar<Tools: View, Marks: ToolbarContent, Bottom: View>: ToolbarContent {
+struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent, Bottom: View>:
+    ToolbarContent
+{
     let back: () -> Void
     let undo: () -> Void
     let canUndo: Bool
     var showsBack = true
     var showsUndo = true
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
+    @ViewBuilder var navigationTools: NavigationTools
     @ViewBuilder var tools: Tools
     @ToolbarContentBuilder var marks: Marks
     @ViewBuilder var bottom: Bottom
 
+    init(
+        back: @escaping () -> Void,
+        undo: @escaping () -> Void,
+        canUndo: Bool,
+        showsBack: Bool = true,
+        showsUndo: Bool = true,
+        @ViewBuilder navigationTools: () -> NavigationTools = { EmptyView() },
+        @ViewBuilder tools: () -> Tools,
+        @ToolbarContentBuilder marks: () -> Marks,
+        @ViewBuilder bottom: () -> Bottom
+    ) {
+        self.back = back
+        self.undo = undo
+        self.canUndo = canUndo
+        self.showsBack = showsBack
+        self.showsUndo = showsUndo
+        self.navigationTools = navigationTools()
+        self.tools = tools()
+        self.marks = marks()
+        self.bottom = bottom()
+    }
+
     var body: some ToolbarContent {
-        if showsBack {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Back", systemImage: "chevron.left", action: back)
-                    .accessibilityIdentifier("clove.nav.back")
+        if usesVerticalBar {
+            if showsBack {
+                ToolbarItem(placement: .cancellationAction) {
+                    backButton
+                }
+                .axisBehavior(.verticalPreferred)
             }
-            .axisBehavior(.verticalPreferred)
+        } else if showsBack || NavigationTools.self != EmptyView.self {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                if showsBack { backButton }
+                navigationTools
+            }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             tools
@@ -91,6 +122,11 @@ struct BrowsingToolbar<Tools: View, Marks: ToolbarContent, Bottom: View>: Toolba
     }
 
     private var usesVerticalBar: Bool { verticalEdge != nil }
+
+    private var backButton: some View {
+        Button("Back", systemImage: "chevron.left", action: back)
+            .accessibilityIdentifier("clove.nav.back")
+    }
 
     private var undoButton: some View {
         Button("Undo", systemImage: "arrow.uturn.backward", action: undo)

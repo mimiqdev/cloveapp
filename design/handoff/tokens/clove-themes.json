@@ -33,6 +33,8 @@
         "label/blue": "#007AFF",
         "label/purple": "#AF52DE",
         "group": "#007AFF",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.28
       }
     },
@@ -61,6 +63,8 @@
         "label/blue": "#0A84FF",
         "label/purple": "#BF5AF2",
         "group": "#0A84FF",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.3
       }
     },
@@ -89,6 +93,8 @@
         "label/blue": "#5A8FD8",
         "label/purple": "#A374C9",
         "group": "#8AB4F8",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.35
       }
     },
@@ -117,6 +123,8 @@
         "label/blue": "#6F86A8",
         "label/purple": "#9A7AA8",
         "group": "#E0A15E",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.3
       }
     },
@@ -145,6 +153,8 @@
         "label/blue": "#1E66F5",
         "label/purple": "#8839EF",
         "group": "#8839EF",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.28
       }
     },
@@ -173,6 +183,8 @@
         "label/blue": "#89B4FA",
         "label/purple": "#CBA6F7",
         "group": "#CBA6F7",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.3
       }
     },
@@ -201,6 +213,8 @@
         "label/blue": "#81A1C1",
         "label/purple": "#B48EAD",
         "group": "#88C0D0",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.3
       }
     },
@@ -229,6 +243,8 @@
         "label/blue": "#83A598",
         "label/purple": "#D3869B",
         "group": "#83A598",
+        "focus/outline": "#FFFFFF",
+        "focus/edge": "#00000073",
         "opacity/rejected": 0.3
       }
     }
@@ -333,6 +349,16 @@
       "type": "color",
       "swiftName": "Color.clove.group",
       "use": "Similar groups: the progress line while grouping. The count badges and the expanded filmstrip background no longer use it (owner decision, 2026-11-13, #226)."
+    },
+    "focus/outline": {
+      "type": "color",
+      "swiftName": "Color.clove.focus.outline",
+      "use": "Camera-style focus overlay normal outline (1.25 pt white, invariant over photos; selected inspection uses accent at 1.5 pt)."
+    },
+    "focus/edge": {
+      "type": "color",
+      "swiftName": "Color.clove.focus.edge",
+      "use": "Subtle dark contrast edge behind camera-style focus overlay outlines."
     },
     "opacity/rejected": {
       "type": "float",

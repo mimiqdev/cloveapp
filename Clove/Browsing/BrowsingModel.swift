@@ -70,6 +70,9 @@ final class BrowsingModel {
     /// Label filtering is a presentation filter over the same ordered photos.
     var labelFilter: LabelColour?
 
+    /// Session-scoped visibility for detail focus region overlays; intentionally unpersisted.
+    var showsFocusRegions = true
+
     /// Sidebar and regular-width navigation use the same name for the active filter.
     var filterTitle: String {
         if let labelFilter { return labelFilter.rawValue }

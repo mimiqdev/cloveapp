@@ -199,6 +199,25 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.photo.mmq02680").tap()
         XCTAssertTrue(rail.exists)
         capture("ipad-detail-rail-dark")
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02683").tap()
+        let focusToggle = element(app, "clove.detail.focusToggle")
+        let overlapAF = element(app, "clove.detail.region.af.0")
+        let separatedEye = element(app, "clove.detail.region.face.4-1")
+        XCTAssertTrue(focusToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(focusToggle.value as? String, "On")
+        XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
+        XCTAssertTrue(separatedEye.exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.1-0").exists)
+        capture("ipad-detail-focus-on")
+        focusToggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), focusToggle))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), overlapAF))
+        XCTAssertFalse(separatedEye.exists)
+        capture("ipad-detail-focus-off")
+        focusToggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), focusToggle))
+        XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
         app.terminate()
         checkDisabledRail()
     }
@@ -1299,6 +1318,24 @@ final class CloveFlowTests: XCTestCase {
                 element(app, "clove.duo.label")))
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
+        element(app, "clove.grid.photo.mmq02683").tap()
+        let focusToggle = element(app, "clove.detail.focusToggle")
+        let overlapAF = element(app, "clove.detail.region.af.0")
+        let separatedEye = element(app, "clove.detail.region.face.4-1")
+        XCTAssertTrue(focusToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(focusToggle.value as? String, "On")
+        XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
+        XCTAssertTrue(separatedEye.exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.1-0").exists)
+        capture("duo-cover-focus-on")
+        focusToggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), focusToggle))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), overlapAF))
+        XCTAssertFalse(separatedEye.exists)
+        capture("duo-cover-focus-off")
+        focusToggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), focusToggle))
+        XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -1306,6 +1343,7 @@ final class CloveFlowTests: XCTestCase {
         let app = launchSample()
         defer { app.terminate() }
         openLibrary(app)
+        applyComparisonTheme("light", app)
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         turnOffAutoAdvance(app)
@@ -1313,12 +1351,15 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.photo.mmq02678").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let toggle = element(app, "clove.detail.focusToggle")
         let autofocus = element(app, "clove.detail.region.af.0")
-        let face = element(app, "clove.detail.region.face.0-0")
         let eye = element(app, "clove.detail.region.face.1-0")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "On")
         XCTAssertTrue(autofocus.waitForExistence(timeout: 5))
-        XCTAssertTrue(face.waitForExistence(timeout: 5))
-        XCTAssertTrue(eye.exists)
+        XCTAssertTrue(eye.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.region.face.0-0").exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.2-0").exists)
         capture("detail-focus-regions-fit")
 
         let fileName = element(app, "clove.detail.fileName").label
@@ -1331,10 +1372,13 @@ final class CloveFlowTests: XCTestCase {
                 NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
             "The region tap did not centre the existing native zoom on the AF rectangle")
         XCTAssertEqual(element(app, "clove.detail.fileName").label, fileName)
+        XCTAssertTrue(autofocus.exists)
+        XCTAssertFalse(eye.exists)
         capture("detail-focus-region-native-zoom")
 
         preview.doubleTap()
         XCTAssertFalse(zoom.label.hasSuffix("100%"))
+        XCTAssertTrue(eye.waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
 
         let eyeSwipe = eye.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -1361,6 +1405,55 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02679.ARW")
         XCTAssertFalse(zoom.label.hasSuffix("100%"))
         capture("detail-focus-region-tiny-unavailable")
+
+        // Local AF overlap suppression & shared Off/On toggle across photo navigation.
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02683").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let overlapAF = element(app, "clove.detail.region.af.0")
+        let personOneEye = element(app, "clove.detail.region.face.4-1")
+        XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
+        XCTAssertTrue(personOneEye.exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.0-0").exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.1-0").exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.3-1").exists)
+        capture("detail-focus-regions-overlap-light")
+
+        toggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), toggle))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), overlapAF))
+        XCTAssertFalse(personOneEye.exists)
+        capture("detail-focus-regions-off-light")
+
+        // Navigating while Off keeps regions and status suppressed.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertTrue(waitForLabel("MMQ02684.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertEqual(toggle.value as? String, "Off")
+        XCTAssertFalse(element(app, "clove.detail.region.af.0").exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.0-0").exists)
+        XCTAssertFalse(element(app, "clove.detail.focusStatus").exists)
+
+        // Turning On reveals AF + face fallback (four corner brackets) on MMQ02684.
+        toggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), toggle))
+        XCTAssertTrue(element(app, "clove.detail.region.af.0").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.region.face.0-0").exists)
+        capture("detail-focus-regions-face-fallback-light")
+
+        // Dark theme toggle contrast and overlay legibility.
+        element(app, "clove.nav.back").tap()
+        applyComparisonTheme("dark", app)
+        element(app, "clove.grid.photo.mmq02683").tap()
+        XCTAssertTrue(element(app, "clove.detail.region.af.0").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.region.face.4-1").exists)
+        capture("detail-focus-regions-overlap-dark")
+        toggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), toggle))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "exists == false"),
+                element(app, "clove.detail.region.af.0")))
+        capture("detail-focus-regions-off-dark")
     }
 
     @MainActor

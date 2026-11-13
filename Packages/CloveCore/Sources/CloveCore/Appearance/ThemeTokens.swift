@@ -1,7 +1,7 @@
-/// One of the 21 tokens the themes share, named as `design/handoff/tokens/clove-themes.json`
+/// One of the 23 tokens the themes share, named as `design/handoff/tokens/clove-themes.json`
 /// names it.
 ///
-/// The colour tokens are the 20 `Color.clove.*` values the chrome uses; `opacity/rejected` is a
+/// The colour tokens are the 22 `Color.clove.*` values the chrome uses; `opacity/rejected` is a
 /// number and stays on ``ThemeTokens/rejectedOpacity``. A token added to the JSON needs a case
 /// here, and the switch in ``ThemeTokens/subscript(_:)`` then fails to compile until the eight
 /// palettes carry it.
@@ -65,9 +65,15 @@ public enum ThemeToken: String, CaseIterable, Hashable, Sendable {
 
     /// Similar groups: the count badge and the tint behind an expanded group.
     case group = "group"
+
+    /// Camera-style focus overlay normal outline.
+    case focusOutline = "focus/outline"
+
+    /// Subtle dark contrast edge behind camera-style focus overlay strokes.
+    case focusEdge = "focus/edge"
 }
 
-/// The 20 colour tokens and the rejected-photo opacity of one theme.
+/// The 22 colour tokens and the rejected-photo opacity of one theme.
 ///
 /// Values come from `design/handoff/tokens/clove-themes.json`, the file a test reads and compares
 /// token by token. The eight palettes live on this type; ``CloveTheme/tokens`` picks the one a
@@ -113,6 +119,10 @@ public struct ThemeTokens: Hashable, Sendable {
     public var labelPurple: ThemeColour
     /// See `group`.
     public var group: ThemeColour
+    /// See `focus/outline`.
+    public var focusOutline: ThemeColour
+    /// See `focus/edge`.
+    public var focusEdge: ThemeColour
 
     /// `opacity/rejected`: the opacity of a rejected photo in the grid and strips.
     public var rejectedOpacity: Double
@@ -140,6 +150,8 @@ public struct ThemeTokens: Hashable, Sendable {
         case .labelBlue: labelBlue
         case .labelPurple: labelPurple
         case .group: group
+        case .focusOutline: focusOutline
+        case .focusEdge: focusEdge
         }
     }
 }
@@ -169,6 +181,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x007AFF),
         labelPurple: ThemeColour(hex: 0xAF52DE),
         group: ThemeColour(hex: 0x007AFF),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.28
     )
 
@@ -194,6 +208,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x0A84FF),
         labelPurple: ThemeColour(hex: 0xBF5AF2),
         group: ThemeColour(hex: 0x0A84FF),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.3
     )
 
@@ -220,6 +236,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x5A8FD8),
         labelPurple: ThemeColour(hex: 0xA374C9),
         group: ThemeColour(hex: 0x8AB4F8),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.35
     )
 
@@ -245,6 +263,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x6F86A8),
         labelPurple: ThemeColour(hex: 0x9A7AA8),
         group: ThemeColour(hex: 0xE0A15E),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.3
     )
 
@@ -270,6 +290,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x1E66F5),
         labelPurple: ThemeColour(hex: 0x8839EF),
         group: ThemeColour(hex: 0x8839EF),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.28
     )
 
@@ -295,6 +317,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x89B4FA),
         labelPurple: ThemeColour(hex: 0xCBA6F7),
         group: ThemeColour(hex: 0xCBA6F7),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.3
     )
 
@@ -320,6 +344,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x81A1C1),
         labelPurple: ThemeColour(hex: 0xB48EAD),
         group: ThemeColour(hex: 0x88C0D0),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.3
     )
 
@@ -345,6 +371,8 @@ extension ThemeTokens {
         labelBlue: ThemeColour(hex: 0x83A598),
         labelPurple: ThemeColour(hex: 0xD3869B),
         group: ThemeColour(hex: 0x83A598),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.3
     )
 }

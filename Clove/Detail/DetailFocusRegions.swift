@@ -45,11 +45,16 @@ enum DetailFocusRegionKind: String, Hashable, Sendable {
     }
 }
 
-/// One advisory rectangle on the displayed photo. A score only decides whether the region can
+/// One advisory focus marker on the displayed photo. A score only decides whether the region can
 /// be inspected; no score or focus percentage reaches the interface.
 struct DetailFocusRegion: Hashable, Identifiable, Sendable {
+    /// Proximity margin in normalized image coordinates used to detect local AF collisions with
+    /// analysis markers without using 44 pt touch padding.
+    static let localOverlapMargin: Double = 0.015
+
     let id: String
     let kind: DetailFocusRegionKind
+    let groupIndex: Int?
     let region: NormalizedRegion
     let unavailableReason: String?
 
@@ -62,6 +67,7 @@ struct DetailFocusRegion: Hashable, Identifiable, Sendable {
     init(id: String, evidence: RegionSharpnessEvidence) {
         self.id = id
         kind = DetailFocusRegionKind(evidence.kind)
+        groupIndex = evidence.groupIndex
         region = evidence.region
         unavailableReason =
             evidence.unavailableBecause?.rawValue ?? (evidence.score == nil ? "unknown" : nil)
@@ -75,6 +81,30 @@ struct DetailFocusRegion: Hashable, Identifiable, Sendable {
             y: fittedImage.minY + region.y * fittedImage.height,
             width: region.width * fittedImage.width,
             height: region.height * fittedImage.height)
+    }
+
+    /// Compact normalized footprint of the visible marker rather than enlarged eye measurement
+    /// ROIs or expanded 44 pt touch targets.
+    var normalizedMarkerRect: CGRect {
+        switch kind {
+        case .autofocus, .face:
+            return CGRect(x: region.x, y: region.y, width: region.width, height: region.height)
+        case .eye:
+            let side = min(max(min(region.width, region.height), 0.025), 0.04)
+            return CGRect(
+                x: region.centerX - side / 2,
+                y: region.centerY - side / 2,
+                width: side,
+                height: side)
+        }
+    }
+
+    /// Deterministic local collision/containment check between a camera AF marker and an analysis
+    /// marker in normalized image space.
+    func collidesLocally(with analysisMarker: DetailFocusRegion) -> Bool {
+        let afRect = normalizedMarkerRect.insetBy(
+            dx: -Self.localOverlapMargin, dy: -Self.localOverlapMargin)
+        return afRect.intersects(analysisMarker.normalizedMarkerRect)
     }
 
     var unavailableAccessibilityDescription: String? {
@@ -104,11 +134,39 @@ struct DetailFocusRegionState {
     private var isAnalyzing = false
     private var analysisUnavailable = false
 
-    var regions: [DetailFocusRegion] {
+    /// All retained evidence mapped to presentation values before per-person and overlap filtering.
+    var retainedRegions: [DetailFocusRegion] {
         var result: [DetailFocusRegion] = []
         if let autofocus { result.append(contentsOf: Self.regions(from: autofocus, path: "af")) }
         if let faces { result.append(contentsOf: Self.regions(from: faces, path: "face")) }
         return result
+    }
+
+    /// Selected camera-style overlay presentation:
+    /// 1. Keep camera AF markers from metadata (never fabricated).
+    /// 2. Per person (`groupIndex`), keep at most one deterministically chosen usable eye and omit
+    ///    that person's face frame; fall back to that person's face frame when no usable eye exists.
+    /// 3. Suppress only analysis markers that locally collide with camera AF in normalized marker
+    ///    geometry, leaving separated AF and unrelated subjects visible.
+    var regions: [DetailFocusRegion] {
+        let afRegions = autofocus.map { Self.regions(from: $0, path: "af") } ?? []
+        let faceRegions = faces.map { Self.regions(from: $0, path: "face") } ?? []
+        let selectedAnalysis = Self.selectPerPerson(from: faceRegions)
+        let filteredAnalysis = Self.suppressLocalOverlaps(
+            analysis: selectedAnalysis, against: afRegions)
+        return afRegions + filteredAnalysis
+    }
+
+    /// Presentation filtered by the session visibility toggle and active focused inspection.
+    func regions(visible: Bool, inspectedRegionID: String?) -> [DetailFocusRegion] {
+        guard visible else { return [] }
+        let presented = regions
+        if let inspectedRegionID,
+            let inspected = presented.first(where: { $0.id == inspectedRegionID })
+        {
+            return [inspected]
+        }
+        return presented
     }
 
     var status: String? {
@@ -130,9 +188,10 @@ struct DetailFocusRegionState {
         if isAnalyzing {
             messages.append(autofocus == nil ? "Analyzing focus regions…" : "Analyzing faces…")
         }
-        if regions.contains(where: { $0.unavailableReason != nil }) {
+        let presented = regions
+        if presented.contains(where: { $0.unavailableReason != nil }) {
             messages.append(
-                regions.contains {
+                presented.contains {
                     $0.unavailableReason == RegionScoreUnavailable.regionTooSmall.rawValue
                 }
                     ? "Tiny focus region unavailable" : "Focus region unavailable")
@@ -176,6 +235,61 @@ struct DetailFocusRegionState {
             let group = evidence.groupIndex.map { "-\($0)" } ?? ""
             return DetailFocusRegion(
                 id: "clove.detail.region.\(path).\(index)\(group)", evidence: evidence)
+        }
+    }
+
+    private static func selectPerPerson(from items: [DetailFocusRegion]) -> [DetailFocusRegion] {
+        var grouped: [Int: [DetailFocusRegion]] = [:]
+        var ungrouped: [DetailFocusRegion] = []
+        for item in items {
+            if let groupIndex = item.groupIndex {
+                grouped[groupIndex, default: []].append(item)
+            } else {
+                ungrouped.append(item)
+            }
+        }
+        var selected: [DetailFocusRegion] = []
+        for groupIndex in grouped.keys.sorted() {
+            let members = grouped[groupIndex] ?? []
+            let usableEyes = members.filter { $0.kind == .eye && $0.isActionable }
+            if let chosenEye = usableEyes.min(by: eyeSelectionPrecedes) {
+                selected.append(chosenEye)
+                continue
+            }
+            let groupFaces = members.filter { $0.kind == .face }
+            if let chosenFace = groupFaces.first(where: \.isActionable) ?? groupFaces.first {
+                selected.append(chosenFace)
+            } else if let fallbackEye = members.first(where: { $0.kind == .eye }) {
+                selected.append(fallbackEye)
+            }
+        }
+        selected.append(contentsOf: ungrouped)
+        return selected
+    }
+
+    /// Stable geometric tie-break among usable eyes for the same person: independent of sharpness
+    /// score and invariant across render scales and zoom.
+    private static func eyeSelectionPrecedes(_ lhs: DetailFocusRegion, _ rhs: DetailFocusRegion)
+        -> Bool
+    {
+        let leftKey = (
+            lhs.region.centerX, lhs.region.centerY, lhs.region.width, lhs.region.height, lhs.id
+        )
+        let rightKey = (
+            rhs.region.centerX, rhs.region.centerY, rhs.region.width, rhs.region.height, rhs.id
+        )
+        return leftKey < rightKey
+    }
+
+    private static func suppressLocalOverlaps(
+        analysis: [DetailFocusRegion], against autofocusRegions: [DetailFocusRegion]
+    ) -> [DetailFocusRegion] {
+        guard !autofocusRegions.isEmpty else { return analysis }
+        return analysis.filter { marker in
+            let blockingAF =
+                marker.isActionable
+                ? autofocusRegions.filter(\.isActionable) : autofocusRegions
+            return !blockingAF.contains { af in af.collidesLocally(with: marker) }
         }
     }
 }
