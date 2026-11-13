@@ -112,24 +112,24 @@ release build.
 ## G1 comparison and current Mac evidence
 
 These values come from one full run on a Mac14,12 with 10 cores and macOS 27.0,
-using source `ecbfb1ba8a809101d6422ac52a5177b3d5ea304f`. The run took 42.7
-seconds on a shared host with load averages 3.45, 3.15, and 3.19. Times are in
+using source `29d9995bb9885e351f73abdaeb681159f6b75c91`. The run took 42.8
+seconds on a shared host with load averages 3.42, 2.85, and 2.53. Times are in
 milliseconds except throughput and memory. Every iPhone value remains pending
 the owner checklist. These are measurements, not pass claims.
 
 | G1 stage | Starting iPhone target | Mac-only p50 / p95 or value | Samples | iPhone |
 | --- | --- | --- | --- | --- |
-| First photos delivered | ≤ 500 ms | Cold 7.577 / 7.577 ms | 1 | Pending |
-| Full scan and pairing | ≤ 3,000 ms | Cold 107.800 / 107.800 ms; warm 99.652 / 102.145 ms | 1 cold, 4 warm | Pending |
-| Capture-time read | Measure | Cold serial 2.658 / 2.753 ms | 240 | Pending |
-| Uncached grid thumbnail | p95 ≤ 150 ms | Cold 94.468 / 102.762 ms | 1,975 | Pending |
-| Disk-cached grid thumbnail | p95 ≤ 20 ms | Disk 13.368 / 13.646 ms | 1,975 | Pending |
-| Thumbnail throughput | ≥ 30 photos/s | Cold 321.283/s; disk 2,385.575/s | 1,975 each | Pending |
-| First detail preview | p95 ≤ 300 ms | Cold 40.390 / 130.120 ms; warm 3.817 / 8.949 ms | 14 each | Pending |
-| Full RAW including cancelled-render wait | p95 ≤ 2,000 ms | Drain 260.948 / 351.118 ms; combined 627.851 / 719.930 ms | 6 | Pending |
-| Feature per photo | Measure | Preview+features+cache 20.599 / 42.554 ms | 215 | Pending |
-| Grouping total | No numeric G1 target | Cold 20,936.639 ms; warm 249.556 ms | 1 each | Pending |
-| Peak process RSS | No numeric G1 target | 716,832,768 bytes (683.6 MiB) | 5 ms samples | Pending |
+| First photos delivered | ≤ 500 ms | Cold 7.348 / 7.348 ms | 1 | Pending |
+| Full scan and pairing | ≤ 3,000 ms | Cold 108.065 / 108.065 ms; warm 101.373 / 104.614 ms | 1 cold, 4 warm | Pending |
+| Capture-time read | Measure | Cold serial 2.661 / 2.711 ms | 240 | Pending |
+| Uncached grid thumbnail | p95 ≤ 150 ms | Cold 93.350 / 97.133 ms | 1,975 | Pending |
+| Disk-cached grid thumbnail | p95 ≤ 20 ms | Disk 13.471 / 13.657 ms | 1,975 | Pending |
+| Thumbnail throughput | ≥ 30 photos/s | Cold 326.169/s; disk 2,374.016/s | 1,975 each | Pending |
+| First detail preview | p95 ≤ 300 ms | Cold 39.806 / 131.785 ms; warm 3.758 / 8.829 ms | 14 each | Pending |
+| Full RAW including cancelled-render wait | p95 ≤ 2,000 ms | Drain 272.814 / 363.461 ms; combined 637.749 / 724.473 ms | 6 | Pending |
+| Feature per photo | Measure | Preview+features+cache 20.543 / 41.979 ms | 215 | Pending |
+| Grouping total | No numeric G1 target | Cold 21,053.065 ms; warm 778.717 ms | 1 each | Pending |
+| Peak process RSS | No numeric G1 target | 717,570,048 bytes (684.3 MiB) | 5 ms samples | Pending |
 | Grid scrolling | Q3 names the stage | Unavailable in the package-only Lab flow | 0 | Pending |
 
 The scan covers 4,000 image files paired into 2,000 photos. Cold thumbnail,
