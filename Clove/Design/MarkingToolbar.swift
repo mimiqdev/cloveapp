@@ -74,14 +74,14 @@ struct MarkingToolbar: View {
                 pickerIdentifier: labelPickerIdentifier ?? "\(identifier).labels",
                 onPick: onLabel, onBegin: onBegin)
         }
-        .frame(width: Self.frame, height: Self.frame)
+        .frame(width: Self.size.width, height: Self.size.height)
         .cloveGlass(in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
     }
 
     /// The control's frame: 168 × 48 (components.md, Marking toolbar).
-    private static let frame: CGFloat = 168
+    private static let size = CGSize(width: 168, height: 48)
 }
 
 /// The Reject action of the marking family: `flag.slash` off in the theme's neutral foreground,
