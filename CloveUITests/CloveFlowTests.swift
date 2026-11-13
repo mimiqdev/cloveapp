@@ -128,11 +128,17 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(stars.isSelected)
         stars.tap()
         XCTAssertFalse(stars.isSelected)
+        // The rail's label action opens the shared picker in its popover; the rail's dot
+        // mirrors the choice, and picking the same colour again clears it (#227).
+        let labelAction = element(app, "clove.detail.rail.label")
+        labelAction.tap()
+        XCTAssertTrue(green.waitForExistence(timeout: 5))
         green.tap()
-        XCTAssertTrue(green.isSelected)
-        XCTAssertFalse(element(app, "clove.detail.labels").exists)
-        green.tap()
-        XCTAssertFalse(green.isSelected)
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS[c] %@", "green"), labelAction))
+        // Picking the current colour again clears it; the write path is the rule C13 tests
+        // cover, so the rail check reads the mirrored dot instead of reopening the popover,
+        // which SwiftUI will not re-present while the first dismissal animates.
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), green))
         let bar = element(app, "clove.detail.rail.stars")
         let bottom = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
         let middle = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -143,11 +149,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(stars.isSelected)
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: -6)))
         XCTAssertTrue(stars.isSelected)
-        green.tap()
         capture("ipad-detail-rail-light")
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(stars.isSelected)
-        XCTAssertTrue(green.isSelected)
+        XCTAssertTrue(String(describing: rail.value).contains("Green"))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         XCUIDevice.shared.orientation = .landscapeLeft
         let stageFrame = preview.frame
@@ -173,7 +178,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(reject.label, "Rejected")
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
         XCTAssertFalse(stars.isSelected)
-        XCTAssertFalse(green.isSelected)
+        // Reject clears the label the dot mirrors, so the action reads plain Label again.
+        XCTAssertEqual(element(app, "clove.detail.rail.label").label, "Label")
         XCTAssertLessThan(element(app, "clove.detail.rejectGlyph").frame.maxX, rail.frame.minX)
         capture("ipad-detail-rail-rejected")
         centre.tap()
@@ -247,7 +253,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(rail.exists)
         XCTAssertFalse(element(disconnected, "clove.detail.rail.stars.3").isEnabled)
         XCTAssertFalse(element(disconnected, "clove.detail.rail.reject").isEnabled)
-        XCTAssertFalse(element(disconnected, "clove.detail.rail.label.green").isEnabled)
+        XCTAssertFalse(element(disconnected, "clove.detail.rail.label").isEnabled)
         let marks = rail.value as? String
         let bar = element(disconnected, "clove.detail.rail.stars")
         bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).press(
@@ -731,7 +737,7 @@ final class CloveFlowTests: XCTestCase {
     func testDesignGalleryShowsSharedControls() {
         let app = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
         XCTAssertTrue(element(app, "clove.design.gallery").exists)
-        XCTAssertTrue(element(app, "clove.mark.capsule").exists)
+        XCTAssertTrue(element(app, "clove.mark.toolbar").exists)
         XCTAssertTrue(element(app, "clove.mark.starBar").exists)
         let nord = element(app, "clove.design.gallery.theme.nord")
         nord.tap()

@@ -80,47 +80,69 @@ struct VerticalStarBar: View {
     /// The glass ladder of stars, top to bottom from five to one (components.md).
     private var pill: some View {
         GeometryReader { proxy in
-            VerticalStarBarStars(
-                rating: shownRating, enabledRatings: enabledRatings, size: size,
-                identifier: identifier,
-                onRate: size == .pad || selectableStars
-                    ? { level in
+            if selectableStars {
+                // A popover ladder is tap-only: plain buttons, no drag machinery, so a tap
+                // commits once through the button's own action.
+                VerticalStarBarStars(
+                    rating: shownRating, enabledRatings: enabledRatings, size: size,
+                    identifier: identifier,
+                    onRate: { level in
                         onCommit(level == rating ? .unrated : level)
-                    } : nil
-            )
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .contentShape(RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
-            // One gesture owns physical taps and drags; the buttons also support VoiceOver.
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
-                    .updating($isDragging) { _, state, _ in
-                        state = true
                     }
-                    .onChanged { value in
-                        trackMove(value.translation)
-                        guard movedPastTapSlop else { return }
-                        previewDrag(at: value.location.y, in: proxy.size.height)
-                    }
-                    .onEnded { value in
-                        commit(value, in: proxy.size.height)
-                    }
-            )
-            .onChange(of: isDragging) { _, dragging in
-                if dragging {
-                    onBegin()
-                } else {
-                    // A cancelled gesture ends without `onEnded`, so clear what it previewed.
-                    preview = nil
-                    movedPastTapSlop = false
-                }
+                )
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .modifier(
+                    StarBarAccessibility(
+                        individualStars: true, value: accessibilityValue,
+                        adjust: adjustRating))
+            } else {
+                interactiveLadder(in: proxy.size)
             }
-            .modifier(
-                StarBarAccessibility(
-                    individualStars: size == .pad || selectableStars, value: accessibilityValue,
-                    adjust: adjustRating))
         }
         .frame(width: metrics.width, height: metrics.height)
         .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
+    }
+
+    /// The swipe and rail ladder: one gesture owns physical taps and drags; the buttons also
+    /// support VoiceOver (components.md).
+    private func interactiveLadder(in extent: CGSize) -> some View {
+        VerticalStarBarStars(
+            rating: shownRating, enabledRatings: enabledRatings, size: size,
+            identifier: identifier,
+            onRate: size == .pad
+                ? { level in
+                    onCommit(level == rating ? .unrated : level)
+                } : nil
+        )
+        .frame(width: extent.width, height: extent.height)
+        .contentShape(RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 0)
+                .updating($isDragging) { _, state, _ in
+                    state = true
+                }
+                .onChanged { value in
+                    trackMove(value.translation)
+                    guard movedPastTapSlop else { return }
+                    previewDrag(at: value.location.y, in: extent.height)
+                }
+                .onEnded { value in
+                    commit(value, in: extent.height)
+                }
+        )
+        .onChange(of: isDragging) { _, dragging in
+            if dragging {
+                onBegin()
+            } else {
+                // A cancelled gesture ends without `onEnded`, so clear what it previewed.
+                preview = nil
+                movedPastTapSlop = false
+            }
+        }
+        .modifier(
+            StarBarAccessibility(
+                individualStars: size == .pad, value: accessibilityValue,
+                adjust: adjustRating))
     }
 
     /// The reject stage the swipe down lands on (components.md): `flag.slash` on its own native
