@@ -238,7 +238,7 @@ final class TapPickerController {
 }
 
 extension EnvironmentValues {
-    @Entry var tapPickerController: TapPickerController?
+    @Entry var tapPickerController: TapPickerController? = nil
 }
 
 private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
