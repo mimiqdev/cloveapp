@@ -34,6 +34,7 @@ import Testing
 @Test func emptyDistributionHasAnExplicitUnavailableReason() {
     var builder = BrowsingPerformanceReportBuilder()
     builder.distribution("raw-focus", cache: "cold", samples: [], failureCount: 2)
+    builder.failureReasons("raw-focus", cache: "cold", reasons: ["noUsablePreview": 2])
     #expect(
         builder.measurements.contains {
             $0.name == "metric-unavailable" && $0.tags["stage"] == "raw-focus"
@@ -42,6 +43,11 @@ import Testing
     #expect(
         builder.measurements.contains {
             $0.name == "raw-focus-failure-count" && $0.value == 2
+        })
+    #expect(
+        builder.measurements.contains {
+            $0.name == "raw-focus-failure-reason" && $0.value == 2
+                && $0.tags["reason"] == "noUsablePreview"
         })
 }
 

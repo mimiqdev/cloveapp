@@ -84,6 +84,16 @@ struct BrowsingPerformanceReportBuilder: Sendable {
         measurements.append(LabMeasurement(name: name, value: value, unit: unit, tags: tags))
     }
 
+    mutating func failureReasons(
+        _ stage: String, cache: String, reasons: [String: Int]
+    ) {
+        for (reason, count) in reasons.sorted(by: { $0.key < $1.key }) {
+            value(
+                "\(stage)-failure-reason", value: Double(count), unit: "count",
+                tags: ["cache": cache, "reason": reason])
+        }
+    }
+
     mutating func unavailable(_ stage: String, cache: String = "none", reason: String) {
         measurements.append(
             LabMeasurement(
@@ -97,10 +107,10 @@ struct BrowsingPerformanceReportBuilder: Sendable {
             tags: ["stage": stage, "basis": "5ms process RSS samples; cumulative lower bound"])
     }
 
-    func report(createdAt: Date = Date()) -> LabReport {
+    func report(createdAt: Date = Date(), app: LabApp = .current()) -> LabReport {
         LabReport(
-            spike: "Q3", createdAt: createdAt, context: context, measurements: measurements,
-            notes: notes)
+            spike: "Q3", createdAt: createdAt, app: app, context: context,
+            measurements: measurements, notes: notes)
     }
 }
 

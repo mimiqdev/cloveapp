@@ -22,10 +22,14 @@ enum BrowsingPerformanceScan {
         report.distribution("scan-complete", cache: "cold", samples: [cold.total])
 
         var warm: [Double] = []
+        var warmFirst: [Double] = []
         for _ in 0..<configuration.warmScanRepetitions {
             try Task.checkCancellation()
-            warm.append(try await scan(folder: folder).total)
+            let pass = try await scan(folder: folder)
+            warm.append(pass.total)
+            warmFirst.append(pass.firstPhotos)
         }
+        report.distribution("scan-first-photos", cache: "warm", samples: warmFirst)
         report.distribution("scan-complete", cache: "warm", samples: warm)
 
         let sets = cold.sets
@@ -50,6 +54,7 @@ enum BrowsingPerformanceScan {
         let reader = MetadataReader()
         var serialSamples: [Double] = []
         var serialFailures = 0
+        var serialFailureReasons: [String: Int] = [:]
         for set in sets.prefix(configuration.metadataSampleLimit) {
             try Task.checkCancellation()
             let watch = Stopwatch()
@@ -62,11 +67,16 @@ enum BrowsingPerformanceScan {
                 serialSamples.append(watch.milliseconds)
             } else {
                 serialFailures += 1
+                if case .failure(let reason) = result.outcome {
+                    serialFailureReasons[String(describing: reason), default: 0] += 1
+                }
             }
         }
         report.distribution(
             "capture-time-read", cache: "cold", samples: serialSamples,
             failureCount: serialFailures)
+        report.failureReasons(
+            "capture-time-read", cache: "cold", reasons: serialFailureReasons)
 
         var groupingByIdentity: [PhotoIdentity: GroupingPhoto] = [:]
         var batchSamples: [Double] = []
@@ -82,9 +92,10 @@ enum BrowsingPerformanceScan {
                 groupingByIdentity[set.id] = groupingPhoto(set: set, read: read)
             }
         }
-        report.distribution(
-            "capture-time-batch", cache: "warm", samples: batchSamples,
-            failureCount: metadataFailures)
+        report.distribution("capture-time-batch", cache: "warm", samples: batchSamples)
+        report.value(
+            "capture-time-failure-count", value: Double(metadataFailures), unit: "count",
+            tags: ["cache": "warm", "basis": "individual metadata reads in the batches"])
         report.value(
             "capture-time-total", value: batchSamples.reduce(0, +), unit: "ms",
             tags: ["cache": "warm", "batchSize": String(ScanConfiguration().batchSize)])

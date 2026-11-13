@@ -66,14 +66,16 @@ func collectFullMacReport() async throws {
     let path = try #require(
         ProcessInfo.processInfo.environment["CLOVE_BROWSING_PERFORMANCE_REPORT"])
     let folder = try #require(Fixtures.set("browsing-2000"))
-    var report = try await BrowsingPerformanceProbe.run(folder: folder) { update in
+    let revision =
+        ProcessInfo.processInfo.environment["CLOVE_SOURCE_REVISION"] ?? "unversioned"
+    let app = LabApp(
+        bundleIdentifier: "com.mimiqdev.clove.lab.tests", version: "debug", build: revision)
+    var report = try await BrowsingPerformanceProbe.run(folder: folder, app: app) { update in
         print("Browsing performance \(update.completed)/\(update.total): \(update.message)")
     }
     report.context["execution"] = "macOS debug Swift Testing runner; production package code"
     report.context["hostLoad"] = "shared Mac host; see PR evidence for uptime and core count"
-    if let revision = ProcessInfo.processInfo.environment["CLOVE_SOURCE_REVISION"] {
-        report.context["sourceRevision"] = revision
-    }
+    report.context["sourceRevision"] = revision
     report.notes.append("Mac-only debug-runner evidence; not an iPhone or release-build result.")
     try report.write(to: URL(fileURLWithPath: path))
     print("Browsing performance report: \(path)")

@@ -6,6 +6,7 @@ import LabSupport
 enum BrowsingPerformanceGrouping {
     static func measure(
         sets: [ScannedPhotoSet], photos: [GroupingPhoto],
+        configuration: BrowsingPerformanceConfiguration,
         cacheRoot: URL, report: inout BrowsingPerformanceReportBuilder
     ) async throws {
         let candidates = GroupingFeatureCandidates.photos(in: photos)
@@ -23,6 +24,9 @@ enum BrowsingPerformanceGrouping {
         report.value(
             "grouping-candidates", value: Double(candidates.count), unit: "count",
             tags: ["photoCount": String(photos.count)])
+        try await measureFeatureLatency(
+            requests: Array(requests.prefix(configuration.featureSampleLimit)),
+            cacheRoot: cacheRoot, report: &report)
 
         let similarity = PhotoFeatureSimilarity<ImageFeatures> { left, right in
             switch left.distance(to: right) {
@@ -48,8 +52,10 @@ enum BrowsingPerformanceGrouping {
             memoryBytes: 64 * 1_024 * 1_024, similarity: similarity,
             photoByRequest: photoByRequest)
         report.distribution(
-            "grouping-feature", cache: "cold", samples: featureResult.samples,
-            failureCount: featureResult.failures)
+            "grouping-feature-completion", cache: "cold", samples: featureResult.samples,
+            failureCount: featureResult.failures.values.reduce(0, +))
+        report.failureReasons(
+            "grouping-feature-completion", cache: "cold", reasons: featureResult.failures)
         report.value(
             "grouping-feature-throughput", value: featureResult.throughput, unit: "photos/s",
             tags: ["cache": "cold", "sampleCount": String(featureResult.samples.count)])
@@ -72,8 +78,10 @@ enum BrowsingPerformanceGrouping {
             thumbnailDirectory: cacheRoot.appendingPathComponent("feature-thumbnails-cold"),
             memoryBytes: 0, similarity: nil, photoByRequest: photoByRequest)
         report.distribution(
-            "grouping-feature", cache: "disk", samples: diskFeatures.samples,
-            failureCount: diskFeatures.failures)
+            "grouping-feature-completion", cache: "disk", samples: diskFeatures.samples,
+            failureCount: diskFeatures.failures.values.reduce(0, +))
+        report.failureReasons(
+            "grouping-feature-completion", cache: "disk", reasons: diskFeatures.failures)
         report.value(
             "grouping-feature-throughput", value: diskFeatures.throughput, unit: "photos/s",
             tags: ["cache": "disk", "sampleCount": String(diskFeatures.samples.count)])
@@ -98,7 +106,7 @@ enum BrowsingPerformanceGrouping {
 
     private struct FeatureRun: Sendable {
         let samples: [Double]
-        let failures: Int
+        let failures: [String: Int]
         let throughput: Double
         let visionStatus: String
     }
@@ -120,7 +128,7 @@ enum BrowsingPerformanceGrouping {
             cache: featureCache, sharedPreviewCache: thumbnailCache)
         let watch = Stopwatch()
         var samples: [Double] = []
-        var failures = 0
+        var failures: [String: Int] = [:]
         var visionCount = 0
         var hashOnlyCount = 0
         for await result in await pipeline.run(requests) {
@@ -135,8 +143,8 @@ enum BrowsingPerformanceGrouping {
                 if let photo = photoByRequest[result.request] {
                     await similarity?.settle(.features(features), for: photo)
                 }
-            case .unavailable:
-                failures += 1
+            case .unavailable(let reason):
+                failures[reason.rawValue, default: 0] += 1
                 if let photo = photoByRequest[result.request] {
                     await similarity?.settle(.unavailable, for: photo)
                 }
@@ -148,6 +156,40 @@ enum BrowsingPerformanceGrouping {
             samples: samples, failures: failures,
             throughput: Double(samples.count) * 1_000 / max(watch.milliseconds, 0.001),
             visionStatus: describe(status, visionCount: visionCount, hashOnlyCount: hashOnlyCount))
+    }
+
+    /// One-at-a-time production feature requests, excluding the queueing seen in a folder pass.
+    /// Each value includes preview reading, Vision and dHash work, and cache publication.
+    private static func measureFeatureLatency(
+        requests: [ImageFeatureRequest], cacheRoot: URL,
+        report: inout BrowsingPerformanceReportBuilder
+    ) async throws {
+        let featureCache = try ImageFeatureCache(
+            directory: cacheRoot.appendingPathComponent("feature-latency", isDirectory: true))
+        let thumbnailCache = try ThumbnailCache(
+            directory: cacheRoot.appendingPathComponent(
+                "feature-latency-thumbnails", isDirectory: true))
+        let pipeline = ImageFeaturePipeline(
+            cache: featureCache, sharedPreviewCache: thumbnailCache)
+        var samples: [Double] = []
+        var failures: [String: Int] = [:]
+        for request in requests {
+            try Task.checkCancellation()
+            let watch = Stopwatch()
+            guard let result = await pipeline.features(for: request) else {
+                failures["no result", default: 0] += 1
+                continue
+            }
+            switch result.outcome {
+            case .features: samples.append(watch.milliseconds)
+            case .unavailable(let reason): failures[reason.rawValue, default: 0] += 1
+            }
+        }
+        await pipeline.close()
+        report.distribution(
+            "feature-read-and-compute", cache: "cold", samples: samples,
+            failureCount: failures.values.reduce(0, +))
+        report.failureReasons("feature-read-and-compute", cache: "cold", reasons: failures)
     }
 
     private static func describe(

@@ -21,7 +21,7 @@ private struct ImageRequestOutcome: Sendable {
 
 private struct ThumbnailRun: Sendable {
     let samples: [Double]
-    let failures: Int
+    let failures: [String: Int]
     let throughput: Double
     let attempted: Int
     let diskEntries: Int
@@ -58,7 +58,7 @@ enum BrowsingPerformanceImages {
         guard !requests.isEmpty else { throw BrowsingPerformanceError.noPhotos }
         let pipeline = DetailPipeline()
         var cold: [Double] = []
-        var coldFailures = 0
+        var coldFailures: [String: Int] = [:]
         for request in requests {
             try Task.checkCancellation()
             let watch = Stopwatch()
@@ -66,11 +66,11 @@ enum BrowsingPerformanceImages {
             if decodedBytes(result) != nil {
                 cold.append(watch.milliseconds)
             } else {
-                coldFailures += 1
+                coldFailures[failureReason(result), default: 0] += 1
             }
         }
         var warm: [Double] = []
-        var warmFailures = 0
+        var warmFailures: [String: Int] = [:]
         for request in requests {
             try Task.checkCancellation()
             let watch = Stopwatch()
@@ -78,14 +78,18 @@ enum BrowsingPerformanceImages {
             if decodedBytes(result) != nil {
                 warm.append(watch.milliseconds)
             } else {
-                warmFailures += 1
+                warmFailures[failureReason(result), default: 0] += 1
             }
         }
         await pipeline.close()
         report.distribution(
-            "detail-first-preview", cache: "cold", samples: cold, failureCount: coldFailures)
+            "detail-first-preview", cache: "cold", samples: cold,
+            failureCount: coldFailures.values.reduce(0, +))
+        report.failureReasons("detail-first-preview", cache: "cold", reasons: coldFailures)
         report.distribution(
-            "detail-first-preview", cache: "warm", samples: warm, failureCount: warmFailures)
+            "detail-first-preview", cache: "warm", samples: warm,
+            failureCount: warmFailures.values.reduce(0, +))
+        report.failureReasons("detail-first-preview", cache: "warm", reasons: warmFailures)
 
         try await measureRAWFocus(sets: sets, configuration: configuration, report: &report)
     }
@@ -98,7 +102,7 @@ enum BrowsingPerformanceImages {
         var raw: [Double] = []
         var includingCancel: [Double] = []
         var warm: [Double] = []
-        var failures = 0
+        var failures: [String: Int] = [:]
         var cancelNotObserved = 0
         var pairsMeasured = 0
         for index in stride(from: 0, to: rawSets.count - 1, by: 2) {
@@ -121,7 +125,7 @@ enum BrowsingPerformanceImages {
             if secondSucceeded {
                 raw.append(elapsed)
             } else {
-                failures += 1
+                failures[failureReason(result), default: 0] += 1
             }
 
             var firstWasCancelled = false
@@ -154,11 +158,22 @@ enum BrowsingPerformanceImages {
                 reason: "The folder has fewer than two RAW photos for a cancel/next pair.")
             return
         }
-        report.distribution("raw-focus", cache: "cold", samples: raw, failureCount: failures)
+        report.distribution(
+            "raw-focus", cache: "cold", samples: raw,
+            failureCount: failures.values.reduce(0, +))
+        report.failureReasons("raw-focus", cache: "cold", reasons: failures)
         report.distribution("raw-focus", cache: "warm", samples: warm)
         report.distribution(
             "raw-focus-including-cancel", cache: "cold", samples: includingCancel,
             failureCount: cancelNotObserved)
+        if cancelNotObserved > 0 {
+            report.failureReasons(
+                "raw-focus-including-cancel", cache: "cold",
+                reasons: [
+                    "First render completed or failed before cancellation was observed":
+                        cancelNotObserved
+                ])
+        }
         report.value(
             "raw-focus-cancel-observed", value: Double(includingCancel.count), unit: "count",
             tags: ["attempted": String(pairsMeasured), "cancelSignalDelayMs": "20"])
@@ -215,8 +230,11 @@ enum BrowsingPerformanceImages {
         let files =
             (try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil)) ?? []
+        let failures = outcomes.compactMap(\.failure).reduce(into: [String: Int]()) {
+            $0[$1, default: 0] += 1
+        }
         return ThumbnailRun(
-            samples: successes.map(\.milliseconds), failures: outcomes.count - successes.count,
+            samples: successes.map(\.milliseconds), failures: failures,
             throughput: Double(successes.count) * 1_000 / max(elapsed, 0.001),
             attempted: outcomes.count,
             diskEntries: files.filter { $0.pathExtension == "jpg" }.count)
@@ -227,7 +245,9 @@ enum BrowsingPerformanceImages {
         report: inout BrowsingPerformanceReportBuilder
     ) {
         report.distribution(
-            "thumbnail", cache: cache, samples: run.samples, failureCount: run.failures)
+            "thumbnail", cache: cache, samples: run.samples,
+            failureCount: run.failures.values.reduce(0, +))
+        report.failureReasons("thumbnail", cache: cache, reasons: run.failures)
         report.value(
             "thumbnail-throughput", value: run.throughput, unit: "photos/s",
             tags: [
@@ -269,6 +289,11 @@ enum BrowsingPerformanceImages {
             displayPixels: configuration.displayPixels, wantsNativeResolution: native,
             locationIdentity: BrowsingPerformanceScan.folderID.rawValue, mode: .rawFirst,
             screenPixels: configuration.displayPixels)
+    }
+
+    private static func failureReason(_ result: DetailResult) -> String {
+        guard case .unavailable(let reason) = result else { return "No materialized pixels." }
+        return reason.rawValue
     }
 
     private static func decodedBytes(_ result: DetailResult) -> Int? {

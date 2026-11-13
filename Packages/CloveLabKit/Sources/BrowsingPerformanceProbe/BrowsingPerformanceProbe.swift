@@ -8,12 +8,14 @@ public struct BrowsingPerformanceConfiguration: Sendable {
     public var thumbnailInFlight: Int
     public var detailSampleLimit: Int
     public var rawSampleLimit: Int
+    public var featureSampleLimit: Int
     public var displayPixels: Int
 
     public init(
         warmScanRepetitions: Int = 4, metadataSampleLimit: Int = 240,
         thumbnailLimit: Int = 2_000, thumbnailInFlight: Int = 32,
-        detailSampleLimit: Int = 24, rawSampleLimit: Int = 6, displayPixels: Int = 1_320
+        detailSampleLimit: Int = 24, rawSampleLimit: Int = 6,
+        featureSampleLimit: Int = 240, displayPixels: Int = 1_320
     ) {
         self.warmScanRepetitions = max(0, warmScanRepetitions)
         self.metadataSampleLimit = max(0, metadataSampleLimit)
@@ -21,6 +23,7 @@ public struct BrowsingPerformanceConfiguration: Sendable {
         self.thumbnailInFlight = max(1, thumbnailInFlight)
         self.detailSampleLimit = max(0, detailSampleLimit)
         self.rawSampleLimit = max(0, rawSampleLimit)
+        self.featureSampleLimit = max(0, featureSampleLimit)
         self.displayPixels = max(1, displayPixels)
     }
 }
@@ -50,19 +53,31 @@ public enum BrowsingPerformanceProbe {
 
     public static func run(
         folder: URL, configuration: BrowsingPerformanceConfiguration = .init(),
+        app: LabApp = .current(),
         progress: @Sendable (BrowsingPerformanceProgress) async -> Void = { _ in }
     ) async throws -> LabReport {
         let sampler = LabResidentSampler()
         var report = BrowsingPerformanceReportBuilder()
-        let app = LabApp.current()
+        let buildIdentity = "\(app.bundleIdentifier) \(app.version) (\(app.build))"
+        let hasBuildIdentity =
+            !app.bundleIdentifier.isEmpty && !app.version.isEmpty
+            && !app.build.isEmpty
         report.context = [
             "folder": folder.lastPathComponent,
-            "buildIdentity": "\(app.bundleIdentifier) \(app.version) (\(app.build))",
+            "buildIdentity": hasBuildIdentity
+                ? buildIdentity : "unavailable: the runner has no CFBundle identity",
             "execution": "production CloveCore/CloveImaging pipelines driven by Clove Lab",
             "thumbnailWorkers": "4",
             "thumbnailInFlight": String(configuration.thumbnailInFlight),
             "detailDisplayPixels": String(configuration.displayPixels),
         ]
+        if !hasBuildIdentity {
+            report.unavailable(
+                "build-identity",
+                reason:
+                    "CFBundleIdentifier, CFBundleShortVersionString and CFBundleVersion are not all available in this runner."
+            )
+        }
         report.notes = [
             "Measurement only. No target pass or physical-device result is inferred from another host.",
             "Cold means fresh Lab-owned cache directories and first touch in this run. iOS/macOS OS caches are not flushed; this is not a reboot-cold measurement.",
@@ -134,8 +149,8 @@ public enum BrowsingPerformanceProbe {
                 await progress(.init(completed: 3, total: 6, message: "Grouping and features"))
                 do {
                     try await BrowsingPerformanceGrouping.measure(
-                        sets: scanned.sets, photos: scanned.groupingPhotos, cacheRoot: cacheRoot,
-                        report: &report)
+                        sets: scanned.sets, photos: scanned.groupingPhotos,
+                        configuration: configuration, cacheRoot: cacheRoot, report: &report)
                 } catch {
                     try record(error, stage: "grouping", report: &report)
                 }
@@ -167,7 +182,7 @@ public enum BrowsingPerformanceProbe {
             tags: ["basis": "process RSS"])
         report.memoryPeak(sampler.finish(), stage: "overall")
         await progress(.init(completed: 6, total: 6, message: "Finished"))
-        return report.report()
+        return report.report(app: app)
     }
 
     private static func temporaryCacheRoot() throws -> URL {
