@@ -64,7 +64,9 @@ final class CloveFlowTests: XCTestCase {
         let detail = element(app, "clove.detail")
         XCTAssertTrue(detail.exists)
         XCTAssertFalse(sidebar.exists)
-        XCTAssertFalse(element(app, "clove.grid").exists)
+        // The push that covers the grid animates; read the settled state instead of one
+        // snapshot taken mid-transition (#203's observed-state pattern).
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), element(app, "clove.grid")))
         XCTAssertGreaterThan(detail.frame.width, app.frame.width * 0.95)
         let back = element(app, "clove.nav.back")
         XCTAssertEqual(back.label, "Back")
