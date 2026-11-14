@@ -27,6 +27,13 @@ private actor ThumbnailDecodeGate {
         var iterator = entries.stream.makeAsyncIterator()
         try #require(await iterator.next() == pixels, "Decoder entries must follow priority order")
     }
+
+    func waitForStarts(_ count: Int) async throws {
+        var iterator = entries.stream.makeAsyncIterator()
+        for _ in 0..<count {
+            try #require(await iterator.next() != nil, "Decoder entries must reach \(count)")
+        }
+    }
 }
 
 @Suite(.imageWork) struct ThumbnailSchedulingTests {
@@ -36,8 +43,11 @@ private actor ThumbnailDecodeGate {
             locationIdentity: base.locationIdentity)
     }
 
+    /// Observes actor queue/active counts where `ThumbnailPipeline` exposes no notification stream
+    /// seam; callers pair this with `.timeLimit(.minutes(1))` so CI CPU contention cannot trigger
+    /// premature 5-second wall-clock timeouts.
     private func eventually(_ condition: () async -> Bool) async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
         while !(await condition()), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(1))
         }
@@ -52,7 +62,9 @@ private actor ThumbnailDecodeGate {
         } catch is CancellationError {} catch { Issue.record(error) }
     }
 
-    @Test(arguments: [2, 4]) func workersStayBounded(workers: Int) async throws {
+    @Test(.timeLimit(.minutes(1)), arguments: [2, 4]) func workersStayBounded(workers: Int)
+        async throws
+    {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let base = try thumbnailRequest(directory.image())
@@ -63,12 +75,14 @@ private actor ThumbnailDecodeGate {
         let tasks = (1...(workers + 2)).map { index in
             Task { try await pipeline.thumbnail(for: request(base, index)) }
         }
+        try await gate.waitForStarts(workers)
+        // ThumbnailPipeline has no queue/drain notification seam without changing production code;
+        // eventually polls actor state within the 1-minute test limit.
         try await eventually {
             let active = await pipeline.activeCount
             let queued = await pipeline.queuedCount
             return active == workers && queued == 2
         }
-        try await eventually { await gate.started.count == workers }
         #expect(await gate.maximum == workers)
         for task in tasks { task.cancel() }
         for task in tasks { await cancelled(task) }
@@ -103,7 +117,9 @@ private actor ThumbnailDecodeGate {
         #expect(await gate.started == [1])
     }
 
-    @Test func supersededNativeWorkDrainsBeforeNewRequestAndNeverDelivers() async throws {
+    @Test(.timeLimit(.minutes(1))) func supersededNativeWorkDrainsBeforeNewRequestAndNeverDelivers()
+        async throws
+    {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let base = try thumbnailRequest(directory.image())
@@ -113,13 +129,13 @@ private actor ThumbnailDecodeGate {
             decode: { await gate.decode($0) })
         let consumer = UUID()
         let old = Task { try await pipeline.thumbnail(for: request(base, 1), consumer: consumer) }
-        try await eventually { await gate.started == [1] }
+        try await gate.waitForStart(1)
         let newer = Task { try await pipeline.thumbnail(for: request(base, 2), consumer: consumer) }
         try await eventually { await pipeline.queuedCount == 1 }
         await cancelled(old)
         #expect(await gate.started == [1])
         await gate.finish(1)
-        try await eventually { await gate.started == [1, 2] }
+        try await gate.waitForStart(2)
         await gate.finish(2)
         _ = try await newer.value
         #expect(await gate.maximum == 1)
@@ -164,7 +180,9 @@ private actor ThumbnailDecodeGate {
         _ = try await prefetch.value
     }
 
-    @Test func reducedWorkerSettingWaitsForRunningWorkAndCancelsPrefetch() async throws {
+    @Test(.timeLimit(.minutes(1))) func reducedWorkerSettingWaitsForRunningWorkAndCancelsPrefetch()
+        async throws
+    {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let base = try thumbnailRequest(directory.image())
@@ -175,7 +193,7 @@ private actor ThumbnailDecodeGate {
         let active = (1...4).map { index in
             Task { try await pipeline.thumbnail(for: request(base, index)) }
         }
-        try await eventually { await gate.started.count == 4 }
+        try await gate.waitForStarts(4)
         await pipeline.setWorkerCount(2)
         let queued = Task {
             try await pipeline.thumbnail(for: request(base, 5), priority: .prefetch)
@@ -193,7 +211,9 @@ private actor ThumbnailDecodeGate {
         #expect(await gate.started.count == 4)
     }
 
-    @Test func closeWaitsForNativeDrainBeforeFolderAccessCanBeReleased() async throws {
+    @Test(.timeLimit(.minutes(1))) func closeWaitsForNativeDrainBeforeFolderAccessCanBeReleased()
+        async throws
+    {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let base = try thumbnailRequest(directory.image())
@@ -202,7 +222,7 @@ private actor ThumbnailDecodeGate {
             cache: try directory.cache(memory: 0, disk: 0), workers: 1,
             decode: { await gate.decode($0) })
         let active = Task { try await pipeline.thumbnail(for: request(base, 1)) }
-        try await eventually { await gate.started == [1] }
+        try await gate.waitForStart(1)
         let closing = Task {
             await pipeline.close()
             await gate.markClosed()
@@ -235,7 +255,9 @@ private actor ThumbnailDecodeGate {
         await pipeline.close()
     }
 
-    @Test func revisionChangedDuringDecodeIsUnavailableAndNotCached() async throws {
+    @Test(.timeLimit(.minutes(1))) func revisionChangedDuringDecodeIsUnavailableAndNotCached()
+        async throws
+    {
         let directory = try ThumbnailTestDirectory()
         defer { directory.remove() }
         let base = try thumbnailRequest(directory.image())
@@ -244,7 +266,7 @@ private actor ThumbnailDecodeGate {
         let pipeline = ThumbnailPipeline(
             cache: cache, workers: 1, decode: { await gate.decode($0) })
         let task = Task { try await pipeline.thumbnail(for: request(base, 1)) }
-        try await eventually { await gate.started == [1] }
+        try await gate.waitForStart(1)
         try Data("changed".utf8).write(to: base.source)
         await gate.finish(1)
         guard case .unavailable(.sourceChanged) = try await task.value else {
@@ -280,18 +302,23 @@ private actor ThumbnailDecodeGate {
         let visibleJoiner = Task {
             try await pipeline.thumbnail(for: request(base, 3), priority: .visible)
         }
-        try await eventually { await pipeline.queuedCount == 2 }
+        // ThumbnailPipeline exposes no waiter-attachment seam without altering production code;
+        // wait briefly so visibleJoiner attaches before cancelling promotedTarget, then wait for
+        // queuedCount == 2 in case extreme contention delays visibleJoiner's actor hop.
+        try await Task.sleep(for: .milliseconds(50))
         promotedTarget.cancel()
         await cancelled(promotedTarget)
-        #expect(await pipeline.queuedCount == 2)
+        try await eventually { await pipeline.queuedCount == 2 }
 
         await gate.finish(1)
         _ = try await active.value
-        try await eventually { await gate.started == [1, 3] }
+        try await gate.waitForStart(3)
+        #expect(await gate.started == [1, 3])
         await gate.finish(3)
         _ = try await visibleJoiner.value
 
-        try await eventually { await gate.started == [1, 3, 2] }
+        try await gate.waitForStart(2)
+        #expect(await gate.started == [1, 3, 2])
         await gate.finish(2)
         _ = try await firstPrefetch.value
     }
@@ -315,7 +342,9 @@ private actor ThumbnailDecodeGate {
         let visible = Task {
             try await pipeline.thumbnail(for: request(base, 1), priority: .visible)
         }
-        // Wait until the visible waiter is attached before cancelling prefetch.
+        // Wait until the visible waiter is attached before cancelling prefetch. ThumbnailPipeline
+        // exposes no waiter-attachment seam without altering production code, so this sleep
+        // stays marked as a non-deterministic seam boundary.
         try await Task.sleep(for: .milliseconds(20))
         prefetch.cancel()
         await cancelled(prefetch)

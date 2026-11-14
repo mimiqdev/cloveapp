@@ -806,33 +806,42 @@ private func until(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
     }
 
-    @Test func resumeDrainsStageQueuesWhoseHolderExitedWhilePaused() async throws {
+    @Test(.timeLimit(.minutes(1))) func resumeDrainsStageQueuesWhoseHolderExitedWhilePaused()
+        async throws
+    {
         // #1: the slot holder finishes under pause; the parked job must be admitted on resume.
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.highResolution)
+        reader.reads.hold(.highResolution)
+        defer {
+            detector.releaseAll()
+            reader.reads.release(.highResolution)
+        }
         let scheduler = makeScheduler(reader, detector)
         let holder = Task { await scheduler.analyzeCurrent(photoRequest("holder")) }
         let parked = Task { await scheduler.analyzeCurrent(photoRequest("parked")) }
-        try await until("the first job's detection is held and the second queues") {
-            if detector.parked < 1 { return false }
-            let snapshot = await scheduler.snapshot()
-            return snapshot.stages[.faceDetection]!.queued >= 1
+        try await detector.waitUntilParked()
+        // RegionSharpnessScheduler exposes no stage-queue/release notification seam without
+        // altering production code; poll snapshots with a 30s budget inside the 1-minute limit.
+        try await until("the second job queues on face detection", timeout: .seconds(30)) {
+            await scheduler.snapshot().stages[.faceDetection]!.queued >= 1
         }
         await scheduler.pause()
         // The holder finishes while paused: its detection slot frees, but nothing admits.
         detector.releaseAll()
-        try await until("the holder's stage slot released under pause") {
+        try await until("the holder's stage slot released under pause", timeout: .seconds(30)) {
             await scheduler.snapshot().stages[.faceDetection]!.active == 0
         }
         // The parked entry is still waiting, and has not run a Vision request of its own.
         #expect(await scheduler.snapshot().stages[.faceDetection]!.queued >= 1)
         #expect(detector.requestCount == 1, "only the holder's detection has run so far")
+        detector.hold()
         await scheduler.resume()
-        try await until("resume admits the parked entry") { detector.requestCount >= 2 }
+        try await detector.waitUntilParked()
+        #expect(detector.requestCount >= 2)
         detector.releaseAll()
-        await reader.reads.release(.highResolution)
+        reader.reads.release(.highResolution)
         _ = try #require(await holder.value)
         _ = try #require(await parked.value)
         await scheduler.close()
@@ -870,27 +879,32 @@ private func until(
         await scheduler.close()
     }
 
-    @Test func invalidateCancelsOnlyMatchingPhotos() async throws {
+    @Test(.timeLimit(.minutes(1))) func invalidateCancelsOnlyMatchingPhotos() async throws {
         // #3: iteration is over a copy of the keys, so dropping inside the loop is safe, and
         // only the invalidated photo's work is dropped.
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.highResolution)
+        reader.reads.hold(.highResolution)
+        defer {
+            detector.releaseAll()
+            reader.reads.release(.highResolution)
+        }
         let scheduler = makeScheduler(reader, detector)
         await scheduler.submit(
             [photoRequest("keep"), photoRequest("gone")], priority: .folder)
-        try await until("both photos have work queued or running") {
-            let snapshot = await scheduler.snapshot()
-            let waiting =
-                snapshot.queuedByPriority.values.reduce(0, +)
-                + snapshot.stages[.faceDetection]!.queued
-            return waiting >= 2
+        try await detector.waitUntilParked()
+        // RegionSharpnessScheduler exposes no stage-queue notification seam without altering
+        // production code; count both active and queued in .faceDetection since each photo may
+        // concurrently hold a different stage (.faceDetection vs .pixelAcquisition).
+        try await until("both photos have reached face detection", timeout: .seconds(30)) {
+            let faceStage = await scheduler.snapshot().stages[.faceDetection]!
+            return faceStage.active + faceStage.queued >= 2
         }
         await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/gone.arw")])
         detector.releaseAll()
-        await reader.reads.release(.highResolution)
-        try await until("the surviving photo is analysed") {
+        reader.reads.release(.highResolution)
+        try await until("the surviving photo is analysed", timeout: .seconds(30)) {
             await scheduler.snapshot().stages[.faceDetection]!.finishedCount >= 1
         }
         await scheduler.close()
