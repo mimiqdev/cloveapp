@@ -582,7 +582,8 @@ struct DetailMarkingView: View {
             onChromeToggle: { toggleChrome() },
             onStep: { actions.step($0) },
             onDoubleTap: { doubleTap(at: $0) },
-            onMarkingSwipe: { applyMarkingSwipe($0) },
+            onMarkingSwipe: { applyMarkingSwipe($0, touchCount: 1) },
+            onTwoFingerMarkingSwipe: { applyMarkingSwipe($0, touchCount: 2) },
             onSwipeBegin: { beginMarkingGesture() },
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
@@ -1144,15 +1145,13 @@ struct DetailMarkingView: View {
     }
 
     /// Resolves one finished marking swipe through C13's gesture rules (PRD P0-06).
-    ///
-    /// The preview only begins a marking swipe at fit, and a one-finger drag cannot change the
-    /// zoom, so the release is never the zoomed case those rules also guard against.
-    func applyMarkingSwipe(_ rating: Rating) {
+    func applyMarkingSwipe(_ rating: Rating, touchCount: Int = 1) {
         guard browsing.canMark else { return }
+        let isZoomed = (probe.container?.isZoomed ?? false) || scale > DetailFitScale.tolerance
         apply(
             rules.result(
                 forSwipeRating: rating, marks: browsing.shownMarks(for: photo.id),
-                isZoomed: false))
+                isZoomed: isZoomed, touchCount: touchCount))
     }
 
     /// Applies one resolved marking input and asks the screen to start the advance it asks for

@@ -162,6 +162,16 @@ struct SettingsScreen: View {
                 Text("Off").tag(DoubleTapBehaviour.off)
             }
             .accessibilityIdentifier("clove.settings.doubleTap")
+            Picker("Zoomed rating swipe", selection: binding(\.zoomedRatingSwipe)) {
+                Text("Two-finger swipe").tag(ZoomedRatingSwipe.twoFinger)
+                Text("Single-finger axis lock").tag(ZoomedRatingSwipe.singleFingerAxisLock)
+            }
+            .accessibilityLabel("Zoomed rating swipe")
+            .accessibilityValue(
+                store.settings.zoomedRatingSwipe == .twoFinger
+                    ? "Two-finger swipe" : "Single-finger axis lock"
+            )
+            .accessibilityIdentifier("clove.settings.zoomedRatingSwipe")
             Toggle("Keep zoom in detail", isOn: binding(\.keepZoom.inDetail))
                 .accessibilityIdentifier("clove.settings.keepZoomInDetail")
             Toggle("Extended color labels", isOn: binding(\.extendedColourLabelsEnabled))

@@ -1,6 +1,7 @@
 import CloveCore
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// The scale above fit at which the preview counts as zoomed (PRD Detail gestures, PRD P0-04).
 ///
@@ -125,6 +126,9 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports the preview value once per release; cancellation reports nothing.
     let onMarkingSwipe: (Rating) -> Void
 
+    /// Reports a two-finger zoomed marking swipe once per release; falls back to `onMarkingSwipe`.
+    var onTwoFingerMarkingSwipe: ((Rating) -> Void)?
+
     /// Cancels pending auto-advance when navigation or marking starts.
     let onSwipeBegin: () -> Void
 
@@ -155,6 +159,7 @@ struct DetailZoomView: UIViewRepresentable {
         view.onStep = onStep
         view.onDoubleTap = onDoubleTap
         view.onMarkingSwipe = onMarkingSwipe
+        view.onTwoFingerMarkingSwipe = onTwoFingerMarkingSwipe
         view.onSwipeBegin = onSwipeBegin
         view.hasPrevious = hasPrevious
         view.hasNext = hasNext
@@ -173,6 +178,7 @@ struct DetailZoomView: UIViewRepresentable {
         view.onStep = onStep
         view.onDoubleTap = onDoubleTap
         view.onMarkingSwipe = onMarkingSwipe
+        view.onTwoFingerMarkingSwipe = onTwoFingerMarkingSwipe
         view.onSwipeBegin = onSwipeBegin
         view.hasPrevious = hasPrevious
         view.hasNext = hasNext
@@ -201,12 +207,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private var renderedFocusRegionColours: DetailFocusRegionColours?
     private let doubleTap = UITapGestureRecognizer()
     private let chromeTap = UITapGestureRecognizer()
-    private let markingPan = UIPanGestureRecognizer()
+    private let markingPan = DetailSingleFingerPanGestureRecognizer()
+    private let twoFingerMarkingSwipe = TwoFingerMarkingSwipeGestureRecognizer()
     private let haptics = MarkingSwipeHaptics()
     private var isNavigating = false
 
     /// One preview session for either direction, discarded on cancel.
     private var markingSession: MarkingSwipeSession?
+    private weak var activeMarkingRecognizer: UIGestureRecognizer?
     private var markingStartTime: TimeInterval = 0
     private var markingTouchStart: CGPoint = .zero
     private var velocitySample: Task<Void, Never>?
@@ -238,6 +246,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     var onStep: ((Int) -> Void)?
     var onDoubleTap: ((UnitPoint) -> Void)?
     var onMarkingSwipe: ((Rating) -> Void)?
+    var onTwoFingerMarkingSwipe: ((Rating) -> Void)?
     var onSwipeBegin: (() -> Void)?
     var hasPrevious = false
     var hasNext = false
@@ -280,13 +289,17 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         chromeTap.require(toFail: doubleTap)
         scrollView.addGestureRecognizer(chromeTap)
 
-        // The marking pan belongs to the container rather than the scroll view, so it is not one
-        // of the scroll view's own gestures. One finger only: a second finger is a pinch, which
-        // stays the scroll view's (PRD Detail gestures: pinch always zooms).
+        // Both marking gestures live on the container outside the scroll view. While zoomed,
+        // `twoFingerMarkingSwipe` runs in the default two-finger mode and `markingPan` runs when
+        // switched to single-finger axis-lock.
         markingPan.maximumNumberOfTouches = 1
         markingPan.delegate = self
         markingPan.addTarget(self, action: #selector(handleMarkingPan))
         addGestureRecognizer(markingPan)
+
+        twoFingerMarkingSwipe.delegate = self
+        twoFingerMarkingSwipe.addTarget(self, action: #selector(handleTwoFingerMarkingSwipe))
+        addGestureRecognizer(twoFingerMarkingSwipe)
 
         // The preview and its region buttons are sibling accessibility elements. Making the
         // container itself the element would hide every region from VoiceOver.
@@ -328,6 +341,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// Whether a single tap can show or hide the chrome, which it can only at fit (PRD Detail
     /// and marking).
     var chromeTapIsEnabled: Bool { chromeTap.isEnabled }
+    var markingPanIsEnabled: Bool { markingPan.isEnabled }
+    var twoFingerMarkingSwipeIsEnabled: Bool { twoFingerMarkingSwipe.isEnabled }
+    var isZoomed: Bool { scrollView.zoomScale > DetailFitScale.tolerance }
+    var twoFingerSwipeRecognizer: TwoFingerMarkingSwipeGestureRecognizer { twoFingerMarkingSwipe }
 
     /// Replaces the pixels without touching the zoom or the position (PRD P0-04).
     ///
@@ -395,8 +412,25 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// zoomed (#131). A disabled recognizer never starts, so that tap has nothing to deliver.
     private func updateGestureAvailability() {
         let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
-        markingPan.isEnabled = !isZoomed
         chromeTap.isEnabled = !isZoomed
+        guard isZoomed else {
+            markingPan.isEnabled = true
+            twoFingerMarkingSwipe.isEnabled = false
+            return
+        }
+        guard rules.settings.gesturesEnabled else {
+            markingPan.isEnabled = false
+            twoFingerMarkingSwipe.isEnabled = false
+            return
+        }
+        switch rules.settings.zoomedRatingSwipe {
+        case .twoFinger:
+            markingPan.isEnabled = false
+            twoFingerMarkingSwipe.isEnabled = true
+        case .singleFingerAxisLock:
+            markingPan.isEnabled = true
+            twoFingerMarkingSwipe.isEnabled = false
+        }
     }
 
     /// Applies one command exactly once (PRD P0-04).
@@ -457,6 +491,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         onZoomChange?(scrollView.zoomScale)
     }
 
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard !isApplyingCommand, isZoomed else { return }
+        updatePreviewAccessibility()
+    }
+
     // MARK: - Marking swipe
 
     /// UIPan translation starts at recognition, losing more distance on a fast swipe. Capture
@@ -469,8 +508,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             if view is DetailFocusRegionControl {
                 // A region owns a single tap, not a drag: the shared pan still resolves
                 // vertical marking and horizontal navigation from its existing rules. Only
-                // double-tap-to-fit and that pan may start over a region.
+                // double-tap-to-fit and marking swipes may start over a region.
                 return recognizer === markingPan
+                    || recognizer === twoFingerMarkingSwipe
                     || (recognizer === doubleTap
                         && scrollView.zoomScale > DetailFitScale.tolerance)
             }
@@ -481,9 +521,24 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Locks the dominant axis once. Later samples cannot switch between navigation and marking.
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
+        if recognizer === twoFingerMarkingSwipe {
+            return isZoomed
+                && rules.settings.gesturesEnabled
+                && rules.settings.zoomedRatingSwipe == .twoFinger
+        }
         guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
-        guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
         let translation = pan.translation(in: self)
+        if isZoomed {
+            guard rules.settings.gesturesEnabled,
+                rules.settings.zoomedRatingSwipe == .singleFingerAxisLock
+            else { return false }
+            isNavigating = false
+            return rules.beginsSwipe(
+                horizontalTravel: Double(translation.x),
+                verticalTravel: -Double(translation.y),
+                isZoomed: true)
+        }
         isNavigating =
             NavigationSwipeRules.axis(
                 horizontal: Double(translation.x), vertical: Double(translation.y)) == .horizontal
@@ -491,16 +546,36 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return rules.beginsSwipe(
             horizontalTravel: Double(translation.x),
             verticalTravel: -Double(translation.y),
-            isZoomed: scrollView.zoomScale > DetailFitScale.tolerance)
+            isZoomed: false)
+    }
+
+    /// Requires zoomed marking gestures to resolve before scroll-view pan/pinch begin so a rating
+    /// swipe never pans or pinches, while a failed candidate yields immediately to pan/pinch.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard scrollView.zoomScale > DetailFitScale.tolerance, rules.settings.gesturesEnabled
+        else { return false }
+        switch rules.settings.zoomedRatingSwipe {
+        case .twoFinger:
+            return gestureRecognizer === twoFingerMarkingSwipe
+                && (otherGestureRecognizer === scrollView.pinchGestureRecognizer
+                    || otherGestureRecognizer === scrollView.panGestureRecognizer)
+        case .singleFingerAxisLock:
+            return gestureRecognizer === markingPan
+                && otherGestureRecognizer === scrollView.panGestureRecognizer
+        }
     }
 
     /// Lets the fit pan read drags alongside scrolling and yield to pinch.
-    /// Zoomed one-finger drags belong to the scroll view alone.
+    /// While zoomed, marking and scrolling/pinching are mutually exclusive.
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
-        gestureRecognizer === markingPan
+        guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
+        return gestureRecognizer === markingPan
             && (other === scrollView.panGestureRecognizer
                 || other === scrollView.pinchGestureRecognizer)
     }
@@ -515,9 +590,38 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             return
         }
         let travel = Double(markingTouchStart.y - pan.location(in: self).y)
-        switch pan.state {
+        handleMarkingState(
+            pan.state, recognizer: pan, startLocation: markingTouchStart, travel: travel
+        ) { [weak self] rating in
+            self?.onMarkingSwipe?(rating)
+        }
+    }
+
+    /// Handles a zoomed two-finger vertical drag through the same rating ladder.
+    @objc func handleTwoFingerMarkingSwipe(_ swipe: TwoFingerMarkingSwipeGestureRecognizer) {
+        handleMarkingState(
+            swipe.state, recognizer: swipe, startLocation: swipe.startCentroid,
+            travel: swipe.verticalTravel
+        ) { [weak self] rating in
+            guard let self else { return }
+            if let onTwoFingerMarkingSwipe {
+                onTwoFingerMarkingSwipe(rating)
+            } else {
+                onMarkingSwipe?(rating)
+            }
+        }
+    }
+
+    private func handleMarkingState(
+        _ state: UIGestureRecognizer.State,
+        recognizer: UIGestureRecognizer,
+        startLocation: CGPoint,
+        travel: Double,
+        commit: (Rating) -> Void
+    ) {
+        switch state {
         case .began:
-            beginMarkingSwipe(at: markingTouchStart)
+            beginMarkingSwipe(at: startLocation, recognizer: recognizer)
             updateMarkingSwipe(travel: travel)
         case .changed:
             updateMarkingSwipe(travel: travel)
@@ -525,7 +629,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             updateMarkingSwipe(travel: travel, releasing: true)
             let rating = markingSession?.rating
             clearMarkingSwipe()
-            if let rating { onMarkingSwipe?(rating) }
+            if let rating { commit(rating) }
         case .cancelled, .failed:
             // A system cancel writes nothing and leaves the marks as they were (PRD P0-06).
             clearMarkingSwipe()
@@ -534,9 +638,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         }
     }
 
-    private func beginMarkingSwipe(at startLocation: CGPoint) {
+    private func beginMarkingSwipe(at startLocation: CGPoint, recognizer: UIGestureRecognizer) {
         onSwipeBegin?()
         haptics.prepare()
+        activeMarkingRecognizer = recognizer
         markingStartTime = ProcessInfo.processInfo.systemUptime
         markingSession = rules.swipeSession(startingRating: currentRating)
         feedback?.startLocation = startLocation
@@ -548,9 +653,15 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 try await Task.sleep(for: .seconds(MarkingSwipeRules.velocityWindow))
             } catch { return }
             guard let self else { return }
-            self.updateMarkingSwipe(
-                travel: Double(self.markingTouchStart.y - self.markingPan.location(in: self).y))
+            self.updateMarkingSwipe(travel: self.activeMarkingTravel)
         }
+    }
+
+    private var activeMarkingTravel: Double {
+        if activeMarkingRecognizer === twoFingerMarkingSwipe {
+            return twoFingerMarkingSwipe.verticalTravel
+        }
+        return Double(markingTouchStart.y - markingPan.location(in: self).y)
     }
 
     /// Every crossing previews and ticks; only the release callback writes a mark.
@@ -569,6 +680,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private func clearMarkingSwipe() {
         velocitySample?.cancel()
         velocitySample = nil
+        activeMarkingRecognizer = nil
         markingSession = nil
         feedback?.clear()
     }
@@ -665,8 +777,13 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 @MainActor
 extension DetailZoomContainerView {
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
-        markingPan.isEnabled = false
-        markingPan.isEnabled = true
+        if markingPan.state == .began || markingPan.state == .changed {
+            markingPan.isEnabled = false
+        }
+        if twoFingerMarkingSwipe.state == .began || twoFingerMarkingSwipe.state == .changed {
+            twoFingerMarkingSwipe.isEnabled = false
+        }
+        updateGestureAvailability()
     }
 
     @objc private func handleChromeTap() {
@@ -730,18 +847,19 @@ extension DetailZoomContainerView {
     }
 
     private func updatePreviewAccessibility() {
-        guard imageView.image != nil else {
-            previewAccessibilityView.accessibilityValue = "Loading"
-            return
+        let newValue: String
+        if imageView.image == nil {
+            newValue = "Loading"
+        } else if let snapshot = zoomSnapshot {
+            let percentX = Int((snapshot.anchor.x * 100).rounded())
+            let percentY = Int((snapshot.anchor.y * 100).rounded())
+            newValue = "Loaded, centred at \(percentX)%, \(percentY)% of the photo"
+        } else {
+            newValue = "Loaded"
         }
-        guard let snapshot = zoomSnapshot else {
-            previewAccessibilityView.accessibilityValue = "Loaded"
-            return
+        if previewAccessibilityView.accessibilityValue != newValue {
+            previewAccessibilityView.accessibilityValue = newValue
         }
-        let percentX = Int((snapshot.anchor.x * 100).rounded())
-        let percentY = Int((snapshot.anchor.y * 100).rounded())
-        previewAccessibilityView.accessibilityValue =
-            "Loaded, centred at \(percentX)%, \(percentY)% of the photo"
     }
 }
 
@@ -785,6 +903,200 @@ private final class DetailZoomImageView: UIImageView {
         case .autofocus: 0
         case .eye: 1
         case .face: 2
+        }
+    }
+}
+
+/// Fails immediately if a second touch lands while `.possible`, preventing a zoomed pinch from
+/// stalling on single-finger axis-lock failure resolution.
+@MainActor
+final class DetailSingleFingerPanGestureRecognizer: UIPanGestureRecognizer {
+    private var activeTouchIDs: Set<ObjectIdentifier> = []
+    private(set) var didFailForMultiTouch = false
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if state == .began || state == .changed {
+            for touch in touches { ignore(touch, for: event) }
+            return
+        }
+        for touch in touches { activeTouchIDs.insert(ObjectIdentifier(touch)) }
+        super.touchesBegan(touches, with: event)
+        if activeTouchIDs.count > 1 {
+            didFailForMultiTouch = true
+            if state == .possible {
+                state = .failed
+            }
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches { activeTouchIDs.remove(ObjectIdentifier(touch)) }
+        super.touchesEnded(touches, with: event)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches { activeTouchIDs.remove(ObjectIdentifier(touch)) }
+        super.touchesCancelled(touches, with: event)
+    }
+
+    override func reset() {
+        activeTouchIDs.removeAll()
+        didFailForMultiTouch = false
+        super.reset()
+    }
+}
+
+/// Recognizes a parallel two-finger vertical drag while zoomed and immediately fails pinches,
+/// horizontal two-finger drags, and single-finger drags.
+@MainActor
+final class TwoFingerMarkingSwipeGestureRecognizer: UIGestureRecognizer {
+    private var orderedTouchIDs: [ObjectIdentifier] = []
+    private var startPoints: [ObjectIdentifier: CGPoint] = [:]
+    private var currentPoints: [ObjectIdentifier: CGPoint] = [:]
+    private(set) var startCentroid: CGPoint = .zero
+    private(set) var currentCentroid: CGPoint = .zero
+    private(set) var didFailInCurrentSequence = false
+
+    var verticalTravel: Double {
+        Double(startCentroid.y - currentCentroid.y)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        guard state == .possible else {
+            for touch in touches { ignore(touch, for: event) }
+            return
+        }
+        if orderedTouchIDs.isEmpty {
+            didFailInCurrentSequence = false
+        }
+        for touch in touches {
+            let id = ObjectIdentifier(touch)
+            let point = touch.location(in: view)
+            if !orderedTouchIDs.contains(id) {
+                orderedTouchIDs.append(id)
+            }
+            startPoints[id] = point
+            currentPoints[id] = point
+        }
+        if orderedTouchIDs.count > 2 {
+            failSequence()
+            return
+        }
+        if orderedTouchIDs.count == 2 {
+            for id in orderedTouchIDs {
+                if let current = currentPoints[id] {
+                    startPoints[id] = current
+                }
+            }
+            updateCentroids(resetStart: true)
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        for touch in touches {
+            let id = ObjectIdentifier(touch)
+            guard startPoints[id] != nil else { continue }
+            currentPoints[id] = touch.location(in: view)
+        }
+        if orderedTouchIDs.count == 2 {
+            updateCentroids(resetStart: false)
+        }
+        switch state {
+        case .possible:
+            if orderedTouchIDs.count == 1, let id = orderedTouchIDs.first,
+                let start = startPoints[id], let current = currentPoints[id]
+            {
+                let distance = hypot(current.x - start.x, current.y - start.y)
+                if distance >= ZoomedTwoFingerSwipeRules.decisionTravel {
+                    failSequence()
+                }
+                return
+            }
+            guard orderedTouchIDs.count == 2 else { return }
+            let id1 = orderedTouchIDs[0]
+            let id2 = orderedTouchIDs[1]
+            guard let start1 = startPoints[id1], let current1 = currentPoints[id1],
+                let start2 = startPoints[id2], let current2 = currentPoints[id2]
+            else { return }
+            let first = ZoomedTwoFingerSwipeRules.TouchDelta(
+                horizontal: Double(current1.x - start1.x),
+                vertical: Double(start1.y - current1.y))
+            let second = ZoomedTwoFingerSwipeRules.TouchDelta(
+                horizontal: Double(current2.x - start2.x),
+                vertical: Double(start2.y - current2.y))
+            switch ZoomedTwoFingerSwipeRules.classify(first: first, second: second) {
+            case .undecided:
+                break
+            case .pinchOrOther:
+                failSequence()
+            case .swipe:
+                state = .began
+            }
+        case .began, .changed:
+            state = .changed
+        default:
+            break
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        for touch in touches {
+            let id = ObjectIdentifier(touch)
+            if startPoints[id] != nil {
+                currentPoints[id] = touch.location(in: view)
+            }
+        }
+        if orderedTouchIDs.count == 2 {
+            updateCentroids(resetStart: false)
+        }
+        switch state {
+        case .possible:
+            failSequence()
+        case .began, .changed:
+            state = .ended
+        default:
+            break
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        switch state {
+        case .possible:
+            failSequence()
+        case .began, .changed:
+            state = .cancelled
+        default:
+            break
+        }
+    }
+
+    override func reset() {
+        orderedTouchIDs.removeAll()
+        startPoints.removeAll()
+        currentPoints.removeAll()
+        startCentroid = .zero
+        currentCentroid = .zero
+        super.reset()
+    }
+
+    private func failSequence() {
+        didFailInCurrentSequence = true
+        state = .failed
+    }
+
+    private func updateCentroids(resetStart: Bool) {
+        guard orderedTouchIDs.count == 2 else { return }
+        let id1 = orderedTouchIDs[0]
+        let id2 = orderedTouchIDs[1]
+        if resetStart, let s1 = startPoints[id1], let s2 = startPoints[id2] {
+            startCentroid = CGPoint(x: (s1.x + s2.x) / 2, y: (s1.y + s2.y) / 2)
+        }
+        if let c1 = currentPoints[id1], let c2 = currentPoints[id2] {
+            currentCentroid = CGPoint(x: (c1.x + c2.x) / 2, y: (c1.y + c2.y) / 2)
         }
     }
 }
