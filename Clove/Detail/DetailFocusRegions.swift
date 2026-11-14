@@ -15,14 +15,10 @@ protocol DetailRegionSharpnessSource: AnyObject {
         onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
     ) async -> RegionSharpnessAnalysis?
 
-    func beginInteractiveRender() -> UUID?
-    func endInteractiveRender(_ token: UUID?)
     func closeRegionAnalysis() async
 }
 
 extension DetailRegionSharpnessSource {
-    func beginInteractiveRender() -> UUID? { nil }
-    func endInteractiveRender(_ token: UUID?) {}
     func closeRegionAnalysis() async {}
 }
 

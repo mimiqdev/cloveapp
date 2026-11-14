@@ -62,10 +62,6 @@ public protocol RegionSharpnessReading: Sendable {
     func properties(of url: URL) async -> ImageProperties?
     /// One preview for face detection, orientation applied, or the reason there is none.
     func preview(_ request: RegionSharpnessRequest) async -> Result<CGImage, RegionImageFailure>
-    /// The one high-resolution acquisition every region shares, orientation applied.
-    func highResolution(_ request: RegionSharpnessRequest) async -> Result<
-        CGImage, RegionImageFailure
-    >
 }
 
 /// The analysis engine: camera-AF regions from metadata and Vision face/eye regions from
@@ -170,9 +166,7 @@ public struct RegionSharpnessAnalyzer: Sendable {
             timings: RegionSharpnessTimings(
                 metadataRead: metadata.duration,
                 previewRead: detectionStage.previewDuration,
-                faceDetection: detectionStage.detectionDuration,
-                pixelAcquisition: nil,
-                regionScoring: nil))
+                faceDetection: detectionStage.detectionDuration))
     }
 
     // MARK: - Stages

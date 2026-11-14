@@ -372,15 +372,6 @@ extension PipelineDetailImages: DetailRegionSharpnessSource {
         }
     }
 
-    func beginInteractiveRender() -> UUID? {
-        regionScheduler.beginInteractiveAcquisitionPause()
-    }
-
-    func endInteractiveRender(_ token: UUID?) {
-        guard let token else { return }
-        regionScheduler.endInteractiveAcquisitionPause(token)
-    }
-
     func closeRegionAnalysis() async {
         await regionScheduler.close()
     }

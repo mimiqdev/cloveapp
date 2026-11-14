@@ -11,13 +11,10 @@ private final class RecordingReader: RegionSharpnessReading, @unchecked Sendable
     private struct Counts {
         var propertiesCalls: [URL] = []
         var previewCalls = 0
-        var highResolutionCalls = 0
     }
     var propertiesAnswer: ImageProperties?
     var previewImage: CGImage?
     var previewFailure: RegionImageFailure?
-    var highResolutionImage: CGImage?
-    var highResolutionFailure: RegionImageFailure?
 
     func properties(of url: URL) async -> ImageProperties? {
         lock.withLock { $0.propertiesCalls.append(url) }
@@ -30,17 +27,8 @@ private final class RecordingReader: RegionSharpnessReading, @unchecked Sendable
         return .failure(previewFailure ?? .noUsablePreview)
     }
 
-    func highResolution(
-        _ request: RegionSharpnessRequest
-    ) async -> Result<CGImage, RegionImageFailure> {
-        lock.withLock { _ = $0.highResolutionCalls += 1 }
-        if let highResolutionImage { return .success(highResolutionImage) }
-        return .failure(highResolutionFailure ?? .noUsablePreview)
-    }
-
     var propertyReadCount: Int { lock.withLock { $0.propertiesCalls.count } }
     var previewReadCount: Int { lock.withLock { $0.previewCalls } }
-    var highResolutionReadCount: Int { lock.withLock { $0.highResolutionCalls } }
 }
 
 private struct StubFaceDetector: FaceRegionDetecting {
@@ -53,7 +41,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
 }
 
 @Suite(.imageWork) struct RegionSharpnessAnalyzerTests {
-    let sharpImage = SharpnessScene.checkerboard(width: 256, height: 256, cell: 4)
     let previewImage = SharpnessScene.flat(width: 800, height: 600)
 
     private func request() throws -> RegionSharpnessRequest {
@@ -91,7 +78,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         let reader = RecordingReader()
         reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
         reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
         let analyzer = RegionSharpnessAnalyzer(reader: reader, faces: detector)
 
         let delivered = Mutex<RegionSharpnessPathResult?>(nil)
@@ -142,7 +128,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             Issue.record("Expected the released detection's answer on the face path")
             return
         }
-        #expect(reader.highResolutionReadCount == 0)
     }
 
     @Test func unavailableAFIsDeliveredEarlyToo() async throws {
@@ -191,7 +176,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             "{TIFF}": ["Make": "SONY"], "{Exif}": ["PixelXDimension": 2768],
         ])
         reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
         let analyzer = RegionSharpnessAnalyzer(
             reader: reader, faces: StubFaceDetector(outcome: .faces([])))
 
@@ -210,7 +194,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         }
         // Presentation analysis never decodes a native RAW.
         #expect(reader.previewReadCount == 1)
-        #expect(reader.highResolutionReadCount == 0)
         #expect(analysis.acquisitionFailure == nil)
         #expect(analysis.timings.pixelAcquisition == nil)
         #expect(analysis.timings.regionScoring == nil)
@@ -225,7 +208,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             "{TIFF}": ["Make": "SONY"], "{Exif}": ["PixelXDimension": 80, "PixelYDimension": 60],
         ])
         reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("clove-sony-\(UUID().uuidString).arw")
         try SyntheticSonyContainer.arw(orientation: 1).write(to: url)
@@ -250,14 +232,12 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         #expect(abs(afRegions[0].region.centerY - 31.0 / 60.0) < 1e-9)
         #expect(afRegions[0].score == nil)
         #expect(afRegions[0].unavailableBecause == nil)
-        #expect(reader.highResolutionReadCount == 0)
     }
 
     @Test func failedPreviewFailsOnlyTheFacePath() async throws {
         let reader = RecordingReader()
         reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
         reader.previewFailure = .cannotOpen
-        reader.highResolutionImage = sharpImage
         let analyzer = RegionSharpnessAnalyzer(
             reader: reader, faces: StubFaceDetector(outcome: .faces([])))
 
@@ -280,7 +260,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
     @Test func tinyDetectedFacesReportTooSmallRatherThanAScore() async throws {
         let reader = RecordingReader()
         reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
         let tinyFace = DetectedFaceRegion(
             face: NormalizedRegion(x: 0.5, y: 0.5, width: 0.002, height: 0.002),
             leftEye: nil, rightEye: nil)
@@ -307,7 +286,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         let reader = RecordingReader()
         reader.propertiesAnswer = nil
         reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
         let analyzer = RegionSharpnessAnalyzer(
             reader: reader, faces: StubFaceDetector(outcome: .failed("Vision unavailable")))
 
@@ -329,7 +307,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         let reader = RecordingReader()
         reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
         reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
         let analyzer = RegionSharpnessAnalyzer(
             reader: reader,
             faces: StubFaceDetector(
@@ -348,7 +325,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         #expect(afRegions[0].unavailableBecause == nil)
         #expect(faceRegions.count == 3)
         #expect(faceRegions.allSatisfy { $0.score == nil && $0.unavailableBecause == nil })
-        #expect(reader.highResolutionReadCount == 0)
 
         // Measurements are exposed as facts; only metadataRead, previewRead, and faceDetection run.
         #expect(analysis.timings.metadataRead != nil)

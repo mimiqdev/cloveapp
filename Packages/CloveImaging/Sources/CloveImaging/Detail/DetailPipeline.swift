@@ -187,18 +187,6 @@ public actor DetailPipeline {
         return result
     }
 
-    /// The one native acquisition shared by a photo's analysis regions. Queued visible
-    /// fit/zoom work takes precedence over this background route.
-    public func analysisImage(
-        for request: DetailRequest, consumer: UUID = UUID()
-    ) async throws -> DetailResult {
-        guard
-            let result = try await enqueue(
-                request, consumer: consumer, effort: .best, priority: .analysis)
-        else { preconditionFailure("An admitted analysis request must return a result") }
-        return result
-    }
-
     /// Embedded previews only. One-ahead RAW work is explicitly requested through screen().
     public func prefetch(_ requests: [DetailRequest]) async {
         await withTaskGroup(of: Void.self) { group in
@@ -345,8 +333,7 @@ public actor DetailPipeline {
                     }
                 }
                 if effort != .previewOnly && priority == .visible {
-                    for queued in queue
-                    where jobs[queued]?.lane == .render && jobs[queued]?.priority != .analysis {
+                    for queued in queue where jobs[queued]?.lane == .render {
                         cancel(queued)
                     }
                 }

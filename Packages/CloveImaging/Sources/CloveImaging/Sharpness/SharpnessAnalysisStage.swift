@@ -10,10 +10,6 @@ public enum SharpnessAnalysisStage: String, CaseIterable, Hashable, Sendable {
     case metadataRead
     /// One Vision face and eye localization over the photo's preview.
     case faceDetection
-    /// The single high-resolution pixel acquisition every region of the photo shares.
-    case pixelAcquisition
-    /// One batch of local sharpness scoring over located regions.
-    case regionScoring
 }
 
 /// Per-stage admission for ``RegionSharpnessAnalyzer``. The analyzer calls ``enter(_:)``

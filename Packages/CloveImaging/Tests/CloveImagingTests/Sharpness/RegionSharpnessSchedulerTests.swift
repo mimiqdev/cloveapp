@@ -11,32 +11,26 @@ import Testing
 /// decisions instead of racing real decodes. Records per-file counts and concurrency peaks.
 final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
     private let lock = Mutex(State())
-    private let acquisitions = AsyncStream<String>.makeStream()
     private struct State {
         var propertiesAnswers: [String: ImageProperties] = [:]
         var activeProperties = 0
         var peakProperties = 0
         var previewAnswers: [String: Result<CGImage, RegionImageFailure>] = [:]
-        var highResolutionAnswers: [String: Result<CGImage, RegionImageFailure>] = [:]
         var defaultProperties: ImageProperties?
         var propertiesCount: [String: Int] = [:]
         var previewCount: [String: Int] = [:]
-        var highResolutionCount: [String: Int] = [:]
-        var activeHighResolution = 0
-        var peakHighResolution = 0
         var activePreview = 0
         var peakPreview = 0
     }
 
     private let preview = SharpnessScene.flat(width: 32, height: 24)
-    private let highResolution = SharpnessScene.checkerboard(width: 256, height: 256, cell: 4)
 
     /// The gate every read parks on: a held kind parks every read of that kind until it is
     /// released. Reference semantics, shared by the reader and the test.
     let reads = ReadGate()
 
     final class ReadGate: Sendable {
-        enum Kind: String, Sendable { case properties, preview, highResolution }
+        enum Kind: String, Sendable { case properties, preview }
         private struct State {
             var held: Set<Kind> = []
             var waiters: [CheckedContinuation<Void, Never>] = []
@@ -93,16 +87,6 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
         }
     }
 
-    func setHighResolution(failure: RegionImageFailure?, for file: String) {
-        lock.withLock {
-            if let failure {
-                $0.highResolutionAnswers[file] = .failure(failure)
-            } else {
-                $0.highResolutionAnswers.removeValue(forKey: file)
-            }
-        }
-    }
-
     func properties(of url: URL) async -> ImageProperties? {
         // Entry recorded before the gate parks, so a test can see a property read in flight.
         lock.withLock { state in
@@ -133,38 +117,10 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
         }
     }
 
-    func highResolution(
-        _ request: RegionSharpnessRequest
-    ) async -> Result<CGImage, RegionImageFailure> {
-        // The entry is recorded on arrival, before parking, so a test can see a read is
-        // in flight while the gate still holds it.
-        let name = request.primaryURL.lastPathComponent
-        lock.withLock { state in
-            state.highResolutionCount[name, default: 0] += 1
-            state.activeHighResolution += 1
-            state.peakHighResolution = max(state.peakHighResolution, state.activeHighResolution)
-        }
-        acquisitions.continuation.yield(name)
-        await reads.waitIfHeld(.highResolution)
-        lock.withLock { $0.activeHighResolution -= 1 }
-        return lock.withLock { state -> Result<CGImage, RegionImageFailure> in
-            if let failure = state.highResolutionAnswers[name] { return failure }
-            return .success(highResolution)
-        }
-    }
-
-    func nextAcquisition() async throws -> String {
-        var iterator = acquisitions.stream.makeAsyncIterator()
-        return try #require(await iterator.next(), "An acquisition must enter the reader")
-    }
-
-    var activeHighResolutionReads: Int { lock.withLock { $0.activeHighResolution } }
     var activePropertyReads: Int { lock.withLock { $0.activeProperties } }
     var peakPropertyReads: Int { lock.withLock { $0.peakProperties } }
     var propertiesCounts: [String: Int] { lock.withLock { $0.propertiesCount } }
     var previewCounts: [String: Int] { lock.withLock { $0.previewCount } }
-    var highResolutionCounts: [String: Int] { lock.withLock { $0.highResolutionCount } }
-    var peakHighResolution: Int { lock.withLock { $0.peakHighResolution } }
     var peakPreview: Int { lock.withLock { $0.peakPreview } }
 }
 
@@ -299,7 +255,6 @@ private func until(
         let reader = GatedSharpnessReader()
         reader.reads.release(.properties)
         reader.reads.release(.preview)
-        reader.reads.release(.highResolution)
 
         let refused = RegionSharpnessAnalyzer(
             reader: reader, faces: GatedSharpnessDetector(),
@@ -317,7 +272,6 @@ private func until(
         reader.setProperties(afInfoProperties(), for: "a.arw")
         reader.reads.release(.properties)
         reader.reads.release(.preview)
-        reader.reads.release(.highResolution)
         let analyzer = RegionSharpnessAnalyzer(
             reader: reader, faces: GatedSharpnessDetector())
         let analysis = await analyzer.analyze(photoRequest("a"))
@@ -385,16 +339,15 @@ private func until(
 @Suite(.imageWork, .serialized) struct SharpnessSchedulingPriorityTests {
     private func makeScheduler(
         _ reader: GatedSharpnessReader, _ detector: GatedSharpnessDetector,
-        scoring: Int = 2
+        metadata: Int = 2
     ) -> RegionSharpnessScheduler {
         RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
-            detectionWorkers: 1, acquisitionWorkers: 1, scoringWorkers: scoring)
+            metadataWorkers: metadata, detectionWorkers: 1)
     }
 
     private func releaseEverything(_ reader: GatedSharpnessReader) {
-        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
-        {
+        for kind in [.properties, .preview] as [GatedSharpnessReader.ReadGate.Kind] {
             reader.reads.release(kind)
         }
     }
@@ -422,14 +375,12 @@ private func until(
             await scheduler.snapshot().queuedByPriority[.folder] ?? 0 >= 18
         }
 
-        // The detector budget (1) belongs to the current photo and no high-resolution acquisition
-        // runs.
+        // The detector budget (1) belongs to the current photo.
         #expect(reader.previewCounts["now.arw"] == 1)
         #expect(
             Set(reader.previewCounts.keys) == ["now.arw"],
             "no background photo entered detection while the current one holds the budget")
         #expect(reader.peakPreview <= 1)
-        #expect(reader.highResolutionCounts.isEmpty)
         #expect(detector.parked == 1)
 
         releaseEverything(reader)
@@ -448,7 +399,6 @@ private func until(
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.highResolution)
         let scheduler = makeScheduler(reader, detector)
         // Admission is held, so the queue below is exact: every photo queues, none runs.
         await scheduler.pause()
@@ -512,10 +462,9 @@ private func until(
         }
         #expect(answers.count == 3)
         #expect(answers.allSatisfy { $0 != nil })
-        // One unit of work: one property read, one preview, one detection, zero acquisitions.
+        // One unit of work: one property read, one preview, one detection.
         #expect(reader.propertiesCounts["shared.arw"] == 1)
         #expect(reader.previewCounts["shared.arw"] == 1)
-        #expect(reader.highResolutionCounts["shared.arw"] == nil)
         #expect(detector.requestCount == 1)
         await scheduler.close()
     }
@@ -538,7 +487,6 @@ private func until(
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.highResolution)
         let scheduler = makeScheduler(reader, detector)
         // Queue ten folder photos; the detector holds the first one's request.
         await scheduler.submit((0..<10).map { photoRequest("q\($0)") }, priority: .folder)
@@ -566,7 +514,6 @@ private func until(
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.highResolution)
         let scheduler = makeScheduler(reader, detector)
         await scheduler.pause()
         await scheduler.submit((0..<10).map { photoRequest("f\($0)") }, priority: .group)
@@ -592,7 +539,6 @@ private func until(
     @Test func sourceChangeInvalidatesQueuedWorkAndStoredResults() async throws {
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
-        await reader.reads.hold(.highResolution)
         detector.hold()
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
@@ -604,7 +550,6 @@ private func until(
         // The file changes: queued work for it must disappear.
         await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/gone.arw")])
         detector.releaseAll()
-        reader.reads.release(.highResolution)
         try await until("no queued entry survives invalidation") {
             let snapshot = await scheduler.snapshot()
             return snapshot.stages.values.allSatisfy { $0.queued == 0 }
@@ -612,13 +557,12 @@ private func until(
         await scheduler.close()
     }
 
-    @Test func staleAcquisitionIsNotStored() async throws {
+    @Test func stalePreviewIsNotStored() async throws {
         let reader = GatedSharpnessReader()
         reader.setPreview(failure: .staleSource, for: "stale.arw")
         reader.setProperties(afInfoProperties(), for: "stale.arw")
         let detector = GatedSharpnessDetector()
-        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
-        {
+        for kind in [.properties, .preview] as [GatedSharpnessReader.ReadGate.Kind] {
             reader.reads.release(kind)
         }
         let scheduler = RegionSharpnessScheduler(
@@ -683,17 +627,16 @@ private func until(
 // MARK: - Budgets and buffers
 
 @Suite(.imageWork, .serialized) struct SharpnessBudgetTests {
-    @Test(.timeLimit(.minutes(1))) func acquisitionAndDetectionBudgetsHoldUnderSyntheticLoad()
+    @Test(.timeLimit(.minutes(1))) func previewAndDetectionBudgetsHoldUnderSyntheticLoad()
         async throws
     {
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         reader.reads.release(.properties)
         reader.reads.release(.preview)
-        reader.reads.release(.highResolution)
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
-            detectionWorkers: 1, acquisitionWorkers: 1, scoringWorkers: 2)
+            metadataWorkers: 2, detectionWorkers: 1)
         // A thousand-photo folder, all at folder rank.
         await scheduler.submit((0..<1000).map { photoRequest("load\($0)") }, priority: .folder)
         // Observe forty entries, without requiring that throughput within a wall-clock
@@ -703,7 +646,6 @@ private func until(
         }
         await scheduler.close()
         #expect(reader.peakPreview <= 1)
-        #expect(reader.highResolutionCounts.isEmpty)
         #expect(detector.peakConcurrency <= 1)
         // The compact store never grew beyond its capacity.
         let snapshot = await scheduler.snapshot()
@@ -726,7 +668,6 @@ private func until(
         let snapshot = await scheduler.snapshot()
         let detection = snapshot.stages[.faceDetection]!
         #expect(detection.active <= 1)
-        #expect(reader.peakHighResolution == 0)
         detector.releaseAll()
         await scheduler.close()
     }
@@ -734,8 +675,7 @@ private func until(
     @Test func pauseStopsAdmittingAndResumeContinues() async throws {
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
-        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
-        {
+        for kind in [.properties, .preview] as [GatedSharpnessReader.ReadGate.Kind] {
             reader.reads.release(kind)
         }
         let scheduler = RegionSharpnessScheduler(
@@ -761,7 +701,6 @@ private func until(
         let detector = GatedSharpnessDetector()
         reader.reads.hold(.properties)
         reader.reads.release(.preview)
-        reader.reads.release(.highResolution)
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
         let running = Task { await scheduler.analyzeCurrent(photoRequest("finishing")) }
@@ -903,7 +842,6 @@ private func until(
         await scheduler.close()
         // The untouched photo still produced its record; the dropped one did not crash the loop.
         #expect(reader.previewCounts["keep.arw"] != nil)
-        #expect(reader.highResolutionCounts.isEmpty)
     }
 
     @Test func metadataAdmissionIsBoundedUnderLoad() async throws {
@@ -942,15 +880,13 @@ private func until(
         await scheduler.close()
         #expect(reader.propertiesCounts["victim.arw"] == nil)
         #expect(reader.previewCounts["victim.arw"] == nil)
-        #expect(reader.highResolutionCounts["victim.arw"] == nil)
     }
 
     @Test func backgroundSubmitSkipsPhotosWithCachedResults() async throws {
         // #8: the cached path also applies to background submits, not just interactive reads.
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
-        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
-        {
+        for kind in [.properties, .preview] as [GatedSharpnessReader.ReadGate.Kind] {
             reader.reads.release(kind)
         }
         let scheduler = makeScheduler(reader, detector)
@@ -960,134 +896,5 @@ private func until(
         // Cached: no new property read for that photo.
         #expect(reader.propertiesCounts["done.arw"] == 1)
         await scheduler.close()
-    }
-
-    @Test func interactivePauseHoldsPixelAcquisitionWithoutBlockingEarlyAFOrDiskHits() async throws
-    {
-        let cacheDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("clove-sharpness-pause-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
-        let disk = try RegionSharpnessCache(directory: cacheDirectory)
-        let reader = GatedSharpnessReader()
-        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
-        {
-            reader.reads.release(kind)
-        }
-        let detector = GatedSharpnessDetector()
-        let warmReq = photoRequest("warm")
-        reader.setProperties(afInfoProperties(), for: "warm.arw")
-        let warmScheduler = RegionSharpnessScheduler(
-            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
-            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
-        _ = try #require(await warmScheduler.analyzeCurrent(warmReq))
-        await warmScheduler.close()
-
-        // Fresh scheduler with `#239` disk cache populated for `warm.arw`.
-        let reader2 = GatedSharpnessReader()
-        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
-        {
-            reader2.reads.release(kind)
-        }
-        reader2.setProperties(afInfoProperties(), for: "af.arw")
-        reader2.setProperties(afInfoProperties(), for: "nearby.arw")
-        let scheduler = RegionSharpnessScheduler(
-            analyzer: RegionSharpnessAnalyzer(reader: reader2, faces: detector),
-            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
-
-        let token = scheduler.beginInteractiveAcquisitionPause()
-        // #239 disk hit resolves immediately during interactive pause.
-        let diskHit = await scheduler.analyzeCurrent(warmReq)
-        #expect(diskHit != nil)
-        #expect(reader2.propertiesCounts["warm.arw"] == nil)
-
-        // Metadata-only early AF delivers immediately while interactive pause is held.
-        let noAFEarly = Mutex<RegionSharpnessPathResult?>(nil)
-        let noAFTask = Task {
-            await scheduler.analyzeCurrent(photoRequest("noaf")) { early in
-                noAFEarly.withLock { $0 = early }
-            }
-        }
-        try await until("metadata-only early AF resolves immediately") {
-            noAFEarly.withLock { $0 != nil }
-        }
-        if case .unavailable(.noAutofocusMetadata) = noAFEarly.withLock({ $0 }) {
-        } else {
-            Issue.record("Expected noAutofocusMetadata early AF")
-        }
-
-        // Background `.nearby` and uncached AF jobs run metadata/preview without high-res acquisition.
-        await scheduler.submit([photoRequest("nearby")], priority: .nearby)
-        let afTask = Task { await scheduler.analyzeCurrent(photoRequest("af")) }
-        try await until("properties read runs while pause is held") {
-            reader2.propertiesCounts["af.arw"] == 1 && reader2.propertiesCounts["nearby.arw"] == 1
-        }
-        #expect(reader2.highResolutionCounts["af.arw"] == nil)
-        #expect(reader2.highResolutionCounts["nearby.arw"] == nil)
-        #expect(reader2.highResolutionCounts["noaf.arw"] == nil)
-
-        scheduler.endInteractiveAcquisitionPause(token)
-        _ = try #require(await afTask.value)
-        _ = try #require(await noAFTask.value)
-        try await until("nearby completes without high-resolution acquisition") {
-            reader2.previewCounts["nearby.arw"] == 1
-        }
-        #expect(reader2.previewCounts["af.arw"] == 1)
-        #expect(reader2.highResolutionCounts.isEmpty)
-        await scheduler.close()
-    }
-
-    @Test func zeroRegionPhotoSkipsPixelAcquisitionAndStillPersistsDiskRecord() async throws {
-        let cacheDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("clove-sharpness-zero-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
-        let disk = try RegionSharpnessCache(directory: cacheDirectory)
-        let reader = GatedSharpnessReader()
-        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
-        {
-            reader.reads.release(kind)
-        }
-        let detector = GatedSharpnessDetector()
-        detector.setOutcome(.faces([]), for: "*")
-        let scheduler = RegionSharpnessScheduler(
-            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
-            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
-
-        // Even while interactive `.pixelAcquisition` is paused, a 0-AF + 0-face photo finishes
-        // without touching `highResolution` and persists its 0-region #239 record.
-        let token = scheduler.beginInteractiveAcquisitionPause()
-        let zeroReq = photoRequest("zero")
-        let analysis = try #require(await scheduler.analyzeCurrent(zeroReq))
-        scheduler.endInteractiveAcquisitionPause(token)
-
-        guard case .unavailable(.noAutofocusMetadata) = analysis.autofocus else {
-            Issue.record("Expected noAutofocusMetadata on zero-region record")
-            return
-        }
-        guard case .unavailable(.noFacesDetected) = analysis.faces else {
-            Issue.record("Expected noFacesDetected on zero-region record")
-            return
-        }
-        #expect(reader.highResolutionCounts["zero.arw"] == nil)
-        #expect(analysis.timings.pixelAcquisition == nil)
-        await scheduler.close()
-
-        // Reopening serves the #239 disk record with zero reads.
-        let reader2 = GatedSharpnessReader()
-        let scheduler2 = RegionSharpnessScheduler(
-            analyzer: RegionSharpnessAnalyzer(reader: reader2, faces: detector),
-            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
-        let diskHit = try #require(await scheduler2.analyzeCurrent(zeroReq))
-        if case .unavailable(.noAutofocusMetadata) = diskHit.autofocus {
-        } else {
-            Issue.record("Expected persisted noAutofocusMetadata disk hit")
-        }
-        if case .unavailable(.noFacesDetected) = diskHit.faces {
-        } else {
-            Issue.record("Expected persisted noFacesDetected disk hit")
-        }
-        #expect(reader2.propertiesCounts["zero.arw"] == nil)
-        #expect(reader2.previewCounts["zero.arw"] == nil)
-        #expect(reader2.highResolutionCounts["zero.arw"] == nil)
-        await scheduler2.close()
     }
 }
