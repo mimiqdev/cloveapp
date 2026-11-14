@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Synchronization
+import os
 
 public enum DetailPipelineError: Error, Sendable {
     case queueFull
@@ -66,6 +67,9 @@ public actor DetailPipeline {
         var lane: Lane { effort == .previewOnly ? .preview : .render }
     }
 
+    private static let signposter = OSSignposter(
+        subsystem: "com.mimiqdev.clove", category: "DetailPipeline")
+
     private let cache: DetailCache
     private let reader: any DetailReading
     private let sizes: any DetailNativeSizeReading
@@ -75,6 +79,7 @@ public actor DetailPipeline {
     private var active: [UUID: Lane] = [:]
     private var jobs: [UUID: Job] = [:]
     private var latest: [UUID: UUID] = [:]
+    private var renderLaneSignposts: [UUID: OSSignpostIntervalState] = [:]
     private var closed = false
     private var navigationGeneration: UInt64 = 0
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
@@ -345,6 +350,13 @@ public actor DetailPipeline {
             job.cancellation.start(retainingScreen: job.effort == .screen && job.request.raw != nil)
         else { cancel(id); return }
         active[id] = job.lane
+        if job.lane == .render {
+            let signpostID = Self.signposter.makeSignpostID()
+            renderLaneSignposts[id] = Self.signposter.beginInterval(
+                "DetailRenderLane", id: signpostID,
+                "effort=\(String(describing: job.effort), privacy: .public) priority=\(String(describing: job.priority), privacy: .public)"
+            )
+        }
         let cache = cache
         let reader = reader
         let sizes = sizes
@@ -362,6 +374,9 @@ public actor DetailPipeline {
     }
 
     private func complete(_ id: UUID, result: DetailResult?) {
+        if let interval = renderLaneSignposts.removeValue(forKey: id) {
+            Self.signposter.endInterval("DetailRenderLane", interval)
+        }
         active.removeValue(forKey: id)
         if let job = jobs.removeValue(forKey: id) {
             if latest[job.consumer] == id { latest[job.consumer] = nil }
@@ -540,7 +555,11 @@ public actor DetailPipeline {
             if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-            if case .image(let pixels) = await reader.fullRaster(fullCamera) {
+            let rasterInterval = Self.signposter.beginInterval(
+                "DetailFullRaster", id: Self.signposter.makeSignpostID())
+            let rasterOutcome = await reader.fullRaster(fullCamera)
+            Self.signposter.endInterval("DetailFullRaster", rasterInterval)
+            if case .image(let pixels) = rasterOutcome {
                 let decoded = DetailImage(
                     image: pixels, source: fullCamera, quality: .raster,
                     hasRAW: true, fullResolutionSize: pixelSize(pixels))
@@ -583,7 +602,11 @@ public actor DetailPipeline {
             cache.releaseNative()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             nativeRAWStarted()
-            guard let pixels = await reader.nativeRAW(raw) else {
+            let nativeInterval = Self.signposter.beginInterval(
+                "DetailNativeRAW", id: Self.signposter.makeSignpostID())
+            let renderedPixels = await reader.nativeRAW(raw)
+            Self.signposter.endInterval("DetailNativeRAW", nativeInterval)
+            guard let pixels = renderedPixels else {
                 return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
                     ?? missing(failures)
             }
@@ -607,7 +630,11 @@ public actor DetailPipeline {
             if let held = cache.native(for: key) { return verified(.available(held)) }
             cache.releaseNative()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-            if case .image(let pixels) = await reader.fullRaster(jpeg) {
+            let rasterInterval = Self.signposter.beginInterval(
+                "DetailFullRaster", id: Self.signposter.makeSignpostID())
+            let rasterOutcome = await reader.fullRaster(jpeg)
+            Self.signposter.endInterval("DetailFullRaster", rasterInterval)
+            if case .image(let pixels) = rasterOutcome {
                 var decoded = DetailImage(
                     image: pixels, source: jpeg, quality: .raster,
                     hasRAW: false, fullResolutionSize: fullSize ?? pixelSize(pixels))
@@ -628,7 +655,12 @@ public actor DetailPipeline {
     ) async -> DetailResult {
         if let held = cache.screen(for: job.request) { return verified(.available(held)) }
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
-        guard let pixels = await reader.screenRAW(raw, longEdge: job.request.screenPixels) else {
+        let screenInterval = Self.signposter.beginInterval(
+            "DetailScreenRAW", id: Self.signposter.makeSignpostID(),
+            "edge=\(job.request.screenPixels)")
+        let screenPixels = await reader.screenRAW(raw, longEdge: job.request.screenPixels)
+        Self.signposter.endInterval("DetailScreenRAW", screenInterval)
+        guard let pixels = screenPixels else {
             return shown.map { verified(.available($0.limited(by: .rawRenderFailed))) }
                 ?? missing(failures)
         }

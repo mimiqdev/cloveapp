@@ -1,6 +1,7 @@
 import CloveCore
 import CloveImaging
 import SwiftUI
+import os
 
 /// What the marking view asks its screen to do beyond drawing it (PRD P0-04, P0-06; PRD P0-12).
 ///
@@ -726,6 +727,24 @@ struct DetailMarkingView: View {
     /// and shown as its own state. The neighbours' previews are prefetched after the photo's own
     /// pixels are on screen, so a swipe to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
+        let arrivalID = PerformanceSignpost.detailArrival.makeSignpostID()
+        var screenArrivalInterval: OSSignpostIntervalState? = PerformanceSignpost.detailArrival
+            .beginInterval("DetailArrivalToScreen", id: arrivalID)
+        defer {
+            if let screenArrivalInterval {
+                PerformanceSignpost.detailArrival.endInterval(
+                    "DetailArrivalToScreen", screenArrivalInterval)
+            }
+        }
+        var previewArrivalInterval: OSSignpostIntervalState? = PerformanceSignpost.detailArrival
+            .beginInterval("DetailArrivalToPreview", id: arrivalID)
+        defer {
+            if let previewArrivalInterval {
+                PerformanceSignpost.detailArrival.endInterval(
+                    "DetailArrivalToPreview", previewArrivalInterval)
+            }
+        }
+
         upgradeTask?.cancel()
         isLoadingFit = true
         keepsPosition =
@@ -789,11 +808,33 @@ struct DetailMarkingView: View {
             switch outcome {
             case .image(let image):
                 show(image)
-                await renderFitAndPrefetch(window)
+                if let interval = previewArrivalInterval {
+                    previewArrivalInterval = nil
+                    PerformanceSignpost.detailArrival.endInterval(
+                        "DetailArrivalToPreview", interval)
+                }
+                await renderFitAndPrefetch(window) {
+                    if let interval = screenArrivalInterval {
+                        screenArrivalInterval = nil
+                        PerformanceSignpost.detailArrival.endInterval(
+                            "DetailArrivalToScreen", interval)
+                    }
+                }
                 return
             case .unavailable(let failure):
                 phase = .unavailable(failure)
-                await renderFitAndPrefetch(window)
+                if let interval = previewArrivalInterval {
+                    previewArrivalInterval = nil
+                    PerformanceSignpost.detailArrival.endInterval(
+                        "DetailArrivalToPreview", interval)
+                }
+                await renderFitAndPrefetch(window) {
+                    if let interval = screenArrivalInterval {
+                        screenArrivalInterval = nil
+                        PerformanceSignpost.detailArrival.endInterval(
+                            "DetailArrivalToScreen", interval)
+                    }
+                }
                 return
             case .deferred:
                 attempts += 1
@@ -925,7 +966,17 @@ struct DetailMarkingView: View {
 
     /// The preview stays on screen throughout the RAW fit upgrade, with no cue
     /// or status word. One-ahead work starts only after the current render shows.
-    private func renderFitAndPrefetch(_ window: DetailPhotoWindow) async {
+    private func renderFitAndPrefetch(
+        _ window: DetailPhotoWindow, onScreenSettled: () -> Void = {}
+    ) async {
+        var renderInterval: OSSignpostIntervalState? = PerformanceSignpost.detailArrival
+            .beginInterval(
+                "DetailScreenRender", id: PerformanceSignpost.detailArrival.makeSignpostID())
+        defer {
+            if let renderInterval {
+                PerformanceSignpost.detailArrival.endInterval("DetailScreenRender", renderInterval)
+            }
+        }
         let outcome = await images.image(
             for: window.current.photo,
             request: window.request(need: .screenRender))
@@ -933,6 +984,11 @@ struct DetailMarkingView: View {
         if case .image(let image) = outcome, shown?.isBestAvailable != true {
             show(image)
         }
+        if let interval = renderInterval {
+            renderInterval = nil
+            PerformanceSignpost.detailArrival.endInterval("DetailScreenRender", interval)
+        }
+        onScreenSettled()
         isLoadingFit = false
         if keepsPosition { upgradeIfNeeded() }
         guard let shown, shown.limitation == nil else { return }

@@ -1,6 +1,7 @@
 import CloveCore
 import SwiftUI
 import UIKit
+import os
 
 /// A reusable collection cell with token-based tile presentation and bounded thumbnail retries.
 final class GridPhotoCell: UICollectionViewCell {
@@ -19,6 +20,7 @@ final class GridPhotoCell: UICollectionViewCell {
     private var theme = CloveTheme.light
     private var isSelecting = false
     private var onOpenGroup: (GroupID) -> Void = { _ in }
+    private var pixelLoadSignpost: (token: UUID, state: OSSignpostIntervalState)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -39,6 +41,10 @@ final class GridPhotoCell: UICollectionViewCell {
         thumbnails: any GridThumbnailSource, theme: CloveTheme,
         onOpenGroup: @escaping (GroupID) -> Void
     ) {
+        let configureInterval = PerformanceSignpost.gridCell.beginInterval(
+            "GridCellConfigure", id: PerformanceSignpost.gridCell.makeSignpostID())
+        defer { PerformanceSignpost.gridCell.endInterval("GridCellConfigure", configureInterval) }
+
         let changesPhoto = currentItem?.photo.id != item.photo.id
         currentItem = item
         currentCompanions = thumbnails.companions(for: item.photo.id)
@@ -79,6 +85,7 @@ final class GridPhotoCell: UICollectionViewCell {
     }
 
     func cancelThumbnailRequest() {
+        endPixelLoadSignpost()
         thumbnailTask?.cancel()
         thumbnailTask = nil
         for task in peekingTasks.values { task.cancel() }
@@ -96,6 +103,22 @@ final class GridPhotoCell: UICollectionViewCell {
         peekingUnavailable.removeAll()
         peekingRetriesUnavailable.removeAll()
         contentConfiguration = nil
+    }
+
+    private func beginPixelLoadSignpost() -> UUID {
+        endPixelLoadSignpost()
+        let token = UUID()
+        let state = PerformanceSignpost.gridCell.beginInterval(
+            "GridCellPixelLoad", id: PerformanceSignpost.gridCell.makeSignpostID())
+        pixelLoadSignpost = (token, state)
+        return token
+    }
+
+    private func endPixelLoadSignpost(for token: UUID? = nil) {
+        guard let active = pixelLoadSignpost else { return }
+        if let token, active.token != token { return }
+        pixelLoadSignpost = nil
+        PerformanceSignpost.gridCell.endInterval("GridCellPixelLoad", active.state)
     }
 
     private func draw() {
@@ -133,7 +156,9 @@ final class GridPhotoCell: UICollectionViewCell {
         thumbnailTask?.cancel()
         isUnavailable = false
         retriesUnavailable = false
+        let signpostToken = beginPixelLoadSignpost()
         thumbnailTask = Task { [weak self] in
+            defer { self?.endPixelLoadSignpost(for: signpostToken) }
             for delay in [0, 150, 300, 600, 1_200, 2_400, 4_000] {
                 if delay > 0 {
                     try? await Task.sleep(for: .milliseconds(delay))
@@ -155,6 +180,7 @@ final class GridPhotoCell: UICollectionViewCell {
                 }
                 self.thumbnailTask = nil
                 self.draw()
+                self.endPixelLoadSignpost(for: signpostToken)
                 return
             }
             guard !Task.isCancelled, let self, self.currentItem?.photo.id == photo else { return }
@@ -162,6 +188,7 @@ final class GridPhotoCell: UICollectionViewCell {
             self.isUnavailable = true
             self.thumbnailTask = nil
             self.draw()
+            self.endPixelLoadSignpost(for: signpostToken)
         }
     }
 

@@ -1,12 +1,15 @@
 import BrowsingPerformanceProbe
 import LabSupport
 import SwiftUI
+import UIKit
 
 /// Current-app browsing measurements over the production packages, with the shared
 /// folder picker and report export. No photos, companions or sidecars are modified.
 struct BrowsingPerformanceView: View {
     @Environment(LabSession.self) private var session
     @State private var folder: URL?
+    @State private var formatFolder: URL?
+    @State private var screenLongEdge = BrowsingPerformanceView.screenLongEdgePixels
     @State private var progress: BrowsingPerformanceProgress?
     @State private var running: Task<Void, Never>?
     @State private var status = "Choose the generated browsing-2000 folder on local storage."
@@ -28,13 +31,40 @@ struct BrowsingPerformanceView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                Stepper(
+                    "Screen long edge: \(screenLongEdge) px",
+                    value: $screenLongEdge, in: 400...4_000, step: 16
+                )
+                .disabled(running != nil)
+                Picker("Screen edge preset", selection: $screenLongEdge) {
+                    Text("Device (\(Self.screenLongEdgePixels) px)")
+                        .tag(Self.screenLongEdgePixels)
+                    Text(
+                        "iPad Pro 13\" (\(BrowsingPerformanceConfiguration.iPadPro13ScreenPixels) px)"
+                    )
+                    .tag(BrowsingPerformanceConfiguration.iPadPro13ScreenPixels)
+                    Text(
+                        "iPhone 17 Pro Max (\(BrowsingPerformanceConfiguration.iPhone17ProMaxScreenPixels) px)"
+                    )
+                    .tag(BrowsingPerformanceConfiguration.iPhone17ProMaxScreenPixels)
+                }
+                .disabled(running != nil)
+                FolderPickerButton(title: "Choose multi-format RAW folder (optional)") {
+                    formatFolder = $0
+                }
+                .disabled(running != nil)
+                if let formatFolder {
+                    Text("Formats: \(formatFolder.lastPathComponent)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section("Measure") {
                 Text(
-                    "Runs scan and metadata, cold and disk-warm thumbnails, detail previews, cancelled/full RAW renders, grouping and features. OS caches cannot be flushed. Grid scrolling is not measured by this Lab flow."
+                    "Runs scan and metadata, cold and disk-warm thumbnails, detail previews, screen RAW renders, cancelled/full RAW renders, multi-format RAW benchmarks, grouping and features. OS caches cannot be flushed. Grid scrolling is not measured by this Lab flow."
                 )
                 Button("Run browsing measurements", action: run)
-                    .disabled(folder == nil || running != nil)
+                    .disabled(folder == nil || running != nil || screenLongEdge <= 0)
                 if let progress {
                     ProgressView(
                         value: Double(progress.completed), total: Double(max(progress.total, 1)))
@@ -61,18 +91,33 @@ struct BrowsingPerformanceView: View {
         .onDisappear { running?.cancel() }
     }
 
+    private static var screenLongEdgePixels: Int {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let bounds = scenes.first?.screen.nativeBounds ?? .zero
+        let edge = Int(max(bounds.width, bounds.height).rounded())
+        return edge > 0 ? edge : BrowsingPerformanceConfiguration.defaultScreenPixels
+    }
+
     private func run() {
-        guard let folder else { return }
+        guard let folder, screenLongEdge > 0 else { return }
         let access = folder.startAccessingSecurityScopedResource()
+        let formatAccess = formatFolder?.startAccessingSecurityScopedResource() ?? false
+        let configuration = BrowsingPerformanceConfiguration(
+            displayPixels: screenLongEdge,
+            screenPixels: screenLongEdge,
+            detailFormatFolder: formatFolder)
         progress = nil
         status = "Measuring the current production pipelines…"
         running = Task {
             defer {
                 if access { folder.stopAccessingSecurityScopedResource() }
+                if formatAccess { formatFolder?.stopAccessingSecurityScopedResource() }
                 running = nil
             }
             let worker = Task.detached(priority: .userInitiated) {
-                try await BrowsingPerformanceProbe.run(folder: folder) { update in
+                try await BrowsingPerformanceProbe.run(
+                    folder: folder, configuration: configuration
+                ) { update in
                     await MainActor.run { progress = update }
                 }
             }

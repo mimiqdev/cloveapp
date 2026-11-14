@@ -82,3 +82,55 @@ import Testing
     #expect(report.spike == "Q3")
     #expect(try LabReport(jsonData: report.encoded()) == report)
 }
+
+@Test func extraTagsPropagateThroughDistributionsFailuresAndUnavailable() {
+    var builder = BrowsingPerformanceReportBuilder()
+    builder.distribution(
+        "detail-format-screen", cache: "cold", samples: [120, 140],
+        extraTags: ["format": "canon-eos-r6.CR3", "screenPixels": "2752"])
+    builder.distribution(
+        "detail-format-screen", cache: "warm", samples: [], failureCount: 1,
+        extraTags: ["format": "canon-eos-r6.CR3", "screenPixels": "2752"])
+    builder.failureReasons(
+        "detail-format-screen", cache: "warm", reasons: ["rawRenderFailed": 1],
+        extraTags: ["format": "canon-eos-r6.CR3", "screenPixels": "2752"])
+
+    #expect(
+        builder.measurements.contains {
+            $0.name == "detail-format-screen" && $0.tags["cache"] == "cold"
+                && $0.tags["format"] == "canon-eos-r6.CR3"
+                && $0.tags["screenPixels"] == "2752"
+                && $0.tags["statistic"] == "p95"
+        })
+    #expect(
+        builder.measurements.contains {
+            $0.name == "metric-unavailable" && $0.tags["stage"] == "detail-format-screen"
+                && $0.tags["cache"] == "warm"
+                && $0.tags["format"] == "canon-eos-r6.CR3"
+                && $0.tags["screenPixels"] == "2752"
+        })
+    #expect(
+        builder.measurements.contains {
+            $0.name == "detail-format-screen-failure-reason"
+                && $0.tags["format"] == "canon-eos-r6.CR3"
+                && $0.tags["screenPixels"] == "2752"
+                && $0.tags["reason"] == "rawRenderFailed"
+        })
+}
+
+@Test func defaultConfigurationUsesNativeScreenEdgeConstants() {
+    let defaults = BrowsingPerformanceConfiguration()
+    #expect(defaults.displayPixels == BrowsingPerformanceConfiguration.iPhone17ProMaxScreenPixels)
+    #expect(defaults.screenPixels == 2_868)
+
+    let customDisplay = BrowsingPerformanceConfiguration(
+        displayPixels: BrowsingPerformanceConfiguration.iPadPro13ScreenPixels)
+    #expect(customDisplay.displayPixels == 2_752)
+    #expect(customDisplay.screenPixels == 2_752)
+
+    let splitOverride = BrowsingPerformanceConfiguration(
+        displayPixels: 1_320,
+        screenPixels: BrowsingPerformanceConfiguration.iPadPro13ScreenPixels)
+    #expect(splitOverride.displayPixels == 1_320)
+    #expect(splitOverride.screenPixels == 2_752)
+}
