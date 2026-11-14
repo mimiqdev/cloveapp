@@ -15,8 +15,11 @@ private final class ObservedDetailImages: DetailImageSource {
     private(set) var windows: [DetailPhotoWindow] = []
     private(set) var deliveries: [(PhotoIdentity, DetailPixelRequest.Need, DetailQuality)] = []
     private(set) var prefetched: [DetailPhotoWindow] = []
+    private(set) var previewPrefetched: [DetailPhotoWindow] = []
     var prefetchEnabled = true
     var heldPhoto: PhotoIdentity?
+    var heldScreenRenderPhoto: PhotoIdentity?
+    var releasesScreenRender = false
     var heldPlaceholder: PhotoIdentity?
     var releasesPlaceholder = false
     private(set) var placeholderRequests: [PhotoIdentity] = []
@@ -49,12 +52,24 @@ private final class ObservedDetailImages: DetailImageSource {
         if photo == heldPhoto {
             do { try await Task.sleep(for: .seconds(5)) } catch { return .deferred }
         }
+        if photo == heldScreenRenderPhoto && request.need == .screenRender {
+            for _ in 0..<250 {
+                guard !Task.isCancelled else { return .deferred }
+                if releasesScreenRender { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
         let outcome = await sample.image(for: photo, request: request)
         if case .image(let image) = outcome {
             delivered.append(image.quality)
             deliveries.append((photo, request.need, image.quality))
         }
         return outcome
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        if prefetchEnabled { await sample.prefetchPreviews(window) }
+        previewPrefetched.append(window)
     }
 
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
@@ -969,6 +984,178 @@ struct DetailDisplayPresentationTests {
 
         #expect(browsing.shownMarks(for: second).rating != .unrated)
         try await waitFor { browsing.state.currentPhoto == third && !preview.isZoomed }
+    }
+
+    @Test func previewPrefetchStartsImmediatelyOnArrivalBeforeScreenRenderFinishes() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        try #require(photos.count >= 6)
+        let current = photos[2]
+        source.heldScreenRenderPhoto = current.id
+        browsing.openPhoto(current.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source)
+                .environment(SettingsStore.sample))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        // +/-2 preview prefetch fires on arrival before screenRender finishes.
+        try await waitFor { source.previewPrefetched.last?.current.photo == current.id }
+        let recorded = try #require(source.previewPrefetched.last)
+        #expect(recorded.neighbours.map(\.photo) == [photos[1].id, photos[3].id])
+        #expect(
+            recorded.previewNeighbours.map(\.photo) == [
+                photos[3].id, photos[1].id, photos[4].id, photos[0].id,
+            ])
+        #expect(source.prefetched.isEmpty)
+
+        source.releasesScreenRender = true
+        try await waitFor { source.prefetched.last?.current.photo == current.id }
+    }
+
+    @Test func warmArrivalShowsCachedBitmapSynchronouslyWithoutFlashingNil() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        try #require(photos.count >= 6)
+        let targetIndices = 2...5
+        var sets: [PhotoIdentity: PhotoSet] = [:]
+        for index in targetIndices {
+            let photo = photos[index]
+            let file = directory.appendingPathComponent("photo-\(index).JPG")
+            let context = try #require(
+                CGContext(
+                    data: nil, width: 1200, height: 800, bitsPerComponent: 8, bytesPerRow: 1200 * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            context.setFillColor(
+                red: CGFloat(index) * 0.15 + 0.1, green: 0.4, blue: 0.6, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: 1200, height: 800))
+            let cg = try #require(context.makeImage())
+            let data = try #require(UIImage(cgImage: cg).jpegData(compressionQuality: 0.9))
+            try data.write(to: file)
+            let generatedSet = try PhotoSet(
+                folderID: photo.id.folderID, relativeFolderPath: photo.id.relativeFolderPath,
+                jpegURL: file)
+            // Key the lookup by the browsing photo identity so DetailScreen resolves real files.
+            sets[photo.id] = generatedSet
+        }
+
+        let directWindow = UIWindow(windowScene: scene)
+        directWindow.frame = scene.coordinateSpace.bounds
+        let mappedBrowsing = BrowsingModel(library: TestLibrary.sample())
+        mappedBrowsing.openFolder()
+        let screenPixels = Int(
+            max(scene.screen.nativeBounds.width, scene.screen.nativeBounds.height))
+        let directSets = Dictionary(
+            uniqueKeysWithValues: sets.values.map { ($0.id, $0) })
+        let directPipeline = DetailPipeline()
+        let directSource = PipelineDetailImages(
+            pipeline: directPipeline, set: { directSets[$0] })
+        let sortedDirectIDs = sets.values.sorted {
+            $0.primary.url.lastPathComponent < $1.primary.url.lastPathComponent
+        }.map(\.id)
+        let firstWindow = DetailPhotoWindow(
+            id: UUID(),
+            current: DetailNeighbour(photo: sortedDirectIDs[0], position: 0),
+            neighbours: [DetailNeighbour(photo: sortedDirectIDs[1], position: 1)],
+            previewNeighbours: [
+                DetailNeighbour(photo: sortedDirectIDs[1], position: 1),
+                DetailNeighbour(photo: sortedDirectIDs[2], position: 2),
+            ],
+            direction: 1, mode: .rawFirst, screenPixels: screenPixels)
+        await directSource.prepare(firstWindow)
+        _ = await directSource.image(for: sortedDirectIDs[0], request: firstWindow.request())
+        await directSource.prefetchPreviews(firstWindow)
+        let warmHit = directSource.warmImage(
+            for: sortedDirectIDs[1], request: firstWindow.request())
+        #expect(warmHit != nil)
+        #expect(warmHit?.image != nil)
+        await directPipeline.close()
+
+        // Also exercise DetailScreen view-level synchronous warm path without nil flash or placeholder request.
+        let sampleSource = SampleDetailImages()
+        @MainActor final class WarmSampleObserver: DetailImageSource {
+            let sample: SampleDetailImages
+            var warmed: [PhotoIdentity: DetailImage] = [:]
+            var placeholderPhotos: [PhotoIdentity] = []
+            var warmHits: [PhotoIdentity] = []
+            var prefetched: [DetailPhotoWindow] = []
+            init(_ sample: SampleDetailImages) { self.sample = sample }
+            func warmImage(for photo: PhotoIdentity, request: DetailPixelRequest) -> DetailImage? {
+                if let hit = warmed[photo] {
+                    warmHits.append(photo)
+                    return hit
+                }
+                return nil
+            }
+            func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource)
+                async
+                -> CGImage?
+            {
+                placeholderPhotos.append(photo)
+                return await sample.placeholder(for: photo, gridThumbnails: gridThumbnails)
+            }
+            func prepare(_ window: DetailPhotoWindow) async { await sample.prepare(window) }
+            func image(for photo: PhotoIdentity, request: DetailPixelRequest) async
+                -> DetailImageOutcome
+            {
+                let outcome = await sample.image(for: photo, request: request)
+                if case .image(let img) = outcome { warmed[photo] = img }
+                return outcome
+            }
+            func prefetchPreviews(_ window: DetailPhotoWindow) async {
+                await sample.prefetchPreviews(window)
+                for n in window.previewNeighbours {
+                    if case .image(let img) = await sample.image(
+                        for: n.photo, request: window.request())
+                    {
+                        warmed[n.photo] = img
+                    }
+                }
+            }
+            func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+                await sample.prefetch(window, renderAhead: renderAhead)
+                prefetched.append(window)
+            }
+            func leave(window: UUID) async { await sample.leave(window: window) }
+        }
+
+        let spy = WarmSampleObserver(sampleSource)
+        mappedBrowsing.openPhoto(photos[2].id)
+        directWindow.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: mappedBrowsing, images: spy)
+                .environment(SettingsStore.sample))
+        directWindow.makeKeyAndVisible()
+        defer {
+            directWindow.isHidden = true
+            directWindow.rootViewController = nil
+        }
+        try await waitFor { spy.prefetched.last?.current.photo == photos[2].id }
+        let preview = try #require(findPreview(in: directWindow))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let imageView = try #require(scroll.subviews.first as? UIImageView)
+        try #require(imageView.image?.cgImage != nil)
+
+        // Swiping to warm neighbour photos[3] hits warmImage synchronously and never flashes nil or requests placeholder.
+        mappedBrowsing.openPhoto(photos[3].id)
+        #expect(!spy.placeholderPhotos.contains(photos[3].id))
+        try await waitFor { spy.warmHits.contains(photos[3].id) && imageView.image?.cgImage != nil }
+        #expect(!spy.placeholderPhotos.contains(photos[3].id))
+        try await waitFor { spy.prefetched.last?.current.photo == photos[3].id }
     }
 
     private func testPixels(gray: CGFloat) throws -> CGImage {

@@ -2,6 +2,7 @@ import CloveCore
 import CloveImaging
 import CoreGraphics
 import Foundation
+import Synchronization
 
 /// The folder supplies session admission, so its security scope outlives every
 /// read, including an uncancellable render draining after navigation.
@@ -28,6 +29,7 @@ final class PipelineDetailImages: DetailImageSource {
     private let regionScheduler: RegionSharpnessScheduler
     private let onUserActivity: (@MainActor () async -> Void)?
     private let regionRequestTracker = KnownRegionRequestTracker()
+    private let knownSources = KnownDetailSourceCache()
     private var activeWindow: DetailPhotoWindow?
     private var navigationGeneration: UInt64 = 0
 
@@ -52,6 +54,15 @@ final class PipelineDetailImages: DetailImageSource {
                 results: RegionSharpnessResultStore(
                     capacity: 512, disk: sharpnessCache))
         self.onUserActivity = onUserActivity
+    }
+
+    func warmImage(for photo: PhotoIdentity, request: DetailPixelRequest) -> DetailImage? {
+        guard let current = sources(for: photo) else { return nil }
+        guard
+            let detailRequest = knownSources.request(
+                for: photo, matching: current, request: request)
+        else { return nil }
+        return pipeline.warmCachedImage(for: detailRequest)
     }
 
     /// Reads the shared grid cache directly, without entering the grid work queue.
@@ -92,9 +103,11 @@ final class PipelineDetailImages: DetailImageSource {
         guard !Task.isCancelled, activeWindow == window, generation == navigationGeneration,
             let current
         else { return }
-        _ = await admitted.image { [pipeline] in
+        _ = await admitted.image { [pipeline, knownSources] in
             guard !Task.isCancelled,
-                let request = current.request(for: window.request())
+                let request = Self.resolveRequest(
+                    for: window.current.photo, sources: current,
+                    request: window.request(), knownSources: knownSources)
             else { return .deferred }
             await pipeline.navigate(to: request, generation: generation)
             return .deferred
@@ -104,8 +117,11 @@ final class PipelineDetailImages: DetailImageSource {
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
         await onUserActivity?()
         guard let sources = sources(for: photo) else { return .unavailable(.cannotOpen) }
-        return await admitted.image { [pipeline, consumer] in
-            guard let detailRequest = sources.request(for: request) else {
+        return await admitted.image { [pipeline, consumer, knownSources] in
+            guard
+                let detailRequest = Self.resolveRequest(
+                    for: photo, sources: sources, request: request, knownSources: knownSources)
+            else {
                 return .unavailable(.cannotOpen)
             }
             do {
@@ -126,27 +142,58 @@ final class PipelineDetailImages: DetailImageSource {
         }
     }
 
-    /// Warm both embedded neighbours, then render exactly one ahead. The shared
-    /// view calls this only after showing the current photo's screen result.
+    /// Warm +/-2 embedded previews immediately on arrival on the preview lane.
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        guard activeWindow == window else { return }
+        let pixelRequest = window.request()
+        let targets = window.previewNeighbours.compactMap {
+            neighbour -> (PhotoIdentity, PhotoSources)? in
+            guard let sources = sources(for: neighbour.photo) else { return nil }
+            return (neighbour.photo, sources)
+        }
+        guard !targets.isEmpty else { return }
+        await admitted.prefetch { [pipeline, knownSources] in
+            guard !Task.isCancelled else { return }
+            let resolved = targets.compactMap { photo, sources in
+                Self.resolveRequest(
+                    for: photo, sources: sources, request: pixelRequest, knownSources: knownSources
+                )
+            }
+            guard !Task.isCancelled, !resolved.isEmpty else { return }
+            await pipeline.prefetch(resolved)
+        }
+    }
+
+    /// Warm +/-2 embedded neighbours, then render exactly one ahead.
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
         guard activeWindow == window else { return }
         let pixelRequest = window.request()
-        let neighbours = window.neighbours.compactMap { neighbour -> (PhotoSources, Bool)? in
+        let previewTargets = window.previewNeighbours.compactMap {
+            neighbour -> (PhotoIdentity, PhotoSources)? in
+            guard let sources = sources(for: neighbour.photo) else { return nil }
+            return (neighbour.photo, sources)
+        }
+        let neighbours = window.neighbours.compactMap {
+            neighbour -> (PhotoIdentity, PhotoSources, Bool)? in
             guard let sources = sources(for: neighbour.photo) else { return nil }
             let ahead = neighbour.position == window.current.position + window.direction
-            return (sources, ahead)
+            return (neighbour.photo, sources, ahead)
         }
-        await admitted.prefetch { [pipeline] in
+        await admitted.prefetch { [pipeline, knownSources] in
             guard !Task.isCancelled else { return }
-            let resolved = neighbours.compactMap { sources, ahead -> (DetailRequest, Bool)? in
-                guard let request = sources.request(for: pixelRequest) else { return nil }
-                return (request, ahead)
+            let resolvedPreviews = previewTargets.compactMap { photo, sources in
+                Self.resolveRequest(
+                    for: photo, sources: sources, request: pixelRequest, knownSources: knownSources
+                )
             }
             guard !Task.isCancelled else { return }
-            await pipeline.prefetch(resolved.map(\.0))
-            guard renderAhead, !Task.isCancelled, let ahead = resolved.first(where: \.1)?.0 else {
-                return
-            }
+            await pipeline.prefetch(resolvedPreviews)
+            guard renderAhead, !Task.isCancelled,
+                let aheadTarget = neighbours.first(where: \.2),
+                let ahead = Self.resolveRequest(
+                    for: aheadTarget.0, sources: aheadTarget.1, request: pixelRequest,
+                    knownSources: knownSources)
+            else { return }
             try? await pipeline.prefetchScreen(for: ahead)
         }
     }
@@ -160,6 +207,70 @@ final class PipelineDetailImages: DetailImageSource {
 
     private func sources(for photo: PhotoIdentity) -> PhotoSources? {
         set(photo).map(PhotoSources.init)
+    }
+
+    private nonisolated static func resolveRequest(
+        for photo: PhotoIdentity,
+        sources: PhotoSources,
+        request: DetailPixelRequest,
+        knownSources: KnownDetailSourceCache
+    ) -> DetailRequest? {
+        let resolved = sources.readResolvedSources()
+        let entry = KnownDetailSources(
+            locationIdentity: sources.locationIdentity,
+            rawURL: sources.raw, jpegURL: sources.jpeg, heifURL: sources.heif,
+            raw: resolved.raw, jpeg: resolved.jpeg, heif: resolved.heif)
+        knownSources.store(entry, for: photo)
+        return entry.detailRequest(for: request)
+    }
+}
+
+private final class KnownDetailSourceCache: Sendable {
+    private let entries = Mutex<[PhotoIdentity: KnownDetailSources]>([:])
+
+    func store(_ entry: KnownDetailSources, for photo: PhotoIdentity) {
+        entries.withLock { map in
+            if map.count >= 256, map[photo] == nil {
+                map.removeAll(keepingCapacity: true)
+            }
+            map[photo] = entry
+        }
+    }
+
+    func request(
+        for photo: PhotoIdentity, matching sources: PhotoSources, request: DetailPixelRequest
+    ) -> DetailRequest? {
+        let entry = entries.withLock { $0[photo] }
+        guard let entry, entry.matches(sources) else { return nil }
+        return entry.detailRequest(for: request)
+    }
+}
+
+private struct KnownDetailSources: Sendable {
+    let locationIdentity: String
+    let rawURL: URL?
+    let jpegURL: URL?
+    let heifURL: URL?
+    let raw: DetailSource?
+    let jpeg: DetailSource?
+    let heif: DetailSource?
+
+    func matches(_ sources: PhotoSources) -> Bool {
+        locationIdentity == sources.locationIdentity
+            && rawURL == sources.raw
+            && jpegURL == sources.jpeg
+            && heifURL == sources.heif
+    }
+
+    func detailRequest(for request: DetailPixelRequest) -> DetailRequest? {
+        guard raw != nil || jpeg != nil || heif != nil else { return nil }
+        return DetailRequest(
+            raw: raw, jpeg: jpeg, heif: heif,
+            displayPixels: request.displayPixels,
+            wantsNativeResolution: request.need == .fullResolution,
+            locationIdentity: locationIdentity,
+            mode: request.mode == .rawFirst ? .rawFirst : .cameraPreviewFirst,
+            screenPixels: request.screenPixels)
     }
 }
 
@@ -186,7 +297,7 @@ private struct PhotoSources: Sendable {
     }
 
     func request(for request: DetailPixelRequest) -> DetailRequest? {
-        let sources = readSources()
+        let sources = readResolvedSources()
         guard sources.raw != nil || sources.jpeg != nil || sources.heif != nil else { return nil }
         return DetailRequest(
             raw: sources.raw, jpeg: sources.jpeg, heif: sources.heif,
@@ -198,14 +309,14 @@ private struct PhotoSources: Sendable {
     }
 
     func regionRequest() -> RegionSharpnessRequest? {
-        let sources = readSources()
+        let sources = readResolvedSources()
         guard sources.raw != nil || sources.jpeg != nil || sources.heif != nil else { return nil }
         return RegionSharpnessRequest(
             raw: sources.raw, jpeg: sources.jpeg, heif: sources.heif,
             locationIdentity: locationIdentity)
     }
 
-    private func readSources() -> (raw: DetailSource?, jpeg: DetailSource?, heif: DetailSource?) {
+    func readResolvedSources() -> (raw: DetailSource?, jpeg: DetailSource?, heif: DetailSource?) {
         (
             raw.flatMap { try? DetailSource.read($0) },
             jpeg.flatMap { try? DetailSource.read($0) },

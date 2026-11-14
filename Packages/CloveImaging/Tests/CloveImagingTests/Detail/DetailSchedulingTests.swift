@@ -337,4 +337,27 @@ struct DetailSchedulingTests {
         _ = try await analysis.value
         await pipeline.close()
     }
+
+    @Test func prefetchCoversUpToTwoNeighboursPerSideAndWarmsSynchronousHits() async throws {
+        let gate = DetailReadGate()
+        let pipeline = makePipeline(gate, previewWorkers: 2)
+        let names = [
+            "sony-ilce-7s.ARW", "nikon-d500.NEF", "canon-eos-r6.CR3", "fujifilm-x-s10.RAF",
+            "olympus-e-m1markii.ORF",
+        ]
+        let requests = try names.enumerated().map { index, name in
+            try rawRequest(
+                DetailFixtures.file(name), displayPixels: 1200, location: "folder-\(index)")
+        }
+        await pipeline.prefetch(Array(requests.prefix(4)))
+        #expect(await gate.previewPaths.count == 4)
+        #expect(await gate.nativePaths.isEmpty)
+        for request in requests.prefix(4) {
+            #expect(pipeline.warmCachedImage(for: request) != nil)
+        }
+        await pipeline.prefetch(requests)
+        // Prefix(4) caps batch prefetch at +/-2 (the 5th entry does not trigger a read).
+        #expect(await gate.previewPaths.count == 4)
+        await pipeline.close()
+    }
 }

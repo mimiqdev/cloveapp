@@ -790,29 +790,70 @@ struct DetailMarkingView: View {
             zoomMode = .fit
             setZoom(.fit)
         }
-        shown = nil
-        phase = .placeholder(nil)
         limitation = nil
         previewOnly = false
-        let thumbnail = await images.placeholder(
-            for: photo.id, gridThumbnails: browsing.thumbnails)
-        guard !Task.isCancelled else { return }
-        phase = .placeholder(thumbnail)
-        // Wait for the display, not just layout: the first render must use the
-        // same physical screen edge as later photos and their held-render keys.
-        for _ in 0..<120 {
+
+        var previewPrefetchTask: Task<Void, Never>?
+        defer { previewPrefetchTask?.cancel() }
+
+        let window: DetailPhotoWindow
+        var presentedWarm = false
+        if viewSize != .zero, let screen = probe.container?.window?.windowScene?.screen {
+            let screenPixels = Int(max(screen.nativeBounds.width, screen.nativeBounds.height))
+            let candidateWindow = photoWindow(for: photo, screenPixels: screenPixels)
+            if let warm = images.warmImage(for: photo.id, request: candidateWindow.request()) {
+                window = candidateWindow
+                currentWindow = window
+                previousPosition = window.current.position
+                show(warm)
+                presentedWarm = true
+                if let interval = previewArrivalInterval {
+                    previewArrivalInterval = nil
+                    PerformanceSignpost.detailArrival.endInterval(
+                        "DetailArrivalToPreview", interval)
+                }
+                await images.prepare(window)
+                guard !Task.isCancelled else { return }
+                previewPrefetchTask = Task { await images.prefetchPreviews(window) }
+            } else {
+                shown = nil
+                phase = .placeholder(nil)
+                let thumbnail = await images.placeholder(
+                    for: photo.id, gridThumbnails: browsing.thumbnails)
+                guard !Task.isCancelled else { return }
+                phase = .placeholder(thumbnail)
+                window = candidateWindow
+                currentWindow = window
+                previousPosition = window.current.position
+                await images.prepare(window)
+                guard !Task.isCancelled else { return }
+            }
+        } else {
+            shown = nil
+            phase = .placeholder(nil)
+            let thumbnail = await images.placeholder(
+                for: photo.id, gridThumbnails: browsing.thumbnails)
             guard !Task.isCancelled else { return }
-            if viewSize != .zero, probe.container?.window?.windowScene != nil { break }
-            try? await Task.sleep(for: .milliseconds(16))
+            phase = .placeholder(thumbnail)
+            // Wait for the display, not just layout: the first render must use the
+            // same physical screen edge as later photos and their held-render keys.
+            for _ in 0..<120 {
+                guard !Task.isCancelled else { return }
+                if viewSize != .zero, probe.container?.window?.windowScene != nil { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            guard !Task.isCancelled, let screen = probe.container?.window?.windowScene?.screen
+            else {
+                return
+            }
+            let screenPixels = Int(max(screen.nativeBounds.width, screen.nativeBounds.height))
+            window = photoWindow(for: photo, screenPixels: screenPixels)
+            currentWindow = window
+            previousPosition = window.current.position
+            await images.prepare(window)
+            guard !Task.isCancelled else { return }
         }
-        guard !Task.isCancelled, let screen = probe.container?.window?.windowScene?.screen else {
-            return
-        }
-        let screenPixels = Int(max(screen.nativeBounds.width, screen.nativeBounds.height))
-        let window = photoWindow(for: photo, screenPixels: screenPixels)
-        currentWindow = window
-        previousPosition = window.current.position
-        await images.prepare(window)
+
         let request = window.request()
         var attempts = 0
         while true {
@@ -820,11 +861,21 @@ struct DetailMarkingView: View {
             if Task.isCancelled { return }
             switch outcome {
             case .image(let image):
-                show(image)
+                if !presentedWarm
+                    || image.image !== shown?.image
+                    || image.quality != shown?.quality
+                    || image.source != shown?.source
+                    || image.fullResolutionSize != shown?.fullResolutionSize
+                {
+                    show(image)
+                }
                 if let interval = previewArrivalInterval {
                     previewArrivalInterval = nil
                     PerformanceSignpost.detailArrival.endInterval(
                         "DetailArrivalToPreview", interval)
+                }
+                if previewPrefetchTask == nil {
+                    previewPrefetchTask = Task { await images.prefetchPreviews(window) }
                 }
                 await renderFitAndPrefetch(window) {
                     if let interval = screenArrivalInterval {
@@ -841,6 +892,9 @@ struct DetailMarkingView: View {
                     PerformanceSignpost.detailArrival.endInterval(
                         "DetailArrivalToPreview", interval)
                 }
+                if previewPrefetchTask == nil {
+                    previewPrefetchTask = Task { await images.prefetchPreviews(window) }
+                }
                 await renderFitAndPrefetch(window) {
                     if let interval = screenArrivalInterval {
                         screenArrivalInterval = nil
@@ -852,7 +906,7 @@ struct DetailMarkingView: View {
             case .deferred:
                 attempts += 1
                 guard attempts < 3 else {
-                    phase = .deferred
+                    if !presentedWarm { phase = .deferred }
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(120))
@@ -968,9 +1022,20 @@ struct DetailMarkingView: View {
             guard order.indices.contains(position) else { return nil }
             return DetailNeighbour(photo: order[position].id, position: position)
         }
+        let previewNeighbours = [
+            index + direction,
+            index - direction,
+            index + 2 * direction,
+            index - 2 * direction,
+        ].compactMap { position -> DetailNeighbour? in
+            guard order.indices.contains(position) else { return nil }
+            return DetailNeighbour(photo: order[position].id, position: position)
+        }
         return DetailPhotoWindow(
             id: windowID,
-            current: DetailNeighbour(photo: photo.id, position: index), neighbours: neighbours,
+            current: DetailNeighbour(photo: photo.id, position: index),
+            neighbours: neighbours,
+            previewNeighbours: previewNeighbours,
             direction: direction,
             mode: currentWindow.flatMap { $0.current.photo == photo.id ? $0.mode : nil }
                 ?? displayMode,

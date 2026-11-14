@@ -40,11 +40,25 @@ public final class DetailCache: Sendable {
     public struct Configuration: Sendable {
         /// Compressed bytes shared by previews and RAW screen renders, encoded as JPEG 0.9.
         public var compressedBytes = 64 * 1024 * 1024
+        /// Pre-decoded bitmaps kept warm for zero-decode swipe arrivals and async encoding.
+        public var warmBytes = 48 * 1024 * 1024
         public init() {}
     }
 
     private struct Entry {
         let image: DetailCompressedImage
+        let access: UInt64
+    }
+
+    private struct PendingEntry {
+        let image: DetailImage
+        let epoch: UInt64
+        let token: UInt64
+    }
+
+    private struct WarmEntry {
+        let image: DetailImage
+        let bytes: Int
         let access: UInt64
     }
 
@@ -61,6 +75,10 @@ public final class DetailCache: Sendable {
     private struct State {
         var images: [DetailCacheKey: Entry] = [:]
         var compressedCost = 0
+        var pending: [DetailCacheKey: PendingEntry] = [:]
+        var warm: [DetailCacheKey: WarmEntry] = [:]
+        var warmCost = 0
+        var encodingEpoch: UInt64 = 0
         var native: (key: DetailCacheKey, image: DetailImage)?
         var nativeSizes: [DetailSource: NativeSize] = [:]
         var currentPhoto: DetailCacheKey?
@@ -73,6 +91,7 @@ public final class DetailCache: Sendable {
 
     public init(configuration: Configuration = Configuration()) {
         precondition(configuration.compressedBytes >= 0)
+        precondition(configuration.warmBytes >= 0)
         self.configuration = configuration
         self.state = Mutex(State())
     }
@@ -88,6 +107,10 @@ public final class DetailCache: Sendable {
         state.withLock { state in
             state.images.removeAll()
             state.compressedCost = 0
+            state.pending.removeAll()
+            state.warm.removeAll()
+            state.warmCost = 0
+            state.encodingEpoch &+= 1
             state.native = nil
             state.nativeSizes.removeAll()
             state.cameraFailures.removeAll()
@@ -141,14 +164,50 @@ public final class DetailCache: Sendable {
         state.withLock { $0.native = nil }
     }
 
+    /// Synchronous memory lookup that never triggers JPEG decoding or file I/O.
+    func warmImage(for key: DetailCacheKey) -> DetailImage? {
+        state.withLock { state in
+            if let entry = state.warm[key] {
+                state.tick &+= 1
+                state.warm[key] = WarmEntry(
+                    image: entry.image, bytes: entry.bytes, access: state.tick)
+                return entry.image
+            }
+            if let pending = state.pending[key] {
+                return pending.image
+            }
+            return nil
+        }
+    }
+
     func image(for key: DetailCacheKey) -> DetailImage? {
-        compressed(for: key)?.decoded()
+        if let warm = warmImage(for: key) { return warm }
+        guard let decoded = compressed(for: key)?.decoded() else { return nil }
+        state.withLock { state in
+            Self.storeWarmLocked(decoded, for: key, limit: configuration.warmBytes, in: &state)
+        }
+        return decoded
     }
 
     /// A prefetch needs only presence and usability, never decoded pixels.
     func contains(_ key: DetailCacheKey, minimumLongEdge: Int = 0) -> Bool {
-        guard let image = compressed(for: key) else { return false }
-        return image.longEdge >= minimumLongEdge
+        state.withLock { state in
+            if let entry = state.warm[key] {
+                state.tick &+= 1
+                state.warm[key] = WarmEntry(
+                    image: entry.image, bytes: entry.bytes, access: state.tick)
+                return entry.image.longEdge >= minimumLongEdge
+            }
+            if let pending = state.pending[key] {
+                return pending.image.longEdge >= minimumLongEdge
+            }
+            if let entry = state.images[key] {
+                state.tick &+= 1
+                state.images[key] = Entry(image: entry.image, access: state.tick)
+                return entry.image.longEdge >= minimumLongEdge
+            }
+            return false
+        }
     }
 
     private func compressed(for key: DetailCacheKey) -> DetailCompressedImage? {
@@ -160,19 +219,80 @@ public final class DetailCache: Sendable {
         }
     }
 
+    /// Stages decoded pixels in the warm/pending tiers so callers never wait on JPEG 0.9 encoding.
+    func stageForEncoding(
+        _ image: DetailImage, for key: DetailCacheKey
+    ) -> (epoch: UInt64, token: UInt64)? {
+        state.withLock { state in
+            Self.storeWarmLocked(image, for: key, limit: configuration.warmBytes, in: &state)
+            guard configuration.compressedBytes > 0 else { return nil }
+            state.tick &+= 1
+            let token = state.tick
+            let epoch = state.encodingEpoch
+            state.pending[key] = PendingEntry(image: image, epoch: epoch, token: token)
+            return (epoch, token)
+        }
+    }
+
+    /// Commits a background-encoded JPEG only if the staged entry is still current.
+    func finishEncoding(
+        _ compressed: DetailCompressedImage?, for key: DetailCacheKey,
+        epoch: UInt64, token: UInt64
+    ) {
+        state.withLock { state in
+            guard state.encodingEpoch == epoch,
+                let current = state.pending[key], current.token == token
+            else { return }
+            state.pending.removeValue(forKey: key)
+            guard let compressed else { return }
+            Self.storeLocked(
+                compressed, for: key, limit: configuration.compressedBytes, in: &state)
+        }
+    }
+
     /// Inserts encoded bytes under the caller's cancellation guard, without doing pixel work.
     func store(_ compressed: DetailCompressedImage, for key: DetailCacheKey) {
         state.withLock { state in
-            state.compressedCost -= state.images.removeValue(forKey: key)?.image.data.count ?? 0
-            guard compressed.data.count <= configuration.compressedBytes else { return }
-            state.tick &+= 1
-            state.images[key] = Entry(image: compressed, access: state.tick)
-            state.compressedCost += compressed.data.count
-            while state.compressedCost > configuration.compressedBytes,
-                let oldest = state.images.min(by: { $0.value.access < $1.value.access })?.key
-            {
-                state.compressedCost -=
-                    state.images.removeValue(forKey: oldest)?.image.data.count ?? 0
+            state.pending.removeValue(forKey: key)
+            Self.storeLocked(
+                compressed, for: key, limit: configuration.compressedBytes, in: &state)
+        }
+    }
+
+    private static func storeWarmLocked(
+        _ image: DetailImage, for key: DetailCacheKey, limit: Int, in state: inout State
+    ) {
+        if let existing = state.warm.removeValue(forKey: key) {
+            state.warmCost -= existing.bytes
+        }
+        let bytes = image.decodedBytes
+        guard limit > 0, bytes <= limit else { return }
+        state.tick &+= 1
+        state.warm[key] = WarmEntry(image: image, bytes: bytes, access: state.tick)
+        state.warmCost += bytes
+        while state.warmCost > limit,
+            let oldest = state.warm.min(by: { $0.value.access < $1.value.access })?.key
+        {
+            state.warmCost -= state.warm.removeValue(forKey: oldest)?.bytes ?? 0
+        }
+    }
+
+    private static func storeLocked(
+        _ compressed: DetailCompressedImage, for key: DetailCacheKey, limit: Int,
+        in state: inout State
+    ) {
+        state.compressedCost -= state.images.removeValue(forKey: key)?.image.data.count ?? 0
+        guard compressed.data.count <= limit else { return }
+        state.tick &+= 1
+        state.images[key] = Entry(image: compressed, access: state.tick)
+        state.compressedCost += compressed.data.count
+        while state.compressedCost > limit,
+            let oldest = state.images.min(by: { $0.value.access < $1.value.access })?.key
+        {
+            state.compressedCost -=
+                state.images.removeValue(forKey: oldest)?.image.data.count ?? 0
+            if let warmRemoved = state.warm.removeValue(forKey: oldest) {
+                state.warmCost -= warmRemoved.bytes
             }
         }
     }
@@ -201,8 +321,12 @@ public final class DetailCache: Sendable {
         state.withLock { $0.nativeSizes[source] = nativeSize }
     }
 
-    /// Compressed bytes and entries currently held, for budget tests.
+    /// Compressed bytes, warm decoded bytes, and entries currently held, for budget tests.
     var compressedCost: Int { state.withLock { $0.compressedCost } }
-    var imageCount: Int { state.withLock { $0.images.count } }
+    var warmCost: Int { state.withLock { $0.warmCost } }
+    var pendingCount: Int { state.withLock { $0.pending.count } }
+    var imageCount: Int {
+        state.withLock { Set($0.images.keys).union($0.pending.keys).count }
+    }
     var holdsNativeImage: Bool { state.withLock { $0.native != nil } }
 }

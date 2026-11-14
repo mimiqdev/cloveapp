@@ -202,7 +202,7 @@ public actor DetailPipeline {
     /// Embedded previews only. One-ahead RAW work is explicitly requested through screen().
     public func prefetch(_ requests: [DetailRequest]) async {
         await withTaskGroup(of: Void.self) { group in
-            for request in requests.prefix(2) {
+            for request in requests.prefix(4) {
                 group.addTask { try? await self.prefetchPreview(for: request) }
             }
         }
@@ -250,6 +250,50 @@ public actor DetailPipeline {
     var queuedCount: Int { queue.count }
     var activeCount: Int { active.count }
     var activeRenderCount: Int { active.values.filter { $0 == .render }.count }
+
+    /// Synchronous in-memory hit for arrival before async file verification.
+    /// Reads only the warm decoded tier and cached native size without file I/O or JPEG decode.
+    public nonisolated func warmCachedImage(for request: DetailRequest) -> DetailImage? {
+        let cameras = [request.heif, request.jpeg].compactMap { $0 }
+        let unfailedCamera =
+            request.raw != nil && request.mode == .cameraPreviewFirst
+            ? cameras.first { !cache.cameraFailed($0) }
+            : nil
+        let usesRAW = request.raw != nil && unfailedCamera == nil
+        if usesRAW, let key = DetailCache.screenKey(request),
+            let screen = cache.warmImage(for: key)
+        {
+            return screen
+        }
+        var best: DetailImage?
+        for step in DetailPreviewPlan.steps(for: request) {
+            let key = DetailCacheKey(
+                source: step.source, locationIdentity: request.locationIdentity,
+                purpose: step.purpose(displayPixels: request.displayPixels))
+            guard let image = cache.warmImage(for: key) else { continue }
+            if DetailPreviewPlan.isUsable(image, from: step) {
+                best = image
+                break
+            }
+            if best == nil { best = image }
+        }
+        guard let best else { return nil }
+        let size: CGSize?
+        if let unfailedCamera {
+            if case .known(let known) = cache.nativeSize(for: unfailedCamera) {
+                size = known
+            } else {
+                size = nil
+            }
+        } else if let reference = request.raw ?? request.jpeg,
+            case .known(let known) = cache.nativeSize(for: reference)
+        {
+            size = known
+        } else {
+            size = nil
+        }
+        return best.withFullResolution(size, hasRAW: request.raw != nil)
+    }
 
     private let nativeRAWCounter = NativeRAWRenderCounter()
 
@@ -528,9 +572,7 @@ public actor DetailPipeline {
                     let candidate = DetailImage(
                         image: pixels, source: step.source,
                         quality: step.quality, hasRAW: false)
-                    if let compressed = DetailCompressedImage(candidate) {
-                        job.cancellation.storeIfActive { cache.store(compressed, for: key) }
-                    }
+                    Self.storeCompressedAsync(candidate, for: key, job: job, cache: cache)
                     image = candidate
                 case .cannotOpen: failures.append(.cannotOpen)
                 case .noUsablePreview: failures.append(.noUsablePreview)
@@ -547,7 +589,8 @@ public actor DetailPipeline {
         } else {
             fullSize = await fullResolutionSize(
                 for: request, previewLongEdge: best?.longEdge ?? 0,
-                cache: cache, sizes: sizes)
+                cache: cache, sizes: sizes,
+                usePreviewHeader: job.effort == .previewOnly)
         }
         var shown = best?.withFullResolution(fullSize, hasRAW: request.raw != nil)
         if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
@@ -678,11 +721,38 @@ public actor DetailPipeline {
         let rendered = DetailImage(
             image: pixels, source: raw, quality: .screenRAW,
             hasRAW: true, fullResolutionSize: fullSize)
-        let compressed = DetailCompressedImage(rendered)
         return publish(rendered, job: job) {
-            if let compressed, let key = DetailCache.screenKey(job.request) {
-                cache.store(compressed, for: key)
+            if let key = DetailCache.screenKey(job.request) {
+                Self.stageCompressedAsync(rendered, for: key, cache: cache)
             }
+        }
+    }
+
+    private nonisolated static func storeCompressedAsync(
+        _ image: DetailImage, for key: DetailCacheKey, job: Job, cache: DetailCache
+    ) {
+        var staged: (epoch: UInt64, token: UInt64)?
+        job.cancellation.storeIfActive {
+            staged = cache.stageForEncoding(image, for: key)
+        }
+        guard let (epoch, token) = staged else { return }
+        Task.detached(
+            executorPreference: ImageWorkExecutor.utility, priority: .utility
+        ) {
+            cache.finishEncoding(
+                DetailCompressedImage(image), for: key, epoch: epoch, token: token)
+        }
+    }
+
+    private nonisolated static func stageCompressedAsync(
+        _ image: DetailImage, for key: DetailCacheKey, cache: DetailCache
+    ) {
+        guard let (epoch, token) = cache.stageForEncoding(image, for: key) else { return }
+        Task.detached(
+            executorPreference: ImageWorkExecutor.utility, priority: .utility
+        ) {
+            cache.finishEncoding(
+                DetailCompressedImage(image), for: key, epoch: epoch, token: token)
         }
     }
 
@@ -710,22 +780,30 @@ public actor DetailPipeline {
 
     private nonisolated static func fullResolutionSize(
         for request: DetailRequest,
-        previewLongEdge: Int, cache: DetailCache, sizes: any DetailNativeSizeReading
+        previewLongEdge: Int, cache: DetailCache, sizes: any DetailNativeSizeReading,
+        usePreviewHeader: Bool = false
     ) async -> CGSize? {
         guard let reference = request.raw ?? request.jpeg, isCurrent(reference) else { return nil }
         if let cached = cache.nativeSize(for: reference) {
             switch cached {
-            case .known(let size): return size;
+            case .known(let size): return size
             case .unknown: return nil
             }
         }
-        var size = await sizes.readNativeSize(of: reference, isRAW: request.raw != nil)
+        var size =
+            usePreviewHeader
+            ? await sizes.readPreviewSize(of: reference, isRAW: request.raw != nil)
+            : await sizes.readNativeSize(of: reference, isRAW: request.raw != nil)
         if let read = size, request.raw != nil,
             max(read.width, read.height) <= CGFloat(previewLongEdge)
         {
             size = nil
         }
-        cache.store(nativeSize: size.map(DetailCache.NativeSize.known) ?? .unknown, for: reference)
+        if let size {
+            cache.store(nativeSize: .known(size), for: reference)
+        } else if !usePreviewHeader {
+            cache.store(nativeSize: .unknown, for: reference)
+        }
         return size
     }
 

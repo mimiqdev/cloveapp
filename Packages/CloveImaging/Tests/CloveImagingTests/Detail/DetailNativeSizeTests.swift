@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Synchronization
 import Testing
 
 @testable import CloveImaging
@@ -297,6 +298,59 @@ actor DetailNativeSizeFixtureTests {
         #expect(!second.hasRAW)
         #expect(second.fullResolutionSize == nil)
         #expect(second.fullResolutionPixels == CGSize(width: 1200, height: 800))
+    }
+
+    @Test func coldRAWPreviewUsesHeaderSizeWithoutNativeDecoderReadUntilRender() async throws {
+        final class RecordingSizeReader: DetailNativeSizeReading, Sendable {
+            private let nativeCount = Mutex(0)
+            private let previewCount = Mutex(0)
+            let previewAnswer: CGSize?
+            let nativeAnswer: CGSize?
+            init(previewAnswer: CGSize?, nativeAnswer: CGSize?) {
+                self.previewAnswer = previewAnswer
+                self.nativeAnswer = nativeAnswer
+            }
+            var nativeCalls: Int { nativeCount.withLock { $0 } }
+            var previewCalls: Int { previewCount.withLock { $0 } }
+            func previewSize(of reference: DetailSource, isRAW: Bool) -> CGSize? {
+                previewCount.withLock { $0 += 1 }
+                return previewAnswer
+            }
+            func nativeSize(of reference: DetailSource, isRAW: Bool) -> CGSize? {
+                nativeCount.withLock { $0 += 1 }
+                return nativeAnswer
+            }
+        }
+
+        let url = DetailFixtures.file("sony-ilce-7s.ARW")
+        let gate = DetailReadGate()
+        let sizes = RecordingSizeReader(
+            previewAnswer: CGSize(width: 2768, height: 1848),
+            nativeAnswer: CGSize(width: 2768, height: 1848))
+        let pipeline = DetailPipeline(
+            cache: DetailCache(), reader: GatedDetailReader(gate: gate), sizes: sizes)
+
+        let preview = try availableDetail(
+            try await pipeline.preview(for: try rawRequest(url, displayPixels: 1200)))
+        #expect(sizes.previewCalls == 1)
+        #expect(sizes.nativeCalls == 0)
+        #expect(preview.fullResolutionSize == CGSize(width: 2768, height: 1848))
+
+        // When previewSize returns nil, preview does not cache .unknown so screen still calls nativeSize.
+        let nilPreviewSizes = RecordingSizeReader(
+            previewAnswer: nil, nativeAnswer: CGSize(width: 2768, height: 1848))
+        let fallbackPipeline = DetailPipeline(
+            cache: DetailCache(), reader: GatedDetailReader(gate: gate), sizes: nilPreviewSizes)
+        let previewWithoutHeader = try availableDetail(
+            try await fallbackPipeline.preview(for: try rawRequest(url, displayPixels: 1200)))
+        #expect(nilPreviewSizes.previewCalls == 1)
+        #expect(nilPreviewSizes.nativeCalls == 0)
+        #expect(previewWithoutHeader.fullResolutionSize == nil)
+
+        let screen = try availableDetail(
+            try await fallbackPipeline.screen(for: try rawRequest(url, displayPixels: 1200)))
+        #expect(nilPreviewSizes.nativeCalls == 1)
+        #expect(screen.fullResolutionSize == CGSize(width: 2768, height: 1848))
     }
 }
 
