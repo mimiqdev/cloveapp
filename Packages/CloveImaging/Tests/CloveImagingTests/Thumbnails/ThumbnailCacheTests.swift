@@ -176,4 +176,22 @@ actor ThumbnailCacheTests {
         #expect(cache.result(for: request) != nil)
         #expect(cache.memoryResult(for: request) != nil)
     }
+
+    @Test func deviceAwareMemoryBudgetScalesAboveEightGibibytes() {
+        let mib = 1024 * 1024
+        #expect(ThumbnailCache.Configuration().memoryBytes == 64 * mib)
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 4 * 1024 * 1024 * 1024)
+                .memoryBytes == 64 * mib)
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 6 * 1024 * 1024 * 1024)
+                .memoryBytes == 64 * mib)
+        // iOS reports 8 GiB devices slightly below 8 * 1024^3 bytes.
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 7_500_000_000).memoryBytes
+                == 128 * mib)
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 16 * 1024 * 1024 * 1024)
+                .memoryBytes == 128 * mib)
+    }
 }

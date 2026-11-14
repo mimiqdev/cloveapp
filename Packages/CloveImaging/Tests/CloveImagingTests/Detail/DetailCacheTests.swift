@@ -227,4 +227,26 @@ actor DetailCacheTests {
             copying: compressed)
         #expect(corrupted.decoded() == nil)
     }
+
+    @Test func deviceAwareBudgetScalesAcrossMemoryTiers() {
+        let mib = 1024 * 1024
+        #expect(
+            DetailCache.Configuration.deviceAware(physicalMemory: 4 * 1024 * 1024 * 1024)
+                .compressedBytes == 64 * mib)
+        #expect(
+            DetailCache.Configuration.deviceAware(physicalMemory: 6 * 1024 * 1024 * 1024)
+                .compressedBytes == 64 * mib)
+        #expect(
+            DetailCache.Configuration.deviceAware(physicalMemory: 7_500_000_000).compressedBytes
+                == 96 * mib)
+        #expect(
+            DetailCache.Configuration.deviceAware(physicalMemory: 8 * 1024 * 1024 * 1024)
+                .compressedBytes == 96 * mib)
+        #expect(
+            DetailCache.Configuration.deviceAware(physicalMemory: 12 * 1024 * 1024 * 1024)
+                .compressedBytes == 128 * mib)
+        #expect(
+            DetailCache.Configuration.deviceAware(physicalMemory: 16 * 1024 * 1024 * 1024)
+                .compressedBytes == 128 * mib)
+    }
 }

@@ -63,6 +63,19 @@ public final class ThumbnailCache: Sendable {
         public var diskBytes = 256 * 1024 * 1024
         public var pipelineVersion = 1
         public init() {}
+
+        /// Scales the memory tier to 128 MiB on devices with at least 8 GiB of physical memory
+        /// (accounting for OS memory reporting slightly below nominal RAM), keeping 64 MiB on
+        /// smaller devices. Intended for callers that wire memory-pressure purging.
+        public static func deviceAware(
+            physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+        ) -> Configuration {
+            var configuration = Configuration()
+            if physicalMemory >= 7_000_000_000 {
+                configuration.memoryBytes = 128 * 1024 * 1024
+            }
+            return configuration
+        }
     }
 
     private let state: Mutex<State>
@@ -127,6 +140,7 @@ public final class ThumbnailCache: Sendable {
     }
 
     var memoryByteCount: Int { state.withLock { $0.memoryCost } }
+    public var memoryCapacityBytes: Int { configuration.memoryBytes }
 
     /// Synchronous memory-only lookup; never reads from disk.
     public func memoryResult(for request: ThumbnailRequest) -> ThumbnailResult? {
