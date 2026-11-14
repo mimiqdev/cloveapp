@@ -232,3 +232,29 @@ import CloveCore
 
     #expect(onePass == stepwise)
 }
+
+@Test func incrementalRefineQueriesOnlySettledBoundaries() async {
+    let photos = [
+        groupingPhoto("a", at: 0),
+        groupingPhoto("b", at: 0.2),
+        groupingPhoto("c", at: 0.4),
+    ]
+    let scripted = ScriptedSimilarity()
+    await scripted.answer(.vision(distance: 0.9), for: photos[0], photos[1])
+    await scripted.answer(.vision(distance: 0.1), for: photos[1], photos[2])
+    let grouper = SimilarGrouping(similarity: scripted)
+
+    await grouper.run(photos: photos, revision: GroupingInputRevision(rawValue: "revision-1"))
+    await grouper.refine(settledPhotos: [photos[0].id, photos[1].id])
+
+    let intermediate = await grouper.current
+    #expect(await scripted.askCount == 1)
+    #expect(intermediate.analysis == .refining(decided: 1, total: 2))
+    #expect(groupingStems(intermediate) == [["b", "c"]])
+
+    await grouper.refine()
+    let final = await grouper.current
+    #expect(await scripted.askCount == 2)
+    #expect(final.analysis == .analyzed)
+    #expect(groupingStems(final) == [["b", "c"]])
+}

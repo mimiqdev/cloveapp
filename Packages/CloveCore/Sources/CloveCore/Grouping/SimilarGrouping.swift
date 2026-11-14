@@ -151,6 +151,19 @@ public actor SimilarGrouping {
     /// cache's finished result is showing, or for a run a later ``run(photos:revision:
     /// similarGroupsEnabled:reuseCache:)`` superseded.
     public func refine() async {
+        await refineBoundaries(settledPhotos: nil)
+    }
+
+    /// One incremental refinement pass over unsettled boundaries whose endpoints have both settled.
+    ///
+    /// Restricting intermediate passes to `settledPhotos` avoids querying the similarity provider
+    /// across thousands of still-queued photos while early bursts finish; a final full ``refine()``
+    /// pass still sweeps every remaining boundary at the end.
+    public func refine(settledPhotos: Set<PhotoIdentity>) async {
+        await refineBoundaries(settledPhotos: settledPhotos)
+    }
+
+    private func refineBoundaries(settledPhotos: Set<PhotoIdentity>?) async {
         guard isEnabled, !cacheIsAuthoritative else { return }
         let generation = self.generation
         var changed = false
@@ -160,6 +173,11 @@ public actor SimilarGrouping {
                 let right = run[index]
                 let key = GroupingBoundaryKey(left: left.id, right: right.id)
                 if decisions[key]?.verdict.isSettled == true { continue }
+                if let settledPhotos,
+                    !settledPhotos.contains(left.id) || !settledPhotos.contains(right.id)
+                {
+                    continue
+                }
                 let answer = await similarity.similarity(between: left, and: right)
                 guard generation == self.generation else { return }
                 let decision = GroupingBoundaryRule.decision(for: answer, thresholds: thresholds)
@@ -227,9 +245,13 @@ public actor SimilarGrouping {
     private func allocateIDs(for candidates: [GroupingCandidateGroup]) -> [SimilarGroup] {
         var groups: [SimilarGroup] = []
         var claimed: Set<GroupID> = []
+        let ancestryIDs = Set(ancestry.values)
         for candidate in candidates {
             let inherited = inheritedID(for: candidate, claimed: claimed)
-            let id = inherited ?? freshID(seed: candidate.photos[0].id, claimed: claimed)
+            let id =
+                inherited
+                ?? freshID(
+                    seed: candidate.photos[0].id, claimed: claimed, ancestryIDs: ancestryIDs)
             claimed.insert(id)
             groups.append(
                 SimilarGroup(
@@ -261,14 +283,17 @@ public actor SimilarGrouping {
     }
 
     /// A new key derived from the earliest member, kept unique among the current groups.
-    private func freshID(seed: PhotoIdentity, claimed: Set<GroupID>) -> GroupID {
+    private func freshID(
+        seed: PhotoIdentity, claimed: Set<GroupID>, ancestryIDs: Set<GroupID>
+    ) -> GroupID {
         let base =
             seed.relativeFolderPath.isEmpty
             ? seed.stem : "\(seed.relativeFolderPath)/\(seed.stem)"
-        let taken = claimed.union(Set(ancestry.values))
         var raw = "group:\(base)"
         var suffix = 2
-        while taken.contains(GroupID(rawValue: raw)) {
+        while claimed.contains(GroupID(rawValue: raw))
+            || ancestryIDs.contains(GroupID(rawValue: raw))
+        {
             raw = "group:\(base)#\(suffix)"
             suffix += 1
         }

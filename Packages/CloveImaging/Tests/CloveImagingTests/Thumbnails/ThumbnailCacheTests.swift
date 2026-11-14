@@ -159,4 +159,39 @@ actor ThumbnailCacheTests {
         #expect(cache.result(for: request) == nil)
         #expect(!FileManager.default.fileExists(atPath: files[0].path))
     }
+
+    @Test func memoryResultIsSynchronousAndNeverReadsDisk() throws {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let request = try thumbnailRequest(directory.image())
+        let result = ThumbnailExtractor().extract(request)
+        let cache = try directory.cache()
+        #expect(cache.memoryResult(for: request) == nil)
+        try cache.store(result, for: request)
+        let memory = try availableThumbnail(#require(cache.memoryResult(for: request)))
+        #expect(max(memory.width, memory.height) == 400)
+        cache.releaseMemory()
+        // Disk entry still exists, yet memory-only lookup must miss without touching disk.
+        #expect(cache.memoryResult(for: request) == nil)
+        #expect(cache.result(for: request) != nil)
+        #expect(cache.memoryResult(for: request) != nil)
+    }
+
+    @Test func deviceAwareMemoryBudgetScalesAboveEightGibibytes() {
+        let mib = 1024 * 1024
+        #expect(ThumbnailCache.Configuration().memoryBytes == 64 * mib)
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 4 * 1024 * 1024 * 1024)
+                .memoryBytes == 64 * mib)
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 6 * 1024 * 1024 * 1024)
+                .memoryBytes == 64 * mib)
+        // iOS reports 8 GiB devices slightly below 8 * 1024^3 bytes.
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 7_500_000_000).memoryBytes
+                == 128 * mib)
+        #expect(
+            ThumbnailCache.Configuration.deviceAware(physicalMemory: 16 * 1024 * 1024 * 1024)
+                .memoryBytes == 128 * mib)
+    }
 }

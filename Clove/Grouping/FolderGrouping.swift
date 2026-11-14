@@ -28,6 +28,10 @@ final class FolderGrouping {
     private let folder: FolderIdentity
     /// The session that holds the folder's C11 scope while features read its files.
     private let session: FolderAccessSession
+    /// C9's thresholds for both time runs and similarity boundaries.
+    private let thresholds: GroupingThresholds
+    /// Minimum interval between incremental refinement updates after the initial burst settles.
+    private let refinementInterval: Duration
     /// C9's grouper: the time stage, the boundary decisions and the group cache.
     private let grouping: SimilarGrouping
     /// I3's feature pipeline, on its own workers and cache.
@@ -83,12 +87,16 @@ final class FolderGrouping {
         featureCache: ImageFeatureCache,
         previewCache: ThumbnailCache,
         thresholds: GroupingThresholds = .standard,
+        featurePipeline: ImageFeaturePipeline? = nil,
+        refinementInterval: Duration = .seconds(1),
         sets: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
         publish: @escaping @MainActor ([BrowsingGroup]) -> Void,
         analysisChanged: @escaping @MainActor (Bool) -> Void = { _ in }
     ) {
         self.folder = folder
         self.session = session
+        self.thresholds = thresholds
+        self.refinementInterval = refinementInterval
         self.sets = sets
         self.publish = publish
         self.analysisChanged = analysisChanged
@@ -107,8 +115,9 @@ final class FolderGrouping {
         self.similarity = similarity
         self.grouping = SimilarGrouping(
             similarity: similarity, thresholds: thresholds, cache: cache)
-        self.features = ImageFeaturePipeline(
-            cache: featureCache, sharedPreviewCache: previewCache)
+        self.features =
+            featurePipeline
+            ?? ImageFeaturePipeline(cache: featureCache, sharedPreviewCache: previewCache)
     }
 
     /// Runs step 2 for the folder and publishes it (PRD Similar groups steps 1–2, P0-11).
@@ -258,26 +267,27 @@ final class FolderGrouping {
             return
         }
         analysisChanged(true)
-        let candidates = GroupingFeatureCandidates.photos(in: inputs)
+        let runs = GroupingFeatureCandidates.runs(in: inputs, thresholds: thresholds)
         analysisTask = Task { [weak self] in
             guard let self else { return }
             // The previous task is awaited before a new run. Cancellation therefore finishes
             // its own presentation before the replacement can report that it is running.
             defer { self.analysisChanged(false) }
-            await self.analyse(candidates)
+            await self.analyse(runs)
         }
     }
 
-    /// Computes the candidates' features inside the folder's admitted work, then refines once
+    /// Computes the candidates' features inside the folder's admitted work in burst order, refining
+    /// settled runs incrementally so visible stacks settle early before the final full pass
     /// (PRD Similar groups step 3, G1's scheduling and folder-access rows).
     ///
     /// The whole pass runs as admitted work, so ending the folder waits for a preview read rather
     /// than releasing the scope under it; ``close()`` finishes the pass early by closing the
-    /// pipeline. One refinement pass covers the whole folder on purpose: C9 re-walks every
-    /// unsettled boundary per call, so asking for a pass per feature would make the work grow
-    /// with the square of the folder's photo count.
-    private func analyse(_ candidates: [GroupingPhoto]) async {
+    /// pipeline. Intermediate refinement passes filter to settled photos so C9 skips unsettled
+    /// boundaries instead of polling every remaining pair on each batch.
+    private func analyse(_ runs: [[GroupingPhoto]]) async {
         guard !isClosed, enabled else { return }
+        let candidates = runs.flatMap { $0 }
         let groupingInterval = PerformanceSignpost.folderGrouping.beginInterval(
             "FolderGroupingPass", id: PerformanceSignpost.folderGrouping.makeSignpostID(),
             "candidates=\(candidates.count)")
@@ -287,47 +297,116 @@ final class FolderGrouping {
         await similarity.start(photos: candidates.map(\.id))
         let sets = sets
         var sources: [(photo: GroupingPhoto, url: URL)] = []
+        var unavailableBeforeAdmission: [PhotoIdentity] = []
         for photo in candidates {
             guard let url = sets(photo.id)?.primary.url else {
                 // A photo the folder no longer holds has no feature, so its boundaries split
                 // (G1's Grouping row).
                 await similarity.settle(.unavailable, for: photo.id)
+                unavailableBeforeAdmission.append(photo.id)
                 continue
             }
             sources.append((photo, url))
         }
+        let grouping = grouping
         let similarity = similarity
         let features = features
         let folder = folder
+        let refinementInterval = refinementInterval
         let previewPixels = PipelineGridThumbnails.targetPixels
         let admittedSources = sources
+        let preSettled = unavailableBeforeAdmission
         do {
             try await session.withAdmittedWork {
+                var neighborsByPhoto: [PhotoIdentity: [PhotoIdentity]] = [:]
+                var runIndexByPhoto: [PhotoIdentity: Int] = [:]
+                var runRemaining: [Int] = []
+                runRemaining.reserveCapacity(runs.count)
+                for (runIndex, run) in runs.enumerated() {
+                    runRemaining.append(run.count)
+                    for (index, photo) in run.enumerated() {
+                        runIndexByPhoto[photo.id] = runIndex
+                        var adjacent: [PhotoIdentity] = []
+                        if index > 0 { adjacent.append(run[index - 1].id) }
+                        if index + 1 < run.count { adjacent.append(run[index + 1].id) }
+                        neighborsByPhoto[photo.id] = adjacent
+                    }
+                }
+
+                var settledPhotos: Set<PhotoIdentity> = []
+                var readyBoundariesSinceRefine = 0
+                var completedRunSinceRefine = false
+                func recordSettled(_ photo: PhotoIdentity) {
+                    guard settledPhotos.insert(photo).inserted else { return }
+                    for neighbor in neighborsByPhoto[photo] ?? []
+                    where settledPhotos.contains(neighbor) {
+                        readyBoundariesSinceRefine += 1
+                    }
+                    if let runIndex = runIndexByPhoto[photo] {
+                        runRemaining[runIndex] -= 1
+                        if runRemaining[runIndex] == 0 { completedRunSinceRefine = true }
+                    }
+                }
+
+                for photo in preSettled { recordSettled(photo) }
+
                 // The revision each request keys on is a file read, so it happens here too
-                // (G1 folder access, I1's request identity).
-                var byRequest: [ImageFeatureRequest: PhotoIdentity] = [:]
+                // (G1 folder access, I1's request identity). Keep request order aligned with grid
+                // time-runs so visible bursts arrive and settle first.
+                var orderedRequests: [ImageFeatureRequest] = []
+                var photosByRequest: [ImageFeatureRequest: [PhotoIdentity]] = [:]
+                orderedRequests.reserveCapacity(admittedSources.count)
                 for source in admittedSources {
                     // A cancelled pass must stop reading files, or a Run again or a lost folder
                     // would leave it queueing work behind the new state (G1 folder access).
                     guard !Task.isCancelled else { return }
                     guard let revision = try? ThumbnailRevision.read(from: source.url) else {
                         await similarity.settle(.unavailable, for: source.photo.id)
+                        recordSettled(source.photo.id)
                         continue
                     }
                     let request = ImageFeatureRequest(
                         preview: ThumbnailRequest(
                             source: source.url, revision: revision, targetPixels: previewPixels,
                             locationIdentity: folder.rawValue))
-                    byRequest[request] = source.photo.id
+                    if photosByRequest[request] == nil {
+                        orderedRequests.append(request)
+                    }
+                    photosByRequest[request, default: []].append(source.photo.id)
                 }
                 guard !Task.isCancelled else { return }
-                for await result in await features.run(Array(byRequest.keys)) {
-                    guard let photo = byRequest[result.request] else { continue }
-                    switch result.outcome {
-                    case .features(let values):
-                        await similarity.settle(.features(values), for: photo)
-                    case .unavailable:
-                        await similarity.settle(.unavailable, for: photo)
+
+                var remainingRequests = orderedRequests.count
+                var hasRefinedOnce = false
+                var lastRefineAt = ContinuousClock.now
+                for await result in await features.run(orderedRequests) {
+                    guard !Task.isCancelled else { return }
+                    remainingRequests -= 1
+                    let settledBatch = photosByRequest[result.request] ?? []
+                    for photo in settledBatch {
+                        switch result.outcome {
+                        case .features(let values):
+                            await similarity.settle(.features(values), for: photo)
+                        case .unavailable:
+                            await similarity.settle(.unavailable, for: photo)
+                        }
+                        recordSettled(photo)
+                    }
+                    guard remainingRequests > 0, readyBoundariesSinceRefine > 0 else { continue }
+                    let elapsed = lastRefineAt.duration(to: .now)
+                    let shouldRefine =
+                        if !hasRefinedOnce {
+                            completedRunSinceRefine || readyBoundariesSinceRefine >= 8
+                                || elapsed >= .milliseconds(500)
+                        } else {
+                            elapsed >= refinementInterval
+                        }
+                    if shouldRefine {
+                        hasRefinedOnce = true
+                        readyBoundariesSinceRefine = 0
+                        completedRunSinceRefine = false
+                        lastRefineAt = .now
+                        await grouping.refine(settledPhotos: settledPhotos)
                     }
                 }
             }

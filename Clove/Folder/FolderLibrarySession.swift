@@ -1080,6 +1080,7 @@ final class FolderLibrarySession: FolderLibrary {
         return PipelineGridThumbnails(
             pipeline: pipeline,
             set: { [weak self] photo in self?.store.scannedSet(for: photo)?.photoSet },
+            scannedSet: { [weak self] photo in self?.store.scannedSet(for: photo) },
             admitted: { [weak self] work in
                 guard let self else { return .unavailable }
                 return await self.admittedThumbnail(work, session: session, folder: folder)
@@ -1188,15 +1189,16 @@ final class FolderLibrarySession: FolderLibrary {
     /// Builds the open folder's detail source over I2's pipeline bound to its session
     /// (PRD P0-04, G1 "Preview, detail (I2)").
     ///
-    /// G1 keeps detail images in memory (64 MiB compressed plus one native render), so the pipeline needs
-    /// no directory, unlike the grid's disk cache. Its reads are admitted through the folder's
-    /// C11 session, so ending the folder waits for a read before releasing the scope.
+    /// G1 keeps detail images in memory (device-sized compressed JPEG cache plus one native
+    /// render), so the pipeline needs no directory, unlike the grid's disk cache. Its reads are
+    /// admitted through the folder's C11 session, so ending the folder waits for a read before
+    /// releasing the scope.
     private func makeDetailSource(
         for session: FolderAccessSession,
         thumbnails: ThumbnailCache?,
         sharpness: RegionSharpnessCache?
     ) -> any DetailImageSource {
-        let pipeline = DetailPipeline()
+        let pipeline = DetailPipeline(cache: DetailCache(configuration: .deviceAware()))
         detailPipeline = pipeline
         let sharpnessResults = RegionSharpnessResultStore(capacity: 512, disk: sharpness)
         let scheduler = RegionSharpnessScheduler(
@@ -1283,7 +1285,8 @@ final class FolderLibrarySession: FolderLibrary {
                 }
                 let thumbnails = try ThumbnailCache(
                     directory: caches.appendingPathComponent(
-                        "Clove/GridThumbnails", isDirectory: true))
+                        "Clove/GridThumbnails", isDirectory: true),
+                    configuration: .deviceAware())
                 let features = try ImageFeatureCache(
                     directory: caches.appendingPathComponent(
                         "Clove/ImageFeatures", isDirectory: true))

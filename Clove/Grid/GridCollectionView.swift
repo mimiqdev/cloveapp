@@ -505,10 +505,17 @@ extension GridCollectionView {
                 guard let item = item(at: indexPath), prefetchRequests[item.id] == nil else {
                     continue
                 }
-                let peeking = item.group?.isCover == true ? (item.group?.peekingPhotos ?? []) : []
+                let needsPrimary = thumbnails.cachedThumbnail(for: item.photo.id) == nil
+                let peeking =
+                    (item.group?.isCover == true ? (item.group?.peekingPhotos ?? []) : [])
+                    .filter { thumbnails.cachedThumbnail(for: $0) == nil }
+                guard needsPrimary || !peeking.isEmpty else { continue }
                 let token = UUID()
                 let task = Task { [weak self] in
-                    _ = await self?.thumbnails.thumbnail(for: item.photo.id, priority: .prefetch)
+                    if needsPrimary {
+                        _ = await self?.thumbnails.thumbnail(
+                            for: item.photo.id, priority: .prefetch)
+                    }
                     for member in peeking {
                         guard !Task.isCancelled else { break }
                         _ = await self?.thumbnails.thumbnail(for: member, priority: .prefetch)
@@ -529,13 +536,13 @@ extension GridCollectionView {
             }
         }
 
-        /// A cell about to show: its prefetch is no longer needed and it asks for its own pixels.
+        /// A cell about to show: keep any in-flight prefetch alive so the visible request coalesces
+        /// onto and promotes the partial decode instead of restarting from scratch.
         func collectionView(
             _ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell,
             forItemAt indexPath: IndexPath
         ) {
-            guard let item = item(at: indexPath), let cell = cell as? GridPhotoCell else { return }
-            cancelPrefetch(item.id)
+            guard let cell = cell as? GridPhotoCell else { return }
             cell.resumeThumbnail(using: thumbnails)
         }
 

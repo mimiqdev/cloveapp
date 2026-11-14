@@ -238,6 +238,7 @@ public actor DetailPipeline {
     }
 
     var cachedImageCount: Int { cache.imageCount }
+    var cachedCompressedCapacityBytes: Int { cache.compressedCapacityBytes }
 
     /// Waits for uncancellable reads before the folder's security scope can end.
     public func close() async {

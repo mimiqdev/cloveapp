@@ -376,12 +376,10 @@ public final class ImageFeatureCache: Sendable {
         for digest in digests { try? FileManager.default.removeItem(at: file(digest)) }
     }
 
-    /// A hit keeps LRU order in the index and in the file's date, as I1's cache does.
+    /// A hit keeps LRU order in the in-memory disk index without writing file metadata.
     private func touch(_ digest: String) {
         let now = Date()
         state.withLock { $0.disk[digest]?.access = now }
-        try? FileManager.default.setAttributes(
-            [.modificationDate: now], ofItemAtPath: file(digest).path)
     }
 
     private func forget(_ digest: String, _ entry: DiskEntry) {

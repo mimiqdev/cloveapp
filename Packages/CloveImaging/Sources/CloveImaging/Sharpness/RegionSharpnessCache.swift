@@ -283,12 +283,10 @@ public final class RegionSharpnessCache: Sendable {
         for digest in digests { try? FileManager.default.removeItem(at: file(digest)) }
     }
 
-    /// Updates LRU order in the index and in the file's modification date.
+    /// Updates LRU order in the in-memory disk index without writing file metadata.
     private func touch(_ digest: String) {
         let now = Date()
         state.withLock { $0.disk[digest]?.access = now }
-        try? FileManager.default.setAttributes(
-            [.modificationDate: now], ofItemAtPath: file(digest).path)
     }
 
     private func forget(_ digest: String, _ entry: DiskEntry) {
