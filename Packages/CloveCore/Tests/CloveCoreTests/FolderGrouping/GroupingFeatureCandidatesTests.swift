@@ -59,4 +59,17 @@ struct GroupingFeatureCandidatesTests {
 
         #expect(candidates.isEmpty)
     }
+
+    @Test func ordersRunsAcrossBodiesByEarliestGridPhoto() {
+        let photos = [
+            groupingPhoto("b1", at: 10, model: "Alpha"),
+            groupingPhoto("b2", at: 10.4, model: "Alpha"),
+            groupingPhoto("a1", at: 0, model: "Zulu"),
+            groupingPhoto("a2", at: 0.4, model: "Zulu"),
+        ]
+
+        let runs = GroupingFeatureCandidates.runs(in: photos)
+
+        #expect(runs.map { $0.map(\.id.stem) } == [["a1", "a2"], ["b1", "b2"]])
+    }
 }
