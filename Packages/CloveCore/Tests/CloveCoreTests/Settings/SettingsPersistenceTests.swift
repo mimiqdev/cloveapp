@@ -49,6 +49,10 @@ import CloveCore
             { $0.autoAdvance.triggers.colourLabel = defaults.autoAdvance.triggers.colourLabel }
         ),
         ("detail.doubleTap", invalid, { $0.doubleTap = defaults.doubleTap }),
+        (
+            "detail.zoomedRatingSwipe", invalid,
+            { $0.zoomedRatingSwipe = defaults.zoomedRatingSwipe }
+        ),
         ("zoom.keepInDetail", invalid, { $0.keepZoom.inDetail = defaults.keepZoom.inDetail }),
         (
             "labels.extended", invalid,

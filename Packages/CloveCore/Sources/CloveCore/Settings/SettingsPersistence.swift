@@ -12,6 +12,7 @@ enum SettingsKey: String, CaseIterable {
     case autoAdvanceColourLabel = "autoAdvance.trigger.colourLabel"
     case photoDisplayMode = "detail.photoDisplayMode"
     case doubleTap = "detail.doubleTap"
+    case zoomedRatingSwipe = "detail.zoomedRatingSwipe"
     case keepZoomInDetail = "zoom.keepInDetail"
     case extendedColourLabels = "labels.extended"
     case rejectsFolderName = "rejects.folderName"
@@ -55,6 +56,7 @@ public struct SettingsPersistence: Sendable {
                 )
             ),
             doubleTap: rawValue(.doubleTap) ?? defaults.doubleTap,
+            zoomedRatingSwipe: rawValue(.zoomedRatingSwipe) ?? defaults.zoomedRatingSwipe,
             keepZoom: KeepZoom(
                 inDetail: boolean(.keepZoomInDetail) ?? defaults.keepZoom.inDetail
             ),
@@ -82,6 +84,7 @@ public struct SettingsPersistence: Sendable {
         setBoolean(settings.autoAdvance.triggers.reject, .autoAdvanceReject)
         setBoolean(settings.autoAdvance.triggers.colourLabel, .autoAdvanceColourLabel)
         setText(settings.doubleTap.rawValue, .doubleTap)
+        setText(settings.zoomedRatingSwipe.rawValue, .zoomedRatingSwipe)
         setBoolean(settings.keepZoom.inDetail, .keepZoomInDetail)
         setBoolean(settings.extendedColourLabelsEnabled, .extendedColourLabels)
         setText(settings.rejectsFolderName.rawValue, .rejectsFolderName)

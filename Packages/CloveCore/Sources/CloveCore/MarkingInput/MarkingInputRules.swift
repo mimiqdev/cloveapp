@@ -22,13 +22,24 @@ public struct MarkingInputRules: Hashable, Sendable {
         self.markingSwipeRules = markingSwipeRules
     }
 
-    /// Claims only vertical, unzoomed drags when gestures are enabled.
+    /// Claims vertical drags at fit, or while zoomed when `singleFingerAxisLock` is selected.
     public func beginsSwipe(
         horizontalTravel: Double, verticalTravel: Double, isZoomed: Bool
     ) -> Bool {
         markingSwipeRules.beginsSwipe(
             horizontalTravel: horizontalTravel, verticalTravel: verticalTravel,
-            isZoomed: isZoomed, gesturesEnabled: settings.gesturesEnabled)
+            isZoomed: isZoomed, gesturesEnabled: settings.gesturesEnabled,
+            zoomedRatingSwipe: settings.zoomedRatingSwipe)
+    }
+
+    /// Whether a swipe with `touchCount` touches may commit at the current zoom state.
+    public func allowsSwipe(isZoomed: Bool, touchCount: Int) -> Bool {
+        guard settings.gesturesEnabled else { return false }
+        guard isZoomed else { return touchCount == 1 }
+        switch settings.zoomedRatingSwipe {
+        case .twoFinger: return touchCount == 2
+        case .singleFingerAxisLock: return touchCount == 1
+        }
     }
 
     public func swipeSession(startingRating: Rating) -> MarkingSwipeSession {
@@ -37,9 +48,9 @@ public struct MarkingInputRules: Hashable, Sendable {
 
     /// Commits exactly the preview, once per release. No label change, no velocity at release.
     public func result(
-        forSwipeRating rating: Rating, marks: PhotoMarks, isZoomed: Bool
+        forSwipeRating rating: Rating, marks: PhotoMarks, isZoomed: Bool, touchCount: Int = 1
     ) -> MarkingResult {
-        guard settings.gesturesEnabled, !isZoomed else { return .noChange }
+        guard allowsSwipe(isZoomed: isZoomed, touchCount: touchCount) else { return .noChange }
         return markResult(
             MarkChange(rating: rating), kind: rating == .rejected ? .reject : .rating, marks: marks)
     }

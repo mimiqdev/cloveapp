@@ -1930,6 +1930,208 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testZoomedRatingSwipeModesAndFitGestures() throws {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let preview = element(app, "clove.detail.preview")
+        let fileName = element(app, "clove.detail.fileName")
+        let capsule = element(app, "clove.detail.capsule")
+        let zoom = element(app, "clove.detail.zoom")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+
+        // Fit gestures remain unchanged in default mode.
+        preview.swipeLeft()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        preview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+
+        // Pinch zooms in default mode and never rates.
+        preview.pinch(withScale: 2.0, velocity: 1.0)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+
+        // 1-finger pan still pans while zoomed in default mode and never rates.
+        let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+        centre.doubleTap()
+        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
+        XCTAssertFalse(capsule.exists)
+        let centredBeforePan = preview.value as? String
+        let panStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        panStart.press(
+            forDuration: 0.05, thenDragTo: panStart.withOffset(CGVector(dx: 0, dy: -150)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
+        XCTAssertFalse(capsule.exists)
+        XCTAssertNotEqual(preview.value as? String, centredBeforePan)
+
+        // Default two-finger vertical swipe while zoomed rates, auto-advances, and returns to fit.
+        try swipeTwoFingersVertically(in: preview, deltaY: -180, app: app)
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName, timeout: 10))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
+        preview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue((capsule.value as? String)?.contains("stars") == true)
+
+        // Switch setting to single-finger axis lock.
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.more").tap()
+        app.buttons["Settings"].tap()
+        let zoomedSwipeSetting = element(app, "clove.settings.zoomedRatingSwipe")
+        for _ in 0..<8 {
+            if zoomedSwipeSetting.exists && zoomedSwipeSetting.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(zoomedSwipeSetting.isHittable)
+        zoomedSwipeSetting.tap()
+        app.buttons["Single-finger axis lock"].tap()
+        XCTAssertTrue(
+            String(describing: zoomedSwipeSetting.value).contains("Single-finger axis lock")
+                || zoomedSwipeSetting.label.contains("Single-finger axis lock"))
+        element(app, "clove.nav.back").tap()
+
+        // Open standalone unrated photo MMQ02682.ARW in axis-lock mode.
+        let standalone = element(app, "clove.grid.photo.mmq02682")
+        XCTAssertTrue(standalone.waitForExistence(timeout: 5))
+        standalone.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let initialAxisLockMarks = capsule.value as? String
+        XCTAssertEqual(initialAxisLockMarks, "Green")
+
+        // Fit horizontal navigation still works cleanly with axis-lock zoomed setting active.
+        preview.swipeLeft()
+        XCTAssertTrue(waitForLabel("MMQ02683.ARW", fileName))
+        preview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
+
+        // Pinch still zooms in axis-lock mode and never rates.
+        preview.pinch(withScale: 2.0, velocity: 1.0)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
+        centre.doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertEqual(capsule.value as? String, initialAxisLockMarks)
+
+        // Zoom to 100%: horizontal drag pans without navigating or rating; vertical drag rates +
+        // auto-advances + returns to fit.
+        centre.doubleTap()
+        XCTAssertEqual(zoom.label, "5 / 36 · 100%")
+        XCTAssertFalse(capsule.exists)
+        let centredBeforeHorizontalPan = preview.value as? String
+        preview.swipeLeft()
+        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
+        XCTAssertFalse(capsule.exists)
+        XCTAssertNotEqual(preview.value as? String, centredBeforeHorizontalPan)
+
+        let verticalStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+        verticalStart.press(
+            forDuration: 0.02, thenDragTo: verticalStart.withOffset(CGVector(dx: 0, dy: -180)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertTrue(waitForLabel("MMQ02683.ARW", fileName, timeout: 10))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
+        preview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
+        XCTAssertTrue((capsule.value as? String)?.contains("stars") == true)
+    }
+
+    @MainActor
+    private func swipeTwoFingersVertically(
+        in element: XCUIElement, deltaY: CGFloat, app: XCUIApplication
+    ) throws {
+        guard
+            let pathClass = NSClassFromString("XCPointerEventPath") as? NSObject.Type,
+            let recordClass = NSClassFromString("XCSynthesizedEventRecord") as? NSObject.Type
+        else {
+            XCTFail("XCTAutomationSupport multi-touch synthesis classes are unavailable")
+            return
+        }
+        let allocSel = NSSelectorFromString("alloc")
+        let initTouchSel = NSSelectorFromString("initForTouchAtPoint:offset:")
+        let moveSel = NSSelectorFromString("moveToPoint:atOffset:")
+        let liftSel = NSSelectorFromString("liftUpAtOffset:")
+        let initRecordSel = NSSelectorFromString("initWithName:interfaceOrientation:")
+        let addPathSel = NSSelectorFromString("addPointerEventPath:")
+        let synthesizeErrorSel = NSSelectorFromString("synthesizeWithError:")
+
+        typealias AllocIMP = @convention(c) (AnyClass, Selector) -> AnyObject
+        typealias InitTouchIMP =
+            @convention(c) (
+                AnyObject, Selector, CGPoint, TimeInterval
+            ) -> AnyObject
+        typealias MoveIMP = @convention(c) (AnyObject, Selector, CGPoint, TimeInterval) -> Void
+        typealias LiftIMP = @convention(c) (AnyObject, Selector, TimeInterval) -> Void
+        typealias InitRecordIMP = @convention(c) (AnyObject, Selector, NSString, Int) -> AnyObject
+        typealias AddPathIMP = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+        typealias SynthesizeErrorIMP =
+            @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>?) -> Bool
+
+        let allocPath = unsafeBitCast(
+            class_getMethodImplementation(object_getClass(pathClass), allocSel), to: AllocIMP.self)
+        let initTouch = unsafeBitCast(
+            class_getMethodImplementation(pathClass, initTouchSel), to: InitTouchIMP.self)
+        let moveTo = unsafeBitCast(
+            class_getMethodImplementation(pathClass, moveSel), to: MoveIMP.self)
+        let liftUp = unsafeBitCast(
+            class_getMethodImplementation(pathClass, liftSel), to: LiftIMP.self)
+
+        let allocRecord = unsafeBitCast(
+            class_getMethodImplementation(object_getClass(recordClass), allocSel),
+            to: AllocIMP.self)
+        let initRecord = unsafeBitCast(
+            class_getMethodImplementation(recordClass, initRecordSel), to: InitRecordIMP.self)
+        let addPath = unsafeBitCast(
+            class_getMethodImplementation(recordClass, addPathSel), to: AddPathIMP.self)
+        let synthesizeWithError = unsafeBitCast(
+            class_getMethodImplementation(recordClass, synthesizeErrorSel),
+            to: SynthesizeErrorIMP.self)
+
+        let frame = element.frame
+        let startY = frame.midY + (deltaY < 0 ? 80 : -80)
+        let leftStart = CGPoint(x: frame.midX - 35, y: startY)
+        let rightStart = CGPoint(x: frame.midX + 35, y: startY)
+
+        let leftPath = initTouch(allocPath(pathClass, allocSel), initTouchSel, leftStart, 0.0)
+        let rightPath = initTouch(allocPath(pathClass, allocSel), initTouchSel, rightStart, 0.0)
+        let steps = 12
+        let duration: TimeInterval = 0.6
+        for step in 1...steps {
+            let fraction = CGFloat(step) / CGFloat(steps)
+            let offset = 0.05 + duration * Double(fraction)
+            moveTo(
+                leftPath, moveSel,
+                CGPoint(x: leftStart.x, y: leftStart.y + deltaY * fraction), offset)
+            moveTo(
+                rightPath, moveSel,
+                CGPoint(x: rightStart.x, y: rightStart.y + deltaY * fraction), offset)
+        }
+        // Stagger release slightly to verify first-finger-lift termination cleanly commits.
+        liftUp(leftPath, liftSel, 0.72)
+        liftUp(rightPath, liftSel, 0.76)
+
+        let rawOrientation = XCUIDevice.shared.orientation.rawValue
+        let orientation = rawOrientation == 0 ? 1 : rawOrientation
+        let record = initRecord(
+            allocRecord(recordClass, allocSel), initRecordSel,
+            "Two-finger vertical swipe" as NSString, orientation)
+        addPath(record, addPathSel, leftPath)
+        addPath(record, addPathSel, rightPath)
+
+        var error: NSError?
+        let ok = synthesizeWithError(record, synthesizeErrorSel, &error)
+        XCTAssertTrue(ok, "Two-finger swipe synthesis failed: \(String(describing: error))")
+        XCTAssertNil(error)
+    }
+
+    @MainActor
     func testCaptureTapPickerReferencesWhenRequested() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_TAP_PICKERS"] == "1")
         defer { XCUIDevice.shared.orientation = .portrait }

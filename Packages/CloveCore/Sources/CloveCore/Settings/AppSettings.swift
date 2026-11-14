@@ -7,6 +7,15 @@ public enum DoubleTapBehaviour: String, CaseIterable, Hashable, Sendable {
     case off
 }
 
+/// How rating swipes behave while the detail preview is zoomed (PRD Gesture-related settings).
+public enum ZoomedRatingSwipe: String, CaseIterable, Hashable, Sendable {
+    /// Two-finger vertical swipe runs the rating ladder while one-finger drags pan.
+    case twoFinger
+
+    /// Single-finger vertical drag runs the rating ladder while horizontal drags pan.
+    case singleFingerAxisLock
+}
+
 /// How similar groups appear in the grid (PRD Grid, similar-group display).
 public enum GridGroupDisplay: String, CaseIterable, Hashable, Sendable {
     /// Show every photo with each group outlined and counted; the launch default (PRD Grid).
@@ -55,6 +64,10 @@ public struct AppSettings: Hashable, Sendable {
     /// Double-tap behavior in detail (PRD Gesture-related settings); zoom by default.
     public var doubleTap: DoubleTapBehaviour
 
+    /// How vertical rating swipes behave while the detail preview is zoomed; two-finger swipe by
+    /// default.
+    public var zoomedRatingSwipe: ZoomedRatingSwipe
+
     /// Whether regular detail keeps its zoom level while navigating. Groups always sync zoom.
     public var keepZoom: KeepZoom
 
@@ -89,6 +102,7 @@ public struct AppSettings: Hashable, Sendable {
         enabledRatings: EnabledRatings = .all,
         autoAdvance: AutoAdvance = AutoAdvance(),
         doubleTap: DoubleTapBehaviour = .zoom,
+        zoomedRatingSwipe: ZoomedRatingSwipe = .twoFinger,
         keepZoom: KeepZoom = KeepZoom(),
         extendedColourLabelsEnabled: Bool = false,
         rejectsFolderName: RejectsFolderName = .defaultFolderName,
@@ -102,6 +116,7 @@ public struct AppSettings: Hashable, Sendable {
         self.enabledRatings = enabledRatings
         self.autoAdvance = autoAdvance
         self.doubleTap = doubleTap
+        self.zoomedRatingSwipe = zoomedRatingSwipe
         self.keepZoom = keepZoom
         self.extendedColourLabelsEnabled = extendedColourLabelsEnabled
         self.rejectsFolderName = rejectsFolderName

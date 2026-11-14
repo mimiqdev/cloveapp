@@ -629,6 +629,348 @@ struct DetailDisplayPresentationTests {
         #expect(steps == 0)
     }
 
+    @Test func zoomedRatingRecognizerAvailabilityFollowsModeZoomAndGesturesEnabled() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.setImage(try testPixels(gray: 0))
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+
+        func applySettings(mode: ZoomedRatingSwipe, gesturesEnabled: Bool) {
+            var settings = AppSettings()
+            settings.zoomedRatingSwipe = mode
+            settings.gesturesEnabled = gesturesEnabled
+            preview.rules = MarkingInputRules(settings: settings)
+        }
+
+        // At fit: 1-finger pan enabled (navigation still lives there), 2-finger zoomed swipe off, chrome tap on.
+        for mode in ZoomedRatingSwipe.allCases {
+            for gesturesEnabled in [true, false] {
+                applySettings(mode: mode, gesturesEnabled: gesturesEnabled)
+                #expect(!preview.isZoomed)
+                #expect(preview.chromeTapIsEnabled)
+                #expect(preview.markingPanIsEnabled)
+                #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+            }
+        }
+
+        // While zoomed: recognizers follow `zoomedRatingSwipe` and `gesturesEnabled`.
+        preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
+        #expect(preview.isZoomed)
+        #expect(!preview.chromeTapIsEnabled)
+
+        applySettings(mode: .twoFinger, gesturesEnabled: true)
+        #expect(!preview.markingPanIsEnabled)
+        #expect(preview.twoFingerMarkingSwipeIsEnabled)
+
+        applySettings(mode: .singleFingerAxisLock, gesturesEnabled: true)
+        #expect(preview.markingPanIsEnabled)
+        #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+
+        for mode in ZoomedRatingSwipe.allCases {
+            applySettings(mode: mode, gesturesEnabled: false)
+            #expect(!preview.markingPanIsEnabled)
+            #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+            #expect(!preview.gestureRecognizerShouldBegin(preview.twoFingerSwipeRecognizer))
+            let pan = DetailTestPan()
+            pan.travel = CGPoint(x: 0, y: -40)
+            #expect(!preview.gestureRecognizerShouldBegin(pan))
+        }
+
+        // Returning to fit restores fit availability.
+        applySettings(mode: .twoFinger, gesturesEnabled: true)
+        preview.apply(DetailZoomCommand(id: 2, kind: .fit))
+        #expect(!preview.isZoomed)
+        #expect(preview.chromeTapIsEnabled)
+        #expect(preview.markingPanIsEnabled)
+        #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+    }
+
+    @Test func zoomedTwoFingerSwipeRatesWithoutPinchAndPinchNeverRates() throws {
+        func makeZoomedPreview() throws -> (
+            preview: DetailZoomContainerView,
+            feedback: DetailSwipeFeedback,
+            twoFingerCommits: () -> [Rating],
+            singleFingerCommits: () -> [Rating]
+        ) {
+            let preview = DetailZoomContainerView(
+                frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+            preview.setImage(try testPixels(gray: 0))
+            let region = DetailFocusRegion(
+                id: "clove.detail.region.af.0",
+                evidence: RegionSharpnessEvidence(
+                    kind: .cameraAutofocus, groupIndex: nil,
+                    region: NormalizedRegion(x: 0.4, y: 0.4, width: 0.2, height: 0.2),
+                    score: RegionSharpnessScore(
+                        tenengradMeanSquare: 1, sampledPixels: 64, sampledWidth: 8, sampledHeight: 8
+                    ),
+                    unavailableBecause: nil))
+            preview.setFocusRegions([region])
+            preview.setNeedsLayout()
+            preview.layoutIfNeeded()
+            preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
+            let feedback = DetailSwipeFeedback()
+            preview.feedback = feedback
+            preview.currentRating = .unrated
+            var twoFinger: [Rating] = []
+            var singleFinger: [Rating] = []
+            preview.onTwoFingerMarkingSwipe = { twoFinger.append($0) }
+            preview.onMarkingSwipe = { singleFinger.append($0) }
+            return (preview, feedback, { twoFinger }, { singleFinger })
+        }
+
+        // Parallel two-finger upward swipe recognizes, previews, and commits on first finger lift.
+        do {
+            let context = try makeZoomedPreview()
+            let preview = context.preview
+            let feedback = context.feedback
+            let scroll = try #require(preview.subviews.first as? UIScrollView)
+            let scrollPan = scroll.panGestureRecognizer
+            let scrollPinch = try #require(scroll.pinchGestureRecognizer)
+            let twoFingerSwipe = preview.twoFingerSwipeRecognizer
+            #expect(twoFingerSwipe.isEnabled)
+
+            // While zoomed in default mode, two-finger marking requires priority over scroll pinch/pan
+            // and never runs simultaneously with them.
+            #expect(
+                preview.gestureRecognizer(twoFingerSwipe, shouldBeRequiredToFailBy: scrollPinch))
+            #expect(preview.gestureRecognizer(twoFingerSwipe, shouldBeRequiredToFailBy: scrollPan))
+            #expect(
+                !preview.gestureRecognizer(
+                    twoFingerSwipe, shouldRecognizeSimultaneouslyWith: scrollPinch))
+            #expect(
+                !preview.gestureRecognizer(
+                    twoFingerSwipe, shouldRecognizeSimultaneouslyWith: scrollPan))
+
+            // Focus region controls allow the zoomed two-finger swipe to start over them.
+            if let control = findFocusControl(in: preview) {
+                let regionTouch = DetailMutableTouch(view: control, location: control.center)
+                #expect(preview.gestureRecognizer(twoFingerSwipe, shouldReceive: regionTouch))
+            }
+
+            let touch1 = DetailMutableTouch(view: preview, location: CGPoint(x: 150, y: 400))
+            let touch2 = DetailMutableTouch(view: preview, location: CGPoint(x: 230, y: 400))
+            let event = UIEvent()
+            twoFingerSwipe.touchesBegan([touch1, touch2], with: event)
+            #expect(twoFingerSwipe.state == .possible)
+
+            touch1.locationPoint = CGPoint(x: 150, y: 380)
+            touch2.locationPoint = CGPoint(x: 230, y: 380)
+            twoFingerSwipe.touchesMoved([touch1, touch2], with: event)
+            #expect(twoFingerSwipe.state == .began)
+            #expect(preview.gestureRecognizerShouldBegin(twoFingerSwipe))
+            preview.handleTwoFingerMarkingSwipe(twoFingerSwipe)
+            #expect(feedback.isShowing)
+
+            touch1.locationPoint = CGPoint(x: 150, y: 200)
+            touch2.locationPoint = CGPoint(x: 230, y: 200)
+            twoFingerSwipe.touchesMoved([touch1, touch2], with: event)
+            #expect(twoFingerSwipe.state == .changed)
+            preview.handleTwoFingerMarkingSwipe(twoFingerSwipe)
+
+            // First finger lift immediately finishes the gesture without waiting for the second.
+            twoFingerSwipe.touchesEnded([touch1], with: event)
+            #expect(twoFingerSwipe.state == .ended)
+            preview.handleTwoFingerMarkingSwipe(twoFingerSwipe)
+            #expect(context.twoFingerCommits().count == 1)
+            #expect(context.twoFingerCommits().first != .unrated)
+            #expect(context.singleFingerCommits().isEmpty)
+            #expect(!feedback.isShowing)
+        }
+
+        // Pinch (opposite / diverging touches) immediately fails and never rates.
+        do {
+            let context = try makeZoomedPreview()
+            let twoFingerSwipe = context.preview.twoFingerSwipeRecognizer
+            let pinch1 = DetailMutableTouch(
+                view: context.preview, location: CGPoint(x: 160, y: 300))
+            let pinch2 = DetailMutableTouch(
+                view: context.preview, location: CGPoint(x: 220, y: 300))
+            let event = UIEvent()
+            twoFingerSwipe.touchesBegan([pinch1, pinch2], with: event)
+            pinch1.locationPoint = CGPoint(x: 140, y: 315)
+            pinch2.locationPoint = CGPoint(x: 240, y: 285)
+            twoFingerSwipe.touchesMoved([pinch1, pinch2], with: event)
+            #expect(twoFingerSwipe.didFailInCurrentSequence)
+            #expect(twoFingerSwipe.state == .failed || twoFingerSwipe.state == .possible)
+            context.preview.handleTwoFingerMarkingSwipe(twoFingerSwipe)
+            #expect(context.twoFingerCommits().isEmpty)
+            #expect(!context.feedback.isShowing)
+        }
+
+        // Two-finger horizontal pan fails and never rates.
+        do {
+            let context = try makeZoomedPreview()
+            let twoFingerSwipe = context.preview.twoFingerSwipeRecognizer
+            let pan1 = DetailMutableTouch(view: context.preview, location: CGPoint(x: 160, y: 300))
+            let pan2 = DetailMutableTouch(view: context.preview, location: CGPoint(x: 220, y: 300))
+            let event = UIEvent()
+            twoFingerSwipe.touchesBegan([pan1, pan2], with: event)
+            pan1.locationPoint = CGPoint(x: 190, y: 302)
+            pan2.locationPoint = CGPoint(x: 250, y: 302)
+            twoFingerSwipe.touchesMoved([pan1, pan2], with: event)
+            #expect(twoFingerSwipe.didFailInCurrentSequence)
+            #expect(twoFingerSwipe.state == .failed || twoFingerSwipe.state == .possible)
+            #expect(context.twoFingerCommits().isEmpty)
+        }
+
+        // Single-finger vertical drag while zoomed in default mode fails two-finger swipe so scroll pan runs.
+        do {
+            let context = try makeZoomedPreview()
+            let twoFingerSwipe = context.preview.twoFingerSwipeRecognizer
+            let single = DetailMutableTouch(
+                view: context.preview, location: CGPoint(x: 190, y: 300))
+            let event = UIEvent()
+            twoFingerSwipe.touchesBegan([single], with: event)
+            single.locationPoint = CGPoint(x: 190, y: 280)
+            twoFingerSwipe.touchesMoved([single], with: event)
+            #expect(twoFingerSwipe.didFailInCurrentSequence)
+            #expect(twoFingerSwipe.state == .failed || twoFingerSwipe.state == .possible)
+            #expect(context.twoFingerCommits().isEmpty)
+        }
+    }
+
+    @Test func zoomedSingleFingerAxisLockVerticalRatesAndHorizontalPansWithoutNavigating() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.setImage(try testPixels(gray: 0))
+        preview.hasPrevious = true
+        preview.hasNext = true
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+        var settings = AppSettings()
+        settings.zoomedRatingSwipe = .singleFingerAxisLock
+        preview.rules = MarkingInputRules(settings: settings)
+        preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
+
+        var commits: [Rating] = []
+        var steps = 0
+        preview.onMarkingSwipe = { commits.append($0) }
+        preview.onStep = { _ in steps += 1 }
+
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let scrollPan = scroll.panGestureRecognizer
+        let pan = try #require(
+            preview.gestureRecognizers?.compactMap { $0 as? DetailSingleFingerPanGestureRecognizer }
+                .first)
+        #expect(pan.isEnabled)
+        #expect(!preview.twoFingerSwipeRecognizer.isEnabled)
+        #expect(preview.gestureRecognizer(pan, shouldBeRequiredToFailBy: scrollPan))
+        #expect(!preview.gestureRecognizer(pan, shouldRecognizeSimultaneouslyWith: scrollPan))
+
+        // Horizontal single-finger start does not begin marking or navigation; yields to scrollView pan.
+        let horizontal = DetailTestPan()
+        horizontal.travel = CGPoint(x: -20, y: 4)
+        #expect(!preview.gestureRecognizerShouldBegin(horizontal))
+        #expect(steps == 0)
+
+        // Two touches immediately fail DetailSingleFingerPanGestureRecognizer so pinch does not stall.
+        let t1 = DetailMutableTouch(view: preview, location: CGPoint(x: 150, y: 300))
+        let t2 = DetailMutableTouch(view: preview, location: CGPoint(x: 230, y: 300))
+        pan.touchesBegan([t1, t2], with: UIEvent())
+        #expect(pan.didFailForMultiTouch)
+        #expect(pan.state == .failed || pan.state == .possible)
+
+        // Vertical single-finger start begins marking and commits rating on release.
+        let verticalStart = CGPoint(x: 195, y: 380)
+        let vertical = DetailTestPan()
+        vertical.locationPoint = verticalStart
+        _ = preview.gestureRecognizer(
+            pan, shouldReceive: DetailMutableTouch(view: preview, location: verticalStart))
+        vertical.travel = CGPoint(x: 2, y: -20)
+        #expect(preview.gestureRecognizerShouldBegin(vertical))
+        preview.handleMarkingPan(vertical)
+        vertical.sampleState = .changed
+        vertical.locationPoint = CGPoint(x: 195, y: 240)
+        vertical.travel = CGPoint(x: 2, y: -140)
+        preview.handleMarkingPan(vertical)
+        vertical.sampleState = .ended
+        preview.handleMarkingPan(vertical)
+        #expect(commits.count == 1)
+        #expect(commits.first != .unrated)
+        #expect(steps == 0)
+    }
+
+    @Test func zoomedRatingSwipeAutoAdvancesAndReturnsToFitInDetailScreen() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let store = SettingsStore.sample
+        store.update {
+            $0.zoomedRatingSwipe = .twoFinger
+            $0.keepZoom.inDetail = false
+            $0.autoAdvance.destination = .nextPhoto
+            $0.autoAdvance.triggers.rating = true
+        }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        // Use standalone consecutive photos (MMQ02682, MMQ02683, MMQ02684) so auto-advance steps
+        // cleanly forward outside burst-2678.
+        let first = photos[4].id
+        let second = photos[5].id
+        let third = photos[6].id
+        browsing.openPhoto(first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor {
+            source.prefetched.last?.current.photo == first && source.delivered.contains(.screenRAW)
+        }
+        let preview = try #require(findPreview(in: window))
+        preview.onDoubleTap?(.center)
+        try await waitFor { preview.isZoomed && preview.twoFingerMarkingSwipeIsEnabled }
+
+        // Zoomed two-finger rating swipe commits rating, auto-advances, and returns to fit.
+        let twoFinger = preview.twoFingerSwipeRecognizer
+        let t1 = DetailMutableTouch(view: preview, location: CGPoint(x: 140, y: 420))
+        let t2 = DetailMutableTouch(view: preview, location: CGPoint(x: 240, y: 420))
+        let event = UIEvent()
+        twoFinger.touchesBegan([t1, t2], with: event)
+        t1.locationPoint = CGPoint(x: 140, y: 390)
+        t2.locationPoint = CGPoint(x: 240, y: 390)
+        twoFinger.touchesMoved([t1, t2], with: event)
+        preview.handleTwoFingerMarkingSwipe(twoFinger)
+        t1.locationPoint = CGPoint(x: 140, y: 240)
+        t2.locationPoint = CGPoint(x: 240, y: 240)
+        twoFinger.touchesMoved([t1, t2], with: event)
+        preview.handleTwoFingerMarkingSwipe(twoFinger)
+        twoFinger.touchesEnded([t1, t2], with: event)
+        preview.handleTwoFingerMarkingSwipe(twoFinger)
+
+        #expect(browsing.shownMarks(for: first).rating != .unrated)
+        try await waitFor { browsing.state.currentPhoto == second && !preview.isZoomed }
+
+        // Switch to single-finger axis lock while zoomed and verify rating + auto-advance + fit reset.
+        store.update { $0.zoomedRatingSwipe = .singleFingerAxisLock }
+        try await waitFor { source.prefetched.last?.current.photo == second }
+        preview.onDoubleTap?(.center)
+        try await waitFor { preview.isZoomed && preview.markingPanIsEnabled }
+
+        let pan = try #require(
+            preview.gestureRecognizers?.compactMap { $0 as? DetailSingleFingerPanGestureRecognizer }
+                .first)
+        let singleTouch = DetailMutableTouch(view: preview, location: CGPoint(x: 195, y: 420))
+        _ = preview.gestureRecognizer(pan, shouldReceive: singleTouch)
+        let testPan = DetailTestPan()
+        testPan.locationPoint = CGPoint(x: 195, y: 400)
+        testPan.travel = CGPoint(x: 0, y: -20)
+        try #require(preview.gestureRecognizerShouldBegin(testPan))
+        preview.handleMarkingPan(testPan)
+        testPan.sampleState = .changed
+        testPan.locationPoint = CGPoint(x: 195, y: 240)
+        testPan.travel = CGPoint(x: 0, y: -180)
+        preview.handleMarkingPan(testPan)
+        testPan.sampleState = .ended
+        preview.handleMarkingPan(testPan)
+
+        #expect(browsing.shownMarks(for: second).rating != .unrated)
+        try await waitFor { browsing.state.currentPhoto == third && !preview.isZoomed }
+    }
+
     private func testPixels(gray: CGFloat) throws -> CGImage {
         let context = try #require(
             CGContext(
@@ -667,6 +1009,14 @@ struct DetailDisplayPresentationTests {
         }
         return nil
     }
+
+    private func findFocusControl(in view: UIView) -> DetailFocusRegionControl? {
+        if let control = view as? DetailFocusRegionControl { return control }
+        for child in view.subviews {
+            if let control = findFocusControl(in: child) { return control }
+        }
+        return nil
+    }
 }
 
 @MainActor
@@ -684,6 +1034,7 @@ private final class RefusedPlaceholderThumbnails: GridThumbnailSource {
 @MainActor
 private final class DetailTestPan: UIPanGestureRecognizer {
     var travel: CGPoint = .zero
+    var locationPoint: CGPoint?
     var sampleState: UIGestureRecognizer.State = .began
 
     override var state: UIGestureRecognizer.State {
@@ -692,5 +1043,27 @@ private final class DetailTestPan: UIPanGestureRecognizer {
     }
 
     override func translation(in view: UIView?) -> CGPoint { travel }
+    override func location(in view: UIView?) -> CGPoint {
+        locationPoint ?? super.location(in: view)
+    }
     override func velocity(in view: UIView?) -> CGPoint { .zero }
+}
+
+@MainActor
+private final class DetailMutableTouch: UITouch {
+    private weak var targetView: UIView?
+    var locationPoint: CGPoint
+
+    init(view: UIView, location: CGPoint) {
+        self.targetView = view
+        self.locationPoint = location
+        super.init()
+    }
+
+    override var view: UIView? { targetView }
+
+    override func location(in view: UIView?) -> CGPoint {
+        guard let targetView, let view, view !== targetView else { return locationPoint }
+        return targetView.convert(locationPoint, to: view)
+    }
 }

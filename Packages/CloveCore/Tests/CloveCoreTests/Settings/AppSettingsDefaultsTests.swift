@@ -11,6 +11,7 @@ import CloveCore
     #expect(settings.autoAdvance.triggers.reject)
     #expect(!settings.autoAdvance.triggers.colourLabel)
     #expect(settings.doubleTap == .zoom)
+    #expect(settings.zoomedRatingSwipe == .twoFinger)
     #expect(!settings.keepZoom.inDetail)
     #expect(!settings.extendedColourLabelsEnabled)
     #expect(settings.rejectsFolderName == .defaultFolderName)
@@ -28,6 +29,7 @@ import CloveCore
     #expect(MarkKind.allCases == [.rating, .reject, .colourLabel])
     #expect(AutoAdvanceDestination.allCases == [.stay, .nextPhoto, .nextUnmarkedPhoto])
     #expect(DoubleTapBehaviour.allCases == [.zoom, .off])
+    #expect(ZoomedRatingSwipe.allCases == [.twoFinger, .singleFingerAxisLock])
     #expect(GridGroupDisplay.allCases == [.expanded, .collapsed])
     #expect(CloveTheme.allCases.first == .light)
     #expect(ThemeAppearance.allCases == [.light, .dark])
@@ -44,6 +46,7 @@ import CloveCore
 
 @Test func settingsAreSendableValues() {
     requireSendable(AppSettings.self)
+    requireSendable(ZoomedRatingSwipe.self)
     requireSendable(EnabledRatings.self)
     requireSendable(AutoAdvance.self)
     requireSendable(AutoAdvanceTriggers.self)

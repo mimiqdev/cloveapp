@@ -10,6 +10,7 @@ import CloveCore
             "enabledRatings",
             "autoAdvance",
             "doubleTap",
+            "zoomedRatingSwipe",
             "keepZoom",
             "extendedColourLabelsEnabled",
             "rejectsFolderName",

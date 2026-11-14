@@ -1,3 +1,5 @@
+import Foundation
+
 /// Starting values for continuous marking, in points and seconds on every device.
 /// Tune these on an iPhone; release has no momentum and holding never changes the stage.
 public struct MarkingSwipeRules: Hashable, Sendable {
@@ -16,10 +18,85 @@ public struct MarkingSwipeRules: Hashable, Sendable {
     }
 
     public func beginsSwipe(
-        horizontalTravel: Double, verticalTravel: Double, isZoomed: Bool, gesturesEnabled: Bool
+        horizontalTravel: Double, verticalTravel: Double, isZoomed: Bool, gesturesEnabled: Bool,
+        zoomedRatingSwipe: ZoomedRatingSwipe = .twoFinger
     ) -> Bool {
-        gesturesEnabled && !isZoomed && abs(verticalTravel) > 0
+        guard gesturesEnabled else { return false }
+        if isZoomed && zoomedRatingSwipe != .singleFingerAxisLock {
+            return false
+        }
+        return abs(verticalTravel) > 0
             && abs(verticalTravel) >= abs(horizontalTravel) * verticalToHorizontalRatio
+    }
+}
+
+/// Pure disambiguation between a two-finger vertical rating swipe and a pinch or pan while zoomed.
+public enum ZoomedTwoFingerSwipeRules {
+    /// Minimum finger movement or relative spread (points) before classifying a two-touch drag.
+    public static let decisionTravel: Double = 8
+
+    /// Maximum relative separation change relative to shared vertical movement (`|meanY|`).
+    public static let maximumSpreadRatio: Double = 0.7
+
+    /// Minimum fraction of the faster finger's vertical motion the slower finger must share.
+    public static let minimumCohesionRatio: Double = 0.35
+
+    /// Minimum vertical travel (points) both touches must contribute so anchored pinches fail.
+    public static let minimumPerTouchVerticalTravel: Double = 4
+
+    public struct TouchDelta: Hashable, Sendable {
+        public let horizontal: Double
+        public let vertical: Double
+
+        public init(horizontal: Double, vertical: Double) {
+            self.horizontal = horizontal
+            self.vertical = vertical
+        }
+    }
+
+    public enum Decision: Hashable, Sendable {
+        case undecided
+        case swipe
+        case pinchOrOther
+    }
+
+    public static func classify(
+        first: TouchDelta,
+        second: TouchDelta,
+        verticalToHorizontalRatio: Double = MarkingSwipeRules.standard.verticalToHorizontalRatio
+    ) -> Decision {
+        let travel1 = hypot(first.horizontal, first.vertical)
+        let travel2 = hypot(second.horizontal, second.vertical)
+        let spread = hypot(second.horizontal - first.horizontal, second.vertical - first.vertical)
+        guard max(travel1, travel2, spread) >= decisionTravel else {
+            return .undecided
+        }
+        guard first.vertical != 0, second.vertical != 0,
+            (first.vertical > 0) == (second.vertical > 0)
+        else {
+            return .pinchOrOther
+        }
+        let absY1 = abs(first.vertical)
+        let absY2 = abs(second.vertical)
+        guard min(absY1, absY2) >= minimumPerTouchVerticalTravel,
+            min(absY1, absY2) >= max(absY1, absY2) * minimumCohesionRatio
+        else {
+            return .pinchOrOther
+        }
+        guard absY1 >= abs(first.horizontal) * verticalToHorizontalRatio,
+            absY2 >= abs(second.horizontal) * verticalToHorizontalRatio
+        else {
+            return .pinchOrOther
+        }
+        let meanX = (first.horizontal + second.horizontal) / 2
+        let meanY = (first.vertical + second.vertical) / 2
+        guard abs(meanY) > 0,
+            abs(meanY) >= abs(meanX) * verticalToHorizontalRatio,
+            spread <= abs(meanY) * maximumSpreadRatio
+        else {
+            return .pinchOrOther
+        }
+        return .swipe
     }
 }
 
