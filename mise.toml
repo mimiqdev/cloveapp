@@ -24,6 +24,10 @@ run = "swift format format --in-place --recursive --configuration .swift-format 
 description = "Run CloveCore package tests on macOS"
 run = "swift test --package-path Packages/CloveCore"
 
+[tasks.test-focusmeta]
+description = "Run the vendored focusmeta package tests on macOS (private-sample tests skip when unset)"
+run = "swift test --package-path Packages/CloveFocusMetadata"
+
 [tasks.test-imaging]
 description = "Run CloveImaging package tests on macOS"
 run = "swift test --package-path Packages/CloveImaging"

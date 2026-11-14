@@ -66,3 +66,26 @@ supplies birth time, the modification-only case uses the real generated file's
 modification date through a file-date provider seam that omits creation time.
 The serial timing test reports 30 reads across three passes; it has no speed
 threshold, cache flush, or device-performance claim.
+
+## Camera autofocus regions
+
+`CloveImaging.AutofocusMetadataReader` locates camera AF regions for the sharpness
+analysis. It reads ImageIO's property dictionaries first: `{ExifAux}.AFInfo` (Fujifilm,
+Panasonic; corner + size tuples) and `{Exif}.SubjectArea` (Apple; center + size in
+pixels). Those shapes are proven against the repository's fixtures and are the only
+coordinate layouts interpreted on that route.
+
+Sony records AF data in private maker notes ImageIO never exposes, so when both property
+paths report missing the reader re-reads the file with the vendored
+`CloveFocusMetadata` package (focusmeta; see
+[docs/decisions/focusmeta-integration.md](decisions/focusmeta-integration.md)), which
+parses the Sony blocks directly and returns display-space geometry that maps into the
+same normalized region type. The fallback runs inside the analysis's metadata stage on
+the image-work executor, never on the main actor. Orientation is handled inside
+focusmeta; the bridge applies no rotation of its own, and synthetic tests pin the
+agreement with Clove's orientation map for all eight EXIF values.
+
+Unavailable answers keep the evidence contract: whatever focusmeta could not verify —
+a missing Sony focus record, another vendor's raw observations, an unrecognized
+container — is reported through `AutofocusMetadataEvidence` as an inspected path with
+the library's conclusion, never as silence and never as a guessed region.
