@@ -171,7 +171,10 @@ struct DetailMarkingView: View {
             .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
                 await loadPreview(for: photo)
             }
-            .task(id: photo.id) {
+            .task(
+                id: DetailFocusTrigger(
+                    photo: photo.id, showsFocusRegions: browsing.showsFocusRegions)
+            ) {
                 await loadFocusRegions(for: photo)
             }
             .onDisappear {
@@ -695,6 +698,10 @@ struct DetailMarkingView: View {
     private func loadFocusRegions(for photo: GridPhoto) async {
         let analysisID = UUID()
         focusAnalysisID = analysisID
+        guard browsing.showsFocusRegions else {
+            focusRegionState = DetailFocusRegionState()
+            return
+        }
         focusRegionState.begin(for: photo.id)
         guard let source = images as? DetailRegionSharpnessSource else {
             focusRegionState.finish(nil, for: photo.id)
@@ -727,6 +734,12 @@ struct DetailMarkingView: View {
     /// and shown as its own state. The neighbours' previews are prefetched after the photo's own
     /// pixels are on screen, so a swipe to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
+        let interactiveToken = (images as? DetailRegionSharpnessSource)?.beginInteractiveRender()
+        defer {
+            if let interactiveToken {
+                (images as? DetailRegionSharpnessSource)?.endInteractiveRender(interactiveToken)
+            }
+        }
         let arrivalID = PerformanceSignpost.detailArrival.makeSignpostID()
         var screenArrivalInterval: OSSignpostIntervalState? = PerformanceSignpost.detailArrival
             .beginInterval("DetailArrivalToScreen", id: arrivalID)
@@ -1330,6 +1343,12 @@ private struct DetailTapPickerDismissTrigger: Equatable {
 private struct DetailDisplayOrder: Hashable {
     let photo: PhotoIdentity
     let order: [PhotoIdentity]
+}
+
+/// Focus region loading starts only for the active photo when the overlay is enabled.
+private struct DetailFocusTrigger: Hashable {
+    let photo: PhotoIdentity
+    let showsFocusRegions: Bool
 }
 
 /// The first preview's state, so loading, failure and success never look alike (PRD P0-04).

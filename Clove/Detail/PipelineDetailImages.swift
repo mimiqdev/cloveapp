@@ -85,9 +85,12 @@ final class PipelineDetailImages: DetailImageSource {
         navigationGeneration += 1
         let generation = navigationGeneration
         activeWindow = window
-        await pipeline.beginNavigation(generation)
+        let current = sources(for: window.current.photo)
+        let keptURLs = Set(
+            [current?.raw, current?.jpeg, current?.heif].compactMap { $0?.standardizedFileURL })
+        await pipeline.beginNavigation(generation, keepingAnalysisFor: keptURLs)
         guard !Task.isCancelled, activeWindow == window, generation == navigationGeneration,
-            let current = sources(for: window.current.photo)
+            let current
         else { return }
         _ = await admitted.image { [pipeline] in
             guard !Task.isCancelled,
@@ -256,6 +259,15 @@ extension PipelineDetailImages: DetailRegionSharpnessSource {
             await regionScheduler.submit(nearbyRequests, priority: .nearby)
             return await analysis
         }
+    }
+
+    func beginInteractiveRender() -> UUID? {
+        regionScheduler.beginInteractiveAcquisitionPause()
+    }
+
+    func endInteractiveRender(_ token: UUID?) {
+        guard let token else { return }
+        regionScheduler.endInteractiveAcquisitionPause(token)
     }
 
     func closeRegionAnalysis() async {

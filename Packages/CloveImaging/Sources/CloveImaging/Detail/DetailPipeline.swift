@@ -123,10 +123,18 @@ public actor DetailPipeline {
 
     /// The app reserves arrival ownership before any file-system work. An older
     /// arrival cannot reclaim ownership after a slow revision read or actor hop.
-    public func beginNavigation(_ generation: UInt64) {
+    public func beginNavigation(_ generation: UInt64, keepingAnalysisFor urls: Set<URL> = []) {
         guard !closed, generation > navigationGeneration else { return }
         navigationGeneration = generation
-        for job in Array(jobs.values) where !isRunningScreen(job) && job.priority != .analysis {
+        let kept = Set(urls.map(\.standardizedFileURL))
+        for job in Array(jobs.values) where !isRunningScreen(job) {
+            if job.priority == .analysis,
+                let primary = (job.request.raw ?? job.request.jpeg ?? job.request.heif)?.url
+                    .standardizedFileURL,
+                kept.contains(primary)
+            {
+                continue
+            }
             cancel(job.id)
         }
         latest = latest.filter { jobs[$0.value] != nil }
@@ -343,6 +351,7 @@ public actor DetailPipeline {
 
     private func nextIndex(lane: Lane) -> Int? {
         queue.firstIndex { jobs[$0]?.lane == lane && jobs[$0]?.priority == .visible }
+            ?? queue.firstIndex { jobs[$0]?.lane == lane && jobs[$0]?.priority == .prefetch }
             ?? queue.firstIndex { jobs[$0]?.lane == lane }
     }
 
