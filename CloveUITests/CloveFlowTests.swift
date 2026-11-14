@@ -481,17 +481,24 @@ final class CloveFlowTests: XCTestCase {
         // The fit animation restores the chrome after the double tap returns, so this reads
         // the observed state instead of asserting one immediate snapshot.
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
-        // The centre single tap waits for the double-tap recognizer to fail, after tap returns.
+        // Single taps anywhere (centre or outer edges) toggle chrome after waiting for double-tap
+        // and never navigate.
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
-        centre.tap()
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         rate(4, in: app)
         // A mark waits out the advance pause before the file name changes. On a loaded runner
         // one accessibility query can consume most of a short window while the app is already
         // correct (#203), so this boundary keeps the 10-second budget the browsing flow uses.
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName, timeout: 10))
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
+        preview.swipeRight()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertTrue(String(describing: capsule.value).contains("4"))
         for (side, horizontalStart, nextPhoto) in [
@@ -574,7 +581,7 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertFalse(glyph.exists)
             reject.tap()
             XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
-            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
+            preview.swipeRight()
             XCTAssertEqual(preview.label, "MMQ02680.ARW, Rejected")
             let rejectedCorner = try rejectGlyphPixels(in: preview)
             XCTAssertNotEqual(rejectedCorner, unmarkedCorner)
@@ -602,7 +609,7 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
             reject.tap()
             XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
-            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
+            preview.swipeRight()
             XCTAssertEqual(preview.label, "MMQ02680.ARW")
             XCTAssertFalse(glyph.exists)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), unmarkedCorner)
@@ -718,11 +725,17 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
         XCTAssertFalse(element(app, "clove.detail.info").exists)
+        // While zoomed, single taps near the edges and horizontal swipes do not navigate (#252).
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+        preview.swipeLeft()
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
         XCTAssertEqual(fileName.label, "MMQ02679.ARW")
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
         XCTAssertFalse(element(app, "clove.detail.info").exists)
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
+        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertTrue(element(app, "clove.detail.info").exists)
     }
@@ -1075,7 +1088,7 @@ final class CloveFlowTests: XCTestCase {
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
             element(app, "clove.detail.capsule.reject").tap()
             XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
-            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
+            preview.swipeRight()
             XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
             capture("detail-rejected-\(theme)")
             element(app, "clove.nav.back").tap()
@@ -1549,7 +1562,7 @@ final class CloveFlowTests: XCTestCase {
         member.tap()
         XCTAssertTrue(waitForLabel("MMQ02698.ARW", fileName))
         let preview = element(app, "clove.detail.preview")
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        preview.swipeLeft()
         XCTAssertTrue(waitForLabel("MMQ02699.ARW", fileName))
         let afterGroup = element(app, "clove.detail.filmstrip.mmq02699")
         XCTAssertTrue(
@@ -1601,7 +1614,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(eye.waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
 
-        // Double-tapping the photo body away from the AF rectangle still centres 100% on AF.
+        // Double-tapping the photo body away from the AF rectangle (including near the edges, #252)
+        // still centres 100% on AF; a second double-tap anywhere returns to fit.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).doubleTap()
         XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
         XCTAssertTrue(
@@ -1614,6 +1628,17 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(zoom.label.hasSuffix("100%"))
         XCTAssertTrue(eye.waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
+
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
+            "Double-tap near the edge should zoom on the preferred region rather than navigate")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).doubleTap()
+        XCTAssertFalse(zoom.label.hasSuffix("100%"))
+        XCTAssertTrue(eye.waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, fileName)
 
         let eyeSwipe = eye.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         eyeSwipe.press(
@@ -1660,7 +1685,7 @@ final class CloveFlowTests: XCTestCase {
         capture("detail-focus-regions-off-light")
 
         // Navigating while Off keeps regions and status suppressed.
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        preview.swipeLeft()
         XCTAssertTrue(waitForLabel("MMQ02684.ARW", element(app, "clove.detail.fileName")))
         XCTAssertEqual(toggle.value as? String, "Off")
         XCTAssertFalse(element(app, "clove.detail.region.af.0").exists)
@@ -1689,7 +1714,7 @@ final class CloveFlowTests: XCTestCase {
                 element(app, "clove.detail.region.af.0")))
         capture("detail-focus-regions-off-dark")
 
-        // Photo with no focus regions keeps tap-point double-tap zoom.
+        // Photo with no focus regions keeps tap-point double-tap zoom anywhere, including edges.
         toggle.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), toggle))
         element(app, "clove.nav.back").tap()
@@ -1705,6 +1730,13 @@ final class CloveFlowTests: XCTestCase {
             "Double-tap on a photo with no focus regions should centre on the tap point")
         preview.doubleTap()
         XCTAssertFalse(zoom.label.hasSuffix("100%"))
+
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).doubleTap()
+        XCTAssertFalse(zoom.label.hasSuffix("100%"))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
     }
 
     @MainActor

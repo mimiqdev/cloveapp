@@ -217,16 +217,4 @@ public enum DetailZoom {
             y: min(max(point.y - size.height / 2, 0), contentSize.height - size.height))
         return CGRect(origin: origin, size: size)
     }
-
-    /// Which edge zone owns a tap at `point` (PRD P0-04, PRD Detail and marking).
-    ///
-    /// The zones are the outer 18% of the preview's width on each side, the width the design's
-    /// edge hints cover (``DetailEdgeZone/edgeFraction``). A degenerate width has no edge.
-    public static func edgeZone(for point: CGPoint, in viewSize: CGSize) -> DetailEdgeZone {
-        guard viewSize.width > 0 else { return .centre }
-        let edge = viewSize.width * DetailEdgeZone.edgeFraction
-        if point.x < edge { return .previous }
-        if point.x >= viewSize.width - edge { return .next }
-        return .centre
-    }
 }

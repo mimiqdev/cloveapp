@@ -4,9 +4,8 @@ import Testing
 
 import CloveCore
 
-/// PRD P0-04 and the G1 detail row: 100% shows one image pixel per screen pixel, a zoomed
-/// viewport is centred on the tapped point and clamped to the image, and the edge zones
-/// navigate without a double-tap delay.
+/// PRD P0-04 and the G1 detail row: 100% shows one image pixel per screen pixel, and a zoomed
+/// viewport is centred on the tapped point and clamped to the image.
 @Suite("Detail zoom")
 struct DetailZoomTests {
     /// A 3000×2000 image on a 393×852 point view at 3x: fit is 393×262 points, and 100% fills
@@ -68,27 +67,6 @@ struct DetailZoomTests {
         #expect(rect == CGRect(origin: .zero, size: fitted))
     }
 
-    /// Edge-zone hits: the outer 18% of the width on each side navigates, the middle does not.
-    @Test func edgeZonesCoverTheOuterEighteenPercentOfEachSide() {
-        let view = CGSize(width: 400, height: 700)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 0, y: 350), in: view) == .previous)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 71, y: 350), in: view) == .previous)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 72, y: 350), in: view) == .centre)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 200, y: 350), in: view) == .centre)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 327, y: 350), in: view) == .centre)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 328, y: 350), in: view) == .next)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 400, y: 350), in: view) == .next)
-    }
-
-    /// The edge zone follows the width, so a wide iPad preview keeps the same proportions.
-    @Test func edgeZonesScaleWithTheViewWidth() {
-        let view = CGSize(width: 1000, height: 700)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 179, y: 350), in: view) == .previous)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 180, y: 350), in: view) == .centre)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 819, y: 350), in: view) == .centre)
-        #expect(DetailZoom.edgeZone(for: CGPoint(x: 820, y: 350), in: view) == .next)
-    }
-
     /// A view that has not been laid out answers neutral values instead of dividing by zero.
     @Test func aDegenerateViewAnswersNeutralGeometry() {
         #expect(
@@ -113,7 +91,6 @@ struct DetailZoomTests {
             DetailZoom.visibleRect(
                 centredOn: .zero, contentSize: .zero, viewSize: CGSize(width: 393, height: 852))
                 == .zero)
-        #expect(DetailZoom.edgeZone(for: .zero, in: .zero) == .centre)
     }
 
     /// The scroll view may always reach 100%, and a small image still remains inspectable.

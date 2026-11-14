@@ -67,25 +67,20 @@ final class DetailZoomProbe {
     weak var container: DetailZoomContainerView?
 }
 
-/// The detail preview: a scroll view with pinch zoom, pan, one centre double-tap and single
-/// taps on the two edges (PRD P0-04, PRD Gestures and keyboard), plus the vertical marking
-/// swipes that rate and reject (PRD P0-06, PRD Detail gestures).
+/// The detail preview: a scroll view with pinch zoom, pan, double-tap zoom everywhere, uniform
+/// single-tap chrome toggle at fit, and fit-only swipes for navigation and marking (PRD P0-04,
+/// PRD Gestures and keyboard, PRD Detail gestures).
 ///
 /// The scroll view is the system zoom container the plan names: pinch and one-finger pan are its
-/// own, the image is drawn aspect-fit in it, and the minimum scale of 1 is the fit view. The
-/// edges carry a single-tap recognizer with no failure requirement, so a tap there navigates
-/// immediately instead of waiting to see whether a double tap follows (PRD Detail and marking).
-/// The centre's presentation tap waits for its double tap, so toggling chrome cannot interrupt
-/// a focus check, and it is off while zoomed, where a tap does nothing (PRD Detail gestures).
-/// Edge taps keep their immediate navigation path.
+/// own, the image is drawn aspect-fit in it, and the minimum scale of 1 is the fit view. Single
+/// taps anywhere on the preview wait for the double-tap recognizer to fail so toggling chrome
+/// cannot interrupt a focus check, and single taps are off while zoomed, where a tap does nothing
+/// (PRD Detail gestures).
 ///
-/// A double tap on an edge is therefore two single taps: the edge belongs to navigation only,
-/// and the document states that width in ``DetailEdgeZone/edgeFraction``. Double taps while
-/// zoomed are reported to the screen, which decides between 100% and fit.
-///
-/// At fit, the container's one-finger pan locks its initial dominant axis. Horizontal drags
-/// navigate; vertical drags use the unchanged marking rules. While zoomed, only the scroll
-/// view pans. Pinch and taps retain their existing recognizers.
+/// Double taps anywhere on the preview toggle between 100% and fit (owner decision, 2026-11-14,
+/// #252). At fit, the container's one-finger pan locks its initial dominant axis: horizontal drags
+/// navigate, and vertical drags use the unchanged marking rules. While zoomed, only the scroll
+/// view pans, and pinch and double tap retain their existing recognizers.
 struct DetailZoomView: UIViewRepresentable {
     /// The pixels to show, or nil while the screen is loading or has nothing to show.
     let image: CGImage?
@@ -102,7 +97,7 @@ struct DetailZoomView: UIViewRepresentable {
     /// The zoom the screen wants, or nil to leave the view's own pinch alone.
     let command: DetailZoomCommand?
 
-    /// Whether the centre double-tap does anything (C12's `doubleTap` setting).
+    /// Whether double-tap zoom does anything (C12's `doubleTap` setting).
     let doubleTapZoomEnabled: Bool
 
     /// The current settings and initial axis split for marking.
@@ -117,10 +112,14 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports every scale the scroll view shows, for the screen's pixel-demand decision.
     let onZoomChange: (CGFloat) -> Void
 
-    /// Reports edge navigation from a tap or a completed swipe.
-    let onEdgeTap: (DetailEdgeZone) -> Void
+    /// Toggles the fit-only chrome when single-tapping anywhere on the preview.
+    var onChromeToggle: () -> Void = {}
 
-    /// Reports a double tap in the centre area, with the tapped point in unit image coordinates.
+    /// Reports a completed horizontal navigation swipe (`-1` previous, `1` next).
+    let onStep: (Int) -> Void
+
+    /// Reports a double tap anywhere on the preview, with the tapped point in unit image
+    /// coordinates.
     let onDoubleTap: (UnitPoint) -> Void
 
     /// Reports the preview value once per release; cancellation reports nothing.
@@ -152,7 +151,8 @@ struct DetailZoomView: UIViewRepresentable {
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
         view.onZoomChange = onZoomChange
-        view.onEdgeTap = onEdgeTap
+        view.onChromeToggle = onChromeToggle
+        view.onStep = onStep
         view.onDoubleTap = onDoubleTap
         view.onMarkingSwipe = onMarkingSwipe
         view.onSwipeBegin = onSwipeBegin
@@ -169,7 +169,8 @@ struct DetailZoomView: UIViewRepresentable {
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
         view.onZoomChange = onZoomChange
-        view.onEdgeTap = onEdgeTap
+        view.onChromeToggle = onChromeToggle
+        view.onStep = onStep
         view.onDoubleTap = onDoubleTap
         view.onMarkingSwipe = onMarkingSwipe
         view.onSwipeBegin = onSwipeBegin
@@ -187,8 +188,8 @@ struct DetailZoomView: UIViewRepresentable {
     }
 }
 
-/// The scroll view and its one image view, plus the page's tap zones, the marking pan and the
-/// zoom application.
+/// The scroll view and its one image view, plus the chrome tap, double-tap zoom, and the marking
+/// and navigation pan.
 @MainActor
 final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let scrollView = UIScrollView()
@@ -198,9 +199,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private var focusRegions: [DetailFocusRegion] = []
     private var inspectedFocusRegionID: String?
     private var renderedFocusRegionColours: DetailFocusRegionColours?
-    private let edgeTap = UITapGestureRecognizer()
-    private let centreDoubleTap = UITapGestureRecognizer()
-    private let centreChromeTap = UITapGestureRecognizer()
+    private let doubleTap = UITapGestureRecognizer()
+    private let chromeTap = UITapGestureRecognizer()
     private let markingPan = UIPanGestureRecognizer()
     private let haptics = MarkingSwipeHaptics()
     private var isNavigating = false
@@ -234,7 +234,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     var focusRegionColours = DetailFocusRegionColours(
         normal: .white, contrastEdge: UIColor.black.withAlphaComponent(0.45),
         selected: .systemBrown, unavailable: UIColor.white.withAlphaComponent(0.58))
-    var onEdgeTap: ((DetailEdgeZone) -> Void)?
+    var onChromeToggle: (() -> Void)?
+    var onStep: ((Int) -> Void)?
     var onDoubleTap: ((UnitPoint) -> Void)?
     var onMarkingSwipe: ((Rating) -> Void)?
     var onSwipeBegin: (() -> Void)?
@@ -270,17 +271,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         previewAccessibilityView.isUserInteractionEnabled = false
         addSubview(previewAccessibilityView)
 
-        edgeTap.delegate = self
-        centreDoubleTap.delegate = self
-        centreChromeTap.delegate = self
-        edgeTap.addTarget(self, action: #selector(handleEdgeTap))
-        centreDoubleTap.numberOfTapsRequired = 2
-        centreDoubleTap.addTarget(self, action: #selector(handleDoubleTap))
-        scrollView.addGestureRecognizer(edgeTap)
-        scrollView.addGestureRecognizer(centreDoubleTap)
-        centreChromeTap.addTarget(self, action: #selector(handleChromeTap))
-        centreChromeTap.require(toFail: centreDoubleTap)
-        scrollView.addGestureRecognizer(centreChromeTap)
+        doubleTap.delegate = self
+        chromeTap.delegate = self
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.addTarget(self, action: #selector(handleDoubleTap))
+        scrollView.addGestureRecognizer(doubleTap)
+        chromeTap.addTarget(self, action: #selector(handleChromeTap))
+        chromeTap.require(toFail: doubleTap)
+        scrollView.addGestureRecognizer(chromeTap)
 
         // The marking pan belongs to the container rather than the scroll view, so it is not one
         // of the scroll view's own gestures. One finger only: a second finger is a pinch, which
@@ -327,9 +325,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return nil
     }
 
-    /// Whether a centre tap can show or hide the chrome, which it can only at fit (PRD Detail and
-    /// marking).
-    var chromeTapIsEnabled: Bool { centreChromeTap.isEnabled }
+    /// Whether a single tap can show or hide the chrome, which it can only at fit (PRD Detail
+    /// and marking).
+    var chromeTapIsEnabled: Bool { chromeTap.isEnabled }
 
     /// Replaces the pixels without touching the zoom or the position (PRD P0-04).
     ///
@@ -377,9 +375,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return abs(firstAspect - secondAspect) / max(firstAspect, secondAspect) > 0.005
     }
 
-    /// Enables or disables the centre double-tap (C12's `doubleTap` setting).
+    /// Enables or disables the double-tap zoom gesture (C12's `doubleTap` setting).
     func setDoubleTapEnabled(_ isEnabled: Bool) {
-        centreDoubleTap.isEnabled = isEnabled
+        doubleTap.isEnabled = isEnabled
     }
 
     /// Switches the fit-only inputs off while zoomed, where a one-finger drag pans the image and a
@@ -398,7 +396,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private func updateGestureAvailability() {
         let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
         markingPan.isEnabled = !isZoomed
-        centreChromeTap.isEnabled = !isZoomed
+        chromeTap.isEnabled = !isZoomed
     }
 
     /// Applies one command exactly once (PRD P0-04).
@@ -473,7 +471,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 // vertical marking and horizontal navigation from its existing rules. Only
                 // double-tap-to-fit and that pan may start over a region.
                 return recognizer === markingPan
-                    || (recognizer === centreDoubleTap
+                    || (recognizer === doubleTap
                         && scrollView.zoomScale > DetailFitScale.tolerance)
             }
             touched = view.superview
@@ -483,14 +481,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Locks the dominant axis once. Later samples cannot switch between navigation and marking.
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
-        if recognizer === edgeTap {
-            return DetailZoom.edgeZone(for: recognizer.location(in: self), in: bounds.size)
-                != .centre
-        }
-        if recognizer === centreChromeTap {
-            return DetailZoom.edgeZone(for: recognizer.location(in: self), in: bounds.size)
-                == .centre
-        }
         guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
         guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
         let translation = pan.translation(in: self)
@@ -598,7 +588,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 width: Double(bounds.width), hasPrevious: hasPrevious, hasNext: hasNext)
             isNavigating = false
             if step != 0 {
-                onEdgeTap?(step > 0 ? .next : .previous)
+                onStep?(step)
             }
         case .cancelled, .failed:
             isNavigating = false
@@ -614,7 +604,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     @objc private func toggleChromeFromAccessibility() -> Bool {
         guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
-        onEdgeTap?(.centre)
+        onChromeToggle?()
         return true
     }
 
@@ -680,22 +670,12 @@ extension DetailZoomContainerView {
     }
 
     @objc private func handleChromeTap() {
-        guard !UIAccessibility.isVoiceOverRunning,
-            DetailZoom.edgeZone(for: centreChromeTap.location(in: self), in: bounds.size) == .centre
-        else { return }
-        onEdgeTap?(.centre)
-    }
-
-    @objc private func handleEdgeTap() {
-        let zone = DetailZoom.edgeZone(for: edgeTap.location(in: self), in: bounds.size)
-        guard zone != .centre else { return }
-        onEdgeTap?(zone)
+        guard !UIAccessibility.isVoiceOverRunning else { return }
+        onChromeToggle?()
     }
 
     @objc private func handleDoubleTap() {
-        let location = centreDoubleTap.location(in: self)
-        // The edge keeps single taps only, so a double tap there never changes the zoom.
-        guard DetailZoom.edgeZone(for: location, in: bounds.size) == .centre else { return }
+        let location = doubleTap.location(in: self)
         onDoubleTap?(imageAnchor(of: location))
     }
 
