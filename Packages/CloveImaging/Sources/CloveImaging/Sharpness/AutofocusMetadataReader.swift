@@ -5,8 +5,8 @@ import CameraFocusMetadata
 
 /// The property paths one file was inspected for, and what was found, so an unavailable answer
 /// can show its evidence instead of an unexplained empty result (#208).
-public struct AutofocusMetadataEvidence: Error, Sendable, Equatable {
-    public enum Finding: Sendable, Equatable {
+public struct AutofocusMetadataEvidence: Error, Codable, Sendable, Equatable {
+    public enum Finding: Codable, Sendable, Equatable {
         /// The path was not present in the file's properties.
         case missing
         /// The path was present but its shape was not understood; the raw description is kept.
@@ -14,7 +14,7 @@ public struct AutofocusMetadataEvidence: Error, Sendable, Equatable {
     }
 
     /// One inspected property path and what was found in it.
-    public struct Inspection: Sendable, Equatable {
+    public struct Inspection: Codable, Sendable, Equatable {
         public let path: String
         public let finding: Finding
 

@@ -8,7 +8,7 @@ import Foundation
 /// orientation applied, so a region in this space maps onto delivered pixels by scaling alone.
 /// Camera metadata is recorded in the file's unrotated storage space and is converted into this
 /// space by the metadata reader before anything else sees it (#208).
-public struct NormalizedRegion: Hashable, Sendable {
+public struct NormalizedRegion: Hashable, Codable, Sendable {
     public let x: Double
     public let y: Double
     public let width: Double
@@ -72,7 +72,7 @@ public struct NormalizedRegion: Hashable, Sendable {
 
 /// Which input produced a region: the camera's own autofocus record, or on-device face and eye
 /// localization (#208). Regions stay separate per face and per eye; they are never collapsed.
-public enum SharpnessRegionKind: String, Sendable {
+public enum SharpnessRegionKind: String, Codable, Sendable {
     case cameraAutofocus
     case face
     case eye
@@ -80,7 +80,7 @@ public enum SharpnessRegionKind: String, Sendable {
 
 /// Sharpness evidence for one region: a measurement over its pixels, never a calibrated focus
 /// percentage or a verdict (#114, #208).
-public struct RegionSharpnessScore: Hashable, Sendable {
+public struct RegionSharpnessScore: Hashable, Codable, Sendable {
     /// Mean of the squared Sobel gradient magnitude over the region's luminance, the Tenengrad
     /// measure. Larger means more local contrast; it is only comparable between regions scored
     /// by the same version of the scorer.
@@ -102,7 +102,7 @@ public struct RegionSharpnessScore: Hashable, Sendable {
 
 /// Why one located region carries no score. An explicit reason is always reported instead of a
 /// misleading measurement (#208).
-public enum RegionScoreUnavailable: String, Sendable {
+public enum RegionScoreUnavailable: String, Codable, Sendable {
     /// The region maps to fewer pixels than the scorer can measure.
     case regionTooSmall
     /// The region does not overlap the delivered pixels at all.
@@ -116,7 +116,7 @@ public enum RegionScoreUnavailable: String, Sendable {
 
 /// The failure of an image read the analysis depends on. A `staleSource` read is mapped
 /// through to every region as ``RegionScoreUnavailable/staleSource``.
-public enum RegionImageFailure: Error, Sendable {
+public enum RegionImageFailure: String, Error, Codable, Sendable {
     case cannotOpen
     case noUsablePreview
     case queueFull
@@ -126,7 +126,7 @@ public enum RegionImageFailure: Error, Sendable {
 
 /// One region's outcome: where it is, and either its sharpness evidence or the explicit reason
 /// there is none.
-public struct RegionSharpnessEvidence: Sendable {
+public struct RegionSharpnessEvidence: Equatable, Codable, Sendable {
     public let kind: SharpnessRegionKind
     /// The face a face or eye region belongs to, so results stay separate per face (#114).
     public let groupIndex: Int?
@@ -151,7 +151,7 @@ public struct RegionSharpnessEvidence: Sendable {
 }
 
 /// What one analysis path concluded when it produced no regions at all.
-public enum RegionPathUnavailable: Sendable {
+public enum RegionPathUnavailable: Equatable, Codable, Sendable {
     /// No usable camera AF coordinates. The evidence records every path that was checked.
     case noAutofocusMetadata(AutofocusMetadataEvidence)
     /// Detection ran and found no face.
@@ -162,14 +162,14 @@ public enum RegionPathUnavailable: Sendable {
     case previewFailed(RegionImageFailure)
 }
 
-public enum RegionSharpnessPathResult: Sendable {
+public enum RegionSharpnessPathResult: Equatable, Codable, Sendable {
     case regions([RegionSharpnessEvidence])
     case unavailable(RegionPathUnavailable)
 }
 
 /// Per-stage wall-clock measurements for later device benchmarking (#208). They are exposed as
 /// recorded facts; no performance claim is derived from them here.
-public struct RegionSharpnessTimings: Sendable {
+public struct RegionSharpnessTimings: Equatable, Codable, Sendable {
     /// Reading the photo's AF metadata properties.
     public let metadataRead: ContinuousClock.Duration?
     /// Reading the preview the face detection ran on.
@@ -205,7 +205,7 @@ public struct RegionSharpnessTimings: Sendable {
 
 /// One photo's local sharpness analysis: the camera-AF path and the face/eye path, each with its
 /// own regions and its own explicit unavailability (#208).
-public struct RegionSharpnessAnalysis: Sendable {
+public struct RegionSharpnessAnalysis: Equatable, Codable, Sendable {
     public let autofocus: RegionSharpnessPathResult
     public let faces: RegionSharpnessPathResult
     /// Why the shared high-resolution acquisition failed, when it did; every region of that

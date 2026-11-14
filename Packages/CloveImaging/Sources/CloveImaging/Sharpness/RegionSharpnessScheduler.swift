@@ -127,6 +127,8 @@ public actor RegionSharpnessScheduler {
     /// invalidate/drop instead of leaking until resume (#216).
     private var pausedWaiters: [SharpnessResultKey: [CheckedContinuation<Void, Never>]] = [:]
     private var closed = false
+    private var invalidationEpoch: UInt64 = 0
+    private var latestInvalidationEpoch: [URL: UInt64] = [:]
 
     // MARK: - Lifecycle
 
@@ -164,18 +166,63 @@ public actor RegionSharpnessScheduler {
 
     // MARK: - Submitting work
 
-    /// Queues photos for background analysis. Requests already running or already cached are
-    /// not queued again; an interactive priority is never lowered by a background submit
-    /// (#216: interactive and background work share valid cached results).
-    public func submit(_ requests: [RegionSharpnessRequest], priority: SharpnessWorkPriority) {
+    /// Queues photos for background analysis. Requests already running or already cached (in
+    /// memory or on disk) are not queued again; an interactive priority is never lowered by a
+    /// background submit (#216, #239).
+    public func submit(_ requests: [RegionSharpnessRequest], priority: SharpnessWorkPriority) async
+    {
         guard !closed else { return }
-        for request in requests { submit(request, priority: priority) }
+        guard results.hasDiskCache else {
+            for request in requests { submit(request, priority: priority) }
+            pump()
+            return
+        }
+        var pendingDiskChecks: [RegionSharpnessRequest] = []
+        var seenKeys: Set<SharpnessResultKey> = []
+        for request in requests {
+            let key = resultKey(for: request)
+            guard seenKeys.insert(key).inserted else { continue }
+            if results.memoryResult(for: key) != nil { continue }
+            if var existing = jobs[key] {
+                if priority < existing.priority {
+                    existing.priority = priority
+                    jobs[key] = existing
+                }
+                continue
+            }
+            pendingDiskChecks.append(request)
+        }
+        guard !pendingDiskChecks.isEmpty else {
+            pump()
+            return
+        }
+        let epoch = invalidationEpoch
+        let resultsStore = results
+        let version = parametersVersion
+        let loaded = await withTaskExecutorPreference(ImageWorkExecutor.current) {
+            pendingDiskChecks.map { request -> (RegionSharpnessRequest, RegionSharpnessAnalysis?) in
+                let key = Self.resultKey(for: request, parametersVersion: version)
+                return (request, resultsStore.diskAnalysis(for: key))
+            }
+        }
+        guard !closed else { return }
+        for (request, diskAnalysis) in loaded {
+            if wasInvalidated(request, since: epoch) { continue }
+            let key = resultKey(for: request)
+            if results.memoryResult(for: key) != nil { continue }
+            if let diskAnalysis {
+                results.storeInMemory(
+                    RegionSharpnessRecord(key: key, request: request, analysis: diskAnalysis))
+                continue
+            }
+            submit(request, priority: priority)
+        }
         pump()
     }
 
-    /// One photo's analysis at interactive priority (#216): a valid cached result returns
-    /// without new work, an in-flight analysis is joined (and promoted), and only a new photo
-    /// starts work. Returns nil when the scheduler closed or the photo was invalidated.
+    /// One photo's analysis at interactive priority (#216): a valid cached result (memory or disk)
+    /// returns without new work, an in-flight analysis is joined (and promoted), and only a new
+    /// photo starts work. Returns nil when the scheduler closed or the photo was invalidated.
     ///
     /// `onAutofocus` receives the AF path before face detection completes (#215). A current
     /// joiner gets an already-produced answer immediately or shares the eventual early
@@ -187,9 +234,29 @@ public actor RegionSharpnessScheduler {
     ) async -> RegionSharpnessAnalysis? {
         guard !closed, !Task.isCancelled else { return nil }
         let key = resultKey(for: request)
-        if let cached = results.result(for: key) {
+        if let cached = results.memoryResult(for: key) {
             onAutofocus?(cached.autofocus)
             return cached
+        }
+        if jobs[key] == nil, results.hasDiskCache {
+            let epoch = invalidationEpoch
+            let resultsStore = results
+            let diskAnalysis = await withTaskExecutorPreference(ImageWorkExecutor.current) {
+                resultsStore.diskAnalysis(for: key)
+            }
+            guard !closed, !Task.isCancelled, !wasInvalidated(request, since: epoch) else {
+                return nil
+            }
+            if let cached = results.memoryResult(for: key) {
+                onAutofocus?(cached.autofocus)
+                return cached
+            }
+            if let diskAnalysis {
+                results.storeInMemory(
+                    RegionSharpnessRecord(key: key, request: request, analysis: diskAnalysis))
+                onAutofocus?(diskAnalysis.autofocus)
+                return diskAnalysis
+            }
         }
         if jobs[key] == nil {
             submit(request, priority: .current)
@@ -214,7 +281,7 @@ public actor RegionSharpnessScheduler {
     ) async -> RegionSharpnessAnalysis? {
         await withCheckedContinuation { continuation in
             guard var job = jobs[key] else {
-                let cached = results.result(for: key)
+                let cached = results.memoryResult(for: key)
                 if let cached { onAutofocus?(cached.autofocus) }
                 continuation.resume(returning: cached)
                 return
@@ -234,7 +301,7 @@ public actor RegionSharpnessScheduler {
 
     private func submit(_ request: RegionSharpnessRequest, priority: SharpnessWorkPriority) {
         let key = resultKey(for: request)
-        if results.result(for: key) != nil { return }
+        if results.memoryResult(for: key) != nil { return }
         if var existing = jobs[key] {
             if priority < existing.priority {
                 existing.priority = priority
@@ -313,6 +380,8 @@ public actor RegionSharpnessScheduler {
     public func invalidate(sources: [URL]) {
         let files = Set(sources.map { $0.standardizedFileURL })
         guard !files.isEmpty else { return }
+        invalidationEpoch &+= 1
+        for file in files { latestInvalidationEpoch[file] = invalidationEpoch }
         results.invalidate(sources: sources)
         // Iterated over a copy: dropping mutates the same dictionary (#216).
         for (key, request) in jobs.mapValues(\.request)
@@ -512,6 +581,7 @@ public actor RegionSharpnessScheduler {
         let generation = generations[key] ?? 0
         let gate = SchedulerStageGate(key: key, scheduler: self)
         let owner = self
+        let results = results
         // Background-only jobs record AF as well: a later interactive joiner may already
         // be waiting when it lands. Only this generation may deliver to those joiners.
         let forwarder: (@Sendable (RegionSharpnessPathResult) -> Void) = { result in
@@ -522,7 +592,7 @@ public actor RegionSharpnessScheduler {
         let task = Task.detached(priority: .utility) {
             await Self.run(
                 analyzer: analyzer, gatedBy: gate, request: request, owner: self, key: key,
-                generation: generation, onAutofocus: forwarder)
+                generation: generation, results: results, onAutofocus: forwarder)
         }
         job.task = task
         jobs[key] = job
@@ -545,12 +615,31 @@ public actor RegionSharpnessScheduler {
     private static func run(
         analyzer: RegionSharpnessAnalyzer, gatedBy gate: SchedulerStageGate,
         request: RegionSharpnessRequest, owner: RegionSharpnessScheduler,
-        key: SharpnessResultKey, generation: Int,
+        key: SharpnessResultKey, generation: Int, results: RegionSharpnessResultStore,
         onAutofocus: (@Sendable (RegionSharpnessPathResult) -> Void)?
     ) async {
         let analysis = try? await analyzer.gated(by: gate).analyzeGated(
             request, onAutofocus: onAutofocus)
+        if let analysis, results.hasDiskCache,
+            let record = await owner.recordToPersist(
+                key: key, generation: generation, analysis: analysis)
+        {
+            await withTaskExecutorPreference(ImageWorkExecutor.current) {
+                results.storeOnDisk(record)
+            }
+        }
         await owner.settle(key: key, generation: generation, analysis: analysis)
+    }
+
+    /// Returns the record to persist to disk if the job is still current and its outcome is
+    /// durable; returns nil for dropped jobs or `staleSource`/contention failures.
+    private func recordToPersist(
+        key: SharpnessResultKey, generation: Int, analysis: RegionSharpnessAnalysis
+    ) -> RegionSharpnessRecord? {
+        guard !closed, generations[key] == generation, let job = jobs[key],
+            RegionSharpnessResultStore.shouldStore(analysis)
+        else { return nil }
+        return RegionSharpnessRecord(key: key, request: job.request, analysis: analysis)
     }
 
     /// Publishes one finished analysis to waiters and the store, or clears a cancelled one.
@@ -565,7 +654,7 @@ public actor RegionSharpnessScheduler {
         }
         generations.removeValue(forKey: key)
         if let analysis {
-            results.store(
+            results.storeInMemory(
                 RegionSharpnessRecord(key: key, request: job.request, analysis: analysis))
             // The engine's callback actor hop can race final settlement. Deliver to pending
             // joiners here as well before resuming them, so none misses its AF answer.
@@ -598,7 +687,17 @@ public actor RegionSharpnessScheduler {
         }
     }
 
+    private func wasInvalidated(_ request: RegionSharpnessRequest, since epoch: UInt64) -> Bool {
+        request.fileURLs.contains { (latestInvalidationEpoch[$0] ?? 0) > epoch }
+    }
+
     private func resultKey(for request: RegionSharpnessRequest) -> SharpnessResultKey {
+        Self.resultKey(for: request, parametersVersion: parametersVersion)
+    }
+
+    private nonisolated static func resultKey(
+        for request: RegionSharpnessRequest, parametersVersion: Int
+    ) -> SharpnessResultKey {
         SharpnessResultKey(
             folderSession: request.locationIdentity, photo: request.primaryURL,
             revision: request.primaryRevision, parametersVersion: parametersVersion)
