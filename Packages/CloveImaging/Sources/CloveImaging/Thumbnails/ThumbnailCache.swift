@@ -108,6 +108,8 @@ public final class ThumbnailCache: Sendable {
         }
     }
 
+    var memoryByteCount: Int { state.withLock { $0.memoryCost } }
+
     public func result(for request: ThumbnailRequest) -> ThumbnailResult? {
         for route in ThumbnailExtractor.routes(for: request) {
             let key = key(request, route: route)

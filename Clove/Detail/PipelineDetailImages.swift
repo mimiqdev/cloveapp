@@ -26,6 +26,7 @@ final class PipelineDetailImages: DetailImageSource {
     private let admitted: DetailWorkAdmission
     private let consumer = UUID()
     private let regionScheduler: RegionSharpnessScheduler
+    private let onUserActivity: (@MainActor () async -> Void)?
     private var knownRegionRequests: [PhotoIdentity: RegionSharpnessRequest] = [:]
     private var activeWindow: DetailPhotoWindow?
     private var navigationGeneration: UInt64 = 0
@@ -36,7 +37,8 @@ final class PipelineDetailImages: DetailImageSource {
         set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
         admitted: DetailWorkAdmission = .direct,
         regionScheduler: RegionSharpnessScheduler? = nil,
-        sharpnessCache: RegionSharpnessCache? = nil
+        sharpnessCache: RegionSharpnessCache? = nil,
+        onUserActivity: (@MainActor () async -> Void)? = nil
     ) {
         self.pipeline = pipeline
         self.thumbnails = thumbnails
@@ -49,6 +51,7 @@ final class PipelineDetailImages: DetailImageSource {
                     reader: DetailRegionSharpnessReading(details: pipeline)),
                 results: RegionSharpnessResultStore(
                     capacity: 512, disk: sharpnessCache))
+        self.onUserActivity = onUserActivity
     }
 
     /// Reads the shared grid cache directly, without entering the grid work queue.
@@ -78,6 +81,7 @@ final class PipelineDetailImages: DetailImageSource {
     }
 
     func prepare(_ window: DetailPhotoWindow) async {
+        await onUserActivity?()
         navigationGeneration += 1
         let generation = navigationGeneration
         activeWindow = window
@@ -95,6 +99,7 @@ final class PipelineDetailImages: DetailImageSource {
     }
 
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        await onUserActivity?()
         guard let sources = sources(for: photo) else { return .unavailable(.cannotOpen) }
         return await admitted.image { [pipeline, consumer] in
             guard let detailRequest = sources.request(for: request) else {
@@ -209,6 +214,7 @@ extension PipelineDetailImages: DetailRegionSharpnessSource {
         nearby: [PhotoIdentity],
         onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
     ) async -> RegionSharpnessAnalysis? {
+        await onUserActivity?()
         guard let current = regionRequest(for: photo) else { return nil }
         let groupPairs = group.compactMap { identity in
             regionRequest(for: identity).map { (identity, $0) }

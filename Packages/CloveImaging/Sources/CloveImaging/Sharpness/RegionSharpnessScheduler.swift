@@ -357,6 +357,8 @@ public actor RegionSharpnessScheduler {
 
     // MARK: - Pause and cancellation
 
+    var isPaused: Bool { paused }
+
     /// Stops admitting new stage entries; running entries finish. The memory-pressure and
     /// interaction handle (#216) — pair with ``resume()``.
     public func pause() { paused = true }

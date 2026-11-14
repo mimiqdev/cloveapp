@@ -169,6 +169,18 @@ final class FolderGrouping {
         await pending?.value
     }
 
+    /// Stops starting new background feature work (G1 memory pressure).
+    func pauseAnalysis() async {
+        await features.pause()
+    }
+
+    /// Resumes background feature work paused for memory pressure.
+    func resumeAnalysis() async {
+        await features.resume()
+    }
+
+    var featurePipeline: ImageFeaturePipeline { features }
+
     // MARK: - Running
 
     /// Runs step 2 and starts the background pass for the current inputs.

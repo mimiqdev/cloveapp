@@ -229,6 +229,8 @@ public actor DetailPipeline {
         cache.releaseAll()
     }
 
+    var cachedImageCount: Int { cache.imageCount }
+
     /// Waits for uncancellable reads before the folder's security scope can end.
     public func close() async {
         closed = true
