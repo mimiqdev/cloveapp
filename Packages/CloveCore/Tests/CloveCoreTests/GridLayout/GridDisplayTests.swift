@@ -208,6 +208,22 @@ struct GridCellLookupTests {
                 == .group(after.id))
     }
 
+    /// An expanded group keeps its members' own cells, so the grid holds the member on screen
+    /// in place rather than resolving it to the cover it no longer draws (owner decision, #225).
+    @Test func anExpandedMemberResolvesToItsOwnCell() {
+        let all = photos(0...2)
+        let burst = group("burst", all)
+        let grid = GridDisplay(
+            photos: all, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        let shown = Set(all.map(\.id))
+        for member in all {
+            #expect(
+                GridCellItem.cell(
+                    for: member.id, in: grid.cells, groups: [burst], shown: shown)
+                    == .photo(member.id))
+        }
+    }
+
     /// A photo the grid does not draw has no cell.
     @Test func aHiddenPhotoHasNoCell() {
         let all = photos(0...5)
@@ -222,6 +238,144 @@ struct GridCellLookupTests {
         #expect(
             GridCellItem.cell(
                 for: all[5].id, in: cells, groups: [burst], shown: shownIDs) == nil)
+    }
+}
+
+/// Owner decision, #225: the Duo's split expands the photo's group in place, so its members
+/// draw at the group's folder position while the surrounding photos and other collapsed groups
+/// keep theirs. These tests pin the runs the grid draws from, which is what the collection view
+/// turns into a header, a shared surface and cells.
+@Suite("Grid sections")
+struct GridSectionTests {
+    /// A grid without an expanded group is one run, so the iPhone, iPad and folded Duo grids keep
+    /// exactly the cells and the single run they had.
+    @Test func aPlainGridIsOneRun() {
+        let burst = group("burst-one", photos(1...2))
+        for display in [GridGroupDisplay.expanded, .collapsed] {
+            let grid = GridDisplay(photos: photos(0...3), groups: [burst], display: display)
+            #expect(grid.sections.map(\.id) == [.photos(0)])
+            #expect(grid.sections[0].cells == grid.cells)
+            #expect(grid.sections[0].expandedGroup == nil)
+        }
+    }
+
+    /// The expanded group replaces its cover, at the group's own place in the folder, with its
+    /// shown members. The photos and the other groups around it stay where they were.
+    @Test func theExpandedGroupDrawsAtItsCoverPosition() throws {
+        let all = photos(0...5)
+        let expanded = group("expanded", [all[1], all[3]])
+        let other = group("other", [all[4], all[5]])
+        let grid = GridDisplay(
+            photos: all, groups: [expanded, other], display: .collapsed,
+            expandedGroup: expanded.id)
+        #expect(
+            grid.sections.map(\.id) == [.photos(0), .group(expanded.id), .photos(1)])
+        #expect(grid.sections[0].cells.map(\.id) == [.photo(all[0].id)])
+        #expect(grid.sections[1].cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id)])
+        #expect(
+            grid.sections[2].cells.map(\.id) == [.photo(all[2].id), .group(other.id)])
+        // The expanded members carry the group's shared surface but no count badge and no
+        // cover: the run's header names the group (#225, with the grid's surface from #227).
+        #expect(
+            grid.sections[1].cells.allSatisfy {
+                $0.group?.id == expanded.id && $0.group?.showsCount == false
+                    && $0.group?.isCover == false
+            })
+        let cover = try #require(grid.sections[2].cells.last?.group)
+        #expect(cover.isCover)
+        #expect(cover.count == 2)
+    }
+
+    /// A group whose members are scattered in the folder draws as one contiguous block at its
+    /// first shown member, and the standalone photo between them follows the block. That is the
+    /// position the collapsed cover already took, so the expansion changes one cell, not the
+    /// folder's arrangement.
+    @Test func theExpandedGroupIsContiguousAtItsFirstMember() {
+        let all = photos(0...3)
+        let burst = group("burst", [all[0], all[2]])
+        let grid = GridDisplay(
+            photos: all, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        #expect(
+            grid.sections.map(\.id) == [.group(burst.id), .photos(1)])
+        #expect(
+            grid.sections[0].cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id)])
+        #expect(grid.sections[1].cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id)])
+    }
+
+    /// A filter narrows the expanded group the same way it narrows a cover: only the shown
+    /// members draw, and the run's member count is what the block can show.
+    @Test func aFilterNarrowsTheExpandedGroup() {
+        let all = photos(0...3)
+        let burst = group("burst", all)
+        let shown = [all[0], all[2], all[3]]
+        let grid = GridDisplay(
+            photos: shown, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        let run = grid.sections.first { $0.expandedGroup == burst.id }
+        #expect(run?.cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id), .photo(all[3].id)])
+        #expect(run?.cells.count == 3)
+    }
+
+    /// A group the filter hides has no cover either, so there is nothing to expand: the grid
+    /// stays one run instead of drawing an empty header.
+    @Test func aHiddenGroupIsNotExpanded() {
+        let all = photos(0...4)
+        let burst = group("burst", [all[3], all[4]])
+        let shown = Array(all[0...2])
+        let grid = GridDisplay(
+            photos: shown, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        #expect(grid.sections.map(\.id) == [.photos(0)])
+        #expect(grid.cells.map(\.id) == shown.map { .photo($0.id) })
+    }
+
+    /// An unknown key, such as a group the folder no longer publishes, expands nothing.
+    @Test func anUnknownGroupExpandsNothing() {
+        let all = photos(0...3)
+        let burst = group("burst", [all[1], all[2]])
+        let grid = GridDisplay(
+            photos: all, groups: [burst], display: .collapsed,
+            expandedGroup: GroupID(rawValue: "gone"))
+        #expect(grid.sections.map(\.id) == [.photos(0)])
+        #expect(
+            grid.cells.map(\.id) == [.photo(all[0].id), .group(burst.id), .photo(all[3].id)])
+    }
+
+    /// Expanded display already draws every member and has no cover to replace, so the split's
+    /// expansion changes nothing there.
+    @Test func expandedDisplayIgnoresTheExpansion() {
+        let burst = group("burst", photos(1...2))
+        let plain = GridDisplay(photos: photos(0...3), groups: [burst], display: .expanded)
+        let expanded = GridDisplay(
+            photos: photos(0...3), groups: [burst], display: .expanded,
+            expandedGroup: burst.id)
+        #expect(expanded.sections.map(\.id) == [.photos(0)])
+        #expect(expanded.cells == plain.cells)
+    }
+
+    /// Grouping off leaves one run with no marks, whichever group the split names.
+    @Test func groupingOffLeavesOnePlainRun() {
+        let burst = group("burst", photos(1...2))
+        let grid = GridDisplay(
+            photos: photos(0...3), groups: [burst], groupsEnabled: false, display: .collapsed,
+            expandedGroup: burst.id)
+        #expect(grid.sections.map(\.id) == [.photos(0)])
+        #expect(grid.cells.allSatisfy { $0.group == nil })
+    }
+
+    /// An empty grid keeps one run, so the collection view always has a section to draw.
+    @Test func anEmptyGridKeepsOneRun() {
+        let grid = GridDisplay(photos: [], groups: [], display: .collapsed)
+        #expect(grid.sections.map(\.id) == [.photos(0)])
+        #expect(grid.cells.isEmpty)
+    }
+
+    /// The expanded group is the only run drawn with a header, and the folder's runs never are.
+    @Test func onlyTheGroupRunNamesAGroup() {
+        let all = photos(0...4)
+        let burst = group("burst", [all[1], all[2], all[3]])
+        let grid = GridDisplay(
+            photos: all, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        #expect(grid.sections.compactMap(\.expandedGroup) == [burst.id])
+        #expect(grid.sections.filter { $0.expandedGroup == nil }.count == 2)
     }
 }
 

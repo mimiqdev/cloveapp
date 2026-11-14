@@ -1,6 +1,20 @@
 import CloveCore
 import SwiftUI
 
+/// How the Duo's photo-only strip folds the current group back into its stack (owner decision,
+/// 2026-11-13, #225). Folding changes the thumbnails alone: the photo on screen, its marks and
+/// the route stay as they are, and the stack's count badge reopens the group in place.
+struct FilmstripGroupFold {
+    /// Whether the current group draws as its stack instead of its members.
+    let isFolded: Bool
+
+    /// Folds the current group into its stack.
+    let fold: () -> Void
+
+    /// Reopens the current group's members.
+    let unfold: () -> Void
+}
+
 /// Grid-order filmstrip. The current group expands on a quiet neutral surface; other groups stay
 /// stacked. Tapping a stack jumps to the group's first photo; the group expands in place.
 ///
@@ -14,8 +28,12 @@ struct DetailFilmstrip: View {
     let open: (PhotoIdentity) -> Void
     var groups: [BrowsingGroup] = []
     var finishingAction: PillAction?
+    /// The Duo's photo-only detail only: folding leaves the photo open and the strip shows the
+    /// group's stack instead of its members (owner decision, #225).
+    var groupFold: FilmstripGroupFold?
+
     /// The width the layout reserves beside the strip's trailing edge for the marking area, or
-    /// nil for the full width.
+    /// nil for the full width (#227).
     var markingWidth: CGFloat? = nil
 
     private struct Entry: Identifiable {
@@ -23,6 +41,7 @@ struct DetailFilmstrip: View {
         let photos: [GridPhoto]
         let group: BrowsingGroup?
         let expands: Bool
+        let holdsCurrent: Bool
     }
 
     private var entries: [Entry] {
@@ -32,14 +51,18 @@ struct DetailFilmstrip: View {
         var seen: Set<GroupID> = []
         return photos.compactMap { photo in
             guard let group = byPhoto[photo.id] else {
-                return Entry(id: photo.id, photos: [photo], group: nil, expands: false)
+                return Entry(
+                    id: photo.id, photos: [photo], group: nil, expands: false,
+                    holdsCurrent: photo.id == current)
             }
             guard seen.insert(group.id).inserted else { return nil }
             let members = Set(group.members)
             let shown = photos.filter { members.contains($0.id) }
+            let holdsCurrent = current.map { members.contains($0) } ?? false
             return Entry(
                 id: photo.id, photos: shown, group: group,
-                expands: current.map { members.contains($0) } ?? false)
+                expands: holdsCurrent && !(groupFold?.isFolded ?? false),
+                holdsCurrent: holdsCurrent)
         }
     }
 
@@ -60,6 +83,19 @@ struct DetailFilmstrip: View {
                         if entry.expands {
                             HStack(spacing: 3) {
                                 ForEach(entry.photos) { photo in frame(photo) }
+                                if let groupFold {
+                                    Button(action: groupFold.fold) {
+                                        Image(systemName: "chevron.up")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(Color.clove.text.primary)
+                                            .frame(width: 20, height: 60)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Collapse group")
+                                    .accessibilityIdentifier(
+                                        "clove.detail.filmstrip.group.fold")
+                                }
                             }
                             .padding(3)
                             .background {
@@ -72,7 +108,13 @@ struct DetailFilmstrip: View {
                             .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
                         } else if let group = entry.group, let photo = entry.photos.first {
                             Button {
-                                open(photo.id)
+                                // The folded group on screen reopens in place; any other stack
+                                // opens the group at its first photo (handoff interactions.md).
+                                if entry.holdsCurrent, let groupFold {
+                                    groupFold.unfold()
+                                } else {
+                                    open(photo.id)
+                                }
                             } label: {
                                 GroupStack(peek: 4) {
                                     DetailPhotoFrame(

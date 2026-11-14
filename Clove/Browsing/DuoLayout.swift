@@ -46,6 +46,9 @@ struct DuoDetailLayout {
     var more: AnyView
     var bottom: AnyView
     var showsGrid: Bool
+    /// The group whose expansion the person folded, shared with the split's grid, so the
+    /// photo-only strip shows the same stack and folds back the same way (#225).
+    var foldedGroup: Binding<GroupID?>?
 }
 
 /// One set of semantic toolbar groups for both axes. The navigation container owns

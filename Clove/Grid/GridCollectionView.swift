@@ -17,9 +17,13 @@ import UIKit
 /// A tap opens detail without delay, because the grid adds no double-tap recognizer (PRD Grid,
 /// P0-03). A long press starts multi-select on the pressed cell, and while the selection is
 /// non-empty a tap toggles a cell instead of opening it (PRD P0-09).
+///
+/// The cells arrive as runs (``GridSection``). A run of the folder's own cells draws as it always
+/// did; the Duo's split adds one group run, which draws a header with its fold control and a
+/// shared surface behind the group's members (owner decision, 2026-11-13, #225).
 struct GridCollectionView: UIViewRepresentable {
-    /// The cells to show, in grid order (PRD P0-03, P0-11).
-    let items: [GridCellItem]
+    /// The runs to show, in grid order (PRD P0-03, P0-11).
+    let sections: [GridSection]
 
     /// The photo the browsing state is on, which the update holds in place (PRD Grid, P0-14).
     let currentPhoto: PhotoIdentity?
@@ -47,9 +51,16 @@ struct GridCollectionView: UIViewRepresentable {
     var placeholderCount = 0
     /// Duo uses six columns in the grid and two beside a focused photo.
     var columnCount: Int?
-    /// Whether the cell drawing the current photo carries its ring. The expanded Duo's
-    /// group-member pane turns this on so the person can see which member is open (#198).
+    /// Whether the cell drawing the current photo carries its ring. The expanded Duo's split
+    /// turns this on so the person can see which member is open (#225).
     var highlightsCurrentPhoto = false
+
+    /// Whether the grid keeps the photo on screen in view: the Duo's split pane follows the open
+    /// member, and its grid opens where the person left off (#225).
+    var followsCurrentPhoto = false
+
+    /// Folds the group run's expansion back into its stack (owner decision, #225).
+    var foldExpandedGroup: (GroupID) -> Void = { _ in }
 
     /// Opens one photo's detail (PRD Grid, P0-03). A single tap never waits for a second one.
     let openPhoto: (PhotoIdentity) -> Void
@@ -67,16 +78,22 @@ struct GridCollectionView: UIViewRepresentable {
         Coordinator(
             thumbnails: thumbnails, openPhoto: openPhoto, openGroup: openGroup,
             beginSelection: beginSelection, toggleSelection: toggleSelection,
-            selection: selection)
+            selection: selection, foldExpandedGroup: foldExpandedGroup)
+    }
+
+    /// What the layout needs from one run: whether it draws a group header and surface
+    /// (owner decision, #225).
+    fileprivate struct SectionPlan: Equatable {
+        let isGroup: Bool
     }
 
     func makeUIView(context: Context) -> UICollectionView {
         let coordinator = context.coordinator
-        let collectionView = UICollectionView(
-            frame: .zero,
-            collectionViewLayout: Self.makeLayout(
-                placeholderCount: { [weak coordinator] in coordinator?.placeholderCount ?? 0 },
-                columnCount: { [weak coordinator] in coordinator?.columnCount }))
+        let layout = Self.makeLayout(
+            placeholderCount: { [weak coordinator] in coordinator?.placeholderCount ?? 0 },
+            columnCount: { [weak coordinator] in coordinator?.columnCount },
+            sectionPlans: { [weak coordinator] in coordinator?.sectionPlans ?? [] })
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = context.coordinator
@@ -95,16 +112,24 @@ struct GridCollectionView: UIViewRepresentable {
         }
         context.coordinator.thumbnails = thumbnails
         context.coordinator.highlightsCurrentPhoto = highlightsCurrentPhoto
+        context.coordinator.followsCurrentPhoto = followsCurrentPhoto
+        context.coordinator.foldExpandedGroup = foldExpandedGroup
         context.coordinator.openPhoto = openPhoto
         context.coordinator.openGroup = openGroup
         context.coordinator.beginSelection = beginSelection
         context.coordinator.toggleSelection = toggleSelection
         context.coordinator.apply(
-            items: items, groups: groups, shownPhotos: shownPhotos,
+            sections: sections, groups: groups, shownPhotos: shownPhotos,
             currentPhoto: currentPhoto, selection: selection,
             sizeClass: context.environment.horizontalSizeClass,
             theme: context.environment.cloveTheme,
             isSelectingEmpty: isSelectingEmpty)
+        for case let header as GridGroupHeader in collectionView.visibleSupplementaryViews(
+            ofKind: GridGroupHeader.kind) where header.theme != context.environment.cloveTheme
+        {
+            header.theme = context.environment.cloveTheme
+            header.fold = foldExpandedGroup
+        }
         for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
             ofKind: UICollectionView.elementKindSectionFooter)
         {
@@ -124,12 +149,18 @@ struct GridCollectionView: UIViewRepresentable {
     }
 
     /// Compact keeps three columns; regular width fits tiles at a minimum of 140 points.
+    ///
+    /// A group run adds its header and its surface; a run of the folder's own cells keeps the
+    /// layout the grid always had (owner decision, #225).
     private static func makeLayout(
-        placeholderCount: @escaping () -> Int, columnCount: @escaping () -> Int?
+        placeholderCount: @escaping () -> Int, columnCount: @escaping () -> Int?,
+        sectionPlans: @escaping () -> [SectionPlan]
     )
         -> UICollectionViewCompositionalLayout
     {
-        UICollectionViewCompositionalLayout { _, environment in
+        UICollectionViewCompositionalLayout { sectionIndex, environment in
+            let plans = sectionPlans()
+            let isGroup = plans.indices.contains(sectionIndex) && plans[sectionIndex].isGroup
             let columns =
                 columnCount()
                 ?? columns(
@@ -150,19 +181,31 @@ struct GridCollectionView: UIViewRepresentable {
                 repeatingSubitem: item, count: columns)
             group.interItemSpacing = .fixed(spacing)
             let section = NSCollectionLayoutSection(group: group)
-            section.contentInsets = NSDirectionalEdgeInsets(
-                top: 0, leading: 0, bottom: spacing, trailing: 0)
+            section.contentInsets =
+                isGroup
+                ? NSDirectionalEdgeInsets(
+                    top: GridGroupRun.inset, leading: 0, bottom: GridGroupRun.inset,
+                    trailing: 0)
+                : NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: spacing, trailing: 0)
             section.interGroupSpacing = spacing
-            let unread = placeholderCount()
-            if unread > 0 {
-                let rows = ceil(Double(unread) / Double(columns))
+            if isGroup {
                 section.boundarySupplementaryItems = [
                     NSCollectionLayoutBoundarySupplementaryItem(
                         layoutSize: NSCollectionLayoutSize(
                             widthDimension: .fractionalWidth(1),
-                            heightDimension: .absolute(CGFloat(rows) * (side + spacing))),
-                        elementKind: UICollectionView.elementKindSectionFooter, alignment: .bottom)
+                            heightDimension: .absolute(GridGroupRun.headerHeight)),
+                        elementKind: GridGroupHeader.kind, alignment: .top)
                 ]
+            }
+            let unread = placeholderCount()
+            if unread > 0, sectionIndex == max(0, plans.count - 1) {
+                let rows = ceil(Double(unread) / Double(columns))
+                section.boundarySupplementaryItems.append(
+                    NSCollectionLayoutBoundarySupplementaryItem(
+                        layoutSize: NSCollectionLayoutSize(
+                            widthDimension: .fractionalWidth(1),
+                            heightDimension: .absolute(CGFloat(rows) * (side + spacing))),
+                        elementKind: UICollectionView.elementKindSectionFooter, alignment: .bottom))
             }
             return section
         }
@@ -180,7 +223,10 @@ extension GridCollectionView {
         var openGroup: (GroupID) -> Void
         var beginSelection: (GridCellItem) -> Void
         var toggleSelection: (GridCellItem) -> Void
+        var foldExpandedGroup: (GroupID) -> Void
+        var followsCurrentPhoto = false
 
+        private var sections: [GridSection] = []
         private var items: [GridCellItem] = []
         private var groups: [BrowsingGroup] = []
         private var shownPhotos: Set<PhotoIdentity> = []
@@ -191,19 +237,20 @@ extension GridCollectionView {
             let task: Task<Void, Never>
         }
 
-        private var dataSource: UICollectionViewDiffableDataSource<Int, GridCellItem.ID>?
+        private var dataSource: UICollectionViewDiffableDataSource<GridSection.ID, GridCellItem.ID>?
         private weak var collectionView: UICollectionView?
         private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
         private var theme = CloveTheme.light
         private var isSelectingEmpty = false
+        fileprivate var sectionPlans: [GridCollectionView.SectionPlan] = []
         var placeholderCount = 0
         var columnCount: Int?
         var highlightsCurrentPhoto = false
-        /// The current photo the cell registration reads when it configures a cell (#198).
+        /// The current photo the cell registration reads when it configures a cell (#225).
         private var currentPhoto: PhotoIdentity?
         /// The current photo and highlight flag the visible cells were configured with,
-        /// so moving to another member reconfigures exactly the two affected cells (#198).
+        /// so moving to another member reconfigures exactly the two affected cells (#225).
         private var drawnCurrentPhoto: PhotoIdentity?
         private var drawnHighlight = false
 
@@ -213,7 +260,8 @@ extension GridCollectionView {
             openGroup: @escaping (GroupID) -> Void,
             beginSelection: @escaping (GridCellItem) -> Void,
             toggleSelection: @escaping (GridCellItem) -> Void,
-            selection: Set<PhotoIdentity>
+            selection: Set<PhotoIdentity>,
+            foldExpandedGroup: @escaping (GroupID) -> Void
         ) {
             self.thumbnails = thumbnails
             self.openPhoto = openPhoto
@@ -221,6 +269,7 @@ extension GridCollectionView {
             self.beginSelection = beginSelection
             self.toggleSelection = toggleSelection
             self.selection = selection
+            self.foldExpandedGroup = foldExpandedGroup
         }
 
         /// Registers the cell and builds the diffable data source (PRD P0-03, P0-11).
@@ -238,21 +287,36 @@ extension GridCollectionView {
                     self?.openGroup(group)
                 }
             }
-            dataSource = UICollectionViewDiffableDataSource<Int, GridCellItem.ID>(
+            dataSource = UICollectionViewDiffableDataSource<GridSection.ID, GridCellItem.ID>(
                 collectionView: collectionView
             ) { view, indexPath, id in
                 view.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: id)
             }
             // Even an empty grid needs its section so the opening footer can be displayed.
-            var initialSnapshot = NSDiffableDataSourceSnapshot<Int, GridCellItem.ID>()
-            initialSnapshot.appendSections([0])
+            var initialSnapshot = NSDiffableDataSourceSnapshot<GridSection.ID, GridCellItem.ID>()
+            initialSnapshot.appendSections([.photos(0)])
             dataSource?.apply(initialSnapshot, animatingDifferences: false)
+            collectionView.register(
+                GridGroupHeader.self, forSupplementaryViewOfKind: GridGroupHeader.kind,
+                withReuseIdentifier: "groupHeader")
             collectionView.register(
                 GridPlaceholderFooter.self,
                 forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter,
                 withReuseIdentifier: "placeholders")
             dataSource?.supplementaryViewProvider = { [weak self] view, kind, indexPath in
                 guard let self else { return nil }
+                if kind == GridGroupHeader.kind {
+                    let header = view.dequeueReusableSupplementaryView(
+                        ofKind: kind, withReuseIdentifier: "groupHeader", for: indexPath)
+                    guard let header = header as? GridGroupHeader,
+                        self.sections.indices.contains(indexPath.section),
+                        let group = self.sections[indexPath.section].expandedGroup
+                    else { return header }
+                    header.configure(
+                        count: self.sections[indexPath.section].cells.count, group: group,
+                        theme: self.theme, fold: self.foldExpandedGroup)
+                    return header
+                }
                 let footer = view.dequeueReusableSupplementaryView(
                     ofKind: kind, withReuseIdentifier: "placeholders", for: indexPath)
                 if let footer = footer as? GridPlaceholderFooter {
@@ -273,7 +337,7 @@ extension GridCollectionView {
                     target: self, action: #selector(handleLongPress(_:))))
         }
 
-        /// Applies the cells SwiftUI handed over, holding the anchor cell's place (PRD P0-11).
+        /// Applies the runs SwiftUI handed over, holding the anchor cell's place (PRD P0-11).
         ///
         /// The anchor is measured before the snapshot changes: the cell that draws the current
         /// photo when the grid shows one, else the top visible cell. ``GridAnchorRule`` answers
@@ -283,19 +347,25 @@ extension GridCollectionView {
         /// still holds the photo, because both sides resolve the photo to its cell before the
         /// old place is measured and after the new cells arrive (PRD Grid, P0-11).
         func apply(
-            items newItems: [GridCellItem], groups newGroups: [BrowsingGroup],
+            sections newSections: [GridSection], groups newGroups: [BrowsingGroup],
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
             selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?,
             theme newTheme: CloveTheme,
             isSelectingEmpty newSelectingEmpty: Bool
         ) {
             guard let collectionView, let dataSource else { return }
+            let newItems = newSections.flatMap(\.cells)
+            let wasEmpty = items.isEmpty
             let styleChanged =
                 theme != newTheme || isSelectingEmpty != newSelectingEmpty
                 || drawnHighlight != highlightsCurrentPhoto
             let highlightMoved =
                 highlightsCurrentPhoto && drawnCurrentPhoto != currentPhoto
                 && !styleChanged
+            // The Duo's split follows the open member, and its grid opens on the photo the
+            // person left (#225).
+            let followsMoved =
+                followsCurrentPhoto && (wasEmpty || drawnCurrentPhoto != currentPhoto)
             let highlightCells = Set(
                 [drawnCurrentPhoto, currentPhoto].compactMap { $0 })
             drawnCurrentPhoto = currentPhoto
@@ -307,9 +377,15 @@ extension GridCollectionView {
                 lastSizeClass = sizeClass
                 collectionView.collectionViewLayout.invalidateLayout()
             }
+            let plans = newSections.map { SectionPlan(isGroup: $0.expandedGroup != nil) }
+            if plans != sectionPlans {
+                sectionPlans = plans
+                // A group run adds a header and a surface, which the layout bounds.
+                collectionView.collectionViewLayout.invalidateLayout()
+            }
             let before = BatchSelection(groups: groups, selection: selection)
             let after = BatchSelection(groups: newGroups, selection: newSelection)
-            guard newItems != items else {
+            guard newSections != sections else {
                 groups = newGroups
                 shownPhotos = newShownPhotos
                 selection = newSelection
@@ -318,12 +394,14 @@ extension GridCollectionView {
                     return !styleChanged && before.showsSelected(item) == after.showsSelected(item)
                         ? nil : item.id
                 }
-                guard !restyled.isEmpty else { return }
-                // Only the cells whose selection changed are redrawn, so a toggle never
-                // re-decodes a thumbnail (PRD P0-09, P0-03).
-                var snapshot = dataSource.snapshot()
-                snapshot.reconfigureItems(restyled)
-                dataSource.apply(snapshot, animatingDifferences: false)
+                if !restyled.isEmpty {
+                    // Only the cells whose selection changed are redrawn, so a toggle never
+                    // re-decodes a thumbnail (PRD P0-09, P0-03).
+                    var snapshot = dataSource.snapshot()
+                    snapshot.reconfigureItems(restyled)
+                    dataSource.apply(snapshot, animatingDifferences: false)
+                }
+                if followsMoved { follow() }
                 return
             }
 
@@ -331,15 +409,18 @@ extension GridCollectionView {
             let previousByID = itemsByID
             let held = hold(
                 currentPhoto: currentPhoto, groups: groups, shownPhotos: shownPhotos)
+            sections = newSections
             items = newItems
             groups = newGroups
             shownPhotos = newShownPhotos
             selection = newSelection
             itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
 
-            var snapshot = NSDiffableDataSourceSnapshot<Int, GridCellItem.ID>()
-            snapshot.appendSections([0])
-            snapshot.appendItems(newItems.map(\.id), toSection: 0)
+            var snapshot = NSDiffableDataSourceSnapshot<GridSection.ID, GridCellItem.ID>()
+            snapshot.appendSections(newSections.map(\.id))
+            for section in newSections {
+                snapshot.appendItems(section.cells.map(\.id), toSection: section.id)
+            }
             let changed: [GridCellItem.ID] = newItems.compactMap { item in
                 if highlightMoved && highlightCells.contains(item.photo.id) { return item.id }
                 guard let old = previousByID[item.id] else { return nil }
@@ -348,24 +429,27 @@ extension GridCollectionView {
             }
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
             dataSource.apply(snapshot, animatingDifferences: false)
+            // The Duo's split follows the open member after the anchor is restored, so a member
+            // that moved out of view comes back (#225).
+            defer { if followsMoved { follow() } }
 
             guard let held else { return }
             // The current photo may now be drawn by a different cell, such as a cover keyed by
-            // a refined group; hold that cell where the photo's old cell was.
+            // a refined group or a group run that folded back to its stack; hold that cell
+            // where the photo's old cell was.
             if held.isCurrentPhoto, let currentPhoto,
                 let cell = GridCellItem.cell(
                     for: currentPhoto, in: newItems, groups: newGroups,
-                    shown: newShownPhotos),
-                let index = newItems.firstIndex(where: { $0.id == cell })
+                    shown: newShownPhotos)
             {
-                restore(index: index, offset: held.offset)
+                restore(cell, offset: held.offset)
                 return
             }
             guard
                 let index = GridAnchorRule.newIndex(
                     of: held.item, previous: previousIDs, in: newItems.map(\.id))
             else { return }
-            restore(index: index, offset: held.offset)
+            restore(newItems[index].id, offset: held.offset)
         }
 
         /// One cell tapped: multi-select toggles it, a collapsed cover opens its group, and any
@@ -458,8 +542,32 @@ extension GridCollectionView {
         }
 
         private func item(at indexPath: IndexPath) -> GridCellItem? {
-            guard items.indices.contains(indexPath.item) else { return nil }
-            return items[indexPath.item]
+            guard sections.indices.contains(indexPath.section) else { return nil }
+            let cells = sections[indexPath.section].cells
+            guard cells.indices.contains(indexPath.item) else { return nil }
+            return cells[indexPath.item]
+        }
+
+        /// The place one cell draws in, across the grid's runs.
+        private func indexPath(of id: GridCellItem.ID) -> IndexPath? {
+            for (section, run) in sections.enumerated() {
+                if let item = run.cells.firstIndex(where: { $0.id == id }) {
+                    return IndexPath(item: item, section: section)
+                }
+            }
+            return nil
+        }
+
+        /// Keeps the photo on screen in view, so the Duo's split pane always shows the open
+        /// member and its grid reopens on the photo the person left (#225).
+        private func follow() {
+            guard followsCurrentPhoto, let collectionView, let currentPhoto,
+                let cell = GridCellItem.cell(
+                    for: currentPhoto, in: items, groups: groups, shown: shownPhotos),
+                let indexPath = indexPath(of: cell),
+                !collectionView.indexPathsForVisibleItems.contains(indexPath)
+            else { return }
+            collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
         }
 
         /// Whether the grid is in multi-select, which a non-empty selection means (PRD P0-09).
@@ -494,18 +602,16 @@ extension GridCollectionView {
                 return HeldPlace(item: cell, offset: offset, isCurrentPhoto: true)
             }
             guard let first = collectionView.indexPathsForVisibleItems.min(),
-                items.indices.contains(first.item)
+                let anchor = item(at: first)?.id
             else { return nil }
-            let anchor = items[first.item].id
             return HeldPlace(
                 item: anchor, offset: viewportOffset(of: anchor), isCurrentPhoto: false)
         }
 
         /// How far one cell sits below the visible area's top edge, negative when above it.
         private func viewportOffset(of id: GridCellItem.ID) -> CGFloat? {
-            guard let collectionView, let index = items.firstIndex(where: { $0.id == id }),
-                let attributes = collectionView.layoutAttributesForItem(
-                    at: IndexPath(item: index, section: 0))
+            guard let collectionView, let indexPath = indexPath(of: id),
+                let attributes = collectionView.layoutAttributesForItem(at: indexPath)
             else { return nil }
             return attributes.frame.minY - collectionView.contentOffset.y
         }
@@ -514,13 +620,12 @@ extension GridCollectionView {
         ///
         /// The offset is clamped to the scrollable range, so a photo near the folder's start or
         /// end keeps as much of its place as the grid can show.
-        private func restore(index: Int, offset: CGFloat?) {
-            guard let collectionView else { return }
+        private func restore(_ id: GridCellItem.ID, offset: CGFloat?) {
+            guard let collectionView, let indexPath = indexPath(of: id) else { return }
             collectionView.layoutIfNeeded()
-            guard
-                let attributes = collectionView.layoutAttributesForItem(
-                    at: IndexPath(item: index, section: 0))
-            else { return }
+            guard let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+                return
+            }
             let insets = collectionView.adjustedContentInset
             let minimum = -insets.top
             let maximum = max(

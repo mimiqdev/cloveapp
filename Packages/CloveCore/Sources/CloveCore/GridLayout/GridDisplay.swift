@@ -10,9 +10,17 @@
 /// group, keyed by the group, and leaves ungrouped photos as their own cells (PRD Grid,
 /// collapsed). With grouping off, no cell carries a group mark, because PRD Grid hides the
 /// badges and PRD P0-11 allows grouping to be turned off.
+///
+/// One collapsed group can be expanded in place instead of drawn as its cover (owner decision,
+/// 2026-11-13, #225). The Duo's split uses it for the photo on screen, so the person browses
+/// the group's members without losing the folder around them.
 public struct GridDisplay: Sendable {
+    /// The grid's runs in drawing order; a grid without an expanded group is one run
+    /// (``GridSection``).
+    public let sections: [GridSection]
+
     /// The grid's cells in the photos' order (PRD P0-03).
-    public let cells: [GridCellItem]
+    public var cells: [GridCellItem] { sections.flatMap(\.cells) }
 
     /// Builds the cells for the photos a filter and an order produced (PRD P0-03, P0-11).
     ///
@@ -22,6 +30,8 @@ public struct GridDisplay: Sendable {
     ///   - groupsEnabled: Similar groups setting; off hides the badges and covers
     ///     (PRD Grid, P0-11).
     ///   - display: C12's grid group display; expanded is the launch default (PRD Grid).
+    ///   - expandedGroup: The group to expand in place instead of drawing its cover, or nil.
+    ///     Only a collapsed display has a cover to replace, so an expanded display ignores it.
     ///
     /// A photo that two groups name, which grouping does not publish, is marked with the first
     /// group in `groups` order so a cell never belongs to two groups.
@@ -29,18 +39,27 @@ public struct GridDisplay: Sendable {
         photos: [GridPhoto],
         groups: [BrowsingGroup],
         groupsEnabled: Bool = true,
-        display: GridGroupDisplay = .expanded
+        display: GridGroupDisplay = .expanded,
+        expandedGroup: GroupID? = nil
     ) {
         let marked = groupsEnabled ? Self.marksByPhoto(photos: photos, groups: groups) : [:]
         switch (groupsEnabled, display) {
         case (true, .expanded):
-            self.cells = Self.expandedCells(photos: photos, marks: marked)
+            self.sections = [
+                GridSection(
+                    id: .photos(0), cells: Self.expandedCells(photos: photos, marks: marked))
+            ]
         case (true, .collapsed):
-            self.cells = Self.collapsedCells(photos: photos, marks: marked)
+            self.sections = Self.collapsedSections(
+                photos: photos, marks: marked, expandedGroup: expandedGroup)
         case (false, _):
-            self.cells = photos.map {
-                GridCellItem(id: .photo($0.id), photo: $0, isDimmed: $0.marks.isRejected)
-            }
+            self.sections = [
+                GridSection(
+                    id: .photos(0),
+                    cells: photos.map {
+                        GridCellItem(id: .photo($0.id), photo: $0, isDimmed: $0.marks.isRejected)
+                    })
+            ]
         }
     }
 }
@@ -82,13 +101,18 @@ extension GridDisplay {
         }
     }
 
-    /// Collapsed display keeps the first shown position, with the first non-rejected shown
-    /// member as cover. All-rejected groups use the first shown member and are dimmed.
+    /// Collapsed display keeps each group's first shown position, with the first non-rejected
+    /// shown member as cover. All-rejected groups use the first shown member and are dimmed.
     /// A group whose members the filter hid has no cover, because the grid never shows a cell
     /// that names no photo it can draw (PRD P0-03).
-    private static func collapsedCells(
-        photos: [GridPhoto], marks: [PhotoIdentity: BrowsingGroup]
-    ) -> [GridCellItem] {
+    ///
+    /// `expandedGroup` replaces one group's cover with its shown members at that same position
+    /// (owner decision, 2026-11-13, #225). The members become their own run, so the split can
+    /// draw the group's header and its members' shared surface around them while every other
+    /// cell keeps its place. Their marks carry no count badge: the run's header names the group.
+    private static func collapsedSections(
+        photos: [GridPhoto], marks: [PhotoIdentity: BrowsingGroup], expandedGroup: GroupID?
+    ) -> [GridSection] {
         var shownByGroup: [GroupID: [GridPhoto]] = [:]
         for photo in photos {
             if let group = marks[photo.id] {
@@ -96,26 +120,48 @@ extension GridDisplay {
             }
         }
         var covered: Set<GroupID> = []
-        var cells: [GridCellItem] = []
+        var before: [GridCellItem] = []
+        var members: [GridCellItem] = []
+        var after: [GridCellItem] = []
         for photo in photos {
             guard let group = marks[photo.id] else {
-                cells.append(
+                let cell = GridCellItem(
+                    id: .photo(photo.id), photo: photo, isDimmed: photo.marks.isRejected)
+                if members.isEmpty { before.append(cell) } else { after.append(cell) }
+                continue
+            }
+            if group.id == expandedGroup {
+                members.append(
                     GridCellItem(
-                        id: .photo(photo.id), photo: photo, isDimmed: photo.marks.isRejected))
+                        id: .photo(photo.id), photo: photo,
+                        group: GridCellItem.GroupMark(
+                            id: group.id, count: group.members.count, showsCount: false,
+                            isCover: false),
+                        isDimmed: photo.marks.isRejected))
                 continue
             }
             guard covered.insert(group.id).inserted else { continue }
             let shown = shownByGroup[group.id] ?? [photo]
             let cover = shown.first { !$0.marks.isRejected } ?? photo
-            cells.append(
-                GridCellItem(
-                    id: .group(group.id),
-                    photo: cover,
-                    group: GridCellItem.GroupMark(
-                        id: group.id, count: group.members.count, showsCount: true,
-                        isCover: true),
-                    isDimmed: shown.allSatisfy { $0.marks.isRejected }))
+            let cell = GridCellItem(
+                id: .group(group.id),
+                photo: cover,
+                group: GridCellItem.GroupMark(
+                    id: group.id, count: group.members.count, showsCount: true,
+                    isCover: true),
+                isDimmed: shown.allSatisfy { $0.marks.isRejected })
+            if members.isEmpty { before.append(cell) } else { after.append(cell) }
         }
-        return cells
+        var sections: [GridSection] = []
+        if !before.isEmpty {
+            sections.append(GridSection(id: .photos(0), cells: before))
+        }
+        if !members.isEmpty, let expandedGroup {
+            sections.append(GridSection(id: .group(expandedGroup), cells: members))
+        }
+        if !after.isEmpty {
+            sections.append(GridSection(id: .photos(1), cells: after))
+        }
+        return sections.isEmpty ? [GridSection(id: .photos(0), cells: [])] : sections
     }
 }

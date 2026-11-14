@@ -373,6 +373,7 @@ struct DetailMarkingView: View {
                         photos: order, current: photo.id, thumbnails: browsing.thumbnails,
                         open: actions.openPhoto,
                         groups: browsing.groups, finishingAction: finishingAction,
+                        groupFold: groupFold,
                         markingWidth: isDuoExpanded ? Self.duoMarkingAreaWidth : nil)
                     if isDuoExpanded {
                         duoMarkingToolbar
@@ -389,6 +390,19 @@ struct DetailMarkingView: View {
         .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.photoOnly" : "clove.duo.focus")
+    }
+
+    /// The Duo's photo-only strip can fold the photo's group back into its stack. Folding keeps
+    /// the photo, its marks and the route as they are, and the stack reopens the group in place
+    /// (owner decision, 2026-11-13, #225). The folded Duo keeps its iPhone-style detail.
+    private var groupFold: FilmstripGroupFold? {
+        guard isDuoExpanded, let folded = duo?.foldedGroup else { return nil }
+        return FilmstripGroupFold(
+            isFolded: folded.wrappedValue == browsing.currentGroup?.id,
+            fold: {
+                if let group = browsing.currentGroup?.id { folded.wrappedValue = group }
+            },
+            unfold: { folded.wrappedValue = nil })
     }
 
     /// The shared marking family in the reserved bottom-right marking area beside the filmstrip

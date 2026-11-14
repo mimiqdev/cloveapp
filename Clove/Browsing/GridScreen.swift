@@ -16,6 +16,14 @@ struct GridScreen: View {
     @State private var showsFilters = false
     @State private var selectsEmpty = false
     @State private var split = DuoSplit.focus
+    /// The group whose expansion the person folded in the Duo's detail, so the split and the
+    /// photo-only strip show its stack. It is what the person is doing right now, not saved
+    /// browsing state (owner decision, 2026-11-13, #225).
+    @State private var foldedGroup: GroupID?
+    /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
+    /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
+    /// the grid where it opens today.
+    @State private var hasOpenedPhoto = false
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
@@ -40,24 +48,42 @@ struct GridScreen: View {
     private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }
     private var isRegular: Bool { horizontalSizeClass == .regular && !isDuoExpanded }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
+    /// The Duo's split grid beside the photo. It is browsing only: multi-select stays with the
+    /// folder grid, as it was before the group expanded in place (owner decision, #225).
+    private var isSplitPane: Bool { isDuoExpanded && browsing.state.route == .detail }
     private var showsMoveRejects: Bool {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
             && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
     }
 
-    private var cells: [GridCellItem] {
-        GridDisplay(
+    private var cells: [GridCellItem] { gridDisplay.cells }
+
+    /// How the grid joins the folder and its groups.
+    ///
+    /// The Duo's split keeps the folder grid around the photo on screen: its groups stay stacks
+    /// and the photo's own group expands in place, folded back to its stack when the person says
+    /// so (owner decision, 2026-11-13, #225). Every other screen reads C12's display choice.
+    private var gridDisplay: GridDisplay {
+        let currentGroup = browsing.currentGroup
+        return GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
             groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
-            display: store.settings.gridGroupDisplay
-        ).cells
+            display: isSplitPane ? .collapsed : store.settings.gridGroupDisplay,
+            expandedGroup: isSplitPane && foldedGroup != currentGroup?.id ? currentGroup?.id : nil)
     }
 
     var body: some View {
         surface
             .background(Color.clove.bg.canvas)
             .onChange(of: browsing.state.route) { _, route in
-                if route != .detail { split = .focus }
+                if route == .detail { hasOpenedPhoto = true }
+                if route != .detail {
+                    split = .focus
+                    foldedGroup = nil
+                }
+            }
+            .onChange(of: browsing.currentGroup?.id) { _, _ in
+                if foldedGroup != nil { foldedGroup = nil }
             }
             .overlay(alignment: .bottomTrailing) {
                 if !isRegular, !usesDock, showsMoveRejects {
@@ -148,9 +174,9 @@ struct GridScreen: View {
                 DetailScreen(
                     browsing: browsing,
                     duo: DuoDetailLayout(
-                        split: $split, grid: AnyView(duoLeftPane), filter: AnyView(filterButton),
+                        split: $split, grid: AnyView(grid), filter: AnyView(filterButton),
                         more: AnyView(moreMenu), bottom: AnyView(dockBottom),
-                        showsGrid: isDuoExpanded))
+                        showsGrid: isDuoExpanded, foldedGroup: $foldedGroup))
             } else {
                 grid
                     .toolbar {
@@ -195,41 +221,6 @@ struct GridScreen: View {
         }
     }
 
-    /// The expanded Duo's left pane: while the photo on screen belongs to a group, its
-    /// members fill the pane with the current one ringed, so the person can compare and
-    /// pick members without closing the preview (#198). Anything else keeps the folder
-    /// grid, and Back or navigating out of the group returns to it with its position.
-    @ViewBuilder private var duoLeftPane: some View {
-        let members = duoGroupMembers
-        if members.isEmpty {
-            grid
-        } else {
-            GridCollectionView(
-                items: GridDisplay(photos: members, groups: [], groupsEnabled: false).cells,
-                currentPhoto: browsing.state.currentPhoto,
-                groups: [], shownPhotos: Set(members.map(\.id)),
-                selection: [], thumbnails: thumbnails,
-                columnCount: 2, highlightsCurrentPhoto: true,
-                openPhoto: { browsing.openPhoto($0) },
-                // Browsing only: selection and group stacks belong to the folder grid.
-                openGroup: { _ in },
-                beginSelection: { _ in }, toggleSelection: { _ in }
-            )
-            .background(Color.clove.bg.canvas)
-            .ignoresSafeArea(.container, edges: .bottom)
-            .accessibilityIdentifier("clove.duo.groupMembers")
-        }
-    }
-
-    /// The shown members of the current photo's group, in the grid's order and filter.
-    private var duoGroupMembers: [GridPhoto] {
-        guard isDuoExpanded, browsing.state.route == .detail,
-            let group = browsing.currentGroup
-        else { return [] }
-        let members = Set(group.members)
-        return browsing.photos.filter { members.contains($0.id) }
-    }
-
     private var grid: some View {
         VStack(spacing: 0) {
             if !usesSystemToolbar { header }
@@ -245,17 +236,21 @@ struct GridScreen: View {
                 emptyState
             } else {
                 GridCollectionView(
-                    items: cells, currentPhoto: browsing.state.currentPhoto,
+                    sections: gridDisplay.sections, currentPhoto: browsing.state.currentPhoto,
                     groups: browsing.groups, shownPhotos: Set(browsing.photos.map(\.id)),
-                    selection: browsing.state.selection, thumbnails: thumbnails,
-                    isSelectingEmpty: selectsEmpty,
+                    selection: isSplitPane ? [] : browsing.state.selection,
+                    thumbnails: thumbnails,
+                    isSelectingEmpty: isSplitPane ? false : selectsEmpty,
                     placeholderCount: browsing.readingProgress.map {
                         $0.total == 0 ? 9 : max($0.total - $0.read, 0)
                     } ?? 0,
-                    columnCount: isDuoExpanded ? (browsing.state.route == .detail ? 2 : 6) : nil,
+                    columnCount: isDuoExpanded ? (isSplitPane ? 2 : 6) : nil,
+                    highlightsCurrentPhoto: isSplitPane,
+                    followsCurrentPhoto: isDuoExpanded && (isSplitPane || hasOpenedPhoto),
+                    foldExpandedGroup: { foldedGroup = $0 },
                     openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
-                    beginSelection: { browsing.beginSelection(of: $0) },
-                    toggleSelection: { browsing.toggleSelection(of: $0) }
+                    beginSelection: { if !isSplitPane { browsing.beginSelection(of: $0) } },
+                    toggleSelection: { if !isSplitPane { browsing.toggleSelection(of: $0) } }
                 )
                 .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
             }
@@ -564,7 +559,14 @@ struct GridScreen: View {
         }
     }
 
+    /// Opens one collapsed group's first photo, except for the group on screen in the Duo's
+    /// split: that stack stands for the expansion the person folded, so tapping it restores the
+    /// members in place without leaving the photo (owner decision, 2026-11-13, #225).
     private func openGroup(_ id: GroupID) {
+        if isSplitPane, browsing.currentGroup?.id == id {
+            foldedGroup = nil
+            return
+        }
         guard let group = browsing.groups.first(where: { $0.id == id }) else { return }
         let visible = group.visible(in: Set(browsing.photos.map(\.id)))
         if let first = visible.members.first(where: { browsing.shownMarks(for: $0).isUnmarked })
