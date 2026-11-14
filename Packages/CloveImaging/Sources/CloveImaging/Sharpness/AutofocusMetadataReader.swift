@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import CameraFocusMetadata
 
 /// The property paths one file was inspected for, and what was found, so an unavailable answer
 /// can show its evidence instead of an unexplained empty result (#208).
@@ -51,7 +52,10 @@ public struct AutofocusRegion: Sendable {
     }
 }
 
-/// Reads camera autofocus regions from ImageIO's property dictionaries.
+/// Reads camera autofocus regions from ImageIO's property dictionaries, falling back to
+/// the vendored focusmeta reader for the cameras whose AF records ImageIO never exposes
+/// (Sony today: private maker notes). Proven paths stay on ImageIO unchanged; see
+/// ``regionsFromMetadataFile(of:)`` for when the fallback runs.
 ///
 /// Only coordinate shapes proven against the repository's fixtures are interpreted; anything
 /// else reports unavailable with the evidence of what was inspected (#208):
@@ -63,10 +67,36 @@ public struct AutofocusRegion: Sendable {
 ///   overflow as a corner rect and are exact as a center rect).
 ///
 /// Sony cameras record AF data in private maker-note blocks that ImageIO does not expose — this
-/// host's SDK has no Sony dictionary at all — so a Sony file reports every path missing rather
-/// than a guessed reading of undocumented bytes.
+/// host's SDK has no Sony dictionary at all — so after both paths above report missing, the
+/// reader re-reads the file with focusmeta, which parses the Sony blocks directly and maps its
+/// display-space geometry into the same ``NormalizedRegion`` the proven paths produce.
 public struct AutofocusMetadataReader: Sendable {
-    public init() {}
+    /// Reads whole metadata containers (Sony maker notes live outside ImageIO's property
+    /// dictionaries). Production reads the file; tests read synthetic bytes or state
+    /// conclusions.
+    public protocol MetadataFileReading: Sendable {
+        func readMetadataFile(at url: URL) -> FocusMetadataConclusion?
+    }
+
+    /// focusmeta over the real file: bounded reads, no image decoding, no caching. A
+    /// conclusion is returned even for unsupported and malformed files; only a failed
+    /// open/read is nil.
+    private struct FocusMetadataFileReader: MetadataFileReading {
+        func readMetadataFile(at url: URL) -> FocusMetadataConclusion? {
+            (try? FocusMetadataReader().read(fileAt: url)).map(
+                AutofocusMetadataReader.conclusion(of:))
+        }
+    }
+
+    private let metadataFiles: any MetadataFileReading
+
+    public init() {
+        self.init(metadataFiles: FocusMetadataFileReader())
+    }
+
+    init(metadataFiles: any MetadataFileReading) {
+        self.metadataFiles = metadataFiles
+    }
 
     public func regions(
         of url: URL, properties: [String: Any]
@@ -111,9 +141,153 @@ public struct AutofocusMetadataReader: Sendable {
             inspected.append(.init(path: "{Exif}.SubjectArea", finding: .missing))
         }
 
+        // The ImageIO paths found nothing. Sony records AF in private maker notes ImageIO
+        // never exposes, so re-read the container with focusmeta before reporting the gap.
+        return regionsFromMetadataFile(of: url, inspected: inspected, make: make)
+    }
+
+    /// What focusmeta concluded about one file, in the few facts the evidence path needs.
+    /// focusmeta's report is a large struct with an internal memberwise initializer, so the
+    /// bridge reduces it to this public-value summary; tests state summaries directly and the
+    /// real-container suites exercise the reduction over synthetic bytes.
+    public struct FocusMetadataConclusion: Sendable, Equatable {
+        /// The camera focusmeta recognized, if any.
+        let vendor: CameraVendor?
+        /// The camera model, for a short Sony evidence path.
+        let model: String?
+        /// The recorded camera make string.
+        let recordedMake: String?
+        /// The focus record focusmeta read, if the container carried one.
+        let focus: RecordedFocus?
+        /// The display-space geometry focusmeta derived, when orientation was unambiguous.
+        let displayGeometry: FocusGeometry?
+        /// focusmeta's overall outcome.
+        let status: ExtractionStatus
+    }
+
+    /// Reduces one focusmeta report to the facts the bridge uses.
+    public static func conclusion(of report: FocusMetadataReport) -> FocusMetadataConclusion {
+        FocusMetadataConclusion(
+            vendor: report.camera?.vendor,
+            model: report.camera?.model,
+            recordedMake: report.camera?.make,
+            focus: report.focus,
+            displayGeometry: report.displayGeometry,
+            status: report.status)
+    }
+
+    /// focusmeta, whose direct container parsing fills the Sony gap, consulted only after both
+    /// ImageIO paths reported missing — the proven Fuji, Panasonic and Apple readings keep
+    /// their route untouched.
+    ///
+    /// focusmeta's `displayGeometry` is already rotated for display; it is normalized against
+    /// its own display extent and used directly, without applying Clove's orientation map
+    /// again (that double application is exactly the mirrored-overlay bug the synthetic
+    /// orientation tests pin down). A stored-space-only report, another vendor's raw
+    /// observations, or any absence of geometry maps to explicit unavailability with focusmeta's
+    /// own facts as evidence — never a guess and never silence.
+    func regionsFromMetadataFile(
+        of url: URL, inspected: [AutofocusMetadataEvidence.Inspection], make: String?
+    ) -> Result<AutofocusRegion, AutofocusMetadataEvidence> {
+        guard let conclusion = metadataFiles.readMetadataFile(at: url) else {
+            return .failure(
+                AutofocusMetadataEvidence(
+                    inspected: inspected, cameraMake: make, exifOrientation: 1))
+        }
+        if let region = conclusion.displayGeometry.flatMap(Self.region(from:)) {
+            return .success(AutofocusRegion(region: region))
+        }
         return .failure(
             AutofocusMetadataEvidence(
-                inspected: inspected, cameraMake: make, exifOrientation: orientation))
+                inspected: inspected + [Self.focusmetaInspection(conclusion)], cameraMake: make,
+                exifOrientation: 1))
+    }
+
+    /// What focusmeta concluded, as one evidence entry. Sony's verified scope is named
+    /// plainly; every other vendor's raw observations map to the explicit unavailability
+    /// focusmeta itself reports.
+    static func focusmetaInspection(
+        _ conclusion: FocusMetadataConclusion
+    ) -> AutofocusMetadataEvidence.Inspection {
+        let vendor = conclusion.vendor
+        let make = conclusion.recordedMake.map { " (\($0))" } ?? ""
+        switch vendor {
+        case .sony:
+            let camera = conclusion.model.map { " \($0)" } ?? ""
+            let reason = Self.sonyUnavailabilityReason(conclusion)
+            return .init(
+                path: "focusmeta.SonyMakerNote\(camera)", finding: .unreadable(reason))
+        case .fujifilm, .panasonic:
+            return .init(
+                path: "focusmeta.\(vendor.map(\.rawValue) ?? "vendor")MakerNote\(make)",
+                finding: .unreadable(
+                    "geometry semantics unverified; ImageIO's reading above is the proven one"))
+        case nil:
+            return .init(
+                path: "focusmeta.container\(make)",
+                finding: .unreadable(
+                    "unrecognized container or vendor; no geometry"))
+        default:
+            return .init(
+                path: "focusmeta.\(vendor.map(\.rawValue) ?? "vendor")MakerNote\(make)",
+                finding: .unreadable("geometry semantics unverified for this vendor"))
+        }
+    }
+
+    /// The short reason focusmeta could not present Sony geometry: its unavailability case,
+    /// or — when the container parsed but no focus record exists at all — that absence.
+    private static func sonyUnavailabilityReason(
+        _ conclusion: FocusMetadataConclusion
+    ) -> String {
+        if case .unavailable(let reason)? = conclusion.focus?.geometry {
+            return "Sony focus geometry unavailable: \(reason)"
+        }
+        if conclusion.focus == nil {
+            return conclusion.status == .focusMetadataMissing
+                ? "no focus record" : "focus record not interpretable"
+        }
+        return "display orientation not established"
+    }
+
+    /// focusmeta's display-space geometry as a display-space ``NormalizedRegion``: centered,
+    /// normalized against the display extent the library already rotated, and clipped into the
+    /// visible frame the way the proven paths clip. A point-only location gets the small box
+    /// the UI already presents for tiny regions; the scorer reports `regionTooSmall` where it
+    /// truly is. An out-of-frame geometry is not evidence Clove can locate.
+    static func region(from geometry: FocusGeometry) -> NormalizedRegion? {
+        switch geometry {
+        case .region(let region):
+            return Self.region(
+                centerX: region.normalizedCenter.x, centerY: region.normalizedCenter.y,
+                width: region.normalizedSize.width, height: region.normalizedSize.height)
+        case .location(let location):
+            return Self.region(
+                centerX: location.normalizedCenter.x, centerY: location.normalizedCenter.y,
+                width: locatedRegionSize, height: locatedRegionSize)
+        case .unavailable:
+            return nil
+        }
+    }
+
+    /// The size presented for a located point with no recorded extent, so a point the camera
+    /// recorded is drawn rather than hidden.
+    static let locatedRegionSize = 0.03
+
+    private static func region(
+        centerX: Double, centerY: Double, width: Double, height: Double
+    ) -> NormalizedRegion? {
+        guard centerX.isFinite, centerY.isFinite, width.isFinite, height.isFinite,
+            centerX >= 0, centerX <= 1, centerY >= 0, centerY <= 1, width > 0, height > 0
+        else { return nil }
+        let region = NormalizedRegion(
+            x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
+        guard region.x >= -0.0001, region.y >= -0.0001,
+            region.x + region.width <= 1.0001, region.y + region.height <= 1.0001
+        else { return nil }
+        return NormalizedRegion(
+            x: min(max(region.x, 0), 1 - region.width),
+            y: min(max(region.y, 0), 1 - region.height),
+            width: region.width, height: region.height)
     }
 
     /// `[x, y, width, height, "f"|"t"]` with corner + size semantics. The Fuji fixture repeats
