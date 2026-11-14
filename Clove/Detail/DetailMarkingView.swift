@@ -365,6 +365,8 @@ struct DetailMarkingView: View {
             }
             // The marking toolbar gets its own reserved bottom-right area beside the narrowed
             // filmstrip, never over the image and never in the system side toolbar (#200, #227).
+            // The toolbar sibling is the one reservation: the strip's viewport narrows by its
+            // width, and the strip's content fills that viewport up to the toolbar (#237).
             // The two regions share the photo stage's background, so no contrasting sidebar slab
             // divides them.
             if showsFilmstrip && chromeIsVisible {
@@ -373,8 +375,7 @@ struct DetailMarkingView: View {
                         photos: order, current: photo.id, thumbnails: browsing.thumbnails,
                         open: actions.openPhoto,
                         groups: browsing.groups, finishingAction: finishingAction,
-                        groupFold: groupFold,
-                        markingWidth: isDuoExpanded ? Self.duoMarkingAreaWidth : nil)
+                        groupFold: groupFold)
                     if isDuoExpanded {
                         duoMarkingToolbar
                     }
@@ -426,10 +427,6 @@ struct DetailMarkingView: View {
             .transition(.opacity)
         }
     }
-
-    /// The width the filmstrip reserves for the bottom-right marking area beside it: the shared
-    /// marking toolbar's 168 pt frame plus its surrounding padding (#227).
-    private static let duoMarkingAreaWidth: CGFloat = 168 + 32
 
     private var standardLayout: some View {
         VStack(spacing: 0) {
