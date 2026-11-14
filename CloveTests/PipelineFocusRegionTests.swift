@@ -198,9 +198,7 @@ struct PipelineFocusRegionTests {
         #expect(revisitedEarly.result != nil)
     }
 
-    @Test func detailViewSkipsFocusAnalysisWhenOverlayIsOffAndHoldsPauseDuringFitAndPrefetch()
-        async throws
-    {
+    @Test func detailViewSkipsFocusAnalysisWhenOverlayIsOff() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = GatedFocusPresentationImages()
         let browsing = BrowsingModel(library: TestLibrary.sample())
@@ -221,8 +219,6 @@ struct PipelineFocusRegionTests {
 
         try await pipelineEventually { source.prefetchedCount == 1 }
         #expect(source.analyzeCalls.isEmpty)
-        #expect(source.beginPauseCount >= 1)
-        #expect(source.activePauseCount == 0)
 
         // Toggling Focus Regions On triggers analysis for the visible photo cleanly.
         browsing.showsFocusRegions = true
@@ -261,9 +257,6 @@ private final class GatedFocusPresentationImages: DetailImageSource, DetailRegio
     private let sample = SampleDetailImages()
     private(set) var analyzeCalls: [PhotoIdentity] = []
     private(set) var prefetchedCount = 0
-    private(set) var beginPauseCount = 0
-    private(set) var activePauseCount = 0
-    private var tokens: Set<UUID> = []
 
     func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
         -> CGImage?
@@ -282,20 +275,6 @@ private final class GatedFocusPresentationImages: DetailImageSource, DetailRegio
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
         await sample.prefetch(window, renderAhead: renderAhead)
         prefetchedCount += 1
-    }
-
-    func beginInteractiveRender() -> UUID? {
-        let token = UUID()
-        tokens.insert(token)
-        beginPauseCount += 1
-        activePauseCount = tokens.count
-        return token
-    }
-
-    func endInteractiveRender(_ token: UUID?) {
-        guard let token else { return }
-        tokens.remove(token)
-        activePauseCount = tokens.count
     }
 
     func analyzeRegions(

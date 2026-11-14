@@ -4,9 +4,9 @@ import Testing
 
 @testable import CloveImaging
 
-/// The production reading seam against the real detail pipeline: the analysis's preview and
-/// high-resolution reads ride the pipeline's existing lanes, so one photo is decoded once per
-/// stage and the analysis adds no route of its own (#208).
+/// The production reading seam against the real detail pipeline: the analysis's preview
+/// reads ride the pipeline's existing preview lane, so one photo is decoded once and the
+/// analysis adds no route of its own (#208).
 @Suite(.serialized, .imageWork)
 struct DetailRegionSharpnessReadingTests {
     @Test func readingDeliversOrientationAppliedPixelsForARaster() async throws {
@@ -28,16 +28,10 @@ struct DetailRegionSharpnessReadingTests {
             Issue.record("Expected preview pixels")
             return
         }
+        // Orientation 6 swaps the stored 1200×800 into portrait display bounds.
+        #expect(previewImage.width < previewImage.height)
         #expect(
             max(previewImage.width, previewImage.height) <= RegionSharpnessAnalyzer.previewPixels)
-
-        let highResolution = await reading.highResolution(request)
-        guard case .success(let fullImage) = highResolution else {
-            Issue.record("Expected full pixels")
-            return
-        }
-        // Orientation 6 swaps the stored 1200×800 to 800×1200 display pixels.
-        #expect(fullImage.width == 800 && fullImage.height == 1200)
     }
 
     @Test(.enabled(if: DetailFixtures.hasFormats))
@@ -62,12 +56,6 @@ struct DetailRegionSharpnessReadingTests {
         #expect(max(pixels.width, pixels.height) <= RegionSharpnessAnalyzer.previewPixels)
         #expect(await gate.previewPaths.count == 1)
         #expect(await gate.nativePaths.isEmpty)
-
-        _ = await reading.highResolution(request)
-        // The native analysis shares the preview already acquired for detection rather than
-        // decoding it again; only this explicit high-resolution path enters native RAW.
-        #expect(await gate.previewPaths.count == 1)
-        #expect(await gate.nativePaths.count == 1)
     }
 
     @Test func unreadableFilesReportExplicitFailures() async throws {

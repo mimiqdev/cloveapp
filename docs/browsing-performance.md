@@ -120,8 +120,7 @@ identities. Tagged measurements add these facts:
   (`DetailArrivalToPreview`, `DetailArrivalToScreen`, `DetailScreenRender`),
   `DetailPipeline` (`DetailRenderLane`, `DetailScreenRAW`, `DetailNativeRAW`,
   `DetailFullRaster`), `Sharpness` (`SharpnessAnalysis`,
-  `SharpnessMetadataRead`, `SharpnessFaceDetection`,
-  `SharpnessPixelAcquisition`, `SharpnessRegionScoring`), and
+  `SharpnessMetadataRead`, `SharpnessFaceDetection`), and
   `FolderGrouping` (`FolderGroupingPass`).
 
 The Lab caches use a temporary directory that the run deletes. Export uses the

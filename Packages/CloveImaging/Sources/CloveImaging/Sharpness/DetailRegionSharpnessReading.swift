@@ -2,13 +2,12 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// The production ``RegionSharpnessReading``: metadata through ImageIO, pixels through the
-/// app's existing detail pipeline, so the analysis decodes nothing on its own route (#208).
+/// The production ``RegionSharpnessReading``: metadata through ImageIO, preview pixels through
+/// the app's existing detail pipeline, so the analysis decodes nothing on its own route (#208).
 ///
-/// One high-resolution acquisition per photo is the detail pipeline's own rule — its render
-/// lane serializes and holds one native image — and preview reads ride the embedded-preview
-/// lane, so the analysis reuses the same bounded execution the viewer already has (G1
-/// "Scheduling and cache") instead of adding a competing budget.
+/// Preview reads ride the bounded embedded-preview lane so the analysis reuses the same bounded
+/// execution the viewer already has (G1 "Scheduling and cache") instead of adding a competing
+/// budget.
 public struct DetailRegionSharpnessReading: RegionSharpnessReading {
     private let details: DetailPipeline
 
@@ -36,36 +35,16 @@ public struct DetailRegionSharpnessReading: RegionSharpnessReading {
     public func preview(_ request: RegionSharpnessRequest) async -> Result<
         CGImage, RegionImageFailure
     > {
-        await read(request, wantsNativeResolution: false)
-    }
-
-    /// Every region's pixels come from one full-resolution read through the render lane: a
-    /// camera companion's raster, the RAW's native render, whichever the pipeline's modes
-    /// produce for this set (#208).
-    public func highResolution(
-        _ request: RegionSharpnessRequest
-    ) async -> Result<CGImage, RegionImageFailure> {
-        await read(request, wantsNativeResolution: true)
-    }
-
-    private func read(
-        _ request: RegionSharpnessRequest, wantsNativeResolution: Bool
-    ) async -> Result<CGImage, RegionImageFailure> {
         let detail = DetailRequest(
             raw: request.raw, jpeg: request.jpeg, heif: request.heif,
-            displayPixels: wantsNativeResolution
-                ? DetailPixelLimit.maximumEdge : RegionSharpnessAnalyzer.previewPixels,
-            wantsNativeResolution: wantsNativeResolution,
+            displayPixels: RegionSharpnessAnalyzer.previewPixels,
+            wantsNativeResolution: false,
             locationIdentity: request.locationIdentity)
         do {
-            let result =
-                wantsNativeResolution
-                ? try await details.analysisImage(for: detail)
-                : try await details.analysisPreview(for: detail)
+            let result = try await details.analysisPreview(for: detail)
             guard case .available(let image) = result else {
                 return .failure(Self.failure(of: result))
             }
-            if wantsNativeResolution { return .success(image.image) }
             return await withTaskExecutorPreference(ImageWorkExecutor.current) {
                 .success(Self.boundedForDetection(image.image))
             }

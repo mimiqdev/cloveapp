@@ -741,12 +741,6 @@ struct DetailMarkingView: View {
     /// and shown as its own state. The neighbours' previews are prefetched after the photo's own
     /// pixels are on screen, so a swipe to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
-        let interactiveToken = (images as? DetailRegionSharpnessSource)?.beginInteractiveRender()
-        defer {
-            if let interactiveToken {
-                (images as? DetailRegionSharpnessSource)?.endInteractiveRender(interactiveToken)
-            }
-        }
         let arrivalID = PerformanceSignpost.detailArrival.makeSignpostID()
         var screenArrivalInterval: OSSignpostIntervalState? = PerformanceSignpost.detailArrival
             .beginInterval("DetailArrivalToScreen", id: arrivalID)

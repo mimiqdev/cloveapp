@@ -56,20 +56,18 @@ public struct SharpnessSchedulerSnapshot: Sendable, Equatable {
 ///
 /// What this actor owns and what it deliberately does not:
 ///
-/// - **Stage budgets.** Face/eye localization, the high-resolution acquisition and local
-///   scoring each keep their own bound. Admission is asked per stage, so priorities are
-///   reconsidered whenever a slot frees — the issue's "reconsider priorities between
-///   stages".
-/// - **No mid-stage displacement.** A running Vision request or decode is uncancellable at
+/// - **Stage budgets.** Metadata reading and face/eye localization each keep their own bound.
+///   Admission is asked per stage, so priorities are reconsidered whenever a slot frees — the
+///   issue's "reconsider priorities between stages".
+/// - **No mid-stage displacement.** A running Vision request or metadata read is uncancellable at
 ///   this layer; it finishes and the newly prioritized work takes the next slot, exactly the
 ///   issue's fallback for pipelines without cancellation.
 /// - **Queued jobs are records.** A job's analysis task parks at its first stage admission,
 ///   so a thousand queued jobs are a thousand parked tasks holding requests — files and
 ///   revisions — and nothing else. Completed results go to ``RegionSharpnessResultStore`` as
 ///   compact facts; no queued job or stored record ever holds pixels.
-/// - **The engine's own rules are untouched.** One acquisition per photo, one detection
-///   request per analysis, and #215's early-AF delivery all live in the analyzer; this type
-///   only decides when each stage may run.
+/// - **The engine's own rules are untouched.** One detection request per analysis and #215's
+///   early-AF delivery all live in the analyzer; this type only decides when each stage may run.
 public actor RegionSharpnessScheduler {
     /// How many finished stage durations each stage keeps for measurement.
     private static let recordedDurations = 64
@@ -126,65 +124,37 @@ public actor RegionSharpnessScheduler {
     /// Parked-on-pause continuations keyed by job, so a cancelled job's park is resumed on
     /// invalidate/drop instead of leaking until resume (#216).
     private var pausedWaiters: [SharpnessResultKey: [CheckedContinuation<Void, Never>]] = [:]
-    private let interactivePauseTokens = Mutex<Set<UUID>>([])
-    private var interactiveWaiters: [SharpnessResultKey: [CheckedContinuation<Void, Never>]] = [:]
     private var closed = false
     private var invalidationEpoch: UInt64 = 0
     private var latestInvalidationEpoch: [URL: UInt64] = [:]
 
-    private nonisolated var isInteractiveAcquisitionPaused: Bool {
-        interactivePauseTokens.withLock { !$0.isEmpty }
-    }
-
-    /// Synchronously holds new `.pixelAcquisition` admissions while interactive detail
-    /// navigation has unfinished `screen` or `+1` prefetch work, without delaying
-    /// `#239` cache hits or metadata-only early AF answers (#261).
-    public nonisolated func beginInteractiveAcquisitionPause() -> UUID {
-        let token = UUID()
-        _ = interactivePauseTokens.withLock { $0.insert(token) }
-        return token
-    }
-
-    /// Releases an interactive acquisition hold acquired via ``beginInteractiveAcquisitionPause()``.
-    public nonisolated func endInteractiveAcquisitionPause(_ token: UUID) {
-        let empty = interactivePauseTokens.withLock { tokens -> Bool in
-            tokens.remove(token)
-            return tokens.isEmpty
-        }
-        if empty {
-            Task { await self.resumeInteractiveAcquisitionWaiters() }
-        }
-    }
-
     // MARK: - Lifecycle
 
     /// - Parameters:
-    ///   - analyzer: the engine whose stages this scheduler admits. Its reader, detector and
-    ///     scorer are shared; each job runs through a copy gated by this scheduler.
+    ///   - analyzer: the engine whose stages this scheduler admits. Its reader and detector are
+    ///     shared; each job runs through a copy gated by this scheduler.
+    ///   - metadataWorkers: the ImageIO metadata and focusmeta read budget.
     ///   - detectionWorkers: the face/eye localization budget (the issue's starting value: 1).
-    ///   - acquisitionWorkers: the high-resolution acquisition budget (the issue fixes 1,
-    ///     shared with interactive viewing through the detail pipeline's own render lane).
-    ///   - scoringWorkers: the local scoring budget (the issue allows 1–2).
     ///   - results: the compact result store shared by interactive and background requests.
-    ///   - parametersVersion: the scorer/detector version baked into every result key.
+    ///   - parametersVersion: the detector/localization version baked into every result key.
     public init(
         analyzer: RegionSharpnessAnalyzer,
+        metadataWorkers: Int = 2,
         detectionWorkers: Int = 1,
-        acquisitionWorkers: Int = 1,
-        scoringWorkers: Int = 2,
         results: RegionSharpnessResultStore = RegionSharpnessResultStore(capacity: 512),
         parametersVersion: Int = 2
     ) {
-        precondition(detectionWorkers >= 1 && acquisitionWorkers >= 1 && scoringWorkers >= 1)
+        precondition(metadataWorkers >= 1 && detectionWorkers >= 1)
         self.baseAnalyzer = analyzer
         self.results = results
         self.parametersVersion = parametersVersion
         var configured: [SharpnessAnalysisStage: StageState] = [:]
         for stage in SharpnessAnalysisStage.allCases {
             let limit =
-                stage == .faceDetection
-                ? detectionWorkers
-                : stage == .pixelAcquisition ? acquisitionWorkers : scoringWorkers
+                switch stage {
+                case .metadataRead: metadataWorkers
+                case .faceDetection: detectionWorkers
+                }
             configured[stage] = StageState(limit: limit)
         }
         self.stages = configured
@@ -424,7 +394,6 @@ public actor RegionSharpnessScheduler {
     public func close() async {
         closed = true
         for key in Array(pausedWaiters.keys) { resumePausedWaiters(of: key) }
-        for key in Array(interactiveWaiters.keys) { resumeInteractiveWaiters(of: key) }
         let running = jobs.values.compactMap(\.task)
         for key in Array(jobs.keys) { drop(key: key) }
         // Admitted stage entries exit through their own path, cancelled or not; awaiting the
@@ -465,24 +434,12 @@ public actor RegionSharpnessScheduler {
     func requestStage(
         _ stage: SharpnessAnalysisStage, of key: SharpnessResultKey
     ) async throws {
-        while (paused || (stage == .pixelAcquisition && isInteractiveAcquisitionPaused)),
-            !closed, jobs[key] != nil
-        {
+        while paused, !closed, jobs[key] != nil {
             try Task.checkCancellation()
-            if paused {
-                // Parked under the job's key, so invalidate/drop can resume (and thereby cancel)
-                // this park without waiting for resume (#216).
-                await withCheckedContinuation { continuation in
-                    pausedWaiters[key, default: []].append(continuation)
-                }
-            } else if stage == .pixelAcquisition && isInteractiveAcquisitionPaused {
-                await withCheckedContinuation { continuation in
-                    guard !closed, jobs[key] != nil, isInteractiveAcquisitionPaused else {
-                        continuation.resume()
-                        return
-                    }
-                    interactiveWaiters[key, default: []].append(continuation)
-                }
+            // Parked under the job's key, so invalidate/drop can resume (and thereby cancel)
+            // this park without waiting for resume (#216).
+            await withCheckedContinuation { continuation in
+                pausedWaiters[key, default: []].append(continuation)
             }
         }
         try Task.checkCancellation()
@@ -507,22 +464,6 @@ public actor RegionSharpnessScheduler {
     private func resumePausedWaiters(of key: SharpnessResultKey) {
         let waiters = pausedWaiters.removeValue(forKey: key) ?? []
         for waiter in waiters { waiter.resume() }
-    }
-
-    private func resumeInteractiveWaiters(of key: SharpnessResultKey) {
-        let waiters = interactiveWaiters.removeValue(forKey: key) ?? []
-        for waiter in waiters { waiter.resume() }
-    }
-
-    private func resumeInteractiveAcquisitionWaiters() {
-        guard !isInteractiveAcquisitionPaused, !closed else { return }
-        let resuming = interactiveWaiters
-        interactiveWaiters.removeAll()
-        for waiters in resuming.values {
-            for waiter in waiters { waiter.resume() }
-        }
-        drain(.pixelAcquisition)
-        pump()
     }
 
     /// Parks one job's stage request in the stage's queue until a slot admits it.
@@ -567,7 +508,6 @@ public actor RegionSharpnessScheduler {
     /// Admits waiting work into one stage's free slots, best photo first.
     private func drain(_ stage: SharpnessAnalysisStage) {
         guard !paused, !closed else { return }
-        if stage == .pixelAcquisition && isInteractiveAcquisitionPaused { return }
         while var state = stages[stage], state.activeKeys.count < state.limit,
             let index = bestWaiterIndex(in: state.waiters)
         {
@@ -729,7 +669,6 @@ public actor RegionSharpnessScheduler {
         // Any later same-key job is a new generation; this drop retires the old one.
         generations[key] = (generations[key] ?? 0) + 1
         resumePausedWaiters(of: key)
-        resumeInteractiveWaiters(of: key)
         job.task?.cancel()
         for waiter in job.waiters { waiter.resume(returning: nil) }
         for stage in SharpnessAnalysisStage.allCases {

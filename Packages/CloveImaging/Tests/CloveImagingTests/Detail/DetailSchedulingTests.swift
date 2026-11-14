@@ -291,52 +291,53 @@ struct DetailSchedulingTests {
         #expect(await gate.previewPaths.count == 2)
     }
 
-    @Test func beginNavigationCancelsNonMatchingQueuedAnalysisJobs() async throws {
+    @Test(.timeLimit(.minutes(1)))
+    func beginNavigationCancelsNonMatchingQueuedAnalysisPreviewJobs() async throws {
         let gate = DetailReadGate()
-        await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
+        await gate.configure(behaviour: .synthetic, holdNative: false, holdPreview: true)
         let pipeline = makePipeline(gate, previewWorkers: 1)
-        let current = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true)
-        let next = try rawRequest(DetailFixtures.file("nikon-d500.NEF"), native: true)
-        let active = Task { try await pipeline.image(for: current) }
-        try await eventually { await gate.nativePaths.count == 1 }
-        let staleAnalysis = Task { try await pipeline.analysisImage(for: current) }
+        let current = try previewRequest("sony-ilce-7s.ARW", index: 1)
+        let next = try previewRequest("nikon-d500.NEF", index: 2)
+        let active = Task { try await pipeline.preview(for: current) }
+        _ = try await gate.nextPreviewEntry()
+        let staleAnalysis = Task { try await pipeline.analysisPreview(for: current) }
         try await eventually { await pipeline.queuedCount == 1 }
         // Navigating to `next` cancels queued `.analysis` for `current` immediately in beginNavigation.
         await pipeline.beginNavigation(1, keepingAnalysisFor: [next.raw!.url])
         await expectCancelled(staleAnalysis)
         await expectCancelled(active)
-        // Keeping `next` preserves an analysis queued for the destination itself.
-        let keptAnalysis = Task { try await pipeline.analysisImage(for: next) }
+        // Keeping `next` preserves an analysisPreview queued for the destination itself.
+        let keptAnalysis = Task { try await pipeline.analysisPreview(for: next) }
         try await eventually { await pipeline.queuedCount == 1 }
         await pipeline.beginNavigation(2, keepingAnalysisFor: [next.raw!.url])
         #expect(await pipeline.queuedCount == 1)
-        try await letEntriesFinish(gate, natives: 2)
+        try await letEntriesFinish(gate, previews: 2)
         _ = try await keptAnalysis.value
         await pipeline.close()
     }
 
-    @Test func queuedPrefetchBeatsQueuedAnalysisOnRenderLane() async throws {
+    @Test(.timeLimit(.minutes(1)))
+    func queuedPrefetchBeatsQueuedAnalysisOnPreviewLane() async throws {
         let gate = DetailReadGate()
-        await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
+        await gate.configure(behaviour: .synthetic, holdNative: false, holdPreview: true)
         let pipeline = makePipeline(gate, previewWorkers: 1)
-        let holder = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true)
-        let analysisTarget = try rawRequest(DetailFixtures.file("nikon-d500.NEF"), native: true)
-        let prefetchTarget = try rawRequest(DetailFixtures.file("canon-eos-r6.CR3"))
-        let running = Task { try await pipeline.image(for: holder) }
-        try await eventually { await gate.nativePaths.count == 1 }
-        let analysis = Task { try await pipeline.analysisImage(for: analysisTarget) }
+        let holder = try previewRequest("sony-ilce-7s.ARW", index: 1)
+        let analysisTarget = try previewRequest("nikon-d500.NEF", index: 2)
+        let prefetchTarget = try previewRequest("canon-eos-r6.CR3", index: 3)
+        let running = Task { try await pipeline.preview(for: holder) }
+        _ = try await gate.nextPreviewEntry()
+        let analysis = Task { try await pipeline.analysisPreview(for: analysisTarget) }
         try await eventually { await pipeline.queuedCount == 1 }
-        let prefetch = Task { try await pipeline.prefetchScreen(for: prefetchTarget) }
+        let prefetch = Task { try await pipeline.prefetchPreview(for: prefetchTarget) }
         try await eventually { await pipeline.queuedCount == 2 }
-        // Release the holder, then allow the next render entry to finish: `.prefetch` must claim the lane first.
-        try await letEntriesFinish(gate, natives: 2)
+        // Release the holder, then allow the next preview entry to finish: `.prefetch` must claim the lane first.
+        await gate.release()
+        #expect(try await gate.nextPreviewEntry() == "canon-eos-r6.CR3")
+        try await letEntriesFinish(gate, previews: 3)
         _ = try await running.value
         _ = try await prefetch.value
-        #expect(
-            await gate.nativePaths.dropFirst().first
-                == DetailFixtures.file("canon-eos-r6.CR3").standardizedFileURL.path)
-        try await letEntriesFinish(gate, natives: 3)
         _ = try await analysis.value
+        #expect(await gate.nativePaths.isEmpty)
         await pipeline.close()
     }
 

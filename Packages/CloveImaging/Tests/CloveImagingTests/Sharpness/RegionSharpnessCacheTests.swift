@@ -43,7 +43,6 @@ struct RegionSharpnessCacheTests {
         private struct Counts {
             var properties = 0
             var preview = 0
-            var highResolution = 0
         }
 
         private let lock = Mutex(Counts())
@@ -52,8 +51,6 @@ struct RegionSharpnessCacheTests {
         ])
         var previewResult: Result<CGImage, RegionImageFailure> = .success(
             SharpnessScene.flat(width: 64, height: 48))
-        var highResolutionResult: Result<CGImage, RegionImageFailure> = .success(
-            SharpnessScene.checkerboard(width: 128, height: 128, cell: 4))
 
         func properties(of url: URL) async -> ImageProperties? {
             lock.withLock { $0.properties += 1 }
@@ -67,15 +64,8 @@ struct RegionSharpnessCacheTests {
             return previewResult
         }
 
-        func highResolution(
-            _ request: RegionSharpnessRequest
-        ) async -> Result<CGImage, RegionImageFailure> {
-            lock.withLock { $0.highResolution += 1 }
-            return highResolutionResult
-        }
-
         var totalCalls: Int {
-            lock.withLock { $0.properties + $0.preview + $0.highResolution }
+            lock.withLock { $0.properties + $0.preview }
         }
     }
 

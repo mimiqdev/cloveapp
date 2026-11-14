@@ -1334,8 +1334,24 @@ struct DetailDisplayPresentationTests {
         try await waitFor { preview.isZoomed }
         try await Task.sleep(for: .milliseconds(450))
 
-        // Photo-only chrome dismissal grows height so fitted width expands; both the native 100%
-        // scale and focus-region anchor must settle cleanly for the enlarged bounds.
+        // Since #273, zooming alone leaves the Duo photo-only filmstrip visible so preview height
+        // stays unchanged while zoom scale and focus anchor settle cleanly.
+        #expect(preview.bounds.height == heightBefore)
+        let zoomedSnapshot = try #require(preview.zoomSnapshot)
+        #expect(zoomedSnapshot.anchor.x < 0.42)
+        #expect(zoomedSnapshot.anchor.y < 0.42)
+        let expectedZoomedScale = DetailZoom.fullResolutionScale(
+            nativePixels: CGSize(width: 3000, height: 2000),
+            shownPixels: CGSize(width: 1616, height: 1078),
+            viewSize: preview.bounds.size,
+            screenScale: host.traitCollection.displayScale)
+        #expect(abs(zoomedSnapshot.scale - expectedZoomedScale) < 0.02)
+
+        // Toggling chrome hides the filmstrip and grows the pane height; both the native 100%
+        // scale and focus-region anchor must re-settle cleanly for the enlarged bounds.
+        preview.onChromeToggle?()
+        try await waitFor { preview.bounds.height > heightBefore }
+        try await Task.sleep(for: .milliseconds(450))
         #expect(preview.bounds.height > heightBefore)
         let settled = try #require(preview.zoomSnapshot)
         #expect(settled.anchor.x < 0.42)
