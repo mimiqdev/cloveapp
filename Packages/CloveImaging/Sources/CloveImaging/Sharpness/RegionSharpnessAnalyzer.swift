@@ -162,45 +162,71 @@ public struct RegionSharpnessAnalyzer: Sendable {
             onAutofocus?(.unavailable(.noAutofocusMetadata(evidence)))
         }
 
-        // Stage 2 — one preview and one detection request, admitted together so a scheduler
-        // bounds both localization costs with one budget. The child runs concurrently with
-        // the acquisition below; this scope never awaits it before the AF result is
-        // delivered (#208).
+        // Stage 2 — zero AF metadata runs preview + face detection *before* pixelAcquisition,
+        // so zero-region photos (no AF metadata and no faces) never decode a native RAW (#261).
         let detector = faceDetector
         let reader = self.reader
         let stages = self.stages
+        if case .failure(let evidence) = autofocus {
+            let detectionStage = try await Self.runDetection(
+                reader: reader, detector: detector, request: request, stages: stages)
+            let faces = Self.detectedFaces(of: detectionStage.outcome)
+            guard !faces.isEmpty else {
+                return RegionSharpnessAnalysis(
+                    autofocus: .unavailable(.noAutofocusMetadata(evidence)),
+                    faces: Self.facePath(
+                        detection: detectionStage.outcome, faces: faces,
+                        preview: detectionStage.preview, evidence: []),
+                    acquisitionFailure: nil,
+                    timings: RegionSharpnessTimings(
+                        metadataRead: metadata.duration,
+                        previewRead: detectionStage.previewDuration,
+                        faceDetection: detectionStage.detectionDuration,
+                        pixelAcquisition: nil,
+                        regionScoring: nil))
+            }
+            let acquisition = try await Self.acquirePixels(
+                reader: reader, request: request, stages: stages)
+            let locatedFaces = Self.unscoredFaces(faces)
+            let faceScoring = try await measureThrowing {
+                try await Self.scoreRegions(
+                    locatedFaces, in: acquisition.pixels,
+                    missingPixelsReason: acquisition.missingPixelsReason,
+                    scorer: self.scorer, stages: stages)
+            }
+            return RegionSharpnessAnalysis(
+                autofocus: .unavailable(.noAutofocusMetadata(evidence)),
+                faces: Self.facePath(
+                    detection: detectionStage.outcome, faces: faces,
+                    preview: detectionStage.preview, evidence: faceScoring.value),
+                acquisitionFailure: acquisition.failure,
+                timings: RegionSharpnessTimings(
+                    metadataRead: metadata.duration,
+                    previewRead: detectionStage.previewDuration,
+                    faceDetection: detectionStage.detectionDuration,
+                    pixelAcquisition: acquisition.duration,
+                    regionScoring: Self.total([faceScoring.duration])))
+        }
+
+        // Stage 2 (AF present) — one preview and one detection request run concurrently with the
+        // acquisition below; this scope never awaits detection before the AF result is delivered
+        // (#208).
         async let detection = Self.runDetection(
             reader: reader, detector: detector, request: request, stages: stages)
 
         // Stage 3 — the one acquisition shared by every region of both paths. Admission is
         // asked before the read starts, and the slot is released as soon as the read lands:
         // the budget bounds concurrent decodes, not the scoring that follows.
-        try await stages.enter(.pixelAcquisition)
-        let acquisitionInterval = Self.signposter.beginInterval(
-            "SharpnessPixelAcquisition", id: Self.signposter.makeSignpostID())
-        let acquisition = await measure { await reader.highResolution(request) }
-        Self.signposter.endInterval("SharpnessPixelAcquisition", acquisitionInterval)
-        await stages.exit(.pixelAcquisition)
-        let pixels: CGImage?
-        let acquisitionFailure: RegionImageFailure?
-        switch acquisition.value {
-        case .success(let image):
-            pixels = image
-            acquisitionFailure = nil
-        case .failure(let failure):
-            pixels = nil
-            acquisitionFailure = failure
-        }
-        let missingPixelsReason: RegionScoreUnavailable? = acquisitionFailure.map { failure in
-            failure == .staleSource ? .staleSource : .pixelsUnavailable
-        }
+        let acquisition = try await Self.acquirePixels(
+            reader: reader, request: request, stages: stages)
 
         // Stage 4a — score the AF regions against the acquisition and deliver the AF path's
         // result before detection is awaited (#208).
         let locatedAutofocus = Self.unscoredAutofocus(autofocus)
         let afScoring = try await measureThrowing {
             try await Self.scoreRegions(
-                locatedAutofocus, in: pixels, missingPixelsReason: missingPixelsReason,
+                locatedAutofocus, in: acquisition.pixels,
+                missingPixelsReason: acquisition.missingPixelsReason,
                 scorer: self.scorer, stages: stages)
         }
         let autofocusResult = Self.autofocusPath(located: autofocus, evidence: afScoring.value)
@@ -215,7 +241,8 @@ public struct RegionSharpnessAnalyzer: Sendable {
         let locatedFaces = Self.unscoredFaces(faces)
         let faceScoring = try await measureThrowing {
             try await Self.scoreRegions(
-                locatedFaces, in: pixels, missingPixelsReason: missingPixelsReason,
+                locatedFaces, in: acquisition.pixels,
+                missingPixelsReason: acquisition.missingPixelsReason,
                 scorer: self.scorer, stages: stages)
         }
 
@@ -224,7 +251,7 @@ public struct RegionSharpnessAnalyzer: Sendable {
             faces: Self.facePath(
                 detection: detectionStage.outcome, faces: faces,
                 preview: detectionStage.preview, evidence: faceScoring.value),
-            acquisitionFailure: acquisitionFailure,
+            acquisitionFailure: acquisition.failure,
             timings: RegionSharpnessTimings(
                 metadataRead: metadata.duration,
                 previewRead: detectionStage.previewDuration,
@@ -234,6 +261,37 @@ public struct RegionSharpnessAnalyzer: Sendable {
     }
 
     // MARK: - Stages
+
+    private struct AcquisitionStage {
+        let pixels: CGImage?
+        let failure: RegionImageFailure?
+        let duration: ContinuousClock.Duration?
+
+        var missingPixelsReason: RegionScoreUnavailable? {
+            failure.map { $0 == .staleSource ? .staleSource : .pixelsUnavailable }
+        }
+    }
+
+    private static func acquirePixels(
+        reader: any RegionSharpnessReading,
+        request: RegionSharpnessRequest,
+        stages: any RegionSharpnessStageGate
+    ) async throws -> AcquisitionStage {
+        try await stages.enter(.pixelAcquisition)
+        let acquisitionInterval = Self.signposter.beginInterval(
+            "SharpnessPixelAcquisition", id: Self.signposter.makeSignpostID())
+        let acquisition = await measure { await reader.highResolution(request) }
+        Self.signposter.endInterval("SharpnessPixelAcquisition", acquisitionInterval)
+        await stages.exit(.pixelAcquisition)
+        switch acquisition.value {
+        case .success(let image):
+            return AcquisitionStage(
+                pixels: image, failure: nil, duration: acquisition.duration)
+        case .failure(let failure):
+            return AcquisitionStage(
+                pixels: nil, failure: failure, duration: acquisition.duration)
+        }
+    }
 
     /// One detection stage's recorded facts: the preview it read, the detection outcome, and
     /// each read's duration.

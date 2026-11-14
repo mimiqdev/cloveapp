@@ -1029,4 +1029,59 @@ private func until(
         #expect(reader2.highResolutionCounts["af.arw"] == 1)
         await scheduler.close()
     }
+
+    @Test func zeroRegionPhotoSkipsPixelAcquisitionAndStillPersistsDiskRecord() async throws {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clove-sharpness-zero-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let disk = try RegionSharpnessCache(directory: cacheDirectory)
+        let reader = GatedSharpnessReader()
+        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
+        {
+            reader.reads.release(kind)
+        }
+        let detector = GatedSharpnessDetector()
+        detector.setOutcome(.faces([]), for: "*")
+        let scheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
+            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
+
+        // Even while interactive `.pixelAcquisition` is paused, a 0-AF + 0-face photo finishes
+        // without touching `highResolution` and persists its 0-region #239 record.
+        let token = scheduler.beginInteractiveAcquisitionPause()
+        let zeroReq = photoRequest("zero")
+        let analysis = try #require(await scheduler.analyzeCurrent(zeroReq))
+        scheduler.endInteractiveAcquisitionPause(token)
+
+        guard case .unavailable(.noAutofocusMetadata) = analysis.autofocus else {
+            Issue.record("Expected noAutofocusMetadata on zero-region record")
+            return
+        }
+        guard case .unavailable(.noFacesDetected) = analysis.faces else {
+            Issue.record("Expected noFacesDetected on zero-region record")
+            return
+        }
+        #expect(reader.highResolutionCounts["zero.arw"] == nil)
+        #expect(analysis.timings.pixelAcquisition == nil)
+        await scheduler.close()
+
+        // Reopening serves the #239 disk record with zero reads.
+        let reader2 = GatedSharpnessReader()
+        let scheduler2 = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader2, faces: detector),
+            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
+        let diskHit = try #require(await scheduler2.analyzeCurrent(zeroReq))
+        if case .unavailable(.noAutofocusMetadata) = diskHit.autofocus {
+        } else {
+            Issue.record("Expected persisted noAutofocusMetadata disk hit")
+        }
+        if case .unavailable(.noFacesDetected) = diskHit.faces {
+        } else {
+            Issue.record("Expected persisted noFacesDetected disk hit")
+        }
+        #expect(reader2.propertiesCounts["zero.arw"] == nil)
+        #expect(reader2.previewCounts["zero.arw"] == nil)
+        #expect(reader2.highResolutionCounts["zero.arw"] == nil)
+        await scheduler2.close()
+    }
 }
