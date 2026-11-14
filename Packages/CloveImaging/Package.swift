@@ -11,8 +11,15 @@ let package = Package(
     products: [
         .library(name: "CloveImaging", targets: ["CloveImaging"])
     ],
+    dependencies: [
+        // Vendored as a git subtree from mimiqdev/focusmeta; see
+        // docs/decisions/focusmeta-integration.md.
+        .package(path: "../CloveFocusMetadata")
+    ],
     targets: [
-        .target(name: "CloveImaging"),
+        .target(
+            name: "CloveImaging",
+            dependencies: [.product(name: "CameraFocusMetadata", package: "CloveFocusMetadata")]),
         .testTarget(name: "CloveImagingTests", dependencies: ["CloveImaging"]),
     ]
 )

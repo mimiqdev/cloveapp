@@ -144,8 +144,9 @@ public struct RegionSharpnessAnalyzer: Sendable {
         // that needs no pixels is final here, before the face path starts (#208).
         try await stages.enter(.metadataRead)
         let metadata = await measure { await self.reader.properties(of: request.primaryURL) }
+        let autofocus = await Self.locateAutofocus(
+            properties: metadata.value, url: request.primaryURL, reader: metadataReader)
         await stages.exit(.metadataRead)
-        let autofocus = Self.locateAutofocus(properties: metadata.value, reader: metadataReader)
         if case .failure(let evidence) = autofocus {
             onAutofocus?(.unavailable(.noAutofocusMetadata(evidence)))
         }
@@ -280,9 +281,12 @@ public struct RegionSharpnessAnalyzer: Sendable {
     // MARK: - Region location
 
     /// The AF region located from one file's properties, or the evidence that none could be.
+    /// The focusmeta file read happens only when the property paths all report missing, and
+    /// runs inside the metadata stage so the ImageIO read and the focusmeta read share one
+    /// admission slot and no synchronous file I/O ever lands on the main actor.
     private static func locateAutofocus(
-        properties: ImageProperties?, reader: AutofocusMetadataReader
-    ) -> Result<AutofocusRegion, AutofocusMetadataEvidence> {
+        properties: ImageProperties?, url: URL, reader: AutofocusMetadataReader
+    ) async -> Result<AutofocusRegion, AutofocusMetadataEvidence> {
         guard let properties else {
             return .failure(
                 AutofocusMetadataEvidence(
@@ -291,7 +295,9 @@ public struct RegionSharpnessAnalyzer: Sendable {
                     ],
                     cameraMake: nil, exifOrientation: 1))
         }
-        return reader.regions(of: URL(fileURLWithPath: "/"), properties: properties.values)
+        return await withTaskExecutorPreference(ImageWorkExecutor.current) {
+            reader.regions(of: url, properties: properties.values)
+        }
     }
 
     /// A detection's faces; a failed or skipped detection has none.

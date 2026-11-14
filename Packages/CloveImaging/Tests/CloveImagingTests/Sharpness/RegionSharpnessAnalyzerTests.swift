@@ -269,6 +269,44 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         }
     }
 
+    /// A Sony file the focusmeta fallback can read (#238): the region is located off the main
+    /// actor, scored against the shared acquisition like any other camera region, and the
+    /// synthetic container never touches the app's fixtures.
+    @Test func sonyRegionThroughTheMetadataFallbackIsLocatedAndScored() async throws {
+        let reader = RecordingReader()
+        reader.propertiesAnswer = ImageProperties([
+            "{TIFF}": ["Make": "SONY"], "{Exif}": ["PixelXDimension": 80, "PixelYDimension": 60],
+        ])
+        reader.previewImage = previewImage
+        reader.highResolutionImage = sharpImage
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clove-sony-\(UUID().uuidString).arw")
+        try SyntheticSonyContainer.arw(orientation: 1).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let sonyRequest = RegionSharpnessRequest(
+            raw: DetailSource(
+                url: url, revision: ThumbnailRevision(size: 1, modificationTime: Date())),
+            locationIdentity: "sony-test")
+        let analyzer = RegionSharpnessAnalyzer(
+            reader: reader, faces: StubFaceDetector(outcome: .faces([])))
+
+        let analysis = await analyzer.analyze(sonyRequest)
+
+        guard case .regions(let afRegions) = analysis.autofocus else {
+            Issue.record("The Sony record must locate through the fallback")
+            return
+        }
+        #expect(afRegions.count == 1)
+        #expect(afRegions[0].kind == .cameraAutofocus)
+        // The synthetic record's region, in display space at orientation 1.
+        #expect(abs(afRegions[0].region.centerX - 17.0 / 80.0) < 1e-9)
+        #expect(abs(afRegions[0].region.centerY - 31.0 / 60.0) < 1e-9)
+        // The 10×6 frame of an 80×60 reference is small against a 256×256 acquisition, so
+        // the scorer's answer is either a score or the explicit too-small reason — never a
+        // silent nil.
+        #expect(afRegions[0].score != nil || afRegions[0].unavailableBecause == .regionTooSmall)
+    }
+
     @Test func failedAcquisitionIsExplicitAndRegionsSayWhy() async throws {
         let reader = RecordingReader()
         reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
