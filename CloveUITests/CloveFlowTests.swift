@@ -1608,6 +1608,74 @@ final class CloveFlowTests: XCTestCase {
         capture("duo-cover-strip-after-navigation-exit")
     }
 
+    /// Runs on the Duo's cover display headlessly: verifies region-centred 100% zoom across
+    /// double-taps and region taps when hiding the Duo filmstrip resizes the preview container
+    /// (#272). The expanded Focus split (`clove.duo.focus`) cannot enter Open pose headlessly and
+    /// is verified on TestFlight.
+    @MainActor
+    func testDuoCoverFocusRegionsCentreNativeZoom() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4")
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = launchSample()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        openLibrary(app)
+        try XCTSkipUnless(
+            app.windows.firstMatch.horizontalSizeClass == .compact,
+            "the Duo is not in the Closed pose; select Closed in Device Hub to test the cover")
+        prepareDuo(app)
+
+        element(app, "clove.grid.photo.mmq02678").tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let toggle = element(app, "clove.detail.focusToggle")
+        let autofocus = element(app, "clove.detail.region.af.0")
+        let eye = element(app, "clove.detail.region.face.1-0")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "On")
+        XCTAssertTrue(autofocus.waitForExistence(timeout: 5))
+        XCTAssertTrue(eye.waitForExistence(timeout: 5))
+
+        let zoom = element(app, "clove.detail.zoom")
+        autofocus.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
+            "The region tap did not keep 100% centred on the AF rectangle after Duo chrome hid")
+        XCTAssertTrue(autofocus.exists)
+        XCTAssertFalse(eye.exists)
+
+        preview.doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "NOT (label ENDSWITH %@)", "100%"), zoom))
+        XCTAssertTrue(eye.waitForExistence(timeout: 5))
+
+        // Double-tapping the photo body away from the AF rectangle (and near the edges) must still
+        // centre 100% on AF after the Duo filmstrip leaves the VStack and resizes the preview.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
+            "Double-tap in Duo should keep zoom centred on the AF region after layout settles")
+
+        preview.doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "NOT (label ENDSWITH %@)", "100%"), zoom))
+        XCTAssertTrue(eye.waitForExistence(timeout: 5))
+
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
+            "Edge double-tap in Duo should zoom on the preferred AF region rather than navigate")
+
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "NOT (label ENDSWITH %@)", "100%"), zoom))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02678.ARW")
+    }
+
     @MainActor
     func testFilmstripAnchorsVisibleGroupAndCentersOffscreenNavigation() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])

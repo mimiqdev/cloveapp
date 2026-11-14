@@ -51,6 +51,31 @@ struct DetailFocusRegionTests {
         #expect(control.center.y == 140)
     }
 
+    @Test func resizePreservesZoomAnchorInsteadOfSnappingToCentre() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 551, height: 492))
+        preview.setImage(
+            try testPixels(width: 1616, height: 1078),
+            fullResolutionPixels: CGSize(width: 3000, height: 2000))
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+
+        let region = makeRegion(
+            normalized: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16))
+        preview.apply(DetailZoomCommand(id: 1, kind: .scale(1.814, anchor: region.centre)))
+        let initial = try #require(preview.zoomSnapshot)
+        #expect(abs(initial.anchor.x - 0.30) < 0.02)
+        #expect(abs(initial.anchor.y - 0.35) < 0.02)
+
+        // Hiding the Duo Focus marking toolbar grows preview height while width stays fixed.
+        preview.frame = CGRect(x: 0, y: 0, width: 551, height: 556)
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+
+        let resized = try #require(preview.zoomSnapshot)
+        #expect(abs(resized.anchor.x - 0.30) < 0.02)
+        #expect(abs(resized.anchor.y - 0.35) < 0.02)
+    }
+
     @Test func verticalMarkingSwipeBeginningOverExpandedEyeTargetStillMarks() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
         preview.setImage(try testPixels(width: 3000, height: 2000))

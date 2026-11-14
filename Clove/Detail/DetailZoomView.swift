@@ -457,11 +457,18 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         guard bounds.size != laidOutSize else { return }
         let previous = laidOutSize
         let previousScale = scrollView.zoomScale
+        let previousAnchor =
+            previous != .zero && previousScale > 1
+            ? DetailZoom.centreAnchor(
+                scale: previousScale, contentOffset: scrollView.contentOffset,
+                imagePixels: shownPixels, viewSize: previous)
+            : nil
         laidOutSize = bounds.size
         isApplyingCommand = true
         // Reset the zoomed frame first, so the scroll view's fit content is the new bounds
-        // rather than the old ones, then re-apply the scale around the middle. A fold, rotation
-        // or split resize therefore keeps the zoom instead of dropping back to fit.
+        // rather than the old ones, then re-apply the scale around the kept viewport centre. A
+        // fold, rotation, split resize or Duo chrome hide/show therefore keeps the inspected
+        // region instead of snapping back to the middle of the photo (#272).
         scrollView.setZoomScale(1, animated: false)
         scrollView.frame = bounds
         imageView.frame = bounds
@@ -469,7 +476,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         scrollView.contentSize = bounds.size
         updateMaximumZoom()
         if previous != .zero, previousScale > 1 {
-            zoom(to: previousScale, around: .centre)
+            zoom(to: previousScale, around: previousAnchor ?? .centre)
         }
         layoutFocusRegions()
         isApplyingCommand = false

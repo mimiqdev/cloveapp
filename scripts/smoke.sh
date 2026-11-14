@@ -48,6 +48,8 @@ for argument in "$@"; do
             duo_test="testDuoCoverToolbarMarkAndPickers" ;;
         -only-testing:CloveUITests/CloveFlowTests/testDuoCoverFilmstripScrollsToTheCurrentPhotoAndFillsItsViewport)
             duo_test="testDuoCoverFilmstripScrollsToTheCurrentPhotoAndFillsItsViewport" ;;
+        -only-testing:CloveUITests/CloveFlowTests/testDuoCoverFocusRegionsCentreNativeZoom)
+            duo_test="testDuoCoverFocusRegionsCentreNativeZoom" ;;
         # The Open pose exists only as a Device Hub control; there is no headless
         # way to select it, so this runner refuses the expanded flow.
         -only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly)
