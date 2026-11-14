@@ -212,9 +212,16 @@ The iPad frames were drawn before the sidebar (#170) and the detail rail (#174) 
 |---|---|
 | [Theme picker](https://www.figma.com/design/xJcgQ7FziNyPM7UToZvkmq/Clove-%E2%80%94-Native-concept?node-id=212-1394) · [png](screens/11-settings-theme-picker.png) | 212:1394 |
 
-- **Appearance**: a "Match system light/dark" toggle and a picker of 8 mini previews, each drawn in its own theme. The footer reads "Photos are never tinted. Only the app around them changes."
-- **Culling**: Similar groups (toggle), Auto-advance after marking (toggle), Rating scale (5 stars).
-- **Move rejects**: Move Rejects (toggle) and Folder name (_Rejected). The footer says nothing is deleted.
+Settings uses an adaptive layout across five categories (`Appearance`, `Culling & marking`, `Browsing & groups`, `Photo display`, `Move rejects`) plus a `Reset to defaults` action with a native destructive confirmation alert.
+
+- **Compact** (iPhone, Duo cover, narrow windows below 680 pt or compact size class): categorized home list with native push navigation into each category detail view; `Rating scale` and `After marking` push as nested detail pages under `Culling & marking`.
+- **Wide** (iPad, expanded Duo, regular width `>= 680` pt): category list on the left (selected category highlighted with a quiet neutral surface and `accent` text) beside the active category detail on the right; preserves the selected category across compact/wide resizes.
+- **Appearance**: "Match system light/dark" toggle and the 4 × 2 picker of 8 theme previews, each drawn in its own tokens. Footer: "Photos are never tinted. Only the app around them changes."
+- **Culling & marking**: Marking gestures (toggle), Zoomed rating swipe (Two-finger swipe / Single-finger axis lock), Rating scale (nested subpage showing enabled levels with cumulative SF Symbols stars and accessible spoken labels, keeping at least one level enabled), Extended color labels (toggle adding Orange and Pink), and Auto-advance (`After marking` nested subpage offering Stay / Next photo / Next unmarked photo; `Ratings advance`, `Reject advances`, `Color labels advance` triggers preserved while Stay disables advancing).
+- **Browsing & groups**: Similar groups (toggle), Grid display (Expanded / Collapsed), Double-tap (Zoom to 100% / Off), Keep zoom in detail (toggle, while similar groups stay zoom-synced).
+- **Photo display**: Show photos as (RAW / Camera preview, preserving device-measured default and explicit choices) with explanation footer.
+- **Move rejects**: Move Rejects (toggle) and validated Folder name (`_Rejected` by default) with inline error feedback; footer confirms rejected photos are moved, never deleted.
+- Interactive emphasis (toggles, selection accents) follows the active theme `accent` token rather than system blue or `status/saved`.
 
 ## 12 Errors
 

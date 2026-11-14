@@ -11,10 +11,18 @@ struct BrowseShell: View {
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
 
+    @State private var settingsNavigation = SettingsNavigationState()
+    @State private var availableWidth: CGFloat = 0
+
     private var usesVerticalBar: Bool { isDuoExpanded || isDuoCover }
 
     private var isRegular: Bool {
         horizontalSizeClass == .regular && !isDuoExpanded
+    }
+
+    private var isWideSettings: Bool {
+        SettingsLayoutMode.isWide(
+            horizontalSizeClass: horizontalSizeClass, availableWidth: availableWidth)
     }
 
     var body: some View {
@@ -33,14 +41,18 @@ struct BrowseShell: View {
             .browsingChrome(
                 title: title, browsing: browsing, usesSystemBar: usesSystemToolbar && !isRegular
             )
-            .navigationDestination(for: BrowserRoute.self) { route in
-                screen(for: route)
-                    .browsingChrome(
-                        title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
-                        backTitle: isRegular && browsing.state.folder != nil
-                            ? browsing.filterTitle : nil
-                    )
-                    .navigationBarBackButtonHidden()
+            .navigationDestination(for: BrowseDestination.self) { destination in
+                screen(for: destination)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.width
+        } action: {
+            availableWidth = $0
+        }
+        .onChange(of: browsing.state.route) { _, route in
+            if route != .settings {
+                settingsNavigation.resetOnExit()
             }
         }
         .task(id: browsing.failureToastBurst) {
@@ -52,22 +64,51 @@ struct BrowseShell: View {
     }
 
     /// The existing route drives the stack, so resizing never creates another navigation state.
-    private var navigationPath: Binding<[BrowserRoute]> {
+    private var navigationPath: Binding<[BrowseDestination]> {
         Binding(
             get: {
                 switch browsing.state.route {
-                case .detail: usesVerticalBar ? [] : [.detail]
-                case .settings: [.settings]
-                case .entry, .grid: []
+                case .detail:
+                    return usesVerticalBar ? [] : [.detail]
+                case .settings:
+                    var path: [BrowseDestination] = [.settings]
+                    if !isWideSettings, settingsNavigation.showsCompactDetail {
+                        path.append(.settingsCategory(settingsNavigation.selectedCategory))
+                    }
+                    if let subpage = settingsNavigation.activeSubpage {
+                        path.append(.settingsSubpage(subpage))
+                    }
+                    return path
+                case .entry, .grid:
+                    return []
                 }
             },
             set: { path in
-                if path.isEmpty,
-                    browsing.state.route == .detail || browsing.state.route == .settings
-                {
-                    browsing.back()
+                if path.isEmpty {
+                    if browsing.state.route == .detail || browsing.state.route == .settings {
+                        settingsNavigation.resetOnExit()
+                        browsing.back()
+                    }
+                    return
                 }
+                guard browsing.state.route == .settings else { return }
+                syncSettingsPath(path)
             })
+    }
+
+    private func syncSettingsPath(_ path: [BrowseDestination]) {
+        if case .settingsSubpage(let subpage) = path.last {
+            settingsNavigation.openSubpage(subpage)
+            return
+        }
+        settingsNavigation.activeSubpage = nil
+        if case .settingsCategory(let category) = path.last {
+            settingsNavigation.openCompactCategory(category)
+            return
+        }
+        if path == [.settings], !isWideSettings {
+            settingsNavigation.showsCompactDetail = false
+        }
     }
 
     /// The outer stack pushes destinations over both columns and keeps the grid's viewport alive.
@@ -84,16 +125,40 @@ struct BrowseShell: View {
     }
 
     @ViewBuilder
-    private func screen(for route: BrowserRoute) -> some View {
-        switch route {
-        case .entry:
-            EntryScreen(browsing: browsing)
-        case .grid:
-            GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+    private func screen(for destination: BrowseDestination) -> some View {
+        switch destination {
         case .detail:
             DetailScreen(browsing: browsing)
+                .browsingChrome(
+                    title: title, browsing: browsing, usesSystemBar: usesSystemToolbar
+                )
+                .navigationBarBackButtonHidden()
         case .settings:
-            SettingsScreen()
+            SettingsScreen(
+                navigation: settingsNavigation, availableWidth: availableWidth
+            )
+            .browsingChrome(
+                title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
+                backTitle: isRegular && browsing.state.folder != nil
+                    ? browsing.filterTitle : nil
+            )
+            .navigationBarBackButtonHidden()
+        case .settingsCategory(let category):
+            SettingsCategoryScreen(category: category)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { browsing.back() }
+                            .accessibilityIdentifier("clove.nav.back")
+                    }
+                }
+        case .settingsSubpage(let subpage):
+            SettingsSubpageScreen(subpage: subpage)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { browsing.back() }
+                            .accessibilityIdentifier("clove.nav.back")
+                    }
+                }
         }
     }
 

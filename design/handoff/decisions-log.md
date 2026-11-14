@@ -8,6 +8,15 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Adaptive Settings across iPhone, iPad, and Duo (#264)
+
+Live Figma frames for the reorganized Settings views were unavailable in the build environment, so the implementation follows the written hierarchy, controls, and token rules in #264 together with `design/handoff/tokens/` and `design/handoff/components.md`:
+
+- Five top-level categories (`Appearance`, `Culling & marking`, `Browsing & groups`, `Photo display`, `Move rejects`) plus `Reset to defaults` with a native confirmation alert (`Cancel` / destructive `Reset`).
+- Compact widths (`horizontalSizeClass == .compact` or container width `< 680` pt) use a categorized home pushing into category details and nested `Rating scale` / `After marking` subpages; wide widths (`horizontalSizeClass == .regular` and `>= 680` pt) present the category list on the left (quiet neutral surface + `accent` text) beside the selected category detail on the right, preserving selection across compact/wide resizes.
+- `Rating scale` represents each star level with cumulative SF Symbols stars (`star.fill` / `star`) while keeping spoken VoiceOver labels (`"1 star"`…`"5 stars"`) and enforcing at least one enabled level.
+- All toggles and interactive emphasis follow the active theme `accent` token instead of `status/saved`.
+
 ## Neutral group count badges and filmstrip surfaces (owner, 2026-11-13, #226)
 
 Saturated blue group counts read as notifications and pull attention away from the photos, and a blue wash behind the expanded filmstrip group distracts from the thumbnails. Both now use restrained neutral treatments in every theme. This supersedes the `group` colour on count badges and `group` at 25% behind an expanded filmstrip group, including #225's styling sentence; #225's expansion and navigation behaviour is unchanged.
