@@ -136,13 +136,6 @@ struct DetailZoomView: UIViewRepresentable {
     /// (PRD In-group culling, synchronized zoom).
     var probe: DetailZoomProbe?
 
-    /// Whether the fitted photo stays still while a horizontal drag is in progress.
-    ///
-    /// The expanded Duo's split places another pane beside the preview, so the navigation
-    /// drag's slide must not carry the fitted photo over the divider (#199). The gesture
-    /// still commits navigation on release; the iPhone, iPad and cover keep the slide.
-    var keepsFitStationary = false
-
     /// Advisory analysis rectangles in the same displayed-image space as the preview.
     var focusRegions: [DetailFocusRegion] = []
     var inspectedFocusRegionID: String?
@@ -155,7 +148,6 @@ struct DetailZoomView: UIViewRepresentable {
     func makeUIView(context: Context) -> DetailZoomContainerView {
         let view = DetailZoomContainerView()
         probe?.container = view
-        view.keepsFitStationary = keepsFitStationary
         view.focusRegionColours = focusRegionColours
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
@@ -173,7 +165,6 @@ struct DetailZoomView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: DetailZoomContainerView, context: Context) {
-        view.keepsFitStationary = keepsFitStationary
         view.focusRegionColours = focusRegionColours
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
@@ -258,10 +249,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     var rules = MarkingInputRules() {
         didSet { updateGestureAvailability() }
     }
-
-    /// The fitted photo stays still during a navigation drag where a pane boundary must
-    /// not be crossed (#199); navigation still commits on release.
-    var keepsFitStationary = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -365,7 +352,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         // Read before the pixels change: the point the viewport centres on in the old bitmap.
         let kept = zoomSnapshot
         imageView.image = pixels.map { UIImage(cgImage: $0) }
-        if !isNavigating { scrollView.transform = .identity }
         shownPixels = pixels.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
         self.fullResolutionPixels = fullResolution
         updateMaximumZoom()
@@ -599,36 +585,22 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     // MARK: - Navigation swipe
 
     private func handleNavigationPan(_ pan: UIPanGestureRecognizer) {
-        let travel = Double(pan.translation(in: self).x)
         switch pan.state {
         case .began:
             onSwipeBegin?()
-            fallthrough
         case .changed:
-            scrollView.layer.removeAllAnimations()
-            guard !keepsFitStationary else { break }
-            let offset = NavigationSwipeRules.offset(
-                travel: travel, width: Double(bounds.width),
-                hasPrevious: hasPrevious, hasNext: hasNext)
-            scrollView.transform = CGAffineTransform(translationX: offset, y: 0)
+            break
         case .ended:
             let step = NavigationSwipeRules.step(
-                travel: travel, velocity: Double(pan.velocity(in: self).x),
+                travel: Double(pan.translation(in: self).x),
+                velocity: Double(pan.velocity(in: self).x),
                 width: Double(bounds.width), hasPrevious: hasPrevious, hasNext: hasNext)
+            isNavigating = false
             if step != 0 {
-                isNavigating = false
                 onEdgeTap?(step > 0 ? .next : .previous)
-                return
             }
-            fallthrough
         case .cancelled, .failed:
             isNavigating = false
-            UIView.animate(
-                withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8,
-                initialSpringVelocity: 0, options: [.curveEaseOut]
-            ) {
-                self.scrollView.transform = .identity
-            }
         default:
             break
         }
