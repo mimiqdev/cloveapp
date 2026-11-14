@@ -15,6 +15,7 @@ CloveLab/Probes/<Topic>/  One folder per verification topic
 CloveTests/               Hosted app unit tests for the browsing consumer
 CloveUITests/             Clove UI tests: CloveSmokeTests (smoke) and CloveFlowTests (flows)
 Packages/CloveCore/       Domain model, scanning, XMP, writes (local Swift package)
+Packages/CloveFocusMetadata/  Vendored focusmeta subtree: camera AF metadata reading (local Swift package)
 Packages/CloveImaging/    Previews, RAW decoding, image features (local Swift package)
 Packages/CloveLabKit/     Lab report tooling plus one module per verification topic
 Config/Shared.xcconfig    Shared build settings; includes Local.xcconfig if present
@@ -44,6 +45,7 @@ XcodeGen. Every task is listed here.
 | `mise run fixtures-fetch` | `scripts/fetch-fixtures`: downloads and verifies the pinned fixtures into the shared cache (`docs/fixtures.md`). | Once per machine, and after `fixtures/manifest.json` changes. |
 | `mise run fixtures-sets` | Runs `fixtures-fetch`, then `scripts/make-fixture-sets` to rebuild the standard test folders in the cache. | Before tests that read the fixture sets. |
 | `mise run test-core` | `swift test --package-path Packages/CloveCore`. | While editing `CloveCore`; runs on macOS, no simulator. |
+| `mise run test-focusmeta` | `swift test --package-path Packages/CloveFocusMetadata`: the vendored focusmeta suite. Its private-sample tests skip when their directory is unset. | While editing `Packages/CloveFocusMetadata` or pulling a new subtree; CI does not run it (the CloveImaging bridge tests cover the integration). |
 | `mise run test-imaging` | `swift test --package-path Packages/CloveImaging`. | While editing `CloveImaging`; runs on macOS, no simulator. |
 | `mise run test-lab` | `swift test --package-path Packages/CloveLabKit`: the lab harness and probe test targets. Fixture tests skip when a set is missing. | While editing `Packages/CloveLabKit`; runs on macOS, no simulator. CI does not run it. |
 | `mise run build-tests` | `xcodebuild build-for-testing` for the `Clove` scheme: the app plus `CloveTests` and `CloveUITests`, iOS Simulator, no signing. | Part of `check`; also run for you by `smoke` and `ui-flows`. |
@@ -64,6 +66,8 @@ XcodeGen. Every task is listed here.
 - A change under `CloveLab/` or `Packages/CloveLabKit/` adds `mise run test-lab`
   (and `mise run build-lab` for app code). CI never tests or builds the lab, so
   these are its only checks.
+- A change under `Packages/CloveFocusMetadata/` (including a subtree pull) adds
+  `mise run test-focusmeta`; CI runs only the CloveImaging bridge tests over it.
 - A change to the fixture scripts or `fixtures/` adds `mise run test-fixtures`;
   a change to the release script or its config adds `mise run test-release`.
 - The full gate runs in CI nightly and by hand, without the lab.

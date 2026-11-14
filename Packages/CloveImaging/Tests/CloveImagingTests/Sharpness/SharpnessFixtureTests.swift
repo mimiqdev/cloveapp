@@ -69,8 +69,10 @@ struct SharpnessFixtureTests {
         #expect(abs(located.region.centerY - 0.5) < 5e-3)
     }
 
-    /// The Sony fixtures expose no AF path through ImageIO; both must report unavailable with
-    /// the inspected paths as evidence, not a guessed region (#208).
+    /// The Sony fixtures expose no AF path through ImageIO, so the focusmeta fallback runs.
+    /// Neither the public ILCE-7S fixtures' maker notes nor their geometry are in focusmeta's
+    /// verified scope, so both files stay unavailable — now with the Sony read itself named
+    /// as evidence instead of a bare gap (#238).
     @Test func sonyFixturesReportUnavailableWithEvidence() throws {
         for name in ["sony-ilce-7s.ARW", "sony-ilce-7s.HEIC"] {
             let properties = try properties(of: name)
@@ -78,15 +80,21 @@ struct SharpnessFixtureTests {
                 case .failure(let evidence) = reader.regions(
                     of: SharpnessFixtures.file(name), properties: properties)
             else {
-                Issue.record("\(name) has no ImageIO-exposed AF data and must be unavailable")
+                Issue.record(
+                    "\(name) is outside focusmeta's verified scope and must be unavailable")
                 continue
             }
             #expect(evidence.cameraMake == "SONY", Comment(rawValue: name))
             #expect(
-                evidence.inspected.map(\.path) == ["{ExifAux}.AFInfo", "{Exif}.SubjectArea"],
+                evidence.inspected.map(\.path) == [
+                    "{ExifAux}.AFInfo", "{Exif}.SubjectArea", "focusmeta.SonyMakerNote ILCE-7S",
+                ],
                 Comment(rawValue: name))
             #expect(
-                evidence.inspected.allSatisfy { $0.finding == .missing }, Comment(rawValue: name))
+                evidence.inspected.allSatisfy {
+                    $0.finding == .missing || $0.path.hasPrefix("focusmeta")
+                },
+                Comment(rawValue: name))
         }
     }
 
