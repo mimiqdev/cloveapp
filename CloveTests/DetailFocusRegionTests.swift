@@ -575,6 +575,62 @@ struct DetailFocusRegionTests {
                 == "clove.detail.region.af.1")
     }
 
+    @Test func scorelessEvidenceIsActionableAndNormalizedGeometryPreservesUnavailability() {
+        let valid = DetailFocusRegion(
+            id: "clove.detail.region.af.0",
+            evidence: RegionSharpnessEvidence(
+                kind: .cameraAutofocus,
+                groupIndex: nil,
+                region: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16),
+                score: nil,
+                unavailableBecause: nil))
+        #expect(valid.isActionable)
+        #expect(valid.unavailableReason == nil)
+
+        let tiny = DetailFocusRegion(
+            id: "clove.detail.region.face.0-0",
+            evidence: RegionSharpnessEvidence(
+                kind: .eye,
+                groupIndex: 0,
+                region: NormalizedRegion(x: 0.5, y: 0.5, width: 0.002, height: 0.004),
+                score: nil,
+                unavailableBecause: nil))
+        #expect(!tiny.isActionable)
+        #expect(tiny.unavailableReason == RegionScoreUnavailable.regionTooSmall.rawValue)
+
+        let outside = DetailFocusRegion(
+            id: "clove.detail.region.af.1",
+            evidence: RegionSharpnessEvidence(
+                kind: .cameraAutofocus,
+                groupIndex: nil,
+                region: NormalizedRegion(x: 1.2, y: 0.2, width: 0.1, height: 0.1),
+                score: nil,
+                unavailableBecause: nil))
+        #expect(!outside.isActionable)
+        #expect(outside.unavailableReason == RegionScoreUnavailable.regionOutsideImage.rawValue)
+
+        let partialTiny = DetailFocusRegion(
+            id: "clove.detail.region.af.2",
+            evidence: RegionSharpnessEvidence(
+                kind: .cameraAutofocus,
+                groupIndex: nil,
+                region: NormalizedRegion(x: 0.999, y: 0.5, width: 0.1, height: 0.1),
+                score: nil,
+                unavailableBecause: nil))
+        #expect(!partialTiny.isActionable)
+        #expect(partialTiny.unavailableReason == RegionScoreUnavailable.regionTooSmall.rawValue)
+
+        let partialValid = DetailFocusRegion(
+            id: "clove.detail.region.af.3",
+            evidence: RegionSharpnessEvidence(
+                kind: .cameraAutofocus,
+                groupIndex: nil,
+                region: NormalizedRegion(x: -0.05, y: 0.5, width: 0.1, height: 0.1),
+                score: nil,
+                unavailableBecause: nil))
+        #expect(partialValid.isActionable)
+    }
+
     private func makeRegion(
         id: String = "test-region",
         kind: SharpnessRegionKind = .cameraAutofocus,

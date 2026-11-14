@@ -436,7 +436,7 @@ struct RegionSharpnessCacheTests {
         defer { dir.remove() }
 
         let staleReader = CountingReader()
-        staleReader.highResolutionResult = .failure(.staleSource)
+        staleReader.previewResult = .failure(.staleSource)
         let detector1 = CountingFaceDetector()
         let cache1 = try dir.makeCache()
         let scheduler1 = RegionSharpnessScheduler(
@@ -446,7 +446,7 @@ struct RegionSharpnessCacheTests {
 
         let staleResult = await scheduler1.analyzeCurrent(
             makeRequest("race.ARW", session: "open-1"))
-        #expect(staleResult?.acquisitionFailure == .staleSource)
+        #expect(staleResult?.faces == .unavailable(.previewFailed(.staleSource)))
         #expect(cache1.diskEntryCount == 0)
         await scheduler1.close()
 
@@ -462,6 +462,10 @@ struct RegionSharpnessCacheTests {
         let freshResult = await scheduler2.analyzeCurrent(
             makeRequest("race.ARW", session: "open-2"))
         #expect(freshResult?.acquisitionFailure == nil)
+        if case .regions = freshResult?.faces {
+        } else {
+            Issue.record("Expected located face regions after healthy reopen")
+        }
         #expect(healthyReader.totalCalls > 0)
         #expect(cache2.diskEntryCount == 1)
         await scheduler2.close()

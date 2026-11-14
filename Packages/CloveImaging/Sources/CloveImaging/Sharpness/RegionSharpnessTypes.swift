@@ -68,6 +68,28 @@ public struct NormalizedRegion: Hashable, Codable, Sendable {
         default: return (x, y)
         }
     }
+
+    /// Minimum normalized edge length per axis for an inspectable focus region (0.3% of frame).
+    public static let minimumNormalizedEdge: Double = 0.003
+
+    /// Validates this region in normalized `[0, 1] × [0, 1]` display coordinates, returning
+    /// `.regionOutsideImage` or `.regionTooSmall` when the region cannot be inspected.
+    public var normalizedUnavailability: RegionScoreUnavailable? {
+        guard x.isFinite, y.isFinite, width.isFinite, height.isFinite,
+            width > 0, height > 0
+        else { return .regionOutsideImage }
+        let clipped = CGRect(x: x, y: y, width: width, height: height)
+            .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+        guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else {
+            return .regionOutsideImage
+        }
+        let clippedWidth = (x >= 0 && x + width <= 1) ? width : Double(clipped.width)
+        let clippedHeight = (y >= 0 && y + height <= 1) ? height : Double(clipped.height)
+        guard clippedWidth >= Self.minimumNormalizedEdge,
+            clippedHeight >= Self.minimumNormalizedEdge
+        else { return .regionTooSmall }
+        return nil
+    }
 }
 
 /// Which input produced a region: the camera's own autofocus record, or on-device face and eye
