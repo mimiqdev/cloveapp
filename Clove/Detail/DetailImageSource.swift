@@ -44,9 +44,28 @@ struct DetailPhotoWindow: Hashable, Sendable {
     let id: UUID
     let current: DetailNeighbour
     let neighbours: [DetailNeighbour]
+    let previewNeighbours: [DetailNeighbour]
     let direction: Int
     let mode: PhotoDisplayMode
     let screenPixels: Int
+
+    init(
+        id: UUID,
+        current: DetailNeighbour,
+        neighbours: [DetailNeighbour],
+        previewNeighbours: [DetailNeighbour]? = nil,
+        direction: Int,
+        mode: PhotoDisplayMode,
+        screenPixels: Int
+    ) {
+        self.id = id
+        self.current = current
+        self.neighbours = neighbours
+        self.previewNeighbours = previewNeighbours ?? neighbours
+        self.direction = direction
+        self.mode = mode
+        self.screenPixels = screenPixels
+    }
 
     func request(need: DetailPixelRequest.Need = .preview) -> DetailPixelRequest {
         DetailPixelRequest(
@@ -60,15 +79,18 @@ struct DetailPhotoWindow: Hashable, Sendable {
 /// generates its own pixels. Leaving cancels work and releases the full image.
 @MainActor
 protocol DetailImageSource: AnyObject {
+    func warmImage(for photo: PhotoIdentity, request: DetailPixelRequest) -> DetailImage?
     func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
         -> CGImage?
     func prepare(_ window: DetailPhotoWindow) async
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome
+    func prefetchPreviews(_ window: DetailPhotoWindow) async
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async
     func leave(window: UUID) async
 }
 
 extension DetailImageSource {
+    func warmImage(for photo: PhotoIdentity, request: DetailPixelRequest) -> DetailImage? { nil }
     func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
         -> CGImage?
     {
@@ -79,6 +101,7 @@ extension DetailImageSource {
         return nil
     }
     func prepare(_ window: DetailPhotoWindow) async {}
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {}
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {}
     func leave(window: UUID) async {}
 }

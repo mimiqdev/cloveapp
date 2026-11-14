@@ -267,6 +267,56 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             Issue.record("Expected no-faces for the face path")
             return
         }
+        // Zero AF metadata + zero faces must never decode a native RAW (#261).
+        #expect(reader.previewReadCount == 1)
+        #expect(reader.highResolutionReadCount == 0)
+        #expect(analysis.acquisitionFailure == nil)
+        #expect(analysis.timings.pixelAcquisition == nil)
+        #expect(analysis.timings.regionScoring == nil)
+    }
+
+    @Test func missingAutofocusWithDetectedFacesDetectsBeforeAcquiringPixels() async throws {
+        final class OrderedDetectionGate: FaceRegionDetecting, @unchecked Sendable {
+            let continuation = Mutex<CheckedContinuation<FaceDetectionOutcome, Never>?>(nil)
+            func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
+                await withCheckedContinuation { cont in
+                    continuation.withLock { $0 = cont }
+                }
+            }
+        }
+        let detector = OrderedDetectionGate()
+        let reader = RecordingReader()
+        reader.propertiesAnswer = ImageProperties(["{TIFF}": ["Make": "SONY"]])
+        reader.previewImage = previewImage
+        reader.highResolutionImage = sharpImage
+        let analyzer = RegionSharpnessAnalyzer(reader: reader, faces: detector)
+
+        let req = try request()
+        let task = Task { await analyzer.analyze(req) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while detector.continuation.withLock({ $0 == nil }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        // Acquisition must wait until detection completes when AF metadata is absent.
+        #expect(reader.previewReadCount == 1)
+        #expect(reader.highResolutionReadCount == 0)
+
+        let faceBox = NormalizedRegion(x: 0.3, y: 0.3, width: 0.3, height: 0.3)
+        detector.continuation.withLock {
+            let cont = $0
+            $0 = nil
+            return cont
+        }?.resume(returning: .faces([face(faceBox)]))
+
+        let analysis = await task.value
+        #expect(reader.highResolutionReadCount == 1)
+        guard case .regions(let faceRegions) = analysis.faces else {
+            Issue.record("Expected scored face regions after delayed acquisition")
+            return
+        }
+        #expect(faceRegions.allSatisfy { $0.score != nil })
+        #expect(analysis.timings.pixelAcquisition != nil)
+        #expect(analysis.timings.regionScoring != nil)
     }
 
     /// A Sony file the focusmeta fallback can read (#238): the region is located off the main

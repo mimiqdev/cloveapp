@@ -288,4 +288,76 @@ struct DetailSchedulingTests {
         #expect(image.source.url.lastPathComponent == "canon-eos-r6.CR3")
         #expect(await gate.previewPaths.count == 2)
     }
+
+    @Test func beginNavigationCancelsNonMatchingQueuedAnalysisJobs() async throws {
+        let gate = DetailReadGate()
+        await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
+        let pipeline = makePipeline(gate, previewWorkers: 1)
+        let current = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true)
+        let next = try rawRequest(DetailFixtures.file("nikon-d500.NEF"), native: true)
+        let active = Task { try await pipeline.image(for: current) }
+        try await eventually { await gate.nativePaths.count == 1 }
+        let staleAnalysis = Task { try await pipeline.analysisImage(for: current) }
+        try await eventually { await pipeline.queuedCount == 1 }
+        // Navigating to `next` cancels queued `.analysis` for `current` immediately in beginNavigation.
+        await pipeline.beginNavigation(1, keepingAnalysisFor: [next.raw!.url])
+        await expectCancelled(staleAnalysis)
+        await expectCancelled(active)
+        // Keeping `next` preserves an analysis queued for the destination itself.
+        let keptAnalysis = Task { try await pipeline.analysisImage(for: next) }
+        try await eventually { await pipeline.queuedCount == 1 }
+        await pipeline.beginNavigation(2, keepingAnalysisFor: [next.raw!.url])
+        #expect(await pipeline.queuedCount == 1)
+        try await letEntriesFinish(gate, natives: 2)
+        _ = try await keptAnalysis.value
+        await pipeline.close()
+    }
+
+    @Test func queuedPrefetchBeatsQueuedAnalysisOnRenderLane() async throws {
+        let gate = DetailReadGate()
+        await gate.configure(behaviour: .synthetic, holdNative: true, holdPreview: false)
+        let pipeline = makePipeline(gate, previewWorkers: 1)
+        let holder = try rawRequest(DetailFixtures.file("sony-ilce-7s.ARW"), native: true)
+        let analysisTarget = try rawRequest(DetailFixtures.file("nikon-d500.NEF"), native: true)
+        let prefetchTarget = try rawRequest(DetailFixtures.file("canon-eos-r6.CR3"))
+        let running = Task { try await pipeline.image(for: holder) }
+        try await eventually { await gate.nativePaths.count == 1 }
+        let analysis = Task { try await pipeline.analysisImage(for: analysisTarget) }
+        try await eventually { await pipeline.queuedCount == 1 }
+        let prefetch = Task { try await pipeline.prefetchScreen(for: prefetchTarget) }
+        try await eventually { await pipeline.queuedCount == 2 }
+        // Release the holder, then allow the next render entry to finish: `.prefetch` must claim the lane first.
+        try await letEntriesFinish(gate, natives: 2)
+        _ = try await running.value
+        _ = try await prefetch.value
+        #expect(
+            await gate.nativePaths.dropFirst().first
+                == DetailFixtures.file("canon-eos-r6.CR3").standardizedFileURL.path)
+        try await letEntriesFinish(gate, natives: 3)
+        _ = try await analysis.value
+        await pipeline.close()
+    }
+
+    @Test func prefetchCoversUpToTwoNeighboursPerSideAndWarmsSynchronousHits() async throws {
+        let gate = DetailReadGate()
+        let pipeline = makePipeline(gate, previewWorkers: 2)
+        let names = [
+            "sony-ilce-7s.ARW", "nikon-d500.NEF", "canon-eos-r6.CR3", "fujifilm-x-s10.RAF",
+            "olympus-e-m1markii.ORF",
+        ]
+        let requests = try names.enumerated().map { index, name in
+            try rawRequest(
+                DetailFixtures.file(name), displayPixels: 1200, location: "folder-\(index)")
+        }
+        await pipeline.prefetch(Array(requests.prefix(4)))
+        #expect(await gate.previewPaths.count == 4)
+        #expect(await gate.nativePaths.isEmpty)
+        for request in requests.prefix(4) {
+            #expect(pipeline.warmCachedImage(for: request) != nil)
+        }
+        await pipeline.prefetch(requests)
+        // Prefix(4) caps batch prefetch at +/-2 (the 5th entry does not trigger a read).
+        #expect(await gate.previewPaths.count == 4)
+        await pipeline.close()
+    }
 }

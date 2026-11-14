@@ -955,4 +955,133 @@ private func until(
         #expect(reader.propertiesCounts["done.arw"] == 1)
         await scheduler.close()
     }
+
+    @Test func interactivePauseHoldsPixelAcquisitionWithoutBlockingEarlyAFOrDiskHits() async throws
+    {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clove-sharpness-pause-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let disk = try RegionSharpnessCache(directory: cacheDirectory)
+        let reader = GatedSharpnessReader()
+        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
+        {
+            reader.reads.release(kind)
+        }
+        let detector = GatedSharpnessDetector()
+        let warmReq = photoRequest("warm")
+        reader.setProperties(afInfoProperties(), for: "warm.arw")
+        let warmScheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
+            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
+        _ = try #require(await warmScheduler.analyzeCurrent(warmReq))
+        await warmScheduler.close()
+
+        // Fresh scheduler with `#239` disk cache populated for `warm.arw`.
+        let reader2 = GatedSharpnessReader()
+        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
+        {
+            reader2.reads.release(kind)
+        }
+        reader2.setProperties(afInfoProperties(), for: "af.arw")
+        reader2.setProperties(afInfoProperties(), for: "nearby.arw")
+        let scheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader2, faces: detector),
+            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
+
+        let token = scheduler.beginInteractiveAcquisitionPause()
+        // #239 disk hit resolves immediately during interactive pause.
+        let diskHit = await scheduler.analyzeCurrent(warmReq)
+        #expect(diskHit != nil)
+        #expect(reader2.propertiesCounts["warm.arw"] == nil)
+
+        // Metadata-only early AF delivers immediately while .pixelAcquisition remains paused.
+        let noAFEarly = Mutex<RegionSharpnessPathResult?>(nil)
+        let noAFTask = Task {
+            await scheduler.analyzeCurrent(photoRequest("noaf")) { early in
+                noAFEarly.withLock { $0 = early }
+            }
+        }
+        try await until("metadata-only early AF resolves immediately") {
+            noAFEarly.withLock { $0 != nil }
+        }
+        if case .unavailable(.noAutofocusMetadata) = noAFEarly.withLock({ $0 }) {
+        } else {
+            Issue.record("Expected noAutofocusMetadata early AF")
+        }
+
+        // Background `.nearby` and uncached AF jobs park before `.pixelAcquisition`.
+        await scheduler.submit([photoRequest("nearby")], priority: .nearby)
+        let afTask = Task { await scheduler.analyzeCurrent(photoRequest("af")) }
+        try await until("properties read runs while acquisition stays paused") {
+            reader2.propertiesCounts["af.arw"] == 1 && reader2.propertiesCounts["nearby.arw"] == 1
+        }
+        #expect(reader2.highResolutionCounts["af.arw"] == nil)
+        #expect(reader2.highResolutionCounts["nearby.arw"] == nil)
+        #expect(reader2.highResolutionCounts["noaf.arw"] == nil)
+
+        // Releasing the interactive pause lets `.pixelAcquisition` proceed, `.current` before `.nearby`.
+        scheduler.endInteractiveAcquisitionPause(token)
+        _ = try #require(await afTask.value)
+        _ = try #require(await noAFTask.value)
+        try await until("nearby completes after interactive release") {
+            reader2.highResolutionCounts["nearby.arw"] == 1
+        }
+        #expect(reader2.highResolutionCounts["af.arw"] == 1)
+        await scheduler.close()
+    }
+
+    @Test func zeroRegionPhotoSkipsPixelAcquisitionAndStillPersistsDiskRecord() async throws {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clove-sharpness-zero-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let disk = try RegionSharpnessCache(directory: cacheDirectory)
+        let reader = GatedSharpnessReader()
+        for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
+        {
+            reader.reads.release(kind)
+        }
+        let detector = GatedSharpnessDetector()
+        detector.setOutcome(.faces([]), for: "*")
+        let scheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
+            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
+
+        // Even while interactive `.pixelAcquisition` is paused, a 0-AF + 0-face photo finishes
+        // without touching `highResolution` and persists its 0-region #239 record.
+        let token = scheduler.beginInteractiveAcquisitionPause()
+        let zeroReq = photoRequest("zero")
+        let analysis = try #require(await scheduler.analyzeCurrent(zeroReq))
+        scheduler.endInteractiveAcquisitionPause(token)
+
+        guard case .unavailable(.noAutofocusMetadata) = analysis.autofocus else {
+            Issue.record("Expected noAutofocusMetadata on zero-region record")
+            return
+        }
+        guard case .unavailable(.noFacesDetected) = analysis.faces else {
+            Issue.record("Expected noFacesDetected on zero-region record")
+            return
+        }
+        #expect(reader.highResolutionCounts["zero.arw"] == nil)
+        #expect(analysis.timings.pixelAcquisition == nil)
+        await scheduler.close()
+
+        // Reopening serves the #239 disk record with zero reads.
+        let reader2 = GatedSharpnessReader()
+        let scheduler2 = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader2, faces: detector),
+            results: RegionSharpnessResultStore(capacity: 16, disk: disk))
+        let diskHit = try #require(await scheduler2.analyzeCurrent(zeroReq))
+        if case .unavailable(.noAutofocusMetadata) = diskHit.autofocus {
+        } else {
+            Issue.record("Expected persisted noAutofocusMetadata disk hit")
+        }
+        if case .unavailable(.noFacesDetected) = diskHit.faces {
+        } else {
+            Issue.record("Expected persisted noFacesDetected disk hit")
+        }
+        #expect(reader2.propertiesCounts["zero.arw"] == nil)
+        #expect(reader2.previewCounts["zero.arw"] == nil)
+        #expect(reader2.highResolutionCounts["zero.arw"] == nil)
+        await scheduler2.close()
+    }
 }

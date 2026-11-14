@@ -126,9 +126,35 @@ public actor RegionSharpnessScheduler {
     /// Parked-on-pause continuations keyed by job, so a cancelled job's park is resumed on
     /// invalidate/drop instead of leaking until resume (#216).
     private var pausedWaiters: [SharpnessResultKey: [CheckedContinuation<Void, Never>]] = [:]
+    private let interactivePauseTokens = Mutex<Set<UUID>>([])
+    private var interactiveWaiters: [SharpnessResultKey: [CheckedContinuation<Void, Never>]] = [:]
     private var closed = false
     private var invalidationEpoch: UInt64 = 0
     private var latestInvalidationEpoch: [URL: UInt64] = [:]
+
+    private nonisolated var isInteractiveAcquisitionPaused: Bool {
+        interactivePauseTokens.withLock { !$0.isEmpty }
+    }
+
+    /// Synchronously holds new `.pixelAcquisition` admissions while interactive detail
+    /// navigation has unfinished `screen` or `+1` prefetch work, without delaying
+    /// `#239` cache hits or metadata-only early AF answers (#261).
+    public nonisolated func beginInteractiveAcquisitionPause() -> UUID {
+        let token = UUID()
+        _ = interactivePauseTokens.withLock { $0.insert(token) }
+        return token
+    }
+
+    /// Releases an interactive acquisition hold acquired via ``beginInteractiveAcquisitionPause()``.
+    public nonisolated func endInteractiveAcquisitionPause(_ token: UUID) {
+        let empty = interactivePauseTokens.withLock { tokens -> Bool in
+            tokens.remove(token)
+            return tokens.isEmpty
+        }
+        if empty {
+            Task { await self.resumeInteractiveAcquisitionWaiters() }
+        }
+    }
 
     // MARK: - Lifecycle
 
@@ -398,6 +424,7 @@ public actor RegionSharpnessScheduler {
     public func close() async {
         closed = true
         for key in Array(pausedWaiters.keys) { resumePausedWaiters(of: key) }
+        for key in Array(interactiveWaiters.keys) { resumeInteractiveWaiters(of: key) }
         let running = jobs.values.compactMap(\.task)
         for key in Array(jobs.keys) { drop(key: key) }
         // Admitted stage entries exit through their own path, cancelled or not; awaiting the
@@ -438,12 +465,24 @@ public actor RegionSharpnessScheduler {
     func requestStage(
         _ stage: SharpnessAnalysisStage, of key: SharpnessResultKey
     ) async throws {
-        while paused, !closed, jobs[key] != nil {
+        while (paused || (stage == .pixelAcquisition && isInteractiveAcquisitionPaused)),
+            !closed, jobs[key] != nil
+        {
             try Task.checkCancellation()
-            // Parked under the job's key, so invalidate/drop can resume (and thereby cancel)
-            // this park without waiting for resume (#216).
-            await withCheckedContinuation { continuation in
-                pausedWaiters[key, default: []].append(continuation)
+            if paused {
+                // Parked under the job's key, so invalidate/drop can resume (and thereby cancel)
+                // this park without waiting for resume (#216).
+                await withCheckedContinuation { continuation in
+                    pausedWaiters[key, default: []].append(continuation)
+                }
+            } else if stage == .pixelAcquisition && isInteractiveAcquisitionPaused {
+                await withCheckedContinuation { continuation in
+                    guard !closed, jobs[key] != nil, isInteractiveAcquisitionPaused else {
+                        continuation.resume()
+                        return
+                    }
+                    interactiveWaiters[key, default: []].append(continuation)
+                }
             }
         }
         try Task.checkCancellation()
@@ -468,6 +507,22 @@ public actor RegionSharpnessScheduler {
     private func resumePausedWaiters(of key: SharpnessResultKey) {
         let waiters = pausedWaiters.removeValue(forKey: key) ?? []
         for waiter in waiters { waiter.resume() }
+    }
+
+    private func resumeInteractiveWaiters(of key: SharpnessResultKey) {
+        let waiters = interactiveWaiters.removeValue(forKey: key) ?? []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    private func resumeInteractiveAcquisitionWaiters() {
+        guard !isInteractiveAcquisitionPaused, !closed else { return }
+        let resuming = interactiveWaiters
+        interactiveWaiters.removeAll()
+        for waiters in resuming.values {
+            for waiter in waiters { waiter.resume() }
+        }
+        drain(.pixelAcquisition)
+        pump()
     }
 
     /// Parks one job's stage request in the stage's queue until a slot admits it.
@@ -512,6 +567,7 @@ public actor RegionSharpnessScheduler {
     /// Admits waiting work into one stage's free slots, best photo first.
     private func drain(_ stage: SharpnessAnalysisStage) {
         guard !paused, !closed else { return }
+        if stage == .pixelAcquisition && isInteractiveAcquisitionPaused { return }
         while var state = stages[stage], state.activeKeys.count < state.limit,
             let index = bestWaiterIndex(in: state.waiters)
         {
@@ -673,6 +729,7 @@ public actor RegionSharpnessScheduler {
         // Any later same-key job is a new generation; this drop retires the old one.
         generations[key] = (generations[key] ?? 0) + 1
         resumePausedWaiters(of: key)
+        resumeInteractiveWaiters(of: key)
         job.task?.cancel()
         for waiter in job.waiters { waiter.resume(returning: nil) }
         for stage in SharpnessAnalysisStage.allCases {

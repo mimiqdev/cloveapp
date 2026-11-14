@@ -14,9 +14,16 @@ protocol DetailNativeSizeReading: Sendable {
     ///   - reference: The photo's RAW when it has one, otherwise its JPEG primary.
     ///   - isRAW: Whether `reference` is the photo's RAW.
     func nativeSize(of reference: DetailSource, isRAW: Bool) -> CGSize?
+
+    /// Fast header-only size for initial previews without instantiating a RAW decoder.
+    func previewSize(of reference: DetailSource, isRAW: Bool) -> CGSize?
 }
 
 extension DetailNativeSizeReading {
+    func previewSize(of reference: DetailSource, isRAW: Bool) -> CGSize? {
+        nativeSize(of: reference, isRAW: isRAW)
+    }
+
     /// ImageIO and RAW size discovery may block; a detached task still uses the cooperative pool.
     func readNativeSize(of reference: DetailSource, isRAW: Bool) async -> CGSize? {
         await withCheckedContinuation { continuation in
@@ -25,10 +32,22 @@ extension DetailNativeSizeReading {
             }
         }
     }
+
+    func readPreviewSize(of reference: DetailSource, isRAW: Bool) async -> CGSize? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: previewSize(of: reference, isRAW: isRAW))
+            }
+        }
+    }
 }
 
 /// The system readers: the RAW decoder for a RAW, the ImageIO header otherwise (PRD P0-04).
 struct DetailNativeSizeReader: DetailNativeSizeReading {
+    func previewSize(of reference: DetailSource, isRAW: Bool) -> CGSize? {
+        DetailNativeSize.header(reference)
+    }
+
     func nativeSize(of reference: DetailSource, isRAW: Bool) -> CGSize? {
         // The render's own decoder answers for a RAW, so the 100% target and the pixels that
         // replace the preview cannot disagree. The header is only the fallback for a RAW the

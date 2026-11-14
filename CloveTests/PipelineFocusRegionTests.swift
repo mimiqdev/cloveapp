@@ -2,6 +2,7 @@ import CloveCore
 import CoreGraphics
 import Foundation
 import ImageIO
+import SwiftUI
 import Testing
 import UIKit
 
@@ -267,6 +268,37 @@ struct PipelineFocusRegionTests {
         #expect(revisitedEarly.result != nil)
     }
 
+    @Test func detailViewSkipsFocusAnalysisWhenOverlayIsOffAndHoldsPauseDuringFitAndPrefetch()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = GatedFocusPresentationImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        browsing.showsFocusRegions = false
+        let first = browsing.photos[2].id
+        browsing.openPhoto(first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source)
+                .environment(SettingsStore.sample))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await pipelineEventually { source.prefetchedCount == 1 }
+        #expect(source.analyzeCalls.isEmpty)
+        #expect(source.beginPauseCount >= 1)
+        #expect(source.activePauseCount == 0)
+
+        // Toggling Focus Regions On triggers analysis for the visible photo cleanly.
+        browsing.showsFocusRegions = true
+        try await pipelineEventually { source.analyzeCalls == [first] }
+    }
+
     private func makeEnvironment(
         photos: [PhotoSet],
         faceGate: PipelineFaceGate = PipelineFaceGate(holding: false)
@@ -291,6 +323,60 @@ struct PipelineFocusRegionTests {
 
     private func fullResolutionRequest() -> DetailPixelRequest {
         DetailPixelRequest(displayPixels: 2400, need: .fullResolution, screenPixels: 1200)
+    }
+}
+
+@MainActor
+private final class GatedFocusPresentationImages: DetailImageSource, DetailRegionSharpnessSource {
+    private let sample = SampleDetailImages()
+    private(set) var analyzeCalls: [PhotoIdentity] = []
+    private(set) var prefetchedCount = 0
+    private(set) var beginPauseCount = 0
+    private(set) var activePauseCount = 0
+    private var tokens: Set<UUID> = []
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        await sample.placeholder(for: photo, gridThumbnails: gridThumbnails)
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async {
+        await sample.prepare(window)
+    }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        await sample.image(for: photo, request: request)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+        prefetchedCount += 1
+    }
+
+    func beginInteractiveRender() -> UUID? {
+        let token = UUID()
+        tokens.insert(token)
+        beginPauseCount += 1
+        activePauseCount = tokens.count
+        return token
+    }
+
+    func endInteractiveRender(_ token: UUID?) {
+        guard let token else { return }
+        tokens.remove(token)
+        activePauseCount = tokens.count
+    }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        analyzeCalls.append(photo)
+        return await sample.analyzeRegions(
+            for: photo, group: group, nearby: nearby, onAutofocus: onAutofocus)
     }
 }
 

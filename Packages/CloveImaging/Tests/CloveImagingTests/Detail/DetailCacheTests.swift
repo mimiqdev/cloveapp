@@ -228,6 +228,78 @@ actor DetailCacheTests {
         #expect(corrupted.decoded() == nil)
     }
 
+    @Test func stagedWarmImageServesImmediatelyAndReleaseAllInvalidatesInFlightEncode() throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let file = try directory.image(name: "bytes.JPG")
+        let cache = directory.cache()
+        let source = try detailSource(file)
+        let entryKey = key(source)
+        let sample = try image(file, width: 128, height: 128)
+        let token = try #require(cache.stageForEncoding(sample, for: entryKey))
+
+        // Synchronously available before compressed encoding finishes.
+        #expect(cache.warmImage(for: entryKey)?.image === sample.image)
+        #expect(cache.image(for: entryKey)?.image === sample.image)
+        #expect(cache.pendingCount == 1)
+        #expect(cache.imageCount == 1)
+        #expect(cache.contains(entryKey, minimumLongEdge: 128))
+
+        // releaseAll bumps encodingEpoch so a late finishEncoding never pollutes the cleared cache.
+        cache.releaseAll()
+        #expect(cache.pendingCount == 0)
+        #expect(cache.warmCost == 0)
+        #expect(cache.warmImage(for: entryKey) == nil)
+        cache.finishEncoding(
+            try #require(DetailCompressedImage(sample)), for: entryKey,
+            epoch: token.epoch, token: token.token)
+        #expect(cache.imageCount == 0)
+        #expect(cache.compressedCost == 0)
+
+        // Fresh stage + commit transitions pending -> compressed cleanly.
+        let freshToken = try #require(cache.stageForEncoding(sample, for: entryKey))
+        cache.finishEncoding(
+            try #require(DetailCompressedImage(sample)), for: entryKey,
+            epoch: freshToken.epoch, token: freshToken.token)
+        #expect(cache.pendingCount == 0)
+        #expect(cache.imageCount == 1)
+        #expect(cache.compressedCost > 0)
+    }
+
+    @Test func warmBudgetEvictsLeastRecentlyUsedBitmapWhileKeepingCompressedEntry() throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let file = try directory.image(name: "bytes.JPG")
+        let sample = try image(file, width: 128, height: 128)
+        let compressed = try #require(DetailCompressedImage(sample))
+        var configuration = DetailCache.Configuration()
+        configuration.compressedBytes = compressed.data.count * 8
+        configuration.warmBytes = sample.decodedBytes * 2
+        let cache = DetailCache(configuration: configuration)
+        let source = try detailSource(file)
+        let keys = (0..<3).map { index in
+            DetailCacheKey(
+                source: source, locationIdentity: "warm-\(index)", purpose: .embeddedPreview)
+        }
+
+        for index in 0..<2 {
+            let staged = try #require(cache.stageForEncoding(sample, for: keys[index]))
+            cache.finishEncoding(
+                compressed, for: keys[index], epoch: staged.epoch, token: staged.token)
+        }
+        // Touch key 0 so key 1 is oldest when key 2 arrives.
+        #expect(cache.warmImage(for: keys[0]) != nil)
+        let third = try #require(cache.stageForEncoding(sample, for: keys[2]))
+        cache.finishEncoding(compressed, for: keys[2], epoch: third.epoch, token: third.token)
+
+        #expect(cache.warmCost == sample.decodedBytes * 2)
+        #expect(cache.warmImage(for: keys[0]) != nil)
+        #expect(cache.warmImage(for: keys[1]) == nil)
+        #expect(cache.warmImage(for: keys[2]) != nil)
+        // Evicted from warm tier, still recoverable from compressed JPEG tier.
+        #expect(cache.image(for: keys[1]) != nil)
+    }
+
     @Test func deviceAwareBudgetScalesAcrossMemoryTiers() {
         let mib = 1024 * 1024
         #expect(
