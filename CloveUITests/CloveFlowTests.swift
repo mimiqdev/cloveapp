@@ -1447,6 +1447,20 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(eye.waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
 
+        // Double-tapping the photo body away from the AF rectangle still centres 100% on AF.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
+            "Double-tap should centre on the AF region instead of the tap point")
+        XCTAssertTrue(autofocus.exists)
+        XCTAssertFalse(eye.exists)
+        preview.doubleTap()
+        XCTAssertFalse(zoom.label.hasSuffix("100%"))
+        XCTAssertTrue(eye.waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
+
         let eyeSwipe = eye.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         eyeSwipe.press(
             forDuration: 0.1,
@@ -1520,6 +1534,23 @@ final class CloveFlowTests: XCTestCase {
                 NSPredicate(format: "exists == false"),
                 element(app, "clove.detail.region.af.0")))
         capture("detail-focus-regions-off-dark")
+
+        // Photo with no focus regions keeps tap-point double-tap zoom.
+        toggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), toggle))
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertFalse(element(app, "clove.detail.region.af.0").exists)
+        XCTAssertFalse(element(app, "clove.detail.region.face.0-0").exists)
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.5)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "value CONTAINS %@", "centred at 65%, 50%"), preview),
+            "Double-tap on a photo with no focus regions should centre on the tap point")
+        preview.doubleTap()
+        XCTAssertFalse(zoom.label.hasSuffix("100%"))
     }
 
     @MainActor
