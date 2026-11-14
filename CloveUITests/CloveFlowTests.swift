@@ -166,12 +166,45 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         centre.doubleTap()
         XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
-        XCTAssertFalse(strip.exists)
+        XCTAssertTrue(strip.exists)
+        XCTAssertFalse(element(app, "clove.detail.info").exists)
         XCTAssertTrue(rail.isHittable)
         XCTAssertEqual(preview.frame, stageFrame)
-        centre.doubleTap()
+        // Single-tapping while zoomed toggles the filmstrip without stepping photos.
+        centre.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        // Swiping/dragging on the filmstrip while zoomed must not pan the photo or rate via swipe.
+        let zoomedPosition = preview.value as? String
+        let railMarksBeforeStrip = rail.value as? String
+        strip.swipeLeft()
+        XCTAssertEqual(preview.value as? String, zoomedPosition)
+        XCTAssertEqual(rail.value as? String, railMarksBeforeStrip)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        let stripVertical = strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        stripVertical.press(
+            forDuration: 0.05, thenDragTo: stripVertical.withOffset(CGVector(dx: 0, dy: -200)))
+        XCTAssertEqual(rail.value as? String, railMarksBeforeStrip)
+        XCTAssertEqual(preview.value as? String, zoomedPosition)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        // Double-tapping near an edge/corner returns to fit without stepping.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.85)).doubleTap()
         // The fit that restores the chrome lands after the double tap returns (#203).
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        let info = element(app, "clove.detail.info")
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        // Corner and edge single taps at fit toggle chrome and never step photos.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.08)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         reject.tap()
         XCTAssertEqual(reject.label, "Rejected")
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
@@ -185,6 +218,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
         XCTAssertTrue(reject.isHittable)
         centre.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         reject.tap()
         XCTAssertEqual(reject.label, "Reject")
         XCTAssertFalse(element(app, "clove.detail.rejectGlyph").exists)
@@ -209,6 +243,18 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
         XCTAssertTrue(separatedEye.exists)
         XCTAssertFalse(element(app, "clove.detail.region.face.1-0").exists)
+        // Corner tap & double-tap on a focus-region photo never step photos and keep filmstrip at zoom.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.08)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02683.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.08)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).doubleTap()
+        XCTAssertTrue(element(app, "clove.detail.zoom").label.contains("100%"))
+        XCTAssertTrue(strip.exists)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02683.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
         capture("ipad-detail-focus-on")
         focusToggle.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), focusToggle))
@@ -434,7 +480,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(info.exists)
         let navigationPreview = element(app, "clove.detail.preview")
         let fileName = element(app, "clove.detail.fileName")
-        let capsule = element(app, "clove.detail.capsule")
+        let isRail = element(app, "clove.detail.rail").exists
+        let marksControl = element(app, isRail ? "clove.detail.rail" : "clove.detail.capsule")
+        let strip = element(app, "clove.detail.filmstrip")
+        let chromeTarget = isRail ? strip : marksControl
         XCTAssertEqual(navigationPreview.label, "MMQ02680.ARW")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), navigationPreview))
         XCTAssertFalse(
@@ -464,19 +513,45 @@ final class CloveFlowTests: XCTestCase {
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", ":05.42")).firstMatch
                 .exists)
         element(app, "clove.detail.info.done").tap()
-        element(app, "clove.detail.capsule.label").tap()
-        element(app, "clove.detail.labels.green").tap()
-        XCTAssertFalse(element(app, "clove.detail.labels").exists)
+        if isRail {
+            element(app, "clove.detail.rail.label.green").tap()
+        } else {
+            element(app, "clove.detail.capsule.label").tap()
+            element(app, "clove.detail.labels.green").tap()
+            XCTAssertFalse(element(app, "clove.detail.labels").exists)
+        }
         let preview = navigationPreview
         let zoom = element(app, "clove.detail.zoom")
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.doubleTap()
         XCTAssertEqual(zoom.label, "3 / 36 · 100%")
-        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        if !isRail {
+            XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        }
         XCTAssertFalse(element(app, "clove.detail.info").exists)
         XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        // Filmstrip stays visible while zoomed; single tap toggles it without stepping (#273).
+        XCTAssertTrue(strip.exists)
         centre.tap()
-        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        centre.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        // Filmstrip interactions while zoomed do not pan the preview or trigger rating swipes.
+        let zoomedPosition = preview.value as? String
+        let marksBeforeStrip = isRail ? (marksControl.value as? String) : nil
+        strip.swipeLeft()
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertEqual(preview.value as? String, zoomedPosition)
+        let stripVertical = strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        stripVertical.press(
+            forDuration: 0.05, thenDragTo: stripVertical.withOffset(CGVector(dx: 0, dy: -200)))
+        if isRail {
+            XCTAssertEqual(marksControl.value as? String, marksBeforeStrip)
+        }
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertEqual(preview.value as? String, zoomedPosition)
         // A horizontal drag while zoomed pans the scroll view instead of stepping photos.
         preview.swipeLeft()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
@@ -484,26 +559,32 @@ final class CloveFlowTests: XCTestCase {
         // The fit animation restores the chrome after the double tap returns, so this reads
         // the observed state instead of asserting one immediate snapshot.
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
+        XCTAssertTrue(strip.exists)
+        XCTAssertEqual(marksControl.value as? String, "Green")
         // Single taps anywhere (centre or outer edges) toggle chrome after waiting for double-tap
         // and never navigate.
         centre.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), chromeTarget))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), chromeTarget))
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), chromeTarget))
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
-        rate(4, in: app)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), chromeTarget))
+        if isRail {
+            element(app, "clove.detail.rail.stars.4").tap()
+        } else {
+            rate(4, in: app)
+        }
         // A mark waits out the advance pause before the file name changes. On a loaded runner
         // one accessibility query can consume most of a short window while the app is already
         // correct (#203), so this boundary keeps the 10-second budget the browsing flow uses.
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName, timeout: 10))
         preview.swipeRight()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        XCTAssertTrue(String(describing: capsule.value).contains("4"))
+        XCTAssertTrue(String(describing: marksControl.value).contains("4"))
         for (side, horizontalStart, nextPhoto) in [
             ("right", 0.8, "MMQ02681.ARW"),
             // Finishing the sample group advances to the following standalone photo.
@@ -512,7 +593,6 @@ final class CloveFlowTests: XCTestCase {
             let start = preview.coordinate(
                 withNormalizedOffset: CGVector(dx: horizontalStart, dy: 0.5))
             let end = start.withOffset(CGVector(dx: 0, dy: -130))
-            print("Swipe beside touch: \(side)")
             start.press(
                 forDuration: 0.1, thenDragTo: end, withVelocity: .slow,
                 thenHoldForDuration: 2)
@@ -720,11 +800,17 @@ final class CloveFlowTests: XCTestCase {
         let preview = element(app, "clove.detail.preview")
         let fileName = element(app, "clove.detail.fileName")
         let info = element(app, "clove.detail.info")
+        let strip = element(app, "clove.detail.filmstrip")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), info))
-        // While zoomed, single taps near the edges and horizontal swipes do not navigate (#252).
+        XCTAssertTrue(strip.exists)
+        // While zoomed, single taps near the edges toggle chrome and horizontal swipes do not navigate (#252, #273).
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         XCTAssertEqual(fileName.label, "MMQ02678.ARW")
         preview.swipeLeft()
         XCTAssertEqual(fileName.label, "MMQ02678.ARW")
@@ -733,9 +819,11 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(
             wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
         XCTAssertFalse(info.exists)
+        XCTAssertTrue(strip.exists)
         app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
+        XCTAssertTrue(strip.exists)
     }
 
     @MainActor

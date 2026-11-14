@@ -58,6 +58,9 @@ struct VerticalStarBar: View {
     /// otherwise look like a tap and clear the rating.
     @State private var movedPastTapSlop = false
 
+    /// Whether `onBegin` has already been fired for the active drag gesture.
+    @State private var didBeginDrag = false
+
     /// Whether a drag is running. SwiftUI resets gesture state when a gesture ends or is cancelled,
     /// so a cancelled drag cannot leave its preview behind.
     @GestureState private var isDragging = false
@@ -111,6 +114,7 @@ struct VerticalStarBar: View {
             identifier: identifier,
             onRate: size == .pad
                 ? { level in
+                    onBegin()
                     onCommit(level == rating ? .unrated : level)
                 } : nil
         )
@@ -122,6 +126,7 @@ struct VerticalStarBar: View {
                     state = true
                 }
                 .onChanged { value in
+                    beginDragIfNeeded()
                     trackMove(value.translation)
                     guard movedPastTapSlop else { return }
                     previewDrag(at: value.location.y, in: extent.height)
@@ -131,13 +136,11 @@ struct VerticalStarBar: View {
                 }
         )
         .onChange(of: isDragging) { _, dragging in
-            if dragging {
-                onBegin()
-            } else {
-                // A cancelled gesture ends without `onEnded`, so clear what it previewed.
-                preview = nil
-                movedPastTapSlop = false
-            }
+            guard !dragging else { return }
+            // A cancelled gesture ends without `onEnded`, so clear what it previewed.
+            preview = nil
+            movedPastTapSlop = false
+            didBeginDrag = false
         }
         .modifier(
             StarBarAccessibility(
@@ -182,6 +185,13 @@ struct VerticalStarBar: View {
         movedPastTapSlop = true
     }
 
+    /// Fires `onBegin` once per touch sequence before any commit can schedule a new advance.
+    private func beginDragIfNeeded() {
+        guard !didBeginDrag else { return }
+        didBeginDrag = true
+        onBegin()
+    }
+
     /// Applies what the gesture chose; nothing is applied before this call (interactions.md).
     ///
     /// A gesture that never moved past the tap slop is a tap: an enabled star is picked, the
@@ -189,9 +199,11 @@ struct VerticalStarBar: View {
     /// does nothing (PRD Marking rules, PRD Enabled rating levels). A drag commits the last value
     /// it previewed, so a drag back to its start keeps the rating instead of clearing it.
     private func commit(_ value: DragGesture.Value, in height: CGFloat) {
+        beginDragIfNeeded()
         defer {
             preview = nil
             movedPastTapSlop = false
+            didBeginDrag = false
         }
         guard movedPastTapSlop else {
             let drawn = drawnLevel(at: value.location.y, in: height)

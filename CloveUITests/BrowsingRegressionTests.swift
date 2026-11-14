@@ -274,7 +274,7 @@ extension CloveFlowTests {
         XCTAssertTrue(
             fileName.label == "MMQ02678.ARW", "The detail view did not show the file name")
 
-        let marks = element(in: app, "clove.detail.capsule").value as? String
+        let marks = detailMarksControl(in: app).value as? String
         XCTAssertTrue(
             marks?.contains("5 stars") == true,
             "The detail view did not show the saved rating: \(String(describing: marks))"
@@ -285,22 +285,25 @@ extension CloveFlowTests {
     private func checkDoubleTapZoom(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
         let zoom = element(in: app, "clove.detail.zoom")
+        let strip = element(in: app, "clove.detail.filmstrip")
         let fitLabel = zoom.label
         XCTAssertFalse(fitLabel.isEmpty, "The detail view had no zoom state")
         XCTAssertFalse(fitLabel.contains("%"), "The detail view did not open at fit")
 
         preview.doubleTap()
         XCTAssertTrue(zoom.label.hasSuffix("100%"))
+        XCTAssertTrue(strip.exists, "The filmstrip should stay visible while zoomed")
 
         preview.doubleTap()
         XCTAssertEqual(zoom.label, fitLabel)
 
         // A pinch still zooms, and while zoomed a one-finger drag pans instead of marking
         // (PRD Detail gestures: vertical marking swipes are disabled while zoomed).
-        let marks = element(in: app, "clove.detail.capsule")
+        let marks = detailMarksControl(in: app)
         let marksAtFit = marks.value as? String
         preview.pinch(withScale: 2, velocity: 1)
         XCTAssertNotEqual(zoom.label, fitLabel)
+        XCTAssertTrue(strip.exists, "The filmstrip should stay visible after pinching to zoom")
 
         drag(preview, byPointsX: 0, y: -150)
 
@@ -316,12 +319,16 @@ extension CloveFlowTests {
 
     @MainActor
     private func markThePhoto(in app: XCUIApplication) {
-        // The compact toolbar's rating action opens the ladder the stars live in (#227).
-        element(in: app, "clove.detail.capsule.rating").tap()
-        let fourStars = element(in: app, "clove.detail.capsule.stars.4")
-        XCTAssertTrue(
-            fourStars.waitForExistence(timeout: 5), "the rating ladder did not open")
-        fourStars.tap()
+        if element(in: app, "clove.detail.rail").exists {
+            element(in: app, "clove.detail.rail.stars.4").tap()
+        } else {
+            // The compact toolbar's rating action opens the ladder the stars live in (#227).
+            element(in: app, "clove.detail.capsule.rating").tap()
+            let fourStars = element(in: app, "clove.detail.capsule.stars.4")
+            XCTAssertTrue(
+                fourStars.waitForExistence(timeout: 5), "the rating ladder did not open")
+            fourStars.tap()
+        }
 
         // Group auto-advance skips the already rejected member. Select it explicitly for the
         // swipe checks below, which replace its existing Reject with stars.
@@ -345,7 +352,7 @@ extension CloveFlowTests {
         // Return to the rated member through the expanded group.
         element(in: app, "clove.detail.filmstrip.mmq02679").tap()
         XCTAssertEqual(fileName.label, "MMQ02679.ARW")
-        let marks = element(in: app, "clove.detail.capsule")
+        let marks = detailMarksControl(in: app)
         XCTAssertTrue((marks.value as? String)?.contains("2 stars") == true)
 
     }
@@ -398,17 +405,26 @@ extension CloveFlowTests {
     private func advanceBySwipe(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
         let fileName = element(in: app, "clove.detail.fileName")
-        let capsule = element(in: app, "clove.detail.capsule")
+        let chromeTarget = element(
+            in: app,
+            element(in: app, "clove.detail.rail").exists
+                ? "clove.detail.filmstrip" : "clove.detail.capsule")
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         // Single taps anywhere (including the outer 18% edges) toggle chrome and never navigate.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), chromeTarget))
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), chromeTarget))
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         preview.swipeLeft()
         XCTAssertEqual(fileName.label, "MMQ02681.ARW")
+    }
+
+    @MainActor
+    private func detailMarksControl(in app: XCUIApplication) -> XCUIElement {
+        let rail = element(in: app, "clove.detail.rail")
+        return rail.exists ? rail : element(in: app, "clove.detail.capsule")
     }
 
     @MainActor

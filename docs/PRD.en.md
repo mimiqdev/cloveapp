@@ -143,8 +143,8 @@ The behavior below follows the product and UI conclusions and the revisions abov
 
 ### Detail and marking
 
-- Provide a full-width preview and pinch zoom for focus inspection. Single-tap anywhere at fit toggles chrome only (waiting for the double-tap window) and never navigates (#252). Double-tap anywhere to zoom to 100% (centred on the preferred focus region when presented, or on the tapped point); double-tap anywhere again to return to fit.
-- Swipe left or right at fit (or use the filmstrip or keyboard) for the previous or next photo. While zoomed, one-finger drags pan the image rather than navigating.
+- Provide a full-width preview and pinch zoom for focus inspection. Single-tap anywhere toggles chrome only (waiting for the double-tap window) and never navigates (#252, #273). Double-tap anywhere to zoom to 100% (centred on the preferred focus region when presented, or on the tapped point); double-tap anywhere again to return to fit.
+- Swipe left or right at fit (or use the filmstrip or keyboard) for the previous or next photo. While zoomed, one-finger drags pan the image rather than navigating, and the filmstrip remains visible unless hidden by the chrome toggle.
 - Current marks must be immediately visible and not hidden by the user's hand. Detail uses a top marking HUD for ratings, Reject, and labels. iPad uses a right-hand marking rail. This avoids the competitor issue where the hand obscures bottom-bar state.
 - A filmstrip identifies the current photo and supports horizontal navigation.
 - The design also contains information such as filenames. The exact shooting metadata to display is undecided and not P0.
@@ -174,8 +174,8 @@ Detail gestures:
 | Fit | Swipe left or right | Navigate |
 | Fit | Single tap anywhere | Toggle chrome (waiting for the double-tap window; never navigates) |
 | Fit | Double-tap anywhere | Zoom to 100% (focused region when presented, else tapped point) |
-| Zoomed | One-finger drag | Pan. Vertical marking and horizontal navigation swipes are disabled while zoomed. |
-| Zoomed | Single tap | No action |
+| Zoomed | One-finger drag | Pan. Horizontal navigation swipes are disabled while zoomed. |
+| Zoomed | Single tap anywhere | Toggle chrome (shows/hides the filmstrip without navigating) |
 | Zoomed | Double-tap anywhere | Return to fit |
 | Any | Pinch | Zoom |
 | Any | Three-finger system gesture or ⌘Z | Undo |
@@ -375,7 +375,7 @@ These manual tests determine whether launch meets product requirements. They are
 | P0-01 | Through Files, open any accessible folder on the iPhone 17 Pro Max: local storage, or the CFexpress Type A USB reader when available. SD readers and other external drives remain supported-media examples; removable-media checks do not block MVP acceptance. Photos from multiple subfolders under `DCIM` appear in the grid, and photos in `_Rejected` do not. Same-name RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets each take one cell with RAW as primary. RAW alone and JPEG alone appear; HIF-only and iPhone HEIC appear when previewable. JPEG+HIF without RAW has no special handling. No imported copy of originals appears in the app's directory. |
 | P0-02 | Fully quit the app, then reopen the same folder through Recents. After disconnecting the drive or revoking permission, the same action explains how to select the folder again rather than failing silently. |
 | P0-03 | Scroll a RAW folder with embedded previews and use its thumbnails to browse. Unreadable files have explicit states. A folder shot with two bodies sorts correctly by capture time with subseconds, using creation time then modification time when capture time is missing; fallback photos are not grouped. No temporary filename order appears first, and the user can switch to filename order. Each of the four filters shows only matching photos. |
-| P0-04 | In detail, pinch to zoom, or double-tap anywhere (including near the edges) to 100% and double-tap anywhere back to fit. Single taps anywhere at fit toggle chrome without navigating. Horizontal swipes at fit and the filmstrip navigate to previous and next photos. Current ratings, Reject, and labels are visible away from the hand. |
+| P0-04 | In detail, pinch to zoom, or double-tap anywhere (including near the edges) to 100% and double-tap anywhere back to fit. Single taps anywhere toggle chrome without navigating. Horizontal swipes at fit and the filmstrip navigate to previous and next photos. Current ratings, Reject, and labels are visible away from the hand. |
 | P0-05 | Apply ratings, labels, and Reject, where Reject is the rating −1 and replaces the stars. Clearing Reject leaves the photo unrated. Original bytes remain unchanged. RAW ratings, Reject included, create or update the shared sidecar; standalone JPEG/HIF marks stay in Clove without a sidecar. Tapping the same rating in the rating bar clears it. Rejected originals remain in place. Undo restores the previous mark, including the stars a Reject replaced, and undoing after auto-advance returns to that photo. |
 | P0-06 | Slow drags step relative to −1, 0, 1, 3 and 5 starting ratings in both directions, including across the start, skipping disabled stars. Quick short down from 3 clears; quick long down rejects; slow down two steps gives 1. Preview and haptics track every crossing; release commits one undo change, preserving labels. Reverse past the start cancels a quick swipe. Existing disabled ratings still display. Keys and auto-advance follow settings. |
 | P0-07 | Clove displays ratings and labels previously written by Lightroom, Capture One, or Photo Mechanic, and reads `xmp:Rating="-1"` as Rejected. Those apps read Clove's XMP ratings and labels for RAW sets. Each RAW set, including a RAW+JPEG+HIF triple, has one XMP; standalone DNG uses a sidecar too. Other preexisting XMP information survives the write, including an out-of-range rating such as `6` or `-2`, which reads as unrated, and companions remain unchanged. Reject is written as the standard rating −1, with no Clove namespace. Standalone JPEG/HIF embedded marks are read; new marks, Reject included, create no sidecar or in-file change and show Saved in Clove only. |

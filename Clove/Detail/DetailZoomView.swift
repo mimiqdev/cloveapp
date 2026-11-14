@@ -69,14 +69,13 @@ final class DetailZoomProbe {
 }
 
 /// The detail preview: a scroll view with pinch zoom, pan, double-tap zoom everywhere, uniform
-/// single-tap chrome toggle at fit, and fit-only swipes for navigation and marking (PRD P0-04,
-/// PRD Gestures and keyboard, PRD Detail gestures).
+/// single-tap chrome toggle at fit and zoom, and fit-only swipes for navigation and marking (PRD
+/// P0-04, PRD Gestures and keyboard, PRD Detail gestures).
 ///
 /// The scroll view is the system zoom container the plan names: pinch and one-finger pan are its
 /// own, the image is drawn aspect-fit in it, and the minimum scale of 1 is the fit view. Single
 /// taps anywhere on the preview wait for the double-tap recognizer to fail so toggling chrome
-/// cannot interrupt a focus check, and single taps are off while zoomed, where a tap does nothing
-/// (PRD Detail gestures).
+/// cannot interrupt a focus check, and toggle chrome at both fit and zoomed scales (#273).
 ///
 /// Double taps anywhere on the preview toggle between 100% and fit (owner decision, 2026-11-14,
 /// #252). At fit, the container's one-finger pan locks its initial dominant axis: horizontal drags
@@ -113,7 +112,7 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports every scale the scroll view shows, for the screen's pixel-demand decision.
     let onZoomChange: (CGFloat) -> Void
 
-    /// Toggles the fit-only chrome when single-tapping anywhere on the preview.
+    /// Toggles chrome when single-tapping anywhere on the preview.
     var onChromeToggle: () -> Void = {}
 
     /// Reports a completed horizontal navigation swipe (`-1` previous, `1` next).
@@ -338,8 +337,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return nil
     }
 
-    /// Whether a single tap can show or hide the chrome, which it can only at fit (PRD Detail
-    /// and marking).
+    /// Whether a single tap can show or hide chrome (active at both fit and zoomed scales, #273).
     var chromeTapIsEnabled: Bool { chromeTap.isEnabled }
     var markingPanIsEnabled: Bool { markingPan.isEnabled }
     var twoFingerMarkingSwipeIsEnabled: Bool { twoFingerMarkingSwipe.isEnabled }
@@ -397,22 +395,17 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         doubleTap.isEnabled = isEnabled
     }
 
-    /// Switches the fit-only inputs off while zoomed, where a one-finger drag pans the image and a
-    /// tap changes nothing (PRD Detail gestures).
+    /// Switches fit-only navigation off while zoomed, where a one-finger drag pans the image (or
+    /// starts a zoomed rating swipe per settings), while chrome tap stays active at both fit and
+    /// zoomed scales (#273).
     ///
     /// The scroll view's own pan stays enabled throughout: at fit there is nothing to scroll, so
     /// the two pans cannot compete, and simultaneous recognition below means neither cancels the
     /// other. Turning the scroll view's pan off at fit would also cost U5's pinch, which needs it
     /// for two-finger panning as it zooms.
-    ///
-    /// The chrome tap is off rather than left to fail its zoom check when it is delivered. A tap
-    /// made while zoomed is held until the double tap it may belong to fails, so under load its
-    /// action can arrive after a double tap has already returned the view to fit; it would then
-    /// toggle the chrome and hide Info, Undo and the capsule for a tap the person made while
-    /// zoomed (#131). A disabled recognizer never starts, so that tap has nothing to deliver.
     private func updateGestureAvailability() {
         let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
-        chromeTap.isEnabled = !isZoomed
+        chromeTap.isEnabled = true
         guard isZoomed else {
             markingPan.isEnabled = true
             twoFingerMarkingSwipe.isEnabled = false
@@ -535,7 +528,20 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 && rules.settings.zoomedRatingSwipe == .twoFinger
         }
         guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
-        let translation = pan.translation(in: self)
+        // `UIPanGestureRecognizer.translation(in:)` starts at recognition after pan hysteresis
+        // settles, which can be `(0, 0)` when a slow drag lands right on the threshold. Measure
+        // initial travel from `markingTouchStart` when real touches are attached (falling back to
+        // `translation` when zero or in synthetic pan tests without touches) so the axis check sees
+        // the true finger displacement from touch-down.
+        let translation: CGPoint
+        if pan.numberOfTouches > 0 {
+            let location = pan.location(in: self)
+            let delta = CGPoint(
+                x: location.x - markingTouchStart.x, y: location.y - markingTouchStart.y)
+            translation = (delta.x != 0 || delta.y != 0) ? delta : pan.translation(in: self)
+        } else {
+            translation = pan.translation(in: self)
+        }
         if isZoomed {
             guard rules.settings.gesturesEnabled,
                 rules.settings.zoomedRatingSwipe == .singleFingerAxisLock
@@ -722,7 +728,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     override func accessibilityActivate() -> Bool { true }
 
     @objc private func toggleChromeFromAccessibility() -> Bool {
-        guard scrollView.zoomScale <= DetailFitScale.tolerance else { return false }
         onChromeToggle?()
         return true
     }
