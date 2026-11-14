@@ -65,12 +65,19 @@ extension GridCellItem {
         /// Whether the cell is the collapsed cover; tapping it opens the group (PRD Grid).
         public let isCover: Bool
 
+        /// Up to two member identities peeking behind a collapsed cover in grid order.
+        public let peekingPhotos: [PhotoIdentity]
+
         /// Describes one cell's part in a group.
-        public init(id: GroupID, count: Int, showsCount: Bool, isCover: Bool) {
+        public init(
+            id: GroupID, count: Int, showsCount: Bool, isCover: Bool,
+            peekingPhotos: [PhotoIdentity] = []
+        ) {
             self.id = id
             self.count = count
             self.showsCount = showsCount
             self.isCover = isCover
+            self.peekingPhotos = peekingPhotos
         }
     }
 }
