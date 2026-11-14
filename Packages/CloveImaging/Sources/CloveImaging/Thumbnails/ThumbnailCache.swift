@@ -129,7 +129,7 @@ public final class ThumbnailCache: Sendable {
                 guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                     let image = CGImageSourceCreateImageAtIndex(
                         source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
-                    image.dataProvider?.data != nil
+                    image.width > 0, image.height > 0, image.bytesPerRow > 0
                 else { return nil as CGImage? }
                 return image
             }

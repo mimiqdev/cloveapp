@@ -68,6 +68,21 @@ actor ThumbnailExtractionTests {
         }
     }
 
+    @Test func truncatedJPEGHeaderIsUnavailable() throws {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let valid = try directory.image(name: "valid.jpg")
+        let validBytes = try Data(contentsOf: valid)
+        // Keep SOI + APP/SOF header bytes but strip the entire scan payload.
+        let headerOnly = directory.url.appendingPathComponent("truncated-header.jpg")
+        try validBytes.prefix(min(validBytes.count / 4, 64)).write(to: headerOnly)
+        let result = ThumbnailExtractor().extract(try thumbnailRequest(headerOnly))
+        guard case .unavailable = result else {
+            Issue.record("Truncated JPEG without scan data must report .unavailable: \(result)")
+            return
+        }
+    }
+
     @Test func fixtureARWAndJPEGProduceExpectedGridSize() throws {
         let root =
             ProcessInfo.processInfo.environment["CLOVE_FIXTURES_DIR"]

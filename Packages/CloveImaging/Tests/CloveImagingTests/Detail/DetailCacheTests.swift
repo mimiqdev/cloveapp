@@ -215,4 +215,16 @@ actor DetailCacheTests {
         #expect(cache.holdsNativeImage == false)
         #expect(cache.imageCount == 0)
     }
+
+    @Test func truncatedCompressedDataFailsToDecode() throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let file = try directory.image(name: "bytes.JPG")
+        let sample = try image(file, width: 128, height: 128)
+        let compressed = try #require(DetailCompressedImage(sample))
+        let corrupted = DetailCompressedImage(
+            corruptingData: Data(compressed.data.prefix(64)),
+            copying: compressed)
+        #expect(corrupted.decoded() == nil)
+    }
 }
