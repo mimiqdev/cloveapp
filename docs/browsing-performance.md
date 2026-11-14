@@ -207,3 +207,39 @@ checks drops warm `raw-focus` from ~50 ms to `0.062 / 0.091 ms` (and warm
 raises peak process RSS from `681.9 MiB` (`5.1 MP` ARW only) to `1,672.7 MiB`.
 The cold grouping run computes features for 1,975 photos and produces three
 groups. Its duration is not a burst-accuracy result.
+
+### Phase 2 detail-swipe smoothness (`task/perf-phase2-detail-swipes`, Release)
+
+Measured on `Mac17,3` (Apple Silicon MacBook Air, 10 cores, 24 GiB RAM) running
+`macOS 27.0.1` (`26A434`) across `286a114` (baseline) vs `65909b4` (O1 + O2)
+with `CLOVE_DETAIL_SCREEN_PIXELS=2868` (`collectFullMacReport`, Release):
+
+| Q3 detail metric (`2,868 px`) | Baseline `286a114` (p50 / p95) | Phase 2 `65909b4` (p50 / p95) | Change |
+| --- | --- | --- | --- |
+| `detail-20mp-preview` cold | `88.542 / 109.806 ms` | `42.983 / 56.342 ms` | `-51.5% / -48.7%` |
+| `detail-20mp-preview` warm | `4.890 / 5.529 ms` | `0.045 / 0.058 ms` | `-99.1% / -98.9%` |
+| `detail-20mp-screen` cold | `211.495 / 242.204 ms` | `190.347 / 223.481 ms` | `-10.0% / -7.7%` |
+| `detail-20mp-screen` warm | `9.113 / 10.075 ms` | `0.040 / 0.054 ms` | `-99.6% / -99.5%` |
+| `detail-first-preview` (`browsing-2000` mix) cold | `119.203 / 120.179 ms` | `93.732 / 99.773 ms` | `-21.4% / -17.0%` |
+| `detail-format-preview` cold (`sony-ilce-7s.ARW`) | `44.618 / 46.892 ms` | `12.594 / 12.775 ms` | `-71.8% / -72.8%` |
+| `detail-format-preview` cold (`canon-eos-r6.CR3`) | `87.297 / 88.542 ms` | `42.707 / 44.670 ms` | `-51.1% / -49.5%` |
+| `detail-format-preview` cold (`nikon-d500.NEF`) | `103.008 / 108.171 ms` | `44.607 / 46.291 ms` | `-56.7% / -57.2%` |
+| `detail-format-preview` cold (`olympus-e-m1markii.ORF`) | `109.675 / 110.056 ms` | `55.963 / 56.834 ms` | `-49.0% / -48.4%` |
+| `detail-format-preview` cold (`fujifilm-x-s10.RAF`) | `69.537 / 70.501 ms` | `34.377 / 34.674 ms` | `-50.6% / -50.8%` |
+| `detail-format-preview` cold (`panasonic-dmc-gh4.RW2`) | `48.659 / 50.739 ms` | `12.366 / 13.754 ms` | `-74.6% / -72.9%` |
+| `memory-peak` (`detail` / `overall`) | `1,220.8 MiB` | `1,148.5 MiB` | `-5.9%` |
+
+Table 3.4 contention simulation on `Mac17,3` (`2,752 px`, Release, `DetailPipeline`
++ `RegionSharpnessScheduler` `.current` + `.nearby` + `.folder`):
+
+| Workload (`screenPixels = 2752`) | Swipes `n` | Arrival → `preview` (p50 / p95) | Arrival → `screenRAW` (p50 / p95; mean) | `+1 screenRAW` Hits | `nativeRAW` Renders |
+| --- | ---: | --- | --- | ---: | ---: |
+| `20 MP canon-eos-r6.CR3` — `400 ms` cadence (O1+O2 gated sharpness) | 12 | `0.2 / 5.1 ms` | `0.3 / 239.0 ms` (`27.6 ms`) | `10 / 12` (`83%`) | `0` |
+| `20 MP canon-eos-r6.CR3` — `800 ms` cadence (O1+O2 gated sharpness) | 12 | `0.3 / 8.6 ms` | `0.4 / 8.7 ms` (`1.1 ms`) | `12 / 12` (`100%`) | `0` |
+| `26 MP fujifilm-x-s10.RAF` (with AF) — `400 ms` cadence (O1+O2 gated sharpness) | 12 | `2.0 / 10.6 ms` | `8.7 / 72.4 ms` (`11.0 ms`) | `11 / 12` (`92%`) | `24` |
+| `26 MP fujifilm-x-s10.RAF` (with AF) — `800 ms` cadence (O1+O2 gated sharpness) | 12 | `0.3 / 9.6 ms` | `0.4 / 9.7 ms` (`3.2 ms`) | `12 / 12` (`100%`) | `21` |
+| `5.1 MP sony-ilce-7s.ARW+JPG` — `800 ms` cadence (O1+O2 sharpness ON) | 16 | `0.3 / 12.0 ms` | `0.4 / 12.0 ms` (`1.2 ms`) | `16 / 16` (`100%`) | `0` |
+
+Physical-device `xctrace` Animation Hitches verification on the owner's iPad Pro
+remains pending TestFlight verification for [#253](https://github.com/mimiqdev/cloveapp/issues/253).
+
