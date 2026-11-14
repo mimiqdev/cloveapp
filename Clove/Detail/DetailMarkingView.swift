@@ -46,8 +46,9 @@ struct DetailMarkingActions {
 /// Every quality replacement preserves zoom and position.
 ///
 /// Navigation is gesture-only: horizontal swipes at fit move between photos. Single taps anywhere
-/// on the preview toggle chrome at fit (waiting for the double-tap window), and double taps
-/// anywhere zoom to 100% or return to fit (PRD Detail and marking, #252).
+/// on the preview toggle chrome at both fit and zoomed scales (waiting for the double-tap window),
+/// and double taps anywhere zoom to 100% or return to fit (PRD Detail and marking, #252, #273).
+/// The filmstrip remains visible while zoomed unless hidden by the chrome toggle.
 ///
 /// Folder access problems appear in the header's indicator and banner (PRD P0-08). A change
 /// that did not confirm brings the shared failure toast, and the files supply the marks again.
@@ -187,6 +188,8 @@ struct DetailMarkingView: View {
 
     private var chromeIsVisible: Bool { !hidesChrome && scale <= DetailFitScale.tolerance }
 
+    private var filmstripIsVisible: Bool { !hidesChrome }
+
     private var displayMarks: PhotoMarks { photo.marks }
 
     private var usesRail: Bool { horizontalSizeClass == .regular && duo == nil }
@@ -203,6 +206,7 @@ struct DetailMarkingView: View {
         }
         .background(Color.clove.bg.stage)
         .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
+        .animation(.easeInOut(duration: 0.2), value: filmstripIsVisible)
         .task(id: scale > DetailFitScale.tolerance) {
             showsZoomChip = scale > DetailFitScale.tolerance
             guard showsZoomChip else { return }
@@ -374,7 +378,7 @@ struct DetailMarkingView: View {
             // width, and the strip's content fills that viewport up to the toolbar (#237).
             // The two regions share the photo stage's background, so no contrasting sidebar slab
             // divides them.
-            if showsFilmstrip && chromeIsVisible {
+            if showsFilmstrip && filmstripIsVisible {
                 HStack(alignment: .bottom, spacing: 0) {
                     DetailFilmstrip(
                         photos: order, current: photo.id, thumbnails: browsing.thumbnails,
@@ -496,13 +500,21 @@ struct DetailMarkingView: View {
                         Toast(message: message, identifier: "clove.save.toast")
                             .padding(.horizontal, 16)
                     }
-                    if chromeIsVisible {
+                    if showsZoomChip && scale > DetailFitScale.tolerance {
+                        Text(zoomName)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.clove.text.primary)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .cloveGlass(in: Capsule())
+                            .padding(.bottom, filmstripIsVisible ? 0 : 12)
+                    }
+                    if filmstripIsVisible {
                         VStack(spacing: 8) {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
                                 open: actions.openPhoto,
                                 groups: browsing.groups, finishingAction: finishingAction)
-                            if !usesRail {
+                            if chromeIsVisible && !usesRail {
                                 MarkingToolbar(
                                     rating: swipeFeedback.rating
                                         ?? (displayMarks.isRejected
@@ -526,13 +538,6 @@ struct DetailMarkingView: View {
                             }
                         }
                         .padding(.bottom, 8)
-                    } else if showsZoomChip && scale > DetailFitScale.tolerance {
-                        Text(zoomName)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Color.clove.text.primary)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .cloveGlass(in: Capsule())
-                            .padding(.bottom, 12)
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) {
@@ -610,7 +615,8 @@ struct DetailMarkingView: View {
         .overlay {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
-                controlsHeight: controlsHeight, chromeIsVisible: chromeIsVisible)
+                controlsHeight: controlsHeight,
+                chromeIsVisible: filmstripIsVisible || chromeIsVisible)
         }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -1231,9 +1237,9 @@ struct DetailMarkingView: View {
         return (index > 0, index + 1 < order.count)
     }
 
-    /// Toggles the fit-only chrome when single-tapping anywhere on the preview (PRD P0-04, #252).
+    /// Toggles chrome visibility when single-tapping anywhere on the preview, at both fit and
+    /// zoomed scales (PRD P0-04, #252, #273).
     private func toggleChrome() {
-        guard scale <= DetailFitScale.tolerance else { return }
         hidesChrome.toggle()
     }
 

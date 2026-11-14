@@ -415,10 +415,11 @@ struct DetailDisplayPresentationTests {
         }
         try await waitFor { source.prefetched.last?.current.photo == photos[2].id }
         let preview = try #require(findPreview(in: window))
-        try sendSwipe(to: preview, travel: CGPoint(x: -180, y: 0))
+        let stepTravel = -max(180, preview.bounds.width * 0.3)
+        try sendSwipe(to: preview, travel: CGPoint(x: stepTravel, y: 0))
         #expect(browsing.state.currentPhoto == photos[3].id)
         try await Task.sleep(for: .milliseconds(100))
-        try sendSwipe(to: preview, travel: CGPoint(x: -180, y: 0))
+        try sendSwipe(to: preview, travel: CGPoint(x: stepTravel, y: 0))
         #expect(browsing.state.currentPhoto == photos[4].id)
         try await Task.sleep(for: .milliseconds(100))
         try sendSwipe(to: preview, travel: CGPoint(x: 0, y: -130))
@@ -459,7 +460,7 @@ struct DetailDisplayPresentationTests {
         preview.handleMarkingPan(pan)
         try await Task.sleep(for: .milliseconds(350))
         #expect(browsing.state.currentPhoto == photos[2].id)
-        pan.travel = CGPoint(x: -180, y: 0)
+        pan.travel = CGPoint(x: -max(180, preview.bounds.width * 0.3), y: 0)
         pan.sampleState = .ended
         preview.handleMarkingPan(pan)
         #expect(browsing.state.currentPhoto == photos[3].id)
@@ -592,7 +593,7 @@ struct DetailDisplayPresentationTests {
         try #require(preview.gestureRecognizerShouldBegin(pan))
         preview.handleMarkingPan(pan)
         pan.sampleState = .changed
-        pan.travel = CGPoint(x: -140, y: 0)
+        pan.travel = CGPoint(x: -max(140, preview.bounds.width * 0.3), y: 0)
         preview.handleMarkingPan(pan)
 
         #expect(scroll.transform == .identity)
@@ -607,18 +608,61 @@ struct DetailDisplayPresentationTests {
         #expect(image.convert(image.bounds, to: window) == initialFrame)
     }
 
-    /// A tap that begins while zoomed must never reach chrome, even when the double tap that
-    /// returns the view to fit is delivered before it (#131).
-    @Test func chromeTapIsLiveOnlyAtFit() throws {
+    /// A single tap toggles chrome at both fit and zoomed scales, waiting on double-tap first
+    /// so returning to fit never toggles chrome (#273).
+    @Test func chromeTapIsLiveAtFitAndZoomed() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
         preview.setImage(try testPixels(gray: 0))
         preview.setNeedsLayout()
         preview.layoutIfNeeded()
+        var chromeToggles = 0
+        preview.onChromeToggle = { chromeToggles += 1 }
         #expect(preview.chromeTapIsEnabled)
         preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
-        #expect(!preview.chromeTapIsEnabled)
+        #expect(preview.chromeTapIsEnabled)
+        let toggleAction = try #require(
+            preview.subviews.compactMap { $0.accessibilityCustomActions }.flatMap { $0 }.first)
+        #expect(toggleAction.name == "Show or hide controls")
+        #expect((preview as NSObject).perform(toggleAction.selector) != nil)
+        #expect(chromeToggles == 1)
         preview.apply(DetailZoomCommand(id: 2, kind: .fit))
         #expect(preview.chromeTapIsEnabled)
+    }
+
+    @Test func filmstripStaysVisibleWhileZoomedAndChromeToggleHidesItInDetailScreen() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photo = browsing.photos[2]
+        browsing.openPhoto(photo.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source)
+                .environment(SettingsStore.sample))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor {
+            source.prefetched.last?.current.photo == photo.id
+                && source.delivered.contains(.screenRAW)
+        }
+        let preview = try #require(findPreview(in: window))
+        try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) != nil }
+
+        // Double-tapping to 100% keeps the filmstrip mounted.
+        preview.onDoubleTap?(.center)
+        try await waitFor { preview.isZoomed }
+        #expect(findFilmstripScrollView(in: window, excluding: preview) != nil)
+
+        // Single-tapping chrome toggle while zoomed hides the filmstrip, then shows it again.
+        preview.onChromeToggle?()
+        try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) == nil }
+        preview.onChromeToggle?()
+        try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) != nil }
     }
 
     @Test func tapsAreUniformAcrossEdgesAndZoomedHorizontalSwipesDoNotNavigate() throws {
@@ -668,10 +712,10 @@ struct DetailDisplayPresentationTests {
             }
         }
 
-        // While zoomed: recognizers follow `zoomedRatingSwipe` and `gesturesEnabled`.
+        // While zoomed: recognizers follow `zoomedRatingSwipe` and `gesturesEnabled`, while chrome tap stays on.
         preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
         #expect(preview.isZoomed)
-        #expect(!preview.chromeTapIsEnabled)
+        #expect(preview.chromeTapIsEnabled)
 
         applySettings(mode: .twoFinger, gesturesEnabled: true)
         #expect(!preview.markingPanIsEnabled)
@@ -1201,6 +1245,19 @@ struct DetailDisplayPresentationTests {
         if let control = view as? DetailFocusRegionControl { return control }
         for child in view.subviews {
             if let control = findFocusControl(in: child) { return control }
+        }
+        return nil
+    }
+
+    private func findFilmstripScrollView(
+        in view: UIView, excluding preview: DetailZoomContainerView
+    ) -> UIScrollView? {
+        if view === preview { return nil }
+        if let scrollView = view as? UIScrollView { return scrollView }
+        for child in view.subviews {
+            if let found = findFilmstripScrollView(in: child, excluding: preview) {
+                return found
+            }
         }
         return nil
     }
