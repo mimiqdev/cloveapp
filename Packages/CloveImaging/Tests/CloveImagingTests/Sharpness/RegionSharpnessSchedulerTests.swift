@@ -325,12 +325,13 @@ private func until(
             Issue.record("Expected AF regions")
             return
         }
-        #expect(afRegions.first?.score != nil)
+        #expect(afRegions.first?.score == nil)
+        #expect(afRegions.first?.unavailableBecause == nil)
         guard case .regions(let faceRegions) = analysis.faces else {
             Issue.record("Expected face regions")
             return
         }
-        #expect(faceRegions.allSatisfy { $0.score != nil })
+        #expect(faceRegions.allSatisfy { $0.score == nil && $0.unavailableBecause == nil })
     }
 
     @Test(.timeLimit(.minutes(1))) func earlyAFDeliverySurvivesStageGating() async throws {
@@ -339,11 +340,9 @@ private func until(
         reader.setProperties(afInfoProperties(), for: "a.arw")
         reader.reads.release(.properties)
         reader.reads.release(.preview)
-        reader.reads.hold(.highResolution)
         let detector = GatedSharpnessDetector()
         detector.hold()
         defer {
-            reader.reads.release(.highResolution)
             detector.releaseAll()
         }
         let scheduler = RegionSharpnessScheduler(
@@ -354,29 +353,29 @@ private func until(
                 delivered.continuation.yield(early)
             }
         }
-        // async-let detection need not start before AF scoring. Establish its held entry
-        // before releasing acquisition, then await the callback without a latency assertion.
         try await detector.waitUntilParked()
-        reader.reads.release(.highResolution)
         var deliveries = delivered.stream.makeAsyncIterator()
         let early = try #require(await deliveries.next())
         #expect(detector.parked == 1, "AF must be delivered before detection completes")
         guard case .regions(let regions) = early else {
-            Issue.record("Expected the scored AF region early")
+            Issue.record("Expected the located AF region early")
             task.cancel()
             return
         }
-        #expect(regions.first?.score != nil)
+        #expect(regions.first?.score == nil)
+        #expect(regions.first?.unavailableBecause == nil)
         detector.releaseAll()
         let analysis = try #require(await task.value)
         guard case .regions(let combinedAF) = analysis.autofocus,
             case .regions(let faces) = analysis.faces
         else {
-            Issue.record("Expected both scored paths after releasing detection")
+            Issue.record("Expected both located paths after releasing detection")
             return
         }
-        #expect(combinedAF.map(\.score) == regions.map(\.score))
-        #expect(!faces.isEmpty && faces.allSatisfy { $0.score != nil })
+        #expect(combinedAF.map(\.region) == regions.map(\.region))
+        #expect(combinedAF.map(\.unavailableBecause) == regions.map(\.unavailableBecause))
+        #expect(
+            !faces.isEmpty && faces.allSatisfy { $0.score == nil && $0.unavailableBecause == nil })
         await scheduler.close()
     }
 }
@@ -405,9 +404,8 @@ private func until(
         reader.setProperties(afInfoProperties(), for: "bg.arw")
         reader.setProperties(afInfoProperties(), for: "now.arw")
         let detector = GatedSharpnessDetector()
-        // Park both heavy stages: queued work accumulates, nothing starts.
+        // Park detection: queued work accumulates, nothing completes.
         detector.hold()
-        await reader.reads.hold(.highResolution)
         let scheduler = makeScheduler(reader, detector)
 
         // One current photo runs; the folder's photos queue behind it.
@@ -424,16 +422,14 @@ private func until(
             await scheduler.snapshot().queuedByPriority[.folder] ?? 0 >= 18
         }
 
-        // The acquisition budget (1) is held by the current photo: it entered the read
-        // (parked on the gate) while no background photo has entered one. Background jobs
-        // may queue for the slot — queueing is free — but entering is bounded.
-        #expect(try await reader.nextAcquisition() == "now.arw")
-        #expect(reader.highResolutionCounts["now.arw"] == 1)
+        // The detector budget (1) belongs to the current photo and no high-resolution acquisition
+        // runs.
+        #expect(reader.previewCounts["now.arw"] == 1)
         #expect(
-            Set(reader.highResolutionCounts.keys) == ["now.arw"],
-            "no background photo entered an acquisition while the current one holds the budget")
-        #expect(reader.peakHighResolution <= 1)
-        // And the detector budget (1) likewise belongs to the current photo.
+            Set(reader.previewCounts.keys) == ["now.arw"],
+            "no background photo entered detection while the current one holds the budget")
+        #expect(reader.peakPreview <= 1)
+        #expect(reader.highResolutionCounts.isEmpty)
         #expect(detector.parked == 1)
 
         releaseEverything(reader)
@@ -443,7 +439,8 @@ private func until(
             Issue.record("Expected the current photo's AF regions")
             return
         }
-        #expect(afRegions.first?.score != nil)
+        #expect(afRegions.first?.score == nil)
+        #expect(afRegions.first?.unavailableBecause == nil)
         await scheduler.close()
     }
 
@@ -515,10 +512,10 @@ private func until(
         }
         #expect(answers.count == 3)
         #expect(answers.allSatisfy { $0 != nil })
-        // One unit of work: one property read, one preview, one acquisition, one detection.
+        // One unit of work: one property read, one preview, one detection, zero acquisitions.
         #expect(reader.propertiesCounts["shared.arw"] == 1)
         #expect(reader.previewCounts["shared.arw"] == 1)
-        #expect(reader.highResolutionCounts["shared.arw"] == 1)
+        #expect(reader.highResolutionCounts["shared.arw"] == nil)
         #expect(detector.requestCount == 1)
         await scheduler.close()
     }
@@ -617,7 +614,7 @@ private func until(
 
     @Test func staleAcquisitionIsNotStored() async throws {
         let reader = GatedSharpnessReader()
-        reader.setHighResolution(failure: .staleSource, for: "stale.arw")
+        reader.setPreview(failure: .staleSource, for: "stale.arw")
         reader.setProperties(afInfoProperties(), for: "stale.arw")
         let detector = GatedSharpnessDetector()
         for kind in [.properties, .preview, .highResolution] as [GatedSharpnessReader.ReadGate.Kind]
@@ -639,16 +636,16 @@ private func until(
         let reader = GatedSharpnessReader()
         reader.setProperties(afInfoProperties(), for: "flip.arw")
         let detector = GatedSharpnessDetector()
-        await reader.reads.hold(.highResolution)
+        await reader.reads.hold(.preview)
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
         let task = Task { await scheduler.analyzeCurrent(photoRequest("flip", revision: 1)) }
-        try await until("the acquisition is held") {
-            reader.highResolutionCounts["flip.arw"] ?? 0 >= 1
+        try await until("the preview read is held") {
+            reader.previewCounts["flip.arw"] ?? 0 >= 1
         }
         // The file changes under the running analysis.
         await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/flip.arw")])
-        reader.reads.release(.highResolution)
+        reader.reads.release(.preview)
         let answer = await task.value
         // The waiter is told the photo no longer has a result, instead of receiving one that
         // belongs to a revision that is gone.
@@ -701,9 +698,12 @@ private func until(
         await scheduler.submit((0..<1000).map { photoRequest("load\($0)") }, priority: .folder)
         // Observe forty entries, without requiring that throughput within a wall-clock
         // window shared with every parallel test. The gates record the concurrency peaks.
-        for _ in 0..<40 { _ = try await reader.nextAcquisition() }
+        try await until("forty photos finish face detection", timeout: .seconds(30)) {
+            await scheduler.snapshot().stages[.faceDetection]!.finishedCount >= 40
+        }
         await scheduler.close()
-        #expect(reader.peakHighResolution <= 1)
+        #expect(reader.peakPreview <= 1)
+        #expect(reader.highResolutionCounts.isEmpty)
         #expect(detector.peakConcurrency <= 1)
         // The compact store never grew beyond its capacity.
         let snapshot = await scheduler.snapshot()
@@ -714,7 +714,6 @@ private func until(
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.highResolution)
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
         await scheduler.submit((0..<50).map { photoRequest("hold\($0)") }, priority: .folder)
@@ -727,9 +726,8 @@ private func until(
         let snapshot = await scheduler.snapshot()
         let detection = snapshot.stages[.faceDetection]!
         #expect(detection.active <= 1)
-        #expect(reader.peakHighResolution <= 1)
+        #expect(reader.peakHighResolution == 0)
         detector.releaseAll()
-        reader.reads.release(.highResolution)
         await scheduler.close()
     }
 
@@ -752,7 +750,7 @@ private func until(
         #expect(detectorEntries.startedCount == 0)
         await scheduler.resume()
         try await until("work resumes") {
-            reader.highResolutionCounts.values.reduce(0, +) >= 1
+            reader.previewCounts.values.reduce(0, +) >= 1
         }
         await scheduler.close()
     }
@@ -761,33 +759,34 @@ private func until(
         let reader = GatedSharpnessReader()
         reader.setProperties(afInfoProperties(), for: "finishing.arw")
         let detector = GatedSharpnessDetector()
-        reader.reads.release(.properties)
+        reader.reads.hold(.properties)
         reader.reads.release(.preview)
-        await reader.reads.hold(.highResolution)
+        reader.reads.release(.highResolution)
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
         let running = Task { await scheduler.analyzeCurrent(photoRequest("finishing")) }
-        try await until("the acquisition is entered") {
-            reader.highResolutionCounts["finishing.arw"] ?? 0 >= 1
+        try await until("the property read is entered") {
+            reader.activePropertyReads == 1
         }
         await scheduler.pause()
         // The read that already entered finishes under the pause (#216: an uncancellable
         // entry is never thrown away) — its stage slot is released honestly…
-        reader.reads.release(.highResolution)
+        reader.reads.release(.properties)
         try await until("the entered read drains while paused") {
-            reader.activeHighResolutionReads == 0
+            reader.activePropertyReads == 0
         }
         // …but no further stage of that photo is admitted until resume.
         #expect((await scheduler.snapshot()).paused)
-        let scoring = await scheduler.snapshot().stages[.regionScoring]!
-        #expect(scoring.startedCount == 0, "scoring waits for resume")
+        let detection = await scheduler.snapshot().stages[.faceDetection]!
+        #expect(detection.startedCount == 0, "face detection waits for resume")
         await scheduler.resume()
         let answer = try #require(await running.value)
         guard case .regions(let afRegions) = answer.autofocus else {
             Issue.record("Expected the finished photo's AF regions after resume")
             return
         }
-        #expect(afRegions.first?.score != nil)
+        #expect(afRegions.first?.score == nil)
+        #expect(afRegions.first?.unavailableBecause == nil)
         await scheduler.close()
     }
 }
@@ -813,10 +812,8 @@ private func until(
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        reader.reads.hold(.highResolution)
         defer {
             detector.releaseAll()
-            reader.reads.release(.highResolution)
         }
         let scheduler = makeScheduler(reader, detector)
         let holder = Task { await scheduler.analyzeCurrent(photoRequest("holder")) }
@@ -841,7 +838,6 @@ private func until(
         try await detector.waitUntilParked()
         #expect(detector.requestCount >= 2)
         detector.releaseAll()
-        reader.reads.release(.highResolution)
         _ = try #require(await holder.value)
         _ = try #require(await parked.value)
         await scheduler.close()
@@ -854,25 +850,26 @@ private func until(
         reader.setProperties(afInfoProperties(), for: "again.arw")
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.highResolution)
+        await reader.reads.hold(.preview)
         let scheduler = makeScheduler(reader, detector)
 
         let oldTask = Task { await scheduler.analyzeCurrent(photoRequest("again", revision: 1)) }
         try await until("the old analysis is in flight") {
-            reader.highResolutionCounts["again.arw"] ?? 0 >= 1
+            reader.previewCounts["again.arw"] ?? 0 >= 1
         }
         await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/again.arw")])
         // Same revision requested right away: the new job must get a real answer, not the old
         // task's cancellation.
         let fresh = Task { await scheduler.analyzeCurrent(photoRequest("again", revision: 1)) }
-        await reader.reads.release(.highResolution)
+        await reader.reads.release(.preview)
         detector.releaseAll()
         let answer = try #require(await fresh.value)
         guard case .regions(let afRegions) = answer.autofocus else {
             Issue.record("Expected the new job's own AF regions")
             return
         }
-        #expect(afRegions.first?.score != nil)
+        #expect(afRegions.first?.score == nil)
+        #expect(afRegions.first?.unavailableBecause == nil)
         // The dropped job's waiter was told nil by the invalidation itself.
         let dropped = await oldTask.value
         #expect(dropped == nil)
@@ -885,38 +882,34 @@ private func until(
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
         detector.hold()
-        reader.reads.hold(.highResolution)
         defer {
             detector.releaseAll()
-            reader.reads.release(.highResolution)
         }
         let scheduler = makeScheduler(reader, detector)
         await scheduler.submit(
             [photoRequest("keep"), photoRequest("gone")], priority: .folder)
         try await detector.waitUntilParked()
         // RegionSharpnessScheduler exposes no stage-queue notification seam without altering
-        // production code; count both active and queued in .faceDetection since each photo may
-        // concurrently hold a different stage (.faceDetection vs .pixelAcquisition).
+        // production code; count both active and queued in .faceDetection.
         try await until("both photos have reached face detection", timeout: .seconds(30)) {
             let faceStage = await scheduler.snapshot().stages[.faceDetection]!
             return faceStage.active + faceStage.queued >= 2
         }
         await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/gone.arw")])
         detector.releaseAll()
-        reader.reads.release(.highResolution)
         try await until("the surviving photo is analysed", timeout: .seconds(30)) {
             await scheduler.snapshot().stages[.faceDetection]!.finishedCount >= 1
         }
         await scheduler.close()
         // The untouched photo still produced its record; the dropped one did not crash the loop.
-        #expect(reader.highResolutionCounts["keep.arw"] != nil)
+        #expect(reader.previewCounts["keep.arw"] != nil)
+        #expect(reader.highResolutionCounts.isEmpty)
     }
 
     @Test func metadataAdmissionIsBoundedUnderLoad() async throws {
         // #4: a thousand-photo submit must not fan out a thousand ImageIO property reads.
         let reader = GatedSharpnessReader()
         let detector = GatedSharpnessDetector()
-        await reader.reads.hold(.highResolution)
         detector.hold()
         let scheduler = makeScheduler(reader, detector)
         await scheduler.submit((0..<1000).map { photoRequest("load\($0)") }, priority: .folder)
@@ -926,7 +919,6 @@ private func until(
         // Close drains the parked reads and requests too: release every gate first so close
         // can await them, which is the point of the test.
         detector.releaseAll()
-        await reader.reads.release(.highResolution)
         await scheduler.close()
     }
 
@@ -1008,7 +1000,7 @@ private func until(
         #expect(diskHit != nil)
         #expect(reader2.propertiesCounts["warm.arw"] == nil)
 
-        // Metadata-only early AF delivers immediately while .pixelAcquisition remains paused.
+        // Metadata-only early AF delivers immediately while interactive pause is held.
         let noAFEarly = Mutex<RegionSharpnessPathResult?>(nil)
         let noAFTask = Task {
             await scheduler.analyzeCurrent(photoRequest("noaf")) { early in
@@ -1023,24 +1015,24 @@ private func until(
             Issue.record("Expected noAutofocusMetadata early AF")
         }
 
-        // Background `.nearby` and uncached AF jobs park before `.pixelAcquisition`.
+        // Background `.nearby` and uncached AF jobs run metadata/preview without high-res acquisition.
         await scheduler.submit([photoRequest("nearby")], priority: .nearby)
         let afTask = Task { await scheduler.analyzeCurrent(photoRequest("af")) }
-        try await until("properties read runs while acquisition stays paused") {
+        try await until("properties read runs while pause is held") {
             reader2.propertiesCounts["af.arw"] == 1 && reader2.propertiesCounts["nearby.arw"] == 1
         }
         #expect(reader2.highResolutionCounts["af.arw"] == nil)
         #expect(reader2.highResolutionCounts["nearby.arw"] == nil)
         #expect(reader2.highResolutionCounts["noaf.arw"] == nil)
 
-        // Releasing the interactive pause lets `.pixelAcquisition` proceed, `.current` before `.nearby`.
         scheduler.endInteractiveAcquisitionPause(token)
         _ = try #require(await afTask.value)
         _ = try #require(await noAFTask.value)
-        try await until("nearby completes after interactive release") {
-            reader2.highResolutionCounts["nearby.arw"] == 1
+        try await until("nearby completes without high-resolution acquisition") {
+            reader2.previewCounts["nearby.arw"] == 1
         }
-        #expect(reader2.highResolutionCounts["af.arw"] == 1)
+        #expect(reader2.previewCounts["af.arw"] == 1)
+        #expect(reader2.highResolutionCounts.isEmpty)
         await scheduler.close()
     }
 

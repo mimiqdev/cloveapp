@@ -75,70 +75,9 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
                 height: 0.05))
     }
 
-    @Test func bothPathsScoreThroughTheSharedScorer() async throws {
-        let reader = RecordingReader()
-        reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
-        reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
-        let analyzer = RegionSharpnessAnalyzer(
-            reader: reader,
-            faces: StubFaceDetector(
-                outcome: .faces([
-                    face(NormalizedRegion(x: 0.3, y: 0.3, width: 0.3, height: 0.3))
-                ])))
-
-        let analysis = await analyzer.analyze(try request())
-
-        // AF path: one region with a score.
-        guard case .regions(let afRegions) = analysis.autofocus else {
-            Issue.record("Expected AF regions")
-            return
-        }
-        #expect(afRegions.count == 1)
-        #expect(afRegions[0].kind == .cameraAutofocus)
-        #expect(afRegions[0].score != nil)
-
-        // Face path: one face and two eyes, each separate, each scored.
-        guard case .regions(let faceRegions) = analysis.faces else {
-            Issue.record("Expected face regions")
-            return
-        }
-        #expect(faceRegions.count == 3)
-        #expect(faceRegions.filter { $0.kind == .face }.count == 1)
-        #expect(faceRegions.filter { $0.kind == .eye }.count == 2)
-        #expect(faceRegions.allSatisfy { $0.score != nil })
-        #expect(faceRegions.allSatisfy { $0.groupIndex == 0 })
-
-        // The AF region and face regions carry different scores where their pixels differ;
-        // equality is not asserted because both sit on the same checkerboard.
-        #expect(analysis.acquisitionFailure == nil)
-    }
-
-    @Test func oneAcquisitionServesEveryRegion() async throws {
-        let reader = RecordingReader()
-        reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
-        reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
-        let analyzer = RegionSharpnessAnalyzer(
-            reader: reader,
-            faces: StubFaceDetector(
-                outcome: .faces([
-                    face(NormalizedRegion(x: 0.1, y: 0.1, width: 0.4, height: 0.4)),
-                    face(NormalizedRegion(x: 0.5, y: 0.5, width: 0.3, height: 0.3)),
-                ])))
-
-        _ = await analyzer.analyze(try request())
-
-        // One property read, one preview read, one high-resolution read — for five regions.
-        #expect(reader.propertyReadCount == 1)
-        #expect(reader.previewReadCount == 1)
-        #expect(reader.highResolutionReadCount == 1)
-    }
-
     @Test func afResultIsDeliveredBeforeFaceDetectionCompletes() async throws {
         // A detector that parks until the test releases it. The early-AF callback must fire
-        // with the scored AF region while detection is still running (#208: AF-region scoring
-        // must not wait for face detection).
+        // straight after metadataRead while detection is still running.
         final class GatedDetector: FaceRegionDetecting, @unchecked Sendable {
             let gate = Mutex<[CheckedContinuation<FaceDetectionOutcome, Never>]>([])
             func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
@@ -174,13 +113,14 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         try #require(early != nil, "AF result must arrive before detection completes")
         #expect(waiting, "the detector must still be parked when the AF result arrives")
         guard case .regions(let afRegions) = early else {
-            Issue.record("Expected the scored AF region, got \(String(describing: early))")
+            Issue.record("Expected the located AF region, got \(String(describing: early))")
             analysisTask.cancel()
             return
         }
         #expect(afRegions.count == 1)
         #expect(afRegions[0].kind == .cameraAutofocus)
-        #expect(afRegions[0].score != nil)
+        #expect(afRegions[0].score == nil)
+        #expect(afRegions[0].unavailableBecause == nil)
 
         // Releasing the detector lets the analysis finish; its combined result carries the
         // same AF answer plus the (empty) face path.
@@ -192,17 +132,17 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             case .regions(let combinedAutofocus) = analysis.autofocus,
             case .regions(let earlyRegions) = early
         else {
-            Issue.record("The combined result must carry the same scored AF regions")
+            Issue.record("The combined result must carry the same located AF regions")
             return
         }
         #expect(combinedAutofocus.map(\.region) == earlyRegions.map(\.region))
-        #expect(combinedAutofocus.map(\.score) == earlyRegions.map(\.score))
+        #expect(
+            combinedAutofocus.map(\.unavailableBecause) == earlyRegions.map(\.unavailableBecause))
         guard case .unavailable(.noFacesDetected) = analysis.faces else {
             Issue.record("Expected the released detection's answer on the face path")
             return
         }
-        // One acquisition still served both paths' regions.
-        #expect(reader.highResolutionReadCount == 1)
+        #expect(reader.highResolutionReadCount == 0)
     }
 
     @Test func unavailableAFIsDeliveredEarlyToo() async throws {
@@ -244,6 +184,7 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         }
         #expect(evidence.cameraMake == "SONY")
     }
+
     @Test func missingAutofocusMetadataReportsEvidenceNotAnEmptyRegion() async throws {
         let reader = RecordingReader()
         reader.propertiesAnswer = ImageProperties([
@@ -267,7 +208,7 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             Issue.record("Expected no-faces for the face path")
             return
         }
-        // Zero AF metadata + zero faces must never decode a native RAW (#261).
+        // Presentation analysis never decodes a native RAW.
         #expect(reader.previewReadCount == 1)
         #expect(reader.highResolutionReadCount == 0)
         #expect(analysis.acquisitionFailure == nil)
@@ -275,54 +216,10 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         #expect(analysis.timings.regionScoring == nil)
     }
 
-    @Test func missingAutofocusWithDetectedFacesDetectsBeforeAcquiringPixels() async throws {
-        final class OrderedDetectionGate: FaceRegionDetecting, @unchecked Sendable {
-            let continuation = Mutex<CheckedContinuation<FaceDetectionOutcome, Never>?>(nil)
-            func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
-                await withCheckedContinuation { cont in
-                    continuation.withLock { $0 = cont }
-                }
-            }
-        }
-        let detector = OrderedDetectionGate()
-        let reader = RecordingReader()
-        reader.propertiesAnswer = ImageProperties(["{TIFF}": ["Make": "SONY"]])
-        reader.previewImage = previewImage
-        reader.highResolutionImage = sharpImage
-        let analyzer = RegionSharpnessAnalyzer(reader: reader, faces: detector)
-
-        let req = try request()
-        let task = Task { await analyzer.analyze(req) }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while detector.continuation.withLock({ $0 == nil }), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(2))
-        }
-        // Acquisition must wait until detection completes when AF metadata is absent.
-        #expect(reader.previewReadCount == 1)
-        #expect(reader.highResolutionReadCount == 0)
-
-        let faceBox = NormalizedRegion(x: 0.3, y: 0.3, width: 0.3, height: 0.3)
-        detector.continuation.withLock {
-            let cont = $0
-            $0 = nil
-            return cont
-        }?.resume(returning: .faces([face(faceBox)]))
-
-        let analysis = await task.value
-        #expect(reader.highResolutionReadCount == 1)
-        guard case .regions(let faceRegions) = analysis.faces else {
-            Issue.record("Expected scored face regions after delayed acquisition")
-            return
-        }
-        #expect(faceRegions.allSatisfy { $0.score != nil })
-        #expect(analysis.timings.pixelAcquisition != nil)
-        #expect(analysis.timings.regionScoring != nil)
-    }
-
     /// A Sony file the focusmeta fallback can read (#238): the region is located off the main
-    /// actor, scored against the shared acquisition like any other camera region, and the
-    /// synthetic container never touches the app's fixtures.
-    @Test func sonyRegionThroughTheMetadataFallbackIsLocatedAndScored() async throws {
+    /// actor without scoring or acquiring high-res pixels, and the synthetic container never
+    /// touches the app's fixtures.
+    @Test func sonyRegionThroughTheMetadataFallbackIsLocatedWithoutScoring() async throws {
         let reader = RecordingReader()
         reader.propertiesAnswer = ImageProperties([
             "{TIFF}": ["Make": "SONY"], "{Exif}": ["PixelXDimension": 80, "PixelYDimension": 60],
@@ -351,60 +248,9 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         // The synthetic record's region, in display space at orientation 1.
         #expect(abs(afRegions[0].region.centerX - 17.0 / 80.0) < 1e-9)
         #expect(abs(afRegions[0].region.centerY - 31.0 / 60.0) < 1e-9)
-        // The 10×6 frame of an 80×60 reference is small against a 256×256 acquisition, so
-        // the scorer's answer is either a score or the explicit too-small reason — never a
-        // silent nil.
-        #expect(afRegions[0].score != nil || afRegions[0].unavailableBecause == .regionTooSmall)
-    }
-
-    @Test func failedAcquisitionIsExplicitAndRegionsSayWhy() async throws {
-        let reader = RecordingReader()
-        reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
-        reader.previewImage = previewImage
-        reader.highResolutionFailure = .queueFull
-        let analyzer = RegionSharpnessAnalyzer(
-            reader: reader,
-            faces: StubFaceDetector(
-                outcome: .faces([face(NormalizedRegion(x: 0.3, y: 0.3, width: 0.3, height: 0.3))])))
-
-        let analysis = await analyzer.analyze(try request())
-
-        #expect(analysis.acquisitionFailure == .queueFull)
-        guard case .regions(let afRegions) = analysis.autofocus else {
-            Issue.record("AF region was located, so it stays reported")
-            return
-        }
-        #expect(afRegions.first?.score == nil)
-        // A located region with no pixels says why instead of guessing a score.
-        #expect(afRegions.first?.unavailableBecause == .pixelsUnavailable)
-    }
-
-    @Test func staleAcquisitionMapsToStaleSourcePerRegion() async throws {
-        // A source that changed mid-analysis is the one failure that is about the photo's
-        // identity rather than its pixels, so it keeps its own reason on every region.
-        let reader = RecordingReader()
-        reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
-        reader.previewImage = previewImage
-        reader.highResolutionFailure = .staleSource
-        let analyzer = RegionSharpnessAnalyzer(
-            reader: reader,
-            faces: StubFaceDetector(
-                outcome: .faces([face(NormalizedRegion(x: 0.3, y: 0.3, width: 0.3, height: 0.3))])))
-
-        let analysis = await analyzer.analyze(try request())
-
-        #expect(analysis.acquisitionFailure == .staleSource)
-        guard case .regions(let afRegions) = analysis.autofocus else {
-            Issue.record("AF region was located, so it stays reported")
-            return
-        }
-        #expect(afRegions.first?.unavailableBecause == .staleSource)
-        guard case .regions(let faceRegions) = analysis.faces else {
-            Issue.record("Expected face regions")
-            return
-        }
-        #expect(faceRegions.allSatisfy { $0.unavailableBecause == .staleSource })
-        #expect(faceRegions.allSatisfy { $0.score == nil })
+        #expect(afRegions[0].score == nil)
+        #expect(afRegions[0].unavailableBecause == nil)
+        #expect(reader.highResolutionReadCount == 0)
     }
 
     @Test func failedPreviewFailsOnlyTheFacePath() async throws {
@@ -422,12 +268,13 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             return
         }
         #expect(failure == .cannotOpen)
-        // The AF path still produced its scored region.
+        // The AF path still produced its located region.
         guard case .regions(let afRegions) = analysis.autofocus else {
             Issue.record("Expected AF regions despite preview failure")
             return
         }
-        #expect(afRegions.first?.score != nil)
+        #expect(afRegions.first?.score == nil)
+        #expect(afRegions.first?.unavailableBecause == nil)
     }
 
     @Test func tinyDetectedFacesReportTooSmallRatherThanAScore() async throws {
@@ -437,8 +284,11 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         let tinyFace = DetectedFaceRegion(
             face: NormalizedRegion(x: 0.5, y: 0.5, width: 0.002, height: 0.002),
             leftEye: nil, rightEye: nil)
+        let outsideFace = DetectedFaceRegion(
+            face: NormalizedRegion(x: 1.5, y: 0.5, width: 0.2, height: 0.2),
+            leftEye: nil, rightEye: nil)
         let analyzer = RegionSharpnessAnalyzer(
-            reader: reader, faces: StubFaceDetector(outcome: .faces([tinyFace])))
+            reader: reader, faces: StubFaceDetector(outcome: .faces([tinyFace, outsideFace])))
 
         let analysis = await analyzer.analyze(try request())
 
@@ -446,8 +296,11 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
             Issue.record("A detected face is a located region, not an empty path")
             return
         }
-        #expect(faceRegions.first?.score == nil)
-        #expect(faceRegions.first?.unavailableBecause == .regionTooSmall)
+        #expect(faceRegions.count == 2)
+        #expect(faceRegions[0].score == nil)
+        #expect(faceRegions[0].unavailableBecause == .regionTooSmall)
+        #expect(faceRegions[1].score == nil)
+        #expect(faceRegions[1].unavailableBecause == .regionOutsideImage)
     }
 
     @Test func detectionFailureCarriesVisionMessage() async throws {
@@ -484,11 +337,24 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
 
         let analysis = await analyzer.analyze(try request())
 
-        // Measurements are exposed as facts; the test only pins that each stage recorded one.
+        guard case .regions(let afRegions) = analysis.autofocus,
+            case .regions(let faceRegions) = analysis.faces
+        else {
+            Issue.record("Expected located AF and face regions")
+            return
+        }
+        #expect(afRegions.count == 1)
+        #expect(afRegions[0].score == nil)
+        #expect(afRegions[0].unavailableBecause == nil)
+        #expect(faceRegions.count == 3)
+        #expect(faceRegions.allSatisfy { $0.score == nil && $0.unavailableBecause == nil })
+        #expect(reader.highResolutionReadCount == 0)
+
+        // Measurements are exposed as facts; only metadataRead, previewRead, and faceDetection run.
         #expect(analysis.timings.metadataRead != nil)
         #expect(analysis.timings.previewRead != nil)
         #expect(analysis.timings.faceDetection != nil)
-        #expect(analysis.timings.pixelAcquisition != nil)
-        #expect(analysis.timings.regionScoring != nil)
+        #expect(analysis.timings.pixelAcquisition == nil)
+        #expect(analysis.timings.regionScoring == nil)
     }
 }

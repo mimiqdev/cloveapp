@@ -173,7 +173,7 @@ public actor RegionSharpnessScheduler {
         acquisitionWorkers: Int = 1,
         scoringWorkers: Int = 2,
         results: RegionSharpnessResultStore = RegionSharpnessResultStore(capacity: 512),
-        parametersVersion: Int = 1
+        parametersVersion: Int = 2
     ) {
         precondition(detectionWorkers >= 1 && acquisitionWorkers >= 1 && scoringWorkers >= 1)
         self.baseAnalyzer = analyzer

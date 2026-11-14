@@ -49,8 +49,9 @@ enum DetailFocusRegionKind: String, Hashable, Sendable {
     }
 }
 
-/// One advisory focus marker on the displayed photo. A score only decides whether the region can
-/// be inspected; no score or focus percentage reaches the interface.
+/// One advisory focus marker on the displayed photo. Located regions are inspectable unless
+/// an explicit unavailability reason or degenerate geometry prevents it; no score or focus
+/// percentage reaches the interface.
 struct DetailFocusRegion: Hashable, Identifiable, Sendable {
     /// Proximity margin in normalized image coordinates used to detect local AF collisions with
     /// analysis markers without using 44 pt touch padding.
@@ -74,7 +75,8 @@ struct DetailFocusRegion: Hashable, Identifiable, Sendable {
         groupIndex = evidence.groupIndex
         region = evidence.region
         unavailableReason =
-            evidence.unavailableBecause?.rawValue ?? (evidence.score == nil ? "unknown" : nil)
+            evidence.unavailableBecause?.rawValue
+            ?? evidence.region.normalizedUnavailability?.rawValue
     }
 
     /// Maps normalized displayed-image coordinates through the same aspect-fit rectangle the

@@ -190,13 +190,14 @@ struct MainActorPerformanceTests {
 
         // Updating `current.jpg` changes its revision; the second `analyzeRegions` call detects the
         // changed `RegionSharpnessRequest` off `@MainActor` and invalidates the old result.
-        let beforeSecondCount = await reader.fullRasterReads
+        let beforeSecondCount = await reader.prefetchedURLs.count
         try writeJPEG(to: currentURL, width: 1400, height: 900, subjectArea: [700, 450, 220, 220])
         let secondAnalysis = await source.analyzeRegions(
             for: currentSet.id, group: [], nearby: [], onAutofocus: { _ in })
         #expect(secondAnalysis != nil)
-        let afterSecondCount = await reader.fullRasterReads
+        let afterSecondCount = await reader.prefetchedURLs.count
         #expect(afterSecondCount > beforeSecondCount)
+        #expect(await reader.fullRasterReads == 0)
 
         await source.closeRegionAnalysis()
         await pipeline.close()

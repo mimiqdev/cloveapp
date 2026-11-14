@@ -24,16 +24,21 @@ struct PipelineFocusRegionTests {
             await environment.source.analyzeRegions(for: first.id, group: [], nearby: []) { _ in }
         }
         try await pipelineEventually {
-            await environment.reads.fullRasterPaths.count == 1
+            await environment.reads.previewPaths.count == 1
         }
 
         // This is the real prepare/beginNavigation/navigate sequence, after analysis has
-        // entered the production pipeline but before its acquisition finishes.
+        // entered the production pipeline but before its preview read finishes.
         await environment.source.prepare(environment.window(for: first))
-        await environment.reads.releaseFullRasters()
+        await environment.reads.releasePreviews()
         let result = await analysis.value
         #expect(result != nil)
         #expect(result?.acquisitionFailure == nil)
+        if case .regions = result?.faces {
+        } else if case .unavailable(.noFacesDetected) = result?.faces {
+        } else {
+            Issue.record("Expected faces path to complete without cancellation")
+        }
     }
 
     @Test func navigationCancelsAnalysisForThePhotoLeftBehind() async throws {
@@ -49,13 +54,13 @@ struct PipelineFocusRegionTests {
             await environment.source.analyzeRegions(for: first.id, group: [], nearby: []) { _ in }
         }
         try await pipelineEventually {
-            await environment.reads.fullRasterPaths.count == 1
+            await environment.reads.previewPaths.count == 1
         }
 
         await environment.source.prepare(environment.window(for: second))
-        await environment.reads.releaseFullRasters()
+        await environment.reads.releasePreviews()
         let result = await analysis.value
-        #expect(result?.acquisitionFailure == .closed)
+        #expect(result?.faces == .unavailable(.previewFailed(.closed)))
     }
 
     @Test func previousCurrentPhotoLosesUrgencyWhenRetainedAsNearby() async throws {
@@ -99,111 +104,37 @@ struct PipelineFocusRegionTests {
                 oldEarly.record($0)
             }
         }
-        try await pipelineEventually { await environment.reads.fullRasterPaths.count == 1 }
+        try await pipelineEventually { await environment.reads.previewPaths.count == 1 }
         await environment.source.prepare(environment.window(for: second))
         let current = Task {
             await environment.source.analyzeRegions(for: second.id, group: [], nearby: []) { _ in }
         }
-        await environment.reads.releaseFullRasters()
+        await environment.reads.releasePreviews()
         let oldResult = await obsolete.value
-        #expect(oldResult == nil || oldResult?.acquisitionFailure == .closed)
+        #expect(oldResult == nil || oldResult?.faces == .unavailable(.previewFailed(.closed)))
         let result = await current.value
         #expect(result?.acquisitionFailure == nil)
+        if case .regions = result?.autofocus {
+        } else {
+            Issue.record("Expected located AF for the new current photo")
+        }
     }
 
-    @Test func queuedManualRenderingWinsOverAnalysis() async throws {
-        let fixture = try PipelinePhotoFixture()
-        defer { fixture.remove() }
-        let first = try fixture.photo("first.jpg")
-        let second = try fixture.photo("second.jpg")
-        let environment = makeEnvironment(photos: [first, second])
-        defer {
-            Task { await environment.finish() }
-        }
-        let request = environment.fullResolutionRequest()
-        let initial = Task {
-            await environment.source.image(for: second.id, request: request)
-        }
-        try await pipelineEventually {
-            await environment.reads.fullRasterPaths.count == 1
-        }
-        let manual = Task {
-            await environment.source.image(for: first.id, request: request)
-        }
-        try await pipelineEventually {
-            await environment.pipeline.queuedCount == 1
-        }
-        let analysis = Task {
-            await environment.source.analyzeRegions(for: first.id, group: [], nearby: []) { _ in }
-        }
-        try await pipelineEventually {
-            await environment.scheduler.snapshot().stages[.pixelAcquisition]?.startedCount == 1
-        }
-        await environment.reads.releaseFullRasters()
-
-        guard case .image = await manual.value else {
-            Issue.record("Analysis cancelled the queued interactive render")
-            return
-        }
-        _ = await initial.value
-        _ = await analysis.value
-    }
-
-    @Test func laterManualRenderingDoesNotCancelQueuedCurrentAnalysis() async throws {
-        let fixture = try PipelinePhotoFixture()
-        defer { fixture.remove() }
-        let first = try fixture.photo("first.jpg")
-        let second = try fixture.photo("second.jpg")
-        let environment = makeEnvironment(photos: [first, second])
-        defer { Task { await environment.finish() } }
-        let request = environment.fullResolutionRequest()
-        let initial = Task {
-            await environment.source.image(for: second.id, request: request)
-        }
-        try await pipelineEventually {
-            await environment.reads.fullRasterPaths.count == 1
-        }
-        let analysis = Task {
-            await environment.source.analyzeRegions(for: first.id, group: [], nearby: []) { _ in }
-        }
-        try await pipelineEventually {
-            await environment.pipeline.queuedCount == 1
-        }
-        let manual = Task {
-            await environment.source.image(for: first.id, request: request)
-        }
-        try await pipelineEventually {
-            await environment.pipeline.queuedCount == 2
-        }
-        await environment.reads.releaseFullRasters()
-        guard case .image = await manual.value else {
-            Issue.record("Queued analysis prevented the interactive render")
-            return
-        }
-        _ = await initial.value
-        let result = try #require(await analysis.value)
-        #expect(result.acquisitionFailure == nil)
-        guard case .regions(let regions) = result.autofocus else {
-            Issue.record("Expected scored AF after interactive rendering")
-            return
-        }
-        #expect(regions.first?.score != nil)
-    }
-
-    @Test func cancelledViewerNeverReceivesAFWhenItsSharedAcquisitionFinishes() async throws {
+    @Test func cancelledViewerNeverReceivesAFWhenItsSharedAnalysisFinishes() async throws {
         let fixture = try PipelinePhotoFixture()
         defer { fixture.remove() }
         let photo = try fixture.photo("first.jpg")
         let faces = PipelineFaceGate(holding: true)
         let environment = makeEnvironment(photos: [photo], faceGate: faces)
         defer { Task { await environment.finish() } }
+        await environment.scheduler.pause()
         let staleEarly = PipelineCallbackBox()
         let oldViewer = Task {
             await environment.source.analyzeRegions(for: photo.id, group: [], nearby: []) {
                 staleEarly.record($0)
             }
         }
-        try await pipelineEventually { await environment.reads.fullRasterPaths.count == 1 }
+        try await pipelineEventually { await environment.scheduler.pausedAdmissionCount == 1 }
         oldViewer.cancel()
         let currentEarly = PipelineCallbackBox()
         let currentViewer = Task {
@@ -211,7 +142,8 @@ struct PipelineFocusRegionTests {
                 currentEarly.record($0)
             }
         }
-        await environment.reads.releaseFullRasters()
+        await environment.scheduler.resume()
+        await environment.reads.releasePreviews()
         try await pipelineEventually { currentEarly.result != nil }
         #expect(staleEarly.result == nil)
         await faces.release()
@@ -229,17 +161,14 @@ struct PipelineFocusRegionTests {
         defer {
             Task { await environment.finish() }
         }
+        await environment.reads.releasePreviews()
         let opening = Task {
             await environment.source.analyzeRegions(
                 for: first.id, group: [], nearby: [nearby.id]
             ) { _ in }
         }
         try await pipelineEventually {
-            await environment.scheduler.snapshot().stages[.pixelAcquisition]?.startedCount == 1
-        }
-        await environment.reads.releaseFullRasters()
-        try await pipelineEventually {
-            await environment.reads.fullRasterPaths.count == 2
+            await environment.scheduler.snapshot().stages[.metadataRead]?.finishedCount == 2
         }
 
         let early = PipelineCallbackBox()
@@ -252,10 +181,11 @@ struct PipelineFocusRegionTests {
             early.result != nil
         }
         guard case .regions(let regions) = early.result else {
-            Issue.record("Expected scored AF from the shared production pipeline")
+            Issue.record("Expected located AF from the shared production pipeline")
             return
         }
-        #expect(regions.first?.score != nil)
+        #expect(regions.first?.score == nil)
+        #expect(regions.first?.unavailableBecause == nil)
         await faces.release()
         _ = await opening.value
         _ = await joined.value
@@ -414,6 +344,7 @@ private struct PipelineEnvironment {
     }
 
     func finish() async {
+        await reads.releasePreviews()
         await reads.releaseFullRasters()
         await faces.release()
         await source.closeRegionAnalysis()
@@ -422,21 +353,38 @@ private struct PipelineEnvironment {
 }
 
 private actor PipelineReadGate {
+    private(set) var previewPaths: [String] = []
     private(set) var fullRasterPaths: [String] = []
-    private var holding = true
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var holdingPreviews = true
+    private var previewWaiters: [CheckedContinuation<Void, Never>] = []
+    private var holdingFullRasters = true
+    private var fullRasterWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func preview(_ source: DetailSource) async {
+        previewPaths.append(source.url.path)
+        if holdingPreviews {
+            await withCheckedContinuation { previewWaiters.append($0) }
+        }
+    }
+
+    func releasePreviews() {
+        holdingPreviews = false
+        let pending = previewWaiters
+        previewWaiters.removeAll()
+        for waiter in pending { waiter.resume() }
+    }
 
     func fullRaster(_ source: DetailSource) async {
         fullRasterPaths.append(source.url.path)
-        if holding {
-            await withCheckedContinuation { waiters.append($0) }
+        if holdingFullRasters {
+            await withCheckedContinuation { fullRasterWaiters.append($0) }
         }
     }
 
     func releaseFullRasters() {
-        holding = false
-        let pending = waiters
-        waiters.removeAll()
+        holdingFullRasters = false
+        let pending = fullRasterWaiters
+        fullRasterWaiters.removeAll()
         for waiter in pending { waiter.resume() }
     }
 }
@@ -445,7 +393,8 @@ private struct PipelineDetailReader: DetailReading {
     let gate: PipelineReadGate
 
     func read(_ step: DetailPreviewStep, displayPixels: Int) async -> DetailReadOutcome {
-        .image(pipelinePixels(width: 800, height: 600))
+        await gate.preview(step.source)
+        return .image(pipelinePixels(width: 800, height: 600))
     }
 
     func fullRaster(_ source: DetailSource) async -> DetailReadOutcome {
