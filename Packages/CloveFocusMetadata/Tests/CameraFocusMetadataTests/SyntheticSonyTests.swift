@@ -15,7 +15,8 @@ struct SyntheticSonyTests {
             let report = try parse(TestSupport.bytes(hex: vector.hex))
             #expect(report.camera?.vendor == .sony, "\(vector.id)")
             #expect(report.camera?.model == "ILCE-1M2", "\(vector.id)")
-            #expect(report.container.byteOrder == (vector.littleEndian ? .littleEndian : .bigEndian))
+            #expect(
+                report.container.byteOrder == (vector.littleEndian ? .littleEndian : .bigEndian))
             #expect(
                 report.container.makerNoteFlavor
                     == (vector.sonyPrefixed ? .sonyPrefixed : .sonyUnprefixed),
@@ -37,7 +38,8 @@ struct SyntheticSonyTests {
                     continue
                 }
                 #expect(geometry.center == ContinuousPoint(x: 17, y: 31))
-                #expect(geometry.normalizedCenter == NormalizedPoint(x: 17.0 / 80.0, y: 31.0 / 60.0))
+                #expect(
+                    geometry.normalizedCenter == NormalizedPoint(x: 17.0 / 80.0, y: 31.0 / 60.0))
             default:
                 #expect(report.status == .verifiedSonyFocusMetadata, "\(vector.id)")
                 if let words = vector.locationWords {
@@ -61,13 +63,16 @@ struct SyntheticSonyTests {
             return try parse(TestSupport.bytes(hex: vector.hex))
         }
 
-        for id in ["le-no-header", "le-header", "frame-flag-one", "frame-flag-256", "frame-flag-65535"] {
+        for id in [
+            "le-no-header", "le-header", "frame-flag-one", "frame-flag-256", "frame-flag-65535",
+        ] {
             let value = try report(id)
             guard case .region(let geometry)? = value.focus?.geometry else {
                 Issue.record("Expected a region for \(id)")
                 continue
             }
-            #expect(geometry.unclippedRect == ContinuousRect(minX: 12, minY: 28, maxX: 22, maxY: 34))
+            #expect(
+                geometry.unclippedRect == ContinuousRect(minX: 12, minY: 28, maxX: 22, maxY: 34))
             #expect(geometry.extendsBeyondExtent == false)
         }
 

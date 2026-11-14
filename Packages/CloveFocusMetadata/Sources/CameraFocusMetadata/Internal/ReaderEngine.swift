@@ -71,7 +71,8 @@ final class ReaderEngine {
 
         throw MetadataError(
             kind: .unrecognizedContainer,
-            detail: "The input did not match a supported TIFF, HEIF, CR3, RAF, RW2, ORF, or JPEG entry point."
+            detail:
+                "The input did not match a supported TIFF, HEIF, CR3, RAF, RW2, ORF, or JPEG entry point."
         )
     }
 

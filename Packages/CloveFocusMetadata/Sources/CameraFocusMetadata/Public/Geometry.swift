@@ -298,7 +298,13 @@ public enum DisplayTransform: String, Sendable, Hashable, CaseIterable {
 
     public func displayExtent(for storedExtent: PixelExtent) -> PixelExtent {
         if swapsDimensions {
-            return PixelExtent(width: storedExtent.height, height: storedExtent.width)!
+            guard
+                let swapped = PixelExtent(
+                    width: storedExtent.height, height: storedExtent.width)
+            else {
+                preconditionFailure("A positive extent stays positive after swapping")
+            }
+            return swapped
         }
         return storedExtent
     }

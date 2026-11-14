@@ -128,7 +128,8 @@ struct RealSampleIntegrationTests {
             #expect(tiffHeaderOffset == 10)
 
             #expect(arw.focus?.sony?.locationWords == hif.focus?.sony?.locationWords)
-            #expect(arw.focus?.sony?.secondaryLocationWords == hif.focus?.sony?.secondaryLocationWords)
+            #expect(
+                arw.focus?.sony?.secondaryLocationWords == hif.focus?.sony?.secondaryLocationWords)
             #expect(arw.focus?.frame == hif.focus?.frame)
             #expect(arw.focus?.geometry == hif.focus?.geometry)
             #expect(arw.displayGeometry == hif.displayGeometry)

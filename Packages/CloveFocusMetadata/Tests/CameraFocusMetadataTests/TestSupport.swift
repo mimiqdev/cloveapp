@@ -506,7 +506,8 @@ struct TestHEIFBuilder {
         return bytes
     }
 
-    private func fullBox(_ type: String, version: UInt8, flags: UInt32, payload: [UInt8]) -> [UInt8] {
+    private func fullBox(_ type: String, version: UInt8, flags: UInt32, payload: [UInt8]) -> [UInt8]
+    {
         box(type, fullBoxPayload(version: version, flags: flags, payload))
     }
 

@@ -77,7 +77,8 @@ final class ExtractionBuilder {
                 addIssue(
                     .unrecognizedOrientation,
                     context: "HEIF primary-image irot",
-                    detail: "Raw payload \(rotation.rawPayload) is outside the observed 0...3 range."
+                    detail:
+                        "Raw payload \(rotation.rawPayload) is outside the observed 0...3 range."
                 )
             }
             return OrientationFacts(
@@ -95,7 +96,8 @@ final class ExtractionBuilder {
                 addIssue(
                     .unrecognizedOrientation,
                     context: "Exif and HEIF orientation",
-                    detail: "At least one orientation representation is outside the observed values."
+                    detail:
+                        "At least one orientation representation is outside the observed values."
                 )
             } else if exif.orientation?.transform != rotation.transform {
                 addIssue(
@@ -144,7 +146,8 @@ final class ExtractionBuilder {
                 addIssue(
                     .unrecognizedOrientation,
                     context: "HEIF primary-image irot",
-                    detail: "Raw payload \(rotation.rawPayload) is outside the observed 0...3 range."
+                    detail:
+                        "Raw payload \(rotation.rawPayload) is outside the observed 0...3 range."
                 )
                 addUncertainty(.displayOrientationUnknown)
                 return OrientationFacts(
