@@ -1307,27 +1307,39 @@ final class CloveFlowTests: XCTestCase {
         let third = element(app, "clove.grid.photo.mmq02698")
         XCTAssertTrue(first.isSelected)
         XCTAssertFalse(third.isSelected)
-        // Folding changes the thumbnails only: the photo, its name and the route stay.
+        // Folding changes the thumbnails only: the photo, its name and the route stay, and the
+        // group folds at its own position without jumping (#241).
+        let beforeExpanded = before.frame
+        let headerExpanded = count.frame
         element(app, "clove.grid.group.fold").tap()
         XCTAssertFalse(element(app, "clove.grid.group.count.burst-2696").exists)
         let stack = element(app, "clove.grid.group.burst-2696")
         XCTAssertTrue(stack.waitForExistence(timeout: 5), "Folding did not leave the group's stack")
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
         XCTAssertTrue(before.exists && after.exists)
+        XCTAssertEqual(before.frame.minY, beforeExpanded.minY, accuracy: 2)
+        XCTAssertEqual(stack.frame.minY, headerExpanded.minY, accuracy: 2)
         capture("duo-group-inline-grid-folded")
-        // The stack reopens the group in place, without leaving the photo.
+        // The stack reopens the group in place, without leaving the photo or moving neighbors.
+        let beforeCollapsed = before.frame
+        let stackCollapsed = stack.frame
         stack.tap()
         XCTAssertTrue(
             element(app, "clove.grid.group.count.burst-2696").waitForExistence(timeout: 5))
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02696").isSelected)
+        XCTAssertEqual(before.frame.minY, beforeCollapsed.minY, accuracy: 2)
+        XCTAssertEqual(count.frame.minY, stackCollapsed.minY, accuracy: 2)
         capture("duo-group-inline-grid")
-        // A member tap moves the preview, the filename, the highlight and the marks.
+        // A member tap moves the preview, the filename, the highlight and the marks, without jumping.
+        let firstBeforeMemberTap = first.frame
         third.tap()
         XCTAssertTrue(waitForLabel("MMQ02698.ARW", preview))
         XCTAssertTrue(third.isSelected)
         XCTAssertFalse(first.isSelected)
         XCTAssertTrue(before.exists && after.exists)
+        XCTAssertEqual(before.frame.minY, beforeCollapsed.minY, accuracy: 2)
+        XCTAssertEqual(first.frame.minY, firstBeforeMemberTap.minY, accuracy: 2)
         let capsule = element(app, "clove.duo.capsule")
         rate(4, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "4 stars"), capsule))
@@ -1347,20 +1359,33 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").exists,
             "The photo-only strip did not expand the current group")
-        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02695").exists)
+        let stripNeighbor = element(app, "clove.detail.filmstrip.mmq02695")
+        XCTAssertTrue(stripNeighbor.exists)
         XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02699").exists)
         capture("duo-group-photo-only")
-        // The strip folds the group to its stack without closing the photo.
+        // The strip folds the group to its stack in place without closing the photo or jumping.
+        let stripNeighborBeforeFold = stripNeighbor.isHittable ? stripNeighbor.frame : nil
         element(app, "clove.detail.filmstrip.group.fold").tap()
         XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
         let stripStack = element(app, "clove.detail.filmstrip.group.burst-2696")
         XCTAssertTrue(stripStack.waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
+        if let stripNeighborBeforeFold, stripNeighbor.isHittable {
+            XCTAssertEqual(stripNeighbor.frame.minX, stripNeighborBeforeFold.minX, accuracy: 2)
+        }
         capture("duo-group-photo-only-folded")
+        let stripStackBeforeUnfold = stripStack.frame
+        let stripNeighborBeforeUnfold = stripNeighbor.isHittable ? stripNeighbor.frame : nil
         stripStack.tap()
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
+        XCTAssertEqual(
+            element(app, "clove.detail.filmstrip.mmq02696").frame.minX,
+            stripStackBeforeUnfold.minX + 3, accuracy: 4)
+        if let stripNeighborBeforeUnfold, stripNeighbor.isHittable {
+            XCTAssertEqual(stripNeighbor.frame.minX, stripNeighborBeforeUnfold.minX, accuracy: 2)
+        }
         // Back returns to the full folder grid with its filter and browsing position.
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.more").waitForExistence(timeout: 5))
@@ -1535,15 +1560,24 @@ final class CloveFlowTests: XCTestCase {
             "the strip went blank after the far jump")
 
         // Entering a group from its stack, a within-group move, and leaving it again cover the
-        // other directions of the same identity change; the strip must land on the photo each
-        // time (#237).
+        // other directions of the same identity change; visible items stay anchored in place and
+        // the strip still lands on off-screen destinations (#237, #241).
         let stack = swipeStripUntilHittable(
             "clove.detail.filmstrip.group.burst-2696", in: app, forward: false)
+        let neighbor = element(app, "clove.detail.filmstrip.mmq02695")
+        let neighborBeforeExpand = neighbor.isHittable ? neighbor.frame : nil
+        let stackBeforeExpand = stack.frame
         stack.tap()
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
             "the strip stayed blank after entering the group")
+        XCTAssertEqual(
+            element(app, "clove.detail.filmstrip.mmq02696").frame.minX,
+            stackBeforeExpand.minX + 3, accuracy: 4)
+        if let neighborBeforeExpand, neighbor.isHittable {
+            XCTAssertEqual(neighbor.frame.minX, neighborBeforeExpand.minX, accuracy: 2)
+        }
         let member = swipeStripUntilHittable(
             "clove.detail.filmstrip.mmq02698", in: app, forward: true)
         member.tap()
@@ -1556,6 +1590,71 @@ final class CloveFlowTests: XCTestCase {
             wait(NSPredicate(format: "isHittable == true"), afterGroup),
             "the strip went blank after leaving the group by navigation")
         capture("duo-cover-strip-after-navigation-exit")
+    }
+
+    @MainActor
+    func testFilmstripAnchorsVisibleGroupAndCentersOffscreenNavigation() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.photo.mmq02695").tap()
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
+
+        let neighborLeft = element(app, "clove.detail.filmstrip.mmq02694")
+        let neighborCurrent = element(app, "clove.detail.filmstrip.mmq02695")
+        let stack = element(app, "clove.detail.filmstrip.group.burst-2696")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), neighborCurrent))
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), stack))
+        XCTAssertTrue(neighborLeft.isHittable)
+
+        let leftBefore = neighborLeft.frame
+        let currentBefore = neighborCurrent.frame
+        let stackBefore = stack.frame
+
+        // Expanding a visible group keeps neighbors put and starts the run at the stack's slot.
+        stack.tap()
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        let firstMember = element(app, "clove.detail.filmstrip.mmq02696")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), firstMember))
+        XCTAssertEqual(neighborLeft.frame.minX, leftBefore.minX, accuracy: 2)
+        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
+        XCTAssertEqual(firstMember.frame.minX, stackBefore.minX + 3, accuracy: 4)
+
+        // Tapping another visible member does not jump the strip.
+        let firstMemberBeforeTap = firstMember.frame
+        let secondMember = element(app, "clove.detail.filmstrip.mmq02697")
+        XCTAssertTrue(secondMember.isHittable)
+        secondMember.tap()
+        XCTAssertTrue(waitForLabel("MMQ02697.ARW", fileName))
+        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
+        XCTAssertEqual(firstMember.frame.minX, firstMemberBeforeTap.minX, accuracy: 2)
+
+        // Leaving to a visible neighbor folds the group back at the same position with no jump.
+        neighborCurrent.tap()
+        XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "exists == false"),
+                element(app, "clove.detail.filmstrip.expandedGroup")))
+        XCTAssertTrue(stack.waitForExistence(timeout: 5))
+        XCTAssertEqual(neighborLeft.frame.minX, leftBefore.minX, accuracy: 2)
+        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
+        XCTAssertEqual(stack.frame.minX, stackBefore.minX, accuracy: 2)
+
+        // Navigating forward to an off-screen photo still brings it into view.
+        let preview = element(app, "clove.detail.preview")
+        for _ in 0..<8 {
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(waitForLabel("MMQ02703.ARW", fileName))
+        let offscreenTarget = element(app, "clove.detail.filmstrip.mmq02703")
+        XCTAssertTrue(
+            wait(NSPredicate(format: "isHittable == true"), offscreenTarget),
+            "off-screen navigation did not bring the destination thumbnail into view")
     }
 
     @MainActor

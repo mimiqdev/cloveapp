@@ -35,6 +35,9 @@ struct DetailFilmstrip: View {
     /// group's stack instead of its members (owner decision, #225).
     var groupFold: FilmstripGroupFold?
 
+    private static let viewportSpace = "clove.detail.filmstrip.viewport"
+    @State private var layoutState = FilmstripLayoutState()
+
     private struct Entry: Identifiable {
         let id: PhotoIdentity
         let photos: [GridPhoto]
@@ -42,6 +45,8 @@ struct DetailFilmstrip: View {
         let expands: Bool
         let holdsCurrent: Bool
     }
+
+    private var isCurrentGroupFolded: Bool { groupFold?.isFolded ?? false }
 
     private var entries: [Entry] {
         let byPhoto = Dictionary(
@@ -131,6 +136,11 @@ struct DetailFilmstrip: View {
                             }
                             .buttonStyle(.plain)
                             .id(photo.id)
+                            .modifier(
+                                FilmstripItemFrameTracker(
+                                    id: photo.id, coordinateSpace: Self.viewportSpace,
+                                    layoutState: layoutState)
+                            )
                             .accessibilityLabel("Similar group of \(group.members.count) photos")
                             .accessibilityIdentifier(
                                 "clove.detail.filmstrip.group.\(group.id.rawValue)")
@@ -142,15 +152,17 @@ struct DetailFilmstrip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
             }
+            .coordinateSpace(name: Self.viewportSpace)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.width
+            } action: {
+                layoutState.viewportWidth = $0
+            }
             .onChange(of: current, initial: true) { _, photo in
-                guard let photo else { return }
-                // The scroll runs after the change's layout settles, not inside its transaction:
-                // entering or leaving a group swaps the lazy entries' identity in the same change,
-                // and a scroll resolved against that transaction lands past the new content's end,
-                // leaving the strip blank until the next drag (#237).
-                Task { @MainActor in
-                    withAnimation { proxy.scrollTo(photo, anchor: .center) }
-                }
+                scheduleScroll(for: photo, using: proxy)
+            }
+            .onChange(of: isCurrentGroupFolded) { _, _ in
+                scheduleScroll(for: current, using: proxy)
             }
         }
         .frame(height: 70)
@@ -167,7 +179,74 @@ struct DetailFilmstrip: View {
         }
         .buttonStyle(.plain)
         .id(photo.id)
+        .modifier(
+            FilmstripItemFrameTracker(
+                id: photo.id, coordinateSpace: Self.viewportSpace, layoutState: layoutState)
+        )
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
+    }
+
+    private func scrollTarget(for photo: PhotoIdentity) -> PhotoIdentity {
+        guard
+            let entry = entries.first(where: { $0.photos.contains(where: { $0.id == photo }) }),
+            !entry.expands
+        else { return photo }
+        return entry.id
+    }
+
+    private func scheduleScroll(for photo: PhotoIdentity?, using proxy: ScrollViewProxy) {
+        layoutState.pendingScroll?.cancel()
+        guard let photo else { return }
+        let target = scrollTarget(for: photo)
+        layoutState.pendingScroll = Task { @MainActor in
+            // The scroll runs after the change's layout settles, not inside its transaction:
+            // entering or leaving a group swaps the lazy entries' identity in the same change,
+            // and a scroll resolved against that transaction lands past the new content's end,
+            // leaving the strip blank until the next drag (#237). Only scroll when the target
+            // is off-screen so in-place taps and group expand/fold do not jump (#241).
+            await Task.yield()
+            guard !Task.isCancelled, !layoutState.isVisible(target) else { return }
+            withAnimation { proxy.scrollTo(target, anchor: .center) }
+        }
+    }
+}
+
+@MainActor
+private final class FilmstripLayoutState {
+    struct TrackedFrame {
+        let token: UUID
+        let frame: CGRect
+    }
+
+    var viewportWidth: CGFloat = 0
+    var frames: [PhotoIdentity: TrackedFrame] = [:]
+    var pendingScroll: Task<Void, Never>?
+
+    func isVisible(_ target: PhotoIdentity) -> Bool {
+        guard viewportWidth > 0, let frame = frames[target]?.frame else { return false }
+        let tolerance: CGFloat = 4
+        return frame.minX >= -tolerance && frame.maxX <= viewportWidth + tolerance
+    }
+}
+
+private struct FilmstripItemFrameTracker: ViewModifier {
+    let id: PhotoIdentity
+    let coordinateSpace: String
+    let layoutState: FilmstripLayoutState
+    @State private var token = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(coordinateSpace))
+            } action: { rect in
+                layoutState.frames[id] = .init(token: token, frame: rect)
+            }
+            .onDisappear {
+                if layoutState.frames[id]?.token == token {
+                    layoutState.frames.removeValue(forKey: id)
+                }
+            }
     }
 }
 
