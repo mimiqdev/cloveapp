@@ -107,6 +107,8 @@ struct DetailFilmstrip: View {
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
                         } else if let group = entry.group, let photo = entry.photos.first {
+                            let peekingIDs = GridDisplay.peekingPhotos(
+                                cover: photo.id, shown: entry.photos, group: group)
                             Button {
                                 // The folded group on screen reopens in place; any other stack
                                 // opens the group at its first photo (handoff interactions.md).
@@ -116,11 +118,11 @@ struct DetailFilmstrip: View {
                                     open(photo.id)
                                 }
                             } label: {
-                                GroupStack(peek: 4) {
-                                    DetailPhotoFrame(
-                                        photo: photo, isCurrent: false, thumbnails: thumbnails,
-                                        side: 54, height: 60, showsMarks: false)
-                                }
+                                FilmstripGroupStack(
+                                    cover: photo,
+                                    peekingIDs: peekingIDs,
+                                    thumbnails: thumbnails
+                                )
                                 .frame(width: 54, height: 64)
                                 .overlay(alignment: .topTrailing) {
                                     GroupCountBadge(
@@ -162,5 +164,55 @@ struct DetailFilmstrip: View {
         .buttonStyle(.plain)
         .id(photo.id)
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
+    }
+}
+
+private struct FilmstripGroupStack: View {
+    let cover: GridPhoto
+    let peekingIDs: [PhotoIdentity]
+    let thumbnails: any GridThumbnailSource
+    @State private var peekingThumbnails: [PhotoIdentity: CGImage] = [:]
+
+    var body: some View {
+        GroupStack(
+            peek: 4,
+            peekingImages: peekingIDs.map { peekingThumbnails[$0] },
+            cardBacking: Color.clove.bg.stage
+        ) {
+            DetailPhotoFrame(
+                photo: cover, isCurrent: false, thumbnails: thumbnails,
+                side: 54, height: 60, showsMarks: false)
+        }
+        .onChange(of: peekingIDs, initial: true) { _, needed in
+            let keep = Set(needed)
+            peekingThumbnails = peekingThumbnails.filter { keep.contains($0.key) }
+        }
+        .task(id: peekingIDs.first) {
+            await loadPeeking(peekingIDs.first)
+        }
+        .task(id: peekingIDs.dropFirst().first) {
+            await loadPeeking(peekingIDs.dropFirst().first)
+        }
+    }
+
+    private func loadPeeking(_ photo: PhotoIdentity?) async {
+        guard let photo, peekingThumbnails[photo] == nil else { return }
+        for delay in [0, 150, 300, 600, 1_200, 2_400] {
+            if delay > 0 {
+                try? await Task.sleep(for: .milliseconds(delay))
+            }
+            guard !Task.isCancelled else { return }
+            let outcome = await thumbnails.thumbnail(for: photo, priority: .visible)
+            guard !Task.isCancelled, peekingIDs.contains(photo) else { return }
+            switch outcome {
+            case .image(let pixels):
+                peekingThumbnails[photo] = pixels
+                return
+            case .unavailable:
+                return
+            case .deferred:
+                continue
+            }
+        }
     }
 }

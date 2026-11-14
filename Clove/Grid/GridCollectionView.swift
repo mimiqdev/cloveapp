@@ -490,9 +490,14 @@ extension GridCollectionView {
                 guard let item = item(at: indexPath), prefetchRequests[item.id] == nil else {
                     continue
                 }
+                let peeking = item.group?.isCover == true ? (item.group?.peekingPhotos ?? []) : []
                 let token = UUID()
                 let task = Task { [weak self] in
                     _ = await self?.thumbnails.thumbnail(for: item.photo.id, priority: .prefetch)
+                    for member in peeking {
+                        guard !Task.isCancelled else { break }
+                        _ = await self?.thumbnails.thumbnail(for: member, priority: .prefetch)
+                    }
                     self?.finishPrefetch(item.id, token: token)
                 }
                 prefetchRequests[item.id] = PrefetchRequest(token: token, task: task)

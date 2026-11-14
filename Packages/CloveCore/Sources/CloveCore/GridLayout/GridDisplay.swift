@@ -143,12 +143,13 @@ extension GridDisplay {
             guard covered.insert(group.id).inserted else { continue }
             let shown = shownByGroup[group.id] ?? [photo]
             let cover = shown.first { !$0.marks.isRejected } ?? photo
+            let peeking = Self.peekingPhotos(cover: cover.id, shown: shown, group: group)
             let cell = GridCellItem(
                 id: .group(group.id),
                 photo: cover,
                 group: GridCellItem.GroupMark(
                     id: group.id, count: group.members.count, showsCount: true,
-                    isCover: true),
+                    isCover: true, peekingPhotos: peeking),
                 isDimmed: shown.allSatisfy { $0.marks.isRejected })
             if members.isEmpty { before.append(cell) } else { after.append(cell) }
         }
@@ -163,5 +164,24 @@ extension GridDisplay {
             sections.append(GridSection(id: .photos(1), cells: after))
         }
         return sections.isEmpty ? [GridSection(id: .photos(0), cells: [])] : sections
+    }
+
+    /// Up to two member identities to peek behind a collapsed group cover, preferring shown
+    /// members in grid order and falling back to remaining group members when filtered.
+    public static func peekingPhotos(
+        cover: PhotoIdentity, shown: [GridPhoto], group: BrowsingGroup
+    ) -> [PhotoIdentity] {
+        let limit = min(2, max(0, group.members.count - 1))
+        guard limit > 0 else { return [] }
+        var result: [PhotoIdentity] = []
+        for candidate in shown where candidate.id != cover {
+            result.append(candidate.id)
+            if result.count == limit { return result }
+        }
+        for candidate in group.members where candidate != cover && !result.contains(candidate) {
+            result.append(candidate)
+            if result.count == limit { return result }
+        }
+        return result
     }
 }

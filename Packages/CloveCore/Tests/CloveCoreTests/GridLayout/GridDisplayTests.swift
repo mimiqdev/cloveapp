@@ -144,6 +144,38 @@ struct GridDisplayTests {
         let secondNamed = try #require(cells[2].group)
         #expect(secondNamed.id == second.id)
     }
+
+    @Test func collapsedCoverCarriesUpToTwoPeekingMembersInGridOrder() throws {
+        let pair = group("pair", photos(0...1))
+        let quad = group("quad", photos(2...5))
+        let cells = GridDisplay(
+            photos: photos(0...5), groups: [pair, quad], display: .collapsed
+        ).cells
+        #expect(cells[0].group?.peekingPhotos == [photos(0...5)[1].id])
+        #expect(
+            cells[1].group?.peekingPhotos == [photos(0...5)[3].id, photos(0...5)[4].id])
+    }
+
+    @Test func collapsedCoverExcludesRejectedSkippedCoverFromPeekingPhotos() throws {
+        let rejected = photo("r", time: capture(seconds(0)), marks: marks(rejected: true))
+        let kept = photo("k", time: capture(seconds(1)), marks: marks(stars: 3))
+        let third = photo("t", time: capture(seconds(2)))
+        let members = [rejected, kept, third]
+        let cells = GridDisplay(
+            photos: members, groups: [group("mixed", members)], display: .collapsed
+        ).cells
+        #expect(cells[0].photo.id == kept.id)
+        #expect(cells[0].group?.peekingPhotos == [rejected.id, third.id])
+    }
+
+    @Test func collapsedFilteredCoverFallsBackToGroupMembersForPeeking() throws {
+        let members = photos(0...2)
+        let burst = group("burst", members)
+        let cells = GridDisplay(
+            photos: [members[0]], groups: [burst], display: .collapsed
+        ).cells
+        #expect(cells[0].group?.peekingPhotos == [members[1].id, members[2].id])
+    }
 }
 
 /// PRD Grid and P0-11: the grid holds the current photo's cell in place, including a collapsed
