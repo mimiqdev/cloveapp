@@ -16,6 +16,25 @@ struct DetailFailureTests {
         #expect(try detailFailure(result) == .cannotOpen)
     }
 
+    @Test func truncatedJPEGReportsFailureInsteadOfEmptyBitmap() async throws {
+        let directory = try DetailTestDirectory()
+        defer { directory.remove() }
+        let valid = try directory.image(name: "valid.JPG")
+        let validBytes = try Data(contentsOf: valid)
+        let truncated = directory.path("truncated.JPG")
+        try validBytes.prefix(min(validBytes.count / 4, 64)).write(to: truncated)
+        let pipeline = DetailPipeline(cache: DetailCache())
+        let request = try rasterRequest(truncated)
+        let previewFailure = try detailFailure(try await pipeline.preview(for: request))
+        #expect(previewFailure == .cannotOpen || previewFailure == .noUsablePreview)
+        let fullFailure = try detailFailure(
+            try await pipeline.image(
+                for: DetailRequest(
+                    jpeg: try detailSource(truncated), displayPixels: 1200,
+                    wantsNativeResolution: true, locationIdentity: "folder")))
+        #expect(fullFailure == .cannotOpen || fullFailure == .noUsablePreview)
+    }
+
     @Test func readableFileWithoutPreviewReportsNoUsablePreview() async throws {
         // A HEIF without an embedded thumbnail is the no-preview control I1 also uses.
         let directory = try DetailTestDirectory()

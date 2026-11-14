@@ -38,7 +38,7 @@ struct DetailFilmstrip: View {
     private static let viewportSpace = "clove.detail.filmstrip.viewport"
     @State private var layoutState = FilmstripLayoutState()
 
-    private struct Entry: Identifiable {
+    struct Entry: Identifiable {
         let id: PhotoIdentity
         let photos: [GridPhoto]
         let group: BrowsingGroup?
@@ -46,28 +46,68 @@ struct DetailFilmstrip: View {
         let holdsCurrent: Bool
     }
 
+    struct Plan {
+        let entries: [Entry]
+        let scrollTargets: [PhotoIdentity: PhotoIdentity]
+
+        func scrollTarget(for photo: PhotoIdentity) -> PhotoIdentity {
+            scrollTargets[photo] ?? photo
+        }
+    }
+
     private var isCurrentGroupFolded: Bool { groupFold?.isFolded ?? false }
 
-    private var entries: [Entry] {
-        let byPhoto = Dictionary(
-            groups.flatMap { group in group.members.map { ($0, group) } },
-            uniquingKeysWith: { first, _ in first })
-        var seen: Set<GroupID> = []
-        return photos.compactMap { photo in
-            guard let group = byPhoto[photo.id] else {
-                return Entry(
-                    id: photo.id, photos: [photo], group: nil, expands: false,
-                    holdsCurrent: photo.id == current)
+    static func makePlan(
+        photos: [GridPhoto],
+        groups: [BrowsingGroup],
+        current: PhotoIdentity?,
+        isFolded: Bool
+    ) -> Plan {
+        var groupByID: [GroupID: BrowsingGroup] = [:]
+        groupByID.reserveCapacity(groups.count)
+        var groupIDByPhoto: [PhotoIdentity: GroupID] = [:]
+        for group in groups {
+            groupByID[group.id] = group
+            for member in group.members where groupIDByPhoto[member] == nil {
+                groupIDByPhoto[member] = group.id
             }
-            guard seen.insert(group.id).inserted else { return nil }
-            let members = Set(group.members)
-            let shown = photos.filter { members.contains($0.id) }
-            let holdsCurrent = current.map { members.contains($0) } ?? false
-            return Entry(
-                id: photo.id, photos: shown, group: group,
-                expands: holdsCurrent && !(groupFold?.isFolded ?? false),
-                holdsCurrent: holdsCurrent)
         }
+        var groupedPhotos: [GroupID: [GridPhoto]] = [:]
+        groupedPhotos.reserveCapacity(groups.count)
+        for photo in photos {
+            if let groupID = groupIDByPhoto[photo.id] {
+                groupedPhotos[groupID, default: []].append(photo)
+            }
+        }
+        let currentGroupID = current.flatMap { groupIDByPhoto[$0] }
+        var seen: Set<GroupID> = []
+        seen.reserveCapacity(groups.count)
+        var entries: [Entry] = []
+        entries.reserveCapacity(photos.count)
+        var scrollTargets: [PhotoIdentity: PhotoIdentity] = [:]
+        for photo in photos {
+            guard let groupID = groupIDByPhoto[photo.id], let group = groupByID[groupID] else {
+                entries.append(
+                    Entry(
+                        id: photo.id, photos: [photo], group: nil, expands: false,
+                        holdsCurrent: photo.id == current))
+                continue
+            }
+            guard seen.insert(groupID).inserted else { continue }
+            let shown = groupedPhotos[groupID] ?? []
+            let holdsCurrent = currentGroupID == groupID
+            let expands = holdsCurrent && !isFolded
+            let entry = Entry(
+                id: photo.id, photos: shown, group: group, expands: expands,
+                holdsCurrent: holdsCurrent)
+            entries.append(entry)
+            if !expands {
+                for member in shown {
+                    scrollTargets[member.id] = entry.id
+                }
+            }
+        }
+        return Plan(entries: entries, scrollTargets: scrollTargets)
     }
 
     var body: some View {
@@ -80,10 +120,12 @@ struct DetailFilmstrip: View {
     }
 
     private var strip: some View {
-        ScrollViewReader { proxy in
+        let plan = Self.makePlan(
+            photos: photos, groups: groups, current: current, isFolded: isCurrentGroupFolded)
+        return ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .bottom, spacing: 8) {
-                    ForEach(entries) { entry in
+                    ForEach(plan.entries) { entry in
                         if entry.expands {
                             HStack(spacing: 3) {
                                 ForEach(entry.photos) { photo in frame(photo) }
@@ -159,10 +201,10 @@ struct DetailFilmstrip: View {
                 layoutState.viewportWidth = $0
             }
             .onChange(of: current, initial: true) { _, photo in
-                scheduleScroll(for: photo, using: proxy)
+                scheduleScroll(for: photo, plan: plan, using: proxy)
             }
             .onChange(of: isCurrentGroupFolded) { _, _ in
-                scheduleScroll(for: current, using: proxy)
+                scheduleScroll(for: current, plan: plan, using: proxy)
             }
         }
         .frame(height: 70)
@@ -186,18 +228,11 @@ struct DetailFilmstrip: View {
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
     }
 
-    private func scrollTarget(for photo: PhotoIdentity) -> PhotoIdentity {
-        guard
-            let entry = entries.first(where: { $0.photos.contains(where: { $0.id == photo }) }),
-            !entry.expands
-        else { return photo }
-        return entry.id
-    }
-
-    private func scheduleScroll(for photo: PhotoIdentity?, using proxy: ScrollViewProxy) {
+    private func scheduleScroll(for photo: PhotoIdentity?, plan: Plan, using proxy: ScrollViewProxy)
+    {
         layoutState.pendingScroll?.cancel()
         guard let photo else { return }
-        let target = scrollTarget(for: photo)
+        let target = plan.scrollTarget(for: photo)
         layoutState.pendingScroll = Task { @MainActor in
             // The scroll runs after the change's layout settles, not inside its transaction:
             // entering or leaving a group swaps the lazy entries' identity in the same change,

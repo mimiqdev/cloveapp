@@ -33,6 +33,16 @@ struct DetailCompressedImage: Sendable {
         fullResolutionSize = image.fullResolutionSize
     }
 
+    init(corruptingData data: Data, copying other: Self) {
+        self.data = data
+        self.longEdge = other.longEdge
+        self.source = other.source
+        self.quality = other.quality
+        self.hasRAW = other.hasRAW
+        self.limitation = other.limitation
+        self.fullResolutionSize = other.fullResolutionSize
+    }
+
     func decoded() -> DetailImage? {
         autoreleasepool {
             guard
@@ -40,7 +50,7 @@ struct DetailCompressedImage: Sendable {
                     data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
                 let pixels = CGImageSourceCreateImageAtIndex(
                     encoded, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
-                let bytes = pixels.dataProvider?.data, CFDataGetLength(bytes) > 0
+                pixels.width > 0, pixels.height > 0, pixels.bytesPerRow > 0
             else { return nil }
             return DetailImage(
                 image: pixels, source: source, quality: quality, hasRAW: hasRAW,

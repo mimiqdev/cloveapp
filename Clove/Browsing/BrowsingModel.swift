@@ -93,10 +93,8 @@ final class BrowsingModel {
         SidebarCounts(photos: storedPhotos.filter { !$0.time.isPending })
     }
 
-    /// All placed photos, used for the filter menu's counts.
-    var allPlacedPhotos: [GridPhoto] {
-        PhotoOrdering(photos: storedPhotos).photos(order: state.order, matching: .all)
-    }
+    /// All placed photos in the active order, kept up to date when stored photos or order change.
+    private(set) var allPlacedPhotos: [GridPhoto] = []
 
     /// One admitted Info read, requested only when the sheet opens.
     func information(for photo: PhotoIdentity) async -> PhotoInformation? {
@@ -122,6 +120,8 @@ final class BrowsingModel {
     /// Shown marks are updated at submission and confirmation, rather than mapped on every read.
     private var storedPhotos: [GridPhoto]
     private var photoIndices: [PhotoIdentity: Int] = [:]
+    private var ordering = PhotoOrdering()
+    private var placedPhotoIndices: [PhotoIdentity: Int] = [:]
 
     /// A pending mark is shown until its ordered write finishes.
     private var desiredMarks = DesiredPhotoMarks()
@@ -194,8 +194,8 @@ final class BrowsingModel {
         self.thumbnails = library.thumbnails
         self.detailImages = library.detailImages
         self.recentFailures = [:]
-        self.confirmedPhotos = library.photos
-        self.storedPhotos = library.photos
+        self.confirmedPhotos = []
+        self.storedPhotos = []
         refresh()
         updateTask = Task { [weak self, updates = library.updates] in
             for await update in updates {
@@ -207,12 +207,7 @@ final class BrowsingModel {
 
     /// The photos the grid shows: this state's order and filter, applied to the folder's photos
     /// (PRD P0-03). Filtering never reorders, and neither choice changes a stored photo.
-    var photos: [GridPhoto] {
-        let ordered = PhotoOrdering(photos: storedPhotos).photos(
-            order: state.order, matching: state.filter)
-        guard let labelFilter else { return ordered }
-        return ordered.filter { $0.marks.label.colour == labelFilter }
-    }
+    private(set) var photos: [GridPhoto] = []
 
     /// Whether the open folder holds photos to browse (PRD P0-01).
     var hasFolderContents: Bool { !storedPhotos.isEmpty }
@@ -448,19 +443,25 @@ final class BrowsingModel {
 
     /// Changes the grid filter without touching the order or the current photo (PRD P0-03).
     func setFilter(_ filter: PhotoFilter) {
+        guard labelFilter != nil || state.filter != filter else { return }
         labelFilter = nil
         state.filter = filter
+        refilterPhotos()
     }
 
     /// Applies a label-only display filter in grid order (handoff Filter menu).
     func setLabelFilter(_ label: LabelColour) {
+        guard state.filter != .all || labelFilter != label else { return }
         state.filter = .all
         labelFilter = label
+        refilterPhotos()
     }
 
     /// Changes the grid order without touching the filter or the current photo (PRD P0-03).
     func setOrder(_ order: PhotoOrder) {
+        guard state.order != order else { return }
         state.order = order
+        rebuildOrderedPhotos()
     }
 
     /// Adds one photo to the multi-selection or removes it (PRD P0-09).
@@ -584,6 +585,7 @@ final class BrowsingModel {
         // A subfolder filter would hide photos just moved into the destination folder.
         if case .folder = result.destination, case .subfolder = state.filter {
             state.filter = .all
+            refilterPhotos()
         }
         state.route = .grid
         completedRename = completed
@@ -750,8 +752,13 @@ final class BrowsingModel {
 
     private func updateShownPhoto(_ photo: PhotoIdentity) {
         guard let index = photoIndices[photo] else { return }
-        storedPhotos[index].marks = desiredMarks.shown(
-            for: photo, confirmed: confirmedPhotos[index].marks)
+        let shown = desiredMarks.shown(for: photo, confirmed: confirmedPhotos[index].marks)
+        storedPhotos[index].marks = shown
+        ordering.setMarks(shown, for: photo)
+        if let placedIndex = placedPhotoIndices[photo] {
+            allPlacedPhotos[placedIndex].marks = shown
+        }
+        refilterPhotos()
     }
 
     /// Only detail marks and finishing actions create a marking undo step. Other actions and
@@ -950,6 +957,13 @@ final class BrowsingModel {
         recordUndo(for: nil)
         desiredMarks.removeAll()
         storedPhotos = confirmedPhotos
+        for photo in confirmedPhotos {
+            ordering.setMarks(photo.marks, for: photo.id)
+            if let placedIndex = placedPhotoIndices[photo.id] {
+                allPlacedPhotos[placedIndex].marks = photo.marks
+            }
+        }
+        refilterPhotos()
         dismissFailureToast()
         for entry in dropped {
             moveCompletions.removeValue(forKey: entry.id)?(.failure(RejectMoveRefusal.disabled))
@@ -1036,6 +1050,10 @@ final class BrowsingModel {
         confirmedPhotos = []
         storedPhotos = []
         photoIndices = [:]
+        ordering = PhotoOrdering()
+        allPlacedPhotos = []
+        placedPhotoIndices = [:]
+        photos = []
         desiredMarks.removeAll()
         recordUndo(for: nil)
         dismissFailureToast()
@@ -1124,9 +1142,16 @@ final class BrowsingModel {
             current: state, contents: library.contents, scanFinished: scanFinished)
         {
         case .apply(let restored):
+            let previousOrder = state.order
+            let previousFilter = state.filter
             pendingRestore = nil
             state = restored.state
             folderFailure = restored.folderFailure
+            if state.order != previousOrder {
+                rebuildOrderedPhotos()
+            } else if state.filter != previousFilter {
+                refilterPhotos()
+            }
         case .drop:
             pendingRestore = nil
         case .wait:
@@ -1148,8 +1173,11 @@ final class BrowsingModel {
             // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
             finishedScanFor = nil
             refresh()
-        case .photos, .reads:
+        case .photos:
             refresh()
+            resolvePendingRestore(scanFinished: false)
+        case .reads(let times, let marks):
+            applyReads(times: times, marks: marks)
             resolvePendingRestore(scanFinished: false)
         case .markReadFailed:
             showFailureToast(Self.readFailureToastMessage)
@@ -1198,18 +1226,105 @@ final class BrowsingModel {
         detailImages = library.detailImages
     }
 
-    /// Takes the library's current photos and groups.
+    /// Applies a `.reads` batch update incrementally when only marks or appended scan batches
+    /// changed, falling back to ``refresh()`` for structural replacements.
+    private func applyReads(
+        times: [PhotoIdentity: PhotoTimeState], marks: [PhotoIdentity: PhotoMarks]
+    ) {
+        guard shownGeneration == library.openGeneration else {
+            refresh()
+            return
+        }
+        let latest = library.photos
+        if times.isEmpty && !marks.isEmpty && latest.count == confirmedPhotos.count
+            && marks.keys.allSatisfy({ id in
+                guard let index = photoIndices[id] else { return false }
+                return latest[index].id == id && latest[index].time == confirmedPhotos[index].time
+                    && latest[index].fileName == confirmedPhotos[index].fileName
+            })
+        {
+            for id in marks.keys {
+                guard let index = photoIndices[id] else { continue }
+                let confirmedMarks = latest[index].marks
+                confirmedPhotos[index].marks = confirmedMarks
+                let shown = desiredMarks.shown(for: id, confirmed: confirmedMarks)
+                storedPhotos[index].marks = shown
+                ordering.setMarks(shown, for: id)
+                if let placedIndex = placedPhotoIndices[id] {
+                    allPlacedPhotos[placedIndex].marks = shown
+                }
+            }
+            refilterPhotos()
+            groups = library.groups
+            return
+        }
+        refresh()
+    }
+
+    /// Takes the library's current photos and groups, updating ``ordering``, ``allPlacedPhotos``,
+    /// and ``photos`` incrementally when possible and skipping sorts on mark-only changes.
     ///
     /// Scan batches, metadata reads and confirmed writes all refresh through this path, so the
     /// screens keep reading the model while the library changes underneath it.
     private func refresh() {
+        var generationChanged = false
         if shownGeneration != library.openGeneration {
             shownGeneration = library.openGeneration
             desiredMarks.removeAll()
             recordUndo(for: nil)
             dismissFailureToast()
+            generationChanged = true
         }
-        confirmedPhotos = library.photos
+        let latest = library.photos
+        if !generationChanged && latest.count == confirmedPhotos.count
+            && Self.haveMatchingOrderKeys(confirmedPhotos, latest)
+        {
+            for index in latest.indices {
+                let updated = latest[index]
+                confirmedPhotos[index] = updated
+                let shown = desiredMarks.shown(for: updated.id, confirmed: updated.marks)
+                if storedPhotos[index].marks != shown {
+                    storedPhotos[index].marks = shown
+                    ordering.setMarks(shown, for: updated.id)
+                    if let placedIndex = placedPhotoIndices[updated.id] {
+                        allPlacedPhotos[placedIndex].marks = shown
+                    }
+                }
+            }
+            refilterPhotos()
+            groups = library.groups
+            return
+        }
+        if !generationChanged && !confirmedPhotos.isEmpty && latest.count > confirmedPhotos.count
+            && Self.haveMatchingOrderKeys(confirmedPhotos, latest.prefix(confirmedPhotos.count))
+        {
+            let previousCount = confirmedPhotos.count
+            for index in 0..<previousCount {
+                let updated = latest[index]
+                confirmedPhotos[index] = updated
+                let shown = desiredMarks.shown(for: updated.id, confirmed: updated.marks)
+                if storedPhotos[index].marks != shown {
+                    storedPhotos[index].marks = shown
+                    ordering.setMarks(shown, for: updated.id)
+                }
+            }
+            var inserted: [GridPhoto] = []
+            inserted.reserveCapacity(latest.count - previousCount)
+            for index in previousCount..<latest.count {
+                let confirmed = latest[index]
+                confirmedPhotos.append(confirmed)
+                photoIndices[confirmed.id] = index
+                var shown = confirmed
+                shown.marks = desiredMarks.shown(for: confirmed.id, confirmed: confirmed.marks)
+                storedPhotos.append(shown)
+                inserted.append(shown)
+            }
+            ordering.insert(inserted)
+            rebuildOrderedPhotos()
+            groups = library.groups
+            return
+        }
+        confirmedPhotos = latest
         photoIndices = Dictionary(
             uniqueKeysWithValues: confirmedPhotos.enumerated().map { ($0.element.id, $0.offset) })
         storedPhotos = confirmedPhotos.map { photo in
@@ -1217,8 +1332,40 @@ final class BrowsingModel {
             shown.marks = desiredMarks.shown(for: photo.id, confirmed: photo.marks)
             return shown
         }
+        rebuildOrderingAndPhotos()
         groups = library.groups
         reconcileRemovedPhotos()
+    }
+
+    private func rebuildOrderingAndPhotos() {
+        ordering = PhotoOrdering(photos: storedPhotos)
+        rebuildOrderedPhotos()
+    }
+
+    private func rebuildOrderedPhotos() {
+        allPlacedPhotos = ordering.photos(order: state.order, matching: .all)
+        placedPhotoIndices = Dictionary(
+            uniqueKeysWithValues: allPlacedPhotos.enumerated().map { ($0.element.id, $0.offset) })
+        refilterPhotos()
+    }
+
+    private func refilterPhotos() {
+        if case .all = state.filter, labelFilter == nil {
+            photos = allPlacedPhotos
+            return
+        }
+        photos = allPlacedPhotos.filter { photo in
+            state.filter.matches(photo.marks, relativeFolderPath: photo.id.relativeFolderPath)
+                && (labelFilter == nil || photo.marks.label.colour == labelFilter)
+        }
+    }
+
+    private static func haveMatchingOrderKeys<C: Collection<GridPhoto>>(
+        _ lhs: [GridPhoto], _ rhs: C
+    ) -> Bool {
+        zip(lhs, rhs).allSatisfy { left, right in
+            left.id == right.id && left.time == right.time && left.fileName == right.fileName
+        }
     }
 
     /// Drops scene state that names a photo the folder no longer holds (PRD P0-10, P0-14).

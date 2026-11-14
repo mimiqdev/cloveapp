@@ -108,6 +108,8 @@ public final class ThumbnailCache: Sendable {
         }
     }
 
+    var memoryByteCount: Int { state.withLock { $0.memoryCost } }
+
     public func result(for request: ThumbnailRequest) -> ThumbnailResult? {
         for route in ThumbnailExtractor.routes(for: request) {
             let key = key(request, route: route)
@@ -127,7 +129,7 @@ public final class ThumbnailCache: Sendable {
                 guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                     let image = CGImageSourceCreateImageAtIndex(
                         source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
-                    image.dataProvider?.data != nil
+                    image.width > 0, image.height > 0, image.bytesPerRow > 0
                 else { return nil as CGImage? }
                 return image
             }

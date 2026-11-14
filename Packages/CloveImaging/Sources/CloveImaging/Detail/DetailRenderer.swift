@@ -75,7 +75,7 @@ final class DetailRenderer: DetailReading, @unchecked Sendable {
                     let image = CGImageSourceCreateImageAtIndex(
                         imageSource, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
                     ),
-                    let data = image.dataProvider?.data, CFDataGetLength(data) > 0
+                    image.width > 0, image.height > 0, image.bytesPerRow > 0
                 else { return .noUsablePreview }
                 let orientation = properties?[kCGImagePropertyOrientation] as? Int ?? 1
                 guard orientation != 1 else { return .image(image) }
@@ -117,8 +117,7 @@ final class DetailRenderer: DetailReading, @unchecked Sendable {
                 let image = Self.context.createCGImage(
                     output, from: output.extent, format: .RGBA8,
                     colorSpace: CGColorSpace(name: CGColorSpace.sRGB)),
-                image.width > 0, image.height > 0,
-                let data = image.dataProvider?.data, CFDataGetLength(data) > 0
+                image.width > 0, image.height > 0, image.bytesPerRow > 0
             else { return nil }
             // S2: a filter that initialises can still fail at rendering, so pixels are the
             // only evidence of support.
@@ -193,8 +192,7 @@ final class DetailRenderer: DetailReading, @unchecked Sendable {
     ) -> CGImage? {
         guard
             let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
-            image.width > 0, image.height > 0,
-            let data = image.dataProvider?.data, CFDataGetLength(data) > 0
+            image.width > 0, image.height > 0, image.bytesPerRow > 0
         else { return nil }
         return image
     }

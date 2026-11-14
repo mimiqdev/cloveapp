@@ -1,6 +1,7 @@
 import CloveCore
 import CloveImaging
 import Foundation
+import UIKit
 
 /// The real ``FolderLibrary``: one open folder behind C11's access, C2's scan, I4's times,
 /// C8's values and C4's writes (PRD P0-01, P0-02, P0-08).
@@ -42,10 +43,10 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
-    /// The open folder's I1 preview cache, I3 feature cache, and sharpness disk cache.
+    /// The library's I1 preview cache, I3 feature cache, and sharpness disk cache.
     ///
     /// All three live in the app's Caches directory because all three can be rebuilt from the
-    /// source files.
+    /// source files, and are shared across folder opens for the library's lifetime.
     struct Caches: Sendable {
         let thumbnails: ThumbnailCache
         let features: ImageFeatureCache
@@ -60,6 +61,8 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// The stores, prepared off the main actor so the first scene never waits on disk.
     private let stores: Task<Stores, any Error>
+    /// Shared preview, feature, and sharpness caches indexed once for the library's lifetime.
+    private let caches: Task<Caches?, Never>
     private let metadata: MetadataReader
     private let codec = XMPCodec()
 
@@ -117,6 +120,19 @@ final class FolderLibrarySession: FolderLibrary {
     /// The folder's detail pipeline, closed before its scope is released (PRD P0-04).
     private var detailPipeline: DetailPipeline?
 
+    /// The open folder's in-memory sharpness result store, purged on memory pressure.
+    private var sharpnessResults: RegionSharpnessResultStore?
+
+    /// The open folder's sharpness scheduler, paused on critical memory pressure.
+    private var sharpnessScheduler: RegionSharpnessScheduler?
+
+    /// Whether background grouping/sharpness workers are paused due to critical memory pressure.
+    private(set) var isPausedForMemoryPressure = false
+
+    /// System memory-pressure source and UIKit warning observer active for the library's lifetime.
+    private let memoryPressureSource: any DispatchSourceMemoryPressure
+    private var memoryWarningTask: Task<Void, Never>?
+
     /// The detail view's source for the open folder, bound to that folder's session and pipeline.
     private var detailSource: (any DetailImageSource)?
 
@@ -154,10 +170,11 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Creates the library over a task that prepares its app-private stores.
     ///
-    /// The metadata reader and the rejects folder name are injectable so a test can keep the work
-    /// small; production passes what ``FolderLibraryLaunch`` builds.
+    /// The metadata reader, caches and rejects folder name are injectable so a test can isolate
+    /// storage and keep work small; production passes what ``FolderLibraryLaunch`` builds.
     init(
         stores: Task<Stores, any Error>,
+        caches: Task<Caches?, Never>? = nil,
         metadata: MetadataReader = MetadataReader(),
         rejectsFolderName: @escaping @MainActor () -> RejectsFolderName = {
             .defaultFolderName
@@ -165,12 +182,32 @@ final class FolderLibrarySession: FolderLibrary {
         similarGroupsEnabled: @escaping @MainActor () -> Bool = { true }
     ) {
         self.stores = stores
+        self.caches = caches ?? Task.detached(priority: .userInitiated) { await Self.makeCaches() }
         self.metadata = metadata
         self.rejectsFolderName = rejectsFolderName
         self.similarGroupsEnabled = similarGroupsEnabled
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         updates = stream
         updatesContinuation = continuation
+
+        let pressure = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.normal, .warning, .critical], queue: .main)
+        memoryPressureSource = pressure
+        pressure.setEventHandler { [weak self, weak pressure] in
+            guard let event = pressure?.data else { return }
+            Task { @MainActor [weak self] in
+                await self?.handleMemoryPressure(event)
+            }
+        }
+        pressure.resume()
+        memoryWarningTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(
+                named: UIApplication.didReceiveMemoryWarningNotification)
+            {
+                guard !Task.isCancelled else { return }
+                await self?.handleMemoryPressure(.warning)
+            }
+        }
     }
 
     /// The folder's photos with their marks, in scan order (PRD P0-03).
@@ -714,9 +751,10 @@ final class FolderLibrarySession: FolderLibrary {
         // PRD How marks reach disk, rule 1: Reject and standalone marks are read when the folder
         // opens. A damaged store is reported by U7's save state; the scan still shows the photos.
         let storedMarks = (try? await stores.writes.storedMarks(for: session.folder.id)) ?? [:]
+        isPausedForMemoryPressure = false
         let configuration = ScanConfiguration(
             rejectsFolderName: rejectsFolderName().rawValue)
-        let caches = await Self.makeCaches()
+        let caches = await resolvedCaches()
         thumbnailSource = makeThumbnailSource(for: session, caches: caches)
         detailSource = makeDetailSource(
             for: session, thumbnails: caches?.thumbnails, sharpness: caches?.sharpness)
@@ -747,6 +785,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// G1 folder access keeps the scope until the work that relies on it drains, so the queue is
     /// drained before the session ends. Ending waits for the scan's admitted work as well.
     private func endOpenFolder() async {
+        isPausedForMemoryPressure = false
         entryPreviewTask?.cancel()
         entryPreviewTask = nil
         progressDebounceTask?.cancel()
@@ -783,6 +822,8 @@ final class FolderLibrarySession: FolderLibrary {
             // before either the pipeline or the security scope can end.
             await analysis.closeRegionAnalysis()
         }
+        sharpnessScheduler = nil
+        sharpnessResults = nil
         detailSource = nil
         if let pipeline = detailPipeline {
             detailPipeline = nil
@@ -833,7 +874,8 @@ final class FolderLibrarySession: FolderLibrary {
                         var marks: [PhotoIdentity: PhotoMarks] = [:]
                         for set in sets {
                             if let read = try? Self.readMarks(
-                                for: [set], storedMarks: storedMarks, codec: codec)
+                                for: [set], storedMarks: storedMarks, codec: codec,
+                                trustAbsentSidecar: true)
                             {
                                 marks.merge(read) { _, new in new }
                             }
@@ -875,7 +917,6 @@ final class FolderLibrarySession: FolderLibrary {
         }
         let added = store.insert(items, storedMarks: storedMarks)
         guard !added.isEmpty else { return [] }
-        publish(.photos(added))
         return added.compactMap { store.scannedSet(for: $0.id) }
     }
 
@@ -888,9 +929,12 @@ final class FolderLibrarySession: FolderLibrary {
     ) {
         guard generation == scanGeneration else { return }
         let timeZone = TimeZone.current
+        let setsByURL = Dictionary(
+            sets.map { ($0.photoSet.primary.url, $0) },
+            uniquingKeysWith: { first, _ in first })
         var times: [PhotoIdentity: PhotoTimeState] = [:]
         for read in reads {
-            guard let set = sets.first(where: { $0.photoSet.primary.url == read.url }) else {
+            guard let set = setsByURL[read.url] else {
                 continue
             }
             let time = Self.timeState(for: read.outcome, in: timeZone)
@@ -981,10 +1025,11 @@ final class FolderLibrarySession: FolderLibrary {
     /// stray packet beside it cannot override the marks Clove stores for it. A packet C3 refuses
     /// contributes nothing and is not repaired, so the photo keeps whatever Clove stores and U7
     /// can report the refusal with its own copy.
-    private nonisolated static func readMarks(
+    nonisolated static func readMarks(
         for sets: [ScannedPhotoSet],
         storedMarks: [PhotoIdentity: CloveStoredMarks],
-        codec: XMPCodec
+        codec: XMPCodec,
+        trustAbsentSidecar: Bool = false
     ) throws -> [PhotoIdentity: PhotoMarks] {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
         for set in sets {
@@ -993,9 +1038,13 @@ final class FolderLibrarySession: FolderLibrary {
             switch set.sidecar {
             case .resolved(let url): sidecar = url
             case .absent:
-                switch set.photoSet.markPersistence.rating {
-                case .xmpSidecar(let url): sidecar = url
-                case .cloveStorage: sidecar = nil
+                if trustAbsentSidecar {
+                    sidecar = nil
+                } else {
+                    switch set.photoSet.markPersistence.rating {
+                    case .xmpSidecar(let url): sidecar = url
+                    case .cloveStorage: sidecar = nil
+                    }
                 }
             case .ambiguous: sidecar = nil
             }
@@ -1149,6 +1198,13 @@ final class FolderLibrarySession: FolderLibrary {
     ) -> any DetailImageSource {
         let pipeline = DetailPipeline()
         detailPipeline = pipeline
+        let sharpnessResults = RegionSharpnessResultStore(capacity: 512, disk: sharpness)
+        let scheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(
+                reader: DetailRegionSharpnessReading(details: pipeline)),
+            results: sharpnessResults)
+        self.sharpnessResults = sharpnessResults
+        self.sharpnessScheduler = scheduler
         let folder = session.folder.id
         return PipelineDetailImages(
             pipeline: pipeline, thumbnails: thumbnails,
@@ -1167,7 +1223,9 @@ final class FolderLibrarySession: FolderLibrary {
                     return await self.admittedDetailSharpness(
                         work, session: session, folder: folder)
                 }),
-            sharpnessCache: sharpness)
+            regionScheduler: scheduler,
+            sharpnessCache: sharpness,
+            onUserActivity: { [weak self] in await self?.resumeAfterMemoryPressure() })
     }
 
     /// Runs one detail request inside the session that holds the folder's scope.
@@ -1207,16 +1265,22 @@ final class FolderLibrarySession: FolderLibrary {
         _ = try? await session.withAdmittedWork { await work() }
     }
 
-    /// Builds the folder's caches over the app's Caches directory, off the main actor.
+    /// Builds the library's shared caches over the app's Caches directory, off the main actor.
     ///
-    /// Creating either cache makes its directory and reads what it already holds, so this runs in
-    /// a detached task; the folder waits for it while opening, and nothing touches the disk during
-    /// the scene's first body evaluation.
-    private nonisolated static func makeCaches() async -> Caches? {
+    /// Creating any cache makes its directory and indexes what it already holds, so this runs once
+    /// per library in a detached task; the first open waits for it if still indexing, and later
+    /// folder opens reuse the same instances with warm memory tiers.
+    nonisolated static func makeCaches(in rootDirectory: URL? = nil) async -> Caches? {
         await Task.detached(priority: .userInitiated) {
             do {
-                let caches = try FileManager.default.url(
-                    for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let caches: URL
+                if let rootDirectory {
+                    caches = rootDirectory
+                } else {
+                    caches = try FileManager.default.url(
+                        for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil,
+                        create: true)
+                }
                 let thumbnails = try ThumbnailCache(
                     directory: caches.appendingPathComponent(
                         "Clove/GridThumbnails", isDirectory: true))
@@ -1302,6 +1366,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// background as it does on open; the group keys stay put through C9's ancestry, so the grid
     /// does not move the photo the user is looking at.
     func runGroupingAgain() async {
+        await resumeAfterMemoryPressure()
         await grouping?.runAgain(photos: store.groupingPhotos)
     }
 
@@ -1313,7 +1378,40 @@ final class FolderLibrarySession: FolderLibrary {
     /// again when the next folder opens. A change during the scan changes nothing: grouping
     /// reads the store when it starts after the scan finishes.
     func setSimilarGroupsEnabled(_ enabled: Bool) async {
+        if enabled {
+            await resumeAfterMemoryPressure()
+        }
         await grouping?.setEnabled(enabled, photos: store.groupingPhotos)
+    }
+
+    // MARK: - Memory pressure
+
+    /// Releases memory tiers across all active caches/pipelines on `.warning`/`.critical`, and
+    /// pauses background grouping/sharpness workers on `.critical`.
+    func handleMemoryPressure(_ event: DispatchSource.MemoryPressureEvent) async {
+        if event.contains(.warning) || event.contains(.critical) {
+            if let caches = await resolvedCaches() {
+                caches.thumbnails.releaseMemory()
+                caches.features.releaseMemory()
+            }
+            sharpnessResults?.releaseMemory()
+            await detailPipeline?.releaseCachedImages()
+        }
+        if event.contains(.critical) {
+            isPausedForMemoryPressure = true
+            await grouping?.pauseAnalysis()
+            await sharpnessScheduler?.pause()
+        } else if event.contains(.normal), isPausedForMemoryPressure {
+            await resumeAfterMemoryPressure()
+        }
+    }
+
+    /// Resumes background grouping and sharpness work that `.critical` pressure paused.
+    func resumeAfterMemoryPressure() async {
+        guard isPausedForMemoryPressure else { return }
+        isPausedForMemoryPressure = false
+        await grouping?.resumeAnalysis()
+        await sharpnessScheduler?.resume()
     }
 
     // MARK: - Publishing
@@ -1322,6 +1420,16 @@ final class FolderLibrarySession: FolderLibrary {
     private func publish(_ update: FolderLibraryUpdate) {
         updatesContinuation.yield(update)
     }
+
+    /// The shared caches indexed for the library's lifetime.
+    func resolvedCaches() async -> Caches? {
+        await caches.value
+    }
+
+    var activeGrouping: FolderGrouping? { grouping }
+    var activeDetailPipeline: DetailPipeline? { detailPipeline }
+    var activeSharpnessResults: RegionSharpnessResultStore? { sharpnessResults }
+    var activeSharpnessScheduler: RegionSharpnessScheduler? { sharpnessScheduler }
 
     /// The stores, or why they could not be prepared (PRD P0-02).
     private func resolvedStores() async -> Result<Stores, any Error> {
@@ -1377,6 +1485,8 @@ final class FolderLibrarySession: FolderLibrary {
         FolderErrorChain(CocoaError(.fileNoSuchFile)))
 
     deinit {
+        memoryPressureSource.cancel()
+        memoryWarningTask?.cancel()
         // A dropped library must not leave its scan running or its consumer attached; C11's
         // session releases the scope itself when it is deallocated.
         openScan?.cancel()

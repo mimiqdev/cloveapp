@@ -82,6 +82,7 @@ final class FolderGrouping {
         cache: SimilarGroupsCache,
         featureCache: ImageFeatureCache,
         previewCache: ThumbnailCache,
+        thresholds: GroupingThresholds = .standard,
         sets: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
         publish: @escaping @MainActor ([BrowsingGroup]) -> Void,
         analysisChanged: @escaping @MainActor (Bool) -> Void = { _ in }
@@ -104,7 +105,8 @@ final class FolderGrouping {
             }
         }
         self.similarity = similarity
-        self.grouping = SimilarGrouping(similarity: similarity, cache: cache)
+        self.grouping = SimilarGrouping(
+            similarity: similarity, thresholds: thresholds, cache: cache)
         self.features = ImageFeaturePipeline(
             cache: featureCache, sharedPreviewCache: previewCache)
     }
@@ -166,6 +168,18 @@ final class FolderGrouping {
         // release the folder's scope.
         await pending?.value
     }
+
+    /// Stops starting new background feature work (G1 memory pressure).
+    func pauseAnalysis() async {
+        await features.pause()
+    }
+
+    /// Resumes background feature work paused for memory pressure.
+    func resumeAnalysis() async {
+        await features.resume()
+    }
+
+    var featurePipeline: ImageFeaturePipeline { features }
 
     // MARK: - Running
 
@@ -239,11 +253,11 @@ final class FolderGrouping {
     private func startAnalysis(needsAnalysis: Bool) {
         analysisTask?.cancel()
         analysisTask = nil
-        guard enabled, !isClosed else {
+        guard enabled, !isClosed, needsAnalysis else {
             analysisChanged(false)
             return
         }
-        analysisChanged(needsAnalysis)
+        analysisChanged(true)
         let candidates = GroupingFeatureCandidates.photos(in: inputs)
         analysisTask = Task { [weak self] in
             guard let self else { return }

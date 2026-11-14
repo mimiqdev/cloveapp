@@ -57,8 +57,7 @@ public struct ThumbnailExtractor: Sendable {
             kCGImageSourceCreateThumbnailFromImageAlways: route == .always,
         ]
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
-            image.width > 0, image.height > 0,
-            let bytes = image.dataProvider?.data, CFDataGetLength(bytes) > 0
+            image.width > 0, image.height > 0, image.bytesPerRow > 0
         else { return nil }
         return image
     }
