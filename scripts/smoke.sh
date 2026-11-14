@@ -46,6 +46,8 @@ for argument in "$@"; do
         # cover flow needs no Device Hub interaction and runs with no GUI session.
         -only-testing:CloveUITests/CloveFlowTests/testDuoCoverToolbarMarkAndPickers)
             duo_test="testDuoCoverToolbarMarkAndPickers" ;;
+        -only-testing:CloveUITests/CloveFlowTests/testDuoCoverFilmstripScrollsToTheCurrentPhotoAndFillsItsViewport)
+            duo_test="testDuoCoverFilmstripScrollsToTheCurrentPhotoAndFillsItsViewport" ;;
         # The Open pose exists only as a Device Hub control; there is no headless
         # way to select it, so this runner refuses the expanded flow.
         -only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly)

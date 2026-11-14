@@ -906,6 +906,31 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.nav.back").tap()
     }
 
+    /// Opt-in visual evidence for the detail filmstrip's settled geometry: the strip dragged to
+    /// the folder's last photo, so a person can compare where the content rests at its end
+    /// before and after the single-reservation fix (#237). Runs on whatever device the runner
+    /// picks; nothing is asserted, the captures are for comparison.
+    @MainActor
+    func testCaptureFilmstripEndReferencesWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_FILMSTRIP"] == "1")
+        for theme in ["light", "dark"] {
+            let app = launchSample()
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            element(app, "clove.grid.photo.mmq02680").tap()
+            XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+            capture("filmstrip-start-\(theme)")
+            let strip = element(app, "clove.detail.filmstrip")
+            let last = element(app, "clove.detail.filmstrip.mmq02713")
+            for _ in 0..<14 where !restsAtTrailingEdge(last, of: strip) {
+                dragStripForward(strip)
+            }
+            capture("filmstrip-end-\(theme)")
+            element(app, "clove.nav.back").tap()
+            app.terminate()
+        }
+    }
+
     /// Opt-in visual evidence for the shared marking family: every rating value, clear versus
     /// Reject, labeled-unrated, the ladder and label picker, and both Entry states, in Light,
     /// Dark and one alternate theme (#227).
@@ -1183,8 +1208,49 @@ final class CloveFlowTests: XCTestCase {
         // In photo only, the capsule stays beneath the photo and beside the narrowed filmstrip.
         XCTAssertGreaterThanOrEqual(capsule.frame.minY, preview.frame.maxY)
         XCTAssertGreaterThan(capsule.frame.midX, element(app, "clove.duo.photoOnly").frame.midX)
+        // View frames alone cannot see the interior dead space a content-side reservation leaves
+        // (#237), so the content check below inspects where the strip's content actually rests.
         XCTAssertLessThanOrEqual(filmstrip.frame.maxX, capsule.frame.minX + 1)
         capture("duo-photo-only")
+        // The strip's content fills its viewport up to the toolbar: dragged to the folder's last
+        // photo, its last thumbnail rests beside the toolbar rather than behind a second,
+        // content-padded reservation. The drags advance one viewport at a time, so the resting
+        // end is the content's real end, not a jump's estimate (#237).
+        let fileName = element(app, "clove.detail.fileName")
+        let last = element(app, "clove.detail.filmstrip.mmq02713")
+        for _ in 0..<14 where !restsAtTrailingEdge(last, of: filmstrip) {
+            dragStripForward(filmstrip)
+        }
+        XCTAssertTrue(
+            wait(NSPredicate { _, _ in self.restsAtTrailingEdge(last, of: filmstrip) }, last),
+            "the last thumbnail stops short of the toolbar: the marking area is reserved twice")
+        capture("duo-photo-only-strip-end")
+        // Opening it moves the current photo far in one step; the strip must still land on it.
+        last.tap()
+        XCTAssertTrue(waitForLabel("MMQ02713.ARW", fileName))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "isHittable == true"), last),
+            "the strip went blank after the far jump")
+        // Entering the group from its stack and leaving it again cover the other directions of
+        // the same identity change beside the toolbar (#237).
+        let stack = swipeStripUntilHittable(
+            "clove.detail.filmstrip.group.burst-2678", in: app, forward: false)
+        stack.tap()
+        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        let exit = swipeStripUntilHittable(
+            "clove.detail.filmstrip.mmq02680", in: app, forward: true)
+        exit.tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "exists == false"),
+                element(app, "clove.detail.filmstrip.expandedGroup")))
+        let current = element(app, "clove.detail.filmstrip.mmq02680")
+        XCTAssertTrue(
+            wait(NSPredicate(format: "isHittable == true"), current),
+            "the strip went blank after leaving the group")
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.duo.capsule").exists)
@@ -1389,6 +1455,94 @@ final class CloveFlowTests: XCTestCase {
         focusToggle.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), focusToggle))
         XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
+    }
+
+    /// Runs on the Duo's cover display: the strip's content fills its viewport after leaving a
+    /// group, and the last photo lands at the strip's trailing edge, not behind a padded gap.
+    /// The strip is the same layout code on the cover and the expanded inner display; the
+    /// expanded photo-only geometry beside the toolbar has no headless runner and is re-checked
+    /// by the owner on TestFlight (#237).
+    @MainActor
+    func testDuoCoverFilmstripScrollsToTheCurrentPhotoAndFillsItsViewport() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4")
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        openLibrary(app)
+        try XCTSkipUnless(
+            app.windows.firstMatch.horizontalSizeClass == .compact,
+            "the Duo is not in the Closed pose; select Closed in Device Hub to test the cover")
+        prepareDuo(app)
+        let fileName = element(app, "clove.detail.fileName")
+        let strip = element(app, "clove.detail.filmstrip")
+
+        // Leaving a group swaps the strip's expanded member row for the group's stack in the
+        // same change that moves the current photo, so this is the blank-strip transition.
+        element(app, "clove.grid.group.burst-2678").tap()
+        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        element(app, "clove.detail.filmstrip.mmq02680").tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "exists == false"),
+                element(app, "clove.detail.filmstrip.expandedGroup")))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.group.burst-2678").exists)
+        // The strip shows its content around the current photo, not blank.
+        let current = element(app, "clove.detail.filmstrip.mmq02680")
+        XCTAssertTrue(
+            wait(NSPredicate(format: "isHittable == true"), current),
+            "the strip went blank after leaving the group")
+        capture("duo-cover-strip-after-group-exit")
+
+        // The strip's content fills its viewport: dragged to the folder's last photo, the last
+        // thumbnail rests at the strip's trailing edge instead of behind a reserved gap. The
+        // drags advance one viewport at a time, so the lazy cells materialize as the offset
+        // moves and the resting end is the content's real end, not a jump's estimate (#237).
+        let last = element(app, "clove.detail.filmstrip.mmq02713")
+        for _ in 0..<14 where !restsAtTrailingEdge(last, of: strip) {
+            dragStripForward(strip)
+        }
+        XCTAssertTrue(
+            wait(NSPredicate { _, _ in self.restsAtTrailingEdge(last, of: strip) }, last),
+            "the last thumbnail stops short of the strip's edge: its trailing area is reserved twice"
+        )
+        capture("duo-cover-strip-last-photo")
+        // Opening it moves the current photo far in one step; the strip must still land on it.
+        last.tap()
+        XCTAssertTrue(waitForLabel("MMQ02713.ARW", fileName))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "isHittable == true"), last),
+            "the strip went blank after the far jump")
+
+        // Entering a group from its stack, a within-group move, and leaving it again cover the
+        // other directions of the same identity change; the strip must land on the photo each
+        // time (#237).
+        let stack = swipeStripUntilHittable(
+            "clove.detail.filmstrip.group.burst-2696", in: app, forward: false)
+        stack.tap()
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
+            "the strip stayed blank after entering the group")
+        let member = swipeStripUntilHittable(
+            "clove.detail.filmstrip.mmq02698", in: app, forward: true)
+        member.tap()
+        XCTAssertTrue(waitForLabel("MMQ02698.ARW", fileName))
+        let preview = element(app, "clove.detail.preview")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        XCTAssertTrue(waitForLabel("MMQ02699.ARW", fileName))
+        let afterGroup = element(app, "clove.detail.filmstrip.mmq02699")
+        XCTAssertTrue(
+            wait(NSPredicate(format: "isHittable == true"), afterGroup),
+            "the strip went blank after leaving the group by navigation")
+        capture("duo-cover-strip-after-navigation-exit")
     }
 
     @MainActor
@@ -1709,6 +1863,50 @@ final class CloveFlowTests: XCTestCase {
         let star = element(app, "\(toolbar).stars.\(level)")
         XCTAssertTrue(star.waitForExistence(timeout: 5), "the rating ladder did not open")
         star.tap()
+    }
+
+    /// Drags the filmstrip one viewport towards its end and waits for the scroll to settle, so
+    /// the strip's lazy cells materialize as the offset advances and the read that follows sees
+    /// the content's real extent, not a programmatic jump's estimate (#237).
+    @MainActor
+    private func dragStripForward(_ strip: XCUIElement) {
+        let start = strip.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+        start.press(
+            forDuration: 0.05,
+            thenDragTo: strip.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 0.3)
+    }
+
+    /// Whether a filmstrip cell is on screen and flush with the strip's trailing edge, within
+    /// one thumbnail's width: the position the strip's content rests at when it fills its
+    /// viewport (#237).
+    @MainActor
+    private func restsAtTrailingEdge(_ cell: XCUIElement, of strip: XCUIElement) -> Bool {
+        guard cell.exists else { return false }
+        let frame = cell.frame
+        let edge = strip.frame.maxX
+        return frame.maxX <= edge && frame.maxX >= edge - 27 && frame.minX >= strip.frame.minX
+    }
+
+    /// Swipes the filmstrip until the thumbnail is on screen, bounded, because a lazy strip does
+    /// not build its far entries until they scroll near. `forward` swipes towards the strip's
+    /// trailing end; the caller picks the direction from the current photo (#237).
+    @MainActor
+    func swipeStripUntilHittable(
+        _ identifier: String, in app: XCUIApplication, forward: Bool = true
+    ) -> XCUIElement {
+        let target = element(app, identifier)
+        let strip = element(app, "clove.detail.filmstrip")
+        for _ in 0..<12 where !target.isHittable {
+            if forward {
+                strip.swipeLeft(velocity: .fast)
+            } else {
+                strip.swipeRight(velocity: .fast)
+            }
+        }
+        XCTAssertTrue(target.isHittable, "the strip never brought \(identifier) on screen")
+        return target
     }
 
     @MainActor
