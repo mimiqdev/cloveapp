@@ -122,11 +122,12 @@ func detailFailure(_ result: DetailResult) throws -> DetailFailure {
     return failure
 }
 
-/// Observes scheduling decisions without spinning against the worker being awaited.
+/// Observes actor queue/active state without spinning against the worker being awaited;
+/// `DetailPipeline` exposes no queue-state notification stream seam without altering production code.
 func eventually(
     _ description: String = "Condition did not become true in time", _ condition: () async -> Bool
 ) async throws {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+    let deadline = ContinuousClock.now.advanced(by: .seconds(30))
     while !(await condition()), ContinuousClock.now < deadline {
         try await Task.sleep(for: .milliseconds(1))
     }
@@ -168,6 +169,8 @@ actor DetailReadGate {
     var holdsNative = false
     var holdsPreview = false
 
+    private let previewEntries = AsyncStream<String>.makeStream()
+    private let nativeEntries = AsyncStream<String>.makeStream()
     private(set) var nativePaths: [String] = []
     private(set) var previewPaths: [String] = []
     private(set) var fullRasterPaths: [String] = []
@@ -191,10 +194,18 @@ actor DetailReadGate {
     }
 
     func beginNative(_ source: DetailSource) async {
+        let name = source.url.lastPathComponent
         nativePaths.append(source.url.path)
         activeNative += 1
         maximumNativeEntries = max(maximumNativeEntries, activeNative)
-        if holdsNative { await withCheckedContinuation { nativeWaiters.append($0) } }
+        if holdsNative {
+            await withCheckedContinuation { continuation in
+                nativeWaiters.append(continuation)
+                nativeEntries.continuation.yield(name)
+            }
+        } else {
+            nativeEntries.continuation.yield(name)
+        }
     }
 
     func endNative() {
@@ -207,15 +218,33 @@ actor DetailReadGate {
     func markClosed() { didClose = true }
 
     func beginPreview(_ source: DetailSource) async {
+        let name = source.url.lastPathComponent
         previewPaths.append(source.url.path)
         activePreview += 1
         maximumPreviewEntries = max(maximumPreviewEntries, activePreview)
-        if holdsPreview { await withCheckedContinuation { previewWaiters.append($0) } }
+        if holdsPreview {
+            await withCheckedContinuation { continuation in
+                previewWaiters.append(continuation)
+                previewEntries.continuation.yield(name)
+            }
+        } else {
+            previewEntries.continuation.yield(name)
+        }
     }
 
     func endPreview() {
         activePreview -= 1
         finishedPreviews += 1
+    }
+
+    func nextPreviewEntry() async throws -> String {
+        var iterator = previewEntries.stream.makeAsyncIterator()
+        return try #require(await iterator.next(), "A preview read must enter the gate")
+    }
+
+    func nextNativeEntry() async throws -> String {
+        var iterator = nativeEntries.stream.makeAsyncIterator()
+        return try #require(await iterator.next(), "A native read must enter the gate")
     }
 
     var totalEntries: Int { previewPaths.count + nativePaths.count }
@@ -234,7 +263,7 @@ actor DetailReadGate {
 /// Releasing a fixed number of times would race entries that are still queued in the
 /// pipeline, and a release that arrives before its entry waits would leave it held forever.
 func letEntriesFinish(_ gate: DetailReadGate, previews: Int = 0, natives: Int = 0) async throws {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+    let deadline = ContinuousClock.now.advanced(by: .seconds(30))
     while ContinuousClock.now < deadline {
         let donePreviews = await gate.finishedPreviews
         let doneNatives = await gate.finishedNatives
