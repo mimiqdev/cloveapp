@@ -417,6 +417,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         layoutFocusRegions()
         // A programmatic zoom is the same handoff as a pinch, whether or not the delegate fires.
         updateGestureAvailability()
+        updatePreviewAccessibility()
     }
 
     override func layoutSubviews() {

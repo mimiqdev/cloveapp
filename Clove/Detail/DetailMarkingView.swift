@@ -970,7 +970,8 @@ struct DetailMarkingView: View {
         return false
     }
 
-    /// The double-tap action: 100% around the tapped point, or back to fit (PRD P0-04).
+    /// The double-tap action: 100% centred on the most relevant presented focus region (or the
+    /// tapped point when none is presented), or back to fit (PRD P0-04).
     ///
     /// The target is the photo's native 100%, computed from the size that arrived with the first
     /// preview, so the embedded preview is drawn enlarged and the RAW render later replaces it at
@@ -991,8 +992,18 @@ struct DetailMarkingView: View {
             setZoom(.fit)
             return
         }
-        inspectedFocusRegionID = nil
-        inspectFullResolution(at: anchor)
+        guard shown != nil else { return }
+        if let targetRegion = focusRegionState.preferredDoubleTapRegion(
+            at: anchor,
+            visible: browsing.showsFocusRegions,
+            inspectedRegionID: inspectedFocusRegionID)
+        {
+            inspectedFocusRegionID = targetRegion.id
+            inspectFullResolution(at: targetRegion.centre)
+        } else {
+            inspectedFocusRegionID = nil
+            inspectFullResolution(at: anchor)
+        }
     }
 
     /// A valid analysis region always enters the existing 100% inspection, independently of the

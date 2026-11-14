@@ -169,6 +169,42 @@ struct DetailFocusRegionState {
         return presented
     }
 
+    /// Selects the most relevant actionable focus region for a double-tap at `anchor`, or `nil`
+    /// when no actionable regions are presented (so double-tap zooms to the tap point).
+    ///
+    /// Order: active inspected region, then camera AF, then the presented per-person eye/face
+    /// regions. Multiple candidates in the winning tier resolve deterministically to the region
+    /// nearest `anchor`, breaking ties by presentation order.
+    func preferredDoubleTapRegion(
+        at anchor: UnitPoint,
+        visible: Bool,
+        inspectedRegionID: String?
+    ) -> DetailFocusRegion? {
+        let candidates = regions(visible: visible, inspectedRegionID: nil).filter(\.isActionable)
+        guard !candidates.isEmpty else { return nil }
+        if let inspectedRegionID,
+            let inspected = candidates.first(where: { $0.id == inspectedRegionID })
+        {
+            return inspected
+        }
+        let autofocusRegions = candidates.filter { $0.kind == .autofocus }
+        let pool = autofocusRegions.isEmpty ? candidates : autofocusRegions
+        return pool.enumerated().min { lhs, rhs in
+            let lhsDistance = Self.squaredDistance(from: anchor, to: lhs.element.centre)
+            let rhsDistance = Self.squaredDistance(from: anchor, to: rhs.element.centre)
+            if abs(lhsDistance - rhsDistance) > 1e-9 {
+                return lhsDistance < rhsDistance
+            }
+            return lhs.offset < rhs.offset
+        }?.element
+    }
+
+    private static func squaredDistance(from first: UnitPoint, to second: UnitPoint) -> Double {
+        let dx = first.x - second.x
+        let dy = first.y - second.y
+        return dx * dx + dy * dy
+    }
+
     var status: String? {
         if analysisUnavailable { return "Analysis unavailable" }
         var messages: [String] = []

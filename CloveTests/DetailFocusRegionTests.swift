@@ -422,6 +422,134 @@ struct DetailFocusRegionTests {
         #expect(state.status == "Analysis unavailable")
     }
 
+    @Test func doubleTapPolicyPrefersInspectedThenAutofocusThenNearestPresentedRegion() {
+        let photoID = photo("double-tap-policy")
+        let af = makeEvidence(
+            .cameraAutofocus,
+            normalized: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16))
+        let p0Face = makeEvidence(
+            .face, group: 0,
+            normalized: NormalizedRegion(x: 0.58, y: 0.20, width: 0.22, height: 0.32))
+        let p0Eye = makeEvidence(
+            .eye, group: 0,
+            normalized: NormalizedRegion(x: 0.625, y: 0.29, width: 0.05, height: 0.05))
+        let p1Face = makeEvidence(
+            .face, group: 1,
+            normalized: NormalizedRegion(x: 0.75, y: 0.50, width: 0.15, height: 0.20))
+
+        var state = DetailFocusRegionState()
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(
+                autofocus: .regions([af]),
+                faces: .regions([p0Face, p0Eye, p1Face])),
+            for: photoID)
+
+        // Single AF wins over eye/face even when tapping much closer to Person 0's eye.
+        let nearEye = UnitPoint(x: 0.66, y: 0.32)
+        #expect(
+            state.preferredDoubleTapRegion(at: nearEye, visible: true, inspectedRegionID: nil)?.id
+                == "clove.detail.region.af.0")
+
+        // An already-inspected region takes highest priority over AF.
+        #expect(
+            state.preferredDoubleTapRegion(
+                at: UnitPoint(x: 0.1, y: 0.1), visible: true,
+                inspectedRegionID: "clove.detail.region.face.2-1")?.id
+                == "clove.detail.region.face.2-1")
+
+        // Session toggle Off suppresses region selection so double-tap zooms to the tap point.
+        #expect(
+            state.preferredDoubleTapRegion(at: nearEye, visible: false, inspectedRegionID: nil)
+                == nil)
+
+        // Without AF, multiple people resolve deterministically: nearest to tap, then first presented.
+        let noAF = RegionSharpnessPathResult.unavailable(
+            .noAutofocusMetadata(
+                AutofocusMetadataEvidence(inspected: [], cameraMake: "Test", exifOrientation: 1)))
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(autofocus: noAF, faces: .regions([p0Face, p0Eye, p1Face])),
+            for: photoID)
+        #expect(
+            state.preferredDoubleTapRegion(
+                at: UnitPoint(x: 0.80, y: 0.60), visible: true, inspectedRegionID: nil)?.id
+                == "clove.detail.region.face.2-1")
+
+        // Symmetric two-person midpoint breaks ties deterministically by presentation order.
+        let leftPerson = makeEvidence(
+            .face, group: 0,
+            normalized: NormalizedRegion(x: 0.15, y: 0.40, width: 0.10, height: 0.20))
+        let rightPerson = makeEvidence(
+            .face, group: 1,
+            normalized: NormalizedRegion(x: 0.75, y: 0.40, width: 0.10, height: 0.20))
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(autofocus: noAF, faces: .regions([leftPerson, rightPerson])),
+            for: photoID)
+        #expect(
+            state.preferredDoubleTapRegion(
+                at: UnitPoint(x: 0.50, y: 0.50), visible: true, inspectedRegionID: nil)?.id
+                == "clove.detail.region.face.0-0")
+    }
+
+    @Test func doubleTapPolicySkipsUnavailableRegionsAndHandlesMultipleAutofocusRegions() {
+        let photoID = photo("double-tap-unavailable")
+        let noAF = RegionSharpnessPathResult.unavailable(
+            .noAutofocusMetadata(
+                AutofocusMetadataEvidence(inspected: [], cameraMake: "Test", exifOrientation: 1)))
+        var state = DetailFocusRegionState()
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(autofocus: noAF, faces: .unavailable(.noFacesDetected)),
+            for: photoID)
+        #expect(
+            state.preferredDoubleTapRegion(
+                at: UnitPoint(x: 0.5, y: 0.5), visible: true, inspectedRegionID: nil) == nil)
+
+        // Only tiny unavailable AF -> falls back to tap point (nil).
+        let tinyAF = RegionSharpnessEvidence(
+            kind: .cameraAutofocus, groupIndex: nil,
+            region: NormalizedRegion(x: 0.1, y: 0.1, width: 0.005, height: 0.005),
+            score: nil, unavailableBecause: .regionTooSmall)
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(autofocus: .regions([tinyAF]), faces: .unavailable(.noFacesDetected)),
+            for: photoID)
+        #expect(
+            state.preferredDoubleTapRegion(
+                at: UnitPoint(x: 0.1, y: 0.1), visible: true, inspectedRegionID: nil) == nil)
+
+        // Tiny unavailable AF + actionable eye -> picks the actionable eye.
+        let eye = makeEvidence(
+            .eye, group: 0,
+            normalized: NormalizedRegion(x: 0.60, y: 0.30, width: 0.05, height: 0.05))
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(autofocus: .regions([tinyAF]), faces: .regions([eye])),
+            for: photoID)
+        #expect(
+            state.preferredDoubleTapRegion(
+                at: UnitPoint(x: 0.1, y: 0.1), visible: true, inspectedRegionID: nil)?.id
+                == "clove.detail.region.face.0-0")
+
+        // Multiple actionable AF regions -> picks the AF region nearest to the tap point.
+        let leftAF = makeEvidence(
+            .cameraAutofocus,
+            normalized: NormalizedRegion(x: 0.15, y: 0.45, width: 0.10, height: 0.10))
+        let rightAF = makeEvidence(
+            .cameraAutofocus,
+            normalized: NormalizedRegion(x: 0.75, y: 0.45, width: 0.10, height: 0.10))
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(autofocus: .regions([leftAF, rightAF]), faces: .regions([eye])),
+            for: photoID)
+        #expect(
+            state.preferredDoubleTapRegion(
+                at: UnitPoint(x: 0.78, y: 0.50), visible: true, inspectedRegionID: nil)?.id
+                == "clove.detail.region.af.1")
+    }
+
     private func makeRegion(
         id: String = "test-region",
         kind: SharpnessRegionKind = .cameraAutofocus,
