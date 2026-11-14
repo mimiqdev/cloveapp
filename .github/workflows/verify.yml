@@ -57,6 +57,8 @@ jobs:
         run: /usr/bin/python3 scripts/test_release_testflight.py
       - name: Simulator runner tests
         run: /usr/bin/python3 scripts/test_smoke.py
+      - name: Duo helper script tests
+        run: /usr/bin/python3 scripts/test_duo_pose.py
 
   packages:
     name: Lint and package tests
