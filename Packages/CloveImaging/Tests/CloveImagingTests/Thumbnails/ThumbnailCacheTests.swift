@@ -159,4 +159,21 @@ actor ThumbnailCacheTests {
         #expect(cache.result(for: request) == nil)
         #expect(!FileManager.default.fileExists(atPath: files[0].path))
     }
+
+    @Test func memoryResultIsSynchronousAndNeverReadsDisk() throws {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let request = try thumbnailRequest(directory.image())
+        let result = ThumbnailExtractor().extract(request)
+        let cache = try directory.cache()
+        #expect(cache.memoryResult(for: request) == nil)
+        try cache.store(result, for: request)
+        let memory = try availableThumbnail(#require(cache.memoryResult(for: request)))
+        #expect(max(memory.width, memory.height) == 400)
+        cache.releaseMemory()
+        // Disk entry still exists, yet memory-only lookup must miss without touching disk.
+        #expect(cache.memoryResult(for: request) == nil)
+        #expect(cache.result(for: request) != nil)
+        #expect(cache.memoryResult(for: request) != nil)
+    }
 }

@@ -1080,6 +1080,7 @@ final class FolderLibrarySession: FolderLibrary {
         return PipelineGridThumbnails(
             pipeline: pipeline,
             set: { [weak self] photo in self?.store.scannedSet(for: photo)?.photoSet },
+            scannedSet: { [weak self] photo in self?.store.scannedSet(for: photo) },
             admitted: { [weak self] work in
                 guard let self else { return .unavailable }
                 return await self.admittedThumbnail(work, session: session, folder: folder)

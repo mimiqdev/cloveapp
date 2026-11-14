@@ -25,6 +25,7 @@ final class PipelineGridThumbnails: GridThumbnailSource {
 
     private let pipeline: ThumbnailPipeline
     private let set: @MainActor (PhotoIdentity) -> PhotoSet?
+    private let scannedSet: (@MainActor (PhotoIdentity) -> ScannedPhotoSet?)?
     private let admitted: @Sendable (AdmittedWork) async -> GridThumbnailOutcome
 
     /// Uses one folder's pipeline and the folder's lookup from identity to scanned set.
@@ -35,53 +36,72 @@ final class PipelineGridThumbnails: GridThumbnailSource {
     init(
         pipeline: ThumbnailPipeline,
         set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
+        scannedSet: (@MainActor (PhotoIdentity) -> ScannedPhotoSet?)? = nil,
         admitted: @escaping @Sendable (AdmittedWork) async -> GridThumbnailOutcome = {
             await $0()
         }
     ) {
         self.pipeline = pipeline
         self.set = set
+        self.scannedSet = scannedSet
         self.admitted = admitted
     }
 
     /// The companions the set holds beside its primary file (PRD Grid).
     func companions(for photo: PhotoIdentity) -> GridCompanions {
-        guard let set = set(photo) else { return GridCompanions() }
+        guard let resolvedSet = scannedSet?(photo)?.photoSet ?? set(photo) else {
+            return GridCompanions()
+        }
         return GridCompanions(
-            hasJPEG: set.jpegCompanion != nil, hasHEIF: set.heifCompanion != nil)
+            hasJPEG: resolvedSet.jpegCompanion != nil, hasHEIF: resolvedSet.heifCompanion != nil)
+    }
+
+    /// Synchronously returns an already-cached thumbnail from memory when the scan revision is known.
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? {
+        guard let source = primaryRequestSource(for: photo), let revision = source.revision else {
+            return nil
+        }
+        let request = ThumbnailRequest(
+            source: source.url, revision: revision, targetPixels: Self.targetPixels,
+            locationIdentity: photo.folderID.rawValue)
+        guard let cached = pipeline.cachedResult(for: request) else { return nil }
+        switch cached {
+        case .available(let thumbnail):
+            return .image(thumbnail.image)
+        case .unavailable:
+            return .unavailable
+        }
     }
 
     /// Asks I1 for the primary file's embedded preview (G1 preview row).
     ///
-    /// Reading the file's size and modification time is what I1's revision check needs, and it
-    /// runs off the main actor: both calls ask the file system, and PRD P0-03 puts smooth
-    /// scrolling before decoding, so a slow card must never stall the grid. A file that is
-    /// already gone then reports unavailable, without taking a queue slot (PRD Scan scope).
-    /// I1's queue pressure, a closed pipeline and a superseded request are deferred instead:
-    /// the file may be readable and the cell asks again (G1 scheduling row).
+    /// When the scan already captured the primary file's size and modification date, the revision
+    /// is reused directly; otherwise reading falls back onto `ImageWorkExecutor` off the main
+    /// actor and cooperative pool.
     func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority)
         async -> GridThumbnailOutcome
     {
-        guard let source = set(photo)?.primary.url else { return .unavailable }
+        guard let source = primaryRequestSource(for: photo) else { return .unavailable }
         let targetPixels = Self.targetPixels
-        // G1 folder access holds the scope until the work that relies on it drains, so the
+        let pipelinePriority = priority.pipeline
+        // G1 folder access holds the scope until the work that relies on it drains, so any
         // revision read and the decode both run inside the closure the folder supplies.
         return await admitted { [pipeline] in
-            guard
-                let revision = await Task.detached(
-                    priority: .userInitiated,
-                    operation: {
-                        try? ThumbnailRevision.read(from: source)
-                    }
-                ).value
-            else {
+            let revision: ThumbnailRevision
+            if let prefetched = source.revision {
+                revision = prefetched
+            } else if let read = try? await ThumbnailRevision.readOnImageWork(
+                from: source.url, priority: pipelinePriority)
+            {
+                revision = read
+            } else {
                 return .unavailable
             }
             let request = ThumbnailRequest(
-                source: source, revision: revision, targetPixels: targetPixels,
+                source: source.url, revision: revision, targetPixels: targetPixels,
                 locationIdentity: photo.folderID.rawValue)
             do {
-                switch try await pipeline.thumbnail(for: request, priority: priority.pipeline) {
+                switch try await pipeline.thumbnail(for: request, priority: pipelinePriority) {
                 case .available(let thumbnail):
                     return .image(thumbnail.image)
                 case .unavailable:
@@ -91,6 +111,29 @@ final class PipelineGridThumbnails: GridThumbnailSource {
                 return .deferred
             }
         }
+    }
+
+    private func primaryRequestSource(for photo: PhotoIdentity) -> (
+        url: URL, revision: ThumbnailRevision?
+    )? {
+        if let scanned = scannedSet?(photo) {
+            let primaryURL = scanned.photoSet.primary.url
+            let primaryFile =
+                scanned.imageFiles.first { $0.file.url == primaryURL }
+                ?? (scanned.imageFiles.first?.file == scanned.photoSet.primary
+                    ? scanned.imageFiles.first : nil)
+            let revision: ThumbnailRevision? =
+                if let size = primaryFile?.size,
+                    let modificationDate = primaryFile?.modificationDate
+                {
+                    ThumbnailRevision(size: Int64(size), modificationTime: modificationDate)
+                } else {
+                    nil
+                }
+            return (primaryURL, revision)
+        }
+        guard let url = set(photo)?.primary.url else { return nil }
+        return (url, nil)
     }
 }
 

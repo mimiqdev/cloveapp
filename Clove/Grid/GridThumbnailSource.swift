@@ -68,6 +68,9 @@ struct GridCompanions: Hashable, Sendable {
 /// implementation and the real folder another (``PipelineGridThumbnails``).
 @MainActor
 protocol GridThumbnailSource: AnyObject {
+    /// Synchronously returns a memory-cached thumbnail outcome when available so warm cells build once.
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome?
+
     /// Requests the photo's grid thumbnail at the G1 preview row's embedded-preview size.
     ///
     /// The request is safe to cancel. A cell cancels its request when it scrolls away, and the
@@ -80,4 +83,8 @@ protocol GridThumbnailSource: AnyObject {
     /// It answers synchronously from what the scan already found, so a cell draws its badge
     /// together with the photo's marks.
     func companions(for photo: PhotoIdentity) -> GridCompanions
+}
+
+extension GridThumbnailSource {
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? { nil }
 }
