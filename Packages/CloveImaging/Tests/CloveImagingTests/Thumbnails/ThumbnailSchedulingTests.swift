@@ -253,4 +253,96 @@ private actor ThumbnailDecodeGate {
         }
         #expect(cache.result(for: request(base, 1)) == nil)
     }
+
+    @Test(.timeLimit(.minutes(1))) func queuedPrefetchPromotesToVisibleAndCoalesces()
+        async throws
+    {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let base = try thumbnailRequest(directory.image())
+        let gate = ThumbnailDecodeGate()
+        let pipeline = ThumbnailPipeline(
+            cache: try directory.cache(memory: 0, disk: 0), workers: 1,
+            decode: { await gate.decode($0) })
+        let active = Task { try await pipeline.thumbnail(for: request(base, 1)) }
+        try await gate.waitForStart(1)
+
+        let firstPrefetch = Task {
+            try await pipeline.thumbnail(for: request(base, 2), priority: .prefetch)
+        }
+        try await eventually { await pipeline.queuedCount == 1 }
+        let promotedTarget = Task {
+            try await pipeline.thumbnail(for: request(base, 3), priority: .prefetch)
+        }
+        try await eventually { await pipeline.queuedCount == 2 }
+
+        // A visible caller requesting the same queued prefetch coalesces and promotes it ahead of item 2.
+        let visibleJoiner = Task {
+            try await pipeline.thumbnail(for: request(base, 3), priority: .visible)
+        }
+        try await eventually { await pipeline.queuedCount == 2 }
+        promotedTarget.cancel()
+        await cancelled(promotedTarget)
+        #expect(await pipeline.queuedCount == 2)
+
+        await gate.finish(1)
+        _ = try await active.value
+        try await eventually { await gate.started == [1, 3] }
+        await gate.finish(3)
+        _ = try await visibleJoiner.value
+
+        try await eventually { await gate.started == [1, 3, 2] }
+        await gate.finish(2)
+        _ = try await firstPrefetch.value
+    }
+
+    @Test(.timeLimit(.minutes(1))) func inFlightPrefetchCoalescesAndSurvivesPrefetchCancel()
+        async throws
+    {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let base = try thumbnailRequest(directory.image())
+        let gate = ThumbnailDecodeGate()
+        let pipeline = ThumbnailPipeline(
+            cache: try directory.cache(memory: 0, disk: 0), workers: 1,
+            decode: { await gate.decode($0) })
+
+        let prefetch = Task {
+            try await pipeline.thumbnail(for: request(base, 1), priority: .prefetch)
+        }
+        try await gate.waitForStart(1)
+
+        let visible = Task {
+            try await pipeline.thumbnail(for: request(base, 1), priority: .visible)
+        }
+        // Wait until the visible waiter is attached before cancelling prefetch.
+        try await Task.sleep(for: .milliseconds(20))
+        prefetch.cancel()
+        await cancelled(prefetch)
+        #expect(await pipeline.activeCount == 1)
+        #expect(await pipeline.queuedCount == 0)
+
+        await gate.finish(1)
+        _ = try await visible.value
+        #expect(await gate.started == [1])
+    }
+
+    @Test func cacheHitServesWithoutStatOrDecoder() async throws {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let base = try thumbnailRequest(directory.image())
+        let cache = try directory.cache()
+        let extracted = ThumbnailExtractor().extract(base)
+        try cache.store(extracted, for: base)
+
+        // Remove the source file so any stat call would fail or trigger sourceChanged.
+        try FileManager.default.removeItem(at: base.source)
+        let gate = ThumbnailDecodeGate()
+        let pipeline = ThumbnailPipeline(cache: cache, workers: 1) { await gate.decode($0) }
+        #expect(pipeline.cachedResult(for: base) != nil)
+        let image = try availableThumbnail(await pipeline.thumbnail(for: base))
+        #expect(max(image.width, image.height) == 400)
+        #expect(await gate.started.isEmpty)
+        await pipeline.close()
+    }
 }

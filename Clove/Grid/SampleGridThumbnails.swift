@@ -29,6 +29,13 @@ final class SampleGridThumbnails: GridThumbnailSource {
         companions[photo] ?? GridCompanions()
     }
 
+    /// Returns an already-generated tile synchronously when warm.
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? {
+        if unavailable.contains(photo) { return .unavailable }
+        if let tile = tiles[photo] { return .image(tile) }
+        return nil
+    }
+
     /// Draws one photo's tile, or reports the sample's unreadable photo (PRD Scan scope).
     func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority) async
         -> GridThumbnailOutcome

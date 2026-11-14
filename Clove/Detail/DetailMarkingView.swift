@@ -795,6 +795,9 @@ struct DetailMarkingView: View {
         guard !Task.isCancelled, let screen = probe.container?.window?.windowScene?.screen else {
             return
         }
+        // Keep the full-screen native long edge across Duo split toggles: reducing to a 70%
+        // split edge saves only ~6% on screen RAW render time while forcing ~280 ms re-renders
+        // whenever split presets change.
         let screenPixels = Int(max(screen.nativeBounds.width, screen.nativeBounds.height))
         let window = photoWindow(for: photo, screenPixels: screenPixels)
         currentWindow = window

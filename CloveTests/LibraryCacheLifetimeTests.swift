@@ -20,6 +20,12 @@ struct LibraryCacheLifetimeTests {
         let photoA = try #require(model.photos.first?.id)
 
         let cachesAfterFirstOpen = try #require(await workspace.library.resolvedCaches())
+        let expectedThumbnailBudget = ThumbnailCache.Configuration.deviceAware().memoryBytes
+        let expectedDetailBudget = DetailCache.Configuration.deviceAware().compressedBytes
+        #expect(cachesAfterFirstOpen.thumbnails.memoryCapacityBytes == expectedThumbnailBudget)
+        let detailPipeline = try #require(workspace.library.activeDetailPipeline)
+        #expect(
+            await detailPipeline.cachedCompressedCapacityBytes == expectedDetailBudget)
         _ = await workspace.library.thumbnails.thumbnail(for: photoA, priority: .visible)
         try await waitUntil {
             cachesAfterFirstOpen.thumbnails.memoryByteCount > 0

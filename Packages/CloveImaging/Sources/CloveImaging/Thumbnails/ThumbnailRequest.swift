@@ -41,6 +41,18 @@ public struct ThumbnailRevision: Hashable, Codable, Sendable {
         }
         return Self(size: Int64(size), modificationTime: date)
     }
+
+    public static func readOnImageWork(
+        from source: URL, priority: ThumbnailPriority = .visible
+    ) async throws -> Self {
+        try await Task.detached(
+            executorPreference: priority == .visible
+                ? ImageWorkExecutor.userInitiated : ImageWorkExecutor.utility,
+            priority: priority == .visible ? .userInitiated : .utility
+        ) {
+            try Self.read(from: source)
+        }.value
+    }
 }
 
 public enum ThumbnailRoute: String, Codable, Sendable {

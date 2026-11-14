@@ -19,4 +19,18 @@ public enum GroupingFeatureCandidates {
     ) -> [GroupingPhoto] {
         GroupingRuns.runs(for: photos, timeGap: thresholds.timeGap).flatMap { $0 }
     }
+
+    /// The candidate time-runs of `photos` that have at least one neighbour, ordered by each
+    /// run's earliest photo in grid order so earlier visible bursts settle first.
+    public static func runs(
+        in photos: [GroupingPhoto],
+        thresholds: GroupingThresholds = .standard
+    ) -> [[GroupingPhoto]] {
+        GroupingRuns.runs(for: photos, timeGap: thresholds.timeGap).sorted { left, right in
+            guard let firstLeft = left.first, let firstRight = right.first else {
+                return !left.isEmpty && right.isEmpty
+            }
+            return GroupingRuns.gridPrecedes(firstLeft, firstRight)
+        }
+    }
 }

@@ -41,6 +41,21 @@ public final class DetailCache: Sendable {
         /// Compressed bytes shared by previews and RAW screen renders, encoded as JPEG 0.9.
         public var compressedBytes = 64 * 1024 * 1024
         public init() {}
+
+        /// Scales the compressed memory tier for devices with at least 8 GiB of physical memory
+        /// (96 MiB at 8 GiB and 128 MiB at 12 GiB+ for 1.5–2× burst retention), keeping 64 MiB
+        /// on smaller devices. Intended for callers that wire memory-pressure purging.
+        public static func deviceAware(
+            physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+        ) -> Configuration {
+            var configuration = Configuration()
+            if physicalMemory >= 11_000_000_000 {
+                configuration.compressedBytes = 128 * 1024 * 1024
+            } else if physicalMemory >= 7_000_000_000 {
+                configuration.compressedBytes = 96 * 1024 * 1024
+            }
+            return configuration
+        }
     }
 
     private struct Entry {
@@ -203,6 +218,7 @@ public final class DetailCache: Sendable {
 
     /// Compressed bytes and entries currently held, for budget tests.
     var compressedCost: Int { state.withLock { $0.compressedCost } }
+    public var compressedCapacityBytes: Int { configuration.compressedBytes }
     var imageCount: Int { state.withLock { $0.images.count } }
     var holdsNativeImage: Bool { state.withLock { $0.native != nil } }
 }

@@ -8,6 +8,24 @@ import UniformTypeIdentifiers
 /// bookkeeping. Per-key gates order publication, touch and deletion of one file;
 /// JPEG work and IO for unrelated keys never hold the state mutex.
 public final class ThumbnailCache: Sendable {
+    private struct MemoryKey: Hashable {
+        let path: String
+        let locationIdentity: String
+        let size: Int64
+        let modificationTimeBits: UInt64
+        let targetPixels: Int
+        let route: ThumbnailRoute
+
+        init(request: ThumbnailRequest, route: ThumbnailRoute) {
+            self.path = request.source.path
+            self.locationIdentity = request.locationIdentity
+            self.size = request.revision.size
+            self.modificationTimeBits =
+                request.revision.modificationTime.timeIntervalSince1970.bitPattern
+            self.targetPixels = request.targetPixels
+            self.route = route
+        }
+    }
     private struct MemoryEntry {
         let result: ThumbnailResult
         let cost: Int
@@ -32,7 +50,7 @@ public final class ThumbnailCache: Sendable {
         let access: FileAccess
     }
     private struct State {
-        var memory: [String: MemoryEntry] = [:]
+        var memory: [MemoryKey: MemoryEntry] = [:]
         var disk: [String: DiskEntry] = [:]
         var fileAccess: [String: FileAccessEntry] = [:]
         var memoryCost = 0
@@ -45,6 +63,19 @@ public final class ThumbnailCache: Sendable {
         public var diskBytes = 256 * 1024 * 1024
         public var pipelineVersion = 1
         public init() {}
+
+        /// Scales the memory tier to 128 MiB on devices with at least 8 GiB of physical memory
+        /// (accounting for OS memory reporting slightly below nominal RAM), keeping 64 MiB on
+        /// smaller devices. Intended for callers that wire memory-pressure purging.
+        public static func deviceAware(
+            physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+        ) -> Configuration {
+            var configuration = Configuration()
+            if physicalMemory >= 7_000_000_000 {
+                configuration.memoryBytes = 128 * 1024 * 1024
+            }
+            return configuration
+        }
     }
 
     private let state: Mutex<State>
@@ -109,13 +140,39 @@ public final class ThumbnailCache: Sendable {
     }
 
     var memoryByteCount: Int { state.withLock { $0.memoryCost } }
+    public var memoryCapacityBytes: Int { configuration.memoryBytes }
+
+    /// Synchronous memory-only lookup; never reads from disk.
+    public func memoryResult(for request: ThumbnailRequest) -> ThumbnailResult? {
+        let routes = ThumbnailExtractor.routes(for: request)
+        return state.withLock { state in
+            for route in routes {
+                let memKey = MemoryKey(request: request, route: route)
+                if let entry = state.memory[memKey] {
+                    remember(entry.result, key: memKey, state: &state)
+                    return entry.result
+                }
+            }
+            return nil
+        }
+    }
 
     public func result(for request: ThumbnailRequest) -> ThumbnailResult? {
         for route in ThumbnailExtractor.routes(for: request) {
+            let memKey = MemoryKey(request: request, route: route)
+            let memoryOrHasDisk = state.withLock { state -> (ThumbnailResult?, Bool) in
+                if let entry = state.memory[memKey] {
+                    remember(entry.result, key: memKey, state: &state)
+                    return (entry.result, false)
+                }
+                return (nil, !state.disk.isEmpty)
+            }
+            if let result = memoryOrHasDisk.0 { return result }
+            guard memoryOrHasDisk.1 else { continue }
             let key = key(request, route: route)
             let lookup = state.withLock { state -> (ThumbnailResult?, DiskEntry?, FileAccess?) in
-                if let entry = state.memory[key] {
-                    remember(entry.result, key: key, state: &state)
+                if let entry = state.memory[memKey] {
+                    remember(entry.result, key: memKey, state: &state)
                     return (entry.result, nil, nil)
                 }
                 guard let entry = state.disk[key], !entry.evicting else { return (nil, nil, nil) }
@@ -155,13 +212,10 @@ public final class ThumbnailCache: Sendable {
                         state.disk[key]?.evicting == false
                     else { return false }
                     state.disk[key]?.access = now
-                    remember(result, key: key, state: &state)
+                    remember(result, key: memKey, state: &state)
                     return true
                 }
-                guard valid else { return nil }
-                try? FileManager.default.setAttributes(
-                    [.modificationDate: now], ofItemAtPath: url.path)
-                return result
+                return valid ? result : nil
             }
             if let result { return result }
         }
@@ -176,9 +230,10 @@ public final class ThumbnailCache: Sendable {
         } else {
             route = ThumbnailExtractor.routes(for: request)[0]
         }
-        let key = key(request, route: route)
-        state.withLock { remember(result, key: key, state: &$0) }
+        let memKey = MemoryKey(request: request, route: route)
+        state.withLock { remember(result, key: memKey, state: &$0) }
         guard case .available(let thumbnail) = result, configuration.diskBytes > 0 else { return }
+        let key = key(request, route: route)
         let data = try jpeg(thumbnail.image)
         guard data.count <= configuration.diskBytes else { return }
         let staging = directory.appendingPathComponent(UUID().uuidString + ".staging")
@@ -199,7 +254,7 @@ public final class ThumbnailCache: Sendable {
                 state.diskCost += data.count
                 // Publication order determines the winner in both tiers, even if
                 // another store began encoding first and finished staging later.
-                remember(result, key: key, state: &state)
+                remember(result, key: memKey, state: &state)
                 return selectEvictions(&state)
             }
         }
@@ -230,7 +285,7 @@ public final class ThumbnailCache: Sendable {
 
     private func file(_ key: String) -> URL { directory.appendingPathComponent(key + ".jpg") }
 
-    private func remember(_ result: ThumbnailResult, key: String, state: inout State) {
+    private func remember(_ result: ThumbnailResult, key: MemoryKey, state: inout State) {
         state.memoryCost -= state.memory.removeValue(forKey: key)?.cost ?? 0
         let cost: Int
         if case .available(let image) = result { cost = image.decodedBytes } else { cost = 256 }

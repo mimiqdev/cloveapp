@@ -11,13 +11,21 @@ private final class ThumbnailCancellation: Sendable {
 }
 
 public actor ThumbnailPipeline {
-    private struct Job {
+    private struct Waiter {
         let id: UUID
+        let workID: UUID
         let consumer: UUID
-        let request: ThumbnailRequest
         let priority: ThumbnailPriority
         let cancellation: ThumbnailCancellation
         let continuation: CheckedContinuation<ThumbnailResult, any Error>
+    }
+
+    private struct Work {
+        let id: UUID
+        let request: ThumbnailRequest
+        var priority: ThumbnailPriority
+        var waiterIDs: [UUID]
+        let cancellation: ThumbnailCancellation
     }
 
     private let cache: ThumbnailCache
@@ -26,7 +34,9 @@ public actor ThumbnailPipeline {
     private var workerCount: Int
     private var queue: [UUID] = []
     private var active: Set<UUID> = []
-    private var jobs: [UUID: Job] = [:]
+    private var works: [UUID: Work] = [:]
+    private var workByRequest: [ThumbnailRequest: UUID] = [:]
+    private var waiters: [UUID: Waiter] = [:]
     private var latest: [UUID: UUID] = [:]
     private var closed = false
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
@@ -50,41 +60,70 @@ public actor ThumbnailPipeline {
         self.decode = decode
     }
 
+    /// Synchronous memory-only lookup; never hops onto the actor or touches disk.
+    public nonisolated func cachedResult(for request: ThumbnailRequest) -> ThumbnailResult? {
+        cache.memoryResult(for: request)
+    }
+
     /// Reuse a consumer ID for a cell/view: its newer request supersedes its old
-    /// request. Cancellation/supersession throws CancellationError, never pixels.
+    /// request. Equivalent in-flight requests coalesce and promote `.prefetch` to
+    /// `.visible`. Cancellation/supersession throws CancellationError, never pixels.
     /// A full queue throws queueFull; visible work may displace queued prefetch.
     public func thumbnail(
         for request: ThumbnailRequest, consumer: UUID = UUID(),
         priority: ThumbnailPriority = .visible
     ) async throws -> ThumbnailResult {
-        let id = UUID()
-        let cancellation = ThumbnailCancellation()
+        let waiterID = UUID()
+        let waiterCancellation = ThumbnailCancellation()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             guard !closed else { throw ThumbnailPipelineError.closed }
             return try await withCheckedThrowingContinuation { continuation in
-                if let old = latest[consumer] { cancel(old) }
+                let oldWaiterID = latest[consumer]
+                if let existingWorkID = workByRequest[request], var work = works[existingWorkID] {
+                    let waiter = Waiter(
+                        id: waiterID, workID: existingWorkID, consumer: consumer,
+                        priority: priority, cancellation: waiterCancellation,
+                        continuation: continuation)
+                    waiters[waiterID] = waiter
+                    latest[consumer] = waiterID
+                    work.waiterIDs.append(waiterID)
+                    if priority == .visible && work.priority == .prefetch {
+                        work.priority = .visible
+                    }
+                    works[existingWorkID] = work
+                    if let oldWaiterID { cancelWaiter(oldWaiterID) }
+                    drain()
+                    return
+                }
+                if let oldWaiterID { cancelWaiter(oldWaiterID) }
                 if queue.count >= queueLimit {
                     if priority == .visible,
-                        let victim = queue.last(where: { jobs[$0]?.priority == .prefetch })
+                        let victim = queue.last(where: { works[$0]?.priority == .prefetch })
                     {
-                        cancel(victim)
+                        cancelWork(victim)
                     } else {
                         continuation.resume(throwing: ThumbnailPipelineError.queueFull)
                         return
                     }
                 }
-                let job = Job(
-                    id: id, consumer: consumer, request: request, priority: priority,
-                    cancellation: cancellation, continuation: continuation)
-                jobs[id] = job
-                latest[consumer] = id
-                queue.append(id)
+                let workID = UUID()
+                let work = Work(
+                    id: workID, request: request, priority: priority, waiterIDs: [waiterID],
+                    cancellation: ThumbnailCancellation())
+                let waiter = Waiter(
+                    id: waiterID, workID: workID, consumer: consumer, priority: priority,
+                    cancellation: waiterCancellation, continuation: continuation)
+                works[workID] = work
+                workByRequest[request] = workID
+                waiters[waiterID] = waiter
+                latest[consumer] = waiterID
+                queue.append(workID)
                 drain()
             }
         } onCancel: {
-            cancellation.cancel()
-            Task { await self.cancel(id) }
+            waiterCancellation.cancel()
+            Task { await self.cancelWaiter(waiterID) }
         }
     }
 
@@ -97,14 +136,16 @@ public actor ThumbnailPipeline {
     }
 
     public func cancelPrefetch() {
-        for job in Array(jobs.values) where job.priority == .prefetch { cancel(job.id) }
+        for waiter in Array(waiters.values) where waiter.priority == .prefetch {
+            cancelWaiter(waiter.id)
+        }
     }
 
     /// Stop accepting work, cancel requests and wait for native calls to drain.
     /// After this returns, the caller can release the folder's security scope.
     public func close() async {
         closed = true
-        for id in Array(jobs.keys) { cancel(id) }
+        for workID in Array(works.keys) { cancelWork(workID) }
         if !active.isEmpty {
             await withCheckedContinuation { closeWaiters.append($0) }
         }
@@ -113,73 +154,105 @@ public actor ThumbnailPipeline {
     var queuedCount: Int { queue.count }
     var activeCount: Int { active.count }
 
-    private func cancel(_ id: UUID) {
-        guard let job = jobs.removeValue(forKey: id) else { return }
-        job.cancellation.cancel()
-        queue.removeAll { $0 == id }
-        if latest[job.consumer] == id { latest[job.consumer] = nil }
-        job.continuation.resume(throwing: CancellationError())
+    private func cancelWaiter(_ waiterID: UUID) {
+        guard let waiter = waiters.removeValue(forKey: waiterID) else { return }
+        waiter.cancellation.cancel()
+        if latest[waiter.consumer] == waiterID { latest[waiter.consumer] = nil }
+        waiter.continuation.resume(throwing: CancellationError())
+        guard var work = works[waiter.workID] else { return }
+        work.waiterIDs.removeAll { $0 == waiterID }
+        if work.waiterIDs.isEmpty {
+            cancelWork(work.id)
+        } else {
+            work.priority =
+                work.waiterIDs.contains { waiters[$0]?.priority == .visible }
+                ? .visible : .prefetch
+            works[work.id] = work
+        }
+    }
+
+    private func cancelWork(_ workID: UUID) {
+        guard let work = works[workID] else { return }
+        work.cancellation.cancel()
+        if workByRequest[work.request] == workID { workByRequest[work.request] = nil }
+        queue.removeAll { $0 == workID }
+        for waiterID in work.waiterIDs {
+            guard let waiter = waiters.removeValue(forKey: waiterID) else { continue }
+            waiter.cancellation.cancel()
+            if latest[waiter.consumer] == waiterID { latest[waiter.consumer] = nil }
+            waiter.continuation.resume(throwing: CancellationError())
+        }
+        if active.contains(workID) {
+            var draining = work
+            draining.waiterIDs.removeAll()
+            works[workID] = draining
+        } else {
+            works[workID] = nil
+        }
         // An active slot is released only by complete(), after native work drains.
     }
 
     private func drain() {
         while active.count < workerCount, !queue.isEmpty {
-            let index = queue.firstIndex { jobs[$0]?.priority == .visible } ?? 0
-            let id = queue.remove(at: index)
-            guard let job = jobs[id] else { continue }
-            if job.cancellation.isCancelled {
-                cancel(id)
+            let index = queue.firstIndex { works[$0]?.priority == .visible } ?? 0
+            let workID = queue.remove(at: index)
+            guard let work = works[workID] else { continue }
+            let hasLiveWaiter = work.waiterIDs.contains {
+                waiters[$0]?.cancellation.isCancelled == false
+            }
+            if work.cancellation.isCancelled || !hasLiveWaiter {
+                cancelWork(workID)
                 continue
             }
-            active.insert(id)
+            active.insert(workID)
             let cache = cache
             let decode = decode
+            let request = work.request
+            let workCancellation = work.cancellation
+            let priority = work.priority
             Task.detached(
-                executorPreference: job.priority == .visible
+                executorPreference: priority == .visible
                     ? ImageWorkExecutor.userInitiated : ImageWorkExecutor.utility,
-                priority: job.priority == .visible ? .userInitiated : .utility
+                priority: priority == .visible ? .userInitiated : .utility
             ) {
                 let result: ThumbnailResult
-                if job.cancellation.isCancelled {
+                if workCancellation.isCancelled {
                     result = .unavailable(.noUsablePreview)
-                } else if (try? ThumbnailRevision.read(from: job.request.source))
-                    != job.request.revision
-                {
-                    result = .unavailable(.sourceChanged)
-                } else if let cached = cache.result(for: job.request) {
+                } else if let cached = cache.result(for: request) {
                     result = cached
-                } else if job.cancellation.isCancelled {
+                } else if workCancellation.isCancelled {
                     result = .unavailable(.noUsablePreview)
                 } else {
-                    let extracted = await decode(job.request)
-                    if (try? ThumbnailRevision.read(from: job.request.source))
-                        != job.request.revision
-                    {
+                    let extracted = await decode(request)
+                    // Single post-decode revision check on misses catches external rewrites
+                    // during decode without stating on cache hits.
+                    if (try? ThumbnailRevision.read(from: request.source)) != request.revision {
                         result = .unavailable(.sourceChanged)
                     } else {
                         result = extracted
-                        if !job.cancellation.isCancelled {
-                            try? cache.store(result, for: job.request)
+                        if !workCancellation.isCancelled {
+                            try? cache.store(result, for: request)
                         }
                     }
                 }
-                // Check cache hits too: the source may change during disk IO.
-                let current =
-                    (try? ThumbnailRevision.read(from: job.request.source)) == job.request.revision
-                await self.complete(id, result: current ? result : .unavailable(.sourceChanged))
+                await self.complete(workID, result: result)
             }
         }
     }
 
-    private func complete(_ id: UUID, result: ThumbnailResult) {
-        active.remove(id)
-        if let job = jobs.removeValue(forKey: id) {
-            if latest[job.consumer] == id { latest[job.consumer] = nil }
-            job.cancellation.deliver { cancelled in
-                if cancelled {
-                    job.continuation.resume(throwing: CancellationError())
-                } else {
-                    job.continuation.resume(returning: result)
+    private func complete(_ workID: UUID, result: ThumbnailResult) {
+        active.remove(workID)
+        if let work = works.removeValue(forKey: workID) {
+            if workByRequest[work.request] == workID { workByRequest[work.request] = nil }
+            for waiterID in work.waiterIDs {
+                guard let waiter = waiters.removeValue(forKey: waiterID) else { continue }
+                if latest[waiter.consumer] == waiterID { latest[waiter.consumer] = nil }
+                waiter.cancellation.deliver { cancelled in
+                    if cancelled {
+                        waiter.continuation.resume(throwing: CancellationError())
+                    } else {
+                        waiter.continuation.resume(returning: result)
+                    }
                 }
             }
         }

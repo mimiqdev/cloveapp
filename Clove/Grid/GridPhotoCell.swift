@@ -21,6 +21,7 @@ final class GridPhotoCell: UICollectionViewCell {
     private var isSelecting = false
     private var onOpenGroup: (GroupID) -> Void = { _ in }
     private var pixelLoadSignpost: (token: UUID, state: OSSignpostIntervalState)?
+    private(set) var hostingConfigurationCount = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -54,27 +55,37 @@ final class GridPhotoCell: UICollectionViewCell {
         self.isSelecting = isSelecting
         self.onOpenGroup = onOpenGroup
         if changesPhoto {
+            thumbnailTask?.cancel()
+            thumbnailTask = nil
+            endPixelLoadSignpost()
             thumbnail = nil
             isUnavailable = false
-            loadThumbnail(for: item.photo.id, thumbnails: thumbnails)
+            retriesUnavailable = false
+            resolveOrLoadThumbnail(for: item.photo.id, thumbnails: thumbnails)
         } else if thumbnailTask == nil, thumbnail == nil, canAskAgain {
-            loadThumbnail(for: item.photo.id, thumbnails: thumbnails)
+            resolveOrLoadThumbnail(for: item.photo.id, thumbnails: thumbnails)
         }
         reconcilePeekingThumbnails(using: thumbnails)
         draw()
     }
 
     func resumeThumbnail(using thumbnails: any GridThumbnailSource) {
+        var resolvedSynchronously = false
         if thumbnailTask == nil, thumbnail == nil, canAskAgain,
             let photo = currentItem?.photo.id
         {
-            loadThumbnail(for: photo, thumbnails: thumbnails)
+            resolvedSynchronously = resolveOrLoadThumbnail(for: photo, thumbnails: thumbnails)
         }
         for photo in currentPeekingIDs
         where peekingTasks[photo] == nil && peekingThumbnails[photo] == nil
             && canAskPeekingAgain(photo)
         {
-            loadPeekingThumbnail(for: photo, thumbnails: thumbnails)
+            if resolveOrLoadPeekingThumbnail(for: photo, thumbnails: thumbnails) {
+                resolvedSynchronously = true
+            }
+        }
+        if resolvedSynchronously {
+            draw()
         }
     }
 
@@ -123,6 +134,7 @@ final class GridPhotoCell: UICollectionViewCell {
 
     private func draw() {
         guard let item = currentItem else { return }
+        hostingConfigurationCount += 1
         let peeking = currentPeekingIDs.map { peekingThumbnails[$0] }
         let tile = GridTile(
             item: item, thumbnail: thumbnail, peekingThumbnails: peeking,
@@ -136,6 +148,54 @@ final class GridPhotoCell: UICollectionViewCell {
         .margins(.all, 0)
     }
 
+    @discardableResult
+    private func resolveOrLoadThumbnail(
+        for photo: PhotoIdentity, thumbnails: any GridThumbnailSource
+    ) -> Bool {
+        if let cached = thumbnails.cachedThumbnail(for: photo) {
+            switch cached {
+            case .image(let image):
+                thumbnail = image
+                isUnavailable = false
+                retriesUnavailable = false
+                return true
+            case .unavailable:
+                thumbnail = nil
+                isUnavailable = true
+                retriesUnavailable = false
+                return true
+            case .deferred:
+                break
+            }
+        }
+        loadThumbnail(for: photo, thumbnails: thumbnails)
+        return false
+    }
+
+    @discardableResult
+    private func resolveOrLoadPeekingThumbnail(
+        for photo: PhotoIdentity, thumbnails: any GridThumbnailSource
+    ) -> Bool {
+        if let cached = thumbnails.cachedThumbnail(for: photo) {
+            switch cached {
+            case .image(let image):
+                peekingThumbnails[photo] = image
+                peekingUnavailable.remove(photo)
+                peekingRetriesUnavailable.remove(photo)
+                return true
+            case .unavailable:
+                peekingThumbnails.removeValue(forKey: photo)
+                peekingUnavailable.insert(photo)
+                peekingRetriesUnavailable.remove(photo)
+                return false
+            case .deferred:
+                break
+            }
+        }
+        loadPeekingThumbnail(for: photo, thumbnails: thumbnails)
+        return false
+    }
+
     private func reconcilePeekingThumbnails(using thumbnails: any GridThumbnailSource) {
         let needed = Set(currentPeekingIDs)
         for (id, task) in peekingTasks where !needed.contains(id) {
@@ -147,7 +207,7 @@ final class GridPhotoCell: UICollectionViewCell {
         peekingRetriesUnavailable = peekingRetriesUnavailable.intersection(needed)
         for id in currentPeekingIDs
         where peekingThumbnails[id] == nil && peekingTasks[id] == nil && canAskPeekingAgain(id) {
-            loadPeekingThumbnail(for: id, thumbnails: thumbnails)
+            resolveOrLoadPeekingThumbnail(for: id, thumbnails: thumbnails)
         }
     }
 

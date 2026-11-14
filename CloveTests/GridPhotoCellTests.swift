@@ -62,6 +62,29 @@ struct GridPhotoCellTests {
         }
     }
 
+    @Test func warmCoverCellBuildsHostingConfigurationOnceWithoutAsyncRequests() async throws {
+        let cover = photo("MMQ02678")
+        let second = photo("MMQ02679")
+        let third = photo("MMQ02681")
+
+        let source = RecordingThumbnailSource(cached: [
+            cover: .image(RecordingThumbnailSource.stubImage),
+            second: .image(RecordingThumbnailSource.stubImage),
+            third: .image(RecordingThumbnailSource.stubImage),
+        ])
+        let cell = GridPhotoCell(frame: CGRect(x: 0, y: 0, width: 120, height: 120))
+        defer { cell.prepareForReuse() }
+
+        cell.configure(
+            with: coverItem(cover: cover, peeking: [second, third]), isSelected: false,
+            isSelecting: false, thumbnails: source, theme: .light, onOpenGroup: { _ in })
+        cell.resumeThumbnail(using: source)
+
+        #expect(cell.hostingConfigurationCount == 1)
+        #expect(source.startedPhotos.isEmpty)
+        #expect(cell.contentConfiguration != nil)
+    }
+
     private func coverItem(cover: PhotoIdentity, peeking: [PhotoIdentity]) -> GridCellItem {
         let gridPhoto = GridPhoto(
             id: cover, fileName: "\(cover.stem).ARW", time: .unavailable, marks: PhotoMarks())
@@ -96,6 +119,7 @@ struct GridPhotoCellTests {
 
 @MainActor
 private final class RecordingThumbnailSource: GridThumbnailSource {
+    private let cached: [PhotoIdentity: GridThumbnailOutcome]
     private let suspended: Set<PhotoIdentity>
     private var deferredOnce: Set<PhotoIdentity>
     private var continuations: [PhotoIdentity: CheckedContinuation<GridThumbnailOutcome, Never>] =
@@ -106,10 +130,16 @@ private final class RecordingThumbnailSource: GridThumbnailSource {
     var cancelledPhotos: Set<PhotoIdentity> = []
     var requestCounts: [PhotoIdentity: Int] = [:]
 
-    init(suspended: Set<PhotoIdentity> = [], deferredOnce: Set<PhotoIdentity> = []) {
+    init(
+        cached: [PhotoIdentity: GridThumbnailOutcome] = [:],
+        suspended: Set<PhotoIdentity> = [], deferredOnce: Set<PhotoIdentity> = []
+    ) {
+        self.cached = cached
         self.suspended = suspended
         self.deferredOnce = deferredOnce
     }
+
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? { cached[photo] }
 
     func companions(for photo: PhotoIdentity) -> GridCompanions { GridCompanions() }
 
@@ -146,7 +176,7 @@ private final class RecordingThumbnailSource: GridThumbnailSource {
         }
     }
 
-    private static let stubImage: CGImage = {
+    static let stubImage: CGImage = {
         let context = CGContext(
             data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 16,
             space: CGColorSpaceCreateDeviceRGB(),
