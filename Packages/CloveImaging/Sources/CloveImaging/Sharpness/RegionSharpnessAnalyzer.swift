@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 
 /// One photo's sharpness-analysis request: the photo set's files, named the way a detail
 /// request names them (#208). `CloveImaging` does not depend on `CloveCore`, so this mirrors
@@ -82,6 +83,9 @@ public protocol RegionSharpnessReading: Sendable {
 /// so there is no per-region decode at this boundary. This type holds no state between calls;
 /// prioritization and caching live in the scheduler (#216).
 public struct RegionSharpnessAnalyzer: Sendable {
+    private static let signposter = OSSignposter(
+        subsystem: "com.mimiqdev.clove", category: "Sharpness")
+
     /// The preview long edge face detection runs on. Large enough for Vision on a 24 MP
     /// photo's subject, small enough that detection stays cheap on the shared executor.
     public static let previewPixels = 800
@@ -139,13 +143,20 @@ public struct RegionSharpnessAnalyzer: Sendable {
         _ request: RegionSharpnessRequest,
         onAutofocus: ((RegionSharpnessPathResult) -> Void)? = nil
     ) async throws -> RegionSharpnessAnalysis {
+        let analysisInterval = Self.signposter.beginInterval(
+            "SharpnessAnalysis", id: Self.signposter.makeSignpostID())
+        defer { Self.signposter.endInterval("SharpnessAnalysis", analysisInterval) }
+
         // Stage 1 — AF metadata, admitted through its own bound so a folder-wide background
         // submit does not fan out one ImageIO read per photo at once (#216). An AF answer
         // that needs no pixels is final here, before the face path starts (#208).
         try await stages.enter(.metadataRead)
+        let metadataInterval = Self.signposter.beginInterval(
+            "SharpnessMetadataRead", id: Self.signposter.makeSignpostID())
         let metadata = await measure { await self.reader.properties(of: request.primaryURL) }
         let autofocus = await Self.locateAutofocus(
             properties: metadata.value, url: request.primaryURL, reader: metadataReader)
+        Self.signposter.endInterval("SharpnessMetadataRead", metadataInterval)
         await stages.exit(.metadataRead)
         if case .failure(let evidence) = autofocus {
             onAutofocus?(.unavailable(.noAutofocusMetadata(evidence)))
@@ -165,7 +176,10 @@ public struct RegionSharpnessAnalyzer: Sendable {
         // asked before the read starts, and the slot is released as soon as the read lands:
         // the budget bounds concurrent decodes, not the scoring that follows.
         try await stages.enter(.pixelAcquisition)
+        let acquisitionInterval = Self.signposter.beginInterval(
+            "SharpnessPixelAcquisition", id: Self.signposter.makeSignpostID())
         let acquisition = await measure { await reader.highResolution(request) }
+        Self.signposter.endInterval("SharpnessPixelAcquisition", acquisitionInterval)
         await stages.exit(.pixelAcquisition)
         let pixels: CGImage?
         let acquisitionFailure: RegionImageFailure?
@@ -239,8 +253,11 @@ public struct RegionSharpnessAnalyzer: Sendable {
         request: RegionSharpnessRequest, stages: any RegionSharpnessStageGate
     ) async throws -> DetectionStage {
         try await stages.enter(.faceDetection)
+        let detectionInterval = Self.signposter.beginInterval(
+            "SharpnessFaceDetection", id: Self.signposter.makeSignpostID())
         let preview = await measure { await reader.preview(request) }
         guard case .success(let image) = preview.value else {
+            Self.signposter.endInterval("SharpnessFaceDetection", detectionInterval)
             await stages.exit(.faceDetection)
             return DetectionStage(
                 preview: preview.value, previewDuration: preview.duration, outcome: nil,
@@ -248,6 +265,7 @@ public struct RegionSharpnessAnalyzer: Sendable {
         }
         let start = ContinuousClock.now
         let outcome = await detector.detectFaces(on: image)
+        Self.signposter.endInterval("SharpnessFaceDetection", detectionInterval)
         await stages.exit(.faceDetection)
         return DetectionStage(
             preview: preview.value, previewDuration: preview.duration, outcome: outcome,
@@ -264,6 +282,9 @@ public struct RegionSharpnessAnalyzer: Sendable {
         stages: any RegionSharpnessStageGate
     ) async throws -> [RegionSharpnessEvidence] {
         try await stages.enter(.regionScoring)
+        let scoringInterval = Self.signposter.beginInterval(
+            "SharpnessRegionScoring", id: Self.signposter.makeSignpostID(),
+            "regions=\(regions.count)")
         let scored = await withTaskExecutorPreference(ImageWorkExecutor.current) {
             guard let pixels else {
                 return regions.map { region in
@@ -274,6 +295,7 @@ public struct RegionSharpnessAnalyzer: Sendable {
             }
             return regions.map { scored($0, in: pixels, scorer: scorer) }
         }
+        Self.signposter.endInterval("SharpnessRegionScoring", scoringInterval)
         await stages.exit(.regionScoring)
         return scored
     }

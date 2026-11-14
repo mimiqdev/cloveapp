@@ -1,6 +1,7 @@
 import CloveCore
 import CloveImaging
 import Foundation
+import os
 
 /// One open folder's similar groups: C9's two stages over I3's features (PRD P0-11, G1's Grouping
 /// row).
@@ -263,6 +264,12 @@ final class FolderGrouping {
     /// with the square of the folder's photo count.
     private func analyse(_ candidates: [GroupingPhoto]) async {
         guard !isClosed, enabled else { return }
+        let groupingInterval = PerformanceSignpost.folderGrouping.beginInterval(
+            "FolderGroupingPass", id: PerformanceSignpost.folderGrouping.makeSignpostID(),
+            "candidates=\(candidates.count)")
+        defer {
+            PerformanceSignpost.folderGrouping.endInterval("FolderGroupingPass", groupingInterval)
+        }
         await similarity.start(photos: candidates.map(\.id))
         let sets = sets
         var sources: [(photo: GroupingPhoto, url: URL)] = []

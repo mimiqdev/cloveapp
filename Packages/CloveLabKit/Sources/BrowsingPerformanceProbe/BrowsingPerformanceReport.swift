@@ -66,24 +66,28 @@ struct BrowsingPerformanceReportBuilder: Sendable {
 
     mutating func distribution(
         _ stage: String, cache: String, samples: [Double], unit: String = "ms",
-        failureCount: Int = 0
+        failureCount: Int = 0, extraTags: [String: String] = [:]
     ) {
         let distribution = Distribution(samples: samples)
-        var tags = ["cache": cache, "sampleCount": String(distribution.count)]
+        var baseTags = extraTags
+        baseTags["cache"] = cache
         measurements.append(
             LabMeasurement(
                 name: "\(stage)-sample-count", value: Double(distribution.count), unit: "count",
-                tags: ["cache": cache]))
+                tags: baseTags))
         if failureCount > 0 {
             measurements.append(
                 LabMeasurement(
                     name: "\(stage)-failure-count", value: Double(failureCount), unit: "count",
-                    tags: ["cache": cache]))
+                    tags: baseTags))
         }
         guard distribution.count > 0 else {
-            unavailable(stage, cache: cache, reason: "No successful samples.")
+            unavailable(
+                stage, cache: cache, reason: "No successful samples.", extraTags: extraTags)
             return
         }
+        var tags = baseTags
+        tags["sampleCount"] = String(distribution.count)
         for (name, fraction) in [("p50", 0.5), ("p95", 0.95)] {
             tags["statistic"] = name
             measurements.append(
@@ -100,20 +104,27 @@ struct BrowsingPerformanceReportBuilder: Sendable {
     }
 
     mutating func failureReasons(
-        _ stage: String, cache: String, reasons: [String: Int]
+        _ stage: String, cache: String, reasons: [String: Int],
+        extraTags: [String: String] = [:]
     ) {
         for (reason, count) in reasons.sorted(by: { $0.key < $1.key }) {
-            value(
-                "\(stage)-failure-reason", value: Double(count), unit: "count",
-                tags: ["cache": cache, "reason": reason])
+            var tags = extraTags
+            tags["cache"] = cache
+            tags["reason"] = reason
+            value("\(stage)-failure-reason", value: Double(count), unit: "count", tags: tags)
         }
     }
 
-    mutating func unavailable(_ stage: String, cache: String = "none", reason: String) {
+    mutating func unavailable(
+        _ stage: String, cache: String = "none", reason: String,
+        extraTags: [String: String] = [:]
+    ) {
+        var tags = extraTags
+        tags["stage"] = stage
+        tags["cache"] = cache
+        tags["reason"] = reason
         measurements.append(
-            LabMeasurement(
-                name: "metric-unavailable", value: 1, unit: "count",
-                tags: ["stage": stage, "cache": cache, "reason": reason]))
+            LabMeasurement(name: "metric-unavailable", value: 1, unit: "count", tags: tags))
     }
 
     mutating func memoryPeak(_ bytes: UInt64, stage: String) {

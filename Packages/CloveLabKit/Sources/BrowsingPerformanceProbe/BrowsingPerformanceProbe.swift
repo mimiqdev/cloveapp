@@ -2,6 +2,10 @@ import Foundation
 import LabSupport
 
 public struct BrowsingPerformanceConfiguration: Sendable {
+    public static let iPadPro13ScreenPixels = 2_752
+    public static let iPhone17ProMaxScreenPixels = 2_868
+    public static let defaultScreenPixels = iPhone17ProMaxScreenPixels
+
     public var warmScanRepetitions: Int
     public var metadataSampleLimit: Int
     public var thumbnailLimit: Int
@@ -10,12 +14,21 @@ public struct BrowsingPerformanceConfiguration: Sendable {
     public var rawSampleLimit: Int
     public var featureSampleLimit: Int
     public var displayPixels: Int
+    public var screenPixels: Int
+    public var detailFormatFolder: URL?
+    public var detailFormatLimit: Int
+    public var detailFormatRepetitions: Int
 
     public init(
         warmScanRepetitions: Int = 4, metadataSampleLimit: Int = 240,
         thumbnailLimit: Int = 2_000, thumbnailInFlight: Int = 32,
         detailSampleLimit: Int = 24, rawSampleLimit: Int = 6,
-        featureSampleLimit: Int = 240, displayPixels: Int = 1_320
+        featureSampleLimit: Int = 240,
+        displayPixels: Int = BrowsingPerformanceConfiguration.defaultScreenPixels,
+        screenPixels: Int? = nil,
+        detailFormatFolder: URL? = nil,
+        detailFormatLimit: Int = 8,
+        detailFormatRepetitions: Int = 5
     ) {
         self.warmScanRepetitions = max(0, warmScanRepetitions)
         self.metadataSampleLimit = max(0, metadataSampleLimit)
@@ -25,6 +38,10 @@ public struct BrowsingPerformanceConfiguration: Sendable {
         self.rawSampleLimit = max(0, rawSampleLimit)
         self.featureSampleLimit = max(0, featureSampleLimit)
         self.displayPixels = max(1, displayPixels)
+        self.screenPixels = max(1, screenPixels ?? self.displayPixels)
+        self.detailFormatFolder = detailFormatFolder
+        self.detailFormatLimit = max(0, detailFormatLimit)
+        self.detailFormatRepetitions = max(0, detailFormatRepetitions)
     }
 }
 
@@ -70,6 +87,7 @@ public enum BrowsingPerformanceProbe {
             "thumbnailWorkers": "4",
             "thumbnailInFlight": String(configuration.thumbnailInFlight),
             "detailDisplayPixels": String(configuration.displayPixels),
+            "detailScreenPixels": String(configuration.screenPixels),
         ]
         if !hasBuildIdentity {
             report.unavailable(
@@ -84,7 +102,7 @@ public enum BrowsingPerformanceProbe {
             "Disk-warm thumbnail and feature passes recreate the production caches with zero memory capacity over the cold run's disk entries. Warm detail uses its in-memory cache. Warm grouping includes group-cache loading, candidate revision reads, feature-cache lookups and refinement; cache hits avoid image recomputation.",
             "Percentiles are nearest-rank over successful samples. Each statistic and sample count carries the cache state; failures and unavailable stages have separate entries.",
             "Thumbnail latency includes bounded queueing behind at most \(configuration.thumbnailInFlight) in-flight requests. Throughput counts materialized successful previews over the whole pass.",
-            "First detail preview uses the production raw-first request at \(configuration.displayPixels) display pixels. RAW focus waits for native render admission, cancels it and measures the production close drain, then measures a second native render in a fresh pipeline. The combined distribution adds those two measured spans only when admission and cancellation were observed.",
+            "Detail preview uses raw-first at \(configuration.displayPixels) display pixels. Screen RAW runs DetailPipeline.screen after preview at \(configuration.screenPixels) native screen long-edge pixels. RAW focus waits for native render admission, cancels it and measures the production close drain, then measures a second native render in a fresh pipeline. Multi-format detail benchmarks measure sony-ilce-7s.ARW alongside 20+ MP RAW fixtures when available. Warm detail checks verify bitmap dimensions without calling CGImage.dataProvider?.data.",
             "Memory is process RSS sampled every 5 ms. Peaks are cumulative lower bounds, not per-stage or per-allocation attribution.",
             "The generated set repeats pinned sources under unique paths. Shared capture metadata and pixels provide repeatable load, not realistic burst-grouping accuracy evidence.",
             "No photo, companion or XMP is modified. Lab caches use a temporary directory removed after the run; normal export adds only the JSON report beside the tested photos.",
@@ -139,7 +157,9 @@ public enum BrowsingPerformanceProbe {
                 report.memoryPeak(sampler.peak, stage: "thumbnails")
 
                 await progress(
-                    .init(completed: 2, total: 6, message: "Detail previews and RAW focus"))
+                    .init(
+                        completed: 2, total: 6,
+                        message: "Detail previews, screen RAW, and RAW focus"))
                 do {
                     try await BrowsingPerformanceImages.measureDetails(
                         sets: scanned.sets, configuration: configuration, report: &report)
