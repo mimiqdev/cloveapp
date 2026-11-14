@@ -135,6 +135,10 @@ struct FolderWalk {
             addFile(url: entry.url, relativeFolderPath: parent.relativePath)
             return false
         }
+        if entry.url.pathExtension.lowercased() == "xmp" {
+            directories[parent.relativePath]?.add(packetURL: entry.url)
+            return true
+        }
         if shouldSkip(folder: entry.url, name: name) {
             skippedFolderCount += 1
             return true

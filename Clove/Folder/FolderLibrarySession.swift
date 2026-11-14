@@ -874,7 +874,8 @@ final class FolderLibrarySession: FolderLibrary {
                         var marks: [PhotoIdentity: PhotoMarks] = [:]
                         for set in sets {
                             if let read = try? Self.readMarks(
-                                for: [set], storedMarks: storedMarks, codec: codec)
+                                for: [set], storedMarks: storedMarks, codec: codec,
+                                trustAbsentSidecar: true)
                             {
                                 marks.merge(read) { _, new in new }
                             }
@@ -916,7 +917,6 @@ final class FolderLibrarySession: FolderLibrary {
         }
         let added = store.insert(items, storedMarks: storedMarks)
         guard !added.isEmpty else { return [] }
-        publish(.photos(added))
         return added.compactMap { store.scannedSet(for: $0.id) }
     }
 
@@ -929,9 +929,12 @@ final class FolderLibrarySession: FolderLibrary {
     ) {
         guard generation == scanGeneration else { return }
         let timeZone = TimeZone.current
+        let setsByURL = Dictionary(
+            sets.map { ($0.photoSet.primary.url, $0) },
+            uniquingKeysWith: { first, _ in first })
         var times: [PhotoIdentity: PhotoTimeState] = [:]
         for read in reads {
-            guard let set = sets.first(where: { $0.photoSet.primary.url == read.url }) else {
+            guard let set = setsByURL[read.url] else {
                 continue
             }
             let time = Self.timeState(for: read.outcome, in: timeZone)
@@ -1022,10 +1025,11 @@ final class FolderLibrarySession: FolderLibrary {
     /// stray packet beside it cannot override the marks Clove stores for it. A packet C3 refuses
     /// contributes nothing and is not repaired, so the photo keeps whatever Clove stores and U7
     /// can report the refusal with its own copy.
-    private nonisolated static func readMarks(
+    nonisolated static func readMarks(
         for sets: [ScannedPhotoSet],
         storedMarks: [PhotoIdentity: CloveStoredMarks],
-        codec: XMPCodec
+        codec: XMPCodec,
+        trustAbsentSidecar: Bool = false
     ) throws -> [PhotoIdentity: PhotoMarks] {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
         for set in sets {
@@ -1034,9 +1038,13 @@ final class FolderLibrarySession: FolderLibrary {
             switch set.sidecar {
             case .resolved(let url): sidecar = url
             case .absent:
-                switch set.photoSet.markPersistence.rating {
-                case .xmpSidecar(let url): sidecar = url
-                case .cloveStorage: sidecar = nil
+                if trustAbsentSidecar {
+                    sidecar = nil
+                } else {
+                    switch set.photoSet.markPersistence.rating {
+                    case .xmpSidecar(let url): sidecar = url
+                    case .cloveStorage: sidecar = nil
+                    }
                 }
             case .ambiguous: sidecar = nil
             }
