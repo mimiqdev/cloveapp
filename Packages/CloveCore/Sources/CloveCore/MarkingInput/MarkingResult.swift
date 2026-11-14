@@ -11,10 +11,10 @@ public enum MarkingResult: Hashable, Sendable {
     /// Apply the change and, for this mark kind, start auto-advance (PRD Auto-advance).
     case mark(MarkChange, MarkKind)
 
-    /// Show the previous photo (PRD Gestures and keyboard: `←` or a left edge tap).
+    /// Show the previous photo (PRD Gestures and keyboard: `←` or horizontal swipe).
     case previousPhoto
 
-    /// Show the next photo (PRD Gestures and keyboard: `→` or a right edge tap).
+    /// Show the next photo (PRD Gestures and keyboard: `→` or horizontal swipe).
     case nextPhoto
 
     /// Undo the last change; the undo stack belongs to C5 (PRD Undo row and `⌘Z`).

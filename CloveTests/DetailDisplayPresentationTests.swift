@@ -460,7 +460,7 @@ struct DetailDisplayPresentationTests {
         let pan = try #require(
             preview.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         var navigations = 0
-        preview.onEdgeTap = { _ in navigations += 1 }
+        preview.onStep = { _ in navigations += 1 }
         // No physical touches exist here: feed travel separately, but cancel the real recognizer.
         pan.delegate = nil
         pan.setValue(UIGestureRecognizer.State.began.rawValue, forKey: "state")
@@ -495,11 +495,11 @@ struct DetailDisplayPresentationTests {
         preview.layoutIfNeeded()
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let image = try #require(scroll.subviews.first as? UIImageView)
-        var zones: [DetailEdgeZone] = []
-        preview.onEdgeTap = { zones.append($0) }
+        var steps: [Int] = []
+        preview.onStep = { steps.append($0) }
         #expect(preview.clipsToBounds)
 
-        for (travelX, expected) in [(-180.0, DetailEdgeZone.next), (180.0, .previous)] {
+        for (travelX, expected) in [(-180.0, 1), (180.0, -1)] {
             let pan = DetailTestPan()
             pan.travel = CGPoint(x: travelX < 0 ? -15 : 15, y: 0)
             try #require(preview.gestureRecognizerShouldBegin(pan))
@@ -512,11 +512,11 @@ struct DetailDisplayPresentationTests {
             #expect(scroll.transform == .identity)
             #expect(scroll.frame == preview.bounds)
             #expect(image.frame == preview.bounds)
-            let countBeforeRelease = zones.count
+            let countBeforeRelease = steps.count
             pan.sampleState = .ended
             preview.handleMarkingPan(pan)
-            #expect(zones.count == countBeforeRelease + 1)
-            #expect(zones.last == expected)
+            #expect(steps.count == countBeforeRelease + 1)
+            #expect(steps.last == expected)
             #expect(scroll.transform == .identity)
         }
 
@@ -531,7 +531,7 @@ struct DetailDisplayPresentationTests {
         #expect(scroll.transform == .identity)
         shortPan.sampleState = .ended
         preview.handleMarkingPan(shortPan)
-        #expect(zones == [.next, .previous])
+        #expect(steps == [1, -1])
         #expect(scroll.transform == .identity)
 
         preview.setImage(replacement)
@@ -604,6 +604,29 @@ struct DetailDisplayPresentationTests {
         #expect(!preview.chromeTapIsEnabled)
         preview.apply(DetailZoomCommand(id: 2, kind: .fit))
         #expect(preview.chromeTapIsEnabled)
+    }
+
+    @Test func tapsAreUniformAcrossEdgesAndZoomedHorizontalSwipesDoNotNavigate() throws {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.hasPrevious = true
+        preview.hasNext = true
+        preview.setImage(try testPixels(gray: 0))
+        preview.layoutIfNeeded()
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let taps = (scroll.gestureRecognizers ?? []).compactMap { $0 as? UITapGestureRecognizer }
+        #expect(taps.count == 2)
+        #expect(taps.map(\.numberOfTapsRequired).sorted() == [1, 2])
+        for tap in taps {
+            #expect(preview.gestureRecognizerShouldBegin(tap))
+        }
+
+        var steps = 0
+        preview.onStep = { _ in steps += 1 }
+        preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
+        let zoomedPan = DetailTestPan()
+        zoomedPan.travel = CGPoint(x: -180, y: 0)
+        #expect(!preview.gestureRecognizerShouldBegin(zoomedPan))
+        #expect(steps == 0)
     }
 
     private func testPixels(gray: CGFloat) throws -> CGImage {

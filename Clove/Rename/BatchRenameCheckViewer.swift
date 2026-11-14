@@ -54,10 +54,8 @@ struct BatchRenameCheckViewer: View {
                     nativeAnchor = nil
                     scale = value
                 },
-                onEdgeTap: { zone in
-                    if zone == .next { step(1) }
-                    if zone == .previous { step(-1) }
-                },
+                onChromeToggle: {},
+                onStep: { step($0) },
                 onDoubleTap: { anchor in doubleTap(anchor) }, onMarkingSwipe: { _ in },
                 onSwipeBegin: {}, hasPrevious: index > 0, hasNext: index + 1 < flow.order.count
             )

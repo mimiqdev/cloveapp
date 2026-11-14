@@ -138,7 +138,7 @@ extension CloveFlowTests {
         rateBySwiping(in: app)
         rejectBySwiping(in: app)
         expandGroupFromFilmstrip(in: app)
-        advanceByEdgeTap(in: app)
+        advanceBySwipe(in: app)
         returnToGrid(in: app)
         openSettings(in: app)
         showGroupsAsCollapsedCovers(in: app)
@@ -350,10 +350,10 @@ extension CloveFlowTests {
         // Cross both the quick Reject threshold and all three slow steps from two stars.
         drag(preview, byPointsX: 0, y: 210)
 
-        // Reject also advances within the group. An edge tap then returns to the interleaved
+        // Reject also advances within the group. A swipe right then returns to the interleaved
         // single photo for the general filmstrip and navigation checks.
         waitForFileName("MMQ02681.ARW", in: app)
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
+        preview.swipeRight()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
     }
 
@@ -386,12 +386,19 @@ extension CloveFlowTests {
     }
 
     @MainActor
-    private func advanceByEdgeTap(in app: XCUIApplication) {
+    private func advanceBySwipe(in app: XCUIApplication) {
         let preview = element(in: app, "clove.detail.preview")
         let fileName = element(in: app, "clove.detail.fileName")
+        let capsule = element(in: app, "clove.detail.capsule")
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        // The outer 18% on each side navigates; 94% is inside the right zone on any width.
+        // Single taps anywhere (including the outer 18% edges) toggle chrome and never navigate.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        preview.swipeLeft()
         XCTAssertEqual(fileName.label, "MMQ02681.ARW")
     }
 

@@ -16,7 +16,7 @@ struct DetailMarkingActions {
     /// (PRD Auto-advance; PRD In-group culling).
     let marked: (MarkKind, GridPhoto) -> Void
 
-    /// Moves the given number of photos in the screen's order, for an edge tap and for a
+    /// Moves the given number of photos in the screen's order, for a horizontal swipe and for a
     /// keyboard result (PRD P0-04; PRD In-group culling).
     let step: (Int) -> Void
 
@@ -29,23 +29,24 @@ struct DetailMarkingActions {
     var finishGroup: (GroupFinishingPlan) -> Void = { _ in }
 }
 
-/// One photo's preview and marking controls: the HUD, the zoomable preview with its edge taps
-/// and marking swipes, and the states that must not look like a loaded image (PRD P0-04, P0-06).
+/// One photo's preview and marking controls: the HUD, the zoomable preview with its chrome taps,
+/// navigation swipes, and marking swipes, and the states that must not look like a loaded image
+/// (PRD P0-04, P0-06).
 ///
 /// Every input — the swipe gesture, the HUD's rating bar, a label, the Reject toggle and the
 /// hardware keys — resolves through C13's ``MarkingInputRules`` and then asks the screen to write
 /// it and start its auto-advance (PRD In-group culling, P0-06, PRD Auto-advance). The screen
-/// supplies the order an edge tap moves through using ``DetailMarkingActions``. Navigating within
-/// the same group preserves zoom and position; leaving follows the detail setting.
+/// supplies the order a navigation swipe moves through using ``DetailMarkingActions``. Navigating
+/// within the same group preserves zoom and position; leaving follows the detail setting.
 ///
 /// The selected display mode controls fit and zoom together. A held screen RAW
 /// appears immediately; otherwise the camera preview fills the screen-render wait.
 /// Camera mode keeps its preview at fit and decodes its full camera image for zoom.
 /// Every quality replacement preserves zoom and position.
 ///
-/// The edge zones are ``DetailEdgeZone``'s: the outer 18% of the preview's width on each side
-/// navigates, with single taps only, so a tap there never waits for a double tap. The middle
-/// keeps the double-tap action (PRD Detail and marking).
+/// Navigation is gesture-only: horizontal swipes at fit move between photos. Single taps anywhere
+/// on the preview toggle chrome at fit (waiting for the double-tap window), and double taps
+/// anywhere zoom to 100% or return to fit (PRD Detail and marking, #252).
 ///
 /// Folder access problems appear in the header's indicator and banner (PRD P0-08). A change
 /// that did not confirm brings the shared failure toast, and the files supply the marks again.
@@ -70,7 +71,7 @@ struct DetailMarkingView: View {
     /// are prefetched (G1 "Scheduling and cache").
     let order: [GridPhoto]
 
-    /// Where an edge tap and a mark go, in the screen's own order (PRD P0-04; PRD P0-12).
+    /// Where navigation and marks go, in the screen's own order (PRD P0-04; PRD P0-12).
     let actions: DetailMarkingActions
     var duo: DuoDetailLayout?
 
@@ -578,7 +579,8 @@ struct DetailMarkingView: View {
             currentRating: browsing.shownMarks(for: photo.id).rating,
             feedback: swipeFeedback,
             onZoomChange: { zoomChanged($0) },
-            onEdgeTap: { navigate($0) },
+            onChromeToggle: { toggleChrome() },
+            onStep: { actions.step($0) },
             onDoubleTap: { doubleTap(at: $0) },
             onMarkingSwipe: { applyMarkingSwipe($0) },
             onSwipeBegin: { beginMarkingGesture() },
@@ -721,7 +723,7 @@ struct DetailMarkingView: View {
     /// deferred answer is retried a bounded number of times because the pipeline may have been
     /// busy with the photo that was on screen a moment ago; a refused or unreadable file is final
     /// and shown as its own state. The neighbours' previews are prefetched after the photo's own
-    /// pixels are on screen, so an edge tap to them is cheap (G1 scheduling row).
+    /// pixels are on screen, so a swipe to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
         upgradeTask?.cancel()
         isLoadingFit = true
@@ -740,7 +742,7 @@ struct DetailMarkingView: View {
             keptNativeScale = nil
         } else if let shown {
             // A preview that has not arrived yet leaves `shown` nil, so this branch is skipped:
-            // the zoom read before an earlier tap in a run of quick taps stays pending for the
+            // the zoom read before an earlier step in a run of quick steps stays pending for the
             // photo that finally loads (PRD In-group culling, synchronized zoom).
             let snapshot = probe.container?.zoomSnapshot
             keptScale = snapshot?.scale
@@ -748,7 +750,7 @@ struct DetailMarkingView: View {
             keptZoom = keepsPosition ? snapshot : nil
             // A view at fit keeps no zoom, so nothing carries into the next photo. That includes a
             // 100% that is still waiting for the render's size: it belongs to the photo that was
-            // tapped, not to the one an edge tap moves to (#111).
+            // tapped, not to the one a swipe moves to (#111).
             if snapshot == nil { zoomMode = .fit }
         }
         if !keepsScale {
@@ -1083,7 +1085,7 @@ struct DetailMarkingView: View {
 
     // MARK: - Navigation
 
-    /// The neighbours edge taps use in grid order.
+    /// The neighbours horizontal swipes and keyboard shortcuts use in grid order.
     var navigationAvailability: (previous: Bool, next: Bool) {
         guard let index = order.firstIndex(where: { $0.id == photo.id }) else {
             return (false, false)
@@ -1091,14 +1093,10 @@ struct DetailMarkingView: View {
         return (index > 0, index + 1 < order.count)
     }
 
-    /// Shows the previous or next photo in the screen's own order (PRD P0-04).
-    private func navigate(_ zone: DetailEdgeZone) {
-        if zone == .centre {
-            guard scale <= DetailFitScale.tolerance else { return }
-            hidesChrome.toggle()
-            return
-        }
-        actions.step(zone == .previous ? -1 : 1)
+    /// Toggles the fit-only chrome when single-tapping anywhere on the preview (PRD P0-04, #252).
+    private func toggleChrome() {
+        guard scale <= DetailFitScale.tolerance else { return }
+        hidesChrome.toggle()
     }
 
     // MARK: - Marking

@@ -2,14 +2,15 @@ import CloveCore
 import CloveImaging
 import SwiftUI
 
-/// One photo's detail: the preview, edge navigation and the filmstrip, with the marking HUD
+/// One photo's detail: the preview, swipe navigation and the filmstrip, with the marking HUD
 /// above them (PRD P0-04, PRD Detail and marking).
 ///
 /// The screen keeps no browsing state of its own. The current photo, the grid's order and filter,
 /// the marks and the pixels all come from ``BrowsingModel`` and the open folder's
 /// ``DetailImageSource``; the preview, its zoom and the marking controls are ``DetailMarkingView``.
-/// This screen supplies the grid's order an edge tap moves through, the expandable filmstrip,
-/// and the auto-advance that follows a written mark (PRD Auto-advance; PRD In-group culling).
+/// This screen supplies the grid's order a horizontal swipe moves through, the expandable
+/// filmstrip, and the auto-advance that follows a written mark (PRD Auto-advance; PRD In-group
+/// culling).
 ///
 /// Settings come from the app-wide ``SettingsStore`` in the environment, so a change on the
 /// settings screen applies the next time this screen draws; the screen reads no storage itself

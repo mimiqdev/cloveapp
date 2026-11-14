@@ -96,8 +96,8 @@ struct DetailFocusRegionTests {
         #expect(
             preview.gestureRecognizer(
                 pan, shouldReceive: DetailRegionTouch(view: control)))
-        var navigation: DetailEdgeZone?
-        preview.onEdgeTap = { navigation = $0 }
+        var stepped: Int?
+        preview.onStep = { stepped = $0 }
         let swipe = DetailRegionPan()
         swipe.travel = CGPoint(x: -15, y: 0)
         #expect(preview.gestureRecognizerShouldBegin(swipe))
@@ -107,7 +107,7 @@ struct DetailFocusRegionTests {
         preview.handleMarkingPan(swipe)
         swipe.sampleState = .ended
         preview.handleMarkingPan(swipe)
-        #expect(navigation == .next)
+        #expect(stepped == 1)
     }
 
     @Test func earlyAutofocusAppearsWhileFacesArePending() {
