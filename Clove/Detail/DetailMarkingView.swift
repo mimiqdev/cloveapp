@@ -617,6 +617,7 @@ struct DetailMarkingView: View {
         } action: { size in
             guard size != viewSize else { return }
             viewSize = size
+            retargetFullResolution(for: size)
         }
         .overlay { previewState }
         .overlay(alignment: .top) { focusRegionStatus }
@@ -1169,6 +1170,22 @@ struct DetailMarkingView: View {
         // inspected the preview (PRD P0-04).
         guard !previewOnly else { return }
         upgradeTask = Task { await upgrade(need: .fullResolution) }
+    }
+
+    private func retargetFullResolution(for size: CGSize) {
+        guard size.width > 0, size.height > 0,
+            case .fullResolution(let chosen, _) = zoomMode,
+            scale > DetailFitScale.tolerance,
+            let shown,
+            let target = DetailZoom.fullResolutionTarget(
+                nativePixels: shown.fullResolutionPixels, shownPixels: pixelSize(shown),
+                viewSize: size, screenScale: displayScale, previewIsAll: previewOnly),
+            target > DetailFitScale.tolerance,
+            abs(target - scale) > 0.005
+        else { return }
+        let anchor = probe.container?.zoomSnapshot?.anchor ?? chosen
+        zoomMode = .fullResolution(anchor: anchor, size: shown.fullResolutionPixels)
+        setZoom(.scale(target, anchor: anchor.unitPoint))
     }
 
     /// Asks I2 for the pixels the zoom on screen needs, if the shown pixels are too small.

@@ -1158,6 +1158,161 @@ struct DetailDisplayPresentationTests {
         try await waitFor { spy.prefetched.last?.current.photo == photos[3].id }
     }
 
+    @Test func duoFocusSplitDoubleTapAndRegionTapKeepZoomCentredOnFocusRegionAfterChromeHides()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02678" })
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 820, height: 600)
+        let rootView = GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+            .environment(store)
+            .environment(\.isDuoExpanded, true)
+            .environment(\.usesSystemBrowsingToolbar, true)
+        let host = UIHostingController(rootView: NavigationStack { rootView })
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // Open photo from the expanded Duo grid into Focus split.
+        try await Task.sleep(for: .milliseconds(100))
+        browsing.openPhoto(target.id)
+
+        try await waitFor {
+            if let preview = findPreview(in: window),
+                let value = preview.subviews.first(where: {
+                    $0.accessibilityIdentifier == "clove.detail.preview"
+                })?.accessibilityValue
+            {
+                return value.contains("Loaded") && findFocusControl(in: preview) != nil
+            }
+            return false
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let previewFrameInWindow = preview.convert(preview.bounds, to: window)
+        // Verify the preview inside PhotoArrangement receives touches across the photo body.
+        let hitCenter = window.hitTest(
+            CGPoint(x: previewFrameInWindow.midX, y: previewFrameInWindow.midY), with: nil)
+        #expect(hitCenter is UIImageView)
+
+        // 1. Double-tapping the photo body away from the AF region centres 100% on AF and keeps it
+        // centred after Duo chrome hides and resizes the preview container (#272).
+        let heightBefore = preview.bounds.height
+        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        try await waitFor { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(preview.bounds.height > heightBefore)
+        let doubleTapSnapshot = try #require(preview.zoomSnapshot)
+        #expect(abs(doubleTapSnapshot.anchor.x - 0.30) < 0.01)
+        #expect(abs(doubleTapSnapshot.anchor.y - 0.35) < 0.01)
+        let accessibilityValue = try #require(
+            preview.subviews.first(where: {
+                $0.accessibilityIdentifier == "clove.detail.preview"
+            })?.accessibilityValue)
+        #expect(accessibilityValue.contains("centred at 30%, 35%"))
+
+        // 2. Return to fit, then tap the AF control directly and verify it stays centred after chrome hides.
+        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.5))
+        try await waitFor { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(350))
+        let afControl = try #require(
+            findAllFocusControls(in: preview).first { $0.region.id == "clove.detail.region.af.0" })
+        afControl.sendActions(for: .touchUpInside)
+        try await waitFor { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(450))
+        let regionTapSnapshot = try #require(preview.zoomSnapshot)
+        #expect(abs(regionTapSnapshot.anchor.x - 0.30) < 0.05)
+        #expect(abs(regionTapSnapshot.anchor.y - 0.35) < 0.05)
+    }
+
+    @Test func duoPhotoOnlyAndPortraitFocusResizeKeepFullResolutionScaleAndFocusAnchor()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02678" })
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+        let split = Binding.constant(DuoSplit.photoOnly)
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                DetailScreen(
+                    browsing: browsing,
+                    duo: DuoDetailLayout(
+                        split: split,
+                        grid: AnyView(EmptyView()),
+                        filter: AnyView(EmptyView()),
+                        more: AnyView(EmptyView()),
+                        bottom: AnyView(EmptyView()),
+                        showsGrid: true,
+                        foldedGroup: nil))
+            }
+            .environment(store)
+            .environment(\.isDuoExpanded, true)
+            .environment(\.usesSystemBrowsingToolbar, true))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        browsing.openPhoto(target.id)
+        try await waitFor {
+            if let preview = findPreview(in: window),
+                let value = preview.subviews.first(where: {
+                    $0.accessibilityIdentifier == "clove.detail.preview"
+                })?.accessibilityValue
+            {
+                return value.contains("Loaded") && findFocusControl(in: preview) != nil
+            }
+            return false
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let heightBefore = preview.bounds.height
+        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        try await waitFor { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(450))
+
+        // Photo-only chrome dismissal grows height so fitted width expands; both the native 100%
+        // scale and focus-region anchor must settle cleanly for the enlarged bounds.
+        #expect(preview.bounds.height > heightBefore)
+        let settled = try #require(preview.zoomSnapshot)
+        #expect(settled.anchor.x < 0.42)
+        #expect(settled.anchor.y < 0.42)
+        let expectedScale = DetailZoom.fullResolutionScale(
+            nativePixels: CGSize(width: 3000, height: 2000),
+            shownPixels: CGSize(width: 1616, height: 1078),
+            viewSize: preview.bounds.size,
+            screenScale: host.traitCollection.displayScale)
+        #expect(abs(settled.scale - expectedScale) < 0.02)
+    }
+
+    private func findAllFocusControls(in view: UIView) -> [DetailFocusRegionControl] {
+        var found: [DetailFocusRegionControl] = []
+        if let control = view as? DetailFocusRegionControl { found.append(control) }
+        for child in view.subviews {
+            found.append(contentsOf: findAllFocusControls(in: child))
+        }
+        return found
+    }
+
     private func testPixels(gray: CGFloat) throws -> CGImage {
         let context = try #require(
             CGContext(
