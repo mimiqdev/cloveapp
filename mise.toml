@@ -96,12 +96,13 @@ depends = ["build-tests"]
 run = "./scripts/smoke.sh flows"
 
 [tasks.check]
-description = "Quick local check with no simulator: generate, lint, runner tests, package tests, and build Clove for testing"
+description = "Quick local check with no simulator: generate, lint, script tests, package tests, and build Clove for testing"
 run = """
 set -eu
 mise run generate
 mise run lint
 /usr/bin/python3 scripts/test_smoke.py
+/usr/bin/python3 scripts/test_duo_pose.py
 mise run test-core
 mise run test-imaging
 mise run build-tests
@@ -117,6 +118,7 @@ mise run lint
 mise run test-fixtures
 mise run test-release
 /usr/bin/python3 scripts/test_smoke.py
+/usr/bin/python3 scripts/test_duo_pose.py
 mise run test-core
 mise run test-imaging
 mise run test-lab
