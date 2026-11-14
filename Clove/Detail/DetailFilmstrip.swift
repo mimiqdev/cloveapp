@@ -18,9 +18,12 @@ struct FilmstripGroupFold {
 /// Grid-order filmstrip. The current group expands on a quiet neutral surface; other groups stay
 /// stacked. Tapping a stack jumps to the group's first photo; the group expands in place.
 ///
-/// In expanded Duo photo-only, `markingWidth` reserves the bottom-right marking area beside the
-/// strip (#227): the strip's viewport narrows by that much, so thumbnails never scroll under the
-/// marking toolbar beside it.
+/// The scroll that follows the current photo runs after the change's layout settles, never
+/// inside its transaction: entering or leaving a group swaps the lazy entries' identity in the
+/// same change, and a scroll resolved against that transaction lands past the new content's end,
+/// leaving the strip blank until the next drag (#237). In expanded Duo photo-only the marking
+/// toolbar beside the strip is the one reservation of that area (#227): its sibling narrows the
+/// strip's viewport, and the strip's content fills it up to the toolbar.
 struct DetailFilmstrip: View {
     let photos: [GridPhoto]
     let current: PhotoIdentity?
@@ -31,10 +34,6 @@ struct DetailFilmstrip: View {
     /// The Duo's photo-only detail only: folding leaves the photo open and the strip shows the
     /// group's stack instead of its members (owner decision, #225).
     var groupFold: FilmstripGroupFold?
-
-    /// The width the layout reserves beside the strip's trailing edge for the marking area, or
-    /// nil for the full width (#227).
-    var markingWidth: CGFloat? = nil
 
     private struct Entry: Identifiable {
         let id: PhotoIdentity
@@ -141,10 +140,15 @@ struct DetailFilmstrip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
             }
-            .padding(.trailing, markingWidth ?? 0)
             .onChange(of: current, initial: true) { _, photo in
                 guard let photo else { return }
-                withAnimation { proxy.scrollTo(photo, anchor: .center) }
+                // The scroll runs after the change's layout settles, not inside its transaction:
+                // entering or leaving a group swaps the lazy entries' identity in the same change,
+                // and a scroll resolved against that transaction lands past the new content's end,
+                // leaving the strip blank until the next drag (#237).
+                Task { @MainActor in
+                    withAnimation { proxy.scrollTo(photo, anchor: .center) }
+                }
             }
         }
         .frame(height: 70)
