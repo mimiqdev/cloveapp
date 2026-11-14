@@ -35,7 +35,8 @@ final class PipelineDetailImages: DetailImageSource {
         thumbnails: ThumbnailCache? = nil,
         set: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
         admitted: DetailWorkAdmission = .direct,
-        regionScheduler: RegionSharpnessScheduler? = nil
+        regionScheduler: RegionSharpnessScheduler? = nil,
+        sharpnessCache: RegionSharpnessCache? = nil
     ) {
         self.pipeline = pipeline
         self.thumbnails = thumbnails
@@ -45,7 +46,9 @@ final class PipelineDetailImages: DetailImageSource {
             regionScheduler
             ?? RegionSharpnessScheduler(
                 analyzer: RegionSharpnessAnalyzer(
-                    reader: DetailRegionSharpnessReading(details: pipeline)))
+                    reader: DetailRegionSharpnessReading(details: pipeline)),
+                results: RegionSharpnessResultStore(
+                    capacity: 512, disk: sharpnessCache))
     }
 
     /// Reads the shared grid cache directly, without entering the grid work queue.

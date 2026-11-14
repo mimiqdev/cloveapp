@@ -42,14 +42,14 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
-    /// The open folder's I1 preview cache and I3 feature cache (G1 preview and scheduling rows).
+    /// The open folder's I1 preview cache, I3 feature cache, and sharpness disk cache.
     ///
-    /// Grouping's features share the grid's preview cache, so a photo the grid already decoded is
-    /// never read twice, and both caches live in the app's Caches directory because both can be
-    /// rebuilt from the files.
+    /// All three live in the app's Caches directory because all three can be rebuilt from the
+    /// source files.
     struct Caches: Sendable {
         let thumbnails: ThumbnailCache
         let features: ImageFeatureCache
+        let sharpness: RegionSharpnessCache?
     }
 
     /// The key a library answers with while no folder is open (PRD P0-02, P0-14).
@@ -718,7 +718,8 @@ final class FolderLibrarySession: FolderLibrary {
             rejectsFolderName: rejectsFolderName().rawValue)
         let caches = await Self.makeCaches()
         thumbnailSource = makeThumbnailSource(for: session, caches: caches)
-        detailSource = makeDetailSource(for: session, thumbnails: caches?.thumbnails)
+        detailSource = makeDetailSource(
+            for: session, thumbnails: caches?.thumbnails, sharpness: caches?.sharpness)
         // The loss is reported for the folder this open installed, never for a later one.
         let monitor = makeLocationMonitor(for: session, mediaType: opened.recent.mediaType)
         locationMonitor = monitor
@@ -1142,7 +1143,9 @@ final class FolderLibrarySession: FolderLibrary {
     /// no directory, unlike the grid's disk cache. Its reads are admitted through the folder's
     /// C11 session, so ending the folder waits for a read before releasing the scope.
     private func makeDetailSource(
-        for session: FolderAccessSession, thumbnails: ThumbnailCache?
+        for session: FolderAccessSession,
+        thumbnails: ThumbnailCache?,
+        sharpness: RegionSharpnessCache?
     ) -> any DetailImageSource {
         let pipeline = DetailPipeline()
         detailPipeline = pipeline
@@ -1163,7 +1166,8 @@ final class FolderLibrarySession: FolderLibrary {
                     guard let self else { return nil }
                     return await self.admittedDetailSharpness(
                         work, session: session, folder: folder)
-                }))
+                }),
+            sharpnessCache: sharpness)
     }
 
     /// Runs one detail request inside the session that holds the folder's scope.
@@ -1219,7 +1223,10 @@ final class FolderLibrarySession: FolderLibrary {
                 let features = try ImageFeatureCache(
                     directory: caches.appendingPathComponent(
                         "Clove/ImageFeatures", isDirectory: true))
-                return Caches(thumbnails: thumbnails, features: features)
+                let sharpness = try? RegionSharpnessCache(
+                    directory: caches.appendingPathComponent(
+                        "Clove/RegionSharpness", isDirectory: true))
+                return Caches(thumbnails: thumbnails, features: features, sharpness: sharpness)
             } catch {
                 return nil
             }
