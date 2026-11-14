@@ -25,24 +25,13 @@ struct NavigationSwipeRulesTests {
         #expect(step(-20, velocity: -599) == 0)
     }
 
-    @Test func endsResistAndNeverNavigateOutsideTheOrder() {
+    @Test func endsNeverNavigateOutsideTheOrder() {
         for travel in [-800.0, -100, 100, 800] {
             #expect(
                 NavigationSwipeRules.step(
                     travel: travel, velocity: travel * 10, width: 400,
                     hasPrevious: false, hasNext: false) == 0)
-            let offset = NavigationSwipeRules.offset(
-                travel: travel, width: 400, hasPrevious: false, hasNext: false)
-            #expect(abs(offset) < abs(travel))
-            #expect(abs(offset) < 400)
-            #expect(offset * travel > 0)
         }
-        #expect(
-            NavigationSwipeRules.offset(
-                travel: -120, width: 400, hasPrevious: false, hasNext: true) == -120)
-        #expect(
-            NavigationSwipeRules.offset(
-                travel: 120, width: 400, hasPrevious: true, hasNext: false) == 120)
         #expect(
             NavigationSwipeRules.step(
                 travel: -120, velocity: -900, width: 0, hasPrevious: true, hasNext: true) == 0)

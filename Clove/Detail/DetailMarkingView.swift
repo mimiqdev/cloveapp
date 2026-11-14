@@ -588,7 +588,6 @@ struct DetailMarkingView: View {
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
-            keepsFitStationary: isDuoExpanded,
             focusRegions: shown == nil
                 ? []
                 : focusRegionState.regions(

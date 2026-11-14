@@ -436,14 +436,24 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), navigationPreview))
         XCTAssertFalse(
             String(describing: navigationPreview.value).localizedCaseInsensitiveContains("loading"))
+        let previewFrame = navigationPreview.frame
+        let fitMiddle = navigationPreview.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        fitMiddle.press(
+            forDuration: 0.1, thenDragTo: fitMiddle.withOffset(CGVector(dx: -50, dy: 0)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertEqual(navigationPreview.frame, previewFrame)
         let navigationStart = ContinuousClock.now
         navigationPreview.swipeLeft()
         XCTAssertEqual(fileName.label, "MMQ02681.ARW")
+        XCTAssertEqual(navigationPreview.frame, previewFrame)
         print(
             "Detail navigation swipe to next filename (informational, XCTest input included): \(navigationStart.duration(to: .now))"
         )
         navigationPreview.swipeRight()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertEqual(navigationPreview.frame, previewFrame)
         info.tap()
         XCTAssertTrue(app.staticTexts["Sample camera · 0123"].exists)
         XCTAssertTrue(app.staticTexts["24–70 mm"].exists)
@@ -464,6 +474,9 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.detail.undo").exists)
         centre.tap()
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        // A horizontal drag while zoomed pans the scroll view instead of stepping photos.
+        preview.swipeLeft()
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         centre.doubleTap()
         // The fit animation restores the chrome after the double tap returns, so this reads
         // the observed state instead of asserting one immediate snapshot.

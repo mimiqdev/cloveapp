@@ -22,16 +22,4 @@ public enum NavigationSwipeRules {
         let flick = abs(travel) >= 10 && abs(velocity) >= 600 && travel * velocity > 0
         return abs(travel) >= width * 0.25 || flick ? direction : 0
     }
-
-    /// At an end, resistance grows smoothly and never lets the photo leave the viewport.
-    public static func offset(
-        travel: Double, width: Double, hasPrevious: Bool, hasNext: Bool
-    ) -> Double {
-        guard width > 0 else { return 0 }
-        let hasNeighbour = travel < 0 ? hasNext : hasPrevious
-        guard !hasNeighbour else { return travel }
-        let distance = abs(travel) * 0.55
-        let resisted = width * distance / (width + distance)
-        return travel < 0 ? -resisted : resisted
-    }
 }

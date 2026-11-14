@@ -455,6 +455,7 @@ struct DetailDisplayPresentationTests {
     @Test func zoomBeginningCancelsAnInProgressNavigationPan() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
         preview.hasNext = true
+        preview.layoutIfNeeded()
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let pan = try #require(
             preview.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
@@ -472,7 +473,8 @@ struct DetailDisplayPresentationTests {
         sample.travel = CGPoint(x: -180, y: 0)
         sample.sampleState = .changed
         preview.handleMarkingPan(sample)
-        #expect(scroll.transform.tx == -180)
+        #expect(scroll.transform == .identity)
+        #expect(scroll.frame == preview.bounds)
         preview.scrollViewWillBeginZooming(scroll, with: scroll.subviews.first)
         #expect(pan.state == .cancelled || pan.state == .failed)
         // Without physical touches UIKit does not dispatch the terminal action; deliver it here.
@@ -482,45 +484,112 @@ struct DetailDisplayPresentationTests {
         #expect(navigations == 0)
     }
 
-    @Test func navigationOffsetResetsOnlyAfterReplacementPixelsAreInstalled() throws {
+    /// At fit, horizontal drags keep the photo stationary and step only on release (#244).
+    @Test func fitNavigationKeepsThePhotoStationaryDuringDragAndStillNavigates() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        preview.hasPrevious = true
         preview.hasNext = true
         let old = try testPixels(gray: 0)
         let replacement = try testPixels(gray: 1)
         preview.setImage(old)
-        try sendSwipe(to: preview, travel: CGPoint(x: -180, y: 0))
+        preview.layoutIfNeeded()
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let image = try #require(scroll.subviews.first as? UIImageView)
-        #expect(scroll.transform.tx == -180)
-        #expect(image.image?.cgImage === old)
+        var zones: [DetailEdgeZone] = []
+        preview.onEdgeTap = { zones.append($0) }
+        #expect(preview.clipsToBounds)
+
+        for (travelX, expected) in [(-180.0, DetailEdgeZone.next), (180.0, .previous)] {
+            let pan = DetailTestPan()
+            pan.travel = CGPoint(x: travelX < 0 ? -15 : 15, y: 0)
+            try #require(preview.gestureRecognizerShouldBegin(pan))
+            preview.handleMarkingPan(pan)
+            #expect(scroll.transform == .identity)
+            #expect(image.frame == preview.bounds)
+            pan.sampleState = .changed
+            pan.travel = CGPoint(x: travelX, y: 0)
+            preview.handleMarkingPan(pan)
+            #expect(scroll.transform == .identity)
+            #expect(scroll.frame == preview.bounds)
+            #expect(image.frame == preview.bounds)
+            let countBeforeRelease = zones.count
+            pan.sampleState = .ended
+            preview.handleMarkingPan(pan)
+            #expect(zones.count == countBeforeRelease + 1)
+            #expect(zones.last == expected)
+            #expect(scroll.transform == .identity)
+        }
+
+        // Below-threshold release keeps the photo stationary and does not navigate.
+        let shortPan = DetailTestPan()
+        shortPan.travel = CGPoint(x: -15, y: 0)
+        try #require(preview.gestureRecognizerShouldBegin(shortPan))
+        preview.handleMarkingPan(shortPan)
+        shortPan.sampleState = .changed
+        shortPan.travel = CGPoint(x: -40, y: 0)
+        preview.handleMarkingPan(shortPan)
+        #expect(scroll.transform == .identity)
+        shortPan.sampleState = .ended
+        preview.handleMarkingPan(shortPan)
+        #expect(zones == [.next, .previous])
+        #expect(scroll.transform == .identity)
+
         preview.setImage(replacement)
         #expect(scroll.transform == .identity)
         #expect(image.image?.cgImage === replacement)
     }
 
-    /// The expanded Duo's fit drag commits navigation without sliding the photo (#199).
-    @Test func confinedFitNavigationKeepsThePhotoStationaryAndStillNavigates() throws {
-        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
-        preview.keepsFitStationary = true
-        preview.hasNext = true
-        preview.setImage(try testPixels(gray: 0))
+    @Test func fitHorizontalDragInDetailScreenDoesNotTranslatePhotoFrameAndStepsOnRelease()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let store = SettingsStore.sample
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let first = browsing.photos[2]
+        let next = browsing.photos[3]
+        browsing.openPhoto(first.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor {
+            source.prefetched.last?.current.photo == first.id
+                && source.delivered.contains(.screenRAW)
+        }
+        let preview = try #require(findPreview(in: window))
         let scroll = try #require(preview.subviews.first as? UIScrollView)
-        var navigations = 0
-        preview.onEdgeTap = { _ in navigations += 1 }
-        // The pane boundary clips whatever a drag or transition would draw outside it.
-        #expect(preview.clipsToBounds)
+        let image = try #require(scroll.subviews.first as? UIImageView)
+        let initialFrame = image.convert(image.bounds, to: window)
+        let photoBand = CGRect(
+            x: initialFrame.minX, y: initialFrame.midY - 60,
+            width: initialFrame.width, height: 120)
+        let initialPixels = try displayedPixels(in: photoBand, window: window)
+
         let pan = DetailTestPan()
         pan.travel = CGPoint(x: -15, y: 0)
         try #require(preview.gestureRecognizerShouldBegin(pan))
         preview.handleMarkingPan(pan)
         pan.sampleState = .changed
-        pan.travel = CGPoint(x: -180, y: 0)
+        pan.travel = CGPoint(x: -140, y: 0)
         preview.handleMarkingPan(pan)
+
         #expect(scroll.transform == .identity)
+        #expect(image.convert(image.bounds, to: window) == initialFrame)
+        #expect(try displayedPixels(in: photoBand, window: window) == initialPixels)
+        #expect(browsing.state.currentPhoto == first.id)
+
         pan.sampleState = .ended
         preview.handleMarkingPan(pan)
-        #expect(navigations == 1)
+        #expect(browsing.state.currentPhoto == next.id)
         #expect(scroll.transform == .identity)
+        #expect(image.convert(image.bounds, to: window) == initialFrame)
     }
 
     /// A tap that begins while zoomed must never reach chrome, even when the double tap that
