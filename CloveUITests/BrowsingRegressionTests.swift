@@ -23,6 +23,7 @@ extension CloveFlowTests {
             element(in: app, "clove.root").waitForExistence(timeout: 30),
             "The Clove root view did not appear")
         openSettings(in: app)
+        openSettingsCategory("clove.settings.category.appearance", in: app)
         _ = scrollToSettingsControl(
             "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
         setAppearanceMatchSystem(in: app, on: false)
@@ -39,6 +40,7 @@ extension CloveFlowTests {
             element(in: app, "clove.root").waitForExistence(timeout: 30),
             "The relaunched Clove did not appear")
         openSettings(in: app)
+        openSettingsCategory("clove.settings.category.appearance", in: app)
         let storedMatchSystem = app.switches["clove.settings.appearance.matchSystem"]
         XCTAssertEqual(storedMatchSystem.value as? String, "0", "The relaunch lost Match system")
         XCTAssertTrue(
@@ -58,8 +60,13 @@ extension CloveFlowTests {
             .firstMatch
         guard settings.exists else { return }
         settings.tap()
+        let appearanceCategory = app.descendants(matching: .any)
+            .matching(identifier: "clove.settings.category.appearance").firstMatch
+        if appearanceCategory.exists {
+            appearanceCategory.tap()
+        }
         let toggle = app.switches["clove.settings.appearance.matchSystem"]
-        guard toggle.exists else { return }
+        guard toggle.waitForExistence(timeout: 5) else { return }
 
         // Matching off first, so choosing Light applies instead of being ignored.
         if toggle.value as? String == "1" {
@@ -96,6 +103,7 @@ extension CloveFlowTests {
     /// The opt-in design captures use the same switch handling as the restored appearance test.
     @MainActor
     func chooseTheme(_ theme: String, _ app: XCUIApplication) {
+        openSettingsCategory("clove.settings.category.appearance", in: app)
         setAppearanceMatchSystem(in: app, on: false)
         let tile = element(in: app, "clove.settings.appearance.theme.\(theme)")
         tile.tap()
@@ -178,11 +186,12 @@ extension CloveFlowTests {
             ).firstMatch.exists)
         attachScreenshot(named: "entry-resume")
         element(in: app, "clove.nav.settings").tap()
-        XCTAssertTrue(
-            element(in: app, "clove.settings.section.appearance").exists)
-        XCTAssertTrue(
-            element(in: app, "clove.settings.section.culling").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.section.move").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.category.appearance").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.category.culling").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.category.browsing").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.category.photoDisplay").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.category.moveRejects").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.reset").exists)
         attachScreenshot(named: "settings-sections")
         back(in: app)
     }
@@ -428,7 +437,7 @@ extension CloveFlowTests {
     }
 
     @MainActor
-    private func openSettings(in app: XCUIApplication) {
+    func openSettings(in app: XCUIApplication) {
         if element(in: app, "clove.grid").exists {
             openSettingsFromGrid(in: app)
             return
@@ -443,7 +452,23 @@ extension CloveFlowTests {
     }
 
     @MainActor
+    func openSettingsCategory(_ categoryIdentifier: String, in app: XCUIApplication) {
+        let category = element(in: app, categoryIdentifier)
+        if !category.exists {
+            let backToHome = app.navigationBars.buttons["Settings"]
+            if backToHome.exists { backToHome.tap() }
+        }
+        for _ in 0..<4 where !category.isHittable { app.swipeDown() }
+        XCTAssertTrue(
+            category.waitForExistence(timeout: 5),
+            "Settings did not show category \(categoryIdentifier)"
+        )
+        category.tap()
+    }
+
+    @MainActor
     private func showGroupsAsCollapsedCovers(in app: XCUIApplication) {
+        openSettingsCategory("clove.settings.category.browsing", in: app)
         setGridGroupDisplay(in: app, to: "Collapsed")
 
         let back = element(in: app, "clove.nav.back")
@@ -463,6 +488,7 @@ extension CloveFlowTests {
     @MainActor
     private func showGroupsAsExpandedCells(in app: XCUIApplication) {
         openSettingsFromGrid(in: app)
+        openSettingsCategory("clove.settings.category.browsing", in: app)
         setGridGroupDisplay(in: app, to: "Expanded")
 
         let back = element(in: app, "clove.nav.back")
@@ -478,6 +504,7 @@ extension CloveFlowTests {
     @MainActor
     private func hideAndShowSimilarGroups(in app: XCUIApplication) {
         openSettingsFromGrid(in: app)
+        openSettingsCategory("clove.settings.category.browsing", in: app)
         setSimilarGroups(in: app, on: false)
         backToGrid(in: app)
         XCTAssertFalse(
@@ -487,6 +514,7 @@ extension CloveFlowTests {
             groupingActionIsVisible(in: app), "Turning similar groups off left Run again")
 
         openSettingsFromGrid(in: app)
+        openSettingsCategory("clove.settings.category.browsing", in: app)
         setSimilarGroups(in: app, on: true)
         backToGrid(in: app)
         element(in: app, "clove.grid").collectionViews.firstMatch.swipeDown()
@@ -562,7 +590,7 @@ extension CloveFlowTests {
     }
 
     @MainActor
-    private func scrollToSettingsControl(
+    func scrollToSettingsControl(
         _ identifier: String, in app: XCUIApplication, swipes: Int = 6, scrollsUp: Bool = true
     ) -> XCUIElement {
         let control = element(in: app, identifier)
@@ -605,6 +633,7 @@ extension CloveFlowTests {
             "The grid did not offer Move rejects with rejected photos in the folder")
 
         openSettingsFromGrid(in: app)
+        openSettingsCategory("clove.settings.category.moveRejects", in: app)
         setMoveRejects(in: app, on: false)
         backToGrid(in: app)
         XCTAssertFalse(
@@ -612,6 +641,7 @@ extension CloveFlowTests {
             "Turning Move rejects off left its grid action")
 
         openSettingsFromGrid(in: app)
+        openSettingsCategory("clove.settings.category.moveRejects", in: app)
         setMoveRejects(in: app, on: true)
         backToGrid(in: app)
         XCTAssertTrue(
@@ -629,6 +659,94 @@ extension CloveFlowTests {
         XCTAssertEqual(
             switchValue(toggle), on ? "1" : "0",
             "The Move rejects switch did not turn \(on ? "on" : "off")")
+    }
+
+    @MainActor @objc
+    func testSettingsCategoriesSubpagesValidationAndResetConfirmation() {
+        let app = launchSample()
+        openSettings(in: app)
+
+        // Nested Rating scale under Culling & marking enforces at least one level enabled.
+        openSettingsCategory("clove.settings.category.culling", in: app)
+        let ratingScaleLink = scrollToSettingsControl("clove.settings.ratingScale", in: app)
+        XCTAssertTrue(ratingScaleLink.exists)
+        ratingScaleLink.tap()
+
+        for level in 1...4 {
+            let toggle = app.switches["clove.settings.rating.\(level)"]
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            if switchValue(toggle) == "1" {
+                toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+            }
+            XCTAssertEqual(switchValue(toggle), "0")
+        }
+        let lastRating = app.switches["clove.settings.rating.5"]
+        XCTAssertEqual(switchValue(lastRating), "1")
+        XCTAssertFalse(lastRating.isEnabled, "The last remaining rating level stayed enabled")
+
+        let backToCulling = app.navigationBars.buttons["Culling & marking"]
+        if backToCulling.exists {
+            backToCulling.tap()
+        } else {
+            app.navigationBars.buttons["Settings"].tap()
+            openSettingsCategory("clove.settings.category.culling", in: app)
+        }
+
+        // Nested Auto-advance destination: Stay disables trigger toggles without clearing choices.
+        let destinationLink = scrollToSettingsControl(
+            "clove.settings.autoAdvanceDestination", in: app)
+        XCTAssertTrue(destinationLink.waitForExistence(timeout: 5))
+        destinationLink.tap()
+        let stayRow = element(in: app, "clove.settings.autoAdvance.stay")
+        XCTAssertTrue(stayRow.waitForExistence(timeout: 5))
+        stayRow.tap()
+        XCTAssertTrue(stayRow.isSelected)
+
+        if app.navigationBars.buttons["Culling & marking"].exists {
+            app.navigationBars.buttons["Culling & marking"].tap()
+        } else {
+            app.navigationBars.buttons["Settings"].tap()
+            openSettingsCategory("clove.settings.category.culling", in: app)
+        }
+        let ratingsAdvance = scrollToSettingsControl("clove.settings.autoAdvanceRating", in: app)
+        XCTAssertFalse(ratingsAdvance.isEnabled)
+
+        // Move rejects folder validation shows inline error on invalid folder name.
+        openSettingsCategory("clove.settings.category.moveRejects", in: app)
+        let folderField = scrollToSettingsControl("clove.settings.rejectsFolderName", in: app)
+        XCTAssertTrue(folderField.waitForExistence(timeout: 5))
+        folderField.tap()
+        folderField.typeText("/")
+        XCTAssertTrue(
+            element(in: app, "clove.settings.rejectsFolderNameProblem").waitForExistence(timeout: 5)
+        )
+
+        // Reset confirmation cancels cleanly and resets preferences only on Reset.
+        let backHome = app.navigationBars.buttons["Settings"]
+        if backHome.exists { backHome.tap() }
+        let reset = scrollToSettingsControl("clove.settings.reset", in: app)
+        XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        reset.tap()
+
+        let alert = app.alerts["Reset settings to defaults?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["Cancel"].tap()
+        openSettingsCategory("clove.settings.category.culling", in: app)
+        XCTAssertFalse(
+            scrollToSettingsControl("clove.settings.autoAdvanceRating", in: app).isEnabled)
+
+        if app.navigationBars.buttons["Settings"].exists {
+            app.navigationBars.buttons["Settings"].tap()
+        }
+        scrollToSettingsControl("clove.settings.reset", in: app).tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["Reset"].tap()
+
+        openSettingsCategory("clove.settings.category.culling", in: app)
+        XCTAssertTrue(
+            scrollToSettingsControl("clove.settings.autoAdvanceRating", in: app).isEnabled)
+        openSettingsCategory("clove.settings.category.moveRejects", in: app)
+        XCTAssertFalse(element(in: app, "clove.settings.rejectsFolderNameProblem").exists)
     }
 
 }

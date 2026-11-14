@@ -1,250 +1,213 @@
 import CloveCore
 import SwiftUI
 
-/// The handoff's Settings sections, followed by the supervisor's default section for existing
-/// controls outside the frame (handoff screens.md §11; PRD Gesture-related settings).
+/// Adaptive Settings container: compact push home below the wide threshold, category-list +
+/// detail split at wide widths (issue #264).
 struct SettingsScreen: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
-    @State private var rejectsFolderNameDraft = ""
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    private static let ratingLevels = (1...5).compactMap { Rating(rawValue: $0) }
+    @Bindable var navigation: SettingsNavigationState
+    let availableWidth: CGFloat
+
+    @State private var showsResetConfirmation = false
+    @State private var resetRevision = 0
+
+    init(
+        navigation: SettingsNavigationState = SettingsNavigationState(),
+        availableWidth: CGFloat = 0
+    ) {
+        self.navigation = navigation
+        self.availableWidth = availableWidth
+    }
+
+    private var isWide: Bool {
+        SettingsLayoutMode.isWide(
+            horizontalSizeClass: horizontalSizeClass, availableWidth: availableWidth)
+    }
+
+    private var sidebarWidth: CGFloat {
+        availableWidth >= 960 ? 280 : 260
+    }
+
+    var body: some View {
+        Group {
+            if isWide {
+                wideSplit
+            } else {
+                compactHome
+            }
+        }
+        .background(Color.clove.surface.sheet)
+        .foregroundStyle(Color.clove.text.primary)
+        .navigationBarTitleDisplayMode(isWide ? .inline : .large)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clove.settings")
+        .onAppear {
+            navigation.enteredSettings(isWide: isWide)
+        }
+        .onChange(of: isWide) { _, wide in
+            navigation.layoutChanged(isWide: wide)
+        }
+        .alert("Reset settings to defaults?", isPresented: $showsResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                store.resetToDefaults()
+                resetRevision += 1
+            }
+        } message: {
+            Text("Preferences return to launch defaults. Photos and their marks stay untouched.")
+        }
+    }
+
+    private var compactHome: some View {
+        List {
+            Section {
+                ForEach(SettingsCategory.allCases) { category in
+                    NavigationLink(value: BrowseDestination.settingsCategory(category)) {
+                        HStack(spacing: 12) {
+                            Image(systemName: category.symbol)
+                                .foregroundStyle(Color.clove.accent)
+                                .frame(width: 24)
+                                .accessibilityHidden(true)
+                            Text(category.title)
+                                .foregroundStyle(Color.clove.text.primary)
+                            Spacer(minLength: 8)
+                            if let summary = compactSummary(for: category) {
+                                Text(summary)
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color.clove.text.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .accessibilityLabel(category.title)
+                    .accessibilityValue(compactSummary(for: category) ?? "")
+                    .accessibilityIdentifier(category.identifier)
+                }
+            }
+            .listRowBackground(theme.tokens.card.color)
+
+            SettingsResetSection { showsResetConfirmation = true }
+            SettingsSaveFailureSection()
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.clove.surface.sheet)
+    }
+
+    private var wideSplit: some View {
+        HStack(spacing: 0) {
+            List {
+                Section {
+                    ForEach(SettingsCategory.allCases) { category in
+                        let isSelected = navigation.selectedCategory == category
+                        Button {
+                            navigation.selectCategory(category, wide: true)
+                        } label: {
+                            Label(category.title, systemImage: category.symbol)
+                                .foregroundStyle(
+                                    isSelected ? Color.clove.accent : Color.clove.text.primary
+                                )
+                                .fontWeight(isSelected ? .medium : .regular)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(
+                            isSelected
+                                ? theme.tokens.primaryText.color.opacity(0.08)
+                                : theme.tokens.card.color
+                        )
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
+                        .accessibilityIdentifier(category.identifier)
+                    }
+                }
+                .listRowBackground(theme.tokens.card.color)
+
+                SettingsResetSection { showsResetConfirmation = true }
+                SettingsSaveFailureSection()
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.clove.surface.sheet)
+            .frame(width: sidebarWidth)
+
+            Rectangle()
+                .fill(Color.clove.separator)
+                .frame(width: 0.5)
+                .ignoresSafeArea(.container, edges: .bottom)
+
+            List {
+                SettingsCategoryContent(
+                    category: navigation.selectedCategory,
+                    showsCategoryTitle: true,
+                    resetRevision: resetRevision)
+            }
+            .id(navigation.selectedCategory)
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.clove.surface.sheet)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func compactSummary(for category: SettingsCategory) -> String? {
+        switch category {
+        case .appearance:
+            store.settings.appearance.matchesSystemAppearance ? "System" : theme.name
+        case .cullingAndMarking:
+            nil
+        case .browsingAndGroups:
+            nil
+        case .photoDisplay:
+            store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview"
+        case .moveRejects:
+            store.settings.moveRejectsEnabled
+                ? store.settings.rejectsFolderName.rawValue : "Off"
+        }
+    }
+}
+
+/// Pushed category detail screen in compact layouts.
+struct SettingsCategoryScreen: View {
+    let category: SettingsCategory
 
     var body: some View {
         List {
-            appearanceSection
-            cullingSection
-            moveRejectsSection
-            otherSettingsSection
-            saveFailureSection
+            SettingsCategoryContent(
+                category: category,
+                showsCategoryTitle: false,
+                resetRevision: 0)
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.clove.surface.sheet)
         .foregroundStyle(Color.clove.text.primary)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle(category.title)
+        .navigationBarTitleDisplayMode(.inline)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.settings")
-        .onAppear {
-            rejectsFolderNameDraft = store.settings.rejectsFolderName.rawValue
-        }
-        .onChange(of: store.settings.rejectsFolderName) { _, name in
-            rejectsFolderNameDraft = name.rawValue
-        }
+        .accessibilityIdentifier("clove.settings.detail")
     }
+}
 
-    private var appearanceSection: some View {
-        Section {
-            Toggle("Match system light/dark", isOn: binding(\.appearance.matchesSystemAppearance))
-                .tint(theme.tokens.saved.color)
-                .accessibilityIdentifier("clove.settings.appearance.matchSystem")
-            ThemePicker(selection: theme) { tile in
-                store.update { $0.appearance = $0.appearance.choosing(tile) }
-            }
-            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-        } header: {
-            sectionHeader("Appearance", identifier: "appearance")
-        } footer: {
-            Text("Photos are never tinted. Only the app around them changes.")
-                .foregroundStyle(Color.clove.text.secondary)
-        }
-        .listRowBackground(theme.tokens.card.color)
-    }
+/// Nested subpage under Culling & marking (Rating scale or After marking destination).
+struct SettingsSubpageScreen: View {
+    let subpage: SettingsSubpage
 
-    private var cullingSection: some View {
-        Section {
-            Toggle("Similar groups", isOn: binding(\.similarGroupsEnabled))
-                .tint(theme.tokens.saved.color)
-                .accessibilityIdentifier("clove.settings.similarGroupsEnabled")
-            Toggle(
-                "Auto-advance after marking",
-                isOn: Binding(
-                    get: { store.settings.autoAdvance.destination != .stay },
-                    set: { store.setAutoAdvanceEnabled($0) })
-            )
-            .tint(theme.tokens.saved.color)
-            .accessibilityIdentifier("clove.settings.autoAdvanceEnabled")
-            NavigationLink {
-                List {
-                    Section {
-                        ForEach(Self.ratingLevels, id: \.rawValue) { rating in
-                            Toggle(ratingName(rating), isOn: enabledRatingBinding(rating))
-                                .disabled(isLastEnabledRating(rating))
-                                .accessibilityIdentifier("clove.settings.rating.\(rating.rawValue)")
-                        }
-                    } footer: {
-                        Text(
-                            "Swipes follow the enabled levels. A rating another app wrote still shows when its level is off."
-                        )
-                    }
-                    saveFailureSection
-                }
-                .navigationTitle("Rating scale")
-                .scrollContentBackground(.hidden)
-                .background(Color.clove.surface.sheet)
-            } label: {
-                LabeledContent(
-                    "Rating scale", value: "\(store.settings.enabledRatings.count) stars")
-            }
-            .accessibilityIdentifier("clove.settings.ratingScale")
-        } header: {
-            sectionHeader("Culling", identifier: "culling")
-        }
-        .listRowBackground(theme.tokens.card.color)
-    }
-
-    private var moveRejectsSection: some View {
-        Section {
-            Toggle("Move Rejects", isOn: binding(\.moveRejectsEnabled))
-                .tint(theme.tokens.saved.color)
-                .accessibilityIdentifier("clove.settings.moveRejectsEnabled")
-            NavigationLink {
-                Form {
-                    TextField("Folder name", text: $rejectsFolderNameDraft)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .accessibilityIdentifier("clove.settings.rejectsFolderName")
-                        .onChange(of: rejectsFolderNameDraft) { _, text in
-                            commitRejectsFolderName(text)
-                        }
-                    if let problem = rejectsFolderNameProblem {
-                        Text(problem)
-                            .foregroundStyle(Color.clove.status.failed)
-                            .accessibilityIdentifier("clove.settings.rejectsFolderNameProblem")
-                    }
-                    saveFailureSection
-                }
-                .navigationTitle("Folder name")
-            } label: {
-                LabeledContent("Folder name", value: store.settings.rejectsFolderName.rawValue)
-            }
-        } header: {
-            sectionHeader("Move rejects", identifier: "move")
-        } footer: {
-            Text("Rejected photos are moved, never deleted.")
-                .foregroundStyle(Color.clove.text.secondary)
-        }
-        .listRowBackground(theme.tokens.card.color)
-    }
-
-    /// The supervisor's default placement pending the owner; these existing settings use system rows.
-    private var otherSettingsSection: some View {
-        Section {
-            Picker(
-                "Show photos as",
-                selection: Binding(
-                    get: { store.photoDisplayMode },
-                    set: { mode in store.update { $0.photoDisplayMode = mode } }
-                )
-            ) {
-                Text("RAW").tag(PhotoDisplayMode.rawFirst)
-                Text("Camera preview").tag(PhotoDisplayMode.cameraPreviewFirst)
-            }
-            .accessibilityLabel("Show photos as")
-            .accessibilityValue(store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview")
-            .accessibilityIdentifier("clove.settings.photoDisplayMode")
-            Toggle("Marking gestures", isOn: binding(\.gesturesEnabled))
-                .accessibilityIdentifier("clove.settings.gesturesEnabled")
-            Picker("After marking", selection: binding(\.autoAdvance.destination)) {
-                Text("Stay").tag(AutoAdvanceDestination.stay)
-                Text("Next photo").tag(AutoAdvanceDestination.nextPhoto)
-                Text("Next unmarked photo").tag(AutoAdvanceDestination.nextUnmarkedPhoto)
-            }
-            .accessibilityIdentifier("clove.settings.autoAdvanceDestination")
-            Toggle("Ratings advance", isOn: binding(\.autoAdvance.triggers.rating))
-                .accessibilityIdentifier("clove.settings.autoAdvanceRating")
-            Toggle("Reject advances", isOn: binding(\.autoAdvance.triggers.reject))
-                .accessibilityIdentifier("clove.settings.autoAdvanceReject")
-            Toggle("Color labels advance", isOn: binding(\.autoAdvance.triggers.colourLabel))
-                .accessibilityIdentifier("clove.settings.autoAdvanceColourLabel")
-            Picker("Double-tap", selection: binding(\.doubleTap)) {
-                Text("Zoom to 100%").tag(DoubleTapBehaviour.zoom)
-                Text("Off").tag(DoubleTapBehaviour.off)
-            }
-            .accessibilityIdentifier("clove.settings.doubleTap")
-            Picker("Zoomed rating swipe", selection: binding(\.zoomedRatingSwipe)) {
-                Text("Two-finger swipe").tag(ZoomedRatingSwipe.twoFinger)
-                Text("Single-finger axis lock").tag(ZoomedRatingSwipe.singleFingerAxisLock)
-            }
-            .accessibilityLabel("Zoomed rating swipe")
-            .accessibilityValue(
-                store.settings.zoomedRatingSwipe == .twoFinger
-                    ? "Two-finger swipe" : "Single-finger axis lock"
-            )
-            .accessibilityIdentifier("clove.settings.zoomedRatingSwipe")
-            Toggle("Keep zoom in detail", isOn: binding(\.keepZoom.inDetail))
-                .accessibilityIdentifier("clove.settings.keepZoomInDetail")
-            Toggle("Extended color labels", isOn: binding(\.extendedColourLabelsEnabled))
-                .accessibilityIdentifier("clove.settings.extendedColourLabels")
-            Picker("Grid display", selection: binding(\.gridGroupDisplay)) {
-                Text("Expanded").tag(GridGroupDisplay.expanded)
-                Text("Collapsed").tag(GridGroupDisplay.collapsed)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("clove.settings.gridGroupDisplay")
-            Button("Reset to defaults") { store.resetToDefaults() }
-                .accessibilityIdentifier("clove.settings.reset")
-        } header: {
-            sectionHeader("Gestures, zoom, navigation and color labels", identifier: "other")
-        } footer: {
-            Text(
-                "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter."
-            )
-            .foregroundStyle(Color.clove.text.secondary)
-        }
-        .listRowBackground(theme.tokens.card.color)
-    }
-
-    @ViewBuilder private var saveFailureSection: some View {
-        if let message = store.saveFailureMessage {
-            Section {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(Color.clove.status.failed)
-                    .accessibilityIdentifier("clove.settings.saveFailure")
+    var body: some View {
+        Group {
+            switch subpage {
+            case .ratingScale:
+                RatingScaleSettingsList()
+            case .autoAdvanceDestination:
+                AutoAdvanceDestinationSettingsList()
             }
         }
-    }
-
-    private func sectionHeader(_ title: String, identifier: String) -> some View {
-        Text(title).font(.caption).foregroundStyle(Color.clove.text.secondary)
-            .textCase(.uppercase)
-            .accessibilityIdentifier("clove.settings.section.\(identifier)")
-    }
-
-    private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
-        Binding(
-            get: { store.settings[keyPath: keyPath] },
-            set: { value in store.update { $0[keyPath: keyPath] = value } })
-    }
-
-    private func enabledRatingBinding(_ rating: Rating) -> Binding<Bool> {
-        Binding(
-            get: { store.settings.enabledRatings.contains(rating) },
-            set: { enabled in
-                store.update {
-                    $0.enabledRatings = $0.enabledRatings.with(rating, enabled: enabled)
-                }
-            })
-    }
-
-    private func isLastEnabledRating(_ rating: Rating) -> Bool {
-        store.settings.enabledRatings.count == 1 && store.settings.enabledRatings.contains(rating)
-    }
-
-    private var rejectsFolderNameProblem: String? {
-        do {
-            _ = try RejectsFolderName.validated(rejectsFolderNameDraft)
-            return nil
-        } catch { return error.message }
-    }
-
-    private func commitRejectsFolderName(_ text: String) {
-        guard let name = try? RejectsFolderName.validated(text) else { return }
-        store.update { $0.rejectsFolderName = name }
-    }
-
-    private func ratingName(_ rating: Rating) -> String {
-        let stars = rating.starCount ?? 0
-        return stars == 1 ? "1 star" : "\(stars) stars"
+        .navigationTitle(subpage.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clove.settings.subpage.\(subpage.rawValue)")
     }
 }

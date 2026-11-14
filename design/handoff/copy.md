@@ -97,18 +97,31 @@ The pill sits centred in its own row above the filmstrip. Hide it with chrome, w
 ## Settings
 | Key | String |
 |---|---|
+| settings.title | Settings |
 | settings.appearance | Appearance |
 | settings.matchSystem | Match system light/dark |
 | settings.theme.* | Light, Dark, Darkroom, Night, Catppuccin Latte, Catppuccin Mocha, Nord, Gruvbox |
 | settings.appearance.footer | Photos are never tinted. Only the app around them changes. |
-| settings.culling | Culling |
+| settings.culling | Culling & marking |
+| settings.gestures | Marking gestures |
+| settings.zoomedRatingSwipe | Zoomed rating swipe |
+| settings.ratingScale | Rating scale |
+| settings.extendedColourLabels | Extended color labels |
+| settings.autoAdvance.destination | After marking (Stay / Next photo / Next unmarked photo) |
+| settings.autoAdvance.triggers | Ratings advance / Reject advances / Color labels advance |
+| settings.browsing | Browsing & groups |
 | settings.groups | Similar groups |
-| settings.autoAdvance | Auto-advance after marking |
-| settings.ratingScale | Rating scale · 5 stars |
+| settings.gridDisplay | Grid display (Expanded / Collapsed) |
+| settings.doubleTap | Double-tap (Zoom to 100% / Off) |
+| settings.keepZoom | Keep zoom in detail |
+| settings.photoDisplay | Photo display |
+| settings.photoDisplay.mode | Show photos as (RAW / Camera preview) |
 | settings.move | Move rejects |
 | settings.move.toggle | Move Rejects |
-| settings.move.folder | Folder name · _Rejected |
-| settings.move.footer | Rejected photos are moved, never deleted. |
+| settings.move.folder | Folder name |
+| settings.move.footer | Rejected photos are moved, never deleted. You can still mark and filter Rejects when Move Rejects is off. |
+| settings.reset | Reset to defaults |
+| settings.reset.alert | Reset settings to defaults? (Cancel / Reset) |
 
 ## Errors
 | Key | String |

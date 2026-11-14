@@ -235,20 +235,23 @@ final class CloveFlowTests: XCTestCase {
     /// marks it set instead of a photo it navigated to.
     @MainActor
     private func turnOffAutoAdvance(_ app: XCUIApplication) {
-        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
+        openSettingsCategory("clove.settings.category.culling", in: app)
+        let destination = element(app, "clove.settings.autoAdvanceDestination")
         for _ in 0..<5 {
-            if advance.isHittable { break }
+            if destination.isHittable { break }
             app.swipeUp()
         }
-        if advance.value as? String == "1" {
-            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-                .withOffset(CGVector(dx: -50, dy: 0)).tap()
-        }
-        XCTAssertEqual(advance.value as? String, "0")
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        destination.tap()
+        let stay = element(app, "clove.settings.autoAdvance.stay")
+        XCTAssertTrue(stay.waitForExistence(timeout: 5))
+        stay.tap()
+        XCTAssertTrue(stay.isSelected)
     }
 
     @MainActor
     private func chooseRailTheme(_ theme: String, _ app: XCUIApplication) {
+        openSettingsCategory("clove.settings.category.appearance", in: app)
         let matchSystem = app.switches["clove.settings.appearance.matchSystem"]
         if matchSystem.value as? String == "1" {
             matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
@@ -527,16 +530,7 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
-        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
-        for _ in 0..<5 {
-            if advance.isHittable { break }
-            app.swipeUp()
-        }
-        if advance.value as? String == "1" {
-            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-                .withOffset(CGVector(dx: -50, dy: 0)).tap()
-        }
-        XCTAssertEqual(advance.value as? String, "0")
+        turnOffAutoAdvance(app)
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
         let preview = element(app, "clove.detail.preview")
@@ -636,6 +630,7 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
+        openSettingsCategory("clove.settings.category.photoDisplay", in: app)
         let display = element(app, "clove.settings.photoDisplayMode")
         for _ in 0..<6 {
             if display.exists && display.isHittable { break }
@@ -1127,6 +1122,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
+        openSettingsCategory("clove.settings.category.appearance", in: app)
         XCTAssertTrue(
             element(app, "clove.settings.appearance.theme.light").exists)
         capture("theme-tiles")
@@ -1136,6 +1132,103 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(opening.collectionViews.firstMatch.exists)
         XCTAssertFalse(element(opening, "clove.grid.moveRejects").exists)
         capture("grid-opening-before-first-photo")
+    }
+
+    /// Explicit Settings capture run (`TEST_RUNNER_CLOVE_CAPTURE_SETTINGS=1`). Skipped in regular
+    /// flow runs; captures every reorganized category, subpage, and reset confirmation in Light
+    /// and Dark across both compact (iPhone) and wide split (iPad) layouts.
+    @MainActor
+    func testCaptureSettingsReferencesWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_SETTINGS"] == "1")
+        let isWide = XCUIScreen.main.screenshot().image.size.width > 700
+        let prefix = isWide ? "settings-ipad" : "settings-iphone"
+
+        for theme in ["light", "dark"] {
+            let app = launchSample()
+            openSettings(in: app)
+            chooseTheme(theme, app)
+
+            if isWide {
+                capture("\(prefix)-appearance-\(theme)")
+
+                openSettingsCategory("clove.settings.category.culling", in: app)
+                capture("\(prefix)-culling-\(theme)")
+
+                scrollToSettingsControl("clove.settings.ratingScale", in: app).tap()
+                XCTAssertTrue(
+                    element(app, "clove.settings.rating.1").waitForExistence(timeout: 5))
+                capture("\(prefix)-rating-scale-\(theme)")
+                if app.navigationBars.buttons["Culling & marking"].exists {
+                    app.navigationBars.buttons["Culling & marking"].tap()
+                } else {
+                    app.navigationBars.buttons["Settings"].tap()
+                    openSettingsCategory("clove.settings.category.culling", in: app)
+                }
+
+                scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app).tap()
+                XCTAssertTrue(
+                    element(app, "clove.settings.autoAdvance.stay").waitForExistence(timeout: 5))
+                capture("\(prefix)-after-marking-\(theme)")
+                if app.navigationBars.buttons["Culling & marking"].exists {
+                    app.navigationBars.buttons["Culling & marking"].tap()
+                } else {
+                    app.navigationBars.buttons["Settings"].tap()
+                }
+
+                openSettingsCategory("clove.settings.category.browsing", in: app)
+                capture("\(prefix)-browsing-\(theme)")
+
+                openSettingsCategory("clove.settings.category.photoDisplay", in: app)
+                capture("\(prefix)-photo-display-\(theme)")
+
+                openSettingsCategory("clove.settings.category.moveRejects", in: app)
+                capture("\(prefix)-move-rejects-\(theme)")
+            } else {
+                capture("\(prefix)-appearance-\(theme)")
+
+                app.navigationBars.buttons["Settings"].tap()
+                XCTAssertTrue(
+                    element(app, "clove.settings.category.appearance").waitForExistence(timeout: 5))
+                capture("\(prefix)-home-\(theme)")
+
+                openSettingsCategory("clove.settings.category.culling", in: app)
+                capture("\(prefix)-culling-\(theme)")
+
+                scrollToSettingsControl("clove.settings.ratingScale", in: app).tap()
+                XCTAssertTrue(
+                    element(app, "clove.settings.rating.1").waitForExistence(timeout: 5))
+                capture("\(prefix)-rating-scale-\(theme)")
+                app.navigationBars.buttons["Culling & marking"].tap()
+
+                scrollToSettingsControl("clove.settings.autoAdvanceDestination", in: app).tap()
+                XCTAssertTrue(
+                    element(app, "clove.settings.autoAdvance.stay").waitForExistence(timeout: 5))
+                capture("\(prefix)-after-marking-\(theme)")
+                app.navigationBars.buttons["Culling & marking"].tap()
+                app.navigationBars.buttons["Settings"].tap()
+
+                openSettingsCategory("clove.settings.category.browsing", in: app)
+                capture("\(prefix)-browsing-\(theme)")
+                app.navigationBars.buttons["Settings"].tap()
+
+                openSettingsCategory("clove.settings.category.photoDisplay", in: app)
+                capture("\(prefix)-photo-display-\(theme)")
+                app.navigationBars.buttons["Settings"].tap()
+
+                openSettingsCategory("clove.settings.category.moveRejects", in: app)
+                capture("\(prefix)-move-rejects-\(theme)")
+                app.navigationBars.buttons["Settings"].tap()
+            }
+
+            let reset = element(app, "clove.settings.reset")
+            for _ in 0..<4 where !reset.isHittable { app.swipeUp() }
+            reset.tap()
+            let alert = app.alerts["Reset settings to defaults?"]
+            XCTAssertTrue(alert.waitForExistence(timeout: 5))
+            capture("\(prefix)-reset-alert-\(theme)")
+            alert.buttons["Reset"].tap()
+            app.terminate()
+        }
     }
 
     /// Runs on the Duo's actual inner display. The Open pose must be selected in
@@ -1163,16 +1256,7 @@ final class CloveFlowTests: XCTestCase {
     private func prepareDuo(_ app: XCUIApplication) {
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
-        let advance = app.switches["clove.settings.autoAdvanceEnabled"]
-        for _ in 0..<6 {
-            if advance.isHittable { break }
-            app.swipeUp()
-        }
-        if advance.value as? String == "1" {
-            advance.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-                .withOffset(CGVector(dx: -advance.frame.height * 0.8, dy: 0)).tap()
-        }
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "0"), advance))
+        turnOffAutoAdvance(app)
         element(app, "clove.nav.back").tap()
     }
 
@@ -2056,6 +2140,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
+        openSettingsCategory("clove.settings.category.culling", in: app)
         let zoomedSwipeSetting = element(app, "clove.settings.zoomedRatingSwipe")
         for _ in 0..<8 {
             if zoomedSwipeSetting.exists && zoomedSwipeSetting.isHittable { break }
@@ -2285,6 +2370,7 @@ final class CloveFlowTests: XCTestCase {
 
     @MainActor
     private func chooseCollapsedGrid(_ app: XCUIApplication) {
+        openSettingsCategory("clove.settings.category.browsing", in: app)
         let control = element(app, "clove.settings.gridGroupDisplay")
         for _ in 0..<8 {
             if control.exists && control.isHittable { break }
