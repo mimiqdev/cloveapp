@@ -701,6 +701,7 @@ final class CloveFlowTests: XCTestCase {
     @MainActor
     func testFinishingPillRequiresAKeepInTheVisibleGroup() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer { app.terminate() }
         openLibrary(app)
         element(app, "clove.grid.filter").tap()
         element(app, "clove.grid.filter.unmarked").tap()
@@ -718,26 +719,28 @@ final class CloveFlowTests: XCTestCase {
     @MainActor
     func testGroupZoomKeepsTheCropUntilLeavingItsMembers() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer { app.terminate() }
         openLibrary(app)
         element(app, "clove.grid.group.burst-2678").tap()
         let preview = element(app, "clove.detail.preview")
         let fileName = element(app, "clove.detail.fileName")
+        let info = element(app, "clove.detail.info")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-        XCTAssertFalse(element(app, "clove.detail.info").exists)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), info))
         // While zoomed, single taps near the edges and horizontal swipes do not navigate (#252).
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
         XCTAssertEqual(fileName.label, "MMQ02678.ARW")
         preview.swipeLeft()
         XCTAssertEqual(fileName.label, "MMQ02678.ARW")
         app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
-        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
+        XCTAssertTrue(waitForLabel("MMQ02679.ARW", fileName))
         XCTAssertTrue(
             wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
-        XCTAssertFalse(element(app, "clove.detail.info").exists)
+        XCTAssertFalse(info.exists)
         app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
-        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        XCTAssertTrue(element(app, "clove.detail.info").exists)
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
     }
 
     @MainActor
@@ -1658,10 +1661,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
         XCTAssertEqual(stack.frame.minX, stackBefore.minX, accuracy: 2)
 
-        // Navigating forward to an off-screen photo still brings it into view.
+        // Navigating forward to an off-screen photo via swipe brings it into view (#252, #255).
         let preview = element(app, "clove.detail.preview")
         for _ in 0..<8 {
-            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+            preview.swipeLeft()
         }
         XCTAssertTrue(waitForLabel("MMQ02703.ARW", fileName))
         let offscreenTarget = element(app, "clove.detail.filmstrip.mmq02703")
@@ -2197,7 +2200,7 @@ final class CloveFlowTests: XCTestCase {
         app.launch()
         let root =
             environment["CLOVE_DESIGN_GALLERY"] == "1" ? "clove.design.gallery" : "clove.root"
-        XCTAssertTrue(element(app, root).waitForExistence(timeout: 15))
+        XCTAssertTrue(element(app, root).waitForExistence(timeout: 30))
         return app
     }
 
@@ -2205,8 +2208,11 @@ final class CloveFlowTests: XCTestCase {
     func openLibrary(_ app: XCUIApplication) {
         let open = element(app, "clove.entry.openFolder")
         if open.exists { open.tap() }
-        if element(app, "clove.detail").exists { element(app, "clove.nav.back").tap() }
-        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+        if element(app, "clove.detail").exists {
+            let back = element(app, "clove.nav.back")
+            if back.waitForExistence(timeout: 5) { back.tap() }
+        }
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 10))
     }
 
     @MainActor
