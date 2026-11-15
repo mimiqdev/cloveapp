@@ -686,26 +686,44 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.photo.mmq02680").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        rate(3, in: app)
         let capsule = element(app, "clove.detail.capsule")
-        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
         let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35))
+
+        // Unrated -> slow down past 30pt rejects immediately (no 120pt dead band).
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 90)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 45)),
+            withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
+        XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
+        element(app, "clove.detail.undo").tap()
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+
+        // Unrated -> up raises stars symmetrically.
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -135)),
+            withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
+        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+
+        // From 3 stars, slow first downward step clears to Unmarked (independent of speed).
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 45)),
+            withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        element(app, "clove.detail.undo").tap()
+        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+
+        // From 3 stars, fast first downward step also clears to Unmarked.
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 45)),
             withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
         XCTAssertEqual(capsule.value as? String, "Unmarked")
         element(app, "clove.detail.undo").tap()
         XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+
+        // From 3 stars, second downward step (>= 75pt) rejects regardless of speed.
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 210)),
-            withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
-        XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
-        element(app, "clove.detail.undo").tap()
-        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
-        start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 135)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 110)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
-        XCTAssertTrue((capsule.value as? String)?.contains("1 star") == true)
+        XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
         XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
     }
 
@@ -2072,12 +2090,12 @@ final class CloveFlowTests: XCTestCase {
         let eyeSwipe = eye.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         eyeSwipe.press(
             forDuration: 0.1,
-            thenDragTo: eyeSwipe.withOffset(CGVector(dx: 0, dy: 70)),
+            thenDragTo: eyeSwipe.withOffset(CGVector(dx: 0, dy: 55)),
             withVelocity: .slow, thenHoldForDuration: 0)
         XCTAssertEqual(element(app, "clove.detail.fileName").label, fileName)
         let eyeMarkValue = element(app, "clove.detail.capsule").value as? String
-        XCTAssertTrue(
-            eyeMarkValue?.contains("4 stars") == true,
+        XCTAssertEqual(
+            eyeMarkValue, "Red",
             "Marks after eye swipe: \(eyeMarkValue ?? "nil")")
         let autofocusSwipe = autofocus.coordinate(
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))

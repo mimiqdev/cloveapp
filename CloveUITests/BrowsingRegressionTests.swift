@@ -343,8 +343,8 @@ extension CloveFlowTests {
         let fileName = element(in: app, "clove.detail.fileName")
         XCTAssertEqual(fileName.label, "MMQ02679.ARW")
 
-        // From Reject, three 60 pt ladder steps reach two stars (Reject → clear → 1 → 2).
-        drag(preview, byPointsX: 0, y: -210)
+        // From Reject, three steps (30 pt dead zone + two 45 pt steps) reach two stars at 120–164 pt.
+        drag(preview, byPointsX: 0, y: -135)
 
         // The mark advances to the group's remaining unmarked member.
         waitForFileName("MMQ02681.ARW", in: app)
@@ -363,7 +363,7 @@ extension CloveFlowTests {
         let fileName = element(in: app, "clove.detail.fileName")
         XCTAssertEqual(fileName.label, "MMQ02679.ARW")
 
-        // Cross both the quick Reject threshold and all three slow steps from two stars.
+        // From two stars, two downward steps (30 pt Clear, 75 pt Reject) reach Rejected.
         drag(preview, byPointsX: 0, y: 210)
 
         // Reject also advances within the group. A swipe right then returns to the interleaved

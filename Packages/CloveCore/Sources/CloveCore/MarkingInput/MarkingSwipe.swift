@@ -1,13 +1,11 @@
 import Foundation
 
-/// Starting values for continuous marking, in points and seconds on every device.
+/// Starting values for continuous marking, in points on every device.
 /// Tune these on an iPhone; release has no momentum and holding never changes the stage.
 public struct MarkingSwipeRules: Hashable, Sendable {
-    public static let stepDistance: Double = 60
-    public static let quickClearDistance: Double = 60
-    public static let quickRejectDistance: Double = 180
-    public static let velocityWindow: Double = 0.1
-    public static let quickDownVelocity: Double = 500
+    public static let deadZone: Double = 30
+    public static let stepDistance: Double = 45
+    public static let reversalHysteresis: Double = 8
     public static let standard = MarkingSwipeRules()
 
     /// The initial axis split only; reversing vertically never changes the claimed axis.
@@ -105,6 +103,11 @@ public struct MarkingStageCrossing: Hashable, Sendable {
     public let rating: Rating
     public let haptic: Haptic
 
+    public init(rating: Rating, haptic: Haptic) {
+        self.rating = rating
+        self.haptic = haptic
+    }
+
     public enum Haptic: Hashable, Sendable {
         case step
         case clear
@@ -114,102 +117,106 @@ public struct MarkingStageCrossing: Hashable, Sendable {
 
 /// One continuous vertical drag. Travel is measured from touch-down, with up positive.
 ///
-/// The first approximately 100 ms select the mode once. Before then the preview stays at the
-/// starting value. A release inside that window selects the mode from the available samples.
-/// The session only previews; its owner commits `rating` once at release or discards on cancel.
+/// The session uses an anchor-symmetric ladder around `startingRating`:
+/// `sortedUnique([-1, 0, startingRating] ∪ { enabledStars > startingRating })`.
+/// Preview and semantic haptics respond purely to position from the first movement, with uniform
+/// buckets, reversal hysteresis, and endpoint overshoot clamping. The session only previews; its
+/// owner commits `rating` once at release or discards on cancel.
 public struct MarkingSwipeSession: Hashable, Sendable {
-    public enum Mode: Hashable, Sendable {
-        case slow
-        case quickDown
-    }
-
     public let startingRating: Rating
     public let enabledRatings: EnabledRatings
-    public private(set) var mode: Mode?
     public private(set) var rating: Rating
-    private var stage: Int?
-    private var initialTravel: Double = 0
-    private var initialElapsed: Double = 0
+
+    private let ladder: [Rating]
+    private let anchor: Int
+    private let minTravel: Double
+    private let maxTravel: Double
+    private var stage: Int
+    private var originOffset: Double = 0
 
     public init(startingRating: Rating, enabledRatings: EnabledRatings = .all) {
         self.startingRating = startingRating
         self.enabledRatings = enabledRatings
         self.rating = startingRating
+
+        let higherEnabled = enabledRatings.levels.filter { $0 > startingRating }
+        let sortedLadder = Array(Set([.rejected, .unrated, startingRating] + higherEnabled))
+            .sorted()
+        let anchorIndex = sortedLadder.firstIndex(of: startingRating) ?? 0
+        self.ladder = sortedLadder
+        self.anchor = anchorIndex
+        self.stage = anchorIndex
+
+        let minRelative = -anchorIndex
+        let maxRelative = (sortedLadder.count - 1) - anchorIndex
+        self.minTravel =
+            -(MarkingSwipeRules.deadZone + Double(-minRelative) * MarkingSwipeRules.stepDistance)
+        self.maxTravel =
+            MarkingSwipeRules.deadZone + Double(maxRelative) * MarkingSwipeRules.stepDistance
     }
 
-    /// Classifies once using the average vertical velocity at the start of the drag, then follows
-    /// position only. A quick upward start and a downward start on Reject use the slow ladder.
+    /// Updates the live preview rating for `travel` (up positive) and returns any crossed stages.
     @discardableResult
-    public mutating func update(travel: Double, elapsed: Double) -> [MarkingStageCrossing] {
-        if mode == nil {
-            let window = MarkingSwipeRules.velocityWindow
-            guard elapsed >= window else {
-                initialTravel = travel
-                initialElapsed = elapsed
-                return []
-            }
-            // Interpolate the sample at the window boundary, so a late callback cannot make
-            // acceleration after the window (or a hold) change the initial classification.
-            let fraction = (window - initialElapsed) / (elapsed - initialElapsed)
-            let windowTravel = initialTravel + (travel - initialTravel) * fraction
-            chooseMode(travel: windowTravel, elapsed: window)
+    public mutating func update(travel: Double) -> [MarkingStageCrossing] {
+        var effectiveTravel = travel - originOffset
+        if effectiveTravel > maxTravel {
+            originOffset = travel - maxTravel
+            effectiveTravel = maxTravel
+        } else if effectiveTravel < minTravel {
+            originOffset = travel - minTravel
+            effectiveTravel = minTravel
         }
-        return move(to: travel)
+
+        var crossings: [MarkingStageCrossing] = []
+        while stage + 1 < ladder.count,
+            effectiveTravel >= Self.upThreshold(fromRelativeStage: stage - anchor)
+        {
+            stage += 1
+            let value = ladder[stage]
+            crossings.append(MarkingStageCrossing(rating: value, haptic: Self.haptic(for: value)))
+        }
+        while stage - 1 >= 0,
+            effectiveTravel <= Self.downThreshold(fromRelativeStage: stage - anchor)
+        {
+            stage -= 1
+            let value = ladder[stage]
+            crossings.append(MarkingStageCrossing(rating: value, haptic: Self.haptic(for: value)))
+        }
+        rating = ladder[stage]
+        return crossings
     }
 
-    /// Resolves a very short swipe too; otherwise release uses the already chosen mode.
+    /// Resolves the final position on release; no momentum is added after release.
     @discardableResult
-    public mutating func release(travel: Double, elapsed: Double) -> [MarkingStageCrossing] {
-        if mode == nil && elapsed < MarkingSwipeRules.velocityWindow {
-            chooseMode(travel: travel, elapsed: elapsed)
-        }
-        return update(travel: travel, elapsed: elapsed)
+    public mutating func release(travel: Double) -> [MarkingStageCrossing] {
+        update(travel: travel)
     }
 
-    private mutating func chooseMode(travel: Double, elapsed: Double) {
-        mode =
-            startingRating != .rejected && elapsed > 0
-                && -travel / elapsed >= MarkingSwipeRules.quickDownVelocity ? .quickDown : .slow
+    private static func upThreshold(fromRelativeStage relative: Int) -> Double {
+        if relative >= 0 {
+            return MarkingSwipeRules.deadZone + Double(relative) * MarkingSwipeRules.stepDistance
+        }
+        return
+            -(MarkingSwipeRules.deadZone
+            + Double(-relative - 1) * MarkingSwipeRules.stepDistance)
+            + MarkingSwipeRules.reversalHysteresis
     }
 
-    private mutating func move(to travel: Double) -> [MarkingStageCrossing] {
-        let ladder: [Rating]
-        let initialStage: Int
-        let next: Int
-        if mode == .quickDown {
-            ladder = [startingRating, .unrated, .rejected]
-            initialStage = 0
-            if -travel >= MarkingSwipeRules.quickRejectDistance {
-                next = 2
-            } else if -travel >= MarkingSwipeRules.quickClearDistance
-                || ((stage ?? 0) > 0 && travel < 0)
-            {
-                // Once clear is reached, returning past the original touch cancels it.
-                next = 1
-            } else {
-                next = 0
-            }
-        } else {
-            // A disabled current value remains an anchor, so returning to the start restores
-            // it. Away from the anchor only enabled stars (plus 0 and Reject) can be reached.
-            ladder = Array(Set([.rejected, .unrated, startingRating] + enabledRatings.levels))
-                .sorted()
-            initialStage = ladder.prefix { $0 < startingRating }.count
-            let steps = Int(min(abs(travel) / MarkingSwipeRules.stepDistance, Double(ladder.count)))
-            next = min(max(initialStage + (travel >= 0 ? steps : -steps), 0), ladder.count - 1)
+    private static func downThreshold(fromRelativeStage relative: Int) -> Double {
+        if relative <= 0 {
+            return
+                -(MarkingSwipeRules.deadZone
+                + Double(-relative) * MarkingSwipeRules.stepDistance)
         }
-        let previous = stage ?? initialStage
-        let direction = next >= previous ? 1 : -1
-        let crossed = stride(from: previous + direction, through: next, by: direction).map {
-            index in
-            let value = ladder[index]
-            let haptic: MarkingStageCrossing.Haptic =
-                mode == .quickDown && index > 0
-                ? (index == 1 ? .clear : .reject) : .step
-            return MarkingStageCrossing(rating: value, haptic: haptic)
+        return MarkingSwipeRules.deadZone + Double(relative - 1) * MarkingSwipeRules.stepDistance
+            - MarkingSwipeRules.reversalHysteresis
+    }
+
+    private static func haptic(for rating: Rating) -> MarkingStageCrossing.Haptic {
+        switch rating {
+        case .rejected: .reject
+        case .unrated: .clear
+        default: .step
         }
-        stage = next
-        rating = ladder[next]
-        return crossed
     }
 }
