@@ -15,11 +15,11 @@ struct ThemeTokenFileTests {
         let file = try ThemeTokenFile.load()
         #expect(file.themes.count == CloveTheme.allCases.count)
 
-        // `prefix` keeps a ninth theme in the file from crashing the loop; the count above fails.
         for (index, entry) in file.themes.enumerated().prefix(CloveTheme.allCases.count) {
             let theme = CloveTheme.allCases[index]
             #expect(entry.id == theme.rawValue)
             #expect(entry.name == theme.name)
+            #expect(entry.family == theme.family.rawValue)
             #expect(entry.appearance.rawValue == theme.appearance.rawValue)
 
             // The file holds the 20 colour tokens plus opacity/rejected, and nothing else.
@@ -82,6 +82,8 @@ private struct ThemeTokenFile {
         let id: String
         /// The display `name`.
         let name: String
+        /// The paired `family` identifier.
+        let family: String
         /// The stored `appearance`.
         let appearance: ThemeAppearance
         /// Every raw token string, for the token-set check.
@@ -130,6 +132,7 @@ private struct ThemeTokenFile {
             return ThemeEntry(
                 id: try text(entry, "id"),
                 name: try text(entry, "name"),
+                family: try text(entry, "family"),
                 appearance: appearance,
                 tokens: tokens,
                 colours: colours,

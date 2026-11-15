@@ -25,8 +25,27 @@ enum DesignGalleryLaunch {
 /// with plain sample values and empty closures, and switching a theme shows all of them in that
 /// theme at once.
 struct DesignGalleryScreen: View {
-    /// The theme the gallery draws, changed by the switcher at the top.
-    @State private var theme = CloveTheme.light
+    /// Selected appearance mode in the gallery switcher.
+    @State private var mode = AppearanceMode.light
+
+    /// Selected theme family in the gallery switcher.
+    @State private var family = ThemeFamily.default
+
+    /// Actual system appearance for System mode previews.
+    @State private var systemAppearance = ThemeAppearance.light
+
+    private var theme: CloveTheme {
+        AppearanceChoice(mode: mode, family: family)
+            .resolvedTheme(inSystemAppearance: systemAppearance)
+    }
+
+    private var preferredColourScheme: ColorScheme? {
+        switch mode {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
 
     /// Sample ratings and labels for the states below.
     private let threeStars = (Rating(rawValue: 3) ?? .unrated)
@@ -79,46 +98,77 @@ struct DesignGalleryScreen: View {
         .tapPickerContainer()
         .environment(\.cloveTheme, theme)
         .environment(\.colorScheme, theme.appearance.colorScheme)
-        .preferredColorScheme(theme.appearance.colorScheme)
+        .preferredColorScheme(preferredColourScheme)
+        .background {
+            SystemAppearanceReader { appearance in
+                guard appearance != systemAppearance else { return }
+                systemAppearance = appearance
+            }
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
+        }
         .accessibilityIdentifier("clove.design.gallery")
     }
 
-    /// The theme switcher, so a screenshot can show the same controls in another theme.
-    ///
-    /// All eight sit in fixed rows, so every one is on screen and can be tapped or seen without
-    /// scrolling.
+    /// The mode and family switcher, so screenshots can inspect any of the 12 resolved palettes.
     private var themeSwitcher: some View {
         VStack(alignment: .leading, spacing: 6) {
-            themeRow([.light, .dark])
-            themeRow([.darkroom, .night])
-            themeRow([.catppuccinLatte, .catppuccinMocha])
-            themeRow([.nord, .gruvbox])
+            modeRow
+            familyRow([.default, .catppuccin, .darkroom])
+            familyRow([.night, .nord, .gruvbox])
         }
     }
 
-    /// One row of theme chips.
-    private func themeRow(_ themes: [CloveTheme]) -> some View {
+    /// The three appearance modes.
+    private var modeRow: some View {
         HStack(spacing: 8) {
-            ForEach(themes) { candidate in
+            ForEach(AppearanceMode.allCases) { candidate in
                 Button {
-                    theme = candidate
+                    mode = candidate
                 } label: {
-                    Text(candidate.name)
-                        .font(.footnote.weight(candidate == theme ? .semibold : .regular))
+                    Text(candidate.title)
+                        .font(.footnote.weight(candidate == mode ? .semibold : .regular))
                         .foregroundStyle(
-                            candidate == theme ? Color.clove.accent : Color.clove.text.secondary
+                            candidate == mode ? Color.clove.accent : Color.clove.text.secondary
                         )
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background {
-                            if candidate == theme {
+                            if candidate == mode {
                                 Capsule().fill(Color.clove.surface.card)
                             }
                         }
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(candidate == theme ? .isSelected : [])
-                .accessibilityIdentifier("clove.design.gallery.theme.\(candidate.id)")
+                .accessibilityAddTraits(candidate == mode ? .isSelected : [])
+                .accessibilityIdentifier("clove.design.gallery.mode.\(candidate.id)")
+            }
+        }
+    }
+
+    /// One row of family chips.
+    private func familyRow(_ families: [ThemeFamily]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(families) { candidate in
+                Button {
+                    family = candidate
+                } label: {
+                    Text(candidate.name)
+                        .font(.footnote.weight(candidate == family ? .semibold : .regular))
+                        .foregroundStyle(
+                            candidate == family ? Color.clove.accent : Color.clove.text.secondary
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background {
+                            if candidate == family {
+                                Capsule().fill(Color.clove.surface.card)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(candidate == family ? .isSelected : [])
+                .accessibilityIdentifier("clove.design.gallery.family.\(candidate.id)")
             }
         }
     }
@@ -339,21 +389,21 @@ struct DesignGalleryScreen: View {
         }
     }
 
-    /// The theme tile, selected and not (components.md, Theme tile).
+    /// The paired theme family tiles, selected and not (components.md, Theme tile).
     private var themeTiles: some View {
         section("Theme tiles") {
             VStack(alignment: .leading, spacing: 10) {
-                themeTileRow([.light, .dark, .darkroom, .night])
-                themeTileRow([.catppuccinLatte, .catppuccinMocha, .nord, .gruvbox])
+                themeTileRow([.default, .catppuccin, .darkroom])
+                themeTileRow([.night, .nord, .gruvbox])
             }
         }
     }
 
-    /// One row of theme tiles.
-    private func themeTileRow(_ themes: [CloveTheme]) -> some View {
+    /// One row of paired family tiles.
+    private func themeTileRow(_ families: [ThemeFamily]) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            ForEach(themes) { candidate in
-                ThemeTile(theme: candidate, isSelected: candidate == theme)
+            ForEach(families) { candidate in
+                ThemeTile(family: candidate, isSelected: candidate == family)
             }
         }
     }

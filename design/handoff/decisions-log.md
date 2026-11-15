@@ -25,6 +25,16 @@ Live Figma frames for the reorganized Settings views were unavailable in the bui
 - `Rating scale` represents each star level with cumulative SF Symbols stars (`star.fill` / `star`) while keeping spoken VoiceOver labels (`"1 star"`…`"5 stars"`) and enforcing at least one enabled level.
 - All toggles and interactive emphasis follow the active theme `accent` token instead of `status/saved`.
 
+## Separated appearance mode and paired theme families (#296)
+
+Supersedes the earlier "Match system light/dark" toggle plus 8 flat theme tiles where choosing a non-default theme turned system matching off (`design/handoff/interactions.md` Theme switching and `#264` Appearance section):
+
+- **Two orthogonal axes:** three-way appearance mode (`Light`, `Dark`, `System`, default `System`) is separate from the six paired theme families (`Default`, `Catppuccin`, `Darkroom`, `Night`, `Nord`, `Gruvbox`, default `Default`). Changing mode keeps the selected family, and changing family keeps the selected mode.
+- **Six families, twelve resolved palettes:** `Default` (`Light`/`Dark`), `Catppuccin` (`Catppuccin Latte`/`Catppuccin Mocha`), `Darkroom` (`Darkroom Light`/`Darkroom`), `Night` (`Night Light`/`Night`), `Nord` (`Nord Light`/`Nord`), and `Gruvbox` (`Gruvbox Light`/`Gruvbox`). `Darkroom Light`, `Night Light`, `Nord Light`, and `Gruvbox Light` are Clove-designed adaptations from Figma variable collection `Clove · Light companions`, not claimed upstream variants.
+- **`System` follows device appearance in every family:** `System` + a non-default family never falls back to `Default`; `RootView` reads the screen's actual style via `SystemAppearanceReader` so app `.preferredColorScheme` overrides never feed back into `System` resolution.
+- **UI & summary:** Settings home summarizes Appearance as `"{Mode} · {Family}"` (default `"System · Default"`). Appearance detail presents a native segmented `Picker` (`Light` / `Dark` / `System`) above a 3 × 2 grid of paired `ThemeTile` buttons (left = Light palette, right = Dark palette, untinted photo across both).
+- **Persistence & legacy compatibility:** `appearance.mode` and `appearance.family` persist independently, resetting to `System + Default`. When neither new key exists, legacy `appearance.matchSystem == "true"` (or absent/corrupt) resolves to `System + Default` without silently activating an inactive stored theme; legacy `appearance.matchSystem == "false"` preserves the stored palette's family and Light/Dark mode.
+
 ## Neutral group count badges and filmstrip surfaces (owner, 2026-11-13, #226)
 
 Saturated blue group counts read as notifications and pull attention away from the photos, and a blue wash behind the expanded filmstrip group distracts from the thumbnails. Both now use restrained neutral treatments in every theme. This supersedes the `group` colour on count badges and `group` at 25% behind an expanded filmstrip group, including #225's styling sentence; #225's expansion and navigation behaviour is unchanged.

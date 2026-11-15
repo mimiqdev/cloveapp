@@ -100,8 +100,9 @@ The pill sits centred in its own row above the filmstrip. Hide it with chrome, w
 |---|---|
 | settings.title | Settings |
 | settings.appearance | Appearance |
-| settings.matchSystem | Match system light/dark |
-| settings.theme.* | Light, Dark, Darkroom, Night, Catppuccin Latte, Catppuccin Mocha, Nord, Gruvbox |
+| settings.appearance.summary | {Mode} · {Family} (default: System · Default) |
+| settings.appearance.mode | Light / Dark / System |
+| settings.appearance.family.* | Default, Catppuccin, Darkroom, Night, Nord, Gruvbox |
 | settings.appearance.footer | Photos are never tinted. Only the app around them changes. |
 | settings.culling | Culling & marking |
 | settings.gestures | Marking gestures |

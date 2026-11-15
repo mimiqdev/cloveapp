@@ -120,5 +120,6 @@ Focus View ──Back──▶ Grid View
 
 ## Theme switching
 
-- Settings ▶ Appearance. With "Match system light/dark" on, Light and Dark follow the system, and the picker selection is ignored for those two. Picking another theme turns the toggle off.
-- Apply by swapping the token set at the app root. The change is immediate, with a short crossfade **(proposed)**. Photos are never tinted.
+- Settings ▶ Appearance offers an independent three-way appearance mode (`Light` / `Dark` / `System`, default `System`) and six paired theme families (`Default`, `Catppuccin`, `Darkroom`, `Night`, `Nord`, `Gruvbox`, default `Default`).
+- Changing mode preserves the selected family, and changing family preserves the selected mode. In `System` mode, the resolved palette follows the device appearance within the selected family without falling back to `Default`.
+- Apply by swapping the resolved token set at the app root (`mode` + `family` + actual device appearance). Photos are never tinted.

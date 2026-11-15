@@ -32,13 +32,20 @@ struct AppearanceSettingsSections: View {
 
     var body: some View {
         Section {
-            Toggle(
-                "Match system light/dark",
-                isOn: settingsBinding(store, \.appearance.matchesSystemAppearance)
-            )
-            .accessibilityIdentifier("clove.settings.appearance.matchSystem")
-            ThemePicker(selection: theme) { tile in
-                store.update { $0.appearance = $0.appearance.choosing(tile) }
+            Picker(
+                "Appearance mode",
+                selection: settingsBinding(store, \.appearance.mode)
+            ) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Appearance mode")
+            .accessibilityIdentifier("clove.settings.appearance.mode")
+
+            ThemePicker(selection: store.settings.appearance.family) { family in
+                store.update { $0.appearance.family = family }
             }
             .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
         } header: {

@@ -1,41 +1,36 @@
-/// The Appearance setting: whether the system light or dark choice picks the theme, and the theme
-/// that applies when it does not (`design/handoff/tokens/tokens.md`).
+/// The Appearance setting: an independent three-way appearance mode (Light / Dark / System)
+/// and a paired theme family (`design/handoff/tokens/tokens.md`).
 ///
-/// A chosen theme applies in both appearances, so a dark theme also darkens the app while the
-/// system is light. The theme's own appearance then fixes the status bar and the keyboard
-/// (tokens.md, `components.md`).
+/// Changing mode preserves the selected family, and changing family preserves the selected mode.
+/// In System mode, the effective palette follows the actual system appearance within the selected
+/// family. Explicit Light and Dark modes ignore system appearance changes.
 public struct AppearanceChoice: Hashable, Sendable {
-    /// Whether the system appearance picks Light or Dark, the launch default (tokens.md).
-    public var matchesSystemAppearance: Bool
+    /// Whether the app forces Light, forces Dark, or follows the device appearance; System by
+    /// default.
+    public var mode: AppearanceMode
 
-    /// The theme the user chose; it applies only while ``matchesSystemAppearance`` is false, and
-    /// Light is the launch default (tokens.md).
-    public var theme: CloveTheme
+    /// The paired theme family in effect; Default by default.
+    public var family: ThemeFamily
 
-    /// Creates the choice, matching the system and keeping Light as the chosen theme by default
-    /// (tokens.md).
-    public init(matchesSystemAppearance: Bool = true, theme: CloveTheme = .light) {
-        self.matchesSystemAppearance = matchesSystemAppearance
-        self.theme = theme
+    /// Creates an Appearance choice, defaulting to System + Default.
+    public init(mode: AppearanceMode = .system, family: ThemeFamily = .default) {
+        self.mode = mode
+        self.family = family
     }
 
-    /// The theme in effect for a system appearance (tokens.md).
-    ///
-    /// Matching the system means Light for a light system and Dark for a dark one, whatever theme
-    /// was chosen. Otherwise the chosen theme applies, in both appearances.
-    public func theme(inSystemAppearance appearance: ThemeAppearance) -> CloveTheme {
-        guard matchesSystemAppearance else { return theme }
-        return appearance == .light ? .light : .dark
+    /// Resolves whether the app renders in Light or Dark for the given actual system appearance.
+    public func resolvedAppearance(inSystemAppearance systemAppearance: ThemeAppearance)
+        -> ThemeAppearance
+    {
+        switch mode {
+        case .light: .light
+        case .dark: .dark
+        case .system: systemAppearance
+        }
     }
 
-    /// The choice after the user picks a tile in the theme picker.
-    ///
-    /// While the system picks the theme, Light and Dark are the two it already picks between, so
-    /// choosing either changes nothing and matching stays on. Picking another theme stops matching
-    /// the system and applies that theme (`design/handoff/interactions.md`, Theme switching:
-    /// "Picking another theme turns the toggle off.").
-    public func choosing(_ tile: CloveTheme) -> AppearanceChoice {
-        guard !matchesSystemAppearance || (tile != .light && tile != .dark) else { return self }
-        return AppearanceChoice(matchesSystemAppearance: false, theme: tile)
+    /// Resolves the effective palette centrally from mode, family, and actual system appearance.
+    public func resolvedTheme(inSystemAppearance systemAppearance: ThemeAppearance) -> CloveTheme {
+        family.theme(for: resolvedAppearance(inSystemAppearance: systemAppearance))
     }
 }

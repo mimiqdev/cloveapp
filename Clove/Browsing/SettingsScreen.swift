@@ -156,7 +156,7 @@ struct SettingsScreen: View {
     private func compactSummary(for category: SettingsCategory) -> String? {
         switch category {
         case .appearance:
-            store.settings.appearance.matchesSystemAppearance ? "System" : theme.name
+            "\(store.settings.appearance.mode.title) · \(store.settings.appearance.family.name)"
         case .cullingAndMarking:
             nil
         case .browsingAndGroups:

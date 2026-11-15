@@ -102,12 +102,47 @@ struct SettingsAdaptiveTests {
             $0.photoDisplayMode = .rawFirst
             $0.zoomedRatingSwipe = .singleFingerAxisLock
             $0.keepZoom.inDetail = true
+            $0.appearance = AppearanceChoice(mode: .dark, family: .nord)
         }
         #expect(store.photoDisplayMode == .rawFirst)
 
         store.resetToDefaults()
         #expect(store.settings == AppSettings())
+        #expect(store.settings.appearance == AppearanceChoice(mode: .system, family: .default))
         #expect(store.photoDisplayMode == .cameraPreviewFirst)
+    }
+
+    @Test func independentAppearanceModeAndFamilyUpdatesPersistAndReset() {
+        let storage = SampleSettingsStorage()
+        let persistence = SettingsPersistence(storage: storage)
+        let store = SettingsStore(
+            persistence: persistence,
+            rememberedAdvanceStorage: storage,
+            physicalMemory: 8 * 1024 * 1024 * 1024)
+
+        #expect(store.settings.appearance == AppearanceChoice(mode: .system, family: .default))
+
+        store.update { $0.appearance.family = .catppuccin }
+        #expect(store.settings.appearance == AppearanceChoice(mode: .system, family: .catppuccin))
+        #expect(
+            persistence.load().appearance == AppearanceChoice(mode: .system, family: .catppuccin))
+
+        store.update { $0.appearance.mode = .light }
+        #expect(store.settings.appearance == AppearanceChoice(mode: .light, family: .catppuccin))
+        #expect(
+            persistence.load().appearance == AppearanceChoice(mode: .light, family: .catppuccin))
+
+        store.update { $0.appearance.family = .gruvbox }
+        #expect(store.settings.appearance == AppearanceChoice(mode: .light, family: .gruvbox))
+        #expect(persistence.load().appearance == AppearanceChoice(mode: .light, family: .gruvbox))
+
+        store.update { $0.appearance.mode = .system }
+        #expect(store.settings.appearance == AppearanceChoice(mode: .system, family: .gruvbox))
+        #expect(persistence.load().appearance == AppearanceChoice(mode: .system, family: .gruvbox))
+
+        store.resetToDefaults()
+        #expect(store.settings.appearance == AppearanceChoice(mode: .system, family: .default))
+        #expect(persistence.load().appearance == AppearanceChoice(mode: .system, family: .default))
     }
 
     @Test func resizingBrowseShellWhileOnSettingsPreservesWidthTransition() async throws {

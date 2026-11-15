@@ -39,15 +39,7 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.grid.more").tap()
             app.buttons["Settings"].tap()
             XCTAssertFalse(sidebar.exists)
-            let matchSystem = app.switches["clove.settings.appearance.matchSystem"]
-            if matchSystem.value as? String == "1" {
-                matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-                    .withOffset(CGVector(dx: -50, dy: 0)).tap()
-                XCTAssertEqual(matchSystem.value as? String, "0")
-            }
-            let tile = element(app, "clove.settings.appearance.theme.\(theme)")
-            tile.tap()
-            XCTAssertTrue(tile.isSelected)
+            chooseTheme(theme, app)
             capture("ipad-settings-back-\(theme)")
             let back = element(app, "clove.nav.back")
             XCTAssertEqual(back.label, "Back")
@@ -368,16 +360,7 @@ final class CloveFlowTests: XCTestCase {
 
     @MainActor
     private func chooseRailTheme(_ theme: String, _ app: XCUIApplication) {
-        openSettingsCategory("clove.settings.category.appearance", in: app)
-        let matchSystem = app.switches["clove.settings.appearance.matchSystem"]
-        if matchSystem.value as? String == "1" {
-            matchSystem.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-                .withOffset(CGVector(dx: -50, dy: 0)).tap()
-            XCTAssertEqual(matchSystem.value as? String, "0")
-        }
-        let tile = element(app, "clove.settings.appearance.theme.\(theme)")
-        tile.tap()
-        XCTAssertTrue(tile.isSelected)
+        chooseTheme(theme, app)
     }
 
     @MainActor
@@ -1039,7 +1022,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.design.gallery").exists)
         XCTAssertTrue(element(app, "clove.mark.toolbar").exists)
         XCTAssertTrue(element(app, "clove.mark.starBar").exists)
-        let nord = element(app, "clove.design.gallery.theme.nord")
+        let dark = element(app, "clove.design.gallery.mode.dark")
+        dark.tap()
+        XCTAssertTrue(dark.isSelected)
+        let nord = element(app, "clove.design.gallery.family.nord")
         nord.tap()
         XCTAssertTrue(nord.isSelected)
     }
@@ -1380,7 +1366,7 @@ final class CloveFlowTests: XCTestCase {
         app.buttons["Settings"].tap()
         openSettingsCategory("clove.settings.category.appearance", in: app)
         XCTAssertTrue(
-            element(app, "clove.settings.appearance.theme.light").exists)
+            element(app, "clove.settings.appearance.family.default").exists)
         capture("theme-tiles")
         app.terminate()
         let opening = launchSample(["CLOVE_TEST_LIBRARY_OPENING": "empty"])
@@ -2724,8 +2710,13 @@ final class CloveFlowTests: XCTestCase {
 
         // 1. Design gallery across Light, Dark, and Nord (values 0–5, rejected, disabled, mixed, vertical, all labels).
         let gallery = launchSample(["CLOVE_DESIGN_GALLERY": "1"])
-        for theme in ["light", "dark", "nord"] {
-            element(gallery, "clove.design.gallery.theme.\(theme)").tap()
+        for (mode, family, theme) in [
+            ("light", "default", "light"),
+            ("dark", "default", "dark"),
+            ("dark", "nord", "nord"),
+        ] {
+            element(gallery, "clove.design.gallery.mode.\(mode)").tap()
+            element(gallery, "clove.design.gallery.family.\(family)").tap()
             let scroll = gallery.scrollViews.firstMatch
             let ratingAnchor = element(gallery, "clove.mark.ratingPicker")
             for _ in 0..<4 where !ratingAnchor.isHittable { scroll.swipeUp() }
@@ -2733,8 +2724,8 @@ final class CloveFlowTests: XCTestCase {
             let labelAnchor = element(gallery, "clove.design.gallery.labelPicker.vertical")
             for _ in 0..<4 where !labelAnchor.isHittable { scroll.swipeUp() }
             capture("gallery-tap-pickers-label-\(theme)")
-            for _ in 0..<6 where !element(gallery, "clove.design.gallery.theme.\(theme)").isHittable
-            {
+            for _ in 0..<6
+            where !element(gallery, "clove.design.gallery.family.\(family)").isHittable {
                 scroll.swipeDown()
             }
         }

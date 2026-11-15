@@ -19,8 +19,8 @@ enum SettingsKey: String, CaseIterable {
     case moveRejects = "rejects.moveEnabled"
     case similarGroups = "groups.similarEnabled"
     case gridGroupDisplay = "grid.groupDisplay"
-    case appearanceMatchesSystem = "appearance.matchSystem"
-    case appearanceTheme = "appearance.theme"
+    case appearanceMode = "appearance.mode"
+    case appearanceFamily = "appearance.family"
 }
 
 /// Reads and writes `AppSettings` through `SettingsStorage`, one key per field.
@@ -28,9 +28,13 @@ enum SettingsKey: String, CaseIterable {
 /// Every field falls back to its own `AppSettings` default when its key is missing or its text
 /// is not understood, so one corrupt value never resets the other settings. A setting added in
 /// a later version is simply absent from old storage and reads its default; add its key, decode
-/// it with that default, and write it in `save`. No migration step is required. Keys this
-/// version does not know are left untouched.
+/// it with that default, and write it in `save`. Keys this version does not know are left
+/// untouched. Legacy `appearance.matchSystem` / `appearance.theme` keys map explicitly when
+/// neither new appearance key is present.
 public struct SettingsPersistence: Sendable {
+    private static let legacyMatchSystemKey = "appearance.matchSystem"
+    private static let legacyThemeKey = "appearance.theme"
+
     private let storage: any SettingsStorage
 
     /// Uses the supplied store; production passes `UserDefaultsSettingsStorage()`.
@@ -66,11 +70,7 @@ public struct SettingsPersistence: Sendable {
             moveRejectsEnabled: boolean(.moveRejects) ?? defaults.moveRejectsEnabled,
             similarGroupsEnabled: boolean(.similarGroups) ?? defaults.similarGroupsEnabled,
             gridGroupDisplay: rawValue(.gridGroupDisplay) ?? defaults.gridGroupDisplay,
-            appearance: AppearanceChoice(
-                matchesSystemAppearance: boolean(.appearanceMatchesSystem)
-                    ?? defaults.appearance.matchesSystemAppearance,
-                theme: rawValue(.appearanceTheme) ?? defaults.appearance.theme
-            ),
+            appearance: loadAppearance(defaults: defaults.appearance),
             photoDisplayMode: rawValue(.photoDisplayMode)
         )
     }
@@ -91,10 +91,35 @@ public struct SettingsPersistence: Sendable {
         setBoolean(settings.moveRejectsEnabled, .moveRejects)
         setBoolean(settings.similarGroupsEnabled, .similarGroups)
         setText(settings.gridGroupDisplay.rawValue, .gridGroupDisplay)
-        setBoolean(settings.appearance.matchesSystemAppearance, .appearanceMatchesSystem)
-        setText(settings.appearance.theme.rawValue, .appearanceTheme)
+        setText(settings.appearance.mode.rawValue, .appearanceMode)
+        setText(settings.appearance.family.rawValue, .appearanceFamily)
         storage.setString(
             settings.photoDisplayMode?.rawValue, forKey: SettingsKey.photoDisplayMode.rawValue)
+    }
+
+    /// Loads `appearance.mode` and `appearance.family` independently when present, falling back
+    /// to an explicit legacy mapping when neither new key exists in storage.
+    private func loadAppearance(defaults: AppearanceChoice) -> AppearanceChoice {
+        let hasNewKeys = text(.appearanceMode) != nil || text(.appearanceFamily) != nil
+        if hasNewKeys {
+            return AppearanceChoice(
+                mode: rawValue(.appearanceMode) ?? defaults.mode,
+                family: rawValue(.appearanceFamily) ?? defaults.family
+            )
+        }
+
+        // Legacy mapping (issue #296):
+        // - matchSystem == "false": preserve the saved palette's family and Light/Dark mode.
+        // - matchSystem == "true", absent, or corrupt: System + Default, never silently activating
+        //   an inactive stored theme.
+        if storage.string(forKey: Self.legacyMatchSystemKey) == "false" {
+            let legacyTheme =
+                storage.string(forKey: Self.legacyThemeKey).flatMap(CloveTheme.init(rawValue:))
+                ?? .light
+            let legacyMode: AppearanceMode = legacyTheme.appearance == .light ? .light : .dark
+            return AppearanceChoice(mode: legacyMode, family: legacyTheme.family)
+        }
+        return defaults
     }
 
     /// Writes every key, then reads them back and reports whether storage kept the settings.

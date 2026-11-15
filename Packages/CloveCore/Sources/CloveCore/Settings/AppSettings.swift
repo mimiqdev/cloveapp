@@ -89,8 +89,8 @@ public struct AppSettings: Hashable, Sendable {
     /// How groups appear in the grid (PRD Grid, similar-group display); expanded by default.
     public var gridGroupDisplay: GridGroupDisplay
 
-    /// Whether the system appearance picks the theme, and the chosen theme otherwise
-    /// (`design/handoff/tokens/tokens.md`); matching the system, with Light chosen, by default.
+    /// The three-way appearance mode (Light, Dark, System) and paired theme family
+    /// (`design/handoff/tokens/tokens.md`); System + Default by default.
     public var appearance: AppearanceChoice
 
     /// An explicit display choice. Absent means use the measured device default.

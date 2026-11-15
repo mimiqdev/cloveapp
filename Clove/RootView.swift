@@ -14,11 +14,12 @@ import UIKit
 /// reopened through C11 before that validation, so a location that is gone lands on entry with the
 /// reason on its Recents item (PRD P0-02).
 ///
-/// The theme in effect comes from the Appearance setting and the system appearance: matching the
-/// system picks Light or Dark, otherwise the chosen theme applies in both, and its light or dark
-/// appearance fixes the window's color scheme and so the status bar and keyboard (tokens.md). The
-/// system appearance is read from the window scene's screen through ``SystemAppearanceReader``,
-/// never from this tree's `\.colorScheme`, which the window override would otherwise report back.
+/// The theme in effect comes from the Appearance setting's three-way mode (`Light`, `Dark`, or
+/// `System`) and paired theme family, resolved centrally against the actual system appearance.
+/// Explicit Light and Dark modes apply their color scheme; System follows the device's appearance
+/// within the selected family without fallback to Default (`tokens.md`). The system appearance is
+/// read from the window scene's screen through ``SystemAppearanceReader``, never from this tree's
+/// `\.colorScheme`, which the window override would otherwise report back.
 struct RootView: View {
     /// This scene's stored browsing state; the key is per scene, so scenes never share it.
     @SceneStorage("clove.browsing.state") private var storedState: Data?
@@ -105,16 +106,20 @@ struct RootView: View {
     /// (PRD P0-02, G1 folder access).
     @Environment(\.scenePhase) private var scenePhase
 
-    /// The theme in effect for the Appearance setting and the system appearance (tokens.md).
+    /// The theme in effect resolved centrally from mode, family, and actual system appearance
+    /// (tokens.md).
     private var themeInEffect: CloveTheme {
-        settings.settings.appearance.theme(inSystemAppearance: systemAppearance)
+        settings.settings.appearance.resolvedTheme(inSystemAppearance: systemAppearance)
     }
 
-    /// The window's color scheme: nil while matching the system, so the system's own appearance
-    /// keeps driving; otherwise the chosen theme's appearance (tokens.md).
+    /// The window's color scheme: nil in System mode so the device's appearance keeps driving, or
+    /// the forced Light / Dark scheme otherwise (tokens.md).
     private var preferredColourScheme: ColorScheme? {
-        guard !settings.settings.appearance.matchesSystemAppearance else { return nil }
-        return themeInEffect.appearance.colorScheme
+        switch settings.settings.appearance.mode {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
     }
 
     /// The device's style at launch, so a dark system does not flash Light first.

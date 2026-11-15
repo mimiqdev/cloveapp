@@ -3,7 +3,7 @@
 ///
 /// The colour tokens are the 22 `Color.clove.*` values the chrome uses; `opacity/rejected` is a
 /// number and stays on ``ThemeTokens/rejectedOpacity``. A token added to the JSON needs a case
-/// here, and the switch in ``ThemeTokens/subscript(_:)`` then fails to compile until the eight
+/// here, and the switch in ``ThemeTokens/subscript(_:)`` then fails to compile until all twelve
 /// palettes carry it.
 public enum ThemeToken: String, CaseIterable, Hashable, Sendable {
     /// App background behind lists, grids and chrome.
@@ -76,7 +76,7 @@ public enum ThemeToken: String, CaseIterable, Hashable, Sendable {
 /// The 22 colour tokens and the rejected-photo opacity of one theme.
 ///
 /// Values come from `design/handoff/tokens/clove-themes.json`, the file a test reads and compares
-/// token by token. The eight palettes live on this type; ``CloveTheme/tokens`` picks the one a
+/// token by token. The twelve palettes live on this type; ``CloveTheme/tokens`` picks the one a
 /// theme uses.
 public struct ThemeTokens: Hashable, Sendable {
     /// See `bg/canvas`.
@@ -156,7 +156,7 @@ public struct ThemeTokens: Hashable, Sendable {
     }
 }
 
-// MARK: - The eight palettes
+// MARK: - The twelve palettes
 
 extension ThemeTokens {
     /// Light: the system light default (clove-themes.json).
@@ -213,6 +213,33 @@ extension ThemeTokens {
         rejectedOpacity: 0.3
     )
 
+    /// Darkroom Light: Clove-designed light companion for Darkroom (clove-themes.json).
+    static let darkroomLight = ThemeTokens(
+        canvas: ThemeColour(hex: 0xF3F3F3),
+        stage: ThemeColour(hex: 0xD3D3D3),
+        glass: ThemeColour(hex: 0xFAFAFA, alpha: 204.0 / 255),
+        sheet: ThemeColour(hex: 0xE9E9E9),
+        card: ThemeColour(hex: 0xFAFAFA),
+        primaryText: ThemeColour(hex: 0x222222),
+        secondaryText: ThemeColour(hex: 0x666666),
+        separator: ThemeColour(hex: 0x222222, alpha: 31.0 / 255),
+        accent: ThemeColour(hex: 0x536579),
+        ratingOn: ThemeColour(hex: 0x98671F),
+        ratingOff: ThemeColour(hex: 0x222222, alpha: 64.0 / 255),
+        reject: ThemeColour(hex: 0xA74640),
+        saved: ThemeColour(hex: 0x41684B),
+        failed: ThemeColour(hex: 0xA74640),
+        labelRed: ThemeColour(hex: 0xB6423B),
+        labelYellow: ThemeColour(hex: 0x9C781B),
+        labelGreen: ThemeColour(hex: 0x41684B),
+        labelBlue: ThemeColour(hex: 0x486B99),
+        labelPurple: ThemeColour(hex: 0x77578F),
+        group: ThemeColour(hex: 0x536579),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
+        rejectedOpacity: 0.28
+    )
+
     /// Darkroom: a neutral mid-grey stage and muted accents for judging color and exposure
     /// (clove-themes.json).
     static let darkroom = ThemeTokens(
@@ -239,6 +266,33 @@ extension ThemeTokens {
         focusOutline: ThemeColour(hex: 0xFFFFFF),
         focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.35
+    )
+
+    /// Night Light: Clove-designed warm light companion for Night (clove-themes.json).
+    static let nightLight = ThemeTokens(
+        canvas: ThemeColour(hex: 0xF7F0E8),
+        stage: ThemeColour(hex: 0xE6DBD0),
+        glass: ThemeColour(hex: 0xFFFAF5, alpha: 204.0 / 255),
+        sheet: ThemeColour(hex: 0xEFE5DB),
+        card: ThemeColour(hex: 0xFFFAF5),
+        primaryText: ThemeColour(hex: 0x3B2B23),
+        secondaryText: ThemeColour(hex: 0x7C6254),
+        separator: ThemeColour(hex: 0x3B2B23, alpha: 31.0 / 255),
+        accent: ThemeColour(hex: 0x8A5123),
+        ratingOn: ThemeColour(hex: 0xAA690A),
+        ratingOff: ThemeColour(hex: 0x3B2B23, alpha: 64.0 / 255),
+        reject: ThemeColour(hex: 0xAE4B3E),
+        saved: ThemeColour(hex: 0x596E36),
+        failed: ThemeColour(hex: 0xAE4B3E),
+        labelRed: ThemeColour(hex: 0xA43D32),
+        labelYellow: ThemeColour(hex: 0x9A6B0E),
+        labelGreen: ThemeColour(hex: 0x526D36),
+        labelBlue: ThemeColour(hex: 0x485F7D),
+        labelPurple: ThemeColour(hex: 0x70557F),
+        group: ThemeColour(hex: 0x8A5123),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
+        rejectedOpacity: 0.28
     )
 
     /// Night: warm, dim chrome with no blue light (clove-themes.json).
@@ -322,6 +376,33 @@ extension ThemeTokens {
         rejectedOpacity: 0.3
     )
 
+    /// Nord Light: Clove-designed light companion for Nord (clove-themes.json).
+    static let nordLight = ThemeTokens(
+        canvas: ThemeColour(hex: 0xECEFF4),
+        stage: ThemeColour(hex: 0xD8DEE9),
+        glass: ThemeColour(hex: 0xF8FAFC, alpha: 204.0 / 255),
+        sheet: ThemeColour(hex: 0xE5E9F0),
+        card: ThemeColour(hex: 0xF8FAFC),
+        primaryText: ThemeColour(hex: 0x2E3440),
+        secondaryText: ThemeColour(hex: 0x4C566A),
+        separator: ThemeColour(hex: 0x2E3440, alpha: 31.0 / 255),
+        accent: ThemeColour(hex: 0x3B7080),
+        ratingOn: ThemeColour(hex: 0x9C722C),
+        ratingOff: ThemeColour(hex: 0x2E3440, alpha: 64.0 / 255),
+        reject: ThemeColour(hex: 0x9B4852),
+        saved: ThemeColour(hex: 0x526D40),
+        failed: ThemeColour(hex: 0x9B4852),
+        labelRed: ThemeColour(hex: 0x9B4852),
+        labelYellow: ThemeColour(hex: 0x9C722C),
+        labelGreen: ThemeColour(hex: 0x526D40),
+        labelBlue: ThemeColour(hex: 0x486B8D),
+        labelPurple: ThemeColour(hex: 0x795374),
+        group: ThemeColour(hex: 0x3B7080),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
+        rejectedOpacity: 0.28
+    )
+
     /// Nord: the arctic blue-grey editor palette (clove-themes.json).
     static let nord = ThemeTokens(
         canvas: ThemeColour(hex: 0x2E3440),
@@ -347,6 +428,33 @@ extension ThemeTokens {
         focusOutline: ThemeColour(hex: 0xFFFFFF),
         focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
         rejectedOpacity: 0.3
+    )
+
+    /// Gruvbox Light: Clove-designed light companion for Gruvbox (clove-themes.json).
+    static let gruvboxLight = ThemeTokens(
+        canvas: ThemeColour(hex: 0xFBF1C7),
+        stage: ThemeColour(hex: 0xEBDBB2),
+        glass: ThemeColour(hex: 0xF9F5D7, alpha: 204.0 / 255),
+        sheet: ThemeColour(hex: 0xF2E5BC),
+        card: ThemeColour(hex: 0xF9F5D7),
+        primaryText: ThemeColour(hex: 0x3C3836),
+        secondaryText: ThemeColour(hex: 0x665C54),
+        separator: ThemeColour(hex: 0x3C3836, alpha: 31.0 / 255),
+        accent: ThemeColour(hex: 0x356748),
+        ratingOn: ThemeColour(hex: 0xB57614),
+        ratingOff: ThemeColour(hex: 0x3C3836, alpha: 64.0 / 255),
+        reject: ThemeColour(hex: 0x9D0006),
+        saved: ThemeColour(hex: 0x79740E),
+        failed: ThemeColour(hex: 0x9D0006),
+        labelRed: ThemeColour(hex: 0x9D0006),
+        labelYellow: ThemeColour(hex: 0xB57614),
+        labelGreen: ThemeColour(hex: 0x79740E),
+        labelBlue: ThemeColour(hex: 0x076678),
+        labelPurple: ThemeColour(hex: 0x8F3F71),
+        group: ThemeColour(hex: 0x356748),
+        focusOutline: ThemeColour(hex: 0xFFFFFF),
+        focusEdge: ThemeColour(hex: 0x000000, alpha: 115.0 / 255),
+        rejectedOpacity: 0.28
     )
 
     /// Gruvbox: the retro warm editor palette (clove-themes.json).

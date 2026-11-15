@@ -2,14 +2,12 @@ import XCTest
 
 /// Restores the original browsing safety net, adapted only to the designed controls and glyphs.
 extension CloveFlowTests {
-    /// The Appearance setting keeps a chosen theme across a relaunch (V1, tokens.md).
+    /// The Appearance setting keeps independent mode and family choices across a relaunch and
+    /// preserves each axis when the other changes.
     ///
     /// This launch uses the app's own settings storage rather than the sample library, because
-    /// the check is that the next launch reads what this one stored. The teardown puts Match
-    /// system back on, so the other tests see the usual appearance. What is stored and how a
-    /// theme resolves are CloveCore's: `savingAndLoadingRoundTripsEveryField`,
-    /// `userDefaultsStorageRoundTripsUnderOneVersionedNamespace` and
-    /// `matchingTheSystemPicksLightOrDark`.
+    /// the check is that the next launch reads what this one stored. The teardown puts System +
+    /// Default back on, so other tests see the default appearance.
     @MainActor @objc
     func testAppearanceChoicePersistsAcrossLaunches() {
         addTeardownBlock { @MainActor in
@@ -25,13 +23,31 @@ extension CloveFlowTests {
         openSettings(in: app)
         openSettingsCategory("clove.settings.category.appearance", in: app)
         _ = scrollToSettingsControl(
-            "clove.settings.appearance.matchSystem", in: app, scrollsUp: false)
-        setAppearanceMatchSystem(in: app, on: false)
+            "clove.settings.appearance.mode", in: app, scrollsUp: false)
 
-        let nord = app.buttons["clove.settings.appearance.theme.nord"]
-        XCTAssertTrue(nord.exists, "The theme picker had no Nord tile")
-        nord.tap()
-        XCTAssertTrue(nord.isSelected, "Nord did not become the chosen theme")
+        let modePicker = element(in: app, "clove.settings.appearance.mode")
+        XCTAssertTrue(modePicker.exists, "Settings had no appearance mode picker")
+        XCTAssertTrue(
+            modePicker.buttons["System"].isSelected,
+            "System mode did not start selected")
+        XCTAssertTrue(
+            app.buttons["clove.settings.appearance.family.default"].isSelected,
+            "Default family did not start selected")
+
+        // Choosing a non-default family preserves System mode.
+        let catppuccin = app.buttons["clove.settings.appearance.family.catppuccin"]
+        XCTAssertTrue(catppuccin.exists, "The theme picker had no Catppuccin tile")
+        catppuccin.tap()
+        XCTAssertTrue(catppuccin.isSelected, "Catppuccin did not become selected")
+        XCTAssertTrue(
+            modePicker.buttons["System"].isSelected,
+            "Selecting a non-default family unexpectedly changed System mode")
+
+        // Changing mode preserves the chosen family.
+        setAppearanceMode(in: app, to: "Dark")
+        XCTAssertTrue(
+            catppuccin.isSelected,
+            "Changing mode unexpectedly reset the selected family")
 
         app.terminate()
         app.launch()
@@ -40,12 +56,103 @@ extension CloveFlowTests {
             element(in: app, "clove.root").waitForExistence(timeout: 30),
             "The relaunched Clove did not appear")
         openSettings(in: app)
+        let appearanceRow = element(in: app, "clove.settings.category.appearance")
+        if appearanceRow.exists, let summary = appearanceRow.value as? String, !summary.isEmpty {
+            XCTAssertEqual(summary, "Dark · Catppuccin")
+        }
         openSettingsCategory("clove.settings.category.appearance", in: app)
-        let storedMatchSystem = app.switches["clove.settings.appearance.matchSystem"]
-        XCTAssertEqual(storedMatchSystem.value as? String, "0", "The relaunch lost Match system")
+        let relaunchedMode = element(in: app, "clove.settings.appearance.mode")
         XCTAssertTrue(
-            app.buttons["clove.settings.appearance.theme.nord"].isSelected,
-            "The relaunch lost the chosen theme")
+            relaunchedMode.buttons["Dark"].isSelected,
+            "The relaunch lost the Dark mode")
+        XCTAssertTrue(
+            app.buttons["clove.settings.appearance.family.catppuccin"].isSelected,
+            "The relaunch lost the Catppuccin family")
+    }
+
+    /// System mode + a non-default family stays on System + that family across live system
+    /// appearance transitions without falling back to Default, while explicit Light/Dark modes
+    /// ignore system appearance transitions, and Reset restores System · Default.
+    @MainActor
+    func testSystemModeWithNonDefaultFamilyTracksSystemAppearance() throws {
+        let initialDeviceAppearance = XCUIDevice.shared.appearance
+        addTeardownBlock { @MainActor in
+            XCUIDevice.shared.appearance = initialDeviceAppearance
+            Self.restoreAppearance()
+        }
+
+        XCUIDevice.shared.appearance = .light
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(
+            element(in: app, "clove.root").waitForExistence(timeout: 30),
+            "The Clove root view did not appear")
+        openSettings(in: app)
+        let appearanceRow = element(in: app, "clove.settings.category.appearance")
+        if appearanceRow.exists, let summary = appearanceRow.value as? String, !summary.isEmpty {
+            XCTAssertEqual(summary, "System · Default")
+        }
+        openSettingsCategory("clove.settings.category.appearance", in: app)
+
+        let nord = app.buttons["clove.settings.appearance.family.nord"]
+        XCTAssertTrue(nord.waitForExistence(timeout: 5), "Nord family tile missing")
+        nord.tap()
+        XCTAssertTrue(nord.isSelected)
+        XCTAssertTrue(
+            element(in: app, "clove.settings.appearance.mode").buttons["System"].isSelected)
+
+        let lightSystemShot = XCUIScreen.main.screenshot().pngRepresentation
+
+        XCUIDevice.shared.appearance = .dark
+        let modeControl = element(in: app, "clove.settings.appearance.mode")
+        XCTAssertTrue(
+            wait(
+                NSPredicate { _, _ in
+                    XCUIScreen.main.screenshot().pngRepresentation != lightSystemShot
+                },
+                modeControl),
+            "System + Nord did not update UI when device switched from Light to Dark")
+        XCTAssertTrue(modeControl.buttons["System"].isSelected)
+        XCTAssertTrue(nord.isSelected, "System appearance change fell back away from Nord")
+
+        // Explicit Light ignores dark system appearance; explicit Dark stays dark even on light system.
+        setAppearanceMode(in: app, to: "Light")
+        XCTAssertTrue(nord.isSelected)
+        let forcedLightOnDarkSystem = XCUIScreen.main.screenshot().pngRepresentation
+        XCUIDevice.shared.appearance = .light
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertTrue(modeControl.buttons["Light"].isSelected)
+        XCTAssertTrue(nord.isSelected)
+
+        setAppearanceMode(in: app, to: "Dark")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertTrue(nord.isSelected)
+        let forcedDarkOnLightSystem = XCUIScreen.main.screenshot().pngRepresentation
+        XCTAssertNotEqual(forcedLightOnDarkSystem, forcedDarkOnLightSystem)
+
+        // Navigate back to compact Settings home if needed and Reset to defaults.
+        let backToSettings = app.navigationBars.buttons["Settings"]
+        if backToSettings.exists, !element(in: app, "clove.settings.reset").exists {
+            backToSettings.tap()
+        }
+        let reset = scrollToSettingsControl("clove.settings.reset", in: app)
+        XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        reset.tap()
+        let confirm = app.alerts["Reset settings to defaults?"].buttons["Reset"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate { _, _ in
+                    let value =
+                        self.element(in: app, "clove.settings.category.appearance").value
+                        as? String
+                    return value == "System · Default"
+                        || self.element(in: app, "clove.settings.appearance.family.default")
+                            .isSelected
+                },
+                app))
     }
 
     @MainActor
@@ -65,49 +172,59 @@ extension CloveFlowTests {
         if appearanceCategory.exists {
             appearanceCategory.tap()
         }
-        let toggle = app.switches["clove.settings.appearance.matchSystem"]
-        guard toggle.waitForExistence(timeout: 5) else { return }
-
-        // Matching off first, so choosing Light applies instead of being ignored.
-        if toggle.value as? String == "1" {
-            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-            XCTAssertEqual(toggle.value as? String, "0")
+        let modeControl = app.descendants(matching: .any)["clove.settings.appearance.mode"]
+        guard modeControl.waitForExistence(timeout: 5) else { return }
+        let systemButton = modeControl.buttons["System"]
+        if systemButton.exists, !systemButton.isSelected {
+            systemButton.tap()
         }
-        let light = app.buttons["clove.settings.appearance.theme.light"]
-        if light.exists {
-            light.tap()
-        }
-        if toggle.value as? String == "0" {
-            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-            XCTAssertEqual(toggle.value as? String, "1")
+        let defaultFamily = app.buttons["clove.settings.appearance.family.default"]
+        if defaultFamily.exists, !defaultFamily.isSelected {
+            defaultFamily.tap()
         }
     }
 
-    /// Turns Match system light/dark on or off, and checks that the switch followed.
-    ///
-    /// A SwiftUI row toggle flips only on its switch, which sits at the trailing edge; a tap in
-    /// the middle of the row lands on the label.
+    /// Selects one of the segmented appearance modes (`Light`, `Dark`, or `System`).
     @MainActor
-    private func setAppearanceMatchSystem(in app: XCUIApplication, on: Bool) {
-        let toggle = app.switches["clove.settings.appearance.matchSystem"]
-        XCTAssertTrue(
-            toggle.exists, "Settings had no Match system switch")
-        if switchValue(toggle) != (on ? "1" : "0") {
-            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+    func setAppearanceMode(in app: XCUIApplication, to modeTitle: String) {
+        let picker = element(in: app, "clove.settings.appearance.mode")
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "Settings had no appearance mode picker")
+        let option = picker.buttons[modeTitle]
+        XCTAssertTrue(option.exists, "Appearance mode picker had no \(modeTitle) option")
+        if !option.isSelected {
+            option.tap()
         }
-        XCTAssertEqual(
-            switchValue(toggle), on ? "1" : "0",
-            "Match system did not turn \(on ? "on" : "off")")
+        XCTAssertTrue(option.isSelected, "Appearance mode did not switch to \(modeTitle)")
     }
 
-    /// The opt-in design captures use the same switch handling as the restored appearance test.
+    /// Selects a theme family and optional mode from a resolved palette or family identifier.
     @MainActor
     func chooseTheme(_ theme: String, _ app: XCUIApplication) {
         openSettingsCategory("clove.settings.category.appearance", in: app)
-        setAppearanceMatchSystem(in: app, on: false)
-        let tile = element(in: app, "clove.settings.appearance.theme.\(theme)")
+        let (modeTitle, familyID) = Self.modeAndFamily(for: theme)
+        setAppearanceMode(in: app, to: modeTitle)
+        let tile = element(in: app, "clove.settings.appearance.family.\(familyID)")
+        XCTAssertTrue(tile.exists, "Theme family tile missing for \(familyID)")
         tile.tap()
-        XCTAssertTrue(tile.isSelected)
+        XCTAssertTrue(tile.isSelected, "Theme family \(familyID) did not become selected")
+    }
+
+    private static func modeAndFamily(for theme: String) -> (mode: String, family: String) {
+        switch theme {
+        case "light": ("Light", "default")
+        case "dark": ("Dark", "default")
+        case "catppuccin-latte": ("Light", "catppuccin")
+        case "catppuccin-mocha": ("Dark", "catppuccin")
+        case "darkroom-light": ("Light", "darkroom")
+        case "darkroom": ("Dark", "darkroom")
+        case "night-light": ("Light", "night")
+        case "night": ("Dark", "night")
+        case "nord-light": ("Light", "nord")
+        case "nord": ("Dark", "nord")
+        case "gruvbox-light": ("Light", "gruvbox")
+        case "gruvbox": ("Dark", "gruvbox")
+        default: ("Dark", theme)
+        }
     }
 
     /// The browsing path through the real controls, from Entry to the grid, detail, the
