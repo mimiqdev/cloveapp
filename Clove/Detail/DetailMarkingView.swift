@@ -76,13 +76,20 @@ struct DetailMarkingView: View {
     /// Where navigation and marks go, in the screen's own order (PRD P0-04; PRD P0-12).
     let actions: DetailMarkingActions
     var duo: DuoDetailLayout?
+    var presentation: Binding<DetailPresentation>? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.cloveTheme) private var theme
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.hasFoldRegion) private var hasFoldRegion
     @Environment(\.displayScale) private var displayScale
     @State private var hidesChrome = false
+    @State private var widePresentation: DetailPresentation
+    @State private var ownedFoldedGroup: GroupID?
+    @State private var containerSize: CGSize = .zero
+    @State private var pendingRestoredZoom: DetailZoomSnapshot?
     @State private var windowID = UUID()
     @State private var currentWindow: DetailPhotoWindow?
     @State private var previousPosition: Int?
@@ -153,6 +160,30 @@ struct DetailMarkingView: View {
     /// Whether the view holds the keyboard focus its hardware keys arrive through (PRD P0-06).
     @FocusState private var hasKeyFocus: Bool
 
+    init(
+        browsing: BrowsingModel,
+        photo: GridPhoto,
+        settings: AppSettings,
+        images: any DetailImageSource,
+        displayMode: PhotoDisplayMode = .rawFirst,
+        order: [GridPhoto],
+        actions: DetailMarkingActions,
+        duo: DuoDetailLayout? = nil,
+        presentation: Binding<DetailPresentation>? = nil,
+        initialPresentation: DetailPresentation = .photoPreview
+    ) {
+        self.browsing = browsing
+        self.photo = photo
+        self.settings = settings
+        self.images = images
+        self.displayMode = displayMode
+        self.order = order
+        self.actions = actions
+        self.duo = duo
+        self.presentation = presentation
+        _widePresentation = State(initialValue: initialPresentation)
+    }
+
     var body: some View {
         detailLayout
             .focusable()
@@ -168,6 +199,12 @@ struct DetailMarkingView: View {
                 showsToolbarStars = false
                 toolbarDragRating = nil
                 inspectedFocusRegionID = nil
+                pendingRestoredZoom = nil
+            }
+            .onChange(of: browsing.currentGroup?.id) { _, _ in
+                if duo == nil, ownedFoldedGroup != nil {
+                    ownedFoldedGroup = nil
+                }
             }
             .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
                 await loadPreview(for: photo)
@@ -194,6 +231,36 @@ struct DetailMarkingView: View {
 
     private var usesRail: Bool { horizontalSizeClass == .regular && duo == nil }
 
+    private var presentationPolicy: DetailPresentationPolicy {
+        DetailPresentationPolicy(
+            isRegularWidth: horizontalSizeClass == .regular,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            hasFoldRegion: hasFoldRegion,
+            availableWidth: Double(containerSize.width),
+            availableHeight: Double(containerSize.height))
+    }
+
+    private var presentationBinding: Binding<DetailPresentation> {
+        presentation ?? duo?.presentation ?? $widePresentation
+    }
+
+    private var foldedGroupBinding: Binding<GroupID?> {
+        duo?.foldedGroup ?? $ownedFoldedGroup
+    }
+
+    private var effectivePresentation: DetailPresentation {
+        presentationPolicy.effectivePresentation(for: presentationBinding.wrappedValue)
+    }
+
+    private var showsPhotoGrid: Bool {
+        effectivePresentation.showsPhotoGrid
+    }
+
+    private var showsFilmstrip: Bool {
+        !showsPhotoGrid
+    }
+
     private var detailLayout: some View {
         Group {
             if let duo {
@@ -205,6 +272,13 @@ struct DetailMarkingView: View {
             }
         }
         .background(Color.clove.bg.stage)
+        .onGeometryChange(for: CGSize.self) {
+            $0.size
+        } action: { size in
+            if containerSize != size {
+                containerSize = size
+            }
+        }
         .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
         .animation(.easeInOut(duration: 0.2), value: filmstripIsVisible)
         .task(id: scale > DetailFitScale.tolerance) {
@@ -227,6 +301,9 @@ struct DetailMarkingView: View {
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
                     showsUndo: chromeIsVisible
                 ) {
+                    if presentationPolicy.supportsPhotoPreview {
+                        photoGridToggle
+                    }
                     focusRegionsToggle
                 } tools: {
                     if chromeIsVisible {
@@ -242,6 +319,38 @@ struct DetailMarkingView: View {
                     .axisBehavior(.horizontalOnly)
             }
             .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder private var photoGridToggle: some View {
+        let gridShown = showsPhotoGrid
+        let actionTitle = gridShown ? "Hide photo grid" : "Show photo grid"
+        let stateValue = gridShown ? "Photo Preview" : "Focus View"
+        if usesSystemToolbar {
+            Button {
+                togglePresentation()
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .foregroundStyle(gridShown ? Color.clove.accent : Color.clove.text.primary)
+            }
+            .tint(gridShown ? Color.clove.accent : Color.clove.text.primary)
+            .help(actionTitle)
+            .accessibilityLabel(actionTitle)
+            .accessibilityValue(stateValue)
+            .accessibilityAddTraits(gridShown ? .isSelected : [])
+            .accessibilityIdentifier("clove.detail.gridToggle")
+        } else {
+            GlassIconButton(
+                label: actionTitle,
+                symbol: "sidebar.left",
+                isActive: gridShown,
+                activeAccessibilityValue: stateValue,
+                size: usesRail ? .pad : .phone,
+                identifier: "clove.detail.gridToggle"
+            ) {
+                togglePresentation()
+            }
+            .help(actionTitle)
+        }
     }
 
     @ViewBuilder private var focusRegionsToggle: some View {
@@ -290,8 +399,12 @@ struct DetailMarkingView: View {
     @ViewBuilder private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
         if #available(iOS 27.1, *) {
             Group {
-                if duo.showsGrid && duo.split.wrappedValue == .focus {
-                    PhotoArrangement(grid: duo.grid, split: duo.split, back: { browsing.back() }) {
+                if duo.showsGrid && showsPhotoGrid {
+                    PhotoArrangement(
+                        grid: AnyView(splitGridPane),
+                        presentation: duo.presentation,
+                        back: { browsing.back() }
+                    ) {
                         duoPhotoPane(showsFilmstrip: false)
                     }
                 } else {
@@ -305,6 +418,9 @@ struct DetailMarkingView: View {
                     if duo.showsGrid {
                         duo.filter
                         duo.more
+                        if presentationPolicy.supportsPhotoPreview {
+                            photoGridToggle
+                        }
                     }
                     focusRegionsToggle
                     Button("Info", systemImage: "info.circle") { showsInformation = true }
@@ -329,7 +445,7 @@ struct DetailMarkingView: View {
                         duo.bottom
                     }
                 }
-                if !duo.showsGrid || duo.split.wrappedValue == .photoOnly {
+                if !duo.showsGrid || !showsPhotoGrid {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
                         .axisBehavior(.horizontalOnly)
                 }
@@ -399,14 +515,14 @@ struct DetailMarkingView: View {
         .contentMargins(for: .container, edges: .horizontal)
         .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(showsFilmstrip ? "clove.duo.photoOnly" : "clove.duo.focus")
+        .accessibilityIdentifier(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
     }
 
-    /// The Duo's photo-only strip can fold the photo's group back into its stack. Folding keeps
-    /// the photo, its marks and the route as they are, and the stack reopens the group in place
-    /// (owner decision, 2026-11-13, #225). The folded Duo keeps its iPhone-style detail.
+    /// Focus View's filmstrip and Photo Preview's grid share the folded-group binding so folding
+    /// keeps the photo, its marks and the route as they are across toggles (#225, #256).
     private var groupFold: FilmstripGroupFold? {
-        guard isDuoExpanded, let folded = duo?.foldedGroup else { return nil }
+        guard isDuoExpanded || presentationPolicy.supportsPhotoPreview else { return nil }
+        let folded = foldedGroupBinding
         return FilmstripGroupFold(
             isFolded: folded.wrappedValue == browsing.currentGroup?.id,
             fold: {
@@ -455,6 +571,9 @@ struct DetailMarkingView: View {
                         }
                     }
                 } leadingTools: {
+                    if presentationPolicy.supportsPhotoPreview {
+                        photoGridToggle
+                    }
                     focusRegionsToggle
                 } tools: {
                     if chromeIsVisible {
@@ -473,20 +592,71 @@ struct DetailMarkingView: View {
             }
             FolderSaveBanner(
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
-            HStack(spacing: 0) {
-                photoStage
-                if usesRail {
-                    DetailMarkRail(
-                        marks: displayMarks, settings: settings,
-                        previewRating: swipeFeedback.rating,
-                        rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
-                        toggleReject: { toggleReject() }, markingBegan: beginMarkingGesture
-                    )
-                    .disabled(!browsing.canMark)
+            Group {
+                if #available(iOS 27.1, *), hasFoldRegion, showsPhotoGrid {
+                    PhotoArrangement(
+                        grid: AnyView(splitGridPane),
+                        presentation: presentationBinding,
+                        back: { browsing.back() }
+                    ) {
+                        standardDetailStage
+                    }
+                } else {
+                    SplitPhotoView(
+                        showsGrid: showsPhotoGrid,
+                        presentation: presentationBinding,
+                        back: { browsing.back() }
+                    ) {
+                        splitGridPane
+                    } secondary: {
+                        standardDetailStage
+                    }
                 }
             }
         }
         .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
+    }
+
+    private var standardDetailStage: some View {
+        HStack(spacing: 0) {
+            photoStage
+            if usesRail {
+                DetailMarkRail(
+                    marks: displayMarks, settings: settings,
+                    previewRating: swipeFeedback.rating,
+                    rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
+                    toggleReject: { toggleReject() }, markingBegan: beginMarkingGesture
+                )
+                .disabled(!browsing.canMark)
+            }
+        }
+    }
+
+    private var splitGridPane: some View {
+        SplitFolderGridPane(
+            browsing: browsing,
+            thumbnails: browsing.thumbnails,
+            similarGroupsEnabled: settings.similarGroupsEnabled,
+            foldedGroup: foldedGroupBinding,
+            openPhoto: actions.openPhoto)
+    }
+
+    private func togglePresentation() {
+        captureZoomForPresentationTransition()
+        presentationBinding.wrappedValue = presentationBinding.wrappedValue.toggled
+    }
+
+    private func captureZoomForPresentationTransition() {
+        guard scale > DetailFitScale.tolerance,
+            let snapshot = probe.container?.zoomSnapshot
+        else {
+            pendingRestoredZoom = nil
+            return
+        }
+        if case .fullResolution(_, let size) = zoomMode {
+            zoomMode = .fullResolution(anchor: snapshot.anchor, size: size)
+        }
+        pendingRestoredZoom = snapshot
     }
 
     private var photoStage: some View {
@@ -506,14 +676,15 @@ struct DetailMarkingView: View {
                             .foregroundStyle(Color.clove.text.primary)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .cloveGlass(in: Capsule())
-                            .padding(.bottom, filmstripIsVisible ? 0 : 12)
+                            .padding(.bottom, (showsFilmstrip && filmstripIsVisible) ? 0 : 12)
                     }
-                    if filmstripIsVisible {
+                    if showsFilmstrip && filmstripIsVisible {
                         VStack(spacing: 8) {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
                                 open: actions.openPhoto,
-                                groups: browsing.groups, finishingAction: finishingAction)
+                                groups: browsing.groups, finishingAction: finishingAction,
+                                groupFold: groupFold)
                             if chromeIsVisible && !usesRail {
                                 MarkingToolbar(
                                     rating: swipeFeedback.rating
@@ -616,14 +787,23 @@ struct DetailMarkingView: View {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
                 controlsHeight: controlsHeight,
-                chromeIsVisible: filmstripIsVisible || chromeIsVisible)
+                chromeIsVisible: (showsFilmstrip && filmstripIsVisible) || chromeIsVisible)
         }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { size in
             guard size != viewSize else { return }
             viewSize = size
-            retargetFullResolution(for: size)
+            if let restored = pendingRestoredZoom {
+                pendingRestoredZoom = nil
+                if case .fullResolution = zoomMode {
+                    retargetFullResolution(for: size, force: true)
+                } else if isDuoExpanded {
+                    setZoom(.scale(restored.scale, anchor: restored.anchor.unitPoint))
+                }
+            } else {
+                retargetFullResolution(for: size)
+            }
         }
         .overlay { previewState }
         .overlay(alignment: .top) { focusRegionStatus }
@@ -1172,7 +1352,7 @@ struct DetailMarkingView: View {
         upgradeTask = Task { await upgrade(need: .fullResolution) }
     }
 
-    private func retargetFullResolution(for size: CGSize) {
+    private func retargetFullResolution(for size: CGSize, force: Bool = false) {
         guard size.width > 0, size.height > 0,
             case .fullResolution(let chosen, _) = zoomMode,
             scale > DetailFitScale.tolerance,
@@ -1181,7 +1361,7 @@ struct DetailMarkingView: View {
                 nativePixels: shown.fullResolutionPixels, shownPixels: pixelSize(shown),
                 viewSize: size, screenScale: displayScale, previewIsAll: previewOnly),
             target > DetailFitScale.tolerance,
-            abs(target - scale) > 0.005
+            force || abs(target - scale) > 0.005
         else { return }
         let anchor = probe.container?.zoomSnapshot?.anchor ?? chosen
         zoomMode = .fullResolution(anchor: anchor, size: shown.fullResolutionPixels)

@@ -22,6 +22,9 @@ struct GlassIconButton: View {
     /// filter fills with `accent` and reports On or Off (components.md).
     var isActive: Bool?
 
+    /// Optional accessibility value override when `isActive` is non-nil.
+    var activeAccessibilityValue: String?
+
     /// The size components.md measures on the device.
     var size: ControlSize = .phone
 
@@ -48,7 +51,9 @@ struct GlassIconButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
-        .modifier(ActiveStateAccessibility(isActive: isActive))
+        .modifier(
+            ActiveStateAccessibility(isActive: isActive, valueOverride: activeAccessibilityValue)
+        )
         .accessibilityIdentifier(identifier)
     }
 
@@ -91,11 +96,12 @@ struct GlassIconButton: View {
 private struct ActiveStateAccessibility: ViewModifier {
     /// The active state, or nil for a button without one.
     let isActive: Bool?
+    let valueOverride: String?
 
     func body(content: Content) -> some View {
         if let isActive {
             content
-                .accessibilityValue(isActive ? "On" : "Off")
+                .accessibilityValue(valueOverride ?? (isActive ? "On" : "Off"))
                 .accessibilityAddTraits(isActive ? .isSelected : [])
         } else {
             content

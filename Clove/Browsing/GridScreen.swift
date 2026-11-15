@@ -15,10 +15,9 @@ struct GridScreen: View {
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
     @State private var selectsEmpty = false
-    @State private var split = DuoSplit.focus
-    /// The group whose expansion the person folded in the Duo's detail, so the split and the
-    /// photo-only strip show its stack. It is what the person is doing right now, not saved
-    /// browsing state (owner decision, 2026-11-13, #225).
+    @State private var presentation = DetailPresentation.photoPreview
+    /// The group whose expansion the person folded in Detail, so Photo Preview's grid and Focus
+    /// View's filmstrip show the same stack (#225, #256).
     @State private var foldedGroup: GroupID?
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
     /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
@@ -48,9 +47,6 @@ struct GridScreen: View {
     private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }
     private var isRegular: Bool { horizontalSizeClass == .regular && !isDuoExpanded }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
-    /// The Duo's split grid beside the photo. It is browsing only: multi-select stays with the
-    /// folder grid, as it was before the group expanded in place (owner decision, #225).
-    private var isSplitPane: Bool { isDuoExpanded && browsing.state.route == .detail }
     private var showsMoveRejects: Bool {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
             && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
@@ -59,17 +55,12 @@ struct GridScreen: View {
     private var cells: [GridCellItem] { gridDisplay.cells }
 
     /// How the grid joins the folder and its groups.
-    ///
-    /// The Duo's split keeps the folder grid around the photo on screen: its groups stay stacks
-    /// and the photo's own group expands in place, folded back to its stack when the person says
-    /// so (owner decision, 2026-11-13, #225). Every other screen reads C12's display choice.
     private var gridDisplay: GridDisplay {
-        let currentGroup = browsing.currentGroup
-        return GridDisplay(
+        GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
             groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
-            display: isSplitPane ? .collapsed : store.settings.gridGroupDisplay,
-            expandedGroup: isSplitPane && foldedGroup != currentGroup?.id ? currentGroup?.id : nil)
+            display: store.settings.gridGroupDisplay,
+            expandedGroup: nil)
     }
 
     var body: some View {
@@ -78,7 +69,7 @@ struct GridScreen: View {
             .onChange(of: browsing.state.route) { _, route in
                 if route == .detail { hasOpenedPhoto = true }
                 if route != .detail {
-                    split = .focus
+                    presentation = .photoPreview
                     foldedGroup = nil
                 }
             }
@@ -174,7 +165,7 @@ struct GridScreen: View {
                 DetailScreen(
                     browsing: browsing,
                     duo: DuoDetailLayout(
-                        split: $split, grid: AnyView(grid), filter: AnyView(filterButton),
+                        presentation: $presentation, filter: AnyView(filterButton),
                         more: AnyView(moreMenu), bottom: AnyView(dockBottom),
                         showsGrid: isDuoExpanded, foldedGroup: $foldedGroup))
             } else {
@@ -238,19 +229,19 @@ struct GridScreen: View {
                 GridCollectionView(
                     sections: gridDisplay.sections, currentPhoto: browsing.state.currentPhoto,
                     groups: browsing.groups, shownPhotos: Set(browsing.photos.map(\.id)),
-                    selection: isSplitPane ? [] : browsing.state.selection,
+                    selection: browsing.state.selection,
                     thumbnails: thumbnails,
-                    isSelectingEmpty: isSplitPane ? false : selectsEmpty,
+                    isSelectingEmpty: selectsEmpty,
                     placeholderCount: browsing.readingProgress.map {
                         $0.total == 0 ? 9 : max($0.total - $0.read, 0)
                     } ?? 0,
-                    columnCount: isDuoExpanded ? (isSplitPane ? 2 : 6) : nil,
-                    highlightsCurrentPhoto: isSplitPane,
-                    followsCurrentPhoto: isDuoExpanded && (isSplitPane || hasOpenedPhoto),
+                    columnCount: isDuoExpanded ? 6 : nil,
+                    highlightsCurrentPhoto: false,
+                    followsCurrentPhoto: isDuoExpanded && hasOpenedPhoto,
                     foldExpandedGroup: { foldedGroup = $0 },
                     openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
-                    beginSelection: { if !isSplitPane { browsing.beginSelection(of: $0) } },
-                    toggleSelection: { if !isSplitPane { browsing.toggleSelection(of: $0) } }
+                    beginSelection: { browsing.beginSelection(of: $0) },
+                    toggleSelection: { browsing.toggleSelection(of: $0) }
                 )
                 .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
             }
@@ -559,14 +550,8 @@ struct GridScreen: View {
         }
     }
 
-    /// Opens one collapsed group's first photo, except for the group on screen in the Duo's
-    /// split: that stack stands for the expansion the person folded, so tapping it restores the
-    /// members in place without leaving the photo (owner decision, 2026-11-13, #225).
+    /// Opens one collapsed group's first photo.
     private func openGroup(_ id: GroupID) {
-        if isSplitPane, browsing.currentGroup?.id == id {
-            foldedGroup = nil
-            return
-        }
         guard let group = browsing.groups.first(where: { $0.id == id }) else { return }
         let visible = group.visible(in: Set(browsing.photos.map(\.id)))
         if let first = visible.members.first(where: { browsing.shownMarks(for: $0).isUnmarked })

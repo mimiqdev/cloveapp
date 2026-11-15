@@ -116,7 +116,7 @@ class SmokeRunnerTests(unittest.TestCase):
         environment = {**self.environment, "SMOKE_TEST_MODE": "pass"}
         result = subprocess.run(
             ["bash", "scripts/smoke.sh", "flows",
-             "-only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly"],
+             "-only-testing:CloveUITests/CloveFlowTests/testDuoGridPhotoPreviewDockMarkAndFocusView"],
             cwd=self.root, env=environment, text=True, capture_output=True, timeout=15,
         )
         self.assertNotEqual(result.returncode, 0)

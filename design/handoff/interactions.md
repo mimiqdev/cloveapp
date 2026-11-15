@@ -60,8 +60,9 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 ## iPad
 
 - The sidebar is the filter. Selecting a row sets the grid's filter and title, and clears any other sidebar filter. There is no Filter button, and "…" and Move Rejects are in the top bar.
-- Tapping a photo opens detail full screen; "‹ All" (the selected row's name) goes back with the same filter.
-- Detail has a right rail instead of the toolbar: tap or drag the quick-rating ladder, tap the shared Reject action, or open the label picker from the label action. Tapping the current rating clears it. The rail never hides; single tap hides the filmstrip, Reject N unmarked pill and top bar buttons while the stage keeps its size, and zoom keeps the filmstrip visible unless toggled off while hiding top bar Info/Undo (#273).
+- Tapping a photo opens detail in **Photo Preview** (`30%` filtered folder grid beside `70%` photo stage + right rail, no filmstrip) when regular width (`>= 680` pt × `>= 420` pt); "‹ All" (the selected row's name) goes back to **Grid View** with the same filter from either Photo Preview or Focus View.
+- Tapping the **Photo Preview / Focus View** (`sidebar.left`, "Hide photo grid" / "Show photo grid") button beside Back toggles between **Photo Preview** and **Focus View** (full photo stage with filmstrip, no folder grid) for the same photo without altering marks, zoom, filter, sort, or reloading pixels. Narrow/compact sizes (`< 680` pt or `.compact`) hide the toggle and fall back to Focus View while preserving the chosen wide presentation for widening back.
+- Detail has a right rail instead of the toolbar: tap or drag the quick-rating ladder, tap the shared Reject action, or open the label picker from the label action. Tapping the current rating clears it. The rail never hides; single tap hides the filmstrip (in Focus View), Reject N unmarked pill and top bar buttons while the stage keeps its size, and zoom keeps the filmstrip visible in Focus View unless toggled off while hiding top bar Info/Undo (#273).
 - Swipe marking stays on the photo as on iPhone: slow vertical drags use the relative slider with live feedback in the rail's ladder; quick down clears then rejects by distance. A downward swipe on Reject leaves it rejected; up steps through 0 to enabled stars.
 - Full keyboard support as above **(proposed)**. Pointer hover shows the rail's tooltips.
 
@@ -75,20 +76,20 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 States and transitions:
 
 ```
-Grid (full width, 6 col) ──tap photo──▶ Photo focus (grid 30 / photo 70)
-Photo focus ──drag divider left──▶ Photo only (iPad-style detail with filmstrip)
-Photo only ──drag from left edge (proposed)──▶ Photo focus
-Photo focus ──drag divider right, or Back──▶ Grid
-Photo only ──Back──▶ Grid
+Grid View (full width, 6 col) ──tap photo──▶ Photo Preview (grid 30 / photo 70, no filmstrip)
+Photo Preview ──tap Hide photo grid (sidebar.left) or drag divider left──▶ Focus View (photo + filmstrip, no grid)
+Focus View ──tap Show photo grid (sidebar.left)──▶ Photo Preview
+Photo Preview ──drag divider right, or Back──▶ Grid View
+Focus View ──Back──▶ Grid View
 ```
 
-- The divider snaps only to **30/70** or **photo only**. It never rests at 50/50 or on the fold.
-- **Folding a group** (owner change, #225): in the split's grid the group's header chevron folds its members to the group's stack, and in photo only the expanded group's chevron does the same in the filmstrip. Both keep the photo, its marks and the route, and the stack reopens the group in place. Back still leaves the whole detail.
-- **The dock** (right column, top to bottom): Back; Filter, "…", Info; Undo, Move Rejects. There are no buttons over the grid or the photo.
-- **Marking toolbar** (owner changes, #200 and #227): the shared 168 × 48 marking toolbar sits in a reserved bottom-right marking area beside the filmstrip, beneath the right-hand photo, inside the photo pane. In photo only the toolbar itself is the one reservation: it narrows the filmstrip's viewport so nothing scrolls under it, and the strip's content fills that viewport up to the toolbar with no second, content-side gap (#237); the toolbar region shares the photo stage's background. The rating action opens the quick-rating ladder; the label action opens the color picker. Marking never competes with system island/status activity for toolbar space, and there are no marking items in the side toolbar. The cover keeps its compact dock controls.
+- The divider snaps only to **Photo Preview (30/70)** or **Focus View (0/100)**. It never rests at 50/50 or on the fold.
+- **Folding a group** (owner change, #225): in Photo Preview's grid the group's header chevron folds its members to the group's stack, and in Focus View's filmstrip the expanded group's chevron does the same. Both keep the photo, its marks and the route, and the stack reopens the group in place. Back still leaves the whole detail.
+- **The dock** (right column, top to bottom): Back; Filter, "…", Photo Preview / Focus View (`sidebar.left`), Focus regions (`viewfinder`), Info; Undo, Move Rejects. There are no buttons over the grid or the photo.
+- **Marking toolbar** (owner changes, #200 and #227): the shared 168 × 48 marking toolbar sits in a reserved bottom-right marking area beside the filmstrip, beneath the right-hand photo, inside the photo pane. In Focus View the toolbar itself is the one reservation: it narrows the filmstrip's viewport so nothing scrolls under it, and the strip's content fills that viewport up to the toolbar with no second, content-side gap (#237); the toolbar region shares the photo stage's background. The rating action opens the quick-rating ladder; the label action opens the color picker. Marking never competes with system island/status activity for toolbar space, and there are no marking items in the side toolbar. The cover keeps its compact dock controls.
 - **Fit containment** (#199): in expanded Duo the fitted photo stays stationary while a horizontal drag is in progress; the swipe still commits navigation on release. Photo pixels never draw over the divider or the left grid, including during transitions. Zoomed panning stays inside the pane and returning to fit centers the photo.
 - **Group expansion** (owner change, #225): the left pane is the folder grid, with the folder's own photos and the other groups' stacks in place. The photo's own group expands at its stack's position: its header names the members the filter shows, and its chevron folds them back into the stack. Tapping a member changes the preview and its marks; navigation and auto-advance keep the current member visible. Folding and reopening change the thumbnails only, and Back returns to the full folder grid with its browsing position. There is no group route or page.
-- In photo focus, tapping a grid tile changes the photo, and the swipe gestures on the photo work as on iPhone.
+- In Photo Preview, tapping a grid tile changes the photo, and the swipe gestures on the photo work as on iPhone.
 
 ## Duo half fold (MVP behavior)
 

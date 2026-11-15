@@ -68,6 +68,19 @@ final class CloveFlowTests: XCTestCase {
         // snapshot taken mid-transition (#203's observed-state pattern).
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), element(app, "clove.grid")))
         XCTAssertGreaterThan(detail.frame.width, app.frame.width * 0.95)
+        // Wide iPad opens in Photo Preview (30% filtered grid beside photo, no filmstrip).
+        let splitGrid = element(app, "clove.detail.photoGrid")
+        let gridToggle = element(app, "clove.detail.gridToggle")
+        XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
+        XCTAssertTrue(gridToggle.exists)
+        XCTAssertEqual(gridToggle.label, "Hide photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Photo Preview")
+        gridToggle.tap()
+        XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+        XCTAssertFalse(splitGrid.exists)
+        XCTAssertEqual(gridToggle.label, "Show photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Focus View")
         let back = element(app, "clove.nav.back")
         XCTAssertEqual(back.label, "Back")
         capture("ipad-detail-rejected-back")
@@ -116,11 +129,54 @@ final class CloveFlowTests: XCTestCase {
         let green = element(app, "clove.detail.rail.label.green")
         let preview = element(app, "clove.detail.preview")
         let strip = element(app, "clove.detail.filmstrip")
+        let splitGrid = element(app, "clove.detail.photoGrid")
+        let gridToggle = element(app, "clove.detail.gridToggle")
+        let undoButton = element(app, "clove.detail.undo")
         XCTAssertTrue(rail.exists)
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertEqual(rail.frame.width, 96, accuracy: 1)
+        // iPad opens in Photo Preview (30% folder grid + 70% photo stage, no filmstrip).
+        XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
+        XCTAssertFalse(strip.exists)
+        XCTAssertTrue(gridToggle.exists)
+        XCTAssertEqual(gridToggle.label, "Hide photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Photo Preview")
+        XCTAssertEqual(splitGrid.frame.width / app.frame.width, 0.3, accuracy: 0.03)
+        XCTAssertLessThanOrEqual(
+            element(app, "clove.nav.back").frame.maxX, gridToggle.frame.minX + 1)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        stars.tap()
+        XCTAssertTrue(stars.isSelected)
+        capture("ipad-detail-photo-preview-light")
+
+        // Toggle to Focus View: same photo, marks, and Undo stay intact; filmstrip appears.
+        gridToggle.tap()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        XCTAssertFalse(splitGrid.exists)
+        XCTAssertEqual(gridToggle.label, "Show photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Focus View")
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        XCTAssertTrue(stars.isSelected)
+        XCTAssertTrue(undoButton.isEnabled)
         XCTAssertLessThanOrEqual(strip.frame.maxX, rail.frame.minX + 1)
+        undoButton.tap()
+        XCTAssertFalse(stars.isSelected)
+
+        // Toggle back to Photo Preview, step to another photo, then return to Focus View to
+        // verify presentation preference persists across photo navigation in Focus View.
+        gridToggle.tap()
+        XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
+        XCTAssertFalse(strip.exists)
+        gridToggle.tap()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        element(app, "clove.detail.filmstrip.mmq02682").tap()
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", element(app, "clove.detail.fileName")))
+        XCTAssertTrue(strip.exists)
+        XCTAssertFalse(splitGrid.exists)
+        element(app, "clove.detail.filmstrip.mmq02680").tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
+
         if #available(iOS 27.1, *) {
             XCTAssertTrue(element(app, "clove.detail.info").isHittable)
         } else {
@@ -170,6 +226,15 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.detail.info").exists)
         XCTAssertTrue(rail.isHittable)
         XCTAssertEqual(preview.frame, stageFrame)
+        // Toggling to Photo Preview while zoomed preserves zoom at 100%, then back to Focus View.
+        gridToggle.tap()
+        XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
+        XCTAssertFalse(strip.exists)
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+        gridToggle.tap()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        XCTAssertFalse(splitGrid.exists)
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
         // Single-tapping while zoomed toggles the filmstrip without stepping photos.
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
@@ -232,6 +297,10 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
         XCTAssertTrue(rail.exists)
+        XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
+        capture("ipad-detail-photo-preview-dark")
+        gridToggle.tap()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
         capture("ipad-detail-rail-dark")
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02683").tap()
@@ -244,6 +313,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(separatedEye.exists)
         XCTAssertFalse(element(app, "clove.detail.region.face.1-0").exists)
         // Corner tap & double-tap on a focus-region photo never step photos and keep filmstrip at zoom.
+        gridToggle.tap()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.08)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02683.ARW")
@@ -1322,7 +1393,7 @@ final class CloveFlowTests: XCTestCase {
     /// Runs on the Duo's actual inner display. The Open pose must be selected in
     /// Device Hub on an unlocked GUI session; no headless lever exists for it.
     @MainActor
-    func testDuoGridFocusDockMarkAndPhotoOnly() throws {
+    func testDuoGridPhotoPreviewDockMarkAndFocusView() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4")
         continueAfterFailure = false
@@ -1355,16 +1426,20 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.duo.capsule").exists)
         capture("duo-grid")
         element(app, "clove.grid.photo.mmq02680").tap()
-        let focus = element(app, "clove.duo.focus")
-        XCTAssertTrue(focus.waitForExistence(timeout: 5))
+        let photoPreview = element(app, "clove.duo.photoPreview")
+        XCTAssertTrue(photoPreview.waitForExistence(timeout: 5))
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertFalse(element(app, "clove.detail.rail").exists)
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
+        let gridToggle = element(app, "clove.detail.gridToggle")
+        XCTAssertTrue(gridToggle.exists)
+        XCTAssertEqual(gridToggle.label, "Hide photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Photo Preview")
         let grid = app.collectionViews.firstMatch
         XCTAssertEqual(
-            grid.frame.width / (grid.frame.width + focus.frame.width), 0.3, accuracy: 0.02)
+            grid.frame.width / (grid.frame.width + photoPreview.frame.width), 0.3, accuracy: 0.02)
         // #200: the marking capsule reserves its own row beneath the fitted photo, and
         // the side toolbar carries no duplicate marking items.
         let capsule = element(app, "clove.duo.capsule")
@@ -1372,11 +1447,11 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
         XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
         XCTAssertGreaterThanOrEqual(capsule.frame.minY, preview.frame.maxY)
-        XCTAssertEqual(capsule.frame.maxX, focus.frame.maxX - 16, accuracy: 1)
+        XCTAssertEqual(capsule.frame.maxX, photoPreview.frame.maxX - 16, accuracy: 1)
         XCTAssertFalse(element(app, "clove.duo.rating").exists)
         XCTAssertFalse(element(app, "clove.duo.reject").exists)
         XCTAssertFalse(element(app, "clove.duo.label").exists)
-        capture("duo-focus")
+        capture("duo-photo-preview")
         rate(3, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
         rate(5, toolbar: "clove.duo.capsule", in: app)
@@ -1397,22 +1472,32 @@ final class CloveFlowTests: XCTestCase {
             wait(
                 NSPredicate(format: "label CONTAINS[c] %@", "green"),
                 element(app, "clove.duo.capsule.label")))
+        // Native toggle switches Photo Preview <-> Focus View cleanly; then return to Photo Preview
+        // to verify the divider drag still transitions as well.
+        gridToggle.tap()
+        let filmstrip = element(app, "clove.detail.filmstrip")
+        XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
+        XCTAssertEqual(gridToggle.label, "Show photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Focus View")
+        gridToggle.tap()
+        XCTAssertTrue(photoPreview.waitForExistence(timeout: 5))
+        XCTAssertFalse(filmstrip.exists)
         let divider = element(app, "clove.duo.divider")
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(
             forDuration: 0.1,
             thenDragTo: grid.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)))
-        let filmstrip = element(app, "clove.detail.filmstrip")
         XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
-        XCTAssertFalse(element(app, "clove.duo.focus").exists)
+        XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
         XCTAssertTrue(element(app, "clove.detail.fileName").exists)
-        // In photo only, the capsule stays beneath the photo and beside the narrowed filmstrip.
+        // In Focus View, the capsule stays beneath the photo and beside the narrowed filmstrip.
         XCTAssertGreaterThanOrEqual(capsule.frame.minY, preview.frame.maxY)
-        XCTAssertGreaterThan(capsule.frame.midX, element(app, "clove.duo.photoOnly").frame.midX)
+        XCTAssertGreaterThan(capsule.frame.midX, element(app, "clove.duo.focus").frame.midX)
         // View frames alone cannot see the interior dead space a content-side reservation leaves
         // (#237), so the content check below inspects where the strip's content actually rests.
         XCTAssertLessThanOrEqual(filmstrip.frame.maxX, capsule.frame.minX + 1)
-        capture("duo-photo-only")
+        capture("duo-focus")
         // The strip's content fills its viewport up to the toolbar: dragged to the folder's last
         // photo, its last thumbnail rests beside the toolbar rather than behind a second,
         // content-padded reservation. The drags advance one viewport at a time, so the resting
@@ -1425,7 +1510,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(
             wait(NSPredicate { _, _ in self.restsAtTrailingEdge(last, of: filmstrip) }, last),
             "the last thumbnail stops short of the toolbar: the marking area is reserved twice")
-        capture("duo-photo-only-strip-end")
+        capture("duo-focus-strip-end")
         // Opening it moves the current photo far in one step; the strip must still land on it.
         last.tap()
         XCTAssertTrue(waitForLabel("MMQ02713.ARW", fileName))
@@ -1478,7 +1563,7 @@ final class CloveFlowTests: XCTestCase {
         prepareDuo(app)
         // The second burst sits between folder photos, so the split pane shows both around it.
         element(app, "clove.grid.group.burst-2696").tap()
-        XCTAssertTrue(element(app, "clove.duo.focus").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.duo.photoPreview").waitForExistence(timeout: 5))
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
@@ -1532,7 +1617,7 @@ final class CloveFlowTests: XCTestCase {
         rate(4, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "4 stars"), capsule))
         XCTAssertTrue(third.label.contains("4 stars"))
-        // Photo only keeps the same photo, the folder-order counter and the folder-order strip.
+        // Focus View keeps the same photo, the folder-order counter and the folder-order strip.
         let grid = app.collectionViews.firstMatch
         let divider = element(app, "clove.duo.divider")
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -1546,11 +1631,11 @@ final class CloveFlowTests: XCTestCase {
             "The counter left the folder order: \(element(app, "clove.detail.zoom").label)")
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").exists,
-            "The photo-only strip did not expand the current group")
+            "The Focus View strip did not expand the current group")
         let stripNeighbor = element(app, "clove.detail.filmstrip.mmq02695")
         XCTAssertTrue(stripNeighbor.exists)
         XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02699").exists)
-        capture("duo-group-photo-only")
+        capture("duo-group-focus")
         // The strip folds the group to its stack in place without closing the photo or jumping.
         let stripNeighborBeforeFold = stripNeighbor.isHittable ? stripNeighbor.frame : nil
         element(app, "clove.detail.filmstrip.group.fold").tap()
@@ -1561,7 +1646,7 @@ final class CloveFlowTests: XCTestCase {
         if let stripNeighborBeforeFold, stripNeighbor.isHittable {
             XCTAssertEqual(stripNeighbor.frame.minX, stripNeighborBeforeFold.minX, accuracy: 2)
         }
-        capture("duo-group-photo-only-folded")
+        capture("duo-group-focus-folded")
         let stripStackBeforeUnfold = stripStack.frame
         let stripNeighborBeforeUnfold = stripNeighbor.isHittable ? stripNeighbor.frame : nil
         stripStack.tap()
@@ -1604,6 +1689,8 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.photo.mmq02680").tap()
         XCTAssertTrue(element(app, "clove.detail.fileName").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
+        XCTAssertFalse(element(app, "clove.detail.gridToggle").exists)
+        XCTAssertFalse(element(app, "clove.detail.photoGrid").exists)
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         XCTAssertFalse(element(app, "clove.detail.rail").exists)
         let rating = element(app, "clove.duo.rating")
@@ -1782,8 +1869,8 @@ final class CloveFlowTests: XCTestCase {
 
     /// Runs on the Duo's cover display headlessly: verifies region-centred 100% zoom across
     /// double-taps and region taps when hiding the Duo filmstrip resizes the preview container
-    /// (#272). The expanded Focus split (`clove.duo.focus`) cannot enter Open pose headlessly and
-    /// is verified on TestFlight.
+    /// (#272). The expanded Photo Preview split (`clove.duo.photoPreview`) cannot enter Open pose
+    /// headlessly and is verified on TestFlight.
     @MainActor
     func testDuoCoverFocusRegionsCentreNativeZoom() throws {
         try XCTSkipUnless(

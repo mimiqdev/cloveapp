@@ -52,7 +52,7 @@ for argument in "$@"; do
             duo_test="testDuoCoverFocusRegionsCentreNativeZoom" ;;
         # The Open pose exists only as a Device Hub control; there is no headless
         # way to select it, so this runner refuses the expanded flow.
-        -only-testing:CloveUITests/CloveFlowTests/testDuoGridFocusDockMarkAndPhotoOnly)
+        -only-testing:CloveUITests/CloveFlowTests/testDuoGridPhotoPreviewDockMarkAndFocusView)
             echo "error: the Open pose has no headless runner; select Open in Device Hub on an unlocked GUI session and see docs/duo-simulator.md" >&2
             exit 1 ;;
         -only-testing:CloveUITests/CloveFlowTests/testDuo*)
