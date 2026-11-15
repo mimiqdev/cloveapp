@@ -22,6 +22,7 @@ private struct SystemBrowsingLayout: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.usesSystemBrowsingToolbar, true)
+            .environment(\.usesVerticalBrowsingToolbar, edge != nil)
             .environment(\.hasFoldRegion, hasFoldRegion)
             .environment(\.isDuoExpanded, (edge != nil || hasFoldRegion) && sizeClass == .regular)
             .environment(\.isDuoCover, edge != nil && sizeClass != .regular)
@@ -35,6 +36,7 @@ private struct SystemBrowsingLayout: ViewModifier {
 
 extension EnvironmentValues {
     @Entry var usesSystemBrowsingToolbar = false
+    @Entry var usesVerticalBrowsingToolbar = false
     @Entry var hasFoldRegion = false
     @Entry var isDuoExpanded = false
     @Entry var isDuoCover = false

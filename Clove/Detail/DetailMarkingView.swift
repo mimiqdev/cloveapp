@@ -81,6 +81,7 @@ struct DetailMarkingView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.cloveTheme) private var theme
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
+    @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.hasFoldRegion) private var hasFoldRegion
@@ -231,6 +232,10 @@ struct DetailMarkingView: View {
 
     private var usesRail: Bool { horizontalSizeClass == .regular && duo == nil }
 
+    private var showsExpandedPhotoHeader: Bool {
+        isDuoExpanded && (usesVerticalToolbar || !hasFoldRegion)
+    }
+
     private var presentationPolicy: DetailPresentationPolicy {
         DetailPresentationPolicy(
             isRegularWidth: horizontalSizeClass == .regular,
@@ -353,8 +358,46 @@ struct DetailMarkingView: View {
         }
     }
 
-    @ViewBuilder private var focusRegionsToggle: some View {
-        if usesSystemToolbar {
+    private var focusRegionsToggle: some View {
+        focusRegionsButton(inStageHeader: false)
+    }
+
+    @ViewBuilder
+    private func focusRegionsButton(inStageHeader: Bool) -> some View {
+        if inStageHeader {
+            if #available(iOS 26.0, *) {
+                Button {
+                    browsing.showsFocusRegions.toggle()
+                } label: {
+                    Image(systemName: "viewfinder")
+                        .font(.body)
+                        .foregroundStyle(
+                            browsing.showsFocusRegions
+                                ? Color.clove.accent : Color.clove.text.primary
+                        )
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Circle())
+                .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
+                .accessibilityLabel("Focus regions")
+                .accessibilityValue(browsing.showsFocusRegions ? "On" : "Off")
+                .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
+                .accessibilityIdentifier("clove.detail.focusToggle")
+            } else {
+                GlassIconButton(
+                    label: "Focus regions",
+                    symbol: "viewfinder",
+                    isActive: browsing.showsFocusRegions,
+                    size: .pad,
+                    identifier: "clove.detail.focusToggle"
+                ) {
+                    browsing.showsFocusRegions.toggle()
+                }
+            }
+        } else if usesSystemToolbar {
             Button {
                 browsing.showsFocusRegions.toggle()
             } label: {
@@ -384,16 +427,38 @@ struct DetailMarkingView: View {
         VStack(spacing: 0) {
             Text(photo.fileName)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.clove.text.primary)
+                .lineLimit(1)
                 .accessibilityIdentifier("clove.detail.fileName")
             HStack(spacing: 0) {
-                Text(detailSubtitle).accessibilityIdentifier("clove.detail.zoom")
+                Text(detailSubtitle)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("clove.detail.zoom")
                 if scale <= DetailFitScale.tolerance {
                     SaveStatusIndicator(
                         browsing: browsing, identifierPrefix: "clove.detail.saveState")
                 }
             }
             .font(.caption)
+            .foregroundStyle(Color.clove.text.secondary)
         }
+    }
+
+    @available(iOS 27.1, *)
+    private var duoPhotoHeader: some View {
+        HStack(spacing: 8) {
+            focusRegionsButton(inStageHeader: true)
+            Spacer(minLength: 0)
+            detailToolbarTitle
+                .multilineTextAlignment(.center)
+            Spacer(minLength: 0)
+            Color.clear
+                .frame(width: 44, height: 44)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color.clove.bg.stage)
     }
 
     @ViewBuilder private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
@@ -415,6 +480,10 @@ struct DetailMarkingView: View {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark
                 ) {
+                    if isDuoExpanded && !showsExpandedPhotoHeader {
+                        focusRegionsToggle
+                    }
+                } tools: {
                     if duo.showsGrid {
                         duo.filter
                         duo.more
@@ -422,7 +491,9 @@ struct DetailMarkingView: View {
                             photoGridToggle
                         }
                     }
-                    focusRegionsToggle
+                    if !isDuoExpanded {
+                        focusRegionsToggle
+                    }
                     Button("Info", systemImage: "info.circle") { showsInformation = true }
                         .accessibilityIdentifier("clove.detail.info")
                 } marks: {
@@ -445,7 +516,7 @@ struct DetailMarkingView: View {
                         duo.bottom
                     }
                 }
-                if !duo.showsGrid || !showsPhotoGrid {
+                if !showsExpandedPhotoHeader && (!duo.showsGrid || !showsPhotoGrid) {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
                         .axisBehavior(.horizontalOnly)
                 }
@@ -479,6 +550,9 @@ struct DetailMarkingView: View {
     @available(iOS 27.1, *)
     private func duoPhotoPane(showsFilmstrip: Bool) -> some View {
         VStack(spacing: 0) {
+            if showsExpandedPhotoHeader {
+                duoPhotoHeader
+            }
             FolderSaveBanner(
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             previewArea
