@@ -56,7 +56,7 @@ cover display off does not switch the OS to the inner display. The pose
 control exists only in Xcode's Device Hub window.
 
 Because of that, `scripts/smoke.sh` refuses the targeted expanded spelling
-(`-only-testing:…/testDuoGridFocusDockMarkAndPhotoOnly`) instead of silently
+(`-only-testing:…/testDuoGridPhotoPreviewDockMarkAndFocusView`) instead of silently
 skipping. To run the expanded flow at all, a human must use Device Hub on a Mac
 with an unlocked, logged-in graphical session:
 
