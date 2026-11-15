@@ -1364,6 +1364,164 @@ struct DetailDisplayPresentationTests {
         #expect(abs(settled.scale - expectedScale) < 0.02)
     }
 
+    @Test func programmaticZoomDefersDuringScrollAndLayoutPassesAndCoalescesToLatestTarget()
+        async throws
+    {
+        let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        let pixels = try CGContext(
+            data: nil, width: 3000, height: 2000, bitsPerComponent: 8, bytesPerRow: 3000 * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ).flatMap { $0.makeImage() }
+        preview.setImage(
+            try #require(pixels), fullResolutionPixels: CGSize(width: 3000, height: 2000))
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+
+        // 1. Triggering programmatic zooms during an active scrollViewDidZoom callback must not
+        // call setZoomScale synchronously inside the callback, and must coalesce to the newest target.
+        var queuedDuringCallback = false
+        preview.onZoomChange = { _ in
+            guard !queuedDuringCallback else { return }
+            queuedDuringCallback = true
+            preview.apply(
+                DetailZoomCommand(id: 1, kind: .scale(2.0, anchor: UnitPoint(x: 0.2, y: 0.2))))
+            preview.apply(
+                DetailZoomCommand(id: 2, kind: .scale(3.0, anchor: UnitPoint(x: 0.72, y: 0.64))))
+        }
+        preview.scrollViewDidZoom(scroll)
+        #expect(queuedDuringCallback)
+        #expect(!preview.isZoomed)
+        #expect(scroll.zoomScale == 1)
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(abs(scroll.zoomScale - 3.0) < 0.001)
+        let afterCallback = try #require(preview.zoomSnapshot)
+        #expect(abs(afterCallback.anchor.x - 0.72) < 0.02)
+        #expect(abs(afterCallback.anchor.y - 0.64) < 0.02)
+
+        // 2. Resizing bounds while zoomed defers the #272 retarget off layoutSubviews, and a newer
+        // command before the runloop tick supersedes the deferred layout retarget with its own anchor.
+        preview.frame = CGRect(x: 0, y: 0, width: 550, height: 480)
+        preview.setNeedsLayout()
+        preview.layoutIfNeeded()
+        // Bounds resized synchronously without re-entering setZoomScale inside layoutSubviews;
+        // explicit command issued before flush supersedes the pending layout retarget.
+        preview.apply(
+            DetailZoomCommand(id: 3, kind: .scale(2.4, anchor: UnitPoint(x: 0.30, y: 0.35))))
+        #expect(abs(scroll.zoomScale - 3.0) < 0.001)
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(abs(scroll.zoomScale - 2.4) < 0.001)
+        let afterResize = try #require(preview.zoomSnapshot)
+        #expect(abs(afterResize.anchor.x - 0.30) < 0.02)
+        #expect(abs(afterResize.anchor.y - 0.35) < 0.02)
+
+        // 3. Pending layout (bounds != laidOutSize) defers and coalesces multiple commands cleanly.
+        preview.frame = CGRect(x: 0, y: 0, width: 420, height: 640)
+        preview.apply(
+            DetailZoomCommand(id: 4, kind: .scale(1.9, anchor: UnitPoint(x: 0.25, y: 0.25))))
+        preview.apply(DetailZoomCommand(id: 5, kind: .fit))
+        #expect(abs(scroll.zoomScale - 2.4) < 0.001)
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(!preview.isZoomed)
+        #expect(scroll.zoomScale == 1)
+    }
+
+    @Test func navigationDetailSurvivesAnimatedPanResizeAndTwoFingerSwipeWithoutReentrancy()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        store.update {
+            $0.doubleTap = .zoom
+            $0.zoomedRatingSwipe = .twoFinger
+            $0.keepZoom.inDetail = false
+            $0.autoAdvance.destination = .nextPhoto
+            $0.autoAdvance.triggers.rating = true
+        }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photos = browsing.photos
+        try #require(photos.count >= 7)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        let shellRoot = BrowseShell(browsing: browsing)
+            .environment(store)
+            .modifier(DuoLayout())
+        let host = UIHostingController(rootView: shellRoot)
+        host.traitOverrides.horizontalSizeClass = .compact
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        browsing.openPhoto(photos[4].id)
+
+        try await waitFor("preview loaded in BrowseShell") {
+            guard let preview = findPreview(in: window),
+                let scroll = preview.subviews.first as? UIScrollView,
+                let imageView = scroll.subviews.first as? UIImageView
+            else { return false }
+            return (imageView.image?.cgImage?.width ?? 0) >= SampleDetailImages.previewLongEdge
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let imageView = try #require(scroll.subviews.first as? UIImageView)
+        for (round, keepZoom) in [false, true].enumerated() {
+            let expectedNext = photos[5 + round].id
+            try await waitFor("detail image loaded for round \(round)") {
+                (imageView.image?.cgImage?.width ?? 0) >= SampleDetailImages.previewLongEdge
+            }
+            store.update { $0.keepZoom.inDetail = keepZoom }
+            if !preview.isZoomed {
+                preview.onDoubleTap?(UnitPoint(x: 0.45, y: 0.45))
+            }
+            try await waitFor("preview zoomed in round \(round)") {
+                preview.isZoomed && preview.twoFingerMarkingSwipeIsEnabled
+            }
+            scroll.setContentOffset(CGPoint(x: 150, y: 120), animated: true)
+            try await Task.sleep(for: .milliseconds(60))
+            window.frame = CGRect(x: 0, y: 0, width: 874, height: 402)
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(40))
+            window.frame = scene.coordinateSpace.bounds
+            window.layoutIfNeeded()
+
+            let twoFinger = preview.twoFingerSwipeRecognizer
+            let t1 = DetailMutableTouch(view: preview, location: CGPoint(x: 140, y: 420))
+            let t2 = DetailMutableTouch(view: preview, location: CGPoint(x: 240, y: 420))
+            let event = UIEvent()
+            twoFinger.touchesBegan([t1, t2], with: event)
+            t1.locationPoint = CGPoint(x: 140, y: 380)
+            t2.locationPoint = CGPoint(x: 240, y: 380)
+            twoFinger.touchesMoved([t1, t2], with: event)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            t1.locationPoint = CGPoint(x: 140, y: 240)
+            t2.locationPoint = CGPoint(x: 240, y: 240)
+            twoFinger.touchesMoved([t1, t2], with: event)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            twoFinger.touchesEnded([t1, t2], with: event)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            try await waitFor("auto-advance settled in round \(round)") {
+                browsing.state.currentPhoto == expectedNext
+                    && (!keepZoom ? !preview.isZoomed : preview.zoomSnapshot != nil)
+            }
+        }
+    }
+
     private func findAllFocusControls(in view: UIView) -> [DetailFocusRegionControl] {
         var found: [DetailFocusRegionControl] = []
         if let control = view as? DetailFocusRegionControl { found.append(control) }
@@ -1396,12 +1554,15 @@ struct DetailDisplayPresentationTests {
         preview.handleMarkingPan(pan)
     }
 
-    private func waitFor(_ condition: () -> Bool) async throws {
+    private func waitFor(
+        _ message: String = "Detail presentation did not settle within five seconds",
+        _ condition: () -> Bool
+    ) async throws {
         for _ in 0..<250 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(condition(), "Detail presentation did not settle within five seconds")
+        try #require(condition(), Comment(rawValue: message))
     }
 
     private func findPreview(in view: UIView) -> DetailZoomContainerView? {

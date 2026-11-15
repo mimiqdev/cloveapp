@@ -2288,6 +2288,164 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testOverlappingZoomPanTwoFingerSwipeAndPinchRemainResponsive() throws {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+
+        let stack = element(app, "clove.grid.group.burst-2678")
+        if stack.exists {
+            stack.tap()
+        } else {
+            element(app, "clove.grid.photo.mmq02678").tap()
+        }
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Loaded"), preview))
+        let frame = preview.frame
+
+        for round in 0..<4 {
+            try synthesizeOverlappingZoomPanSwipe(
+                in: frame,
+                swipeDeltaY: round.isMultiple(of: 2) ? -160 : 160,
+                includePostSwipePinch: round >= 2,
+                includeChromeTap: round.isMultiple(of: 2))
+            XCTAssertTrue(preview.waitForExistence(timeout: 5), "App wedged in round \(round)")
+            if (preview.value as? String)?.contains("centred at") == true {
+                preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
+            }
+        }
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func synthesizeOverlappingZoomPanSwipe(
+        in frame: CGRect,
+        swipeDeltaY: CGFloat,
+        includePostSwipePinch: Bool,
+        includeChromeTap: Bool
+    ) throws {
+        guard
+            let pathClass = NSClassFromString("XCPointerEventPath") as? NSObject.Type,
+            let recordClass = NSClassFromString("XCSynthesizedEventRecord") as? NSObject.Type
+        else { return }
+        let allocSel = NSSelectorFromString("alloc")
+        let initTouchSel = NSSelectorFromString("initForTouchAtPoint:offset:")
+        let moveSel = NSSelectorFromString("moveToPoint:atOffset:")
+        let liftSel = NSSelectorFromString("liftUpAtOffset:")
+        let initRecordSel = NSSelectorFromString("initWithName:interfaceOrientation:")
+        let addPathSel = NSSelectorFromString("addPointerEventPath:")
+        let synthesizeErrorSel = NSSelectorFromString("synthesizeWithError:")
+
+        typealias AllocIMP = @convention(c) (AnyClass, Selector) -> AnyObject
+        typealias InitTouchIMP =
+            @convention(c) (AnyObject, Selector, CGPoint, TimeInterval) -> AnyObject
+        typealias MoveIMP = @convention(c) (AnyObject, Selector, CGPoint, TimeInterval) -> Void
+        typealias LiftIMP = @convention(c) (AnyObject, Selector, TimeInterval) -> Void
+        typealias InitRecordIMP =
+            @convention(c) (AnyObject, Selector, NSString, Int) -> AnyObject
+        typealias AddPathIMP = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+        typealias SynthesizeErrorIMP =
+            @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>?) -> Bool
+
+        let allocPath = unsafeBitCast(
+            class_getMethodImplementation(object_getClass(pathClass), allocSel), to: AllocIMP.self)
+        let initTouch = unsafeBitCast(
+            class_getMethodImplementation(pathClass, initTouchSel), to: InitTouchIMP.self)
+        let moveTo = unsafeBitCast(
+            class_getMethodImplementation(pathClass, moveSel), to: MoveIMP.self)
+        let liftUp = unsafeBitCast(
+            class_getMethodImplementation(pathClass, liftSel), to: LiftIMP.self)
+        let allocRecord = unsafeBitCast(
+            class_getMethodImplementation(object_getClass(recordClass), allocSel),
+            to: AllocIMP.self)
+        let initRecord = unsafeBitCast(
+            class_getMethodImplementation(recordClass, initRecordSel), to: InitRecordIMP.self)
+        let addPath = unsafeBitCast(
+            class_getMethodImplementation(recordClass, addPathSel), to: AddPathIMP.self)
+        let synthesize = unsafeBitCast(
+            class_getMethodImplementation(recordClass, synthesizeErrorSel),
+            to: SynthesizeErrorIMP.self)
+
+        let mid = CGPoint(x: frame.midX, y: frame.midY)
+        let record = initRecord(
+            allocRecord(recordClass, allocSel), initRecordSel, "ZoomPanTwoFinger" as NSString, 1)
+
+        // Tap 1 + Tap 2 (double tap to 100%)
+        let tap1 = initTouch(allocPath(pathClass, allocSel), initTouchSel, mid, 0.0)
+        liftUp(tap1, liftSel, 0.03)
+        let tap2 = initTouch(allocPath(pathClass, allocSel), initTouchSel, mid, 0.08)
+        liftUp(tap2, liftSel, 0.11)
+        addPath(record, addPathSel, tap1)
+        addPath(record, addPathSel, tap2)
+
+        // Pan immediately at t=0.22..0.38 (fast enough to leave UIScrollView decelerating)
+        let panStart = CGPoint(x: frame.midX + 40, y: frame.midY + 40)
+        let pan = initTouch(allocPath(pathClass, allocSel), initTouchSel, panStart, 0.22)
+        for step in 1...6 {
+            let f = CGFloat(step) / 6.0
+            let point = CGPoint(x: panStart.x - 110 * f, y: panStart.y - 75 * f)
+            moveTo(pan, moveSel, point, 0.22 + 0.025 * Double(step))
+        }
+        liftUp(pan, liftSel, 0.38)
+        addPath(record, addPathSel, pan)
+
+        // Two-finger vertical swipe immediately at t=0.41 while decelerating
+        let startY = frame.midY + (swipeDeltaY < 0 ? 70 : -70)
+        let leftStart = CGPoint(x: frame.midX - 35, y: startY)
+        let rightStart = CGPoint(x: frame.midX + 35, y: startY)
+        let left = initTouch(allocPath(pathClass, allocSel), initTouchSel, leftStart, 0.41)
+        let right = initTouch(allocPath(pathClass, allocSel), initTouchSel, rightStart, 0.41)
+        for step in 1...8 {
+            let f = CGFloat(step) / 8.0
+            let t = 0.43 + 0.025 * Double(step)
+            moveTo(left, moveSel, CGPoint(x: leftStart.x, y: leftStart.y + swipeDeltaY * f), t)
+            moveTo(right, moveSel, CGPoint(x: rightStart.x, y: rightStart.y + swipeDeltaY * f), t)
+        }
+        liftUp(left, liftSel, 0.65)
+        liftUp(right, liftSel, 0.66)
+        addPath(record, addPathSel, left)
+        addPath(record, addPathSel, right)
+
+        // Collide a pan or pinch right around the 0.3s auto-advance window (t=0.90..1.10)
+        if includePostSwipePinch {
+            let p1Start = CGPoint(x: frame.midX - 30, y: frame.midY)
+            let p2Start = CGPoint(x: frame.midX + 30, y: frame.midY)
+            let p1 = initTouch(allocPath(pathClass, allocSel), initTouchSel, p1Start, 0.90)
+            let p2 = initTouch(allocPath(pathClass, allocSel), initTouchSel, p2Start, 0.90)
+            for step in 1...6 {
+                let f = CGFloat(step) / 6.0
+                let t = 0.92 + 0.025 * Double(step)
+                moveTo(p1, moveSel, CGPoint(x: p1Start.x - 50 * f, y: p1Start.y), t)
+                moveTo(p2, moveSel, CGPoint(x: p2Start.x + 50 * f, y: p2Start.y), t)
+            }
+            liftUp(p1, liftSel, 1.10)
+            liftUp(p2, liftSel, 1.10)
+            addPath(record, addPathSel, p1)
+            addPath(record, addPathSel, p2)
+        } else {
+            let collidePan = initTouch(allocPath(pathClass, allocSel), initTouchSel, mid, 0.92)
+            for step in 1...5 {
+                let f = CGFloat(step) / 5.0
+                let point = CGPoint(x: mid.x + 80 * f, y: mid.y + 60 * f)
+                moveTo(collidePan, moveSel, point, 0.92 + 0.03 * Double(step))
+            }
+            liftUp(collidePan, liftSel, 1.10)
+            addPath(record, addPathSel, collidePan)
+        }
+        if includeChromeTap {
+            let chromePoint = CGPoint(x: frame.midX + 50, y: frame.midY - 50)
+            let chromeTap = initTouch(
+                allocPath(pathClass, allocSel), initTouchSel, chromePoint, 0.16)
+            liftUp(chromeTap, liftSel, 0.19)
+            addPath(record, addPathSel, chromeTap)
+        }
+
+        var error: NSError?
+        XCTAssertTrue(
+            synthesize(record, synthesizeErrorSel, &error), "\(String(describing: error))")
+    }
+
+    @MainActor
     private func swipeTwoFingersVertically(
         in element: XCUIElement, deltaY: CGFloat, app: XCUIApplication
     ) throws {
