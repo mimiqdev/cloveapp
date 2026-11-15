@@ -254,6 +254,18 @@ extension GridCollectionView {
         private var drawnCurrentPhoto: PhotoIdentity?
         private var drawnHighlight = false
 
+        private struct ExpansionViewportMemory {
+            let groupID: GroupID
+            let preExpansionOffsetY: CGFloat
+            var settledOffsetY: CGFloat
+            var userScrolled: Bool
+        }
+
+        private var expansionMemory: ExpansionViewportMemory?
+        private var isProgrammaticScroll = false
+        private var lastViewportSize: CGSize = .zero
+        private var lastAdjustedInsets: UIEdgeInsets = .zero
+
         init(
             thumbnails: any GridThumbnailSource,
             openPhoto: @escaping (PhotoIdentity) -> Void,
@@ -377,6 +389,14 @@ extension GridCollectionView {
                 lastSizeClass = sizeClass
                 collectionView.collectionViewLayout.invalidateLayout()
             }
+            isProgrammaticScroll = true
+            defer {
+                lastViewportSize = collectionView.bounds.size
+                lastAdjustedInsets = collectionView.adjustedContentInset
+                expansionMemory?.settledOffsetY = collectionView.contentOffset.y
+                isProgrammaticScroll = false
+            }
+
             let oldExpandedGroup = sections.compactMap(\.expandedGroup).first
             let newExpandedGroup = newSections.compactMap(\.expandedGroup).first
             let before = BatchSelection(groups: groups, selection: selection)
@@ -403,9 +423,58 @@ extension GridCollectionView {
 
             let previousIDs = items.map(\.id)
             let previousByID = itemsByID
+            let previousSectionIDs = sections.map(\.id)
+            let newSectionIDs = newSections.map(\.id)
+            let newItemIDs = newItems.map(\.id)
+            let isExpansionTransition = !wasEmpty && oldExpandedGroup != newExpandedGroup
+            let isFoldBackToGroupStack: Bool =
+                if let oldExpandedGroup,
+                    newItems.contains(where: { $0.id == .group(oldExpandedGroup) })
+                {
+                    if let currentPhoto {
+                        GridCellItem.cell(
+                            for: currentPhoto, in: newItems, groups: newGroups,
+                            shown: newShownPhotos) == .group(oldExpandedGroup)
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                }
+            let foldRestoreOffsetY: CGFloat? =
+                if isExpansionTransition, let oldExpandedGroup, newExpandedGroup == nil,
+                    isFoldBackToGroupStack,
+                    let memory = expansionMemory,
+                    memory.groupID == oldExpandedGroup, !memory.userScrolled
+                {
+                    memory.preExpansionOffsetY
+                } else {
+                    nil
+                }
+            let preExpansionOffsetY: CGFloat?
+            if isExpansionTransition, oldExpandedGroup == nil, newExpandedGroup != nil {
+                if collectionView.bounds.height > 0 {
+                    collectionView.layoutIfNeeded()
+                }
+                preExpansionOffsetY = collectionView.contentOffset.y
+            } else {
+                preExpansionOffsetY = nil
+            }
+            let keepsExpansionMemory =
+                !isExpansionTransition
+                && newExpandedGroup != nil
+                && expansionMemory?.groupID == newExpandedGroup
+                && previousSectionIDs == newSectionIDs
+                && previousIDs == newItemIDs
+            if !keepsExpansionMemory && (!isExpansionTransition || newExpandedGroup == nil) {
+                expansionMemory = nil
+            }
+
             // Measure against the existing layout and section plans before updating them (#241).
             let held: HeldPlace? =
-                if !wasEmpty, oldExpandedGroup != newExpandedGroup {
+                if foldRestoreOffsetY != nil {
+                    nil
+                } else if isExpansionTransition {
                     holdExpansionAnchor(
                         oldExpanded: oldExpandedGroup, newExpanded: newExpandedGroup)
                 } else {
@@ -437,34 +506,32 @@ extension GridCollectionView {
             }
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
             dataSource.apply(snapshot, animatingDifferences: false)
-            // The Duo's split follows the open member after the anchor is restored, so a member
-            // that moved out of view comes back (#225, #241).
-            defer { if followsMoved { follow() } }
 
-            guard let held else { return }
-            // The current photo may now be drawn by a different cell, such as a cover keyed by
-            // a refined group or a group run that folded back to its stack; hold that cell
-            // where the photo's old cell was.
-            if held.isCurrentPhoto, let currentPhoto,
-                let cell = GridCellItem.cell(
-                    for: currentPhoto, in: newItems, groups: newGroups,
-                    shown: newShownPhotos)
-            {
-                restore(.item(cell), offset: held.offset)
-                return
-            }
-            switch held.target {
-            case .groupHeader(let groupID):
-                restore(.groupHeader(groupID), offset: held.offset)
-            case .item(let itemID):
-                if newItems.contains(where: { $0.id == itemID }) {
-                    restore(.item(itemID), offset: held.offset)
-                } else if let index = GridAnchorRule.newIndex(
-                    of: itemID, previous: previousIDs, in: newItems.map(\.id))
-                {
-                    restore(.item(newItems[index].id), offset: held.offset)
+            if let foldRestoreOffsetY {
+                if collectionView.bounds.height > 0 {
+                    collectionView.layoutIfNeeded()
                 }
+                scrollToClampedOffsetY(foldRestoreOffsetY)
+            } else if let held {
+                restore(
+                    held: held, previousIDs: previousIDs, newItems: newItems, newGroups: newGroups,
+                    newShownPhotos: newShownPhotos, currentPhoto: currentPhoto)
             }
+
+            if isExpansionTransition, let expanded = newExpandedGroup {
+                if collectionView.bounds.height > 0 {
+                    collectionView.layoutIfNeeded()
+                }
+                let baselineOffsetY = preExpansionOffsetY ?? collectionView.contentOffset.y
+                revealExpandedGroup(expanded, currentPhoto: currentPhoto)
+                expansionMemory = ExpansionViewportMemory(
+                    groupID: expanded, preExpansionOffsetY: baselineOffsetY,
+                    settledOffsetY: collectionView.contentOffset.y, userScrolled: false)
+            }
+
+            // The Duo's split follows the open member after the anchor and expansion visibility
+            // are resolved, so a member that moved out of view comes back (#225, #241, #290).
+            if followsMoved { follow() }
         }
 
         /// One cell tapped: multi-select toggles it, a collapsed cover opens its group, and any
@@ -554,6 +621,29 @@ extension GridCollectionView {
             (cell as? GridPhotoCell)?.cancelThumbnailRequest()
         }
 
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            expansionMemory?.userScrolled = true
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard !isProgrammaticScroll, var memory = expansionMemory, !memory.userScrolled else {
+                return
+            }
+            guard abs(scrollView.contentOffset.y - memory.settledOffsetY) > 0.5 else { return }
+            if scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating
+                || (scrollView.bounds.size == lastViewportSize
+                    && scrollView.adjustedContentInset == lastAdjustedInsets)
+            {
+                memory.userScrolled = true
+                expansionMemory = memory
+            } else {
+                lastViewportSize = scrollView.bounds.size
+                lastAdjustedInsets = scrollView.adjustedContentInset
+                memory.settledOffsetY = scrollView.contentOffset.y
+                expansionMemory = memory
+            }
+        }
+
         /// Drops one prefetch, cancelling the request when it is still running.
         private func cancelPrefetch(_ id: GridCellItem.ID) {
             prefetchRequests.removeValue(forKey: id)?.task.cancel()
@@ -596,8 +686,29 @@ extension GridCollectionView {
             if collectionView.bounds.height > 0 {
                 collectionView.layoutIfNeeded()
             }
-            guard !collectionView.indexPathsForVisibleItems.contains(indexPath) else { return }
+            guard !isItemVisible(at: indexPath, in: collectionView) else { return }
             collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
+        }
+
+        private func isItemVisible(at indexPath: IndexPath, in collectionView: UICollectionView)
+            -> Bool
+        {
+            let insets = collectionView.adjustedContentInset
+            let visibleHeight = collectionView.bounds.height - insets.top - insets.bottom
+            guard visibleHeight > 0,
+                let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+            else {
+                return collectionView.indexPathsForVisibleItems.contains(indexPath)
+            }
+            let visibleTop = collectionView.contentOffset.y + insets.top
+            let visibleBottom =
+                collectionView.contentOffset.y + collectionView.bounds.height - insets.bottom
+            if attributes.frame.height <= visibleHeight + 0.5 {
+                return attributes.frame.minY >= visibleTop - 0.5
+                    && attributes.frame.maxY <= visibleBottom + 0.5
+            }
+            return attributes.frame.maxY > visibleTop + 0.5
+                && attributes.frame.minY < visibleBottom - 0.5
         }
 
         /// Whether the grid is in multi-select, which a non-empty selection means (PRD P0-09).
@@ -693,6 +804,120 @@ extension GridCollectionView {
             return attributes.frame.minY - collectionView.contentOffset.y
         }
 
+        private func restore(
+            held: HeldPlace, previousIDs: [GridCellItem.ID], newItems: [GridCellItem],
+            newGroups: [BrowsingGroup], newShownPhotos: Set<PhotoIdentity>,
+            currentPhoto: PhotoIdentity?
+        ) {
+            // The current photo may now be drawn by a different cell, such as a cover keyed by
+            // a refined group or a group run that folded back to its stack; hold that cell
+            // where the photo's old cell was.
+            if held.isCurrentPhoto, let currentPhoto,
+                let cell = GridCellItem.cell(
+                    for: currentPhoto, in: newItems, groups: newGroups,
+                    shown: newShownPhotos)
+            {
+                restore(.item(cell), offset: held.offset)
+                return
+            }
+            switch held.target {
+            case .groupHeader(let groupID):
+                restore(.groupHeader(groupID), offset: held.offset)
+            case .item(let itemID):
+                if newItems.contains(where: { $0.id == itemID }) {
+                    restore(.item(itemID), offset: held.offset)
+                } else if let index = GridAnchorRule.newIndex(
+                    of: itemID, previous: previousIDs, in: newItems.map(\.id))
+                {
+                    restore(.item(newItems[index].id), offset: held.offset)
+                }
+            }
+        }
+
+        /// After an in-place expansion's new layout settles, ensures the expanded run is
+        /// reviewable with the minimum scroll needed (#290). Already-visible runs stay untouched
+        /// (#241); fitting runs reveal in full; over-height runs reveal the current or first
+        /// member while keeping the header and fold control discoverable without blind centering.
+        private func revealExpandedGroup(_ groupID: GroupID, currentPhoto: PhotoIdentity?) {
+            guard let collectionView, collectionView.bounds.height > 0,
+                let sectionIndex = sections.firstIndex(where: { $0.expandedGroup == groupID })
+            else { return }
+            let cells = sections[sectionIndex].cells
+            guard !cells.isEmpty else { return }
+
+            let insets = collectionView.adjustedContentInset
+            let visibleHeight = collectionView.bounds.height - insets.top - insets.bottom
+            guard visibleHeight > 0 else { return }
+
+            let firstIndexPath = IndexPath(item: 0, section: sectionIndex)
+            let lastIndexPath = IndexPath(item: cells.count - 1, section: sectionIndex)
+            guard let firstAttrs = collectionView.layoutAttributesForItem(at: firstIndexPath),
+                let lastAttrs = collectionView.layoutAttributesForItem(at: lastIndexPath)
+            else { return }
+            let headerAttrs = collectionView.layoutAttributesForSupplementaryElement(
+                ofKind: GridGroupHeader.kind, at: firstIndexPath)
+
+            let runTop =
+                headerAttrs?.frame.minY
+                ?? (firstAttrs.frame.minY - GridGroupRun.headerHeight - GridGroupRun.inset)
+            let runBottom = lastAttrs.frame.maxY + GridGroupRun.inset
+            let runHeight = runBottom - runTop
+
+            let currentY = collectionView.contentOffset.y
+            let visibleTop = currentY + insets.top
+            let visibleBottom = currentY + collectionView.bounds.height - insets.bottom
+            let tolerance: CGFloat = 0.5
+
+            if runHeight <= visibleHeight + tolerance {
+                if runTop >= visibleTop - tolerance && runBottom <= visibleBottom + tolerance {
+                    return
+                }
+                if runBottom > visibleBottom + tolerance {
+                    scrollToClampedOffsetY(
+                        runBottom - (collectionView.bounds.height - insets.bottom))
+                } else if runTop < visibleTop - tolerance {
+                    scrollToClampedOffsetY(runTop - insets.top)
+                }
+                return
+            }
+
+            let targetIndexPath: IndexPath =
+                if let currentPhoto,
+                    let memberIndex = cells.firstIndex(where: { $0.photo.id == currentPhoto })
+                {
+                    IndexPath(item: memberIndex, section: sectionIndex)
+                } else {
+                    firstIndexPath
+                }
+            let targetAttrs =
+                collectionView.layoutAttributesForItem(at: targetIndexPath) ?? firstAttrs
+            let memberTop = targetAttrs.frame.minY
+            let memberBottom = targetAttrs.frame.maxY
+
+            if memberBottom - runTop <= visibleHeight + tolerance {
+                if runTop >= visibleTop - tolerance && memberBottom <= visibleBottom + tolerance {
+                    return
+                }
+                if memberBottom > visibleBottom + tolerance {
+                    scrollToClampedOffsetY(
+                        memberBottom - (collectionView.bounds.height - insets.bottom))
+                } else if runTop < visibleTop - tolerance {
+                    scrollToClampedOffsetY(runTop - insets.top)
+                }
+            } else {
+                if memberTop >= visibleTop - tolerance && memberBottom <= visibleBottom + tolerance
+                {
+                    return
+                }
+                if memberBottom > visibleBottom + tolerance {
+                    scrollToClampedOffsetY(
+                        memberBottom - (collectionView.bounds.height - insets.bottom))
+                } else if memberTop < visibleTop - tolerance {
+                    scrollToClampedOffsetY(memberTop - insets.top)
+                }
+            }
+        }
+
         /// Scrolls the held cell or group header back to its distance from the top before the
         /// update, clamped to the scrollable range.
         private func restore(_ target: AnchorTarget, offset: CGFloat?) {
@@ -721,12 +946,17 @@ extension GridCollectionView {
                 }
             }
             guard let frameMinY else { return }
+            scrollToClampedOffsetY(frameMinY - (offset ?? 0))
+        }
+
+        private func scrollToClampedOffsetY(_ requestedY: CGFloat) {
+            guard let collectionView else { return }
             let insets = collectionView.adjustedContentInset
             let minimum = -insets.top
             let maximum = max(
                 collectionView.contentSize.height + insets.bottom - collectionView.bounds.height,
                 minimum)
-            let y = min(max(frameMinY - (offset ?? 0), minimum), maximum)
+            let y = min(max(requestedY, minimum), maximum)
             guard abs(y - collectionView.contentOffset.y) > 0.5 else { return }
             collectionView.setContentOffset(
                 CGPoint(x: collectionView.contentOffset.x, y: y), animated: false)

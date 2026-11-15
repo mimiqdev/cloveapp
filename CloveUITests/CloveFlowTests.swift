@@ -400,6 +400,85 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testIPadPhotoPreviewGroupNearBottomRevealsAndFolds() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
+        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+
+        let splitGrid = element(app, "clove.detail.photoGrid")
+        XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
+        let gridCollection = splitGrid.collectionViews.firstMatch
+        XCTAssertTrue(gridCollection.waitForExistence(timeout: 5))
+
+        // Scroll the split pane down in small steps until burst-2696 sits near the bottom edge
+        // so expanding its 3-member run would overflow the viewport.
+        let stack = element(app, "clove.grid.group.burst-2696")
+        for _ in 0..<12 {
+            if stack.exists && stack.isHittable && stack.frame.maxY <= splitGrid.frame.maxY - 4 {
+                break
+            }
+            let start = gridCollection.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.68))
+            start.press(
+                forDuration: 0.05,
+                thenDragTo: gridCollection.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.42)),
+                withVelocity: .slow, thenHoldForDuration: 0)
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        XCTAssertTrue(stack.isHittable, "burst-2696 never scrolled into the split pane")
+        let stackFrameBefore = stack.frame
+        let expandedRunHeight = stackFrameBefore.height * 2 + 40
+        XCTAssertGreaterThan(
+            stackFrameBefore.minY + expandedRunHeight, gridCollection.frame.maxY,
+            "burst-2696 should sit near enough to the bottom that expanding overflows the split pane"
+        )
+
+        // Expanding near the bottom reveals header, fold control, and all 3 members in view.
+        stack.tap()
+        let count = element(app, "clove.grid.group.count.burst-2696")
+        let fold = element(app, "clove.grid.group.fold")
+        let member1 = element(app, "clove.grid.photo.mmq02696")
+        let member2 = element(app, "clove.grid.photo.mmq02697")
+        let member3 = element(app, "clove.grid.photo.mmq02698")
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        XCTAssertTrue(fold.isHittable)
+        XCTAssertTrue(member1.isHittable)
+        XCTAssertTrue(member2.isHittable)
+        XCTAssertTrue(member3.waitForExistence(timeout: 5))
+        XCTAssertTrue(member3.isHittable)
+        XCTAssertGreaterThanOrEqual(count.frame.minY, splitGrid.frame.minY - 2)
+        XCTAssertLessThanOrEqual(member3.frame.maxY, gridCollection.frame.maxY + 2)
+        XCTAssertLessThan(count.frame.minY, stackFrameBefore.minY - 20)
+
+        // Folding without scrolling restores the stack to its pre-expansion viewport position.
+        fold.tap()
+        XCTAssertTrue(stack.waitForExistence(timeout: 5))
+        XCTAssertEqual(stack.frame.minY, stackFrameBefore.minY, accuracy: 4)
+
+        // Expanding again, manually scrolling, then folding does not yank back to stackFrameBefore.
+        stack.tap()
+        XCTAssertTrue(fold.waitForExistence(timeout: 5))
+        let dragStart = gridCollection.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+        dragStart.press(
+            forDuration: 0.05,
+            thenDragTo: gridCollection.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 0.25)
+        XCTAssertTrue(fold.isHittable)
+        fold.tap()
+        XCTAssertTrue(stack.waitForExistence(timeout: 5))
+        XCTAssertLessThan(stack.frame.minY, stackFrameBefore.minY - 20)
+    }
+
+    @MainActor
     func testGridAndDetailControls() {
         let app = launchSample()
         openLibrary(app)
