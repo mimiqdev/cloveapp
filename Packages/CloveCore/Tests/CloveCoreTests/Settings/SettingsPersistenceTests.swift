@@ -69,10 +69,13 @@ import CloveCore
         ),
         ("grid.groupDisplay", invalid, { $0.gridGroupDisplay = defaults.gridGroupDisplay }),
         (
-            "appearance.matchSystem", invalid,
-            { $0.appearance.matchesSystemAppearance = defaults.appearance.matchesSystemAppearance }
+            "appearance.mode", invalid,
+            { $0.appearance.mode = defaults.appearance.mode }
         ),
-        ("appearance.theme", invalid, { $0.appearance.theme = defaults.appearance.theme }),
+        (
+            "appearance.family", invalid,
+            { $0.appearance.family = defaults.appearance.family }
+        ),
         ("detail.photoDisplayMode", invalid, { $0.photoDisplayMode = nil }),
     ]
     // The table covers every persisted key, so a new key cannot skip the fallback rule.
@@ -111,8 +114,8 @@ import CloveCore
     #expect(persistence.load().enabledRatings == custom.enabledRatings)
 }
 
-/// Storage written before the Appearance setting existed loads its launch defaults, so an update
-/// needs no migration step and keeps every other stored value.
+/// Storage written before the Appearance setting existed loads its launch defaults and keeps every
+/// other stored value.
 @Test func appearanceReadsItsDefaultsFromOlderStorage() {
     let storage = InMemorySettingsStorage()
     var older = AppSettings()
@@ -120,12 +123,73 @@ import CloveCore
     older.keepZoom = KeepZoom(inDetail: true)
     SettingsPersistence(storage: storage).save(older)
     // What the previous version wrote: every key it knew, and none of the Appearance keys.
-    storage.setString(nil, forKey: "appearance.matchSystem")
-    storage.setString(nil, forKey: "appearance.theme")
+    storage.setString(nil, forKey: "appearance.mode")
+    storage.setString(nil, forKey: "appearance.family")
 
     var expected = older
     expected.appearance = AppearanceChoice()
     #expect(SettingsPersistence(storage: storage).load() == expected)
+}
+
+/// Legacy `appearance.matchSystem == "true"` (or absent/corrupt) resolves to System + Default, even
+/// when an inactive old `appearance.theme` value is stored, without resetting unrelated settings.
+@Test func legacySystemMatchingIgnoresInactiveStoredTheme() {
+    for matchSystemValue in [Optional("true"), Optional("corrupt"), nil] {
+        let storage = InMemorySettingsStorage()
+        storage.setString("false", forKey: "gestures.enabled")
+        storage.setString("true", forKey: "zoom.keepInDetail")
+        storage.setString(matchSystemValue, forKey: "appearance.matchSystem")
+        storage.setString("nord", forKey: "appearance.theme")
+
+        let loaded = SettingsPersistence(storage: storage).load()
+        #expect(loaded.appearance == AppearanceChoice(mode: .system, family: .default))
+        #expect(!loaded.gesturesEnabled)
+        #expect(loaded.keepZoom.inDetail)
+    }
+}
+
+/// Legacy `appearance.matchSystem == "false"` maps every old manual theme to its family and
+/// explicit Light/Dark mode without resetting unrelated settings.
+@Test func legacyManualThemesMapToFamilyAndExplicitMode() {
+    let legacyCases: [(theme: String, expected: AppearanceChoice)] = [
+        ("light", AppearanceChoice(mode: .light, family: .default)),
+        ("dark", AppearanceChoice(mode: .dark, family: .default)),
+        ("catppuccin-latte", AppearanceChoice(mode: .light, family: .catppuccin)),
+        ("catppuccin-mocha", AppearanceChoice(mode: .dark, family: .catppuccin)),
+        ("darkroom", AppearanceChoice(mode: .dark, family: .darkroom)),
+        ("night", AppearanceChoice(mode: .dark, family: .night)),
+        ("nord", AppearanceChoice(mode: .dark, family: .nord)),
+        ("gruvbox", AppearanceChoice(mode: .dark, family: .gruvbox)),
+    ]
+
+    for (legacyTheme, expectedChoice) in legacyCases {
+        let storage = InMemorySettingsStorage()
+        storage.setString("false", forKey: "gestures.enabled")
+        storage.setString("false", forKey: "appearance.matchSystem")
+        storage.setString(legacyTheme, forKey: "appearance.theme")
+
+        let loaded = SettingsPersistence(storage: storage).load()
+        #expect(loaded.appearance == expectedChoice, "legacy \(legacyTheme)")
+        #expect(!loaded.gesturesEnabled)
+    }
+
+    // Unknown or missing legacy theme while matchSystem == "false" falls back to Light + Default.
+    let invalidStorage = InMemorySettingsStorage()
+    invalidStorage.setString("false", forKey: "appearance.matchSystem")
+    invalidStorage.setString("unknown-theme", forKey: "appearance.theme")
+    #expect(
+        SettingsPersistence(storage: invalidStorage).load().appearance
+            == AppearanceChoice(mode: .light, family: .default))
+
+    // Once either new key is persisted, legacy keys no longer apply.
+    let migratedStorage = InMemorySettingsStorage()
+    migratedStorage.setString("false", forKey: "appearance.matchSystem")
+    migratedStorage.setString("nord", forKey: "appearance.theme")
+    migratedStorage.setString("system", forKey: "appearance.mode")
+    migratedStorage.setString("catppuccin", forKey: "appearance.family")
+    #expect(
+        SettingsPersistence(storage: migratedStorage).load().appearance
+            == AppearanceChoice(mode: .system, family: .catppuccin))
 }
 
 @Test func aNewSettingReadsItsDefaultWithoutMigration() {

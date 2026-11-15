@@ -1,31 +1,33 @@
 import CloveCore
 import SwiftUI
 
-/// The eight theme tiles in a 4 × 2 grid (`design/handoff/screens.md`, Settings Appearance).
+/// The six paired theme family tiles in a 3 × 2 grid (`design/handoff/screens.md`, Settings
+/// Appearance).
 ///
-/// The ring follows the theme in effect, so with Match system on it sits on Light or Dark as the
-/// system changes, exactly as the frame shows. Choosing a tile only reports the theme; the settings
-/// section applies `design/handoff/interactions.md`'s rule: Light or Dark keeps Match system on,
-/// and any other theme turns it off.
+/// Choosing a family preserves the active appearance mode (`Light`, `Dark`, or `System`).
 struct ThemePicker: View {
-    /// The theme in effect, which carries the ring (components.md, Theme tile).
-    let selection: CloveTheme
+    /// The selected family, which carries the ring (components.md, Theme tile).
+    let selection: ThemeFamily
 
-    /// Chosen tile.
-    let onSelect: (CloveTheme) -> Void
+    /// Chosen family.
+    let onSelect: (ThemeFamily) -> Void
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(CloveTheme.allCases) { theme in
+            ForEach(ThemeFamily.allCases) { family in
+                let isSelected = family == selection
                 Button {
-                    onSelect(theme)
+                    onSelect(family)
                 } label: {
-                    ThemeTile(theme: theme, isSelected: theme == selection)
+                    ThemeTile(family: family, isSelected: isSelected)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("clove.settings.appearance.theme.\(theme.id)")
+                .accessibilityLabel(family.name)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityIdentifier("clove.settings.appearance.family.\(family.id)")
             }
         }
         .accessibilityElement(children: .contain)

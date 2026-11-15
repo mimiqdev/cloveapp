@@ -20,9 +20,10 @@ import CloveCore
     #expect(settings.similarGroupsEnabled)
     #expect(settings.gridGroupDisplay == .expanded)
     #expect(settings.appearance == AppearanceChoice())
-    #expect(settings.appearance.matchesSystemAppearance)
-    #expect(settings.appearance.theme == .light)
-    #expect(settings.appearance.theme(inSystemAppearance: .dark) == .dark)
+    #expect(settings.appearance.mode == .system)
+    #expect(settings.appearance.family == .default)
+    #expect(settings.appearance.resolvedTheme(inSystemAppearance: .light) == .light)
+    #expect(settings.appearance.resolvedTheme(inSystemAppearance: .dark) == .dark)
 }
 
 @Test func settingChoicesAreTheLaunchChoices() {
@@ -31,7 +32,10 @@ import CloveCore
     #expect(DoubleTapBehaviour.allCases == [.zoom, .off])
     #expect(ZoomedRatingSwipe.allCases == [.twoFinger, .singleFingerAxisLock])
     #expect(GridGroupDisplay.allCases == [.expanded, .collapsed])
+    #expect(AppearanceMode.allCases == [.light, .dark, .system])
+    #expect(ThemeFamily.allCases == [.default, .catppuccin, .darkroom, .night, .nord, .gruvbox])
     #expect(CloveTheme.allCases.first == .light)
+    #expect(CloveTheme.allCases.count == 12)
     #expect(ThemeAppearance.allCases == [.light, .dark])
 }
 

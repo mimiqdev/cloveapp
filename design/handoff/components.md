@@ -73,7 +73,7 @@ All floating controls use one glass material:
 | **Hero resume card** | Full-width rounded card (radius about 20) showing the last photo viewed. A gradient scrim at the bottom carries "Continue · Yesterday", the name, the source and "412 left", plus a 3-segment progress line (marked in `accent`, rejected in `reject`, left in `rating/off`). |
 | **Recent row** | A strip of 3 small thumbnails (rounded 6), the name and source, then the count and date on the right. "Done" is in `status/saved`. The missing-drive variant is faded with a **Reconnect** chip (a small capsule, `accent` text). |
 | **Open folder button** | A text-only capsule at the bottom center, 168 × 48, centred label, no folder or plus glyph (owner decision, 2026-11-13, #227). Resume uses the native bordered-prominent style; first launch fills it with `accent`. |
-| **Theme tile** | A mini preview (a grid strip and a capsule) drawn in that theme's own tokens, with the name below it. The selected tile has a 2 pt `accent` ring. |
+| **Theme tile** | A 70 × 82 paired mini preview split into the family's Light palette (left) and Dark palette (right) behind an untinted centered sample photo, with the family name below it. The selected tile has a 2 pt `accent` ring and `accent` label. |
 | **Settings rows** | A standard inset grouped list with toggles and value rows. |
 
 ## Icons (SF Symbols)

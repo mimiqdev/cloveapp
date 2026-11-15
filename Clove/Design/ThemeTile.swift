@@ -1,22 +1,20 @@
 import CloveCore
 import SwiftUI
 
-/// A theme's mini preview with its name below it (`design/handoff/components.md`, Theme tile;
-/// `screens/11-settings-theme-picker.png`).
+/// A theme family's mini paired preview with its name below it (`design/handoff/components.md`,
+/// Theme tile; `screens/11-settings-theme-picker.png`).
 ///
-/// The preview is a portrait tile, 70 × 82, drawn in the tile's own theme tokens and never in the
-/// theme in effect: the theme's stage holds one sample photo, and under it a dot row stands in for
-/// the mark capsule with a reject dot, three stars and a label dot. That is how the picker shows
-/// what a theme looks like before the user chooses it. The selected tile carries a 2 pt `accent`
-/// ring, and its name is in `accent` as well.
-///
-/// The photo is a fixed placeholder landscape: photos are never tinted by a theme (tokens.md), and
-/// the handoff's sample photos are placeholders (README.md).
+/// The preview is a portrait tile, 70 × 82, split down the middle into the family's light palette
+/// (left) and dark palette (right), never drawn in the theme in effect: each half draws its own
+/// canvas, stage, glass capsule, reject dot, stars and accent dot, while the centered sample photo
+/// stays untinted across both halves. That shows how a family behaves in both Light and Dark
+/// appearances before selection. The selected tile carries a 2 pt `accent` ring, and its name is
+/// in `accent` as well.
 struct ThemeTile: View {
-    /// The theme this tile previews (clove-themes.json).
-    let theme: CloveTheme
+    /// The paired theme family this tile previews.
+    let family: ThemeFamily
 
-    /// Whether the tile is the one in effect, so it draws the ring (components.md).
+    /// Whether this family is currently selected, so the tile draws the `accent` ring.
     var isSelected = false
 
     var body: some View {
@@ -26,7 +24,7 @@ struct ThemeTile: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(theme.tokens.separator.color, lineWidth: 1)
+                        .strokeBorder(Color.clove.separator, lineWidth: 1)
                 }
                 .overlay {
                     if isSelected {
@@ -34,49 +32,73 @@ struct ThemeTile: View {
                             .strokeBorder(Color.clove.accent, lineWidth: 2)
                     }
                 }
-            Text(theme.name)
+            Text(family.name)
                 .font(.caption2)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .foregroundStyle(isSelected ? Color.clove.accent : Color.clove.text.secondary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(theme.name)
+        .accessibilityLabel(family.name)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    /// The tile's own colours: the stage with one photo, and the dot row under it (components.md).
+    /// Paired Light (left) and Dark (right) chrome behind an untinted centered photo.
     private var preview: some View {
         ZStack(alignment: .top) {
-            theme.tokens.canvas.color
+            ZStack {
+                halfPreview(for: family.lightTheme)
+                    .mask(leftHalfMask)
+                halfPreview(for: family.darkTheme)
+                    .mask(rightHalfMask)
+            }
             VStack(spacing: 0) {
                 Color.clear.frame(height: 6)
-                stage.frame(height: 44)
-                dotRow.frame(maxHeight: .infinity)
+                SamplePhoto()
+                    .frame(width: 52, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .frame(height: 44)
+                Spacer(minLength: 0)
             }
         }
     }
 
-    /// The theme's stage with the sample photo on it.
-    private var stage: some View {
-        ZStack {
-            theme.tokens.stage.color
-            SamplePhoto()
-                .frame(width: 52, height: 34)
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+    private var leftHalfMask: some View {
+        HStack(spacing: 0) {
+            Color.black
+            Color.clear
+        }
+    }
+
+    private var rightHalfMask: some View {
+        HStack(spacing: 0) {
+            Color.clear
+            Color.black
+        }
+    }
+
+    /// Chrome preview in a single resolved palette's tokens (without the centered photo).
+    private func halfPreview(for theme: CloveTheme) -> some View {
+        ZStack(alignment: .top) {
+            theme.tokens.canvas.color
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 6)
+                theme.tokens.stage.color.frame(height: 44)
+                dotRow(for: theme).frame(maxHeight: .infinity)
+            }
         }
     }
 
     /// The frame's miniature glass capsule: reject dot, rating dots and an accent dot.
-    private var dotRow: some View {
+    private func dotRow(for theme: CloveTheme) -> some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(theme.tokens.reject.color)
                 .frame(width: 6, height: 6)
             HStack(spacing: 2) {
-                star(filled: true)
-                star(filled: true)
-                star(filled: false)
+                star(filled: true, for: theme)
+                star(filled: true, for: theme)
+                star(filled: false, for: theme)
             }
             Circle()
                 .fill(theme.tokens.accent.color)
@@ -88,7 +110,7 @@ struct ThemeTile: View {
     }
 
     /// One star of the miniature, in the theme's rating tokens.
-    private func star(filled: Bool) -> some View {
+    private func star(filled: Bool, for theme: CloveTheme) -> some View {
         Circle()
             .fill(filled ? theme.tokens.ratingOn.color : theme.tokens.ratingOff.color)
             .frame(width: 5, height: 5)
@@ -123,9 +145,10 @@ private struct SamplePhoto: View {
 
 #Preview("Theme tiles") {
     HStack(spacing: 10) {
-        ThemeTile(theme: .light, isSelected: true)
-        ThemeTile(theme: .darkroom)
-        ThemeTile(theme: .nord)
+        ThemeTile(family: .default, isSelected: true)
+        ThemeTile(family: .catppuccin)
+        ThemeTile(family: .darkroom)
+        ThemeTile(family: .nord)
     }
     .padding(16)
     .background(Rectangle().fill(Color.clove.bg.canvas))
