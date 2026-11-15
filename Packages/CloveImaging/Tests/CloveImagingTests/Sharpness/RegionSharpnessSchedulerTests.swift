@@ -33,9 +33,20 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
         enum Kind: String, Sendable { case properties, preview }
         private struct State {
             var held: Set<Kind> = []
-            var waiters: [CheckedContinuation<Void, Never>] = []
+            var waiters: [Kind: [CheckedContinuation<Void, Never>]] = [:]
         }
         private let state = Mutex(State())
+        private let parkedProperties = AsyncStream<Void>.makeStream()
+        private let parkedPreviews = AsyncStream<Void>.makeStream()
+
+        private func parkedStream(for kind: Kind) -> (
+            stream: AsyncStream<Void>, continuation: AsyncStream<Void>.Continuation
+        ) {
+            switch kind {
+            case .properties: parkedProperties
+            case .preview: parkedPreviews
+            }
+        }
 
         func hold(_ kind: Kind) {
             state.withLock { _ = $0.held.insert(kind) }
@@ -44,26 +55,33 @@ final class GatedSharpnessReader: RegionSharpnessReading, @unchecked Sendable {
         func release(_ kind: Kind) {
             let pending = state.withLock { state -> [CheckedContinuation<Void, Never>] in
                 state.held.remove(kind)
-                let all = state.waiters
-                state.waiters.removeAll()
-                return all
+                return state.waiters.removeValue(forKey: kind) ?? []
             }
             for waiter in pending { waiter.resume() }
         }
 
         func waitIfHeld(_ kind: Kind) async {
             while state.withLock({ $0.held.contains(kind) }) {
-                let parked = state.withLock { $0.waiters.count }
-                _ = parked
                 await withCheckedContinuation { continuation in
-                    let resumed = state.withLock { state -> Bool in
+                    let parked = state.withLock { state -> Bool in
                         guard state.held.contains(kind) else { return false }
-                        state.waiters.append(continuation)
+                        state.waiters[kind, default: []].append(continuation)
                         return true
                     }
-                    if !resumed { continuation.resume() }
+                    if parked {
+                        parkedStream(for: kind).continuation.yield(())
+                    } else {
+                        continuation.resume()
+                    }
                 }
             }
+        }
+
+        func waitUntilParked(_ kind: Kind) async throws {
+            var iterator = parkedStream(for: kind).stream.makeAsyncIterator()
+            try #require(
+                await iterator.next() != nil,
+                "Read gate must park \(kind.rawValue) while held")
         }
     }
 
@@ -576,17 +594,16 @@ private func until(
         await scheduler.close()
     }
 
-    @Test func staleResultsAreNeverPublished() async throws {
+    @Test(.timeLimit(.minutes(1))) func staleResultsAreNeverPublished() async throws {
         let reader = GatedSharpnessReader()
         reader.setProperties(afInfoProperties(), for: "flip.arw")
         let detector = GatedSharpnessDetector()
-        await reader.reads.hold(.preview)
+        reader.reads.hold(.preview)
+        defer { reader.reads.release(.preview) }
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
         let task = Task { await scheduler.analyzeCurrent(photoRequest("flip", revision: 1)) }
-        try await until("the preview read is held") {
-            reader.previewCounts["flip.arw"] ?? 0 >= 1
-        }
+        try await reader.reads.waitUntilParked(.preview)
         // The file changes under the running analysis.
         await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/flip.arw")])
         reader.reads.release(.preview)
@@ -695,23 +712,22 @@ private func until(
         await scheduler.close()
     }
 
-    @Test func pauseHoldsAdmissionButAnEnteredReadFinishes() async throws {
+    @Test(.timeLimit(.minutes(1))) func pauseHoldsAdmissionButAnEnteredReadFinishes() async throws {
         let reader = GatedSharpnessReader()
         reader.setProperties(afInfoProperties(), for: "finishing.arw")
         let detector = GatedSharpnessDetector()
         reader.reads.hold(.properties)
+        defer { reader.reads.release(.properties) }
         reader.reads.release(.preview)
         let scheduler = RegionSharpnessScheduler(
             analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector))
         let running = Task { await scheduler.analyzeCurrent(photoRequest("finishing")) }
-        try await until("the property read is entered") {
-            reader.activePropertyReads == 1
-        }
+        try await reader.reads.waitUntilParked(.properties)
         await scheduler.pause()
         // The read that already entered finishes under the pause (#216: an uncancellable
         // entry is never thrown away) — its stage slot is released honestly…
         reader.reads.release(.properties)
-        try await until("the entered read drains while paused") {
+        try await until("the entered read drains while paused", timeout: .seconds(30)) {
             reader.activePropertyReads == 0
         }
         // …but no further stage of that photo is admitted until resume.
@@ -782,25 +798,27 @@ private func until(
         await scheduler.close()
     }
 
-    @Test func droppedGenerationNeverAnswersTheNewJob() async throws {
+    @Test(.timeLimit(.minutes(1))) func droppedGenerationNeverAnswersTheNewJob() async throws {
         // #2: invalidate a running job, then immediately ask for the same revision again.
         // The old task must not remove, cancel or answer the new job.
         let reader = GatedSharpnessReader()
         reader.setProperties(afInfoProperties(), for: "again.arw")
         let detector = GatedSharpnessDetector()
         detector.hold()
-        await reader.reads.hold(.preview)
+        reader.reads.hold(.preview)
+        defer {
+            reader.reads.release(.preview)
+            detector.releaseAll()
+        }
         let scheduler = makeScheduler(reader, detector)
 
         let oldTask = Task { await scheduler.analyzeCurrent(photoRequest("again", revision: 1)) }
-        try await until("the old analysis is in flight") {
-            reader.previewCounts["again.arw"] ?? 0 >= 1
-        }
+        try await reader.reads.waitUntilParked(.preview)
         await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/again.arw")])
         // Same revision requested right away: the new job must get a real answer, not the old
         // task's cancellation.
         let fresh = Task { await scheduler.analyzeCurrent(photoRequest("again", revision: 1)) }
-        await reader.reads.release(.preview)
+        reader.reads.release(.preview)
         detector.releaseAll()
         let answer = try #require(await fresh.value)
         guard case .regions(let afRegions) = answer.autofocus else {
