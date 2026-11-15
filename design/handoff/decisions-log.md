@@ -8,6 +8,14 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Photo Preview and Focus View terminology and toggle (#256)
+
+Live Figma links for the updated wide iPad and expanded Duo detail controls require an authenticated Figma session and were unavailable in this environment, so the implementation follows the written specification in #256 together with `design/handoff/screens.md`, `design/handoff/components.md`, `design/handoff/interactions.md`, and `design/handoff/tokens/`:
+
+- **Three-view terminology**: replaces the older internal `DuoSplit.focus` / `.photoOnly` naming across code, accessibility identifiers, and handoff docs with **Grid View** (full folder grid, no large photo preview or filmstrip), **Photo Preview** (30% filtered folder grid + 70% photo stage, inline current-group expansion, no filmstrip, no redundant `"All / N photos"` header in the split pane), and **Focus View** (full photo stage + bottom filmstrip, no folder grid).
+- **Discoverable native toggle (`sidebar.left`)**: rendered beside Back on wide iPad (`horizontalSizeClass == .regular`, width `>= 680` pt, height `>= 420` pt, non-cover) and inside the expanded Duo right dock view tools (`Filter`, `"…"`, `Photo Preview / Focus View`, `Focus regions`, `Info`). Uses `accent` + selected state in **Photo Preview** (`"Hide photo grid"`) and neutral `text/primary` in **Focus View** (`"Show photo grid"`), with accessibility identifier `clove.detail.gridToggle` and values `"Photo Preview"` / `"Focus View"`. Hidden on iPhone, Duo cover, and compact/narrow iPad widths (`< 680` pt), which fall back to **Focus View** while preserving the wide preference across temporary resizes.
+- **State continuity and reset**: switching between **Photo Preview** and **Focus View** keeps the same current photo, marks, Undo, filter, sort, inline `foldedGroup`, focus region overlay state, and zoom scale/anchor without reloading previews or re-running focus detection. Chosen presentation persists while navigating photos inside detail and resets to **Photo Preview** upon returning via Back to **Grid View**. The existing 8 pt draggable divider (`clove.duo.divider`) stays functional and synchronized with the toggle.
+
 ## Adaptive Settings across iPhone, iPad, and Duo (#264)
 
 Live Figma frames for the reorganized Settings views were unavailable in the build environment, so the implementation follows the written hierarchy, controls, and token rules in #264 together with `design/handoff/tokens/` and `design/handoff/components.md`:

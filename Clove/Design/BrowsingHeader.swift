@@ -40,7 +40,7 @@ struct BrowsingHeader<Subtitle: View, LeadingTools: View, Tools: View>: View {
                         .font(.caption)
                         .foregroundStyle(Color.clove.text.secondary)
                 }
-                .frame(width: max(proxy.size.width - 192, 80))
+                .frame(width: max(proxy.size.width - (backTitle != nil ? 380 : 192), 100))
                 HStack(spacing: 8) {
                     if let backTitle {
                         Button(action: back) {

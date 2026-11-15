@@ -46,7 +46,7 @@ Things to know about the frames:
 
 ## Scope
 
-**In the MVP:** Entry (resume first, first launch), grid (filter, select, opening, "…" menu), detail (all states, including groups expanded in the filmstrip), Move Rejects (confirm, quick grid, results), iPad grid and detail, Duo cover and expanded (grid, 30/70, photo only, dock pickers), Duo half fold (quick refresh), Settings, error states, and 8 themes.
+**In the MVP:** Entry (resume first, first launch), grid (filter, select, opening, "…" menu), detail (Grid View, Photo Preview, Focus View, groups expanded in the filmstrip or inline folder grid), Move Rejects (confirm, quick grid, results), iPad grid and detail (Photo Preview 30/70 default + Focus View toggle on wide iPad), Duo cover and expanded (Grid View, Photo Preview 30/70, Focus View, dock pickers), Duo half fold (quick refresh), Settings, error states, and 8 themes.
 
 **Not in the MVP:** a dedicated Duo half-fold layout (1.1), metadata editing in Info, and the Archive explorations (Entry B and C, the old ladders and toolbars).
 

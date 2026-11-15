@@ -22,6 +22,7 @@ private struct SystemBrowsingLayout: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.usesSystemBrowsingToolbar, true)
+            .environment(\.hasFoldRegion, hasFoldRegion)
             .environment(\.isDuoExpanded, (edge != nil || hasFoldRegion) && sizeClass == .regular)
             .environment(\.isDuoCover, edge != nil && sizeClass != .regular)
             .onGeometryChange(for: Bool.self) {
@@ -34,20 +35,20 @@ private struct SystemBrowsingLayout: ViewModifier {
 
 extension EnvironmentValues {
     @Entry var usesSystemBrowsingToolbar = false
+    @Entry var hasFoldRegion = false
     @Entry var isDuoExpanded = false
     @Entry var isDuoCover = false
 }
 
-/// The grid owns its tools and sheets; the detail owns marking and preview state.
+/// The grid owns its filter/more/move controls; detail owns marking and preview state.
 struct DuoDetailLayout {
-    var split: Binding<DuoSplit>
-    var grid: AnyView
+    var presentation: Binding<DetailPresentation>
     var filter: AnyView
     var more: AnyView
     var bottom: AnyView
     var showsGrid: Bool
-    /// The group whose expansion the person folded, shared with the split's grid, so the
-    /// photo-only strip shows the same stack and folds back the same way (#225).
+    /// The group whose expansion the person folded, shared with Photo Preview's grid so the
+    /// Focus View filmstrip shows the same stack and folds back the same way (#225).
     var foldedGroup: Binding<GroupID?>?
 }
 
@@ -138,20 +139,84 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
     }
 }
 
+/// Shared Photo Preview 30/70 divider interaction for both `ArrangementView` and `SplitPhotoView`.
+struct SplitDivider: View {
+    @Binding var presentation: DetailPresentation
+    let horizontal: Bool
+    let contentExtent: CGFloat
+    let back: () -> Void
+
+    var body: some View {
+        Divider()
+            .contentShape(.interaction, Rectangle().inset(by: -22))
+            .gesture(
+                DragGesture(minimumDistance: 4).onEnded { value in
+                    let next = presentation.released(
+                        translation: horizontal
+                            ? value.translation.width : value.translation.height,
+                        contentWidth: contentExtent)
+                    if next == .grid { back() } else { presentation = next }
+                }
+            )
+            .accessibilityLabel("Photo split")
+            .accessibilityValue("Grid 30 percent, photo 70 percent")
+            .accessibilityAdjustableAction { direction in
+                if direction == .decrement { presentation = .focus } else { back() }
+            }
+            .accessibilityIdentifier("clove.duo.divider")
+    }
+}
+
+/// Horizontal 30/70 Photo Preview container for non-fold wide layouts across iOS versions. Keeping
+/// `secondary` outside the conditional grid branch preserves its SwiftUI identity across toggles.
+struct SplitPhotoView<Grid: View, Secondary: View>: View {
+    let showsGrid: Bool
+    @Binding var presentation: DetailPresentation
+    let back: () -> Void
+    @ViewBuilder let grid: () -> Grid
+    @ViewBuilder let secondary: () -> Secondary
+
+    var body: some View {
+        GeometryReader { proxy in
+            let totalWidth = proxy.size.width
+            let gridWidth =
+                showsGrid
+                ? (totalWidth * DetailPresentation.photoPreview.gridFraction).rounded() : 0
+            HStack(spacing: 0) {
+                if showsGrid {
+                    HStack(spacing: 0) {
+                        grid()
+                        SplitDivider(
+                            presentation: $presentation,
+                            horizontal: true,
+                            contentExtent: totalWidth,
+                            back: back)
+                    }
+                    .frame(width: gridWidth)
+                }
+                secondary()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(width: totalWidth, height: proxy.size.height)
+        }
+    }
+}
+
 /// The arrangement owns pane geometry and adapts to reserved fold regions. Its API
-/// has no drag-to-collapse navigation, so DuoSplit retains the temporary snap/Back
+/// has no drag-to-collapse navigation, so ``DetailPresentation`` retains the temporary snap/Back
 /// transitions. The separator is the standard Divider, without custom chrome or sizing.
 @available(iOS 27.1, *)
 struct PhotoArrangement<Photo: View>: View {
     let grid: AnyView
-    @Binding var split: DuoSplit
+    @Binding var presentation: DetailPresentation
     let back: () -> Void
     @ViewBuilder var photo: Photo
 
     var body: some View {
         ArrangementView {
-            ArrangementGrid(grid: grid, split: $split, back: back)
-                .splitArrangementLayoutRatio(CGFloat(DuoSplit.focus.gridFraction))
+            ArrangementGrid(grid: grid, presentation: $presentation, back: back)
+                .splitArrangementLayoutRatio(
+                    CGFloat(DetailPresentation.photoPreview.gridFraction))
         } secondary: {
             photo
         }
@@ -162,7 +227,7 @@ struct PhotoArrangement<Photo: View>: View {
 @available(iOS 27.1, *)
 private struct ArrangementGrid: View {
     let grid: AnyView
-    @Binding var split: DuoSplit
+    @Binding var presentation: DetailPresentation
     let back: () -> Void
     @Environment(\.splitArrangementAxis) private var axis
     @State private var primaryExtent: CGFloat = 0
@@ -174,23 +239,12 @@ private struct ArrangementGrid: View {
             ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
         layout {
             grid
-            Divider()
-                .contentShape(.interaction, Rectangle().inset(by: -22))
-                .gesture(
-                    DragGesture(minimumDistance: 4).onEnded { value in
-                        let next = split.released(
-                            translation: horizontal
-                                ? value.translation.width : value.translation.height,
-                            contentWidth: primaryExtent / CGFloat(DuoSplit.focus.gridFraction))
-                        if next == .grid { back() } else { split = next }
-                    }
-                )
-                .accessibilityLabel("Photo split")
-                .accessibilityValue("Grid 30 percent, photo 70 percent")
-                .accessibilityAdjustableAction { direction in
-                    if direction == .decrement { split = .photoOnly } else { back() }
-                }
-                .accessibilityIdentifier("clove.duo.divider")
+            SplitDivider(
+                presentation: $presentation,
+                horizontal: horizontal,
+                contentExtent: primaryExtent
+                    / CGFloat(DetailPresentation.photoPreview.gridFraction),
+                back: back)
         }
         .onGeometryChange(for: CGFloat.self) {
             horizontal ? $0.size.width : $0.size.height

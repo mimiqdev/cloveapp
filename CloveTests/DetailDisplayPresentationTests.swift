@@ -639,8 +639,10 @@ struct DetailDisplayPresentationTests {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
         window.rootViewController = UIHostingController(
-            rootView: DetailScreen(browsing: browsing, images: source)
-                .environment(SettingsStore.sample))
+            rootView: DetailScreen(
+                browsing: browsing, images: source, initialPresentation: .focus
+            )
+            .environment(SettingsStore.sample))
         window.makeKeyAndVisible()
         defer {
             window.isHidden = true
@@ -1279,7 +1281,7 @@ struct DetailDisplayPresentationTests {
         #expect(abs(regionTapSnapshot.anchor.y - 0.35) < 0.05)
     }
 
-    @Test func duoPhotoOnlyAndPortraitFocusResizeKeepFullResolutionScaleAndFocusAnchor()
+    @Test func duoFocusViewAndPortraitFocusResizeKeepFullResolutionScaleAndFocusAnchor()
         async throws
     {
         guard #available(iOS 27.1, *) else { return }
@@ -1291,14 +1293,13 @@ struct DetailDisplayPresentationTests {
 
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
-        let split = Binding.constant(DuoSplit.photoOnly)
+        let presentation = Binding.constant(DetailPresentation.focus)
         let host = UIHostingController(
             rootView: NavigationStack {
                 DetailScreen(
                     browsing: browsing,
                     duo: DuoDetailLayout(
-                        split: split,
-                        grid: AnyView(EmptyView()),
+                        presentation: presentation,
                         filter: AnyView(EmptyView()),
                         more: AnyView(EmptyView()),
                         bottom: AnyView(EmptyView()),
@@ -1334,7 +1335,7 @@ struct DetailDisplayPresentationTests {
         try await waitFor { preview.isZoomed }
         try await Task.sleep(for: .milliseconds(450))
 
-        // Since #273, zooming alone leaves the Duo photo-only filmstrip visible so preview height
+        // Since #273, zooming alone leaves the Duo Focus View filmstrip visible so preview height
         // stays unchanged while zoom scale and focus anchor settle cleanly.
         #expect(preview.bounds.height == heightBefore)
         let zoomedSnapshot = try #require(preview.zoomSnapshot)
@@ -1362,6 +1363,285 @@ struct DetailDisplayPresentationTests {
             viewSize: preview.bounds.size,
             screenScale: host.traitCollection.displayScale)
         #expect(abs(settled.scale - expectedScale) < 0.02)
+    }
+
+    @Test func widePadPhotoPreviewDefaultsAndTogglePreserveStateWithoutReloading() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedFocusDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02678" })
+        let next = try #require(browsing.photos.first { $0.id.stem == "mmq02679" })
+        browsing.openPhoto(target.id)
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let usesSystemToolbar =
+            if #available(iOS 27.1, *) {
+                true
+            } else {
+                false
+            }
+        let host = UIHostingController(
+            rootView: TestDetailPresentationHost(
+                browsing: browsing, images: source, presentation: presentationBox,
+                usesSystemToolbar: usesSystemToolbar))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor {
+            self.findCollectionView(in: window) != nil
+                && source.prefetched.last?.current.photo == target.id
+                && source.delivered.contains(.screenRAW)
+                && source.analyzeCalls.count == 1
+        }
+        let preview = try #require(findPreview(in: window))
+        let splitGrid = try #require(findCollectionView(in: window))
+        #expect(findFilmstripScrollView(in: window, excluding: preview) == nil)
+        #expect(abs(splitGrid.frame.width / 1024 - 0.3) < 0.03)
+        #expect(
+            DetailPresentationPolicy(
+                isRegularWidth: true, isDuoExpanded: false, isDuoCover: false,
+                hasFoldRegion: false, availableWidth: 1024, availableHeight: 768
+            ).supportsPhotoPreview)
+
+        if #available(iOS 27.1, *) {
+            let toggle = try #require(
+                findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window))
+            #expect(toggle.accessibilityLabel == "Hide photo grid")
+            #expect(toggle.accessibilityValue == "Photo Preview")
+        }
+
+        // Apply a mark and zoom to 100%, then toggle between Photo Preview and Focus View.
+        let fourStars = try #require(Rating(rawValue: 4))
+        browsing.apply(.rating(fourStars), to: target.id)
+        preview.onDoubleTap?(UnitPoint(x: 0.35, y: 0.4))
+        try await waitFor { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(350))
+        let windowCountBeforeToggle = source.windows.count
+        let requestCountBeforeToggle = source.requests.count
+        let analyzeCountBeforeToggle = source.analyzeCalls.count
+        let splitPreviewWidth = preview.bounds.width
+
+        if #available(iOS 27.1, *) {
+            let toggle = try #require(
+                findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window))
+            #expect(toggle.accessibilityActivate())
+        } else {
+            presentationBox.value = presentationBox.value.toggled
+        }
+        try await waitFor {
+            self.findCollectionView(in: window) == nil
+                && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+                && preview.bounds.width > splitPreviewWidth
+        }
+        if #available(iOS 27.1, *) {
+            let toggleAfterFocus = try #require(
+                findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window))
+            #expect(toggleAfterFocus.accessibilityLabel == "Show photo grid")
+            #expect(toggleAfterFocus.accessibilityValue == "Focus View")
+        }
+        #expect(browsing.state.currentPhoto == target.id)
+        #expect(browsing.shownMarks(for: target.id).rating == fourStars)
+        #expect(browsing.canUndoMark)
+        #expect(preview.isZoomed)
+        #expect(source.windows.count == windowCountBeforeToggle)
+        #expect(source.requests.count == requestCountBeforeToggle)
+        #expect(source.analyzeCalls.count == analyzeCountBeforeToggle)
+
+        // Navigating to another photo keeps Focus View.
+        browsing.openPhoto(next.id)
+        try await waitFor {
+            browsing.state.currentPhoto == next.id
+                && source.prefetched.last?.current.photo == next.id
+        }
+        #expect(findCollectionView(in: window) == nil)
+        #expect(findFilmstripScrollView(in: window, excluding: preview) != nil)
+
+        // Toggling back restores Photo Preview on the same photo without re-loading pixels.
+        let windowCountBeforeRestore = source.windows.count
+        let analyzeCountBeforeRestore = source.analyzeCalls.count
+        if #available(iOS 27.1, *) {
+            let toggleAfterFocus = try #require(
+                findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window))
+            #expect(toggleAfterFocus.accessibilityActivate())
+        } else {
+            presentationBox.value = presentationBox.value.toggled
+        }
+        try await waitFor {
+            self.findCollectionView(in: window) != nil
+                && self.findFilmstripScrollView(in: window, excluding: preview) == nil
+        }
+        #expect(browsing.state.currentPhoto == next.id)
+        #expect(source.windows.count == windowCountBeforeRestore)
+        #expect(source.analyzeCalls.count == analyzeCountBeforeRestore)
+    }
+
+    @Test func compactAndNarrowFallbackHidesToggleAndRestoresWidePresentation() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photo = try #require(browsing.photos.first?.id)
+        browsing.openPhoto(photo)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let rootView: AnyView
+        if #available(iOS 27.1, *) {
+            rootView = AnyView(
+                NavigationStack {
+                    DetailScreen(browsing: browsing, images: source)
+                }
+                .environment(SettingsStore.sample)
+                .environment(\.usesSystemBrowsingToolbar, true))
+        } else {
+            rootView = AnyView(
+                DetailScreen(browsing: browsing, images: source)
+                    .environment(SettingsStore.sample))
+        }
+        let host = UIHostingController(rootView: rootView)
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor {
+            let hasToggle =
+                if #available(iOS 27.1, *) {
+                    self.findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window)
+                        != nil
+                } else {
+                    true
+                }
+            return self.findCollectionView(in: window) != nil && hasToggle
+        }
+
+        // Narrowing below 680 pt falls back to Focus View and hides the grid toggle.
+        let narrowPolicy = DetailPresentationPolicy(
+            isRegularWidth: true, isDuoExpanded: false, isDuoCover: false,
+            hasFoldRegion: false, availableWidth: 600, availableHeight: 768)
+        #expect(!narrowPolicy.supportsPhotoPreview)
+        #expect(narrowPolicy.effectivePresentation(for: .photoPreview) == .focus)
+        window.frame = CGRect(x: 0, y: 0, width: 600, height: 768)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor {
+            let preview = self.findPreview(in: window)
+            let toggleHidden =
+                if #available(iOS 27.1, *) {
+                    self.findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window)
+                        == nil
+                } else {
+                    true
+                }
+            return self.findCollectionView(in: window) == nil
+                && preview != nil
+                && self.findFilmstripScrollView(in: window, excluding: preview!) != nil
+                && toggleHidden
+        }
+
+        // Widening back restores Photo Preview and the toggle button.
+        let widePolicy = DetailPresentationPolicy(
+            isRegularWidth: true, isDuoExpanded: false, isDuoCover: false,
+            hasFoldRegion: false, availableWidth: 1024, availableHeight: 768)
+        #expect(widePolicy.supportsPhotoPreview)
+        #expect(widePolicy.effectivePresentation(for: .photoPreview) == .photoPreview)
+        window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor {
+            let preview = self.findPreview(in: window)
+            let toggleShown =
+                if #available(iOS 27.1, *) {
+                    self.findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window)
+                        != nil
+                } else {
+                    true
+                }
+            return self.findCollectionView(in: window) != nil
+                && preview != nil
+                && self.findFilmstripScrollView(in: window, excluding: preview!) == nil
+                && toggleShown
+        }
+    }
+
+    @Test func expandedDuoToggleSwitchesBetweenPhotoPreviewAndFocusView() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photo = try #require(browsing.photos.first?.id)
+        browsing.openPhoto(photo)
+
+        var currentPresentation = DetailPresentation.photoPreview
+        let presentationBinding = Binding(
+            get: { currentPresentation },
+            set: { currentPresentation = $0 })
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                DetailScreen(
+                    browsing: browsing,
+                    images: source,
+                    duo: DuoDetailLayout(
+                        presentation: presentationBinding,
+                        filter: AnyView(EmptyView()),
+                        more: AnyView(EmptyView()),
+                        bottom: AnyView(EmptyView()),
+                        showsGrid: true,
+                        foldedGroup: nil))
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.isDuoExpanded, true)
+            .environment(\.usesSystemBrowsingToolbar, true))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor {
+            let preview = self.findPreview(in: window)
+            return preview != nil
+                && self.findAccessibilityElement(identifier: "clove.duo.photoPreview", in: window)
+                    != nil
+                && self.findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window)
+                    != nil
+                && self.findFilmstripScrollView(in: window, excluding: preview!) == nil
+        }
+
+        let toggle = try #require(
+            findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window))
+        #expect(toggle.accessibilityLabel == "Hide photo grid")
+        #expect(toggle.accessibilityActivate())
+
+        try await waitFor {
+            let preview = self.findPreview(in: window)
+            return currentPresentation == .focus
+                && preview != nil
+                && self.findAccessibilityElement(identifier: "clove.duo.focus", in: window) != nil
+                && self.findFilmstripScrollView(in: window, excluding: preview!) != nil
+        }
+        let toggleInFocus = try #require(
+            findAccessibilityElement(identifier: "clove.detail.gridToggle", in: window))
+        #expect(toggleInFocus.accessibilityLabel == "Show photo grid")
+        #expect(toggleInFocus.accessibilityValue == "Focus View")
     }
 
     @Test func programmaticZoomDefersDuringScrollAndLayoutPassesAndCoalescesToLatestTarget()
@@ -1581,17 +1861,131 @@ struct DetailDisplayPresentationTests {
         return nil
     }
 
+    private func findCollectionView(in view: UIView) -> UICollectionView? {
+        if let collectionView = view as? UICollectionView { return collectionView }
+        for child in view.subviews {
+            if let found = findCollectionView(in: child) { return found }
+        }
+        return nil
+    }
+
     private func findFilmstripScrollView(
         in view: UIView, excluding preview: DetailZoomContainerView
     ) -> UIScrollView? {
         if view === preview { return nil }
-        if let scrollView = view as? UIScrollView { return scrollView }
+        if let scrollView = view as? UIScrollView, !(view is UICollectionView) {
+            return scrollView
+        }
         for child in view.subviews {
             if let found = findFilmstripScrollView(in: child, excluding: preview) {
                 return found
             }
         }
         return nil
+    }
+
+    private func findAccessibilityElement(identifier: String, in root: Any) -> NSObject? {
+        var visited = Set<ObjectIdentifier>()
+        return searchAccessibilityElement(identifier: identifier, in: root, visited: &visited)
+    }
+
+    private func searchAccessibilityElement(
+        identifier: String, in node: Any, visited: inout Set<ObjectIdentifier>
+    ) -> NSObject? {
+        if let object = node as? NSObject {
+            let id = ObjectIdentifier(object)
+            if visited.contains(id) { return nil }
+            visited.insert(id)
+            if let identified = object as? UIAccessibilityIdentification,
+                identified.accessibilityIdentifier == identifier
+            {
+                return object
+            }
+            if let elements = object.accessibilityElements {
+                for element in elements {
+                    if let match = searchAccessibilityElement(
+                        identifier: identifier, in: element, visited: &visited)
+                    {
+                        return match
+                    }
+                }
+            }
+            let count = object.accessibilityElementCount()
+            if count != NSNotFound, count > 0 {
+                for index in 0..<count {
+                    if let element = object.accessibilityElement(at: index),
+                        let match = searchAccessibilityElement(
+                            identifier: identifier, in: element, visited: &visited)
+                    {
+                        return match
+                    }
+                }
+            }
+        }
+        if let view = node as? UIView {
+            for child in view.subviews {
+                if let match = searchAccessibilityElement(
+                    identifier: identifier, in: child, visited: &visited)
+                {
+                    return match
+                }
+            }
+        }
+        return nil
+    }
+}
+
+@MainActor
+private final class ObservedFocusDetailImages: DetailImageSource, DetailRegionSharpnessSource {
+    let sample = SampleDetailImages()
+    private(set) var requests: [(PhotoIdentity, DetailPixelRequest)] = []
+    private(set) var delivered: [DetailQuality] = []
+    private(set) var windows: [DetailPhotoWindow] = []
+    private(set) var prefetched: [DetailPhotoWindow] = []
+    private(set) var analyzeCalls: [PhotoIdentity] = []
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        if case .image(let pixels) = await gridThumbnails.thumbnail(for: photo, priority: .visible)
+        {
+            return pixels
+        }
+        return nil
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async {
+        windows.append(window)
+        await sample.prepare(window)
+    }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        requests.append((photo, request))
+        let outcome = await sample.image(for: photo, request: request)
+        if case .image(let image) = outcome { delivered.append(image.quality) }
+        return outcome
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+        prefetched.append(window)
+    }
+
+    func leave(window: UUID) async { await sample.leave(window: window) }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        analyzeCalls.append(photo)
+        return await sample.analyzeRegions(
+            for: photo, group: group, nearby: nearby, onAutofocus: onAutofocus)
     }
 }
 
@@ -1641,5 +2035,38 @@ private final class DetailMutableTouch: UITouch {
     override func location(in view: UIView?) -> CGPoint {
         guard let targetView, let view, view !== targetView else { return locationPoint }
         return targetView.convert(locationPoint, to: view)
+    }
+}
+
+@MainActor
+@Observable
+private final class TestPresentationBox {
+    var value: DetailPresentation
+
+    init(value: DetailPresentation) {
+        self.value = value
+    }
+}
+
+private struct TestDetailPresentationHost: View {
+    let browsing: BrowsingModel
+    let images: any DetailImageSource
+    @Bindable var presentation: TestPresentationBox
+    let usesSystemToolbar: Bool
+
+    var body: some View {
+        Group {
+            if usesSystemToolbar {
+                NavigationStack {
+                    DetailScreen(
+                        browsing: browsing, images: images, presentation: $presentation.value)
+                }
+                .environment(\.usesSystemBrowsingToolbar, true)
+            } else {
+                DetailScreen(
+                    browsing: browsing, images: images, presentation: $presentation.value)
+            }
+        }
+        .environment(SettingsStore.sample)
     }
 }
