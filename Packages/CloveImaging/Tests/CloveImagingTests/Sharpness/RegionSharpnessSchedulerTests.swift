@@ -897,4 +897,80 @@ private func until(
         #expect(reader.propertiesCounts["done.arw"] == 1)
         await scheduler.close()
     }
+
+    @Test func eventsStreamReportsSettlementAndInvalidationAndFinishesOnClose() async throws {
+        let reader = GatedSharpnessReader()
+        let detector = GatedSharpnessDetector()
+        for kind in [.properties, .preview] as [GatedSharpnessReader.ReadGate.Kind] {
+            reader.reads.release(kind)
+        }
+        let scheduler = makeScheduler(reader, detector)
+        let stream = await scheduler.events()
+
+        let collector = Task<[SharpnessSchedulerEvent], Never> {
+            var collected: [SharpnessSchedulerEvent] = []
+            for await event in stream {
+                collected.append(event)
+            }
+            return collected
+        }
+
+        _ = await scheduler.analyzeCurrent(photoRequest("one"))
+        await scheduler.invalidate(sources: [URL(fileURLWithPath: "/tmp/folder/one.arw")])
+        await scheduler.close()
+
+        let events = await collector.value
+        var sawSettled = false
+        var sawInvalidated = false
+        for event in events {
+            switch event {
+            case .settled(let key, _, let analysis):
+                if key.photo.lastPathComponent == "one.arw", analysis != nil {
+                    sawSettled = true
+                }
+            case .invalidated(let sources):
+                if sources.contains(where: { $0.lastPathComponent == "one.arw" }) {
+                    sawInvalidated = true
+                }
+            }
+        }
+        #expect(sawSettled)
+        #expect(sawInvalidated)
+    }
+
+    @Test func cachedAnalysesReadsMemoryAndDiskWithoutSchedulingWork() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let diskCache = try RegionSharpnessCache(directory: directory)
+        let resultStore = RegionSharpnessResultStore(capacity: 4, disk: diskCache)
+        let reader = GatedSharpnessReader()
+        let detector = GatedSharpnessDetector()
+        for kind in [.properties, .preview] as [GatedSharpnessReader.ReadGate.Kind] {
+            reader.reads.release(kind)
+        }
+
+        let firstScheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
+            results: resultStore)
+        let cachedReq = photoRequest("cached", revision: 1)
+        let freshReq = photoRequest("fresh", revision: 1)
+        _ = await firstScheduler.analyzeCurrent(cachedReq)
+        await firstScheduler.close()
+
+        // New scheduler sharing the same disk cache but empty memory tier.
+        let secondStore = RegionSharpnessResultStore(capacity: 4, disk: diskCache)
+        let secondScheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
+            results: secondStore)
+        let hits = await secondScheduler.cachedAnalyses(for: [cachedReq, freshReq])
+        #expect(hits.count == 1)
+        #expect(hits.keys.first?.photo.lastPathComponent == "cached.arw")
+        #expect(secondStore.count == 0, "cachedAnalyses must not evict/churn the memory LRU")
+        #expect(reader.propertiesCounts["cached.arw"] == 1)
+        #expect(reader.propertiesCounts["fresh.arw"] == nil)
+        await secondScheduler.close()
+    }
 }

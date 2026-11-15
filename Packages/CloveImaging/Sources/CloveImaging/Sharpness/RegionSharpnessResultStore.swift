@@ -142,6 +142,11 @@ public final class RegionSharpnessResultStore: Sendable {
         }
     }
 
+    /// Reads an in-memory analysis without altering LRU order.
+    func peekMemoryResult(for key: SharpnessResultKey) -> RegionSharpnessAnalysis? {
+        state.withLock { $0.entries[key]?.record.analysis }
+    }
+
     func diskAnalysis(for key: SharpnessResultKey) -> RegionSharpnessAnalysis? {
         disk?.analysis(for: key)
     }

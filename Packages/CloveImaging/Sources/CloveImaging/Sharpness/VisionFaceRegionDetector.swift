@@ -55,6 +55,9 @@ struct VisionFaceRegionDetector: FaceRegionDetecting {
     static func requestFaces(of image: CGImage) -> FaceDetectionOutcome {
         autoreleasepool {
             let request = VNDetectFaceLandmarksRequest()
+            #if targetEnvironment(simulator)
+                request.usesCPUOnly = true
+            #endif
             do {
                 try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
             } catch {

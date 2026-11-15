@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import CloveImaging
@@ -373,5 +374,89 @@ private actor ThumbnailDecodeGate {
         #expect(max(image.width, image.height) == 400)
         #expect(await gate.started.isEmpty)
         await pipeline.close()
+    }
+
+    @Test(.timeLimit(.minutes(1))) func folderPriorityRunsAfterVisibleAndPrefetchAndEvictsFirst()
+        async throws
+    {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let base = try thumbnailRequest(directory.image())
+        let gate = ThumbnailDecodeGate()
+        let pipeline = ThumbnailPipeline(
+            cache: try directory.cache(memory: 0, disk: 0), workers: 1,
+            queueLimit: 2, decode: { await gate.decode($0) })
+
+        let active = Task { try await pipeline.thumbnail(for: request(base, 1)) }
+        try await gate.waitForStart(1)
+
+        let folderKeep = Task {
+            try await pipeline.thumbnail(for: request(base, 2), priority: .folder)
+        }
+        try await eventually { await pipeline.queuedCount == 1 }
+        let folderEvicted = Task {
+            try await pipeline.thumbnail(for: request(base, 3), priority: .folder)
+        }
+        try await eventually { await pipeline.queuedCount == 2 }
+
+        // A .folder request cannot displace queued work when full.
+        do {
+            _ = try await pipeline.thumbnail(for: request(base, 4), priority: .folder)
+            Issue.record("Full queue accepted another .folder request")
+        } catch ThumbnailPipelineError.queueFull {}
+
+        // A .prefetch request displaces the queued .folder work.
+        let prefetch = Task {
+            try await pipeline.thumbnail(for: request(base, 5), priority: .prefetch)
+        }
+        await cancelled(folderEvicted)
+        #expect(await pipeline.queuedCount == 2)
+
+        await gate.finish(1)
+        _ = try await active.value
+        try await gate.waitForStart(5)
+        await gate.finish(5)
+        _ = try await prefetch.value
+        try await gate.waitForStart(2)
+        await gate.finish(2)
+        _ = try await folderKeep.value
+        #expect(await gate.started == [1, 5, 2])
+    }
+
+    @Test func cachedOutcomeChecksMemoryAndDiskWithoutDecodingAndNotifiesObservers() async throws {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let base = try thumbnailRequest(directory.image())
+        let uncached = request(base, 200)
+        let afterDecodeCounter = Mutex(0)
+        let cache = try ThumbnailCache(
+            directory: directory.url.appendingPathComponent("cache"),
+            configuration: .init(),
+            beforeCommit: { _ in },
+            afterDecode: { afterDecodeCounter.withLock { $0 += 1 } })
+
+        let recorded = Mutex<[(ThumbnailRequest, ThumbnailCachedOutcome)]>([])
+        let observerID = cache.addStoreObserver { req, outcome in
+            recorded.withLock { $0.append((req, outcome)) }
+        }
+
+        #expect(cache.cachedOutcome(for: base) == nil)
+        let extracted = ThumbnailExtractor().extract(base)
+        try cache.store(extracted, for: base)
+        try cache.store(.unavailable(.noUsablePreview), for: uncached)
+
+        #expect(cache.cachedOutcome(for: base) == .available)
+        #expect(cache.cachedOutcome(for: uncached) == .unavailable(.noUsablePreview))
+
+        cache.releaseMemory()
+        // Disk tier hit must report .available without triggering JPEG decode.
+        #expect(cache.cachedOutcome(for: base) == .available)
+        #expect(afterDecodeCounter.withLock { $0 } == 0)
+
+        cache.removeStoreObserver(observerID)
+        let events = recorded.withLock { $0 }
+        #expect(events.count == 2)
+        #expect(events[0].0 == base && events[0].1 == .available)
+        #expect(events[1].0 == uncached && events[1].1 == .unavailable(.noUsablePreview))
     }
 }

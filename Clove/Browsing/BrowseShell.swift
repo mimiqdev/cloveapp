@@ -122,6 +122,9 @@ struct BrowseShell: View {
                 .toolbar(usesSystemToolbar ? .visible : .hidden, for: .navigationBar)
         }
         .navigationSplitViewStyle(.balanced)
+        .environment(
+            \.folderPreparationPresentationMode,
+            FolderPreparationPresentationMode.resolved(horizontalSizeClass: horizontalSizeClass))
     }
 
     @ViewBuilder
