@@ -1657,6 +1657,229 @@ struct DetailDisplayPresentationTests {
         }
     }
 
+    @Test
+    func expandedDuoFocusToggleLivesInPhotoHeaderWithoutDuplicatesAcrossPresentationsAndPoses()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedFocusDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photo = try #require(browsing.photos.first { $0.id.stem == "mmq02678" }?.id)
+        browsing.openPhoto(photo)
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+        let host = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: source,
+                presentation: presentationBox,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: true,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .light))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // Photo Preview: expanded Duo reserves the photo-stage header (44pt control + vertical
+        // padding = ~56pt) above preview and beside the 30% grid, and presents focus overlays.
+        try await waitFor("Expanded Duo Photo Preview header did not settle") {
+            let preview = self.findPreview(in: window)
+            return preview != nil
+                && self.findCollectionView(in: window) != nil
+                && source.delivered.contains(.screenRAW)
+                && self.findFocusControl(in: preview!) != nil
+        }
+        let splitGrid = try #require(findCollectionView(in: window))
+        let previewInSplit = try #require(findPreview(in: window))
+        let splitGridFrame = splitGrid.convert(splitGrid.bounds, to: window)
+        let splitPreviewFrame = previewInSplit.convert(previewInSplit.bounds, to: window)
+        #expect(splitPreviewFrame.minX >= splitGridFrame.maxX - 1)
+        #expect(splitPreviewFrame.minY >= 56)
+
+        browsing.showsFocusRegions = false
+        try await waitFor("Focus controls hid when toggled Off in Photo Preview") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return self.findAllFocusControls(in: preview).isEmpty
+        }
+        browsing.showsFocusRegions = true
+        try await waitFor("Focus controls returned when toggled On in Photo Preview") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return self.findFocusControl(in: preview) != nil
+        }
+
+        // Focus View: same photo-stage header sits above preview without restarting analysis.
+        let analyzesBeforeFocus = source.analyzeCalls.count
+        presentationBox.value = .focus
+        try await waitFor("Expanded Duo Focus View header did not settle") {
+            let preview = self.findPreview(in: window)
+            return preview != nil
+                && self.findCollectionView(in: window) == nil
+                && self.findFilmstripScrollView(in: window, excluding: preview!) != nil
+                && self.findFocusControl(in: preview!) != nil
+        }
+        #expect(source.analyzeCalls.count == analyzesBeforeFocus)
+        let previewInFocus = try #require(findPreview(in: window))
+        let focusPreviewFrame = previewInFocus.convert(previewInFocus.bounds, to: window)
+        #expect(focusPreviewFrame.minY >= 56)
+        #expect(focusPreviewFrame.minX < splitPreviewFrame.minX)
+
+        // Pose transitions: Half-fold (no vertical toolbar) & Duo Cover remove the inline photo
+        // header cleanly; returning to Expanded Duo Open pose restores it without losing state.
+        presentationBox.value = .photoPreview
+        host.rootView = TestDuoPoseDetailHost(
+            browsing: browsing,
+            images: source,
+            presentation: presentationBox,
+            isDuoExpanded: true,
+            isDuoCover: false,
+            usesVerticalToolbar: false,
+            hasFoldRegion: true,
+            showsGrid: true,
+            theme: .light)
+        try await waitFor("Half-fold removed inline expanded photo header") {
+            guard let preview = self.findPreview(in: window),
+                self.findCollectionView(in: window) != nil
+            else { return false }
+            return preview.convert(preview.bounds, to: window).minY < splitPreviewFrame.minY - 12
+        }
+
+        host.rootView = TestDuoPoseDetailHost(
+            browsing: browsing,
+            images: source,
+            presentation: presentationBox,
+            isDuoExpanded: false,
+            isDuoCover: true,
+            usesVerticalToolbar: true,
+            hasFoldRegion: false,
+            showsGrid: false,
+            theme: .light)
+        host.traitOverrides.horizontalSizeClass = .compact
+        try await waitFor("Duo Cover settled cleanly") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return self.findCollectionView(in: window) == nil
+                && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+        }
+
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.rootView = TestDuoPoseDetailHost(
+            browsing: browsing,
+            images: source,
+            presentation: presentationBox,
+            isDuoExpanded: true,
+            isDuoCover: false,
+            usesVerticalToolbar: true,
+            hasFoldRegion: true,
+            showsGrid: true,
+            theme: .light)
+        try await waitFor("Expanded Duo Open pose restored inline photo header and overlays") {
+            guard let preview = self.findPreview(in: window),
+                self.findCollectionView(in: window) != nil
+            else { return false }
+            return preview.convert(preview.bounds, to: window).minY >= 56
+                && self.findFocusControl(in: preview) != nil
+        }
+        #expect(browsing.showsFocusRegions)
+    }
+
+    @Test func expandedDuoFocusOffSurvivesNavigationPresentationSwitchAndLateCallbacks()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = GatedLateFocusDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let first = try #require(browsing.photos.first { $0.id.stem == "mmq02678" }?.id)
+        let second = try #require(browsing.photos.first { $0.id.stem == "mmq02683" }?.id)
+        browsing.openPhoto(first)
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+        let host = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: source,
+                presentation: presentationBox,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: true,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .dark))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            source.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("Gated analysis began for first photo") {
+            source.analyzeCalls == [first] && self.findPreview(in: window) != nil
+        }
+
+        // Turn Focus regions Off while analysis is still in flight, then deliver late AF & finish.
+        browsing.showsFocusRegions = false
+        source.deliverLateResults(for: first)
+        try await Task.sleep(for: .milliseconds(150))
+
+        #expect(!browsing.showsFocusRegions)
+        let previewFirst = try #require(findPreview(in: window))
+        #expect(findAllFocusControls(in: previewFirst).isEmpty)
+
+        // Switching Photo Preview -> Focus View keeps Off without restarting analysis.
+        let callsBeforeSwitch = source.analyzeCalls.count
+        presentationBox.value = .focus
+        try await waitFor("Focus View settled while Off") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return self.findCollectionView(in: window) == nil
+                && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+        }
+        #expect(!browsing.showsFocusRegions)
+        #expect(source.analyzeCalls.count == callsBeforeSwitch)
+        let previewFocus = try #require(findPreview(in: window))
+        #expect(findAllFocusControls(in: previewFocus).isEmpty)
+
+        // Navigating to the next photo and switching back to Photo Preview keeps Off and runs no
+        // new analysis while Off.
+        browsing.openPhoto(second)
+        try await waitFor("Navigated to second photo while Off") {
+            browsing.state.currentPhoto == second
+        }
+        presentationBox.value = .photoPreview
+        try await waitFor("Returned to Photo Preview on second photo while Off") {
+            self.findCollectionView(in: window) != nil && self.findPreview(in: window) != nil
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!browsing.showsFocusRegions)
+        #expect(source.analyzeCalls.count == callsBeforeSwitch)
+        let previewSecond = try #require(findPreview(in: window))
+        #expect(findAllFocusControls(in: previewSecond).isEmpty)
+
+        // Turning back On reveals overlays for the current photo cleanly.
+        browsing.showsFocusRegions = true
+        source.releaseAll()
+        try await waitFor("Turning Focus regions back On analyzed and presented second photo") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return source.analyzeCalls.contains(second)
+                && !self.findAllFocusControls(in: preview).isEmpty
+        }
+    }
+
     @Test func programmaticZoomDefersDuringScrollAndLayoutPassesAndCoalescesToLatestTarget()
         async throws
     {
@@ -2062,5 +2285,120 @@ private struct TestDetailPresentationHost: View {
             }
         }
         .environment(SettingsStore.sample)
+    }
+}
+
+private struct TestDuoPoseDetailHost: View {
+    let browsing: BrowsingModel
+    let images: any DetailImageSource
+    @Bindable var presentation: TestPresentationBox
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let usesVerticalToolbar: Bool
+    let hasFoldRegion: Bool
+    let showsGrid: Bool
+    let theme: CloveTheme
+
+    var body: some View {
+        NavigationStack {
+            DetailScreen(
+                browsing: browsing, images: images,
+                duo: DuoDetailLayout(
+                    presentation: $presentation.value,
+                    filter: AnyView(EmptyView()),
+                    more: AnyView(EmptyView()),
+                    bottom: AnyView(EmptyView()),
+                    showsGrid: showsGrid,
+                    foldedGroup: nil))
+        }
+        .environment(SettingsStore.sample)
+        .environment(\.cloveTheme, theme)
+        .environment(\.isDuoExpanded, isDuoExpanded)
+        .environment(\.isDuoCover, isDuoCover)
+        .environment(\.usesSystemBrowsingToolbar, true)
+        .environment(\.usesVerticalBrowsingToolbar, usesVerticalToolbar)
+        .environment(\.hasFoldRegion, hasFoldRegion)
+    }
+}
+
+@MainActor
+private final class GatedLateFocusDetailImages: DetailImageSource, DetailRegionSharpnessSource {
+    private let sample = SampleDetailImages()
+    private(set) var analyzeCalls: [PhotoIdentity] = []
+    private var pendingAutofocus: [PhotoIdentity: @Sendable (RegionSharpnessPathResult) -> Void] =
+        [:]
+    private var pendingFinish:
+        [PhotoIdentity: CheckedContinuation<RegionSharpnessAnalysis?, Never>] =
+            [:]
+    private var heldPhotos: Set<PhotoIdentity> = []
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        if case .image(let pixels) = await gridThumbnails.thumbnail(for: photo, priority: .visible)
+        {
+            return pixels
+        }
+        return nil
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async { await sample.prepare(window) }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        await sample.image(for: photo, request: request)
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async { await sample.leave(window: window) }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        analyzeCalls.append(photo)
+        if heldPhotos.isEmpty && pendingFinish[photo] == nil {
+            heldPhotos.insert(photo)
+            pendingAutofocus[photo] = onAutofocus
+            return await withCheckedContinuation { continuation in
+                pendingFinish[photo] = continuation
+            }
+        }
+        return await sample.analyzeRegions(
+            for: photo, group: group, nearby: nearby, onAutofocus: onAutofocus)
+    }
+
+    func deliverLateResults(for photo: PhotoIdentity) {
+        let af = RegionSharpnessEvidence(
+            kind: .cameraAutofocus, groupIndex: nil,
+            region: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16),
+            score: nil, unavailableBecause: nil)
+        let eye = RegionSharpnessEvidence(
+            kind: .eye, groupIndex: 0,
+            region: NormalizedRegion(x: 0.62, y: 0.29, width: 0.04, height: 0.04),
+            score: RegionSharpnessScore(
+                tenengradMeanSquare: 42, sampledPixels: 64, sampledWidth: 8, sampledHeight: 8),
+            unavailableBecause: nil)
+        pendingAutofocus.removeValue(forKey: photo)?(.regions([af]))
+        let analysis = RegionSharpnessAnalysis(
+            autofocus: .regions([af]),
+            faces: .regions([eye]),
+            acquisitionFailure: nil,
+            timings: RegionSharpnessTimings())
+        pendingFinish.removeValue(forKey: photo)?.resume(returning: analysis)
+    }
+
+    func releaseAll() {
+        for photo in Array(pendingFinish.keys) {
+            deliverLateResults(for: photo)
+        }
     }
 }
