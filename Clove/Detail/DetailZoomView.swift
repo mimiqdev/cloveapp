@@ -214,10 +214,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// One preview session for either direction, discarded on cancel.
     private var markingSession: MarkingSwipeSession?
-    private weak var activeMarkingRecognizer: UIGestureRecognizer?
-    private var markingStartTime: TimeInterval = 0
     private var markingTouchStart: CGPoint = .zero
-    private var velocitySample: Task<Void, Never>?
     var currentRating: Rating = .unrated
 
     /// The pixels on screen, so a command can clamp and a double tap can report an image point.
@@ -776,17 +773,16 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Feeds one sample of the drag to the session and shows the step it reached.
     ///
-    /// UIKit counts down as positive; the session counts up as positive and samples the first
-    /// approximately 100 ms once to choose slow or quick.
+    /// UIKit counts down as positive; the session counts up as positive and responds purely to
+    /// position from the first movement.
     @objc func handleMarkingPan(_ pan: UIPanGestureRecognizer) {
         if isNavigating {
             handleNavigationPan(pan)
             return
         }
         let travel = Double(markingTouchStart.y - pan.location(in: self).y)
-        handleMarkingState(
-            pan.state, recognizer: pan, startLocation: markingTouchStart, travel: travel
-        ) { [weak self] rating in
+        handleMarkingState(pan.state, startLocation: markingTouchStart, travel: travel) {
+            [weak self] rating in
             self?.onMarkingSwipe?(rating)
         }
     }
@@ -794,8 +790,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// Handles a zoomed two-finger vertical drag through the same rating ladder.
     @objc func handleTwoFingerMarkingSwipe(_ swipe: TwoFingerMarkingSwipeGestureRecognizer) {
         handleMarkingState(
-            swipe.state, recognizer: swipe, startLocation: swipe.startCentroid,
-            travel: swipe.verticalTravel
+            swipe.state, startLocation: swipe.startCentroid, travel: swipe.verticalTravel
         ) { [weak self] rating in
             guard let self else { return }
             if let onTwoFingerMarkingSwipe {
@@ -808,14 +803,13 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     private func handleMarkingState(
         _ state: UIGestureRecognizer.State,
-        recognizer: UIGestureRecognizer,
         startLocation: CGPoint,
         travel: Double,
         commit: (Rating) -> Void
     ) {
         switch state {
         case .began:
-            beginMarkingSwipe(at: startLocation, recognizer: recognizer)
+            beginMarkingSwipe(at: startLocation)
             updateMarkingSwipe(travel: travel)
         case .changed:
             updateMarkingSwipe(travel: travel)
@@ -832,49 +826,24 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         }
     }
 
-    private func beginMarkingSwipe(at startLocation: CGPoint, recognizer: UIGestureRecognizer) {
+    private func beginMarkingSwipe(at startLocation: CGPoint) {
         onSwipeBegin?()
         haptics.prepare()
-        activeMarkingRecognizer = recognizer
-        markingStartTime = ProcessInfo.processInfo.systemUptime
         markingSession = rules.swipeSession(startingRating: currentRating)
         feedback?.startLocation = startLocation
         feedback?.rating = currentRating
-        // Resolve the initial speed even if the finger stops moving inside the sample window.
-        // This timer only chooses the mode; holding never advances clear to Reject.
-        velocitySample = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(MarkingSwipeRules.velocityWindow))
-            } catch { return }
-            guard let self else { return }
-            self.updateMarkingSwipe(travel: self.activeMarkingTravel)
-        }
-    }
-
-    private var activeMarkingTravel: Double {
-        if activeMarkingRecognizer === twoFingerMarkingSwipe {
-            return twoFingerMarkingSwipe.verticalTravel
-        }
-        return Double(markingTouchStart.y - markingPan.location(in: self).y)
     }
 
     /// Every crossing previews and ticks; only the release callback writes a mark.
     private func updateMarkingSwipe(travel: Double, releasing: Bool = false) {
         guard var session = markingSession else { return }
-        let elapsed = ProcessInfo.processInfo.systemUptime - markingStartTime
-        let crossings =
-            releasing
-            ? session.release(travel: travel, elapsed: elapsed)
-            : session.update(travel: travel, elapsed: elapsed)
+        let crossings = releasing ? session.release(travel: travel) : session.update(travel: travel)
         for crossing in crossings { haptics.crossed(crossing.haptic) }
         markingSession = session
         feedback?.rating = session.rating
     }
 
     private func clearMarkingSwipe() {
-        velocitySample?.cancel()
-        velocitySample = nil
-        activeMarkingRecognizer = nil
         markingSession = nil
         feedback?.clear()
     }

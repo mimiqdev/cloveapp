@@ -890,6 +890,88 @@ struct DetailDisplayPresentationTests {
         }
     }
 
+    @Test func anchorSymmetricSwipeWorksConsistentlyAtFitAndZoomedTwoFinger() throws {
+        // Fit single-finger drag: immediate preview from first movement, unrated down 30pt -> Reject.
+        do {
+            let preview = DetailZoomContainerView(
+                frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+            preview.setImage(try testPixels(gray: 0))
+            preview.setNeedsLayout()
+            preview.layoutIfNeeded()
+            let feedback = DetailSwipeFeedback()
+            preview.feedback = feedback
+            preview.currentRating = .unrated
+            var commits: [Rating] = []
+            preview.onMarkingSwipe = { commits.append($0) }
+
+            let pan = try #require(
+                preview.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+            let start = CGPoint(x: 195, y: 400)
+            _ = preview.gestureRecognizer(
+                pan, shouldReceive: DetailMutableTouch(view: preview, location: start))
+            let testPan = DetailTestPan()
+            testPan.locationPoint = CGPoint(x: 195, y: 430)
+            testPan.travel = CGPoint(x: 0, y: 30)
+            try #require(preview.gestureRecognizerShouldBegin(testPan))
+            preview.handleMarkingPan(testPan)
+            #expect(feedback.rating == .rejected)
+            testPan.sampleState = .ended
+            preview.handleMarkingPan(testPan)
+            #expect(commits == [.rejected])
+        }
+
+        // Zoomed two-finger drag from 3★: down 30pt -> Clear, down 75pt -> Reject, up 30pt -> 4★, origin -> 3★.
+        do {
+            let three = try #require(Rating(rawValue: 3))
+            let preview = DetailZoomContainerView(
+                frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+            preview.setImage(try testPixels(gray: 0))
+            preview.setNeedsLayout()
+            preview.layoutIfNeeded()
+            preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
+            let feedback = DetailSwipeFeedback()
+            preview.feedback = feedback
+            preview.currentRating = three
+            var commits: [Rating] = []
+            preview.onTwoFingerMarkingSwipe = { commits.append($0) }
+
+            let twoFinger = preview.twoFingerSwipeRecognizer
+            let t1 = DetailMutableTouch(view: preview, location: CGPoint(x: 150, y: 400))
+            let t2 = DetailMutableTouch(view: preview, location: CGPoint(x: 230, y: 400))
+            let event = UIEvent()
+            twoFinger.touchesBegan([t1, t2], with: event)
+
+            t1.locationPoint = CGPoint(x: 150, y: 430)
+            t2.locationPoint = CGPoint(x: 230, y: 430)
+            twoFinger.touchesMoved([t1, t2], with: event)
+            #expect(twoFinger.state == .began)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            #expect(feedback.rating == .unrated)
+
+            t1.locationPoint = CGPoint(x: 150, y: 475)
+            t2.locationPoint = CGPoint(x: 230, y: 475)
+            twoFinger.touchesMoved([t1, t2], with: event)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            #expect(feedback.rating == .rejected)
+
+            t1.locationPoint = CGPoint(x: 150, y: 370)
+            t2.locationPoint = CGPoint(x: 230, y: 370)
+            twoFinger.touchesMoved([t1, t2], with: event)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            #expect(feedback.rating?.rawValue == 4)
+
+            t1.locationPoint = CGPoint(x: 150, y: 400)
+            t2.locationPoint = CGPoint(x: 230, y: 400)
+            twoFinger.touchesMoved([t1, t2], with: event)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            #expect(feedback.rating == three)
+
+            twoFinger.touchesEnded([t1], with: event)
+            preview.handleTwoFingerMarkingSwipe(twoFinger)
+            #expect(commits == [three])
+        }
+    }
+
     @Test func zoomedSingleFingerAxisLockVerticalRatesAndHorizontalPansWithoutNavigating() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
         preview.setImage(try testPixels(gray: 0))
@@ -1754,12 +1836,20 @@ struct DetailDisplayPresentationTests {
     }
 
     private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
+        let start = CGPoint(x: 195, y: 300)
         let pan = DetailTestPan()
-        pan.travel = CGPoint(x: travel.x == 0 ? 0 : -15, y: travel.y == 0 ? 0 : -15)
+        _ = preview.gestureRecognizer(
+            pan, shouldReceive: DetailMutableTouch(view: preview, location: start))
+        let initial = CGPoint(
+            x: travel.x == 0 ? 0 : (travel.x < 0 ? -15 : 15),
+            y: travel.y == 0 ? 0 : (travel.y < 0 ? -15 : 15))
+        pan.travel = initial
+        pan.locationPoint = CGPoint(x: start.x + initial.x, y: start.y + initial.y)
         try #require(preview.gestureRecognizerShouldBegin(pan))
         preview.handleMarkingPan(pan)
         pan.sampleState = .changed
         pan.travel = travel
+        pan.locationPoint = CGPoint(x: start.x + travel.x, y: start.y + travel.y)
         preview.handleMarkingPan(pan)
         pan.sampleState = .ended
         preview.handleMarkingPan(pan)
