@@ -186,10 +186,11 @@ struct DetailZoomView: UIViewRepresentable {
         view.currentRating = currentRating
         view.setDoubleTapEnabled(doubleTapZoomEnabled)
         // The image goes in before the command, so a 100% command for new pixels uses the new
-        // pixel size and a quality change never needs a second pass.
-        view.setImage(image, fullResolutionPixels: fullResolutionPixels)
+        // pixel size and a quality change never needs a second pass. Defer zoom execution off
+        // SwiftUI's representable update so setZoomScale never re-enters layout/safe-area passes.
+        view.setImage(image, fullResolutionPixels: fullResolutionPixels, deferRezoom: true)
         view.setFocusRegions(focusRegions, inspectedRegionID: inspectedFocusRegionID)
-        if let command { view.apply(command) }
+        if let command { view.scheduleCommand(command) }
     }
 }
 
@@ -232,9 +233,38 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// The last bounds layout, so a resize re-applies the zoom instead of resetting it.
     private var laidOutSize: CGSize = .zero
 
-    /// Whether the view is applying a zoom the screen asked for, so its delegate callback does
-    /// not write SwiftUI state during a view update. A user's pinch is always reported.
-    private var isApplyingCommand = false
+    /// One deferred zoom target waiting for active scroll, zoom, or layout passes to finish.
+    private enum PendingZoom {
+        case fit
+        case scale(CGFloat, anchor: DetailZoomAnchor)
+        case layoutRetarget(scale: CGFloat, anchor: DetailZoomAnchor)
+    }
+
+    /// The latest pending zoom target, coalesced so newer commands supersede older ones.
+    private var pendingZoom: PendingZoom?
+
+    /// Whether `layoutSubviews()` is currently running on this container.
+    private var isLayingOut = false
+
+    /// Whether a programmatic zoom or offset adjustment is in flight, so scroll delegate
+    /// callbacks do not re-enter or report a programmatic zoom as a user pinch.
+    private var isApplyingZoom = false
+
+    /// Whether `scrollViewDidZoom` or `scrollViewDidScroll` is currently executing.
+    private var isInScrollCallback = false
+
+    /// Whether a `DispatchQueue.main.async` flush for `pendingZoom` is already queued.
+    private var isFlushScheduled = false
+
+    /// Whether bounds changed while zoomed so the next programmatic zoom must reset the scroll
+    /// view's fit geometry before applying the target scale.
+    private var needsResetBeforeZoom = false
+
+    private var isScrollOrLayoutActive: Bool {
+        isLayingOut || isApplyingZoom || isInScrollCallback
+            || scrollView.isDragging || scrollView.isDecelerating
+            || scrollView.isZooming || scrollView.isZoomBouncing
+    }
 
     var onZoomChange: ((CGFloat) -> Void)?
     var onFocusRegionTap: ((DetailFocusRegion) -> Void)?
@@ -357,7 +387,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// changes, so the image point at the viewport's centre is kept as a unit coordinate. With a
     /// crop that unit point names a slightly different pixel, so the visible spot can shift by
     /// the crop margin, but it does not jump to a corner (PRD P0-04; G1 "Preview, detail (I2)").
-    func setImage(_ pixels: CGImage?, fullResolutionPixels: CGSize? = nil) {
+    func setImage(
+        _ pixels: CGImage?, fullResolutionPixels: CGSize? = nil, deferRezoom: Bool = false
+    ) {
         let fullResolution = fullResolutionPixels ?? .zero
         guard pixels !== imageView.image?.cgImage || fullResolution != self.fullResolutionPixels
         else { return }
@@ -371,9 +403,21 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         updatePreviewAccessibility()
         layoutFocusRegions()
         if let kept, Self.aspectDiffers(previousPixels, shownPixels) {
-            isApplyingCommand = true
-            zoom(to: kept.scale, around: kept.anchor)
-            isApplyingCommand = false
+            if deferRezoom || isScrollOrLayoutActive || pendingZoom != nil
+                || bounds.size != laidOutSize
+            {
+                if pendingZoom == nil {
+                    pendingZoom = .layoutRetarget(scale: kept.scale, anchor: kept.anchor)
+                }
+                schedulePendingZoomFlushIfNeeded()
+            } else {
+                isApplyingZoom = true
+                defer { isApplyingZoom = false }
+                zoom(to: kept.scale, around: kept.anchor)
+                layoutFocusRegions()
+                updateGestureAvailability()
+                updatePreviewAccessibility()
+            }
         }
     }
 
@@ -426,18 +470,108 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         }
     }
 
-    /// Applies one command exactly once (PRD P0-04).
+    /// Applies one command once when idle, or coalesces it into the pending zoom queue when
+    /// layout, scroll, or zoom passes are active (#283).
     func apply(_ command: DetailZoomCommand) {
         guard lastCommand != command.id else { return }
         lastCommand = command.id
-        isApplyingCommand = true
-        defer { isApplyingCommand = false }
+        let target = pendingZoom(for: command)
+        if isScrollOrLayoutActive || pendingZoom != nil || bounds.size != laidOutSize {
+            pendingZoom = target
+            schedulePendingZoomFlushIfNeeded()
+            return
+        }
+        executePendingZoom(target)
+    }
+
+    /// Defers a command to the next runloop tick and coalesces to the latest target so SwiftUI
+    /// representable updates never invoke `setZoomScale` synchronously inside layout or graph passes.
+    func scheduleCommand(_ command: DetailZoomCommand) {
+        guard lastCommand != command.id else { return }
+        lastCommand = command.id
+        pendingZoom = pendingZoom(for: command)
+        schedulePendingZoomFlushIfNeeded()
+    }
+
+    private func pendingZoom(for command: DetailZoomCommand) -> PendingZoom {
         switch command.kind {
         case .fit:
-            scrollView.setZoomScale(1, animated: false)
-            scrollView.setContentOffset(.zero, animated: false)
+            return .fit
         case .scale(let scale, let anchor):
-            zoom(to: scale, around: DetailZoomAnchor(x: anchor.x, y: anchor.y))
+            return .scale(scale, anchor: DetailZoomAnchor(x: anchor.x, y: anchor.y))
+        }
+    }
+
+    private func schedulePendingZoomFlushIfNeeded() {
+        guard pendingZoom != nil, !isFlushScheduled else { return }
+        guard !scrollView.isDragging, !scrollView.isDecelerating,
+            !scrollView.isZooming, !scrollView.isZoomBouncing
+        else { return }
+        scheduleFlushOnNextRunLoop()
+    }
+
+    private func scheduleFlushOnNextRunLoop() {
+        guard pendingZoom != nil, !isFlushScheduled else { return }
+        isFlushScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isFlushScheduled = false
+                self.flushPendingZoom()
+            }
+        }
+    }
+
+    private func flushPendingZoom() {
+        guard let next = pendingZoom else { return }
+        if isScrollOrLayoutActive {
+            schedulePendingZoomFlushIfNeeded()
+            return
+        }
+        if bounds.size != laidOutSize {
+            setNeedsLayout()
+            layoutIfNeeded()
+            guard !isScrollOrLayoutActive, let current = pendingZoom else {
+                schedulePendingZoomFlushIfNeeded()
+                return
+            }
+            pendingZoom = nil
+            executePendingZoom(current)
+            return
+        }
+        pendingZoom = nil
+        executePendingZoom(next)
+    }
+
+    private func executePendingZoom(_ target: PendingZoom) {
+        isApplyingZoom = true
+        defer { isApplyingZoom = false }
+        switch target {
+        case .fit:
+            needsResetBeforeZoom = false
+            if scrollView.zoomScale != 1 {
+                scrollView.setZoomScale(1, animated: false)
+            }
+            if imageView.frame != bounds {
+                imageView.frame = bounds
+            }
+            if scrollView.contentSize != bounds.size {
+                scrollView.contentSize = bounds.size
+            }
+            if scrollView.contentOffset != .zero {
+                scrollView.setContentOffset(.zero, animated: false)
+            }
+        case .scale(let scale, let anchor), .layoutRetarget(let scale, let anchor):
+            if needsResetBeforeZoom {
+                needsResetBeforeZoom = false
+                if scrollView.zoomScale != 1 {
+                    scrollView.setZoomScale(1, animated: false)
+                }
+                imageView.frame = bounds
+                scrollView.contentSize = bounds.size
+                updateMaximumZoom()
+            }
+            zoom(to: scale, around: anchor)
         }
         layoutFocusRegions()
         // A programmatic zoom is the same handoff as a pinch, whether or not the delegate fires.
@@ -448,6 +582,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.size != laidOutSize else { return }
+        isLayingOut = true
+        defer { isLayingOut = false }
         let previous = laidOutSize
         let previousScale = scrollView.zoomScale
         let previousAnchor =
@@ -457,22 +593,32 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 imagePixels: shownPixels, viewSize: previous)
             : nil
         laidOutSize = bounds.size
-        isApplyingCommand = true
-        // Reset the zoomed frame first, so the scroll view's fit content is the new bounds
-        // rather than the old ones, then re-apply the scale around the kept viewport centre. A
-        // fold, rotation, split resize or Duo chrome hide/show therefore keeps the inspected
-        // region instead of snapping back to the middle of the photo (#272).
-        scrollView.setZoomScale(1, animated: false)
         scrollView.frame = bounds
-        imageView.frame = bounds
         previewAccessibilityView.frame = bounds
-        scrollView.contentSize = bounds.size
-        updateMaximumZoom()
-        if previous != .zero, previousScale > 1 {
-            zoom(to: previousScale, around: previousAnchor ?? .centre)
+        // Never invoke setZoomScale synchronously inside layoutSubviews (#283): keep imageView's
+        // bounds and scroll contentSize matching the current scale, and defer the anchor-preserving
+        // #272 retarget to the next runloop tick unless a newer explicit command supersedes it.
+        if abs(previousScale - 1) > 0.0001 {
+            let scaled = CGSize(
+                width: bounds.width * previousScale, height: bounds.height * previousScale)
+            imageView.bounds = CGRect(origin: .zero, size: bounds.size)
+            imageView.center = CGPoint(x: scaled.width / 2, y: scaled.height / 2)
+            scrollView.contentSize = scaled
+            updateMaximumZoom()
+            needsResetBeforeZoom = true
+            if previous != .zero, previousScale > 1, !scrollView.isZooming, pendingZoom == nil {
+                pendingZoom = .layoutRetarget(
+                    scale: previousScale, anchor: previousAnchor ?? .centre)
+            }
+        } else {
+            imageView.frame = bounds
+            scrollView.contentSize = bounds.size
+            updateMaximumZoom()
+        }
+        if pendingZoom != nil {
+            schedulePendingZoomFlushIfNeeded()
         }
         layoutFocusRegions()
-        isApplyingCommand = false
         updateGestureAvailability()
         updatePreviewAccessibility()
     }
@@ -482,18 +628,53 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        isInScrollCallback = true
+        defer { isInScrollCallback = false }
         // The zoom level decides whether a one-finger drag pans or marks, so the split follows
         // every pinch, including one the screen did not ask for (PRD Detail gestures).
         layoutFocusRegions()
         updateGestureAvailability()
         updatePreviewAccessibility()
-        guard !isApplyingCommand else { return }
-        onZoomChange?(scrollView.zoomScale)
+        if !isApplyingZoom {
+            onZoomChange?(scrollView.zoomScale)
+        }
+        schedulePendingZoomFlushIfNeeded()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard !isApplyingCommand, isZoomed else { return }
-        updatePreviewAccessibility()
+        isInScrollCallback = true
+        defer { isInScrollCallback = false }
+        if !isApplyingZoom, isZoomed {
+            updatePreviewAccessibility()
+            if !isLayingOut,
+                scrollView.isDragging || scrollView.isDecelerating,
+                case .layoutRetarget(let scale, _) = pendingZoom,
+                let currentAnchor = zoomSnapshot?.anchor
+            {
+                pendingZoom = .layoutRetarget(scale: scale, anchor: currentAnchor)
+            }
+        }
+        schedulePendingZoomFlushIfNeeded()
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard !decelerate else { return }
+        scheduleFlushOnNextRunLoop()
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        scheduleFlushOnNextRunLoop()
+    }
+
+    func scrollViewDidEndZooming(
+        _ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat
+    ) {
+        guard !scrollView.isZoomBouncing else { return }
+        scheduleFlushOnNextRunLoop()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        scheduleFlushOnNextRunLoop()
     }
 
     // MARK: - Marking swipe
@@ -742,15 +923,21 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         guard bounds.width > 0, bounds.height > 0, shownPixels.width > 0, shownPixels.height > 0
         else { return }
         let target = min(max(scale, 1), max(scrollView.maximumZoomScale, scale))
-        scrollView.maximumZoomScale = max(scrollView.maximumZoomScale, target)
+        if scrollView.maximumZoomScale < target {
+            scrollView.maximumZoomScale = target
+        }
         let contentSize = CGSize(
             width: bounds.width * target, height: bounds.height * target)
         let point = DetailZoom.contentPoint(
             for: anchor, scale: target, imagePixels: shownPixels, viewSize: bounds.size)
         let visible = DetailZoom.visibleRect(
             centredOn: point, contentSize: contentSize, viewSize: bounds.size)
-        scrollView.setZoomScale(target, animated: false)
-        scrollView.setContentOffset(visible.origin, animated: false)
+        if abs(scrollView.zoomScale - target) > 0.0001 {
+            scrollView.setZoomScale(target, animated: false)
+        }
+        if scrollView.contentOffset != visible.origin {
+            scrollView.setContentOffset(visible.origin, animated: false)
+        }
     }
 
     /// The point a view location names, in unit image coordinates.
@@ -789,6 +976,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 @MainActor
 extension DetailZoomContainerView {
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        if case .layoutRetarget = pendingZoom {
+            pendingZoom = nil
+            needsResetBeforeZoom = false
+        }
         if markingPan.state == .began || markingPan.state == .changed {
             markingPan.isEnabled = false
         }

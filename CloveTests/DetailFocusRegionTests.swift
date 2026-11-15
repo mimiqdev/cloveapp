@@ -51,7 +51,7 @@ struct DetailFocusRegionTests {
         #expect(control.center.y == 140)
     }
 
-    @Test func resizePreservesZoomAnchorInsteadOfSnappingToCentre() throws {
+    @Test func resizePreservesZoomAnchorInsteadOfSnappingToCentre() async throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 551, height: 492))
         preview.setImage(
             try testPixels(width: 1616, height: 1078),
@@ -70,6 +70,13 @@ struct DetailFocusRegionTests {
         preview.frame = CGRect(x: 0, y: 0, width: 551, height: 556)
         preview.setNeedsLayout()
         preview.layoutIfNeeded()
+
+        // The #272 retarget defers off layoutSubviews onto the next main-queue turn (#283).
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                continuation.resume()
+            }
+        }
 
         let resized = try #require(preview.zoomSnapshot)
         #expect(abs(resized.anchor.x - 0.30) < 0.02)
