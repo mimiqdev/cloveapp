@@ -15,7 +15,7 @@ struct DetailMarkingActions {
 
     /// Starts the auto-advance one written mark asks for, resolved in the screen's own order
     /// (PRD Auto-advance; PRD In-group culling).
-    let marked: (MarkKind, GridPhoto) -> Void
+    let marked: (MarkKind, MarkChange, GridPhoto) -> Void
 
     /// Moves the given number of photos in the screen's order, for a horizontal swipe and for a
     /// keyboard result (PRD P0-04; PRD In-group culling).
@@ -26,6 +26,9 @@ struct DetailMarkingActions {
 
     /// Filmstrip navigation keeps the screen's existing auto-advance cancellation.
     var openPhoto: (PhotoIdentity) -> Void = { _ in }
+    var selectGroupPhoto: (PhotoIdentity) -> Void = { _ in }
+    var expandGroup: (GroupID) -> Void = { _ in }
+    var collapseGroup: () -> Void = {}
     /// Submits the visible group's finishing action and starts its auto-advance.
     var finishGroup: (GroupFinishingPlan) -> Void = { _ in }
 }
@@ -37,8 +40,9 @@ struct DetailMarkingActions {
 /// Every input — the swipe gesture, the HUD's rating bar, a label, the Reject toggle and the
 /// hardware keys — resolves through C13's ``MarkingInputRules`` and then asks the screen to write
 /// it and start its auto-advance (PRD In-group culling, P0-06, PRD Auto-advance). The screen
-/// supplies the order a navigation swipe moves through using ``DetailMarkingActions``. Navigating
-/// within the same group preserves zoom and position; any other photo change returns to fit.
+/// supplies the active level's order using ``DetailMarkingActions``. Navigating within Group Focus
+/// preserves zoom and position; Timeline navigation or returning to Timeline onto another photo
+/// resets to fit (#302, #304).
 ///
 /// The selected display mode controls fit and zoom together. A held screen RAW
 /// appears immediately; otherwise the camera preview fills the screen-render wait.
@@ -53,7 +57,8 @@ struct DetailMarkingActions {
 ///
 /// Folder access problems appear in the header's indicator and banner (PRD P0-08). A change
 /// that did not confirm brings the shared failure toast, and the files supply the marks again.
-/// The current group's finishing pill sits centred in its own row above the filmstrip.
+/// The stage pill (`Expand N photos` in Timeline or `Reject N unmarked` in Group Focus) sits centred
+/// above the filmstrip (or at the bottom of the stage in Photo Preview).
 struct DetailMarkingView: View {
     /// The scene's browsing state and ordered marking actions
     /// (PRD P0-08).
@@ -70,7 +75,13 @@ struct DetailMarkingView: View {
     let images: any DetailImageSource
     var displayMode: PhotoDisplayMode = .rawFirst
 
-    /// The photos this screen can step through, in its own order, so the neighbours' previews
+    /// Two-level Timeline model for this Detail session (#304).
+    let timeline: DetailTimeline
+
+    /// Non-nil while Detail is in Group Focus on an active multi-photo group.
+    let expandedGroup: ActiveBrowsingGroup?
+
+    /// The photos this screen can step through in its active level, so the neighbours' previews
     /// are prefetched (G1 "Scheduling and cache").
     let order: [GridPhoto]
 
@@ -89,11 +100,12 @@ struct DetailMarkingView: View {
     @Environment(\.displayScale) private var displayScale
     @State private var hidesChrome = false
     @State private var widePresentation: DetailPresentation
-    @State private var ownedFoldedGroup: GroupID?
+    @State private var expandPillNudgeCount = 0
     @State private var containerSize: CGSize = .zero
     @State private var pendingRestoredZoom: DetailZoomSnapshot?
     @State private var windowID = UUID()
     @State private var currentWindow: DetailPhotoWindow?
+    @State private var loadedOrder: DetailDisplayOrder?
     @State private var previousPosition: Int?
     @State private var previousPhoto: PhotoIdentity?
     @State private var keepsPosition = false
@@ -168,6 +180,8 @@ struct DetailMarkingView: View {
         settings: AppSettings,
         images: any DetailImageSource,
         displayMode: PhotoDisplayMode = .rawFirst,
+        timeline: DetailTimeline? = nil,
+        expandedGroup: ActiveBrowsingGroup? = nil,
         order: [GridPhoto],
         actions: DetailMarkingActions,
         duo: DuoDetailLayout? = nil,
@@ -179,6 +193,12 @@ struct DetailMarkingView: View {
         self.settings = settings
         self.images = images
         self.displayMode = displayMode
+        self.timeline =
+            timeline
+            ?? DetailTimeline(
+                photos: browsing.photos, groups: browsing.groups,
+                groupsEnabled: settings.similarGroupsEnabled && browsing.readingProgress == nil)
+        self.expandedGroup = expandedGroup
         self.order = order
         self.actions = actions
         self.duo = duo
@@ -203,13 +223,11 @@ struct DetailMarkingView: View {
                 inspectedFocusRegionID = nil
                 pendingRestoredZoom = nil
             }
-            .onChange(of: browsing.currentGroup?.id) { _, _ in
-                if duo == nil, ownedFoldedGroup != nil {
-                    ownedFoldedGroup = nil
-                }
+            .task(id: photo.id) {
+                await loadPreview(for: photo)
             }
             .task(id: DetailDisplayOrder(photo: photo.id, order: order.map(\.id))) {
-                await loadPreview(for: photo)
+                await refreshPrefetchForOrderChange(for: photo)
             }
             .task(
                 id: DetailFocusTrigger(
@@ -230,6 +248,18 @@ struct DetailMarkingView: View {
 
     private var displayMarks: PhotoMarks { photo.marks }
 
+    private var currentTimelineGroup: ActiveBrowsingGroup? {
+        expandedGroup == nil ? timeline.activeGroup(containing: photo.id) : nil
+    }
+
+    private var isReadOnlyCollapsedGroup: Bool {
+        currentTimelineGroup != nil
+    }
+
+    private var allowsMarkingInput: Bool {
+        browsing.canMark && !isReadOnlyCollapsedGroup
+    }
+
     private var usesRail: Bool { horizontalSizeClass == .regular && duo == nil }
 
     private var showsExpandedPhotoHeader: Bool {
@@ -248,10 +278,6 @@ struct DetailMarkingView: View {
 
     private var presentationBinding: Binding<DetailPresentation> {
         presentation ?? duo?.presentation ?? $widePresentation
-    }
-
-    private var foldedGroupBinding: Binding<GroupID?> {
-        duo?.foldedGroup ?? $ownedFoldedGroup
     }
 
     private var effectivePresentation: DetailPresentation {
@@ -516,7 +542,7 @@ struct DetailMarkingView: View {
                     } else {
                         DuoMarkControls(
                             photoID: photo.id, marks: displayMarks, settings: settings,
-                            previewRating: swipeFeedback.rating, canMark: browsing.canMark,
+                            previewRating: swipeFeedback.rating, canMark: allowsMarkingInput,
                             showsStars: $showsToolbarStars, dragRating: $toolbarDragRating,
                             rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
                             toggleReject: { toggleReject() },
@@ -539,7 +565,7 @@ struct DetailMarkingView: View {
                 if !isDuoExpanded {
                     ToolbarRatingGesture(
                         rating: displayMarks.rating, enabledRatings: settings.enabledRatings,
-                        canMark: browsing.canMark, began: beginMarkingGesture,
+                        canMark: allowsMarkingInput, began: beginMarkingGesture,
                         preview: {
                             toolbarDragRating = $0
                             showsToolbarStars = true
@@ -567,6 +593,12 @@ struct DetailMarkingView: View {
             FolderSaveBanner(
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             previewArea
+                .overlay(alignment: .bottom) {
+                    if !showsFilmstrip && chromeIsVisible, let stagePill {
+                        stagePill
+                            .padding(.bottom, 12)
+                    }
+                }
             // The failure toast sits above the filmstrip, clear of the capsule row
             // (handoff screens.md §03, components.md Toast).
             if let message = browsing.failureToastMessage {
@@ -582,10 +614,15 @@ struct DetailMarkingView: View {
             if showsFilmstrip && chromeIsVisible {
                 HStack(alignment: .bottom, spacing: 0) {
                     DetailFilmstrip(
-                        photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                        open: actions.openPhoto,
-                        groups: browsing.groups, finishingAction: finishingAction,
-                        groupFold: groupFold)
+                        timeline: timeline,
+                        expandedGroup: expandedGroup,
+                        current: photo.id,
+                        thumbnails: browsing.thumbnails,
+                        openPhoto: actions.openPhoto,
+                        selectGroupPhoto: actions.selectGroupPhoto,
+                        expandGroup: actions.expandGroup,
+                        collapseGroup: actions.collapseGroup,
+                        pillAction: stagePill)
                     if isDuoExpanded {
                         duoMarkingToolbar
                     }
@@ -601,19 +638,6 @@ struct DetailMarkingView: View {
         .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
-    }
-
-    /// Focus View's filmstrip and Photo Preview's grid share the folded-group binding so folding
-    /// keeps the photo, its marks and the route as they are across toggles (#225, #256).
-    private var groupFold: FilmstripGroupFold? {
-        guard isDuoExpanded || presentationPolicy.supportsPhotoPreview else { return nil }
-        let folded = foldedGroupBinding
-        return FilmstripGroupFold(
-            isFolded: folded.wrappedValue == browsing.currentGroup?.id,
-            fold: {
-                if let group = browsing.currentGroup?.id { folded.wrappedValue = group }
-            },
-            unfold: { folded.wrappedValue = nil })
     }
 
     /// The shared marking family in the reserved bottom-right marking area beside the filmstrip
@@ -632,7 +656,7 @@ struct DetailMarkingView: View {
                 onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
                 onBegin: actions.markingSwipeBegan
             )
-            .disabled(!browsing.canMark)
+            .disabled(!allowsMarkingInput)
             .accessibilityValue(MarkSummary.text(for: displayMarks))
             .transition(.opacity)
         }
@@ -714,7 +738,7 @@ struct DetailMarkingView: View {
                     rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
                     toggleReject: { toggleReject() }, markingBegan: beginMarkingGesture
                 )
-                .disabled(!browsing.canMark)
+                .disabled(!allowsMarkingInput)
             }
         }
     }
@@ -724,8 +748,10 @@ struct DetailMarkingView: View {
             browsing: browsing,
             thumbnails: browsing.thumbnails,
             similarGroupsEnabled: settings.similarGroupsEnabled,
-            foldedGroup: foldedGroupBinding,
-            openPhoto: actions.openPhoto)
+            openPhoto: actions.openPhoto,
+            selectGroupPhoto: actions.selectGroupPhoto,
+            openGroup: actions.expandGroup,
+            collapseGroup: actions.collapseGroup)
     }
 
     private func togglePresentation() {
@@ -768,10 +794,15 @@ struct DetailMarkingView: View {
                     if showsFilmstrip && chromeIsVisible {
                         VStack(spacing: 8) {
                             DetailFilmstrip(
-                                photos: order, current: photo.id, thumbnails: browsing.thumbnails,
-                                open: actions.openPhoto,
-                                groups: browsing.groups, finishingAction: finishingAction,
-                                groupFold: groupFold)
+                                timeline: timeline,
+                                expandedGroup: expandedGroup,
+                                current: photo.id,
+                                thumbnails: browsing.thumbnails,
+                                openPhoto: actions.openPhoto,
+                                selectGroupPhoto: actions.selectGroupPhoto,
+                                expandGroup: actions.expandGroup,
+                                collapseGroup: actions.collapseGroup,
+                                pillAction: stagePill)
                             if chromeIsVisible && !usesRail {
                                 MarkingToolbar(
                                     rating: swipeFeedback.rating
@@ -790,12 +821,15 @@ struct DetailMarkingView: View {
                                     },
                                     onBegin: actions.markingSwipeBegan
                                 )
-                                .disabled(!browsing.canMark)
+                                .disabled(!allowsMarkingInput)
                                 .accessibilityValue(MarkSummary.text(for: displayMarks))
                                 .padding(.horizontal, 16)
                             }
                         }
                         .padding(.bottom, 8)
+                    } else if !showsFilmstrip && chromeIsVisible, let stagePill {
+                        stagePill
+                            .padding(.bottom, 12)
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) {
@@ -807,23 +841,41 @@ struct DetailMarkingView: View {
             }
     }
 
-    private var finishingAction: PillAction? {
-        guard browsing.canMark, let group = browsing.currentGroup else { return nil }
-        let plan = GroupFinishingPlan(
-            group: group.visible(in: Set(order.map(\.id))),
-            action: .rejectUnmarked, currentPhoto: photo.id,
-            marks: Dictionary(uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) }))
-        guard plan.availability.isAvailable, !plan.isEmpty else { return nil }
-        return PillAction(
-            title: "Reject \(plan.rejects.count.formatted()) unmarked",
-            identifier: "clove.detail.rejectUnmarked"
-        ) { actions.finishGroup(plan) }
+    private var stagePill: PillAction? {
+        if let expandedGroup {
+            guard browsing.canMark else { return nil }
+            let plan = GroupFinishingPlan(
+                group: expandedGroup,
+                action: .rejectUnmarked,
+                currentPhoto: photo.id)
+            guard plan.availability.isAvailable, !plan.isEmpty else { return nil }
+            return PillAction(
+                title: "Reject \(plan.rejects.count.formatted()) unmarked",
+                identifier: "clove.detail.rejectUnmarked",
+                tone: .destructive
+            ) { actions.finishGroup(plan) }
+        }
+        if let group = currentTimelineGroup {
+            return PillAction(
+                title: "Expand \(group.visibleMembers.count.formatted()) photos",
+                identifier: "clove.detail.expandGroup",
+                tone: .neutral,
+                nudgeTrigger: expandPillNudgeCount
+            ) { actions.expandGroup(group.id) }
+        }
+        return nil
     }
 
     private var detailSubtitle: String {
         var parts: [String] = []
-        if let index = order.firstIndex(where: { $0.id == photo.id }) {
-            parts.append("\((index + 1).formatted()) / \(order.count.formatted())")
+        if let expandedGroup,
+            let index = expandedGroup.visibleMembers.firstIndex(where: { $0.id == photo.id })
+        {
+            parts.append(
+                "Group · \((index + 1).formatted()) / \(expandedGroup.visibleMembers.count.formatted())"
+            )
+        } else if let index = timeline.slotIndex(containing: photo.id) {
+            parts.append("\((index + 1).formatted()) / \(timeline.slots.count.formatted())")
         }
         if scale > DetailFitScale.tolerance {
             parts.append(zoomName)
@@ -852,6 +904,8 @@ struct DetailMarkingView: View {
             onMarkingSwipe: { applyMarkingSwipe($0, touchCount: 1) },
             onTwoFingerMarkingSwipe: { applyMarkingSwipe($0, touchCount: 2) },
             onSwipeBegin: { beginMarkingGesture() },
+            allowsMarking: allowsMarkingInput,
+            onReadOnlyMarkingDrag: isReadOnlyCollapsedGroup ? { expandPillNudgeCount += 1 } : nil,
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
@@ -980,7 +1034,10 @@ struct DetailMarkingView: View {
             focusRegionState.finish(nil, for: photo.id)
             return
         }
-        let group = browsing.currentGroup?.members.filter { $0 != photo.id } ?? []
+        let group =
+            timeline.activeGroup(containing: photo.id)?.visibleMembers.map(\.id).filter {
+                $0 != photo.id
+            } ?? []
         let position = order.firstIndex(where: { $0.id == photo.id }) ?? 0
         let nearby = [position - 1, position + 1].compactMap { index in
             order.indices.contains(index) ? order[index].id : nil
@@ -999,14 +1056,14 @@ struct DetailMarkingView: View {
 
     // MARK: - Pixels
 
-    /// Asks for the photo's preview and keeps the crop only within its similar group (PRD P0-04).
+    /// Asks for the photo's preview and keeps the crop only within Group Focus (PRD P0-04, #304).
     ///
-    /// Between members of one group, the new photo opens at the previous photo's crop; every other
-    /// photo change returns to fit (#302). A deferred answer is retried a bounded number of times
-    /// because the pipeline may have been busy with the photo that was on screen a moment ago; a
-    /// refused or unreadable file is final and shown as its own state. The neighbours' previews are
-    /// prefetched after the photo's own pixels are on screen, so a swipe to them is cheap (G1
-    /// scheduling row).
+    /// Between members of the expanded group, the new photo opens at the previous photo's crop;
+    /// every Timeline step or collapse onto another photo returns to fit (#302, #304). A deferred
+    /// answer is retried a bounded number of times because the pipeline may have been busy with the
+    /// photo that was on screen a moment ago; a refused or unreadable file is final and shown as
+    /// its own state. The neighbours' previews are prefetched after the photo's own pixels are on
+    /// screen, so a swipe to them is cheap (G1 scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
         let arrivalID = PerformanceSignpost.detailArrival.makeSignpostID()
         var screenArrivalInterval: OSSignpostIntervalState? = PerformanceSignpost.detailArrival
@@ -1028,16 +1085,19 @@ struct DetailMarkingView: View {
 
         upgradeTask?.cancel()
         isLoadingFit = true
+        loadedOrder = DetailDisplayOrder(photo: photo.id, order: order.map(\.id))
         keepsPosition =
             previousPhoto.map { previous in
-                browsing.groups.contains {
-                    $0.members.contains(previous) && $0.members.contains(photo.id)
-                }
+                previous != photo.id
+                    && (expandedGroup?.visibleMembers.contains(where: { $0.id == previous })
+                        ?? false)
+                    && (expandedGroup?.visibleMembers.contains(where: { $0.id == photo.id })
+                        ?? false)
             } ?? false
         previousPhoto = photo.id
-        // Only members of one similar group share a crop; every other photo change returns to fit
-        // (#302). A retained zoom across unrelated photos would open on an arbitrary region before
-        // the next photo's focus analysis lands.
+        // Only members within Group Focus share a crop; every other photo change returns to fit
+        // (#302, #304). A retained zoom across unrelated photos would open on an arbitrary region
+        // before the next photo's focus analysis lands.
         if keepsPosition {
             if let shown {
                 // A preview that has not arrived yet leaves `shown` nil, so this branch is skipped:
@@ -1184,6 +1244,43 @@ struct DetailMarkingView: View {
                 try? await Task.sleep(for: .milliseconds(120))
             }
         }
+    }
+
+    /// Updates `DetailPhotoWindow` prefetch neighbours when the active level or filter order
+    /// changes without changing `photo.id` (e.g. expanding/collapsing on the representative photo),
+    /// keeping the shown pixels and zoom untouched (issue #304, decision 3).
+    private func refreshPrefetchForOrderChange(for photo: GridPhoto) async {
+        let targetOrder = DetailDisplayOrder(photo: photo.id, order: order.map(\.id))
+        guard loadedOrder?.photo == photo.id, loadedOrder != targetOrder else { return }
+        for _ in 0..<120 {
+            guard !Task.isCancelled else { return }
+            if currentWindow?.current.photo == photo.id,
+                viewSize != .zero,
+                probe.container?.window?.windowScene != nil
+            {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+        guard !Task.isCancelled,
+            currentWindow?.current.photo == photo.id,
+            viewSize != .zero,
+            let screen = probe.container?.window?.windowScene?.screen
+        else {
+            return
+        }
+        loadedOrder = targetOrder
+        let screenPixels = Int(max(screen.nativeBounds.width, screen.nativeBounds.height))
+        let window = photoWindow(for: photo, screenPixels: screenPixels)
+        currentWindow = window
+        previousPosition = window.current.position
+        await images.prepare(window)
+        guard !Task.isCancelled else { return }
+        await images.prefetchPreviews(window)
+        guard !Task.isCancelled, !isLoadingFit, let shown, shown.limitation == nil else { return }
+        let renderAhead =
+            shown.quality == .screenRAW || shown.quality == .nativeRAW || !shown.hasRAW
+        await images.prefetch(window, renderAhead: renderAhead)
     }
 
     /// Shows pixels, keeping the zoom and the position the policy keeps.
@@ -1533,7 +1630,10 @@ struct DetailMarkingView: View {
     /// would change nothing is the same no-input the rules already report for them.
     private func markKey(_ key: MarkingKey) {
         tapPickerDismissToken += 1
-        apply(rules.result(for: key, marks: browsing.shownMarks(for: photo.id)))
+        apply(
+            rules.result(
+                for: key, marks: browsing.shownMarks(for: photo.id),
+                allowsMarking: allowsMarkingInput))
     }
 
     private func beginMarkingGesture() {
@@ -1553,30 +1653,38 @@ struct DetailMarkingView: View {
         // The rail resolves tap-to-clear itself and a drag commits its final value directly.
         apply(
             togglesCurrent
-                ? rules.result(forRating: rating, marks: marks)
-                : rules.result(for: .rating(rating), marks: marks))
+                ? rules.result(
+                    forRating: rating, marks: marks, allowsMarking: allowsMarkingInput)
+                : rules.result(
+                    for: .rating(rating), marks: marks, allowsMarking: allowsMarkingInput))
     }
 
     /// One label choice, resolved by C13's label rule (PRD Marking rules).
     private func choose(_ label: ColourLabel) {
-        apply(rules.result(forLabel: label, marks: browsing.shownMarks(for: photo.id)))
+        apply(
+            rules.result(
+                forLabel: label, marks: browsing.shownMarks(for: photo.id),
+                allowsMarking: allowsMarkingInput))
     }
 
     /// Toggles Reject, which is the rating −1 (PRD Marking rules).
     private func toggleReject() {
         // The HUD's Reject is a toggle, while the `↓` key only turns Reject on. C13 owns both
         // directions and the mark kind auto-advance reads (PRD Marking rules, PRD Auto-advance).
-        apply(rules.result(forRejectToggle: browsing.shownMarks(for: photo.id)))
+        apply(
+            rules.result(
+                forRejectToggle: browsing.shownMarks(for: photo.id),
+                allowsMarking: allowsMarkingInput))
     }
 
     /// Resolves one finished marking swipe through C13's gesture rules (PRD P0-06).
     func applyMarkingSwipe(_ rating: Rating, touchCount: Int = 1) {
-        guard browsing.canMark else { return }
+        guard allowsMarkingInput else { return }
         let isZoomed = (probe.container?.isZoomed ?? false) || scale > DetailFitScale.tolerance
         apply(
             rules.result(
                 forSwipeRating: rating, marks: browsing.shownMarks(for: photo.id),
-                isZoomed: isZoomed, touchCount: touchCount))
+                isZoomed: isZoomed, touchCount: touchCount, allowsMarking: allowsMarkingInput))
     }
 
     /// Applies one resolved marking input and asks the screen to start the advance it asks for
@@ -1588,10 +1696,10 @@ struct DetailMarkingView: View {
     private func apply(_ result: MarkingResult) {
         switch result {
         case .mark(let change, let kind):
-            guard browsing.canMark else { return }
+            guard allowsMarkingInput else { return }
             // Plan navigation from the current order before a mark removes this photo from
             // a live filter. Both calls are synchronous; the mark still shows in this input turn.
-            actions.marked(kind, photo)
+            actions.marked(kind, change, photo)
             actions.apply(change, photo)
         case .previousPhoto:
             actions.step(-1)
@@ -1599,6 +1707,16 @@ struct DetailMarkingView: View {
             actions.step(1)
         case .undo:
             undo()
+        case .toggleGroupFocus:
+            if expandedGroup != nil {
+                actions.collapseGroup()
+            } else if let group = currentTimelineGroup {
+                actions.expandGroup(group.id)
+            }
+        case .collapseGroup:
+            if expandedGroup != nil {
+                actions.collapseGroup()
+            }
         case .noChange:
             break
         }

@@ -50,7 +50,7 @@ public struct GroupPhotoNavigation: Hashable, Sendable {
     ) -> PhotoIdentity? {
         let cells = GridDisplay(
             photos: orderedPhotos.filter { visiblePhotos.contains($0.id) },
-            groups: groups, display: .collapsed
+            groups: groups
         ).cells
         if let index = cells.firstIndex(where: { $0.group?.id == group.id }) {
             return cells.dropFirst(index + 1).first?.photo.id

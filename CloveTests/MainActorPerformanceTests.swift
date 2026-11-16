@@ -10,7 +10,7 @@ import UIKit
 
 @MainActor
 struct MainActorPerformanceTests {
-    @Test func filmstripPlanGroupsContiguousAndNonContiguousMembersInOrder() {
+    @Test func detailTimelineGroupsContiguousAndNonContiguousMembersInOrder() {
         let folder = FolderIdentity(rawValue: "filmstrip-plan-test")
         let s1 = gridPhoto(folder: folder, stem: "s1", seconds: 1)
         let g1a = gridPhoto(folder: folder, stem: "g1a", seconds: 2)
@@ -27,27 +27,28 @@ struct MainActorPerformanceTests {
             id: GroupID(rawValue: "g2"), members: [g2a.id, g2b.id, g2c.id])
         let photos = [s1, g1a, g1b, s2, g2a, s3, g2b, g2c]
 
-        let expanded = DetailFilmstrip.makePlan(
-            photos: photos, groups: [group1, group2], current: g1b.id, isFolded: false)
-        #expect(expanded.entries.map(\.id) == [s1.id, g1a.id, s2.id, g2a.id, s3.id])
-        #expect(expanded.entries[1].expands)
-        #expect(expanded.entries[1].holdsCurrent)
-        #expect(expanded.entries[1].photos.map(\.id) == [g1a.id, g1b.id])
-        #expect(!expanded.entries[3].expands)
-        #expect(!expanded.entries[3].holdsCurrent)
-        #expect(expanded.entries[3].photos.map(\.id) == [g2a.id, g2b.id, g2c.id])
-        #expect(expanded.scrollTarget(for: g1a.id) == g1a.id)
-        #expect(expanded.scrollTarget(for: g1b.id) == g1b.id)
-        #expect(expanded.scrollTarget(for: g2a.id) == g2a.id)
-        #expect(expanded.scrollTarget(for: g2b.id) == g2a.id)
-        #expect(expanded.scrollTarget(for: g2c.id) == g2a.id)
-        #expect(expanded.scrollTarget(for: s2.id) == s2.id)
-
-        let folded = DetailFilmstrip.makePlan(
-            photos: photos, groups: [group1, group2], current: g1b.id, isFolded: true)
-        #expect(folded.entries[1].holdsCurrent)
-        #expect(!folded.entries[1].expands)
-        #expect(folded.scrollTarget(for: g1b.id) == g1a.id)
+        let timeline = DetailTimeline(photos: photos, groups: [group1, group2])
+        #expect(
+            timeline.slots.map(\.id)
+                == [
+                    .photo(s1.id), .group(group1.id), .photo(s2.id), .group(group2.id),
+                    .photo(s3.id),
+                ])
+        #expect(
+            timeline.activeGroup(with: group1.id)?.visibleMembers.map(\.id) == [g1a.id, g1b.id])
+        #expect(
+            timeline.activeGroup(with: group2.id)?.visibleMembers.map(\.id)
+                == [g2a.id, g2b.id, g2c.id])
+        #expect(
+            timeline.stageOrder(expandedGroup: nil).map(\.id)
+                == [s1.id, g1a.id, s2.id, g2a.id, s3.id])
+        #expect(
+            timeline.stageOrder(expandedGroup: group1.id).map(\.id) == [g1a.id, g1b.id])
+        #expect(timeline.slotIndex(containing: g2b.id) == 3)
+        #expect(timeline.slotIndex(containing: s3.id) == 4)
+        #expect(timeline.steppedPhoto(from: g1a.id, offset: 1, expandedGroup: nil) == s2.id)
+        #expect(timeline.steppedPhoto(from: g1a.id, offset: 1, expandedGroup: group1.id) == g1b.id)
+        #expect(timeline.steppedPhoto(from: g1b.id, offset: 1, expandedGroup: group1.id) == nil)
     }
 
     @Test func browsingModelIncrementalOrderingMatchesPhotoOrderingAcrossScanAndEdits() async throws

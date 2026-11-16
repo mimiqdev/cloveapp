@@ -3,154 +3,137 @@ import Testing
 
 import CloveCore
 
-/// PRD Grid's similar-group display and PRD P0-11: expanded shows every photo with the group's
-/// membership and one count, collapsed shows one cover per group with its count, and grouping off
-/// hides the group marks. These tests pin how the grid's cells are composed.
+/// Issue #304 decisions 1 & 2: Similar groups On collapses visible groups with 2+ members using
+/// the unified Representative Photo, visible-member count/peeking/dimming, and standalone behavior
+/// when fewer than 2 members are visible; Similar groups Off leaves every photo its own flat cell.
 @Suite("Grid display cells")
 struct GridDisplayTests {
-    /// Expanded display keeps every photo and draws the count once, on the group's first cell.
-    @Test func expandedMarksEveryMemberAndCountsTheGroupOnce() throws {
-        let burst = group("burst-one", photos(0...1))
-        let display = GridDisplay(
-            photos: photos(0...3), groups: [burst], display: .expanded)
-        #expect(display.cells.count == 4)
-        #expect(display.cells.map(\.id) == photos(0...3).map { .photo($0.id) })
-
-        let first = try #require(display.cells[0].group)
-        #expect(first.id == burst.id)
-        #expect(first.count == 2)
-        #expect(first.showsCount)
-        #expect(!first.isCover)
-
-        let second = try #require(display.cells[1].group)
-        #expect(second.showsCount == false)
-        #expect(display.cells[2].group == nil)
-    }
-
-    /// A filter that hides the group's first member moves the count to the first shown member,
-    /// and the count stays the published group's count rather than the shown count.
-    @Test func aFilteredGroupKeepsItsPublishedCountOnTheFirstShownCell() throws {
-        let burst = group("burst-one", photos(0...2))
-        let shown = Array(photos(0...2).dropFirst())
-        let display = GridDisplay(photos: shown, groups: [burst], display: .expanded)
-        let mark = try #require(display.cells.first?.group)
-        #expect(mark.count == 3)
-        #expect(mark.showsCount)
-        #expect(display.cells.dropFirst().allSatisfy { $0.group?.showsCount == false })
-    }
-
-    /// Collapsed display keeps one cover per group, on its first shown member, and leaves the
-    /// ungrouped photos as their own cells.
-    @Test func collapsedShowsOneCoverPerGroup() throws {
+    /// Collapsed display keeps one cover per active (2+ visible) group and treats 1-visible groups
+    /// as standalone cells.
+    @Test func activeGroupsCollapseAndSingleVisibleGroupBecomesStandalone() throws {
         let first = group("burst-one", photos(0...1))
-        let second = group("burst-two", photos(3...3))
-        let display = GridDisplay(
-            photos: photos(0...3), groups: [first, second], display: .collapsed)
+        let singleton = group("burst-two", photos(3...3))
+        let display = GridDisplay(photos: photos(0...3), groups: [first, singleton])
         #expect(
             display.cells.map(\.id) == [
-                .group(first.id), .photo(photos(2...2)[0].id), .group(second.id),
+                .group(first.id), .photo(photos(2...2)[0].id), .photo(photos(3...3)[0].id),
             ])
         let cover = try #require(display.cells.first?.group)
         #expect(cover.isCover)
         #expect(cover.showsCount)
         #expect(cover.count == 2)
         #expect(display.cells.first?.photo == photos(0...1)[0])
-        #expect(display.cells[2].group?.count == 1)
+        #expect(display.cells[2].group == nil)
     }
 
-    /// A collapsed cover follows the group's first member that the filter still shows.
-    @Test func aCollapsedCoverFollowsTheFirstShownMember() {
+    /// A filter that hides one of three members lowers the stack count to 2 and draws only visible
+    /// members.
+    @Test func aFilteredGroupCountsOnlyVisibleMembers() throws {
         let burst = group("burst-one", photos(0...2))
-        let display = GridDisplay(
-            photos: Array(photos(0...2).dropFirst()), groups: [burst], display: .collapsed)
+        let display = GridDisplay(photos: Array(photos(0...2).dropFirst()), groups: [burst])
         #expect(display.cells.count == 1)
+        #expect(display.cells[0].id == .group(burst.id))
         #expect(display.cells[0].photo == photos(0...2)[1])
-        #expect(display.cells[0].group?.count == 3)
+        #expect(display.cells[0].group?.count == 2)
     }
 
-    @Test func collapsedCoverSkipsRejectedMembersInShownOrder() {
+    /// Under a strict filter leaving only 1 visible member, the group renders as a standalone cell.
+    @Test func aGroupNarrowedToOneVisibleMemberRendersStandalone() {
+        let burst = group("burst-one", photos(0...2))
+        let display = GridDisplay(photos: [photos(0...2)[1]], groups: [burst])
+        #expect(display.cells.count == 1)
+        #expect(display.cells[0].id == .photo(photos(0...2)[1].id))
+        #expect(display.cells[0].group == nil)
+    }
+
+    /// Cover follows unified Representative Photo rule in `photos` order: highest rated beats
+    /// labelled, labelled beats unmarked, unmarked beats rejected, ties broken by first visible.
+    @Test func collapsedCoverUsesUnifiedRepresentativePriorityRule() {
         let rejected = photo("reject", time: capture(seconds(0)), marks: marks(rejected: true))
         let kept = photo("kept", time: capture(seconds(1)), marks: marks(stars: 3))
         let later = photo("later", time: capture(seconds(2)))
         let members = [rejected, kept, later]
         let cells = GridDisplay(
-            photos: members, groups: [group("mixed", members.reversed())], display: .collapsed
+            photos: members, groups: [group("mixed", members.reversed())]
         ).cells
         #expect(cells.first?.photo.id == kept.id)
         #expect(cells.first?.isDimmed == false)
+
+        let rated5 = photo("r5", time: capture(seconds(3)), marks: marks(stars: 5))
+        let labelledRed = photo(
+            "red", time: capture(seconds(0)), marks: PhotoMarks(label: ColourLabel(colour: .red)))
+        let cellsHighest = GridDisplay(
+            photos: [rejected, labelledRed, kept, rated5],
+            groups: [group("prio", [rejected, labelledRed, kept, rated5])]
+        ).cells
+        #expect(cellsHighest.first?.photo.id == rated5.id)
     }
 
     @Test func collapsedAllRejectedUsesFirstShownAndDims() {
         let members = (0..<3).map {
             photo("r\($0)", time: capture(seconds(Double($0))), marks: marks(rejected: true))
         }
-        let cells = GridDisplay(
-            photos: members, groups: [group("rejected", members)], display: .collapsed
-        ).cells
+        let cells = GridDisplay(photos: members, groups: [group("rejected", members)]).cells
         #expect(cells.first?.photo.id == members[0].id)
         #expect(cells.first?.isDimmed == true)
     }
 
     @Test func collapsedFilterUsesOnlyShownMembersForCoverAndDimming() {
         let hiddenKept = photo("hidden", time: capture(seconds(0)), marks: marks(stars: 5))
-        let rejected = photo("shown", time: capture(seconds(1)), marks: marks(rejected: true))
-        let burst = group("filtered", [hiddenKept, rejected])
-        let cells = GridDisplay(photos: [rejected], groups: [burst], display: .collapsed).cells
-        #expect(cells.first?.photo.id == rejected.id)
+        let rejected1 = photo("shown1", time: capture(seconds(1)), marks: marks(rejected: true))
+        let rejected2 = photo("shown2", time: capture(seconds(2)), marks: marks(rejected: true))
+        let burst = group("filtered", [hiddenKept, rejected1, rejected2])
+        let cells = GridDisplay(photos: [rejected1, rejected2], groups: [burst]).cells
+        #expect(cells.first?.id == .group(burst.id))
+        #expect(cells.first?.photo.id == rejected1.id)
         #expect(cells.first?.isDimmed == true)
         #expect(cells.first?.group?.count == 2)
     }
 
-    @Test func expandedAndUngroupedDimmingFollowsEachPhoto() {
+    @Test func ungroupedAndFlatDimmingFollowsEachPhoto() {
         let members = [
             photo("r", time: capture(seconds(0)), marks: marks(rejected: true)),
             photo("k", time: capture(seconds(1))),
         ]
-        for enabled in [true, false] {
-            let cells = GridDisplay(
-                photos: members, groups: [group("pair", members)], groupsEnabled: enabled
-            ).cells
-            #expect(cells.map(\.isDimmed) == [true, false])
-        }
+        let cells = GridDisplay(
+            photos: members, groups: [group("pair", members)], groupsEnabled: false
+        ).cells
+        #expect(cells.map(\.isDimmed) == [true, false])
     }
 
     /// A group with no shown member has no cover, because a cover always names a drawn photo.
     @Test func aGroupWithNoShownMemberHasNoCover() {
         let burst = group("burst-one", photos(2...3))
-        let display = GridDisplay(
-            photos: photos(0...1), groups: [burst], display: .collapsed)
+        let display = GridDisplay(photos: photos(0...1), groups: [burst])
         #expect(display.cells.map(\.id) == photos(0...1).map { .photo($0.id) })
     }
 
-    /// Grouping off hides every group mark in both displays (PRD Grid, PRD P0-11).
+    /// Grouping off hides every group mark (PRD Grid, PRD P0-11, issue #304 Decision 1).
     @Test func groupingOffLeavesEveryPhotoItsOwnCell() {
         let burst = group("burst-one", photos(0...1))
-        for display in [GridGroupDisplay.expanded, .collapsed] {
-            let cells = GridDisplay(
-                photos: photos(0...3), groups: [burst], groupsEnabled: false, display: display
-            ).cells
-            #expect(cells.map(\.id) == photos(0...3).map { .photo($0.id) })
-            #expect(cells.allSatisfy { $0.group == nil })
-        }
+        let cells = GridDisplay(
+            photos: photos(0...3), groups: [burst], groupsEnabled: false
+        ).cells
+        #expect(cells.map(\.id) == photos(0...3).map { .photo($0.id) })
+        #expect(cells.allSatisfy { $0.group == nil })
     }
 
-    /// A photo that two groups name carries the first published group.
-    @Test func theFirstPublishedGroupMarksAPhotoNamedByTwo() throws {
-        let first = group("burst-one", photos(0...1))
-        let second = group("burst-two", photos(1...2))
-        let cells = GridDisplay(photos: photos(0...2), groups: [first, second]).cells
-        let named = try #require(cells[1].group)
-        #expect(named.id == first.id)
-        let secondNamed = try #require(cells[2].group)
-        #expect(secondNamed.id == second.id)
+    /// A photo that two groups name stays in the first published group; the second group drops
+    /// below 2 visible members so its remaining photo becomes standalone.
+    @Test func theFirstPublishedGroupClaimsOverlappingPhoto() throws {
+        let all = photos(0...3)
+        let first = group("burst-one", [all[0], all[1]])
+        let second = group("burst-two", [all[1], all[2], all[3]])
+        let cells = GridDisplay(photos: all, groups: [first, second]).cells
+        #expect(cells.map(\.id) == [.group(first.id), .group(second.id)])
+        #expect(cells[0].group?.count == 2)
+        #expect(cells[1].group?.count == 2)
     }
 
     @Test func collapsedCoverCarriesUpToTwoPeekingMembersInGridOrder() throws {
         let pair = group("pair", photos(0...1))
         let quad = group("quad", photos(2...5))
-        let cells = GridDisplay(
-            photos: photos(0...5), groups: [pair, quad], display: .collapsed
-        ).cells
+        let cells = GridDisplay(photos: photos(0...5), groups: [pair, quad]).cells
         #expect(cells[0].group?.peekingPhotos == [photos(0...5)[1].id])
         #expect(
             cells[1].group?.peekingPhotos == [photos(0...5)[3].id, photos(0...5)[4].id])
@@ -161,20 +144,17 @@ struct GridDisplayTests {
         let kept = photo("k", time: capture(seconds(1)), marks: marks(stars: 3))
         let third = photo("t", time: capture(seconds(2)))
         let members = [rejected, kept, third]
-        let cells = GridDisplay(
-            photos: members, groups: [group("mixed", members)], display: .collapsed
-        ).cells
+        let cells = GridDisplay(photos: members, groups: [group("mixed", members)]).cells
         #expect(cells[0].photo.id == kept.id)
         #expect(cells[0].group?.peekingPhotos == [rejected.id, third.id])
     }
 
-    @Test func collapsedFilteredCoverFallsBackToGroupMembersForPeeking() throws {
+    @Test func collapsedFilteredCoverNeverFallsBackToHiddenGroupMembersForPeeking() throws {
         let members = photos(0...2)
         let burst = group("burst", members)
-        let cells = GridDisplay(
-            photos: [members[0]], groups: [burst], display: .collapsed
-        ).cells
-        #expect(cells[0].group?.peekingPhotos == [members[1].id, members[2].id])
+        let cells = GridDisplay(photos: [members[0], members[2]], groups: [burst]).cells
+        #expect(cells[0].group?.count == 2)
+        #expect(cells[0].group?.peekingPhotos == [members[2].id])
     }
 }
 
@@ -182,7 +162,7 @@ struct GridDisplayTests {
 /// cover that stands for the photo and a cover keyed by a refined group.
 @Suite("Grid cell lookup")
 struct GridCellLookupTests {
-    /// Expanded display resolves a photo to its own cell.
+    /// Standalone cell resolves a photo to its own cell.
     @Test func aPhotoResolvesToItsOwnCell() {
         let shown = photos(0...2)
         let cells = GridDisplay(photos: shown, groups: []).cells
@@ -197,29 +177,26 @@ struct GridCellLookupTests {
     @Test func aCollapsedMemberResolvesToItsCover() {
         let shown = photos(0...2)
         let burst = group("burst-one", shown)
-        let cells = GridDisplay(photos: shown, groups: [burst], display: .collapsed).cells
+        let cells = GridDisplay(photos: shown, groups: [burst]).cells
         #expect(
             GridCellItem.cell(
                 for: shown[2].id, in: cells, groups: [burst], shown: Set(shown.map(\.id)))
                 == .group(burst.id))
     }
 
-    /// A member the filter hides has no cell, even though its group's cover is on screen.
-    ///
-    /// The cover stands for the group, not for every member: holding it for a hidden photo
-    /// would move the visible photo the cover actually draws (PRD Grid, P0-03).
-    @Test func aHiddenMemberHasNoCellEvenWhenItsCoverShows() {
+    /// A group narrowed to one visible member resolves that member to its own photo cell.
+    @Test func aSingleVisibleMemberResolvesToItsOwnCell() {
         let all = photos(0...2)
         let shown = [all[1]]
         let burst = group("burst-one", all)
-        let cells = GridDisplay(photos: shown, groups: [burst], display: .collapsed).cells
+        let cells = GridDisplay(photos: shown, groups: [burst]).cells
         #expect(
             GridCellItem.cell(
                 for: all[0].id, in: cells, groups: [burst], shown: Set(shown.map(\.id))) == nil)
         #expect(
             GridCellItem.cell(
                 for: shown[0].id, in: cells, groups: [burst], shown: Set(shown.map(\.id)))
-                == .group(burst.id))
+                == .photo(shown[0].id))
     }
 
     /// Refinement can move the photo into a group with a new key; each update resolves against
@@ -229,8 +206,8 @@ struct GridCellLookupTests {
         let before = group("burst-one", all)
         let after = group("burst-two", Array(all[1...]))
         let shown = Set(all.map(\.id))
-        let oldCells = GridDisplay(photos: all, groups: [before], display: .collapsed).cells
-        let newCells = GridDisplay(photos: all, groups: [after], display: .collapsed).cells
+        let oldCells = GridDisplay(photos: all, groups: [before]).cells
+        let newCells = GridDisplay(photos: all, groups: [after]).cells
         let photo = all[1].id
         #expect(
             GridCellItem.cell(for: photo, in: oldCells, groups: [before], shown: shown)
@@ -245,8 +222,7 @@ struct GridCellLookupTests {
     @Test func anExpandedMemberResolvesToItsOwnCell() {
         let all = photos(0...2)
         let burst = group("burst", all)
-        let grid = GridDisplay(
-            photos: all, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        let grid = GridDisplay(photos: all, groups: [burst], expandedGroup: burst.id)
         let shown = Set(all.map(\.id))
         for member in all {
             #expect(
@@ -261,34 +237,29 @@ struct GridCellLookupTests {
         let all = photos(0...5)
         let shown = Array(all[0...1])
         let burst = group("burst-one", Array(all[2...3]))
-        let cells = GridDisplay(photos: shown, groups: [burst], display: .collapsed).cells
+        let cells = GridDisplay(photos: shown, groups: [burst]).cells
         let shownIDs = Set(shown.map(\.id))
         #expect(
             GridCellItem.cell(
                 for: all[2].id, in: cells, groups: [burst], shown: shownIDs) == nil)
-        // A photo outside the shown list and outside every group has no cell either.
         #expect(
             GridCellItem.cell(
                 for: all[5].id, in: cells, groups: [burst], shown: shownIDs) == nil)
     }
 }
 
-/// Owner decision, #225: the Duo's split expands the photo's group in place, so its members
-/// draw at the group's folder position while the surrounding photos and other collapsed groups
-/// keep theirs. These tests pin the runs the grid draws from, which is what the collection view
-/// turns into a header, a shared surface and cells.
+/// Owner decision, #225 & #304 Decision 6: the split expands `expandedGroup` in place, so its
+/// visible members draw at the group's folder position while surrounding photos and other collapsed
+/// groups keep theirs.
 @Suite("Grid sections")
 struct GridSectionTests {
-    /// A grid without an expanded group is one run, so the iPhone, iPad and folded Duo grids keep
-    /// exactly the cells and the single run they had.
+    /// A grid without an expanded group is one run.
     @Test func aPlainGridIsOneRun() {
         let burst = group("burst-one", photos(1...2))
-        for display in [GridGroupDisplay.expanded, .collapsed] {
-            let grid = GridDisplay(photos: photos(0...3), groups: [burst], display: display)
-            #expect(grid.sections.map(\.id) == [.photos(0)])
-            #expect(grid.sections[0].cells == grid.cells)
-            #expect(grid.sections[0].expandedGroup == nil)
-        }
+        let grid = GridDisplay(photos: photos(0...3), groups: [burst])
+        #expect(grid.sections.map(\.id) == [.photos(0)])
+        #expect(grid.sections[0].cells == grid.cells)
+        #expect(grid.sections[0].expandedGroup == nil)
     }
 
     /// The expanded group replaces its cover, at the group's own place in the folder, with its
@@ -298,16 +269,13 @@ struct GridSectionTests {
         let expanded = group("expanded", [all[1], all[3]])
         let other = group("other", [all[4], all[5]])
         let grid = GridDisplay(
-            photos: all, groups: [expanded, other], display: .collapsed,
-            expandedGroup: expanded.id)
+            photos: all, groups: [expanded, other], expandedGroup: expanded.id)
         #expect(
             grid.sections.map(\.id) == [.photos(0), .group(expanded.id), .photos(1)])
         #expect(grid.sections[0].cells.map(\.id) == [.photo(all[0].id)])
         #expect(grid.sections[1].cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id)])
         #expect(
             grid.sections[2].cells.map(\.id) == [.photo(all[2].id), .group(other.id)])
-        // The expanded members carry the group's shared surface but no count badge and no
-        // cover: the run's header names the group (#225, with the grid's surface from #227).
         #expect(
             grid.sections[1].cells.allSatisfy {
                 $0.group?.id == expanded.id && $0.group?.showsCount == false
@@ -319,18 +287,13 @@ struct GridSectionTests {
     }
 
     /// A group whose members are scattered in the folder draws as one contiguous block at its
-    /// first shown member, and the standalone photo between them follows the block. That is the
-    /// position the collapsed cover already took, so the expansion changes one cell, not the
-    /// folder's arrangement.
+    /// first shown member, and the standalone photo between them follows the block.
     @Test func theExpandedGroupIsContiguousAtItsFirstMember() {
         let all = photos(0...3)
         let burst = group("burst", [all[0], all[2]])
-        let grid = GridDisplay(
-            photos: all, groups: [burst], display: .collapsed, expandedGroup: burst.id)
-        #expect(
-            grid.sections.map(\.id) == [.group(burst.id), .photos(1)])
-        #expect(
-            grid.sections[0].cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id)])
+        let grid = GridDisplay(photos: all, groups: [burst], expandedGroup: burst.id)
+        #expect(grid.sections.map(\.id) == [.group(burst.id), .photos(1)])
+        #expect(grid.sections[0].cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id)])
         #expect(grid.sections[1].cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id)])
     }
 
@@ -340,23 +303,21 @@ struct GridSectionTests {
         let all = photos(0...3)
         let burst = group("burst", all)
         let shown = [all[0], all[2], all[3]]
-        let grid = GridDisplay(
-            photos: shown, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        let grid = GridDisplay(photos: shown, groups: [burst], expandedGroup: burst.id)
         let run = grid.sections.first { $0.expandedGroup == burst.id }
         #expect(run?.cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id), .photo(all[3].id)])
         #expect(run?.cells.count == 3)
     }
 
-    /// A group the filter hides has no cover either, so there is nothing to expand: the grid
-    /// stays one run instead of drawing an empty header.
-    @Test func aHiddenGroupIsNotExpanded() {
-        let all = photos(0...4)
-        let burst = group("burst", [all[3], all[4]])
-        let shown = Array(all[0...2])
-        let grid = GridDisplay(
-            photos: shown, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+    /// A group narrowed below 2 visible members cannot remain expanded.
+    @Test func aGroupNarrowedToOneVisibleMemberIsNotExpanded() {
+        let all = photos(0...3)
+        let burst = group("burst", Array(all[1...3]))
+        let shown = [all[0], all[2]]
+        let grid = GridDisplay(photos: shown, groups: [burst], expandedGroup: burst.id)
         #expect(grid.sections.map(\.id) == [.photos(0)])
         #expect(grid.cells.map(\.id) == shown.map { .photo($0.id) })
+        #expect(grid.cells.allSatisfy { $0.group == nil })
     }
 
     /// An unknown key, such as a group the folder no longer publishes, expands nothing.
@@ -364,38 +325,24 @@ struct GridSectionTests {
         let all = photos(0...3)
         let burst = group("burst", [all[1], all[2]])
         let grid = GridDisplay(
-            photos: all, groups: [burst], display: .collapsed,
-            expandedGroup: GroupID(rawValue: "gone"))
+            photos: all, groups: [burst], expandedGroup: GroupID(rawValue: "gone"))
         #expect(grid.sections.map(\.id) == [.photos(0)])
         #expect(
             grid.cells.map(\.id) == [.photo(all[0].id), .group(burst.id), .photo(all[3].id)])
-    }
-
-    /// Expanded display already draws every member and has no cover to replace, so the split's
-    /// expansion changes nothing there.
-    @Test func expandedDisplayIgnoresTheExpansion() {
-        let burst = group("burst", photos(1...2))
-        let plain = GridDisplay(photos: photos(0...3), groups: [burst], display: .expanded)
-        let expanded = GridDisplay(
-            photos: photos(0...3), groups: [burst], display: .expanded,
-            expandedGroup: burst.id)
-        #expect(expanded.sections.map(\.id) == [.photos(0)])
-        #expect(expanded.cells == plain.cells)
     }
 
     /// Grouping off leaves one run with no marks, whichever group the split names.
     @Test func groupingOffLeavesOnePlainRun() {
         let burst = group("burst", photos(1...2))
         let grid = GridDisplay(
-            photos: photos(0...3), groups: [burst], groupsEnabled: false, display: .collapsed,
-            expandedGroup: burst.id)
+            photos: photos(0...3), groups: [burst], groupsEnabled: false, expandedGroup: burst.id)
         #expect(grid.sections.map(\.id) == [.photos(0)])
         #expect(grid.cells.allSatisfy { $0.group == nil })
     }
 
     /// An empty grid keeps one run, so the collection view always has a section to draw.
     @Test func anEmptyGridKeepsOneRun() {
-        let grid = GridDisplay(photos: [], groups: [], display: .collapsed)
+        let grid = GridDisplay(photos: [], groups: [])
         #expect(grid.sections.map(\.id) == [.photos(0)])
         #expect(grid.cells.isEmpty)
     }
@@ -404,8 +351,7 @@ struct GridSectionTests {
     @Test func onlyTheGroupRunNamesAGroup() {
         let all = photos(0...4)
         let burst = group("burst", [all[1], all[2], all[3]])
-        let grid = GridDisplay(
-            photos: all, groups: [burst], display: .collapsed, expandedGroup: burst.id)
+        let grid = GridDisplay(photos: all, groups: [burst], expandedGroup: burst.id)
         #expect(grid.sections.compactMap(\.expandedGroup) == [burst.id])
         #expect(grid.sections.filter { $0.expandedGroup == nil }.count == 2)
     }

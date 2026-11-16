@@ -251,6 +251,7 @@ extension GridCollectionView {
         private var currentPhoto: PhotoIdentity?
         /// The current photo and highlight flag the visible cells were configured with,
         /// so moving to another member reconfigures exactly the two affected cells (#225).
+        private var highlightedCellID: GridCellItem.ID?
         private var drawnCurrentPhoto: PhotoIdentity?
         private var drawnHighlight = false
 
@@ -292,7 +293,7 @@ extension GridCollectionView {
                 guard let self, let item = self.itemsByID[id] else { return }
                 cell.configure(
                     with: item, isSelected: self.showsSelected(item),
-                    isCurrent: self.highlightsCurrentPhoto && item.photo.id == self.currentPhoto,
+                    isCurrent: self.highlightsCurrentPhoto && self.highlightedCellID == item.id,
                     isSelecting: self.isSelecting, thumbnails: self.thumbnails,
                     theme: self.theme
                 ) { [weak self] group in
@@ -371,15 +372,21 @@ extension GridCollectionView {
             let styleChanged =
                 theme != newTheme || isSelectingEmpty != newSelectingEmpty
                 || drawnHighlight != highlightsCurrentPhoto
-            let highlightMoved =
-                highlightsCurrentPhoto && drawnCurrentPhoto != currentPhoto
-                && !styleChanged
+            let newHighlightedCellID: GridCellItem.ID? =
+                highlightsCurrentPhoto
+                ? currentPhoto.flatMap {
+                    GridCellItem.cell(
+                        for: $0, in: newItems, groups: newGroups, shown: newShownPhotos)
+                }
+                : nil
+            let highlightChanged =
+                highlightsCurrentPhoto && highlightedCellID != newHighlightedCellID && !styleChanged
             // The Duo's split follows the open member, and its grid opens on the photo the
             // person left (#225).
             let followsMoved =
                 followsCurrentPhoto && (wasEmpty || drawnCurrentPhoto != currentPhoto)
-            let highlightCells = Set(
-                [drawnCurrentPhoto, currentPhoto].compactMap { $0 })
+            let highlightCells = Set([highlightedCellID, newHighlightedCellID].compactMap { $0 })
+            highlightedCellID = newHighlightedCellID
             drawnCurrentPhoto = currentPhoto
             drawnHighlight = highlightsCurrentPhoto
             self.currentPhoto = currentPhoto
@@ -406,7 +413,7 @@ extension GridCollectionView {
                 shownPhotos = newShownPhotos
                 selection = newSelection
                 let restyled = items.compactMap { item in
-                    if highlightMoved && highlightCells.contains(item.photo.id) { return item.id }
+                    if highlightChanged && highlightCells.contains(item.id) { return item.id }
                     return !styleChanged && before.showsSelected(item) == after.showsSelected(item)
                         ? nil : item.id
                 }
@@ -499,7 +506,7 @@ extension GridCollectionView {
                 snapshot.appendItems(section.cells.map(\.id), toSection: section.id)
             }
             let changed: [GridCellItem.ID] = newItems.compactMap { item in
-                if highlightMoved && highlightCells.contains(item.photo.id) { return item.id }
+                if highlightChanged && highlightCells.contains(item.id) { return item.id }
                 guard let old = previousByID[item.id] else { return nil }
                 if old != item || styleChanged { return item.id }
                 return before.showsSelected(old) != after.showsSelected(item) ? item.id : nil

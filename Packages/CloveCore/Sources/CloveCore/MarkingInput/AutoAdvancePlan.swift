@@ -45,15 +45,23 @@ public struct AutoAdvancePlan: Hashable, Sendable {
     /// The photo that was just marked; undo returns here (PRD Undo row).
     public let markedPhoto: PhotoIdentity
 
+    /// Whether completing the current mark exits Group Focus (`expandedGroup = nil`).
+    public let exitsGroupFocus: Bool
+
     /// Pairs one target with the photo that was marked.
-    public init(target: AutoAdvanceTarget, markedPhoto: PhotoIdentity) {
+    public init(
+        target: AutoAdvanceTarget,
+        markedPhoto: PhotoIdentity,
+        exitsGroupFocus: Bool = false
+    ) {
         self.target = target
         self.markedPhoto = markedPhoto
+        self.exitsGroupFocus = exitsGroupFocus
     }
 
-    /// Whether the view moves at all.
+    /// Whether the view moves or exits Group Focus after the pause.
     public var advances: Bool {
-        if case .stay = target { return false }
+        if case .stay = target { return exitsGroupFocus }
         return true
     }
 }

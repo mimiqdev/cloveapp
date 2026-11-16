@@ -15,7 +15,6 @@ import CloveCore
             "rejectsFolderName",
             "moveRejectsEnabled",
             "similarGroupsEnabled",
-            "gridGroupDisplay",
             "appearance",
             "photoDisplayMode",
         ])
@@ -34,6 +33,7 @@ import CloveCore
         "groupingSensitivity",
         "detail.zoomedRatingSwipe",
         "zoom.keepInDetail",
+        "grid.groupDisplay",
     ]
     let storage = InMemorySettingsStorage()
     for key in removedKeys {

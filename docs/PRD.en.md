@@ -84,7 +84,7 @@ Open a folder or reopen it from Recents → browse, filter, and sort the grid �
 | P0-09 | Long-press the grid to enter multi-select, then write ratings, labels, or Reject in batches. |
 | P0-10 | Move rejects: after user confirmation, move rejected photo sets as one unit, including RAW, JPEG and/or HIF companions, and the matching XMP, into `_Rejected` under the opened folder, preserving the subfolder structure. Never delete or overwrite any file. The user can keep individual rejects in the confirmation, and the move can be undone. The folder name can be changed, or the feature turned off, in Settings. |
 | P0-11 | Similar groups: group photos automatically by capture time and visual similarity when a folder opens, and always offer Run again. Grouping itself never writes marks. It can be turned off. |
-| P0-12 | In-group culling in detail: an expanded filmstrip group, synchronized zoom and position, group auto-advance, and a Reject N unmarked pill above the strip. It protects rated, labeled and rejected photos. |
+| P0-12 | In-group culling in detail: two-level Timeline (collapsed read-only stacks) and Group Focus (isolated group filmstrip), synchronized zoom and position, first-pass/second-pass auto-advance, and a Reject N unmarked pill above the strip. It protects rated, labeled and rejected photos. |
 | P0-13 | Deliver the single-photo culling flow on both iPhone and iPad. Two-photo comparison on iPad is not in launch scope. |
 | P0-14 | iPhone Duo: use a compact cover-screen layout. Default to a split grid and detail view on the inner screen. Controls must not cross the hinge when half-folded. Preserve the folder, current photo, filters, selection, and write status across folding, unfolding, and window resizing. Overlay and a dedicated half-fold layout move to 1.1. |
 | P0-15 | Use system components with light and dark appearances that follow the system. Ratings use system orange. Reject uses system red. Color labels follow Lightroom color meanings. |
@@ -133,10 +133,10 @@ The behavior below follows the product and UI conclusions and the revisions abov
 - Cells overlay a Reject flag, ratings, and color dots. RAW sets with JPEG and/or HIF companions have a badge.
 - Sort by capture time by default, with subsecond precision, falling back to file creation time, then modification time. Never show temporary filename order first. Photos using fallback times are not grouped. Filename order remains an option.
 - Top filters are All, Unmarked, Rejected, and N stars or higher.
-- Similar-group display:
-  - Expanded, the default: show every photo, with each group outlined in blue and labeled with its count.
-  - Collapsed: show one cover cell per group with its count. Tapping it opens detail on the group's first unmarked photo, or its first photo when all are marked.
-  - Expanded is the default because grouping refines in the background, which adds and removes cells in the collapsed view. In either mode, refinement must not move the photo the user is looking at.
+- Similar groups:
+  - When Similar groups is on (default, once scanning completes), multi-photo visible groups (`visibleMembers.count >= 2`) render as collapsed stacks with count badges showing the visible member count and peeking cards drawn from visible members; stacks dim only when all visible members are rejected. Groups narrowed to 1 visible member by active filtering behave as standalone photos everywhere.
+  - Stack covers use the unified Representative Photo rule: highest star rating (`rating > 0`, earliest in active order on ties), else first non-rejected photo with a color label, else first unmarked photo, else first visible photo.
+  - Tapping a collapsed stack opens detail directly in Group Focus on its Representative Photo; turning Similar groups off renders a flat 1D stream everywhere without stacks or group expansion.
 - Open detail or similar groups from the grid.
 - Long-press to enter multi-select, then write in batches.
 - The grid has no double-tap action, so a single tap opens detail without delay.
@@ -169,17 +169,19 @@ Detail gestures:
 
 | State | Action | Result |
 | --- | --- | --- |
-| Fit | Vertical drag | Position-driven anchor-symmetric slider (`sortedUnique([-1, 0, startingRating] ∪ { enabledStars > startingRating })`): from unrated, up selects stars and down reaches −1; from 1–5★, up raises higher stars and down goes to 0 (Clear) then −1 (Reject). Reverse back to origin to cancel. |
-| Fit | Swipe left or right | Navigate |
+| Fit | Vertical drag | On standalone photos or inside Group Focus: position-driven anchor-symmetric slider (`sortedUnique([-1, 0, startingRating] ∪ { enabledStars > startingRating })`); up raises through higher enabled stars, down goes to 0 (Clear) then −1 (Reject). On unexpanded group stacks in Timeline: marking is disabled and dragging nudges the **Expand N photos** pill. |
+| Fit | Swipe left or right | Navigate within the active level (Timeline slots, skipping collapsed bursts in one step; or Group Focus members, stopping at both ends) |
 | Fit | Single tap anywhere | Toggle all chrome together (waiting for the double-tap window; never navigates) |
 | Fit | Double-tap anywhere | Zoom to 100%: the most relevant presented focus region with Zoom to focus (default), the tapped point with Zoom to tap point, or nothing with Off |
-| Zoomed, Rate & switch | One-finger vertical drag | Rating swipe with the same ladder and semantics as at fit |
-| Zoomed, Rate & switch | One-finger horizontal drag | Previous or next photo |
+| Zoomed, Rate & switch | One-finger vertical drag | Rating swipe with the same ladder and semantics as at fit (or nudges **Expand N photos** on a read-only collapsed group stack) |
+| Zoomed, Rate & switch | One-finger horizontal drag | Previous or next photo within the active level |
 | Zoomed, Rate & switch | Two-finger drag | Pan the image; pinches do not rate |
 | Zoomed, Pan | One-finger drag | Pan the image |
-| Zoomed, Pan | Two-finger vertical drag | Rating swipe with the same ladder and semantics; pinches do not rate |
+| Zoomed, Pan | Two-finger vertical drag | Rating swipe with the same ladder and semantics (or nudges **Expand N photos** on a read-only collapsed group stack); pinches do not rate |
 | Zoomed | Single tap anywhere | Toggle all chrome together without navigating |
 | Zoomed | Double-tap anywhere | Return to fit |
+| Filmstrip (Timeline) | Swipe up on a stack (`>= 24 pt`, `1.5x` vertical) | Enter Group Focus on that group |
+| Filmstrip (Group Focus) | Swipe down anywhere (`>= 24 pt`, `1.5x` vertical) | Collapse back to Timeline on the group's Representative Photo |
 | Any | Pinch | Zoom |
 | Any | Three-finger system gesture or ⌘Z | Undo |
 
@@ -210,7 +212,9 @@ External keyboard support prioritizes iPad and also works on an iPhone with a ke
 | `6` `7` `8` `9` | Red, yellow, green, blue label, matching Lightroom |
 | `↑` | Raise to the next enabled rating |
 | `↓` | Reject |
-| `←` `→` | Navigate |
+| `←` `→` | Navigate within the active level (Timeline slots or Group Focus members) |
+| `Return` | Toggle Group Focus on a group stack (expand in Timeline, collapse in Group Focus) |
+| `Escape` | Collapse Group Focus back to Timeline |
 | `⌘Z` | Undo |
 
 Auto-advance (Settings):
@@ -218,9 +222,11 @@ Auto-advance (Settings):
 - After marking: stay, next photo (default), or next unmarked photo.
 - Marks that trigger advance: ratings and Reject by default. Color labels do not trigger it by default.
 - Pause about 0.3 seconds after marking so the user sees the mark take effect, then advance.
-- Inside a group in detail, advance to the next unmarked member, wrapping within the group. When none is left, including after Reject N unmarked, advance to the first photo after the group in grid order.
+- In Timeline (standalone photos): **Next photo** steps to the next Timeline slot (landing on a group stack's Representative Photo); **Next unmarked photo** steps to the next unmarked standalone photo or group stack still holding at least one visible unmarked member.
+- In Group Focus first-pass culling (while the visible group held at least one unmarked member before the mark): advance to the next unmarked member, wrapping once within the group. When marking the last remaining unmarked member—or tapping **Reject N unmarked**—collapse back to Timeline and advance across Timeline slots according to Settings (**Stay** remains in Group Focus).
+- In Group Focus second-pass review (0 unmarked visible members before the mark): changing a rating, label, or Reject never auto-collapses or ejects the user out of the group (**Stay** and **Next unmarked** remain on the current member; **Next photo** steps within the group and stops at the end).
 
-Gesture-related settings: gestures on or off, enabled ratings, auto-advance, marks that trigger advance, double-tap behavior (Zoom to focus, the default, Zoom to tap point, or Off), and while-zoomed gestures (Rate & switch, the default, or Pan). Similar groups always synchronize zoom level and position; every other photo change returns to fit.
+Gesture-related settings: gestures on or off, enabled ratings, auto-advance, marks that trigger advance, double-tap behavior (Zoom to focus, the default, Zoom to tap point, or Off), and while-zoomed gestures (Rate & switch, the default, or Pan). Group Focus always synchronizes zoom level and position across members; Timeline steps and collapsing onto a different photo return to fit.
 
 ### Similar groups
 
@@ -234,23 +240,24 @@ Grouping:
 
 Rules:
 
-- A group has at least 2 photos. Files without a capture time are not grouped.
+- A group has at least 2 photos. Files without a capture time are not grouped. A group is rendered and navigated as a group only while at least 2 of its members remain visible under the active filter.
 - Groups are cached only in Clove and never written to XMP.
 - Show analysis progress or Analyzed. Run again is always available.
-- Users can turn similar groups off. That hides group entry points and blue outlines while preserving opening, browsing, and manual marking.
+- Users can turn similar groups off. That hides group stacks and expansion entry points across Grid and Detail while preserving opening, browsing, and manual marking in a flat stream.
 - There is no grouping-sensitivity setting. Use calibrated defaults.
 - No numeric grouping-accuracy commitment.
 
 ### In-group culling
 
-A burst is culled in the same detail view as any other photo. Its group expands in place in the grid-order filmstrip; other groups remain stacked. There is no separate group screen or sidebar.
+A burst is culled in the same detail view through an explicit two-level filmstrip (`Timeline` and `Group Focus`). There is no separate group screen or sidebar:
 
-- Moving between members of the same group keeps zoom level and position. Leaving that group or switching between standalone photos returns to fit.
-- Rejected thumbnails stay dimmed. Manual navigation follows grid order.
-- With auto-advance on, a triggering mark moves to the next unmarked member, wrapping within the group. When none remains, it moves to the first photo after the group in grid order, including after Reject N unmarked. At the end of the grid it stays.
-- The **Reject N unmarked** pill sits centred in its own row above the filmstrip. It appears only when the visible group has both a rated or labeled photo and an unmarked photo. It rejects only visible photos with no rating, label or Reject.
-- The pill hides when marking is off, when nothing is left to reject, and with the chrome. It never replaces itself with another action or overlaps the capsule or swipe star bar.
-- The action follows batch-write failure rules and undoes as one step. Undo returns to the photo shown when the pill was tapped; undo after a single-photo auto-advance returns to the marked photo.
+- **Timeline** (`expandedGroup == nil`): the filmstrip renders standalone photos and collapsed multi-photo group stacks in grid order with no inline expansion (`"{i} / {slotCount}"` subtitle). Selecting a collapsed stack opens its Representative Photo as read-only (disabling bar/rail/key/swipe marking and nudging the **Expand N photos** pill on vertical stage drags). Tapping **Expand N photos**, tapping an already-selected stack, swiping up `>= 24 pt` on any stack, or pressing `Return` enters Group Focus without reloading pixels.
+- **Group Focus** (`expandedGroup == group.id`): tapping a group stack in the grid enters Group Focus directly on its Representative Photo. The filmstrip isolates **only** the expanded group's visible members (`1 … N`) with a leading collapse button (`"Group · {i} / {n}"` subtitle), horizontal swipes and arrow keys stop at both ends without wrapping, and zoom level and position stay synchronized across members.
+- Collapsing (the strip's collapse button, downward vertical strip swipe `>= 24 pt`, Split Grid header chevron, `Return`, or `Escape`) returns to Timeline on the group's Representative Photo. Leaving Detail via top-bar `‹ Back` always returns to Grid View in one tap.
+- Rejected thumbnails stay dimmed. Manual navigation follows visible grid order.
+- First-pass marking advances through remaining unmarked members with wrap and, on the last unmarked member or **Reject N unmarked**, exits Group Focus and advances across Timeline slots; editing an already-decided group never auto-collapses.
+- The **Reject N unmarked** pill sits centred above the strip when in Group Focus and the group has at least one rated/labeled member and at least one unmarked member. It rejects only visible unmarked photos, hides when marking is off or nothing remains unmarked (and with chrome), and undoes as one step returning to the photo shown at submission.
+- **Photo Preview** (30/70 split grid on wide iPad and expanded Duo) binds inline group expansion to the same `expandedGroup` state so switching between `Photo Preview` and `Focus View` preserves group focus, marks, and zoom.
 
 ### Move rejects
 
@@ -388,8 +395,8 @@ These manual tests determine whether launch meets product requirements. They are
 | P0-08 | Hold a write and verify its mark appears immediately; make two quick marks and verify write order. Force a connected failure and verify one “Couldn't save the mark.” toast, a fresh file read and the file's marks on screen. Verify no save subtitle, failure marker, retry or leave prompt. Disconnect through a real folder session and verify queued marks are dropped, marking stays disabled until Reopen, and Reopen reads fresh sidecars. A partial Move Rejects result reports the unmoved count with Undo and shows what remains on disk. |
 | P0-09 | Long-press, select multiple photos, and rate them in a batch. Force some writes to fail. Report Saved N photos. M photos couldn't be saved. Successful items stay saved and failed items can be retried separately. |
 | P0-10 | Reject several photos, including RAW+JPEG, RAW+HIF, and RAW+JPEG+HIF sets across multiple subfolders, then run Move rejects. The confirmation shows the correct count. Afterward, every set's RAW, JPEG and/or HIF companions, and XMP are in the matching subfolders under `_Rejected`, no file was deleted or overwritten, and the photos no longer appear in the grid. A moved RAW set's sidecar holds the rating −1. Forced name collisions add a suffix, and forced partial failures report Moved N photos. M photos couldn't be moved. Running it on a read-only location shows the view-only message. A photo kept in the confirmation stays in place with its rating set to 0. Undo after the move returns every moved file to its original path and writes Reject (−1) again. |
-| P0-11 | Opening a folder with bursts starts grouping automatically: groups appear by time first, then refine, and Run again is available. The photo being viewed does not jump during grouping. Grouping separates by model and serial when present, falling back to model when serial is missing; two same-model bodies shooting the same scene at the same moment are unsupported. Photos with only fallback file times are excluded. Starting values are a gap below 2 seconds and a split above Vision distance 0.5. All XMP is unchanged before and after grouping. Turning similar groups off hides entry points and blue outlines while the main flow still works. |
-| P0-12 | A stack opens detail on its first unmarked photo with its filmstrip group expanded. In a group of 20 or more photos, navigation keeps zoom and position. The pill rejects only unmarked photos and undoes as one step, returning to the photo shown at submission. Auto-advance visits unmarked members, then the first photo after the group in grid order. |
+| P0-11 | Opening a folder with bursts starts grouping automatically: groups appear by time first, then refine, and Run again is available. The photo being viewed does not jump during grouping. Grouping separates by model and serial when present, falling back to model when serial is missing; two same-model bodies shooting the same scene at the same moment are unsupported. Photos with only fallback file times are excluded. Starting values are a gap below 2 seconds and a split above Vision distance 0.5. All XMP is unchanged before and after grouping. Turning similar groups off renders a flat 1D stream with no group stacks or expansion entry points while the main flow still works. |
+| P0-12 | A group stack opens Detail directly in Group Focus on its Representative Photo (`Highest rated > Non-rejected labeled > First unmarked > First visible`). In Timeline, groups stay collapsed as single-step read-only stacks (vertical stage drags nudge Expand N photos without marking) and horizontal navigation skips each burst in one step. In Group Focus (including 20+ photo bursts), the filmstrip isolates only the group's visible members, horizontal navigation stays bounded to the group while keeping zoom and position, Reject N unmarked rejects only unmarked members and undoes as one step returning to the photo shown at submission, first-pass auto-advance visits remaining unmarked members then exits to the next Timeline slot, and second-pass edits stay inside the group. Collapsing (`Collapse group`, downward strip swipe, Split Grid chevron, Return, or Escape) returns to Timeline on the Representative Photo. |
 | P0-13 | Complete the flow on both iPhone and iPad: open folder → grid → mark in detail → cull a group → move rejects → quit and reopen with marks intact. |
 | P0-14 | Open and mark on the Duo cover screen. Unfold and retain the same folder, photo, marks, and expanded filmstrip group in detail, with grid and detail split by default. Half-folded filters, marking controls, and bottom bar never cross the hinge. |
 | P0-15 | Switching system appearance updates entry, grid, detail with expanded filmstrip groups, similar groups, and all Duo postures between light and dark. |

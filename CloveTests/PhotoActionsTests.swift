@@ -17,9 +17,10 @@ struct PhotoActionsTests {
         let model = BrowsingModel(library: library)
         model.openFolder()
         model.apply(.label(ColourLabel(colour: .green)), to: library.identity("a"))
-        model.openPhoto(library.identity("b"))
+        model.openGroup(group.id, on: library.identity("b"))
         let plan = GroupFinishingPlan(
-            group: group, action: .rejectUnmarked, currentPhoto: library.identity("b"),
+            groupID: group.id, members: group.members, action: .rejectUnmarked,
+            currentPhoto: library.identity("b"),
             marks: Dictionary(uniqueKeysWithValues: model.groupPhotos.map { ($0.id, $0.marks) }))
         return (model, library, plan)
     }
@@ -433,7 +434,7 @@ struct PhotoActionsTests {
             order: model.photos,
             actions: DetailMarkingActions(
                 apply: { change, photo in model.apply(change, to: photo.id) },
-                marked: { _, _ in advanced() }, step: { _ in }, markingSwipeBegan: {}))
+                marked: { _, _, _ in advanced() }, step: { _ in }, markingSwipeBegan: {}))
     }
 
     private func waitUntil(_ condition: () -> Bool) async throws {

@@ -19,4 +19,10 @@ public enum MarkingResult: Hashable, Sendable {
 
     /// Undo the last change; the undo stack belongs to C5 (PRD Undo row and `⌘Z`).
     case undo
+
+    /// Toggle between Timeline collapsed stack and Group Focus (`Return`).
+    case toggleGroupFocus
+
+    /// Collapse Group Focus back to Timeline (`Escape`).
+    case collapseGroup
 }

@@ -238,11 +238,12 @@ struct DetailDisplayPresentationTests {
             window.isHidden = true
             window.rootViewController = nil
         }
-        try await waitFor { source.delivered.contains(.screenRAW) }
+        try await waitFor { source.delivered.contains(.screenRAW) && !browsing.isFolderOpening }
         #expect(source.delivered.first == .preview)
         #expect(source.windows.first?.mode == .rawFirst)
+        let windowsBeforeFilter = source.windows.count
         browsing.setFilter(.unmarked)
-        try await waitFor { source.windows.count >= 2 }
+        try await waitFor { source.windows.count > windowsBeforeFilter }
         #expect(source.windows.last?.current.photo == first)
         #expect(source.windows.last?.current.position == 0)
         #expect(source.windows.last?.mode == .rawFirst)
@@ -324,8 +325,9 @@ struct DetailDisplayPresentationTests {
         let store = SettingsStore.sample
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening }
         let group = try #require(browsing.groups.first)
-        browsing.openPhoto(group.members[0])
+        browsing.openGroup(group.id, on: group.members[0])
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
         window.rootViewController = UIHostingController(
@@ -342,14 +344,14 @@ struct DetailDisplayPresentationTests {
                 x: (scroll.contentSize.width - scroll.bounds.width) * 0.7,
                 y: scroll.contentOffset.y), animated: false)
         let before = try #require(preview.zoomSnapshot)
-        browsing.openPhoto(group.members[1])
+        browsing.selectGroupPhoto(group.members[1])
         try await waitFor { source.prefetched.last?.current.photo == group.members[1] }
         let after = try #require(preview.zoomSnapshot)
         #expect(abs(before.scale - after.scale) < 0.02)
         #expect(abs(before.anchor.x - after.anchor.x) < 0.02)
         #expect(abs(before.anchor.y - after.anchor.y) < 0.02)
 
-        // Leaving the group always returns to fit (#302).
+        // Leaving the group always returns to fit (#302, #304).
         let outside = try #require(browsing.photos.first { !group.members.contains($0.id) }?.id)
         browsing.openPhoto(outside)
         try await waitFor { source.prefetched.last?.current.photo == outside }
@@ -409,8 +411,10 @@ struct DetailDisplayPresentationTests {
         store.update { $0.autoAdvance.destination = .stay }
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening }
         let photos = browsing.photos
-        browsing.openPhoto(photos[2].id)
+        // MMQ02682, MMQ02683, MMQ02684 are consecutive standalone Timeline slots (#304).
+        browsing.openPhoto(photos[4].id)
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
         window.rootViewController = UIHostingController(
@@ -420,18 +424,18 @@ struct DetailDisplayPresentationTests {
             window.isHidden = true
             window.rootViewController = nil
         }
-        try await waitFor { source.prefetched.last?.current.photo == photos[2].id }
+        try await waitFor { source.prefetched.last?.current.photo == photos[4].id }
         let preview = try #require(findPreview(in: window))
         let stepTravel = -max(180, preview.bounds.width * 0.3)
         try sendSwipe(to: preview, travel: CGPoint(x: stepTravel, y: 0))
-        #expect(browsing.state.currentPhoto == photos[3].id)
+        #expect(browsing.state.currentPhoto == photos[5].id)
         try await Task.sleep(for: .milliseconds(100))
         try sendSwipe(to: preview, travel: CGPoint(x: stepTravel, y: 0))
-        #expect(browsing.state.currentPhoto == photos[4].id)
+        #expect(browsing.state.currentPhoto == photos[6].id)
         try await Task.sleep(for: .milliseconds(100))
         try sendSwipe(to: preview, travel: CGPoint(x: 0, y: -130))
-        #expect(browsing.shownMarks(for: photos[4].id).rating != .unrated)
-        #expect(browsing.shownMarks(for: photos[3].id) == photos[3].marks)
+        #expect(browsing.shownMarks(for: photos[6].id).rating != .unrated)
+        #expect(browsing.shownMarks(for: photos[5].id) == photos[5].marks)
     }
 
     @Test func navigationStartedAfterRatingCancelsAutoAdvanceAndMovesExactlyOnePhoto() async throws
@@ -445,8 +449,10 @@ struct DetailDisplayPresentationTests {
         }
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening }
         let photos = browsing.photos
-        browsing.openPhoto(photos[2].id)
+        // MMQ02683 and MMQ02684 are consecutive standalone Timeline slots (#304).
+        browsing.openPhoto(photos[5].id)
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
         window.rootViewController = UIHostingController(
@@ -456,23 +462,23 @@ struct DetailDisplayPresentationTests {
             window.isHidden = true
             window.rootViewController = nil
         }
-        try await waitFor { source.prefetched.last?.current.photo == photos[2].id }
+        try await waitFor { source.prefetched.last?.current.photo == photos[5].id }
         let preview = try #require(findPreview(in: window))
         try sendSwipe(to: preview, travel: CGPoint(x: 0, y: -130))
-        #expect(browsing.shownMarks(for: photos[2].id).rating != .unrated)
+        #expect(browsing.shownMarks(for: photos[5].id).rating != .unrated)
         try await Task.sleep(for: .milliseconds(100))
         let pan = DetailTestPan()
         pan.travel = CGPoint(x: -15, y: 0)
         try #require(preview.gestureRecognizerShouldBegin(pan))
         preview.handleMarkingPan(pan)
         try await Task.sleep(for: .milliseconds(350))
-        #expect(browsing.state.currentPhoto == photos[2].id)
+        #expect(browsing.state.currentPhoto == photos[5].id)
         pan.travel = CGPoint(x: -max(180, preview.bounds.width * 0.3), y: 0)
         pan.sampleState = .ended
         preview.handleMarkingPan(pan)
-        #expect(browsing.state.currentPhoto == photos[3].id)
+        #expect(browsing.state.currentPhoto == photos[6].id)
         try await Task.sleep(for: .milliseconds(350))
-        #expect(browsing.state.currentPhoto == photos[3].id)
+        #expect(browsing.state.currentPhoto == photos[6].id)
     }
 
     @Test func zoomBeginningCancelsAnInProgressNavigationPan() throws {
@@ -570,8 +576,9 @@ struct DetailDisplayPresentationTests {
         let store = SettingsStore.sample
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
-        let first = browsing.photos[2]
-        let next = browsing.photos[3]
+        try await waitFor { !browsing.isFolderOpening }
+        let first = browsing.photos[4]
+        let next = browsing.photos[5]
         browsing.openPhoto(first.id)
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
@@ -1249,9 +1256,11 @@ struct DetailDisplayPresentationTests {
         let source = ObservedDetailImages()
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening }
         let photos = browsing.photos
-        try #require(photos.count >= 6)
-        let current = photos[2]
+        try #require(photos.count >= 9)
+        // MMQ02684 (photos[6]) is standalone with consecutive standalone Timeline slots on both sides.
+        let current = photos[6]
         source.heldScreenRenderPhoto = current.id
         browsing.openPhoto(current.id)
         let window = UIWindow(windowScene: scene)
@@ -1267,10 +1276,10 @@ struct DetailDisplayPresentationTests {
         // +/-2 preview prefetch fires on arrival before screenRender finishes.
         try await waitFor { source.previewPrefetched.last?.current.photo == current.id }
         let recorded = try #require(source.previewPrefetched.last)
-        #expect(recorded.neighbours.map(\.photo) == [photos[1].id, photos[3].id])
+        #expect(recorded.neighbours.map(\.photo) == [photos[5].id, photos[7].id])
         #expect(
             recorded.previewNeighbours.map(\.photo) == [
-                photos[3].id, photos[1].id, photos[4].id, photos[0].id,
+                photos[7].id, photos[5].id, photos[8].id, photos[4].id,
             ])
         #expect(source.prefetched.isEmpty)
 
@@ -1316,6 +1325,7 @@ struct DetailDisplayPresentationTests {
         directWindow.frame = scene.coordinateSpace.bounds
         let mappedBrowsing = BrowsingModel(library: TestLibrary.sample())
         mappedBrowsing.openFolder()
+        try await waitFor { !mappedBrowsing.isFolderOpening }
         let screenPixels = Int(
             max(scene.screen.nativeBounds.width, scene.screen.nativeBounds.height))
         let directSets = Dictionary(
@@ -1393,7 +1403,8 @@ struct DetailDisplayPresentationTests {
         }
 
         let spy = WarmSampleObserver(sampleSource)
-        mappedBrowsing.openPhoto(photos[2].id)
+        // MMQ02682 and MMQ02683 are adjacent Timeline slots, so navigating between them hits warmImage.
+        mappedBrowsing.openPhoto(photos[4].id)
         directWindow.rootViewController = UIHostingController(
             rootView: DetailScreen(browsing: mappedBrowsing, images: spy)
                 .environment(SettingsStore.sample))
@@ -1402,18 +1413,18 @@ struct DetailDisplayPresentationTests {
             directWindow.isHidden = true
             directWindow.rootViewController = nil
         }
-        try await waitFor { spy.prefetched.last?.current.photo == photos[2].id }
+        try await waitFor { spy.prefetched.last?.current.photo == photos[4].id }
         let preview = try #require(findPreview(in: directWindow))
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let imageView = try #require(scroll.subviews.first as? UIImageView)
         try #require(imageView.image?.cgImage != nil)
 
-        // Swiping to warm neighbour photos[3] hits warmImage synchronously and never flashes nil or requests placeholder.
-        mappedBrowsing.openPhoto(photos[3].id)
-        #expect(!spy.placeholderPhotos.contains(photos[3].id))
-        try await waitFor { spy.warmHits.contains(photos[3].id) && imageView.image?.cgImage != nil }
-        #expect(!spy.placeholderPhotos.contains(photos[3].id))
-        try await waitFor { spy.prefetched.last?.current.photo == photos[3].id }
+        // Swiping to warm neighbour photos[5] hits warmImage synchronously and never flashes nil or requests placeholder.
+        mappedBrowsing.openPhoto(photos[5].id)
+        #expect(!spy.placeholderPhotos.contains(photos[5].id))
+        try await waitFor { spy.warmHits.contains(photos[5].id) && imageView.image?.cgImage != nil }
+        #expect(!spy.placeholderPhotos.contains(photos[5].id))
+        try await waitFor { spy.prefetched.last?.current.photo == photos[5].id }
     }
 
     @Test func duoFocusSplitDoubleTapAndRegionTapKeepZoomCentredOnFocusRegion()
@@ -1515,8 +1526,7 @@ struct DetailDisplayPresentationTests {
                         filter: AnyView(EmptyView()),
                         more: AnyView(EmptyView()),
                         bottom: AnyView(EmptyView()),
-                        showsGrid: true,
-                        foldedGroup: nil))
+                        showsGrid: true))
             }
             .environment(store)
             .environment(\.isDuoExpanded, true)
@@ -2185,6 +2195,146 @@ struct DetailDisplayPresentationTests {
         return try #require(context.makeImage())
     }
 
+    @Test func collapsedStackIsReadOnlyAndVerticalDragNudgesWithoutMarking() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let store = SettingsStore.sample
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first)
+        let rep = try #require(
+            BrowsingGroup.representative(
+                of: browsing.photos.filter { group.members.contains($0.id) })?.id)
+        let marksBefore = browsing.shownMarks(for: rep)
+        browsing.openPhoto(rep)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor { source.prefetched.last?.current.photo == rep }
+        let preview = try #require(findPreview(in: window))
+        #expect(browsing.expandedGroup == nil)
+        #expect(!preview.allowsMarking)
+        #expect(preview.onReadOnlyMarkingDrag != nil)
+
+        var nudged = 0
+        let originalNudge = preview.onReadOnlyMarkingDrag
+        preview.onReadOnlyMarkingDrag = {
+            nudged += 1
+            originalNudge?()
+        }
+        try sendSwipe(to: preview, travel: CGPoint(x: 0, y: -120))
+        #expect(nudged == 1)
+        #expect(browsing.shownMarks(for: rep) == marksBefore)
+        #expect(preview.feedback?.rating == nil)
+
+        browsing.openGroup(group.id, on: rep)
+        try await waitFor { preview.allowsMarking }
+        #expect(browsing.expandedGroup == group.id)
+
+        browsing.collapseGroup()
+        try await waitFor { !preview.allowsMarking }
+        #expect(browsing.expandedGroup == nil)
+        #expect(browsing.state.currentPhoto == rep)
+    }
+
+    @Test func splitPhotoPreviewAndFocusViewSyncExpandedGroupMarksAndZoom() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first)
+        browsing.openGroup(group.id, on: group.members[0])
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let usesSystemToolbar =
+            if #available(iOS 27.1, *) {
+                true
+            } else {
+                false
+            }
+        let host = UIHostingController(
+            rootView: TestDetailPresentationHost(
+                browsing: browsing, images: source, presentation: presentationBox,
+                usesSystemToolbar: usesSystemToolbar))
+        host.traitOverrides.horizontalSizeClass = .regular
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("Photo Preview did not settle") {
+            source.delivered.contains(.screenRAW) && self.findCollectionView(in: window) != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let collectionView = try #require(findCollectionView(in: window))
+        // Photo Preview split grid shows the expanded group header + section alongside the preview.
+        #expect(collectionView.numberOfSections >= 2)
+        #expect(!collectionView.visibleSupplementaryViews(ofKind: GridGroupHeader.kind).isEmpty)
+        #expect(browsing.expandedGroup == group.id)
+
+        preview.onDoubleTap?(.center)
+        try await waitFor("100% zoom did not settle") {
+            source.delivered.contains(.nativeRAW) && preview.zoomSnapshot != nil
+        }
+        try await Task.sleep(for: .milliseconds(250))
+        let zoomBeforeToggle = try #require(preview.zoomSnapshot)
+        let requestCountBeforeToggle = source.requests.count
+
+        // Switch from Photo Preview -> Focus View: preserves expandedGroup and zoom anchor without reloading pixels.
+        presentationBox.value = presentationBox.value.toggled
+        try await waitFor("Focus View did not settle") {
+            presentationBox.value == .focus
+                && self.findCollectionView(in: window) == nil
+                && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+                && preview.zoomSnapshot.map {
+                    abs($0.anchor.x - zoomBeforeToggle.anchor.x) < 0.05
+                        && abs($0.anchor.y - zoomBeforeToggle.anchor.y) < 0.05
+                } == true
+        }
+        #expect(browsing.expandedGroup == group.id)
+        let filmstrip = try #require(findFilmstripScrollView(in: window, excluding: preview))
+        #expect(filmstrip.contentSize.width < 300)
+        #expect(preview.isZoomed)
+        let zoomAfterToggle = try #require(preview.zoomSnapshot)
+        #expect(abs(zoomAfterToggle.anchor.x - zoomBeforeToggle.anchor.x) < 0.05)
+        #expect(abs(zoomAfterToggle.anchor.y - zoomBeforeToggle.anchor.y) < 0.05)
+        #expect(source.requests.count == requestCountBeforeToggle)
+
+        // Mark member[1] in Focus View, then return to Photo Preview: expandedGroup and mark stay synced.
+        browsing.selectGroupPhoto(group.members[1])
+        try await waitFor("member[1] prefetch did not settle") {
+            source.prefetched.last?.current.photo == group.members[1]
+        }
+        let two = try #require(Rating(rawValue: 2))
+        browsing.apply(.rating(two), to: group.members[1])
+
+        let requestCountBeforeReturn = source.requests.count
+        presentationBox.value = presentationBox.value.toggled
+        try await waitFor("Return to Photo Preview did not settle") {
+            presentationBox.value == .photoPreview
+                && self.findCollectionView(in: window) != nil
+                && self.findFilmstripScrollView(in: window, excluding: preview) == nil
+        }
+        #expect(browsing.expandedGroup == group.id)
+        #expect(browsing.state.currentPhoto == group.members[1])
+        #expect(browsing.shownMarks(for: group.members[1]).rating == two)
+        #expect(source.requests.count == requestCountBeforeReturn)
+    }
+
     private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
         let start = CGPoint(x: 195, y: 300)
         let pan = DetailTestPan()
@@ -2383,8 +2533,7 @@ private struct TestDuoDetailHost: View {
                     filter: AnyView(EmptyView()),
                     more: AnyView(EmptyView()),
                     bottom: AnyView(EmptyView()),
-                    showsGrid: true,
-                    foldedGroup: nil))
+                    showsGrid: true))
         }
         .environment(SettingsStore.sample)
         .environment(\.isDuoExpanded, true)
@@ -2435,8 +2584,7 @@ private struct TestDuoPoseDetailHost: View {
                     filter: AnyView(EmptyView()),
                     more: AnyView(EmptyView()),
                     bottom: AnyView(EmptyView()),
-                    showsGrid: showsGrid,
-                    foldedGroup: nil))
+                    showsGrid: showsGrid))
         }
         .environment(SettingsStore.sample)
         .environment(\.cloveTheme, theme)

@@ -42,16 +42,12 @@ extension EnvironmentValues {
     @Entry var isDuoCover = false
 }
 
-/// The grid owns its filter/more/move controls; detail owns marking and preview state.
 struct DuoDetailLayout {
     var presentation: Binding<DetailPresentation>
     var filter: AnyView
     var more: AnyView
     var bottom: AnyView
     var showsGrid: Bool
-    /// The group whose expansion the person folded, shared with Photo Preview's grid so the
-    /// Focus View filmstrip shows the same stack and folds back the same way (#225).
-    var foldedGroup: Binding<GroupID?>?
 }
 
 /// One set of semantic toolbar groups for both axes. The navigation container owns

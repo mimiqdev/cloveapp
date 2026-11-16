@@ -44,7 +44,6 @@ let launchSettingKeys = [
     "detail.doubleTap",
     "detail.zoomedGestures",
     "gestures.enabled",
-    "grid.groupDisplay",
     "groups.similarEnabled",
     "labels.extended",
     "ratings.enabled",
@@ -72,7 +71,6 @@ func nonDefaultSettings() throws -> AppSettings {
         rejectsFolderName: folderName,
         moveRejectsEnabled: false,
         similarGroupsEnabled: false,
-        gridGroupDisplay: .collapsed,
         appearance: AppearanceChoice(mode: .dark, family: .nord),
         photoDisplayMode: .cameraPreviewFirst
     )

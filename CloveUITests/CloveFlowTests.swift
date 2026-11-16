@@ -213,7 +213,7 @@ final class CloveFlowTests: XCTestCase {
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         centre.doubleTap()
-        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
         XCTAssertTrue(strip.exists)
         // Chrome is one visibility across fit and zoom (#302).
         XCTAssertTrue(element(app, "clove.detail.info").exists)
@@ -223,16 +223,16 @@ final class CloveFlowTests: XCTestCase {
         gridToggle.tap()
         XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
         XCTAssertFalse(strip.exists)
-        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
         gridToggle.tap()
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
         XCTAssertFalse(splitGrid.exists)
-        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
         // Single-tapping while zoomed toggles the filmstrip without stepping photos.
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
-        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
@@ -510,7 +510,7 @@ final class CloveFlowTests: XCTestCase {
         app.typeKey("x", modifierFlags: [])
         XCTAssertEqual(capsule.value as? String, "Rejected")
         app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
-        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
+        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
         app.typeKey("z", modifierFlags: .command)
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertEqual(capsule.value as? String, "3 stars")
@@ -607,7 +607,7 @@ final class CloveFlowTests: XCTestCase {
     func testMixedBatchCanClearRatingsWithoutAnIntermediateMark() {
         let app = launchSample()
         openLibrary(app)
-        let rated = element(app, "clove.grid.photo.mmq02678")
+        let rated = element(app, "clove.grid.group.burst-2678")
         rated.press(forDuration: 0.6)
         element(app, "clove.grid.photo.mmq02680").tap()
         element(app, "clove.grid.batch").press(forDuration: 0.6)
@@ -644,7 +644,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(navigationPreview.frame, previewFrame)
         let navigationStart = ContinuousClock.now
         navigationPreview.swipeLeft()
-        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
+        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
         XCTAssertEqual(navigationPreview.frame, previewFrame)
         print(
             "Detail navigation swipe to next filename (informational, XCTest input included): \(navigationStart.duration(to: .now))"
@@ -670,7 +670,7 @@ final class CloveFlowTests: XCTestCase {
         let zoom = element(app, "clove.detail.zoom")
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.doubleTap()
-        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
+        XCTAssertEqual(zoom.label, "2 / 32 · 100%")
         // Chrome is one visibility across fit and zoom: the marking controls, Info, Undo and the
         // filmstrip all stay put until a single tap hides them (#302).
         if !isRail {
@@ -702,7 +702,7 @@ final class CloveFlowTests: XCTestCase {
         // A horizontal drag while zoomed switches photos in the default mode, and a photo outside
         // the group opens at fit (#302).
         preview.swipeLeft()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
         XCTAssertFalse(zoom.label.contains("100%"))
         preview.swipeRight()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
@@ -731,14 +731,14 @@ final class CloveFlowTests: XCTestCase {
         // A mark waits out the advance pause before the file name changes. On a loaded runner
         // one accessibility query can consume most of a short window while the app is already
         // correct (#203), so this boundary keeps the 10-second budget the browsing flow uses.
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName, timeout: 10))
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName, timeout: 10))
         preview.swipeRight()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertTrue(String(describing: marksControl.value).contains("4"))
         for (side, horizontalStart, nextPhoto) in [
-            ("right", 0.8, "MMQ02681.ARW"),
-            // Finishing the sample group advances to the following standalone photo.
-            ("left-third", 0.2, "MMQ02680.ARW"),
+            ("right", 0.8, "MMQ02682.ARW"),
+            // Standalone Timeline swipe-mark moves to the next standalone Timeline slot.
+            ("left-third", 0.2, "MMQ02683.ARW"),
         ] {
             let start = preview.coordinate(
                 withNormalizedOffset: CGVector(dx: horizontalStart, dy: 0.5))
@@ -822,7 +822,7 @@ final class CloveFlowTests: XCTestCase {
             let capsule = element(app, "clove.detail.capsule")
             XCTAssertFalse(glyph.exists)
             reject.tap()
-            XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+            XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
             preview.swipeRight()
             XCTAssertEqual(preview.label, "MMQ02680.ARW, Rejected")
             let rejectedCorner = try rejectGlyphPixels(in: preview)
@@ -838,7 +838,7 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
             capture("detail-rejected-\(theme)-chrome-hidden")
             centre.doubleTap()
-            XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+            XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
             XCTAssertTrue(glyph.exists)
             XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
@@ -852,7 +852,7 @@ final class CloveFlowTests: XCTestCase {
             centre.tap()
             XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
             reject.tap()
-            XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+            XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
             preview.swipeRight()
             XCTAssertEqual(preview.label, "MMQ02680.ARW")
             XCTAssertFalse(glyph.exists)
@@ -897,7 +897,7 @@ final class CloveFlowTests: XCTestCase {
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-        XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
     }
 
     @MainActor
@@ -927,20 +927,25 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.detail.labels.green").tap()
         element(app, "clove.nav.back").tap()
         group.tap()
-        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
+        // Unified Representative Photo selects the green-labelled keeper (MMQ02678) over unmarked.
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
         let pill = element(app, "clove.detail.rejectUnmarked")
         XCTAssertEqual(pill.label, "Reject 2 unmarked")
         pill.tap()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         XCTAssertFalse(pill.exists)
         element(app, "clove.detail.undo").tap()
-        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
         XCTAssertEqual(pill.label, "Reject 2 unmarked")
         element(app, "clove.nav.back").tap()
-        XCTAssertTrue(element(app, "clove.grid.photo.mmq02678").label.contains("Green"))
-        XCTAssertFalse(element(app, "clove.grid.photo.mmq02679").label.contains("Rejected"))
-        XCTAssertFalse(element(app, "clove.grid.photo.mmq02681").label.contains("Rejected"))
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        XCTAssertTrue(group.label.contains("Similar group of 3 photos"))
         XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        // Re-entering confirms the Green keeper and both restored unmarked members.
+        group.tap()
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+        XCTAssertEqual(element(app, "clove.detail.capsule.label").label, "Label, Green")
+        XCTAssertEqual(pill.label, "Reject 2 unmarked")
     }
 
     @MainActor
@@ -985,15 +990,27 @@ final class CloveFlowTests: XCTestCase {
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        // A zoomed one-finger horizontal drag switches to the next group member and keeps the crop.
+        // Zoomed navigation stays strictly within Group Focus and synchronizes the crop.
         preview.swipeLeft()
         XCTAssertTrue(waitForLabel("MMQ02679.ARW", fileName))
         XCTAssertTrue(
             wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
         XCTAssertTrue(strip.exists)
         app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
+        // At the end of Group Focus, right arrow stops instead of leaving the group.
+        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
+        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        // Collapsing snaps to the Representative Photo (MMQ02678) and resets zoom when changed;
+        // Timeline right arrow then skips the collapsed burst in one step to MMQ02680 at fit.
+        element(app, "clove.detail.filmstrip.group.fold").tap()
+        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
-        // MMQ02680 is outside the group, so leaving it returns to fit with all the chrome.
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
         XCTAssertTrue(strip.exists)
@@ -1060,7 +1077,7 @@ final class CloveFlowTests: XCTestCase {
             openLibrary(app)
             applyComparisonTheme(theme, app)
             element(app, "clove.grid.group.burst-2678").tap()
-            XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+            XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
             let pill = element(app, "clove.detail.rejectUnmarked")
             XCTAssertTrue(pill.exists)
             XCTAssertTrue(pill.isHittable)
@@ -1128,11 +1145,6 @@ final class CloveFlowTests: XCTestCase {
             let app = launchSample()
             openLibrary(app)
             applyComparisonTheme(theme, app)
-            capture("stacks-expanded-\(theme)")
-            element(app, "clove.grid.more").tap()
-            app.buttons["Settings"].tap()
-            chooseCollapsedGrid(app)
-            element(app, "clove.nav.back").tap()
             capture("stacks-collapsed-\(theme)")
             element(app, "clove.grid.photo.mmq02682").tap()
             XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
@@ -1176,6 +1188,7 @@ final class CloveFlowTests: XCTestCase {
                 capture("group-badge-\(count)-filmstrip-\(theme)")
                 element(app, "clove.detail.filmstrip.group.burst-2678").tap()
                 XCTAssertTrue(waitForLabel("MMQ02678.ARW", element(app, "clove.detail.fileName")))
+                element(app, "clove.detail.filmstrip.group.burst-2678").tap()
                 XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
                 capture("group-badge-\(count)-filmstrip-expanded-\(theme)")
                 // Leave detail before terminating, so the next launch restores the grid.
@@ -1268,7 +1281,7 @@ final class CloveFlowTests: XCTestCase {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
             // Mixed batch state in select mode.
             element(app, "clove.nav.back").tap()
-            let rated = element(app, "clove.grid.photo.mmq02678")
+            let rated = element(app, "clove.grid.group.burst-2678")
             rated.press(forDuration: 0.6)
             element(app, "clove.grid.photo.mmq02680").tap()
             capture("marking-mixed-batch-\(theme)")
@@ -1313,7 +1326,6 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.grid.more").tap()
             app.buttons["Settings"].tap()
             chooseTheme(theme, app)
-            chooseCollapsedGrid(app)
             element(app, "clove.nav.back").tap()
             capture("grid-\(theme)")
             element(app, "clove.grid.filter").tap()
@@ -1349,7 +1361,7 @@ final class CloveFlowTests: XCTestCase {
             capture("detail-zoom-\(theme)")
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
             element(app, "clove.detail.capsule.reject").tap()
-            XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
+            XCTAssertTrue(waitForLabel("MMQ02682.ARW", element(app, "clove.detail.fileName")))
             preview.swipeRight()
             XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
             capture("detail-rejected-\(theme)")
@@ -1649,16 +1661,19 @@ final class CloveFlowTests: XCTestCase {
             "clove.detail.filmstrip.group.burst-2678", in: app, forward: false)
         stack.tap()
         XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        stack.tap()
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
-        let exit = swipeStripUntilHittable(
-            "clove.detail.filmstrip.mmq02680", in: app, forward: true)
-        exit.tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        element(app, "clove.detail.filmstrip.group.fold").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "exists == false"),
                 element(app, "clove.detail.filmstrip.expandedGroup")))
+        let exit = swipeStripUntilHittable(
+            "clove.detail.filmstrip.mmq02680", in: app, forward: true)
+        exit.tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         let current = element(app, "clove.detail.filmstrip.mmq02680")
         XCTAssertTrue(
             wait(NSPredicate(format: "isHittable == true"), current),
@@ -1753,43 +1768,35 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
         XCTAssertTrue(
-            element(app, "clove.detail.zoom").label.hasPrefix("21 / 36"),
-            "The counter left the folder order: \(element(app, "clove.detail.zoom").label)")
+            element(app, "clove.detail.zoom").label.hasPrefix("Group · 3 / 3"),
+            "The counter did not scope to the group: \(element(app, "clove.detail.zoom").label)")
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").exists,
-            "The Focus View strip did not expand the current group")
-        let stripNeighbor = element(app, "clove.detail.filmstrip.mmq02695")
-        XCTAssertTrue(stripNeighbor.exists)
-        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02699").exists)
+            "The Focus View strip did not keep the expanded group")
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02696").exists)
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02698").exists)
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.mmq02695").exists)
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.mmq02699").exists)
         capture("duo-group-focus")
-        // The strip folds the group to its stack in place without closing the photo or jumping.
-        let stripNeighborBeforeFold = stripNeighbor.isHittable ? stripNeighbor.frame : nil
+        // Folding the strip returns to Timeline on the representative photo; tapping its stack again
+        // re-enters Group Focus.
         element(app, "clove.detail.filmstrip.group.fold").tap()
         XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
         let stripStack = element(app, "clove.detail.filmstrip.group.burst-2696")
         XCTAssertTrue(stripStack.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02695").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
-        if let stripNeighborBeforeFold, stripNeighbor.isHittable {
-            XCTAssertEqual(stripNeighbor.frame.minX, stripNeighborBeforeFold.minX, accuracy: 2)
-        }
         capture("duo-group-focus-folded")
-        let stripStackBeforeUnfold = stripStack.frame
-        let stripNeighborBeforeUnfold = stripNeighbor.isHittable ? stripNeighbor.frame : nil
         stripStack.tap()
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02698.ARW")
-        XCTAssertEqual(
-            element(app, "clove.detail.filmstrip.mmq02696").frame.minX,
-            stripStackBeforeUnfold.minX + 3, accuracy: 4)
-        if let stripNeighborBeforeUnfold, stripNeighbor.isHittable {
-            XCTAssertEqual(stripNeighbor.frame.minX, stripNeighborBeforeUnfold.minX, accuracy: 2)
-        }
-        // Back returns to the full folder grid with its filter and browsing position.
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.mmq02695").exists)
+        // Back returns to the full collapsed folder grid with its filter and browsing position.
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.more").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.grid.title").label, "Coastal light")
-        XCTAssertTrue(element(app, "clove.grid.photo.mmq02698").exists)
+        XCTAssertTrue(element(app, "clove.grid.group.burst-2696").exists)
         XCTAssertGreaterThanOrEqual(grid.frame.width, app.frame.width * 0.95)
         capture("duo-group-back-to-grid")
     }
@@ -1928,18 +1935,19 @@ final class CloveFlowTests: XCTestCase {
         let fileName = element(app, "clove.detail.fileName")
         let strip = element(app, "clove.detail.filmstrip")
 
-        // Leaving a group swaps the strip's expanded member row for the group's stack in the
-        // same change that moves the current photo, so this is the blank-strip transition.
+        // Folding Group Focus swaps the strip's isolated member row back to the Timeline strip, so
+        // this verifies the strip stays populated across both transition directions.
         element(app, "clove.grid.group.burst-2678").tap()
         XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
-        element(app, "clove.detail.filmstrip.mmq02680").tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        element(app, "clove.detail.filmstrip.group.fold").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "exists == false"),
                 element(app, "clove.detail.filmstrip.expandedGroup")))
+        element(app, "clove.detail.filmstrip.mmq02680").tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         XCTAssertTrue(element(app, "clove.detail.filmstrip.group.burst-2678").exists)
         // The strip shows its content around the current photo, not blank.
         let current = element(app, "clove.detail.filmstrip.mmq02680")
@@ -1968,29 +1976,26 @@ final class CloveFlowTests: XCTestCase {
             wait(NSPredicate(format: "isHittable == true"), last),
             "the strip went blank after the far jump")
 
-        // Entering a group from its stack, a within-group move, and leaving it again cover the
-        // other directions of the same identity change; visible items stay anchored in place and
-        // the strip still lands on off-screen destinations (#237, #241).
+        // Entering a group from its stack, a within-group move, and folding back to Timeline cover
+        // the two-level filmstrip transitions and off-screen destinations (#237, #304).
         let stack = swipeStripUntilHittable(
             "clove.detail.filmstrip.group.burst-2696", in: app, forward: false)
-        let neighbor = element(app, "clove.detail.filmstrip.mmq02695")
-        let neighborBeforeExpand = neighbor.isHittable ? neighbor.frame : nil
-        let stackBeforeExpand = stack.frame
         stack.tap()
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        stack.tap()
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
             "the strip stayed blank after entering the group")
-        XCTAssertEqual(
-            element(app, "clove.detail.filmstrip.mmq02696").frame.minX,
-            stackBeforeExpand.minX + 3, accuracy: 4)
-        if let neighborBeforeExpand, neighbor.isHittable {
-            XCTAssertEqual(neighbor.frame.minX, neighborBeforeExpand.minX, accuracy: 2)
-        }
         let member = swipeStripUntilHittable(
             "clove.detail.filmstrip.mmq02698", in: app, forward: true)
         member.tap()
         XCTAssertTrue(waitForLabel("MMQ02698.ARW", fileName))
+        element(app, "clove.detail.filmstrip.group.fold").tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "exists == false"),
+                element(app, "clove.detail.filmstrip.expandedGroup")))
         let preview = element(app, "clove.detail.preview")
         preview.swipeLeft()
         XCTAssertTrue(waitForLabel("MMQ02699.ARW", fileName))
@@ -2022,7 +2027,7 @@ final class CloveFlowTests: XCTestCase {
             "the Duo is not in the Closed pose; select Closed in Device Hub to test the cover")
         prepareDuo(app)
 
-        element(app, "clove.grid.photo.mmq02678").tap()
+        element(app, "clove.grid.group.burst-2678").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         let toggle = element(app, "clove.detail.focusToggle")
@@ -2090,41 +2095,55 @@ final class CloveFlowTests: XCTestCase {
         let currentBefore = neighborCurrent.frame
         let stackBefore = stack.frame
 
-        // Expanding a visible group keeps neighbors put and starts the run at the stack's slot.
+        // First tap on a collapsed stack opens its representative in Timeline without expanding;
+        // neighbors stay anchored in place and the Expand nudge appears.
         stack.tap()
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        XCTAssertTrue(element(app, "clove.detail.expandGroup").waitForExistence(timeout: 5))
+        XCTAssertEqual(neighborLeft.frame.minX, leftBefore.minX, accuracy: 2)
+        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
+
+        // Second tap on the selected group's stack enters isolated Group Focus.
+        stack.tap()
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
         let firstMember = element(app, "clove.detail.filmstrip.mmq02696")
         XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), firstMember))
-        XCTAssertEqual(neighborLeft.frame.minX, leftBefore.minX, accuracy: 2)
-        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
-        XCTAssertEqual(firstMember.frame.minX, stackBefore.minX + 3, accuracy: 4)
+        XCTAssertFalse(neighborCurrent.exists)
 
-        // Tapping another visible member does not jump the strip.
+        // Tapping another visible member keeps firstMember anchored in Group Focus.
         let firstMemberBeforeTap = firstMember.frame
         let secondMember = element(app, "clove.detail.filmstrip.mmq02697")
         XCTAssertTrue(secondMember.isHittable)
         secondMember.tap()
         XCTAssertTrue(waitForLabel("MMQ02697.ARW", fileName))
-        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
         XCTAssertEqual(firstMember.frame.minX, firstMemberBeforeTap.minX, accuracy: 2)
 
-        // Leaving to a visible neighbor folds the group back at the same position with no jump.
-        neighborCurrent.tap()
-        XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
+        // Folding returns to Timeline on the Representative Photo (MMQ02696), centering the stack;
+        // tapping a visible neighbor keeps Timeline items anchored in place without jumping.
+        element(app, "clove.detail.filmstrip.group.fold").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "exists == false"),
                 element(app, "clove.detail.filmstrip.expandedGroup")))
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
         XCTAssertTrue(stack.waitForExistence(timeout: 5))
-        XCTAssertEqual(neighborLeft.frame.minX, leftBefore.minX, accuracy: 2)
-        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
-        XCTAssertEqual(stack.frame.minX, stackBefore.minX, accuracy: 2)
+        XCTAssertTrue(neighborCurrent.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), neighborCurrent))
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), neighborLeft))
+        let leftAfterCollapse = neighborLeft.frame
+        let currentAfterCollapse = neighborCurrent.frame
+        let stackAfterCollapse = stack.frame
+        neighborCurrent.tap()
+        XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
+        XCTAssertEqual(neighborLeft.frame.minX, leftAfterCollapse.minX, accuracy: 2)
+        XCTAssertEqual(neighborCurrent.frame.minX, currentAfterCollapse.minX, accuracy: 2)
+        XCTAssertEqual(stack.frame.minX, stackAfterCollapse.minX, accuracy: 2)
 
-        // Navigating forward to an off-screen photo via swipe brings it into view (#252, #255).
+        // Navigating forward across collapsed burst-2696 to an off-screen photo brings it into view (#252, #255).
         let preview = element(app, "clove.detail.preview")
-        for _ in 0..<8 {
+        for _ in 0..<6 {
             preview.swipeLeft()
         }
         XCTAssertTrue(waitForLabel("MMQ02703.ARW", fileName))
@@ -2144,7 +2163,7 @@ final class CloveFlowTests: XCTestCase {
         app.buttons["Settings"].tap()
         turnOffAutoAdvance(app)
         element(app, "clove.nav.back").tap()
-        element(app, "clove.grid.photo.mmq02678").tap()
+        element(app, "clove.grid.group.burst-2678").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         let toggle = element(app, "clove.detail.focusToggle")
@@ -2371,7 +2390,7 @@ final class CloveFlowTests: XCTestCase {
         }
 
         // 2. Mixed batch selection: mixed labels must NOT highlight None, and outside tap dismisses.
-        let ratedAndRed = element(app, "clove.grid.photo.mmq02678")
+        let ratedAndRed = element(app, "clove.grid.group.burst-2678")
         XCTAssertTrue(ratedAndRed.waitForExistence(timeout: 5))
         ratedAndRed.press(forDuration: 0.6)
         element(app, "clove.grid.photo.mmq02680").tap()
@@ -2389,8 +2408,11 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(batchPicker.waitForExistence(timeout: 5))
         element(app, "clove.grid.batch.labels.none").tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
-        XCTAssertFalse(ratedAndRed.label.contains("Red"))
-        XCTAssertTrue(ratedAndRed.label.contains("5 stars"))
+        element(app, "clove.grid.batch.done").tap()
+        ratedAndRed.tap()
+        let burstCapsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(burstCapsule.waitForExistence(timeout: 5))
+        XCTAssertEqual(burstCapsule.value as? String, "5 stars")
     }
 
     /// #302: the default zoomed mode keeps one-finger rating and photo switching, `Pan` keeps the
@@ -2412,7 +2434,7 @@ final class CloveFlowTests: XCTestCase {
 
         // Fit gestures remain unchanged in the default mode.
         preview.swipeLeft()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
         preview.swipeRight()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
 
@@ -2426,26 +2448,26 @@ final class CloveFlowTests: XCTestCase {
         centre.doubleTap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         centre.doubleTap()
-        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
+        XCTAssertEqual(zoom.label, "2 / 32 · 100%")
         XCTAssertEqual(capsule.value as? String, "Unmarked")
         XCTAssertTrue(strip.exists)
 
         // A one-finger horizontal drag while zoomed switches photo instead of panning the image,
         // and the photo outside the group opens at fit.
         preview.swipeLeft()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.swipeRight()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
 
         // A one-finger vertical drag while zoomed rates, auto-advances, and returns to fit.
         centre.doubleTap()
-        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
+        XCTAssertEqual(zoom.label, "2 / 32 · 100%")
         let verticalStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
         verticalStart.press(
             forDuration: 0.02, thenDragTo: verticalStart.withOffset(CGVector(dx: 0, dy: -180)),
             withVelocity: .slow, thenHoldForDuration: 0)
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName, timeout: 10))
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName, timeout: 10))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
         preview.swipeRight()
@@ -2494,14 +2516,14 @@ final class CloveFlowTests: XCTestCase {
         // Zoom to 100%: one-finger drags pan the image without navigating or rating, and a
         // two-finger vertical swipe rates + auto-advances + returns to fit.
         centre.doubleTap()
-        XCTAssertEqual(zoom.label, "5 / 36 · 100%")
+        XCTAssertEqual(zoom.label, "3 / 32 · 100%")
         let centredBeforePan = preview.value as? String
         let panStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
         panStart.press(
             forDuration: 0.05, thenDragTo: panStart.withOffset(CGVector(dx: 0, dy: -150)),
             withVelocity: .slow, thenHoldForDuration: 0)
         XCTAssertEqual(fileName.label, "MMQ02682.ARW")
-        XCTAssertEqual(zoom.label, "5 / 36 · 100%")
+        XCTAssertEqual(zoom.label, "3 / 32 · 100%")
         XCTAssertEqual(capsule.value as? String, panModeMarks)
         XCTAssertNotEqual(preview.value as? String, centredBeforePan)
 
@@ -2844,7 +2866,7 @@ final class CloveFlowTests: XCTestCase {
             UIDevice.current.userInterfaceIdiom == .pad
                 ? "clove.detail.rail.reject" : "clove.detail.capsule.reject")
         rejectButton.tap()
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
     }
 
     @MainActor
@@ -2962,7 +2984,7 @@ final class CloveFlowTests: XCTestCase {
             openLibrary(app)
             applyComparisonTheme(theme, app)
             if theme == "light" {
-                let rated = element(app, "clove.grid.photo.mmq02678")
+                let rated = element(app, "clove.grid.group.burst-2678")
                 rated.press(forDuration: 0.6)
                 element(app, "clove.grid.photo.mmq02680").tap()
                 element(app, "clove.grid.batch.label").tap()
@@ -3020,18 +3042,6 @@ final class CloveFlowTests: XCTestCase {
             if back.waitForExistence(timeout: 5) { back.tap() }
         }
         XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 10))
-    }
-
-    @MainActor
-    private func chooseCollapsedGrid(_ app: XCUIApplication) {
-        openSettingsCategory("clove.settings.category.browsing", in: app)
-        let control = element(app, "clove.settings.gridGroupDisplay")
-        for _ in 0..<8 {
-            if control.exists && control.isHittable { break }
-            app.swipeUp()
-        }
-        XCTAssertTrue(control.exists)
-        control.buttons["Collapsed"].tap()
     }
 
     @MainActor

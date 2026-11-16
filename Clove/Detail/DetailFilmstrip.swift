@@ -1,118 +1,35 @@
 import CloveCore
 import SwiftUI
 
-/// How the Duo's photo-only strip folds the current group back into its stack (owner decision,
-/// 2026-11-13, #225). Folding changes the thumbnails alone: the photo on screen, its marks and
-/// the route stay as they are, and the stack's count badge reopens the group in place.
-struct FilmstripGroupFold {
-    /// Whether the current group draws as its stack instead of its members.
-    let isFolded: Bool
-
-    /// Folds the current group into its stack.
-    let fold: () -> Void
-
-    /// Reopens the current group's members.
-    let unfold: () -> Void
-}
-
-/// Grid-order filmstrip. The current group expands on a quiet neutral surface; other groups stay
-/// stacked. Tapping a stack jumps to the group's first photo; the group expands in place.
+/// Two-level Detail filmstrip built directly from `DetailTimeline` (issue #304).
 ///
-/// The scroll that follows the current photo runs after the change's layout settles, never
-/// inside its transaction: entering or leaving a group swaps the lazy entries' identity in the
-/// same change, and a scroll resolved against that transaction lands past the new content's end,
-/// leaving the strip blank until the next drag (#237). In expanded Duo photo-only the marking
-/// toolbar beside the strip is the one reservation of that area (#227): its sibling narrows the
-/// strip's viewport, and the strip's content fills it up to the toolbar.
+/// - Timeline (`expandedGroup == nil`): renders `timeline.slots` only — standalone photos and
+///   collapsed group stacks (at `visibleMembers.count >= 2`). Never expands inline. Tapping the
+///   already-selected collapsed stack, or dragging upward on any collapsed stack, enters Group Focus.
+///   Tapping an unselected stack opens its Representative Photo in Timeline.
+/// - Group Focus (`expandedGroup != nil`): renders ONLY the expanded group's `visibleMembers` inside
+///   `ExpandedGroupSurface`, with a leading `chevron.down` collapse button. Dragging downward
+///   anywhere on the strip collapses back to Timeline.
 struct DetailFilmstrip: View {
-    let photos: [GridPhoto]
+    let timeline: DetailTimeline
+    let expandedGroup: ActiveBrowsingGroup?
     let current: PhotoIdentity?
     let thumbnails: any GridThumbnailSource
-    let open: (PhotoIdentity) -> Void
-    var groups: [BrowsingGroup] = []
-    var finishingAction: PillAction?
-    /// The Duo's photo-only detail only: folding leaves the photo open and the strip shows the
-    /// group's stack instead of its members (owner decision, #225).
-    var groupFold: FilmstripGroupFold?
+    let openPhoto: (PhotoIdentity) -> Void
+    let selectGroupPhoto: (PhotoIdentity) -> Void
+    let expandGroup: (GroupID) -> Void
+    let collapseGroup: () -> Void
+    var pillAction: PillAction?
 
     private static let viewportSpace = "clove.detail.filmstrip.viewport"
     @State private var layoutState = FilmstripLayoutState()
-
-    struct Entry: Identifiable {
-        let id: PhotoIdentity
-        let photos: [GridPhoto]
-        let group: BrowsingGroup?
-        let expands: Bool
-        let holdsCurrent: Bool
-    }
-
-    struct Plan {
-        let entries: [Entry]
-        let scrollTargets: [PhotoIdentity: PhotoIdentity]
-
-        func scrollTarget(for photo: PhotoIdentity) -> PhotoIdentity {
-            scrollTargets[photo] ?? photo
-        }
-    }
-
-    private var isCurrentGroupFolded: Bool { groupFold?.isFolded ?? false }
-
-    static func makePlan(
-        photos: [GridPhoto],
-        groups: [BrowsingGroup],
-        current: PhotoIdentity?,
-        isFolded: Bool
-    ) -> Plan {
-        var groupByID: [GroupID: BrowsingGroup] = [:]
-        groupByID.reserveCapacity(groups.count)
-        var groupIDByPhoto: [PhotoIdentity: GroupID] = [:]
-        for group in groups {
-            groupByID[group.id] = group
-            for member in group.members where groupIDByPhoto[member] == nil {
-                groupIDByPhoto[member] = group.id
-            }
-        }
-        var groupedPhotos: [GroupID: [GridPhoto]] = [:]
-        groupedPhotos.reserveCapacity(groups.count)
-        for photo in photos {
-            if let groupID = groupIDByPhoto[photo.id] {
-                groupedPhotos[groupID, default: []].append(photo)
-            }
-        }
-        let currentGroupID = current.flatMap { groupIDByPhoto[$0] }
-        var seen: Set<GroupID> = []
-        seen.reserveCapacity(groups.count)
-        var entries: [Entry] = []
-        entries.reserveCapacity(photos.count)
-        var scrollTargets: [PhotoIdentity: PhotoIdentity] = [:]
-        for photo in photos {
-            guard let groupID = groupIDByPhoto[photo.id], let group = groupByID[groupID] else {
-                entries.append(
-                    Entry(
-                        id: photo.id, photos: [photo], group: nil, expands: false,
-                        holdsCurrent: photo.id == current))
-                continue
-            }
-            guard seen.insert(groupID).inserted else { continue }
-            let shown = groupedPhotos[groupID] ?? []
-            let holdsCurrent = currentGroupID == groupID
-            let expands = holdsCurrent && !isFolded
-            let entry = Entry(
-                id: photo.id, photos: shown, group: group, expands: expands,
-                holdsCurrent: holdsCurrent)
-            entries.append(entry)
-            if !expands {
-                for member in shown {
-                    scrollTargets[member.id] = entry.id
-                }
-            }
-        }
-        return Plan(entries: entries, scrollTargets: scrollTargets)
-    }
+    @State private var isTrackingVerticalStackDrag = false
+    @State private var lastVerticalStackDragDate = Date.distantPast
+    @Environment(\.cloveTheme) private var theme
 
     var body: some View {
         VStack(spacing: 6) {
-            if let finishingAction { finishingAction }
+            if let pillAction { pillAction }
             strip
         }
         .accessibilityElement(children: .contain)
@@ -120,80 +37,43 @@ struct DetailFilmstrip: View {
     }
 
     private var strip: some View {
-        let plan = Self.makePlan(
-            photos: photos, groups: groups, current: current, isFolded: isCurrentGroupFolded)
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .bottom, spacing: 8) {
-                    ForEach(plan.entries) { entry in
-                        if entry.expands {
-                            HStack(spacing: 3) {
-                                ForEach(entry.photos) { photo in frame(photo) }
-                                if let groupFold {
-                                    Button(action: groupFold.fold) {
-                                        Image(systemName: "chevron.up")
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .foregroundStyle(Color.clove.text.primary)
-                                            .frame(width: 20, height: 60)
-                                            .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Collapse group")
-                                    .accessibilityIdentifier(
-                                        "clove.detail.filmstrip.group.fold")
-                                }
-                            }
-                            .padding(3)
-                            .background {
-                                // The group's extent, not its selection: the neutral token at
-                                // 12%, on the background shape alone (owner decision,
-                                // 2026-11-13, #226).
-                                ExpandedGroupSurface(cornerRadius: 9)
-                            }
-                            .accessibilityElement(children: .contain)
-                            .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
-                        } else if let group = entry.group, let photo = entry.photos.first {
-                            let peekingIDs = GridDisplay.peekingPhotos(
-                                cover: photo.id, shown: entry.photos, group: group)
-                            Button {
-                                // The folded group on screen reopens in place; any other stack
-                                // opens the group at its first photo (handoff interactions.md).
-                                if entry.holdsCurrent, let groupFold {
-                                    groupFold.unfold()
-                                } else {
-                                    open(photo.id)
-                                }
-                            } label: {
-                                FilmstripGroupStack(
-                                    cover: photo,
-                                    peekingIDs: peekingIDs,
-                                    thumbnails: thumbnails
-                                )
-                                .frame(width: 54, height: 64)
-                                .overlay(alignment: .topTrailing) {
-                                    GroupCountBadge(
-                                        count: group.members.count, presentation: .filmstrip
-                                    ).padding(2)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .id(photo.id)
-                            .modifier(
-                                FilmstripItemFrameTracker(
-                                    id: photo.id, coordinateSpace: Self.viewportSpace,
-                                    layoutState: layoutState)
-                            )
-                            .accessibilityLabel("Similar group of \(group.members.count) photos")
-                            .accessibilityIdentifier(
-                                "clove.detail.filmstrip.group.\(group.id.rawValue)")
-                        } else if let photo = entry.photos.first {
-                            frame(photo)
+                LazyHStack(alignment: .bottom, spacing: expandedGroup != nil ? 3 : 8) {
+                    if let expandedGroup {
+                        expandedGroupItems(expandedGroup)
+                    } else {
+                        ForEach(timeline.slots) { slot in
+                            timelineSlotView(slot)
                         }
                     }
                 }
+                .padding(expandedGroup != nil ? 3 : 0)
+                .background {
+                    if expandedGroup != nil {
+                        ExpandedGroupSurface(cornerRadius: 9)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(
+                    expandedGroup != nil
+                        ? "clove.detail.filmstrip.expandedGroup"
+                        : "clove.detail.filmstrip.timeline"
+                )
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .onEnded { value in
+                        guard expandedGroup != nil,
+                            FilmstripVerticalGesture.shouldCollapse(
+                                horizontal: Double(value.translation.width),
+                                vertical: Double(value.translation.height))
+                        else { return }
+                        collapseGroup()
+                    }
+            )
             .coordinateSpace(name: Self.viewportSpace)
             .onGeometryChange(for: CGFloat.self) {
                 $0.size.width
@@ -201,47 +81,162 @@ struct DetailFilmstrip: View {
                 layoutState.viewportWidth = $0
             }
             .onChange(of: current, initial: true) { _, photo in
-                scheduleScroll(for: photo, plan: plan, using: proxy)
+                scheduleScroll(for: photo, using: proxy, forceScroll: false)
             }
-            .onChange(of: isCurrentGroupFolded) { _, _ in
-                scheduleScroll(for: current, plan: plan, using: proxy)
+            .onChange(of: expandedGroup?.id) { _, _ in
+                layoutState.frames.removeAll()
+                scheduleScroll(for: current, using: proxy, forceScroll: true)
             }
         }
         .frame(height: 70)
     }
 
-    private func frame(_ photo: GridPhoto) -> some View {
-        Button {
-            open(photo.id)
+    @ViewBuilder
+    private func expandedGroupItems(_ group: ActiveBrowsingGroup) -> some View {
+        Button(action: collapseGroup) {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.clove.text.primary)
+                .frame(width: 20, height: 60)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .id(GridCellItem.ID.group(group.id))
+        .accessibilityLabel("Collapse group")
+        .accessibilityIdentifier("clove.detail.filmstrip.group.fold")
+
+        ForEach(group.visibleMembers) { photo in
+            frame(photo) {
+                selectGroupPhoto(photo.id)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func timelineSlotView(_ slot: TimelineSlot) -> some View {
+        switch slot {
+        case .photo(let photo):
+            frame(photo) {
+                openPhoto(photo.id)
+            }
+        case .group(let active):
+            collapsedGroupStack(active)
+        }
+    }
+
+    private func collapsedGroupStack(_ active: ActiveBrowsingGroup) -> some View {
+        let holdsCurrent =
+            current.map { id in
+                active.visibleMembers.contains { $0.id == id }
+            } ?? false
+        let isDimmed = active.visibleMembers.allSatisfy(\.marks.isRejected)
+        let peekingIDs = GridDisplay.peekingPhotos(
+            cover: active.representative.id, visibleMembers: active.visibleMembers)
+
+        return Button {
+            if isTrackingVerticalStackDrag
+                || Date().timeIntervalSince(lastVerticalStackDragDate) < 0.25
+            {
+                return
+            }
+            if holdsCurrent {
+                expandGroup(active.id)
+            } else {
+                openPhoto(active.representative.id)
+            }
         } label: {
+            FilmstripGroupStack(
+                cover: active.representative,
+                peekingIDs: peekingIDs,
+                isCurrent: holdsCurrent,
+                isDimmed: isDimmed,
+                visibleCount: active.visibleMembers.count,
+                thumbnails: thumbnails
+            )
+            .frame(width: 54, height: 64)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    if abs(value.translation.height) > 12,
+                        abs(value.translation.height)
+                            > FilmstripVerticalGesture.dominanceRatio * abs(value.translation.width)
+                    {
+                        isTrackingVerticalStackDrag = true
+                    }
+                }
+                .onEnded { value in
+                    let shouldExpand = FilmstripVerticalGesture.shouldExpand(
+                        horizontal: Double(value.translation.width),
+                        vertical: Double(value.translation.height))
+                    isTrackingVerticalStackDrag = false
+                    if shouldExpand {
+                        lastVerticalStackDragDate = Date()
+                        expandGroup(active.id)
+                    }
+                }
+        )
+        .id(GridCellItem.ID.group(active.id))
+        .modifier(
+            FilmstripItemFrameTracker(
+                id: .group(active.id), coordinateSpace: Self.viewportSpace,
+                layoutState: layoutState)
+        )
+        .accessibilityLabel("Similar group of \(active.visibleMembers.count) photos")
+        .accessibilityValue(MarkSummary.text(for: active.representative.marks))
+        .accessibilityAddTraits(holdsCurrent ? [.isSelected] : [])
+        .accessibilityIdentifier("clove.detail.filmstrip.group.\(active.id.rawValue)")
+    }
+
+    private func frame(_ photo: GridPhoto, tap: @escaping () -> Void) -> some View {
+        let cellID = GridCellItem.ID.photo(photo.id)
+        return Button(action: tap) {
             DetailPhotoFrame(
                 photo: photo, isCurrent: photo.id == current, thumbnails: thumbnails,
                 side: 54, height: 60
             )
         }
         .buttonStyle(.plain)
-        .id(photo.id)
+        .id(cellID)
         .modifier(
             FilmstripItemFrameTracker(
-                id: photo.id, coordinateSpace: Self.viewportSpace, layoutState: layoutState)
+                id: cellID, coordinateSpace: Self.viewportSpace, layoutState: layoutState)
         )
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
     }
 
-    private func scheduleScroll(for photo: PhotoIdentity?, plan: Plan, using proxy: ScrollViewProxy)
-    {
+    private func scrollTarget(for photo: PhotoIdentity) -> GridCellItem.ID {
+        if expandedGroup != nil {
+            return .photo(photo)
+        }
+        if let active = timeline.activeGroup(containing: photo) {
+            return .group(active.id)
+        }
+        return .photo(photo)
+    }
+
+    private func scheduleScroll(
+        for photo: PhotoIdentity?, using proxy: ScrollViewProxy, forceScroll: Bool
+    ) {
         layoutState.pendingScroll?.cancel()
         guard let photo else { return }
-        let target = plan.scrollTarget(for: photo)
+        let target = scrollTarget(for: photo)
         layoutState.pendingScroll = Task { @MainActor in
             // The scroll runs after the change's layout settles, not inside its transaction:
             // entering or leaving a group swaps the lazy entries' identity in the same change,
             // and a scroll resolved against that transaction lands past the new content's end,
             // leaving the strip blank until the next drag (#237). Only scroll when the target
-            // is off-screen so in-place taps and group expand/fold do not jump (#241).
+            // is off-screen so in-place taps do not jump (#241); level transitions always scroll
+            // cleanly onto the target item or stack (#304).
             await Task.yield()
-            guard !Task.isCancelled, !layoutState.isVisible(target) else { return }
-            withAnimation { proxy.scrollTo(target, anchor: .center) }
+            guard !Task.isCancelled else { return }
+            if forceScroll {
+                proxy.scrollTo(target, anchor: .center)
+            } else {
+                guard !layoutState.isVisible(target) else { return }
+                withAnimation { proxy.scrollTo(target, anchor: .center) }
+            }
         }
     }
 }
@@ -254,10 +249,10 @@ private final class FilmstripLayoutState {
     }
 
     var viewportWidth: CGFloat = 0
-    var frames: [PhotoIdentity: TrackedFrame] = [:]
+    var frames: [GridCellItem.ID: TrackedFrame] = [:]
     var pendingScroll: Task<Void, Never>?
 
-    func isVisible(_ target: PhotoIdentity) -> Bool {
+    func isVisible(_ target: GridCellItem.ID) -> Bool {
         guard viewportWidth > 0, let frame = frames[target]?.frame else { return false }
         let tolerance: CGFloat = 4
         return frame.minX >= -tolerance && frame.maxX <= viewportWidth + tolerance
@@ -265,7 +260,7 @@ private final class FilmstripLayoutState {
 }
 
 private struct FilmstripItemFrameTracker: ViewModifier {
-    let id: PhotoIdentity
+    let id: GridCellItem.ID
     let coordinateSpace: String
     let layoutState: FilmstripLayoutState
     @State private var token = UUID()
@@ -288,8 +283,12 @@ private struct FilmstripItemFrameTracker: ViewModifier {
 private struct FilmstripGroupStack: View {
     let cover: GridPhoto
     let peekingIDs: [PhotoIdentity]
+    let isCurrent: Bool
+    let isDimmed: Bool
+    let visibleCount: Int
     let thumbnails: any GridThumbnailSource
     @State private var peekingThumbnails: [PhotoIdentity: CGImage] = [:]
+    @Environment(\.cloveTheme) private var theme
 
     var body: some View {
         GroupStack(
@@ -299,7 +298,16 @@ private struct FilmstripGroupStack: View {
         ) {
             DetailPhotoFrame(
                 photo: cover, isCurrent: false, thumbnails: thumbnails,
-                side: 54, height: 60, showsMarks: false)
+                side: 54, height: 60, showsMarks: true, appliesRejectedOpacity: false)
+        }
+        .opacity(isDimmed ? theme.tokens.rejectedOpacity : 1)
+        .overlay(alignment: .topTrailing) {
+            GroupCountBadge(count: visibleCount, presentation: .filmstrip)
+                .padding(2)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.clove.text.primary, lineWidth: isCurrent ? 2 : 0)
         }
         .onChange(of: peekingIDs, initial: true) { _, needed in
             let keep = Set(needed)

@@ -104,6 +104,13 @@ final class BrowsingModel {
     /// Session-scoped visibility for detail focus region overlays; intentionally unpersisted.
     var showsFocusRegions = true
 
+    /// Transient Detail level: `nil` is Timeline (collapsed group stacks), non-nil is Group Focus
+    /// scoped to that active group's visible members (issue #304, decision 3). Intentionally not
+    /// persisted in `BrowsingState`.
+    private(set) var expandedGroup: GroupID?
+
+    private var similarGroupsEnabled = true
+
     /// Sidebar and regular-width navigation use the same name for the active filter.
     var filterTitle: String {
         if let labelFilter { return labelFilter.rawValue }
@@ -217,10 +224,14 @@ final class BrowsingModel {
     private var updateTask: Task<Void, Never>?
 
     /// Creates the model over one library, starting at entry unless a state is passed in.
-    init(library: any FolderLibrary, state: BrowsingState = .entry) {
+    init(
+        library: any FolderLibrary, state: BrowsingState = .entry,
+        similarGroupsEnabled: Bool = true
+    ) {
         self.library = library
         self.shownGeneration = library.openGeneration
         self.state = state
+        self.similarGroupsEnabled = similarGroupsEnabled
         self.groups = library.groups
         self.preparationStatus = library.preparationStatus
         self.recents = library.recents
@@ -369,6 +380,7 @@ final class BrowsingModel {
             openRequests += 1
             recentFailures[recent.id] = nil
             folderFailure = nil
+            expandedGroup = nil
             state.route = .grid
             return
         }
@@ -431,11 +443,69 @@ final class BrowsingModel {
         hasLoadedRecents = true
     }
 
-    /// Shows one photo's detail (PRD Detail and marking).
+    /// Shows one photo's detail in Timeline mode (`expandedGroup = nil`).
     func openPhoto(_ photo: PhotoIdentity) {
+        expandedGroup = nil
         state.currentPhoto = photo
         library.setEntryResumePhoto(photo)
         state.route = .detail
+    }
+
+    /// Opens an active visible group directly in Group Focus on its Representative Photo (or on
+    /// `photo` when provided and visible inside that group).
+    func openGroup(_ groupID: GroupID, on photo: PhotoIdentity? = nil) {
+        let timeline = DetailTimeline(
+            photos: photos, groups: groups,
+            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+        guard let active = timeline.activeGroup(with: groupID) else {
+            if let photo { openPhoto(photo) }
+            return
+        }
+        let target =
+            photo.flatMap { candidate in
+                active.visibleMembers.contains(where: { $0.id == candidate }) ? candidate : nil
+            } ?? active.representative.id
+        expandedGroup = active.id
+        state.currentPhoto = target
+        library.setEntryResumePhoto(target)
+        state.route = .detail
+    }
+
+    /// Switches to another visible member of the expanded group while remaining in Group Focus.
+    func selectGroupPhoto(_ photo: PhotoIdentity) {
+        guard let expanded = expandedGroup else {
+            openPhoto(photo)
+            return
+        }
+        let timeline = DetailTimeline(
+            photos: photos, groups: groups,
+            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+        guard let active = timeline.activeGroup(with: expanded),
+            active.visibleMembers.contains(where: { $0.id == photo })
+        else {
+            openPhoto(photo)
+            return
+        }
+        state.currentPhoto = photo
+        library.setEntryResumePhoto(photo)
+        state.route = .detail
+    }
+
+    /// Collapses Group Focus back to Timeline and snaps `currentPhoto` to the group's
+    /// Representative Photo.
+    func collapseGroup() {
+        guard let expanded = expandedGroup else { return }
+        expandedGroup = nil
+        let timeline = DetailTimeline(
+            photos: photos, groups: groups,
+            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+        if let active = timeline.activeGroup(with: expanded) {
+            let representative = active.representative.id
+            if state.currentPhoto != representative {
+                state.currentPhoto = representative
+                library.setEntryResumePhoto(representative)
+            }
+        }
     }
 
     /// Runs similar groups again for the open folder, without the group cache (PRD P0-11).
@@ -452,6 +522,10 @@ final class BrowsingModel {
     /// restores its groups at once, and every later open in this launch reads the same value.
     /// Saving the choice stays with the settings store.
     func setSimilarGroupsEnabled(_ enabled: Bool) async {
+        similarGroupsEnabled = enabled
+        if !enabled {
+            expandedGroup = nil
+        }
         await library.setSimilarGroupsEnabled(enabled)
     }
 
@@ -470,6 +544,7 @@ final class BrowsingModel {
 
     /// Shows Clove's settings (PRD Gesture-related settings).
     func showSettings() {
+        expandedGroup = nil
         settingsReturnRoute = state.route == .entry ? .entry : .grid
         state.route = .settings
     }
@@ -488,6 +563,7 @@ final class BrowsingModel {
         case .settings:
             state.route = settingsReturnRoute
         case .detail:
+            expandedGroup = nil
             state.route = state.folder == nil ? .entry : .grid
         }
     }
@@ -638,6 +714,7 @@ final class BrowsingModel {
             state.filter = .all
             refilterPhotos()
         }
+        expandedGroup = nil
         state.route = .grid
         completedRename = completed
         dismissFailureToast()
@@ -789,7 +866,14 @@ final class BrowsingModel {
             return request(change, for: edit.photo)
         }
         submit(.batch(edits))
-        openPhoto(undo.photo)
+        let timeline = DetailTimeline(
+            photos: photos, groups: groups,
+            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+        if let active = timeline.activeGroup(containing: undo.photo) {
+            openGroup(active.id, on: undo.photo)
+        } else {
+            openPhoto(undo.photo)
+        }
     }
 
     // MARK: - Ordered actions
@@ -1058,6 +1142,7 @@ final class BrowsingModel {
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
         if let lastViewed = state.currentPhoto { library.setEntryResumePhoto(lastViewed) }
+        expandedGroup = nil
         state.route = .entry
         hasLeftFolder = true
         state.folder = nil
@@ -1091,6 +1176,7 @@ final class BrowsingModel {
         state.folder = nil
         state.currentPhoto = nil
         state.selection = []
+        expandedGroup = nil
         state.route = .entry
         folderLocationLoss = nil
         folderLocationLossGeneration = nil
@@ -1279,6 +1365,7 @@ final class BrowsingModel {
             }
         case .groups(let groups):
             self.groups = groups
+            reconcileExpandedGroup()
         }
     }
 
@@ -1295,6 +1382,7 @@ final class BrowsingModel {
         clearRecentFailureForOpenFolder()
         state.currentPhoto = nil
         state.selection = []
+        expandedGroup = nil
         state.route = .grid
         // The previous folder's completed move cannot be undone through this folder's session.
         lastRejectMove = nil
@@ -1343,6 +1431,7 @@ final class BrowsingModel {
             }
             refilterPhotos()
             groups = library.groups
+            reconcileExpandedGroup()
             return
         }
         refresh()
@@ -1382,6 +1471,7 @@ final class BrowsingModel {
             }
             refilterPhotos()
             groups = library.groups
+            reconcileExpandedGroup()
             return
         }
         if !generationChanged && !confirmedPhotos.isEmpty && latest.count > confirmedPhotos.count
@@ -1411,6 +1501,7 @@ final class BrowsingModel {
             ordering.insert(inserted)
             rebuildOrderedPhotos()
             groups = library.groups
+            reconcileExpandedGroup()
             return
         }
         confirmedPhotos = latest
@@ -1424,6 +1515,7 @@ final class BrowsingModel {
         rebuildOrderingAndPhotos()
         groups = library.groups
         reconcileRemovedPhotos()
+        reconcileExpandedGroup()
     }
 
     private func rebuildOrderingAndPhotos() {
@@ -1441,12 +1533,13 @@ final class BrowsingModel {
     private func refilterPhotos() {
         if case .all = state.filter, labelFilter == nil {
             photos = allPlacedPhotos
-            return
+        } else {
+            photos = allPlacedPhotos.filter { photo in
+                state.filter.matches(photo.marks, relativeFolderPath: photo.id.relativeFolderPath)
+                    && (labelFilter == nil || photo.marks.label.colour == labelFilter)
+            }
         }
-        photos = allPlacedPhotos.filter { photo in
-            state.filter.matches(photo.marks, relativeFolderPath: photo.id.relativeFolderPath)
-                && (labelFilter == nil || photo.marks.label.colour == labelFilter)
-        }
+        reconcileExpandedGroup()
     }
 
     private static func haveMatchingOrderKeys<C: Collection<GridPhoto>>(
@@ -1469,7 +1562,23 @@ final class BrowsingModel {
         }
         if let current = state.currentPhoto, !present.contains(current) {
             state.currentPhoto = nil
-            if state.route == .detail { state.route = .grid }
+            if state.route == .detail {
+                expandedGroup = nil
+                state.route = .grid
+            }
+        }
+    }
+
+    /// Clears `expandedGroup` whenever leaving Detail, turning grouping off, scanning, or when the
+    /// expanded group drops below two visible members (issue #304, decisions 2 & 3).
+    private func reconcileExpandedGroup() {
+        guard let expanded = expandedGroup else { return }
+        guard state.route == .detail, similarGroupsEnabled, readingProgress == nil,
+            DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
+                .activeGroup(with: expanded) != nil
+        else {
+            expandedGroup = nil
+            return
         }
     }
 }

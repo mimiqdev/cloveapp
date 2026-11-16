@@ -17,7 +17,6 @@ enum SettingsKey: String, CaseIterable {
     case rejectsFolderName = "rejects.folderName"
     case moveRejects = "rejects.moveEnabled"
     case similarGroups = "groups.similarEnabled"
-    case gridGroupDisplay = "grid.groupDisplay"
     case appearanceMode = "appearance.mode"
     case appearanceFamily = "appearance.family"
 }
@@ -66,7 +65,6 @@ public struct SettingsPersistence: Sendable {
             rejectsFolderName: rejectsFolderName() ?? defaults.rejectsFolderName,
             moveRejectsEnabled: boolean(.moveRejects) ?? defaults.moveRejectsEnabled,
             similarGroupsEnabled: boolean(.similarGroups) ?? defaults.similarGroupsEnabled,
-            gridGroupDisplay: rawValue(.gridGroupDisplay) ?? defaults.gridGroupDisplay,
             appearance: loadAppearance(defaults: defaults.appearance),
             photoDisplayMode: rawValue(.photoDisplayMode)
         )
@@ -86,7 +84,6 @@ public struct SettingsPersistence: Sendable {
         setText(settings.rejectsFolderName.rawValue, .rejectsFolderName)
         setBoolean(settings.moveRejectsEnabled, .moveRejects)
         setBoolean(settings.similarGroupsEnabled, .similarGroups)
-        setText(settings.gridGroupDisplay.rawValue, .gridGroupDisplay)
         setText(settings.appearance.mode.rawValue, .appearanceMode)
         setText(settings.appearance.family.rawValue, .appearanceFamily)
         storage.setString(

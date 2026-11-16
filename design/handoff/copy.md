@@ -40,7 +40,7 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 ## Detail
 | Key | String |
 |---|---|
-| detail.subtitle | {i} / {n} · + JPG |
+| detail.subtitle | {i} / {n} · + JPG (Timeline) / Group · {i} / {n} · + JPG (Group Focus) |
 | detail.subtitle.rejected | Rejected (accessibility label only) |
 | detail.zoom | 100% |
 | info.section.capture | Capture |
@@ -53,6 +53,7 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | a11y.gridToggle | Hide photo grid / Show photo grid (value: Photo Preview / Focus View) |
 | a11y.focusToggle | Focus regions (value: On / Off) |
 | a11y.focusRegion.* | Autofocus region / Face region / Eye region |
+| a11y.collapseGroup | Collapse group (`chevron.down` in filmstrip, `chevron.up` in Photo Preview split grid) |
 | detail.focus.status | Analyzing focus regions… / Analyzing faces… / No AF metadata / No faces / Tiny focus region unavailable / Focus region unavailable / Analysis unavailable |
 
 ## Folder access accessibility
@@ -76,9 +77,10 @@ Show one toast per failure burst, above the bottom edge in the Move rejects toas
 ## Groups in detail
 | Key | String |
 |---|---|
+| group.expand | Expand {n} photos |
 | group.rejectRest | Reject {n} unmarked |
 
-The pill sits centred in its own row above the filmstrip. Hide it with chrome, while marking is off, or when nothing remains to reject. Nothing replaces it.
+The active pill sits centred in its own row above the filmstrip (or at the bottom of the stage in Photo Preview when chrome is visible): `"Expand {n} photos"` when browsing an unexpanded multi-photo group stack in Timeline (marking disabled; vertical stage drags gently pulse the pill), and `"Reject {n} unmarked"` in Group Focus once the visible group has both a rated or labeled member and an unmarked member. Both hide with chrome; nothing replaces them.
 
 ## Move Rejects
 | Key | String |
@@ -114,7 +116,6 @@ The pill sits centred in its own row above the filmstrip. Hide it with chrome, w
 | settings.autoAdvance.triggers | Ratings advance / Reject advances / Color labels advance |
 | settings.browsing | Browsing & groups |
 | settings.groups | Similar groups |
-| settings.gridDisplay | Grid display (Expanded / Collapsed) |
 | settings.doubleTap | Double-tap (Zoom to focus / Zoom to tap point / Off) |
 | settings.detailZoom.footer | Similar groups keep zoom and position between members. Leaving a group or switching standalone photos returns to fit. |
 | settings.photoDisplay | Photo display |

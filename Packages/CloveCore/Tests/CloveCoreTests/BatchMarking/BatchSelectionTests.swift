@@ -29,7 +29,7 @@ struct BatchSelectionTests {
     @Test func aCollapsedCoverSelectsItsWholeGroup() throws {
         let photos = ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) }
         let cells = GridDisplay(
-            photos: photos, groups: BatchMarkFixtures.groups, display: .collapsed
+            photos: photos, groups: BatchMarkFixtures.groups
         ).cells
         let cover = try #require(cells.first)
         #expect(cover.id == .group(BatchMarkFixtures.burst))
@@ -50,7 +50,7 @@ struct BatchSelectionTests {
     @Test func aPartlySelectedCoverCompletesItsGroup() throws {
         let photos = ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) }
         let cells = GridDisplay(
-            photos: photos, groups: BatchMarkFixtures.groups, display: .collapsed
+            photos: photos, groups: BatchMarkFixtures.groups
         ).cells
         let cover = try #require(cells.first)
         let group: Set<PhotoIdentity> = ["a", "b", "c"].reduce(into: Set()) {
@@ -70,7 +70,7 @@ struct BatchSelectionTests {
     @Test func aCoverWithoutItsGroupSelectsItsOwnPhoto() throws {
         let display = GridDisplay(
             photos: ["a", "b"].map { BatchMarkFixtures.gridPhoto($0) },
-            groups: BatchMarkFixtures.groups, display: .collapsed)
+            groups: BatchMarkFixtures.groups)
         let cover = try #require(display.cells.first)
         let stale = BatchSelection()
         #expect(stale.identities(for: cover) == [BatchMarkFixtures.photo("a")])

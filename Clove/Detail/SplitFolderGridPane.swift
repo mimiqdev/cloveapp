@@ -2,25 +2,39 @@ import CloveCore
 import SwiftUI
 
 /// The 30% filtered folder grid shown beside the photo in Photo Preview on both iPad and expanded
-/// Duo. Groups stay collapsed except the current photo's group, which expands inline without a
-/// redundant folder header (#225, #256).
+/// Duo. Groups follow `browsing.expandedGroup`: collapsed stacks when nil (highlighting the stack
+/// containing `currentPhoto`), or the expanded group inline when active (issue #304, decision 6).
 struct SplitFolderGridPane: View {
     let browsing: BrowsingModel
     let thumbnails: any GridThumbnailSource
     let similarGroupsEnabled: Bool
-    @Binding var foldedGroup: GroupID?
     let openPhoto: (PhotoIdentity) -> Void
+    let selectGroupPhoto: (PhotoIdentity) -> Void
+    let openGroup: (GroupID) -> Void
+    let collapseGroup: () -> Void
 
     @Environment(\.isDuoExpanded) private var isDuoExpanded
 
+    private var groupsEnabled: Bool {
+        similarGroupsEnabled && browsing.readingProgress == nil
+    }
+
+    private var timeline: DetailTimeline {
+        DetailTimeline(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: groupsEnabled)
+    }
+
+    private var activeExpandedGroup: ActiveBrowsingGroup? {
+        guard let expanded = browsing.expandedGroup else { return nil }
+        return timeline.activeGroup(with: expanded)
+    }
+
     private var gridDisplay: GridDisplay {
-        let currentGroup = browsing.currentGroup
-        return GridDisplay(
+        GridDisplay(
             photos: browsing.photos,
             groups: browsing.groups,
-            groupsEnabled: similarGroupsEnabled && browsing.readingProgress == nil,
-            display: .collapsed,
-            expandedGroup: foldedGroup != currentGroup?.id ? currentGroup?.id : nil)
+            groupsEnabled: groupsEnabled,
+            expandedGroup: activeExpandedGroup?.id)
     }
 
     var body: some View {
@@ -47,8 +61,16 @@ struct SplitFolderGridPane: View {
                     columnCount: 2,
                     highlightsCurrentPhoto: true,
                     followsCurrentPhoto: true,
-                    foldExpandedGroup: { foldedGroup = $0 },
-                    openPhoto: openPhoto,
+                    foldExpandedGroup: { _ in collapseGroup() },
+                    openPhoto: { tapped in
+                        if let activeExpandedGroup,
+                            activeExpandedGroup.visibleMembers.contains(where: { $0.id == tapped })
+                        {
+                            selectGroupPhoto(tapped)
+                        } else {
+                            openPhoto(tapped)
+                        }
+                    },
                     openGroup: openGroup,
                     beginSelection: { _ in },
                     toggleSelection: { _ in }
@@ -60,19 +82,5 @@ struct SplitFolderGridPane: View {
         .ignoresSafeArea(.container, edges: isDuoExpanded ? .bottom : [])
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.photoGrid")
-    }
-
-    private func openGroup(_ id: GroupID) {
-        if browsing.currentGroup?.id == id {
-            foldedGroup = nil
-            return
-        }
-        guard let group = browsing.groups.first(where: { $0.id == id }) else { return }
-        let visible = group.visible(in: Set(browsing.photos.map(\.id)))
-        if let first = visible.members.first(where: { browsing.shownMarks(for: $0).isUnmarked })
-            ?? visible.members.first
-        {
-            openPhoto(first)
-        }
     }
 }
