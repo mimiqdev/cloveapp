@@ -82,8 +82,17 @@ public enum ThumbnailResult: Sendable {
     case unavailable(ThumbnailUnavailable)
 }
 
-public enum ThumbnailPriority: Sendable {
-    case visible, prefetch
+public enum ThumbnailPriority: Int, Sendable, Comparable {
+    case visible = 0
+    case prefetch = 1
+    case folder = 2
+
+    public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+public enum ThumbnailCachedOutcome: Equatable, Sendable {
+    case available
+    case unavailable(ThumbnailUnavailable)
 }
 
 public enum ThumbnailPipelineError: Error, Sendable {

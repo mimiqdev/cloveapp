@@ -358,11 +358,11 @@ extension PipelineDetailImages: DetailRegionSharpnessSource {
             guard !Task.isCancelled else { return nil }
             let groupRequests = groupPairs.map(\.1)
             let nearbyRequests = nearbyPairs.map(\.1)
-            // Cancel analyses outside this detail window before admitting more work. A nearby
-            // job that becomes current stays shared, including its stored early-AF answer.
+            // Demote analyses outside this detail window back to folder priority before admitting more
+            // work so rapid navigation keeps background preparation alive behind interactive work.
             await regionScheduler.focus(
                 current: current, group: groupRequests, nearby: nearbyRequests,
-                cancellingObsolete: true)
+                cancellingObsolete: false)
             guard !Task.isCancelled else { return nil }
             async let analysis = regionScheduler.analyzeCurrent(
                 current, onAutofocus: onAutofocus)

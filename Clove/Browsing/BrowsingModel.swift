@@ -53,6 +53,37 @@ final class BrowsingModel {
     /// Display-only activity forwarded by the folder's visual grouping pass.
     private(set) var isFindingSimilarShots = false
 
+    /// Folder-wide analysis and preview preparation progress shared by Grid, Preview, and Focus.
+    private(set) var preparationStatus: FolderPreparationStatus = .idle
+
+    private struct DismissedPreparationCompletion: Equatable {
+        let folder: FolderIdentity
+        let generation: Int
+    }
+
+    private var dismissedPreparationCompletion: DismissedPreparationCompletion?
+
+    var showsPreparationIndicator: Bool {
+        guard preparationStatus.phase != .idle else { return false }
+        if preparationStatus.phase == .complete,
+            let dismissed = dismissedPreparationCompletion,
+            dismissed.folder == preparationStatus.folder,
+            dismissed.generation == preparationStatus.generation
+        {
+            return false
+        }
+        return true
+    }
+
+    func dismissPreparationCompletion(folder: FolderIdentity, generation: Int) {
+        guard preparationStatus.phase == .complete,
+            preparationStatus.folder == folder,
+            preparationStatus.generation == generation
+        else { return }
+        dismissedPreparationCompletion = DismissedPreparationCompletion(
+            folder: folder, generation: generation)
+    }
+
     /// Progress from discovered photos, including photos still waiting for metadata.
     var readingProgress: (read: Int, total: Int)? {
         guard !hasFinishedScan else { return nil }
@@ -157,6 +188,7 @@ final class BrowsingModel {
     /// A loss explains the folder with the disconnected-drive or missing-location copy and
     /// stops new marking actions. It is cleared when another folder opens.
     private(set) var folderLocationLoss: FolderLocationLoss?
+    private var folderLocationLossGeneration: Int?
 
     /// Whether this scene left its folder and is ignoring that folder's updates until a real open
     /// shows another one.
@@ -190,6 +222,7 @@ final class BrowsingModel {
         self.shownGeneration = library.openGeneration
         self.state = state
         self.groups = library.groups
+        self.preparationStatus = library.preparationStatus
         self.recents = library.recents
         self.thumbnails = library.thumbnails
         self.detailImages = library.detailImages
@@ -298,13 +331,22 @@ final class BrowsingModel {
         // Clearing before the await keeps a loss the new open reports. A failed pick has not
         // reconnected the old folder, so its disconnected gate must remain in effect.
         let previousLoss = folderLocationLoss
+        let previousLossGeneration = folderLocationLossGeneration
         folderLocationLoss = nil
+        folderLocationLossGeneration = nil
         await folderClose?.value
         await drainActions()
         folderFailure = await library.pick(url)
         guard folderFailure == nil else {
-            if folderLocationLoss == nil { folderLocationLoss = previousLoss }
+            if folderLocationLoss == nil {
+                folderLocationLoss = previousLoss
+                folderLocationLossGeneration = previousLossGeneration
+            }
             return
+        }
+        if folderLocationLossGeneration != library.openGeneration {
+            folderLocationLoss = nil
+            folderLocationLossGeneration = nil
         }
         showOpenFolder()
         await reloadRecents()
@@ -357,13 +399,22 @@ final class BrowsingModel {
         openRequests += 1
         // Keep a new open's own loss, and retain the old gate if reopening fails.
         let previousLoss = folderLocationLoss
+        let previousLossGeneration = folderLocationLossGeneration
         folderLocationLoss = nil
+        folderLocationLossGeneration = nil
         await folderClose?.value
         await drainActions()
         if let failure = await library.reopen(recent) {
             recentFailures[recent.id] = failure
-            if folderLocationLoss == nil { folderLocationLoss = previousLoss }
+            if folderLocationLoss == nil {
+                folderLocationLoss = previousLoss
+                folderLocationLossGeneration = previousLossGeneration
+            }
             return
+        }
+        if folderLocationLossGeneration != library.openGeneration {
+            folderLocationLoss = nil
+            folderLocationLossGeneration = nil
         }
         recentFailures[recent.id] = nil
         folderFailure = nil
@@ -918,12 +969,14 @@ final class BrowsingModel {
         guard folderLocationLoss == nil else {
             return MarkBatchResult(id: MarkBatchID(), change: MarkChange(), outcomes: [])
         }
+        let generation = openGeneration
         let result = await library.apply(
             edits.map { BatchMarkItem(photo: $0.photo, change: $0.change) })
-        guard folderLocationLoss == nil else { return result }
+        guard folderLocationLoss == nil, generation == openGeneration else { return result }
         if result.outcomes.contains(where: { $0.state.failure?.reason == .locationUnavailable }) {
             await discardDisconnectedChanges(
-                FolderLocationLoss(reason: .externalVolumeDisconnected, date: Date()))
+                FolderLocationLoss(reason: .externalVolumeDisconnected, date: Date()),
+                generation: generation)
             return result
         }
         let failed = result.outcomes.filter { $0.state.failure != nil }.map(\.identity)
@@ -950,9 +1003,10 @@ final class BrowsingModel {
     }
 
     /// Drive loss drops queued work and pending marks; Reopen reads the files.
-    private func discardDisconnectedChanges(_ loss: FolderLocationLoss) async {
+    private func discardDisconnectedChanges(_ loss: FolderLocationLoss, generation: Int) async {
         guard folderLocationLoss == nil else { return }
         folderLocationLoss = loss
+        folderLocationLossGeneration = generation
         let dropped = actionPipeline.removePending()
         recordUndo(for: nil)
         desiredMarks.removeAll()
@@ -1039,8 +1093,10 @@ final class BrowsingModel {
         state.selection = []
         state.route = .entry
         folderLocationLoss = nil
+        folderLocationLossGeneration = nil
         finishedScanFor = nil
         isFindingSimilarShots = false
+        preparationStatus = .idle
         labelFilter = nil
         pendingRestore = nil
         hasLeftFolder = true
@@ -1111,6 +1167,7 @@ final class BrowsingModel {
             // open it just installed is the one this scene shows, even when the saved route is
             // entry or settings and the grid does not appear yet.
             folderLocationLoss = nil
+            folderLocationLossGeneration = nil
             hasLeftFolder = false
             await reloadRecents()
             if saved.showsPhotos {
@@ -1167,11 +1224,30 @@ final class BrowsingModel {
         switch update {
         case .groupingActivity(let isRunning):
             isFindingSimilarShots = isRunning
+        case .preparation(let status):
+            if status.phase == .idle,
+                library.folder == FolderLibrarySession.noFolder
+                    || library.folder == TestLibrary.emptyFolderKey
+            {
+                preparationStatus = .idle
+                dismissedPreparationCompletion = nil
+                return
+            }
+            guard status.folder == library.folder, status.generation == library.openGeneration
+            else {
+                return
+            }
+            if status.phase != .complete {
+                dismissedPreparationCompletion = nil
+            }
+            preparationStatus = status
         case .scanStarted:
             isFindingSimilarShots = false
             // A reopen of the same folder starts a new scan, so the old finished marker cannot
             // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
             finishedScanFor = nil
+            dismissedPreparationCompletion = nil
+            preparationStatus = library.preparationStatus
             refresh()
         case .photos:
             refresh()
@@ -1190,7 +1266,14 @@ final class BrowsingModel {
             // A buffered loss can arrive after another folder opened, or after the same folder
             // opened again, so it only applies to the folder and the open this scene shows.
             guard folder == library.folder, generation == library.openGeneration else { return }
-            await discardDisconnectedChanges(loss)
+            await discardDisconnectedChanges(loss, generation: generation)
+            if preparationStatus.folder == folder, preparationStatus.generation == generation,
+                preparationStatus.phase != .idle, preparationStatus.phase != .complete,
+                preparationStatus.phase != .completeWithIssues
+            {
+                preparationStatus.waitingReason = .folderUnavailable(loss.reason)
+                dismissedPreparationCompletion = nil
+            }
             if let index = recents.firstIndex(where: { $0.identity == folder }) {
                 recents[index].needsReconnect = true
             }
@@ -1220,6 +1303,10 @@ final class BrowsingModel {
         // while the old folder closed, or grouping's first result) is read here, so the grid
         // never waits for one more update (PRD P0-11).
         refresh()
+        preparationStatus = library.preparationStatus
+        if preparationStatus.phase != .complete {
+            dismissedPreparationCompletion = nil
+        }
         // The library replaced its pipeline with the folder's, so the grid takes the new source
         // even when the route does not change. Detail takes the source bound to the same folder.
         thumbnails = library.thumbnails
@@ -1273,6 +1360,8 @@ final class BrowsingModel {
             desiredMarks.removeAll()
             recordUndo(for: nil)
             dismissFailureToast()
+            dismissedPreparationCompletion = nil
+            preparationStatus = library.preparationStatus
             generationChanged = true
         }
         let latest = library.photos

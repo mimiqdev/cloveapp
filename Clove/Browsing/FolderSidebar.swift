@@ -14,15 +14,24 @@ struct FolderSidebar: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Button {
-                        browsing.back()
-                    } label: {
-                        Label(browsing.folderTitle, systemImage: "chevron.left")
-                            .font(.headline)
+                    HStack(spacing: 0) {
+                        Button {
+                            browsing.back()
+                        } label: {
+                            Label(browsing.folderTitle, systemImage: "chevron.left")
+                                .font(.headline)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Back")
+                        .accessibilityIdentifier("clove.nav.back")
+                        FolderPreparationIndicator(
+                            browsing: browsing,
+                            identifierPrefix: "clove.grid.preparation",
+                            inListRow: true
+                        )
+                        .layoutPriority(1)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Back")
-                    .accessibilityIdentifier("clove.nav.back")
                     if let source = browsing.folderSource {
                         Text(source).font(.caption).foregroundStyle(.secondary)
                     }

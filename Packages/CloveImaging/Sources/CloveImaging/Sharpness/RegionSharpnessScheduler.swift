@@ -28,6 +28,15 @@ public enum SharpnessWorkPriority: Int, CaseIterable, Hashable, Sendable, Compar
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
+/// Lifecycle notifications emitted by ``RegionSharpnessScheduler`` so folder-level observers can
+/// track settled analyses and source invalidations without polling.
+public enum SharpnessSchedulerEvent: Sendable {
+    case settled(
+        key: SharpnessResultKey, request: RegionSharpnessRequest, analysis: RegionSharpnessAnalysis?
+    )
+    case invalidated(sources: [URL])
+}
+
 /// Per-stage queue/active counts and entry timings, for later device measurement (#216).
 /// Exposed as recorded facts; no performance claim is derived here.
 public struct SharpnessSchedulerSnapshot: Sendable, Equatable {
@@ -72,7 +81,7 @@ public actor RegionSharpnessScheduler {
     /// How many finished stage durations each stage keeps for measurement.
     private static let recordedDurations = 64
 
-    public let parametersVersion: Int
+    public nonisolated let parametersVersion: Int
 
     private let baseAnalyzer: RegionSharpnessAnalyzer
     private let results: RegionSharpnessResultStore
@@ -127,6 +136,7 @@ public actor RegionSharpnessScheduler {
     private var closed = false
     private var invalidationEpoch: UInt64 = 0
     private var latestInvalidationEpoch: [URL: UInt64] = [:]
+    private var eventContinuations: [UUID: AsyncStream<SharpnessSchedulerEvent>.Continuation] = [:]
 
     // MARK: - Lifecycle
 
@@ -158,6 +168,59 @@ public actor RegionSharpnessScheduler {
             configured[stage] = StageState(limit: limit)
         }
         self.stages = configured
+    }
+
+    // MARK: - Observation and cache inspection
+
+    public func events() -> AsyncStream<SharpnessSchedulerEvent> {
+        let (stream, continuation) = AsyncStream.makeStream(of: SharpnessSchedulerEvent.self)
+        guard !closed else {
+            continuation.finish()
+            return stream
+        }
+        let id = UUID()
+        eventContinuations[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeEventContinuation(id) }
+        }
+        return stream
+    }
+
+    /// Reads revision-valid cached analyses (memory then disk) for the supplied requests without
+    /// altering memory LRU order or scheduling new analysis work.
+    public func cachedAnalyses(
+        for requests: [RegionSharpnessRequest]
+    ) async -> [SharpnessResultKey: RegionSharpnessAnalysis] {
+        guard !closed, !requests.isEmpty else { return [:] }
+        var found: [SharpnessResultKey: RegionSharpnessAnalysis] = [:]
+        var misses: [(SharpnessResultKey, RegionSharpnessRequest)] = []
+        var seen: Set<SharpnessResultKey> = []
+        for request in requests {
+            let key = resultKey(for: request)
+            guard seen.insert(key).inserted else { continue }
+            if let cached = results.peekMemoryResult(for: key) {
+                found[key] = cached
+            } else if results.hasDiskCache {
+                misses.append((key, request))
+            }
+        }
+        guard !misses.isEmpty else { return found }
+        let epoch = invalidationEpoch
+        let resultsStore = results
+        let diskHits = await withTaskExecutorPreference(ImageWorkExecutor.current) {
+            misses.compactMap {
+                key, request -> (
+                    SharpnessResultKey, RegionSharpnessRequest, RegionSharpnessAnalysis
+                )? in
+                guard let analysis = resultsStore.diskAnalysis(for: key) else { return nil }
+                return (key, request, analysis)
+            }
+        }
+        guard !closed else { return found }
+        for (key, request, analysis) in diskHits where !wasInvalidated(request, since: epoch) {
+            found[key] = analysis
+        }
+        return found
     }
 
     // MARK: - Submitting work
@@ -386,6 +449,7 @@ public actor RegionSharpnessScheduler {
         where !Set(request.fileURLs).isDisjoint(with: files) {
             drop(key: key)
         }
+        emit(.invalidated(sources: Array(files)))
         pump()
     }
 
@@ -399,6 +463,9 @@ public actor RegionSharpnessScheduler {
         // Admitted stage entries exit through their own path, cancelled or not; awaiting the
         // tasks is what makes the return safe for the folder's security scope.
         for task in running { _ = await task.value }
+        let continuations = Array(eventContinuations.values)
+        eventContinuations.removeAll()
+        for continuation in continuations { continuation.finish() }
     }
 
     // MARK: - Measurement
@@ -659,6 +726,9 @@ public actor RegionSharpnessScheduler {
             for callback in job.autofocusWaiters { callback(analysis.autofocus) }
         }
         for waiter in job.waiters { waiter.resume(returning: analysis) }
+        if !closed {
+            emit(.settled(key: key, request: job.request, analysis: analysis))
+        }
         pump()
     }
 
@@ -683,13 +753,26 @@ public actor RegionSharpnessScheduler {
             stages[stage] = state
             for waiter in parked { waiter.continuation.resume(throwing: CancellationError()) }
         }
+        if !closed {
+            emit(.settled(key: key, request: job.request, analysis: nil))
+        }
+    }
+
+    private func removeEventContinuation(_ id: UUID) {
+        eventContinuations.removeValue(forKey: id)
+    }
+
+    private func emit(_ event: SharpnessSchedulerEvent) {
+        for continuation in eventContinuations.values {
+            continuation.yield(event)
+        }
     }
 
     private func wasInvalidated(_ request: RegionSharpnessRequest, since epoch: UInt64) -> Bool {
         request.fileURLs.contains { (latestInvalidationEpoch[$0] ?? 0) > epoch }
     }
 
-    private func resultKey(for request: RegionSharpnessRequest) -> SharpnessResultKey {
+    public nonisolated func resultKey(for request: RegionSharpnessRequest) -> SharpnessResultKey {
         Self.resultKey(for: request, parametersVersion: parametersVersion)
     }
 

@@ -17,7 +17,7 @@ import Foundation
 @MainActor
 final class PipelineGridThumbnails: GridThumbnailSource {
     /// The grid preview size from the G1 preview row's embedded preview at about 400 px.
-    static let targetPixels = 400
+    nonisolated static let targetPixels = 400
 
     /// One request's file reads and decode, so a folder can admit them through C11's session
     /// (G1 folder access).

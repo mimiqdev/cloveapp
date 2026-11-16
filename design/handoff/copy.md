@@ -134,3 +134,29 @@ The pill sits centred in its own row above the filmstrip. Hide it with chrome, w
 | error.access.subtitle | View only (accessibility label of the `lock.fill` glyph) |
 | error.access.banner | Access to this folder is no longer available. |
 | error.access.action | Open |
+
+## Folder preparation (#293)
+| Key | String |
+|---|---|
+| preparation.title | Folder preparation |
+| preparation.summary.scanning | Scanning folder… |
+| preparation.summary.ready | {ready} of {total} ready |
+| preparation.summary.enumerating | Still counting photos in this folder. |
+| preparation.summary.partial | Showing partial folder scan. |
+| preparation.analysis.title | Focus analysis |
+| preparation.analysis.count | {n} of {total} analyzed |
+| preparation.previews.title | Previews |
+| preparation.previews.count | {n} of {total} prepared |
+| preparation.waiting.count | Waiting for photo count |
+| preparation.waiting.memory.title | Paused for memory |
+| preparation.waiting.memory.detail | Preparation paused while memory is low and will resume automatically. |
+| preparation.waiting.disconnected.title | Paused · drive disconnected |
+| preparation.waiting.disconnected.detail | Reconnect the drive to continue preparing this folder. |
+| preparation.waiting.unavailable.title | Paused · folder unavailable |
+| preparation.waiting.unavailable.detail | Reopen the folder to continue preparing photos. |
+| preparation.issues.title | Issues |
+| preparation.issues.truncated | Showing {shown} of {total} issues |
+| a11y.preparation | Folder preparation (hint: Shows folder analysis and preview preparation details.) |
+| a11y.preparation.value.complete | Complete, {ready} of {total} ready |
+| a11y.preparation.value.issues | Finished with {n} issues, {ready} of {total} ready |
+

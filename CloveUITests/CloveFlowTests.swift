@@ -2745,6 +2745,174 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testFolderPreparationInlineIndicatorAndDetailsPresentation() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "preparing"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        let gridPrep = element(app, "clove.grid.preparation")
+        XCTAssertTrue(gridPrep.waitForExistence(timeout: 5))
+        XCTAssertTrue(gridPrep.isHittable)
+        XCTAssertEqual(gridPrep.label, "Folder preparation")
+        XCTAssertEqual(gridPrep.value as? String, "15 of 36 ready")
+        XCTAssertGreaterThanOrEqual(gridPrep.frame.width, 43)
+        XCTAssertGreaterThanOrEqual(gridPrep.frame.height, 43)
+
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let gridTitle = element(app, "clove.grid.title")
+            XCTAssertTrue(gridTitle.exists)
+            XCTAssertGreaterThanOrEqual(gridPrep.frame.midX, gridTitle.frame.maxX - 4)
+        }
+
+        gridPrep.tap()
+        let details = element(app, "clove.preparation.details")
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.preparation.folderName").label, "Coastal light")
+        XCTAssertEqual(element(app, "clove.preparation.summary").label, "15 of 36 ready")
+        XCTAssertEqual(element(app, "clove.preparation.analysis.count").label, "18 of 36 analyzed")
+        XCTAssertEqual(element(app, "clove.preparation.previews.count").label, "29 of 36 prepared")
+        XCTAssertTrue(
+            element(app, "clove.preparation.analysis.progress").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            element(app, "clove.preparation.previews.progress").waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Pause"].exists)
+        XCTAssertFalse(app.buttons["Cancel"].exists)
+
+        let doneButton = element(app, "clove.preparation.done")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCTAssertFalse(doneButton.exists)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)).tap()
+        } else {
+            XCTAssertTrue(doneButton.exists)
+            doneButton.tap()
+        }
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), details))
+
+        // Open Detail and verify inline ring beside filename without colliding with #292's focus toggle.
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(fileName.waitForExistence(timeout: 5))
+        let detailPrep = element(app, "clove.detail.preparation")
+        XCTAssertTrue(detailPrep.waitForExistence(timeout: 5))
+        XCTAssertTrue(detailPrep.isHittable)
+        XCTAssertEqual(detailPrep.value as? String, "15 of 36 ready")
+        XCTAssertGreaterThanOrEqual(detailPrep.frame.width, 43)
+        XCTAssertGreaterThanOrEqual(detailPrep.frame.height, 43)
+
+        let focusToggle = element(app, "clove.detail.focusToggle")
+        XCTAssertTrue(focusToggle.exists)
+        XCTAssertLessThan(focusToggle.frame.maxX, detailPrep.frame.minX)
+        XCTAssertFalse(focusToggle.frame.intersects(detailPrep.frame))
+        XCTAssertGreaterThanOrEqual(detailPrep.frame.midX, fileName.frame.maxX - 4)
+        XCTAssertTrue(element(app, "clove.detail.zoom").exists)
+
+        let info = element(app, "clove.detail.info")
+        if info.exists {
+            XCTAssertLessThanOrEqual(detailPrep.frame.maxX, info.frame.minX + 16)
+        }
+
+        detailPrep.tap()
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "clove.preparation.summary").label, "15 of 36 ready")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCTAssertFalse(doneButton.exists)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)).tap()
+        } else {
+            doneButton.tap()
+        }
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), details))
+
+        // Culling remains active and responsive with preparation ring shown.
+        let rejectButton = element(
+            app,
+            UIDevice.current.userInterfaceIdiom == .pad
+                ? "clove.detail.rail.reject" : "clove.detail.capsule.reject")
+        rejectButton.tap()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+    }
+
+    @MainActor
+    func testFolderPreparationStatesAndThemes() {
+        // 1. Unknown total / enumerating state.
+        do {
+            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "enumerating"])
+            defer { app.terminate() }
+            openLibrary(app)
+            let prep = element(app, "clove.grid.preparation")
+            XCTAssertTrue(prep.waitForExistence(timeout: 5))
+            XCTAssertEqual(prep.value as? String, "Scanning folder")
+            prep.tap()
+            XCTAssertTrue(element(app, "clove.preparation.details").waitForExistence(timeout: 5))
+            XCTAssertEqual(element(app, "clove.preparation.summary").label, "Scanning folder…")
+            XCTAssertEqual(
+                element(app, "clove.preparation.analysis.count").label, "Waiting for photo count")
+            XCTAssertEqual(
+                element(app, "clove.preparation.previews.count").label, "Waiting for photo count")
+            if element(app, "clove.preparation.done").exists {
+                element(app, "clove.preparation.done").tap()
+            }
+        }
+
+        // 2. Waiting / memory-pressure paused state.
+        do {
+            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "waiting_pressure"])
+            defer { app.terminate() }
+            openLibrary(app)
+            let prep = element(app, "clove.grid.preparation")
+            XCTAssertTrue(prep.waitForExistence(timeout: 5))
+            XCTAssertTrue((prep.value as? String)?.contains("Paused for memory") == true)
+            prep.tap()
+            XCTAssertTrue(element(app, "clove.preparation.waiting").waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["Pause"].exists)
+            XCTAssertFalse(app.buttons["Cancel"].exists)
+        }
+
+        // 3. Explicit material failures surfaced in details across Nord / Dark / Light themes.
+        do {
+            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "issues"])
+            defer { app.terminate() }
+            openLibrary(app)
+            for theme in ["light", "dark", "nord"] {
+                applyComparisonTheme(theme, app)
+                let prep = element(app, "clove.grid.preparation")
+                XCTAssertTrue(prep.waitForExistence(timeout: 5))
+                XCTAssertTrue((prep.value as? String)?.contains("issue") == true)
+                prep.tap()
+                let issues = element(app, "clove.preparation.issues")
+                XCTAssertTrue(issues.waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["MMQ02700.ARW"].exists)
+                if element(app, "clove.preparation.done").exists {
+                    element(app, "clove.preparation.done").tap()
+                } else {
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)).tap()
+                }
+                XCTAssertTrue(
+                    wait(
+                        NSPredicate(format: "exists == false"),
+                        element(app, "clove.preparation.details")))
+            }
+        }
+
+        // 4. Completion briefly shows checkmark, then withdraws persistent indicator.
+        do {
+            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "complete"])
+            defer { app.terminate() }
+            let open = element(app, "clove.entry.openFolder")
+            if open.exists { open.tap() }
+            let detailPrep = element(app, "clove.detail.preparation")
+            let gridPrep = element(app, "clove.grid.preparation")
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline && !detailPrep.exists && !gridPrep.exists {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            }
+            let prep = detailPrep.exists ? detailPrep : gridPrep
+            XCTAssertTrue(prep.exists)
+            XCTAssertTrue((prep.value as? String)?.contains("Complete") == true)
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), prep, timeout: 6))
+        }
+    }
+
+    @MainActor
     func testCaptureTapPickerReferencesWhenRequested() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_TAP_PICKERS"] == "1")
         defer { XCUIDevice.shared.orientation = .portrait }
@@ -2822,7 +2990,15 @@ final class CloveFlowTests: XCTestCase {
     @MainActor
     func openLibrary(_ app: XCUIApplication) {
         let open = element(app, "clove.entry.openFolder")
-        if open.exists { open.tap() }
+        if open.exists {
+            open.tap()
+            let detail = element(app, "clove.detail")
+            let grid = element(app, "clove.grid")
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline && !detail.exists && !grid.exists {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            }
+        }
         if element(app, "clove.detail").exists {
             let back = element(app, "clove.nav.back")
             if back.waitForExistence(timeout: 5) { back.tap() }

@@ -46,6 +46,9 @@ enum FolderLibraryUpdate: Hashable, Sendable {
 
     /// The visual grouping pass is running or finished, including cached and cancelled runs.
     case groupingActivity(Bool)
+
+    /// The open folder's combined analysis and preview-preparation status.
+    case preparation(FolderPreparationStatus)
 }
 
 /// What the browsing screens read and change, behind one seam (PRD P0-08, P0-13, P0-14).
@@ -62,6 +65,9 @@ protocol FolderLibrary: AnyObject {
     /// A library with no folder open answers with its own placeholder key, which no saved state
     /// and no photo identity ever uses.
     var folder: FolderIdentity { get }
+
+    /// The open folder's current preparation progress across analysis and grid previews.
+    var preparationStatus: FolderPreparationStatus { get }
 
     /// The folder's photos with their marks, in any order: the browsing state orders and filters
     /// them through its C8 order and C1 marks (PRD P0-03).
@@ -258,6 +264,8 @@ extension FolderLibrary {
     var contents: FolderContents {
         FolderContents(folder: folder, photos: photos.map(\.id), groups: groups)
     }
+
+    var preparationStatus: FolderPreparationStatus { .idle }
 
     /// A library with no folder access cannot open a picked or remembered folder; the reason
     /// asks for the folder again (PRD P0-02). The real library and the test library override

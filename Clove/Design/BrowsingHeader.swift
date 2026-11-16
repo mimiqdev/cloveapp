@@ -1,12 +1,15 @@
 import SwiftUI
 
 /// The handoff's compact navigation title and subtitle, between Back and the view tools.
-struct BrowsingHeader<Subtitle: View, LeadingTools: View, Tools: View>: View {
+struct BrowsingHeader<
+    TitleAccessory: View, Subtitle: View, LeadingTools: View, Tools: View
+>: View {
     let title: String
     var titleIdentifier = "clove.browsing.title"
     var backTitle: String? = nil
     let back: () -> Void
     @ViewBuilder let subtitle: () -> Subtitle
+    @ViewBuilder let titleAccessory: () -> TitleAccessory
     @ViewBuilder let leadingTools: () -> LeadingTools
     @ViewBuilder let tools: () -> Tools
 
@@ -16,6 +19,7 @@ struct BrowsingHeader<Subtitle: View, LeadingTools: View, Tools: View>: View {
         backTitle: String? = nil,
         back: @escaping () -> Void,
         @ViewBuilder subtitle: @escaping () -> Subtitle,
+        @ViewBuilder titleAccessory: @escaping () -> TitleAccessory = { EmptyView() },
         @ViewBuilder leadingTools: @escaping () -> LeadingTools = { EmptyView() },
         @ViewBuilder tools: @escaping () -> Tools
     ) {
@@ -24,6 +28,7 @@ struct BrowsingHeader<Subtitle: View, LeadingTools: View, Tools: View>: View {
         self.backTitle = backTitle
         self.back = back
         self.subtitle = subtitle
+        self.titleAccessory = titleAccessory
         self.leadingTools = leadingTools
         self.tools = tools
     }
@@ -32,15 +37,20 @@ struct BrowsingHeader<Subtitle: View, LeadingTools: View, Tools: View>: View {
         GeometryReader { proxy in
             ZStack {
                 VStack(spacing: 0) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .accessibilityIdentifier(titleIdentifier)
+                    HStack(spacing: 0) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .accessibilityIdentifier(titleIdentifier)
+                        titleAccessory()
+                            .layoutPriority(1)
+                    }
                     subtitle()
                         .font(.caption)
                         .foregroundStyle(Color.clove.text.secondary)
                 }
-                .frame(width: max(proxy.size.width - (backTitle != nil ? 380 : 192), 100))
+                .frame(maxWidth: max(proxy.size.width - (backTitle != nil ? 520 : 240), 100))
                 HStack(spacing: 8) {
                     if let backTitle {
                         Button(action: back) {

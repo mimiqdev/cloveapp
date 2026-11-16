@@ -184,14 +184,25 @@ struct GridScreen: View {
                         }
                         ToolbarItem(placement: .principal) {
                             VStack(alignment: .leading, spacing: 0) {
-                                Text(
-                                    isSelecting
-                                        ? "\(browsing.state.selection.count.formatted()) selected"
-                                        : (isRegular ? browsing.filterTitle : browsing.folderTitle)
-                                )
-                                .font(.subheadline.weight(.semibold))
-                                .accessibilityIdentifier(
-                                    isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
+                                HStack(spacing: 0) {
+                                    Text(
+                                        isSelecting
+                                            ? "\(browsing.state.selection.count.formatted()) selected"
+                                            : (isRegular
+                                                ? browsing.filterTitle : browsing.folderTitle)
+                                    )
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                    .accessibilityIdentifier(
+                                        isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
+                                    if !isRegular && !isSelecting {
+                                        FolderPreparationIndicator(
+                                            browsing: browsing,
+                                            identifierPrefix: "clove.grid.preparation"
+                                        )
+                                        .layoutPriority(1)
+                                    }
+                                }
                                 HStack(spacing: 0) {
                                     Text(subtitle)
                                     SaveStatusIndicator(
@@ -304,6 +315,12 @@ struct GridScreen: View {
                 Text(subtitle).lineLimit(1)
                 SaveStatusIndicator(
                     browsing: browsing, identifierPrefix: "clove.grid.saveState")
+            }
+        } titleAccessory: {
+            if !isSelecting {
+                FolderPreparationIndicator(
+                    browsing: browsing,
+                    identifierPrefix: "clove.grid.preparation")
             }
         } tools: {
             headerTools

@@ -77,6 +77,9 @@ final class TestLibrary: FolderLibrary {
     /// names the pinned count. Nothing is written, and no cell names a photo the sample lacks.
     static let groupCountVariable = "CLOVE_TEST_LIBRARY_GROUP_COUNT"
 
+    /// The launch environment value that holds a synthetic folder-preparation status for UI tests.
+    static let preparationVariable = "CLOVE_TEST_LIBRARY_PREPARATION"
+
     /// The library this launch browses: the sample when the launch value asks for it (PRD P0-13).
     static func forLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -228,6 +231,9 @@ final class TestLibrary: FolderLibrary {
     private var disconnectsOnWrite = false
     private let sampleLocationLoss: FolderLocationLoss.Reason?
 
+    /// The open folder's simulated preparation progress across analysis and grid previews.
+    private(set) var preparationStatus: FolderPreparationStatus = .idle
+
     /// The open this sample library installed last, which ``closeFolder()`` changes (PRD P0-02).
     private(set) var openGeneration = 0
 
@@ -248,6 +254,7 @@ final class TestLibrary: FolderLibrary {
         sampleLocationLoss = nil
         thumbnails = SampleGridThumbnails()
         detailImages = EmptyDetailImages()
+        preparationStatus = .idle
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
     }
 
@@ -275,6 +282,21 @@ final class TestLibrary: FolderLibrary {
         self.sampleLocationLoss = locationLoss
         thumbnails = TestLibrary.sampleThumbnails
         self.detailImages = detailImages ?? SampleDetailImages()
+        let count = photos.count
+        let initialPreparation = FolderPreparationStatus(
+            folder: folder,
+            folderName: "Coastal light",
+            generation: 0,
+            isEnumerating: false,
+            isPartialScan: false,
+            waitingReason: locationLoss.map { .folderUnavailable($0) },
+            totalPhotos: count,
+            analysis: FolderPreparationTaskCounts(completed: count),
+            previews: FolderPreparationTaskCounts(completed: count),
+            readyForBothCount: count,
+            bothSettledCount: count,
+            issues: [])
+        preparationStatus = initialPreparation
         (updates, updateContinuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         if let locationLoss {
             updateContinuation.yield(
@@ -285,6 +307,7 @@ final class TestLibrary: FolderLibrary {
         // The sample is fully scanned when it opens, so the grid can show the actions the
         // handoff hides during opening (design handoff, PRD P0-01).
         updateContinuation.yield(.scanStarted)
+        updateContinuation.yield(.preparation(initialPreparation))
         updateContinuation.yield(
             .scanFinished(
                 FolderScanSummary(photoCount: stored.count, status: .complete)))
@@ -431,6 +454,7 @@ final class TestLibrary: FolderLibrary {
     func rescanAfterRename() async throws {
         updateContinuation.yield(.scanStarted)
         updateContinuation.yield(.photos(stored))
+        syncCompletedPreparationCount()
         updateContinuation.yield(
             .scanFinished(FolderScanSummary(photoCount: stored.count, status: .complete)))
     }
@@ -509,6 +533,7 @@ final class TestLibrary: FolderLibrary {
                 stored[index].marks = edit.after
             }
         }
+        syncCompletedPreparationCount()
         updateContinuation.yield(.photos([]))
         return RejectMoveUndoResult(id: RejectMoveUndoBatchID(), outcomes: outcomes)
     }
@@ -635,6 +660,7 @@ final class TestLibrary: FolderLibrary {
         if !moved.isEmpty {
             stored.removeAll { moved.contains($0.id) }
             updateGroupsAfterMove(moved)
+            syncCompletedPreparationCount()
             updateContinuation.yield(.photos([]))
         }
         let result = RejectMoveResult(id: id, outcomes: outcomes)
@@ -692,6 +718,8 @@ final class TestLibrary: FolderLibrary {
 
     /// Reports the sample folder's location gone, as C11's watch does (PRD P0-02).
     func reportLocationLoss(_ reason: FolderLocationLoss.Reason) {
+        preparationStatus.waitingReason = .folderUnavailable(reason)
+        updateContinuation.yield(.preparation(preparationStatus))
         updateContinuation.yield(
             .locationLost(
                 folder: folder, loss: FolderLocationLoss(reason: reason, date: Date()),
@@ -710,6 +738,8 @@ final class TestLibrary: FolderLibrary {
     /// Closing a presentation leaves the sample's simulated files available to Reopen.
     func closeFolder() async {
         openGeneration += 1
+        preparationStatus = .idle
+        updateContinuation.yield(.preparation(.idle))
     }
 
     /// Deterministic Info without a file or device path (handoff Detail).
@@ -775,6 +805,146 @@ final class TestLibrary: FolderLibrary {
                 updateContinuation.yield(.groupingActivity(true))
             }
         }
+        if let preparationMode = environment[Self.preparationVariable] {
+            configurePreparationSample(preparationMode)
+        } else if preparationStatus.totalPhotos != stored.count {
+            syncCompletedPreparationCount()
+        }
+    }
+
+    private func syncCompletedPreparationCount() {
+        let count = stored.count
+        preparationStatus = FolderPreparationStatus(
+            folder: folder,
+            folderName: "Coastal light",
+            generation: openGeneration,
+            isEnumerating: false,
+            isPartialScan: false,
+            waitingReason: preparationStatus.waitingReason,
+            totalPhotos: count,
+            analysis: FolderPreparationTaskCounts(completed: count),
+            previews: FolderPreparationTaskCounts(completed: count),
+            readyForBothCount: count,
+            bothSettledCount: count,
+            issues: [])
+        updateContinuation.yield(.preparation(preparationStatus))
+    }
+
+    private func configurePreparationSample(_ mode: String) {
+        let count = stored.count
+        let sampleStatus: FolderPreparationStatus
+        switch mode {
+        case "enumerating":
+            sampleStatus = FolderPreparationStatus(
+                folder: folder,
+                folderName: "Coastal light",
+                generation: openGeneration,
+                isEnumerating: true,
+                isPartialScan: false,
+                waitingReason: nil,
+                totalPhotos: 0,
+                analysis: FolderPreparationTaskCounts(),
+                previews: FolderPreparationTaskCounts(),
+                readyForBothCount: 0,
+                bothSettledCount: 0,
+                issues: [])
+        case "preparing":
+            let analysisCompleted = min(18, count)
+            let previewsCompleted = min(29, count)
+            let readyForBoth = min(15, min(analysisCompleted, previewsCompleted))
+            sampleStatus = FolderPreparationStatus(
+                folder: folder,
+                folderName: "Coastal light",
+                generation: openGeneration,
+                isEnumerating: false,
+                isPartialScan: false,
+                waitingReason: nil,
+                totalPhotos: count,
+                analysis: FolderPreparationTaskCounts(completed: analysisCompleted),
+                previews: FolderPreparationTaskCounts(completed: previewsCompleted),
+                readyForBothCount: readyForBoth,
+                bothSettledCount: readyForBoth,
+                issues: [])
+        case "waiting_pressure":
+            let analysisCompleted = min(18, count)
+            let previewsCompleted = min(29, count)
+            let readyForBoth = min(15, min(analysisCompleted, previewsCompleted))
+            sampleStatus = FolderPreparationStatus(
+                folder: folder,
+                folderName: "Coastal light",
+                generation: openGeneration,
+                isEnumerating: false,
+                isPartialScan: false,
+                waitingReason: .memoryPressure,
+                totalPhotos: count,
+                analysis: FolderPreparationTaskCounts(completed: analysisCompleted),
+                previews: FolderPreparationTaskCounts(completed: previewsCompleted),
+                readyForBothCount: readyForBoth,
+                bothSettledCount: readyForBoth,
+                issues: [])
+        case "waiting_disconnected":
+            let analysisCompleted = min(18, count)
+            let previewsCompleted = min(29, count)
+            let readyForBoth = min(15, min(analysisCompleted, previewsCompleted))
+            sampleStatus = FolderPreparationStatus(
+                folder: folder,
+                folderName: "Coastal light",
+                generation: openGeneration,
+                isEnumerating: false,
+                isPartialScan: false,
+                waitingReason: .folderUnavailable(.externalVolumeDisconnected),
+                totalPhotos: count,
+                analysis: FolderPreparationTaskCounts(completed: analysisCompleted),
+                previews: FolderPreparationTaskCounts(completed: previewsCompleted),
+                readyForBothCount: readyForBoth,
+                bothSettledCount: readyForBoth,
+                issues: [])
+        case "issues":
+            let ok = max(0, count - 1)
+            let failed = count > 0 ? 1 : 0
+            sampleStatus = FolderPreparationStatus(
+                folder: folder,
+                folderName: "Coastal light",
+                generation: openGeneration,
+                isEnumerating: false,
+                isPartialScan: false,
+                waitingReason: nil,
+                totalPhotos: count,
+                analysis: FolderPreparationTaskCounts(completed: ok, failed: failed),
+                previews: FolderPreparationTaskCounts(completed: ok, failed: failed),
+                readyForBothCount: ok,
+                bothSettledCount: count,
+                issues: count > 0
+                    ? [
+                        FolderPreparationIssue(
+                            photo: Self.unreadablePhoto,
+                            fileName: "MMQ02700.ARW",
+                            task: .previews,
+                            reason: "No usable embedded preview."),
+                        FolderPreparationIssue(
+                            photo: Self.unreadablePhoto,
+                            fileName: "MMQ02700.ARW",
+                            task: .analysis,
+                            reason: "No usable preview for focus analysis."),
+                    ]
+                    : [])
+        default:
+            sampleStatus = FolderPreparationStatus(
+                folder: folder,
+                folderName: "Coastal light",
+                generation: openGeneration,
+                isEnumerating: false,
+                isPartialScan: false,
+                waitingReason: nil,
+                totalPhotos: count,
+                analysis: FolderPreparationTaskCounts(completed: count),
+                previews: FolderPreparationTaskCounts(completed: count),
+                readyForBothCount: count,
+                bothSettledCount: count,
+                issues: [])
+        }
+        preparationStatus = sampleStatus
+        updateContinuation.yield(.preparation(sampleStatus))
     }
 
     /// Turns the sample's groups on or off through the same call the settings screen makes

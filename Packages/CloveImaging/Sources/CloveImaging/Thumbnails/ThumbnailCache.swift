@@ -49,6 +49,8 @@ public final class ThumbnailCache: Sendable {
         let entry: DiskEntry
         let access: FileAccess
     }
+    public typealias StoreObserver = @Sendable (ThumbnailRequest, ThumbnailCachedOutcome) -> Void
+
     private struct State {
         var memory: [MemoryKey: MemoryEntry] = [:]
         var disk: [String: DiskEntry] = [:]
@@ -56,6 +58,7 @@ public final class ThumbnailCache: Sendable {
         var memoryCost = 0
         var diskCost = 0
         var tick: UInt64 = 0
+        var observers: [UUID: StoreObserver] = [:]
     }
 
     public struct Configuration: Sendable {
@@ -141,6 +144,48 @@ public final class ThumbnailCache: Sendable {
 
     var memoryByteCount: Int { state.withLock { $0.memoryCost } }
     public var memoryCapacityBytes: Int { configuration.memoryBytes }
+
+    @discardableResult
+    public func addStoreObserver(_ observer: @escaping StoreObserver) -> UUID {
+        let id = UUID()
+        state.withLock { $0.observers[id] = observer }
+        return id
+    }
+
+    public func removeStoreObserver(_ id: UUID) {
+        _ = state.withLock { $0.observers.removeValue(forKey: id) }
+    }
+
+    /// Synchronous read-only check for cached thumbnail availability without decoding pixels,
+    /// reading from disk, or altering LRU order.
+    public func cachedOutcome(for request: ThumbnailRequest) -> ThumbnailCachedOutcome? {
+        let routes = ThumbnailExtractor.routes(for: request)
+        let (memoryOutcome, hasDisk) = state.withLock { state -> (ThumbnailCachedOutcome?, Bool) in
+            for route in routes {
+                let memKey = MemoryKey(request: request, route: route)
+                if let entry = state.memory[memKey] {
+                    switch entry.result {
+                    case .available:
+                        return (.available, false)
+                    case .unavailable(let reason):
+                        return (.unavailable(reason), false)
+                    }
+                }
+            }
+            return (nil, !state.disk.isEmpty)
+        }
+        if let memoryOutcome { return memoryOutcome }
+        guard hasDisk else { return nil }
+        let keys = routes.map { key(request, route: $0) }
+        return state.withLock { state -> ThumbnailCachedOutcome? in
+            for key in keys {
+                if let entry = state.disk[key], !entry.evicting {
+                    return .available
+                }
+            }
+            return nil
+        }
+    }
 
     /// Synchronous memory-only lookup; never reads from disk.
     public func memoryResult(for request: ThumbnailRequest) -> ThumbnailResult? {
@@ -230,8 +275,21 @@ public final class ThumbnailCache: Sendable {
         } else {
             route = ThumbnailExtractor.routes(for: request)[0]
         }
+        let outcome: ThumbnailCachedOutcome =
+            switch result {
+            case .available: .available
+            case .unavailable(let reason): .unavailable(reason)
+            }
         let memKey = MemoryKey(request: request, route: route)
-        state.withLock { remember(result, key: memKey, state: &$0) }
+        let observers = state.withLock { state -> [StoreObserver] in
+            remember(result, key: memKey, state: &state)
+            return Array(state.observers.values)
+        }
+        defer {
+            for observer in observers {
+                observer(request, outcome)
+            }
+        }
         guard case .available(let thumbnail) = result, configuration.diskBytes > 0 else { return }
         let key = key(request, route: route)
         let data = try jpeg(thumbnail.image)

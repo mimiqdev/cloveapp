@@ -365,38 +365,43 @@ struct DetailMarkingView: View {
     @ViewBuilder
     private func focusRegionsButton(inStageHeader: Bool) -> some View {
         if inStageHeader {
-            if #available(iOS 26.0, *) {
-                Button {
-                    browsing.showsFocusRegions.toggle()
-                } label: {
-                    Image(systemName: "viewfinder")
-                        .font(.body)
-                        .foregroundStyle(
-                            browsing.showsFocusRegions
-                                ? Color.clove.accent : Color.clove.text.primary
-                        )
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Circle())
-                .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
-                .accessibilityLabel("Focus regions")
-                .accessibilityValue(browsing.showsFocusRegions ? "On" : "Off")
-                .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
-                .accessibilityIdentifier("clove.detail.focusToggle")
-            } else {
-                GlassIconButton(
-                    label: "Focus regions",
-                    symbol: "viewfinder",
-                    isActive: browsing.showsFocusRegions,
-                    size: .pad,
-                    identifier: "clove.detail.focusToggle"
-                ) {
-                    browsing.showsFocusRegions.toggle()
+            Group {
+                if #available(iOS 26.0, *) {
+                    Button {
+                        browsing.showsFocusRegions.toggle()
+                    } label: {
+                        Image(systemName: "viewfinder")
+                            .font(.body)
+                            .foregroundStyle(
+                                browsing.showsFocusRegions
+                                    ? Color.clove.accent : Color.clove.text.primary
+                            )
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Circle())
+                    .tint(
+                        browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary
+                    )
+                    .accessibilityLabel("Focus regions")
+                    .accessibilityValue(browsing.showsFocusRegions ? "On" : "Off")
+                    .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
+                    .accessibilityIdentifier("clove.detail.focusToggle")
+                } else {
+                    GlassIconButton(
+                        label: "Focus regions",
+                        symbol: "viewfinder",
+                        isActive: browsing.showsFocusRegions,
+                        size: .pad,
+                        identifier: "clove.detail.focusToggle"
+                    ) {
+                        browsing.showsFocusRegions.toggle()
+                    }
                 }
             }
+            .reportHeaderControlFrame("clove.detail.focusToggle")
         } else if usesSystemToolbar {
             Button {
                 browsing.showsFocusRegions.toggle()
@@ -425,11 +430,20 @@ struct DetailMarkingView: View {
 
     private var detailToolbarTitle: some View {
         VStack(spacing: 0) {
-            Text(photo.fileName)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.clove.text.primary)
-                .lineLimit(1)
-                .accessibilityIdentifier("clove.detail.fileName")
+            HStack(spacing: 0) {
+                Text(photo.fileName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.clove.text.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("clove.detail.fileName")
+                    .reportHeaderControlFrame("clove.detail.fileName")
+                FolderPreparationIndicator(
+                    browsing: browsing,
+                    identifierPrefix: "clove.detail.preparation"
+                )
+                .layoutPriority(1)
+            }
             HStack(spacing: 0) {
                 Text(detailSubtitle)
                     .lineLimit(1)
@@ -644,6 +658,10 @@ struct DetailMarkingView: View {
                                 browsing: browsing, identifierPrefix: "clove.detail.saveState")
                         }
                     }
+                } titleAccessory: {
+                    FolderPreparationIndicator(
+                        browsing: browsing,
+                        identifierPrefix: "clove.detail.preparation")
                 } leadingTools: {
                     if presentationPolicy.supportsPhotoPreview {
                         photoGridToggle

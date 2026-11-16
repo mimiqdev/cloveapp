@@ -126,6 +126,9 @@ final class FolderLibrarySession: FolderLibrary {
     /// The open folder's sharpness scheduler, paused on critical memory pressure.
     private var sharpnessScheduler: RegionSharpnessScheduler?
 
+    /// Coordinates folder-wide analysis and preview preparation status for the open session.
+    private var preparationCoordinator: FolderPreparationCoordinator?
+
     /// Whether background grouping/sharpness workers are paused due to critical memory pressure.
     private(set) var isPausedForMemoryPressure = false
 
@@ -213,6 +216,11 @@ final class FolderLibrarySession: FolderLibrary {
     /// The folder's photos with their marks, in scan order (PRD P0-03).
     var photos: [GridPhoto] { store.photos }
 
+    /// The open folder's analysis and preview-preparation status.
+    var preparationStatus: FolderPreparationStatus {
+        preparationCoordinator?.currentStatus ?? .idle
+    }
+
     /// Grouping's groups for the folder, in grid order and by grouping's stable keys
     /// (PRD P0-11). They arrive through ``FolderLibraryUpdate/groups(_:)``; before grouping's
     /// first publication this is empty.
@@ -289,6 +297,7 @@ final class FolderLibrarySession: FolderLibrary {
         publishedGroups = []
         thumbnailSource = nil
         detailSource = nil
+        publish(.preparation(.idle))
         publish(.photos([]))
     }
 
@@ -412,6 +421,7 @@ final class FolderLibrarySession: FolderLibrary {
             movedPhotoRecords[photo.id] = photo
         }
         store.remove(moved)
+        preparationCoordinator?.removePhotos(Set(moved))
         publish(.photos([]))
         await startGrouping()
         return result
@@ -427,13 +437,18 @@ final class FolderLibrarySession: FolderLibrary {
         let result = try await session.withAdmittedWork {
             try await mover.undo(entry, currentMarks: { currentMarks[$0] })
         }
+        var restoredSets: [ScannedPhotoSet] = []
         for restored in result.restored where !restored.keptInConfirmation {
             store.insert([.photo(restored.set)])
+            restoredSets.append(restored.set)
             if let photo = movedPhotoRecords.removeValue(forKey: restored.identity) {
                 store.setTime(photo.time, for: restored.identity)
                 store.setMarks(photo.marks, for: restored.identity)
             }
             movedRejectIdentities.remove(restored.identity)
+        }
+        if !restoredSets.isEmpty {
+            preparationCoordinator?.restorePhotos(restoredSets)
         }
         // The files are already back, so a failed reread must not turn the Undo into a failure.
         try? await rereadMarks(for: result.restored.map(\.identity))
@@ -758,6 +773,21 @@ final class FolderLibrarySession: FolderLibrary {
         thumbnailSource = makeThumbnailSource(for: session, caches: caches)
         detailSource = makeDetailSource(
             for: session, thumbnails: caches?.thumbnails, sharpness: caches?.sharpness)
+        let folderName = RecentFolderSummary.name(for: opened.recent)
+        let coordinator = FolderPreparationCoordinator(
+            folder: session.folder.id,
+            folderName: folderName,
+            generation: generation,
+            session: session,
+            thumbnailCache: caches?.thumbnails,
+            thumbnailPipeline: thumbnailPipeline,
+            regionScheduler: sharpnessScheduler,
+            publish: { [weak self] status in
+                guard let self, status.generation == self.scanGeneration else { return }
+                self.publish(.preparation(status))
+            })
+        preparationCoordinator = coordinator
+        coordinator.start()
         // The loss is reported for the folder this open installed, never for a later one.
         let monitor = makeLocationMonitor(for: session, mediaType: opened.recent.mediaType)
         locationMonitor = monitor
@@ -798,6 +828,10 @@ final class FolderLibrarySession: FolderLibrary {
         if let monitor = locationMonitor {
             locationMonitor = nil
             await monitor.stop()
+        }
+        if let coordinator = preparationCoordinator {
+            preparationCoordinator = nil
+            await coordinator.close()
         }
         await cacheEntryPreviews(generation: scanGeneration, immediate: true)
         thumbnailSource = nil
@@ -917,7 +951,9 @@ final class FolderLibrarySession: FolderLibrary {
         }
         let added = store.insert(items, storedMarks: storedMarks)
         guard !added.isEmpty else { return [] }
-        return added.compactMap { store.scannedSet(for: $0.id) }
+        let sets = added.compactMap { store.scannedSet(for: $0.id) }
+        preparationCoordinator?.registerDiscovered(sets, generation: generation)
+        return sets
     }
 
     /// Applies one batch's metadata and mark reads (PRD P0-03, P0-07, P0-11).
@@ -979,6 +1015,8 @@ final class FolderLibrarySession: FolderLibrary {
         // The folder can be replaced while grouping runs above, so the report is re-checked
         // against the generation it belongs to before it reaches the model.
         guard generation == scanGeneration else { return }
+        preparationCoordinator?.finishScan(
+            isPartial: recorded.status == .partial, generation: generation)
         publish(.scanFinished(recorded))
     }
 
@@ -987,6 +1025,7 @@ final class FolderLibrarySession: FolderLibrary {
         guard generation == scanGeneration else { return }
         await startGrouping()
         guard generation == scanGeneration else { return }
+        preparationCoordinator?.finishScan(isPartial: true, generation: generation)
         publish(
             .scanFinished(
                 FolderScanSummary(photoCount: store.count, status: .partial)))
@@ -1321,6 +1360,7 @@ final class FolderLibrarySession: FolderLibrary {
     /// apply it to a newer folder or to a later open of the same folder either.
     private func locationLost(_ loss: FolderLocationLoss, folder: FolderIdentity, generation: Int) {
         guard generation == scanGeneration else { return }
+        preparationCoordinator?.markLocationLost(loss.reason)
         publish(.locationLost(folder: folder, loss: loss, generation: generation))
         Task { [stores] in
             guard let access = try? await stores.value.access else { return }
@@ -1402,6 +1442,7 @@ final class FolderLibrarySession: FolderLibrary {
         }
         if event.contains(.critical) {
             isPausedForMemoryPressure = true
+            preparationCoordinator?.setMemoryPressurePaused(true)
             await grouping?.pauseAnalysis()
             await sharpnessScheduler?.pause()
         } else if event.contains(.normal), isPausedForMemoryPressure {
@@ -1415,6 +1456,7 @@ final class FolderLibrarySession: FolderLibrary {
         isPausedForMemoryPressure = false
         await grouping?.resumeAnalysis()
         await sharpnessScheduler?.resume()
+        preparationCoordinator?.setMemoryPressurePaused(false)
     }
 
     // MARK: - Publishing

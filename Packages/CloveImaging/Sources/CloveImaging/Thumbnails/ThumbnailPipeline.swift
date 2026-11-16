@@ -88,8 +88,8 @@ public actor ThumbnailPipeline {
                     waiters[waiterID] = waiter
                     latest[consumer] = waiterID
                     work.waiterIDs.append(waiterID)
-                    if priority == .visible && work.priority == .prefetch {
-                        work.priority = .visible
+                    if priority < work.priority {
+                        work.priority = priority
                     }
                     works[existingWorkID] = work
                     if let oldWaiterID { cancelWaiter(oldWaiterID) }
@@ -98,9 +98,7 @@ public actor ThumbnailPipeline {
                 }
                 if let oldWaiterID { cancelWaiter(oldWaiterID) }
                 if queue.count >= queueLimit {
-                    if priority == .visible,
-                        let victim = queue.last(where: { works[$0]?.priority == .prefetch })
-                    {
+                    if let victim = evictionVictim(for: priority) {
                         cancelWork(victim)
                     } else {
                         continuation.resume(throwing: ThumbnailPipelineError.queueFull)
@@ -154,6 +152,18 @@ public actor ThumbnailPipeline {
     var queuedCount: Int { queue.count }
     var activeCount: Int { active.count }
 
+    private func evictionVictim(for incoming: ThumbnailPriority) -> UUID? {
+        switch incoming {
+        case .visible:
+            return queue.last(where: { works[$0]?.priority == .folder })
+                ?? queue.last(where: { works[$0]?.priority == .prefetch })
+        case .prefetch:
+            return queue.last(where: { works[$0]?.priority == .folder })
+        case .folder:
+            return nil
+        }
+    }
+
     private func cancelWaiter(_ waiterID: UUID) {
         guard let waiter = waiters.removeValue(forKey: waiterID) else { return }
         waiter.cancellation.cancel()
@@ -165,8 +175,7 @@ public actor ThumbnailPipeline {
             cancelWork(work.id)
         } else {
             work.priority =
-                work.waiterIDs.contains { waiters[$0]?.priority == .visible }
-                ? .visible : .prefetch
+                work.waiterIDs.compactMap { waiters[$0]?.priority }.min() ?? .folder
             works[work.id] = work
         }
     }
@@ -194,7 +203,10 @@ public actor ThumbnailPipeline {
 
     private func drain() {
         while active.count < workerCount, !queue.isEmpty {
-            let index = queue.firstIndex { works[$0]?.priority == .visible } ?? 0
+            let index =
+                queue.firstIndex { works[$0]?.priority == .visible }
+                ?? queue.firstIndex { works[$0]?.priority == .prefetch }
+                ?? 0
             let workID = queue.remove(at: index)
             guard let work = works[workID] else { continue }
             let hasLiveWaiter = work.waiterIDs.contains {
