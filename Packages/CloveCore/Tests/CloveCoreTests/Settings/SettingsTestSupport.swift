@@ -42,7 +42,7 @@ let launchSettingKeys = [
     "autoAdvance.trigger.rating",
     "autoAdvance.trigger.reject",
     "detail.doubleTap",
-    "detail.zoomedRatingSwipe",
+    "detail.zoomedGestures",
     "gestures.enabled",
     "grid.groupDisplay",
     "groups.similarEnabled",
@@ -50,7 +50,6 @@ let launchSettingKeys = [
     "ratings.enabled",
     "rejects.folderName",
     "rejects.moveEnabled",
-    "zoom.keepInDetail",
 ]
 
 /// Settings where every field differs from its default, so a round trip exercises every key.
@@ -68,8 +67,7 @@ func nonDefaultSettings() throws -> AppSettings {
             triggers: AutoAdvanceTriggers(rating: false, reject: false, colourLabel: true)
         ),
         doubleTap: .off,
-        zoomedRatingSwipe: .singleFingerAxisLock,
-        keepZoom: KeepZoom(inDetail: true),
+        zoomedGestures: .pan,
         extendedColourLabelsEnabled: true,
         rejectsFolderName: folderName,
         moveRejectsEnabled: false,

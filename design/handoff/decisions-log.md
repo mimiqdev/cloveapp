@@ -8,6 +8,15 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Zoomed detail gestures, double-tap target, group-only kept zoom, and one chrome (#302)
+
+Owner decisions, 2026-11-16. Zooming in centres the subject, so the culling actions and the controls that act on them have to keep working there:
+
+- **`While zoomed` replaces `Zoomed rating swipe`** (`detail.zoomedGestures`, default `Rate & switch`): `Rate & switch` keeps the fit single-finger muscle memory at every scale. Vertical drags run the same rating ladder and horizontal drags switch photos, while two-finger drags pan and pinch. `Pan` keeps one-finger panning and rates from a two-finger vertical drag. Two-finger panning is the scroll view's own pan with `minimumNumberOfTouches = 2`, so a rating or a switch never pans the image. The old `twoFinger` value is not migrated to `Pan`; the upgrade adopts the new default.
+- **`Double-tap` gains `Zoom to tap point`** (`detail.doubleTap`, default `Zoom to focus`): `Zoom to focus` keeps the presented-region target described above, `Zoom to tap point` always centres 100% on the tapped image point even while focus regions are shown, and `Off` disables the recognizer. A stored legacy `zoom` value no longer names a case and falls back to `Zoom to focus`, so the upgrade keeps its behavior without migration code.
+- **`Keep zoom in detail` is removed** (`zoom.keepInDetail`): a retained zoom across unrelated standalone photos could open on an arbitrary region before focus analysis landed and forced high-resolution renders during fast browsing. Similar groups keep synchronizing scale and centre anchor between members, including through a zoomed horizontal switch and group auto-advance; leaving a group or switching between standalone photos always returns to fit.
+- **Chrome is one visibility across fit and zoom**: `MarkingToolbar`, the filmstrip, the Reject N unmarked pill, Info/Undo and the status line stay put when the photo zooms in or returns to fit, and a single tap on the preview hides or shows all of them together. The iPad rail still never hides. This supersedes the `100% zoom` line in Detail states and the earlier "both fade while zoomed" note.
+
 ## Photo Preview and Focus View terminology and toggle (#256)
 
 Live Figma links for the updated wide iPad and expanded Duo detail controls require an authenticated Figma session and were unavailable in this environment, so the implementation follows the written specification in #256 together with `design/handoff/screens.md`, `design/handoff/components.md`, `design/handoff/interactions.md`, and `design/handoff/tokens/`:
@@ -119,7 +128,7 @@ Issue #118 replaces visible save-status words in grid and detail with glyphs:
 - Batch success has no toast. On partial failure, failed tiles have corner dots and the header shows the Failed glyph. Tapping retries the failed items only.
 - Every glyph has a VoiceOver label. The former status strings in `copy.md` are accessibility labels only. Counts and companion text remain visible.
 
-Undo stays in the detail top bar with its existing wiring and hides at 100% zoom. This decision adds no undo behavior. Reject presentation reads `isRejected` and does not depend on its storage representation.
+Undo stays in the detail top bar with its existing wiring and shares the chrome's one visibility, so it stays put across fit and zoom (#302). This decision adds no undo behavior. Reject presentation reads `isRejected` and does not depend on its storage representation.
 
 ## Design principles
 
@@ -134,7 +143,7 @@ Undo stays in the detail top bar with its existing wiring and hides at 100% zoom
 - Bottom input is option A: one floating glass capsule above the home indicator.
   - Left: Reject, system red. Middle: 5 stars. Right: label button that pops the 5 color dots above the capsule, closing after a pick.
   - Undo moves to the top bar.
-  - Filmstrip floats just above the capsule; both fade while zoomed or on tap of the photo.
+  - Filmstrip floats just above the capsule; both stay in place at fit and while zoomed, and a single tap on the photo hides or shows them with the rest of the chrome (#302).
 - Reject is icon-only: a red-outlined circle with a ✕ (off); filled red circle with a white ✕ when the photo is rejected. Same control in the capsule, iPad rail and Duo dock.
 - Top bar right: ⓘ Info and Undo. Info opens a medium-detent sheet: Capture (time with subseconds, camera + serial, lens, exposure) and File (folder, size, marks + where they are stored, save status). Read-only for MVP; editing metadata comes later.
 - Swipe-up rating shows a compact vertical star bar (empty stars that fill bottom-up as you drag, max = enabled levels) with a ✕ chip below for swipe-down Reject. The capsule stars preview the live step.
@@ -145,7 +154,7 @@ Figma: revised frames sit to the right of the original 03 Photo Detail row (defa
 
 - Rejected: capsule Reject becomes a filled red circle, stars and label go neutral, photo dims. Subtitle "1 / 11 · Rejected · ● Saved".
 - Save failed: subtitle "1 / 11 · ● Save failed · Retry" (red, Retry tappable). Marks stay as set.
-- 100% zoom: capsule, filmstrip, Info and Undo hide; subtitle shows "100%" and a small 100% chip fades out.
+- 100% zoom: chrome stays as it was, so the capsule, filmstrip, Info and Undo remain until a single tap hides them; the subtitle shows "100%" and a small 100% chip fades out (#302).
 - Filmstrips everywhere: rejected thumbs are dimmed, no ✕ badge.
 
 ## Grid (decided 2026-11-10)

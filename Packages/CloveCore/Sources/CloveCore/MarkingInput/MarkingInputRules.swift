@@ -4,9 +4,9 @@
 /// input value. A change that would leave the marks equal is reported as `.noChange`, so it
 /// neither writes nor starts auto-advance (PRD P0-06 acceptance).
 ///
-/// Gestures report no change while marking gestures are off or the view is zoomed, because
-/// vertical marking swipes are disabled while zoomed (PRD Gesture-related settings and Detail
-/// gestures). Keys and the rating bar are not affected by either switch.
+/// Gestures report no change while marking gestures are off, and a swipe that no zoomed gesture
+/// mode claims never commits (PRD Gesture-related settings and Detail gestures). Keys and the
+/// rating bar are not affected by either switch.
 public struct MarkingInputRules: Hashable, Sendable {
     /// The settings the rules read: gestures, enabled ratings and auto-advance (PRD P0-06).
     public var settings: AppSettings
@@ -22,23 +22,24 @@ public struct MarkingInputRules: Hashable, Sendable {
         self.markingSwipeRules = markingSwipeRules
     }
 
-    /// Claims vertical drags at fit, or while zoomed when `singleFingerAxisLock` is selected.
+    /// Claims vertical drags at fit, and while zoomed when single-finger drags rate
+    /// (`zoomedGestures == .rateAndSwitch`).
     public func beginsSwipe(
         horizontalTravel: Double, verticalTravel: Double, isZoomed: Bool
     ) -> Bool {
         markingSwipeRules.beginsSwipe(
             horizontalTravel: horizontalTravel, verticalTravel: verticalTravel,
             isZoomed: isZoomed, gesturesEnabled: settings.gesturesEnabled,
-            zoomedRatingSwipe: settings.zoomedRatingSwipe)
+            zoomedGestures: settings.zoomedGestures)
     }
 
     /// Whether a swipe with `touchCount` touches may commit at the current zoom state.
     public func allowsSwipe(isZoomed: Bool, touchCount: Int) -> Bool {
         guard settings.gesturesEnabled else { return false }
         guard isZoomed else { return touchCount == 1 }
-        switch settings.zoomedRatingSwipe {
-        case .twoFinger: return touchCount == 2
-        case .singleFingerAxisLock: return touchCount == 1
+        switch settings.zoomedGestures {
+        case .rateAndSwitch: return touchCount == 1
+        case .pan: return touchCount == 2
         }
     }
 

@@ -38,17 +38,18 @@ struct DetailMarkingActions {
 /// hardware keys — resolves through C13's ``MarkingInputRules`` and then asks the screen to write
 /// it and start its auto-advance (PRD In-group culling, P0-06, PRD Auto-advance). The screen
 /// supplies the order a navigation swipe moves through using ``DetailMarkingActions``. Navigating
-/// within the same group preserves zoom and position; leaving follows the detail setting.
+/// within the same group preserves zoom and position; any other photo change returns to fit.
 ///
 /// The selected display mode controls fit and zoom together. A held screen RAW
 /// appears immediately; otherwise the camera preview fills the screen-render wait.
 /// Camera mode keeps its preview at fit and decodes its full camera image for zoom.
 /// Every quality replacement preserves zoom and position.
 ///
-/// Navigation is gesture-only: horizontal swipes at fit move between photos. Single taps anywhere
-/// on the preview toggle chrome at both fit and zoomed scales (waiting for the double-tap window),
-/// and double taps anywhere zoom to 100% or return to fit (PRD Detail and marking, #252, #273).
-/// The filmstrip remains visible while zoomed unless hidden by the chrome toggle.
+/// Navigation is gesture-only: horizontal swipes move between photos at fit and in the default
+/// zoomed mode. Single taps anywhere on the preview toggle chrome at both fit and zoomed scales
+/// (waiting for the double-tap window), and double taps anywhere zoom to 100% or return to fit
+/// (PRD Detail and marking, #252, #273). Chrome stays steady across fit and zoom, so entering 100%
+/// never hides the marking controls (#302).
 ///
 /// Folder access problems appear in the header's indicator and banner (PRD P0-08). A change
 /// that did not confirm brings the shared failure toast, and the files supply the marks again.
@@ -138,7 +139,7 @@ struct DetailMarkingView: View {
     @State private var nextCommandID = 0
 
     /// The position the previous photo showed, waiting for the new pixels (PRD In-group culling,
-    /// synchronized zoom). A regular detail view keeps the level without this.
+    /// synchronized zoom). Only a group keeps it; every other photo change returns to fit (#302).
     @State private var keptZoom: DetailZoomSnapshot?
 
     /// The scale the previous photo showed, so the next photo opens at the same native-relative
@@ -224,9 +225,8 @@ struct DetailMarkingView: View {
             }
     }
 
-    private var chromeIsVisible: Bool { !hidesChrome && scale <= DetailFitScale.tolerance }
-
-    private var filmstripIsVisible: Bool { !hidesChrome }
+    /// Chrome is one visibility across fit and zoom: only the single-tap toggle changes it (#302).
+    private var chromeIsVisible: Bool { !hidesChrome }
 
     private var displayMarks: PhotoMarks { photo.marks }
 
@@ -285,7 +285,6 @@ struct DetailMarkingView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
-        .animation(.easeInOut(duration: 0.2), value: filmstripIsVisible)
         .task(id: scale > DetailFitScale.tolerance) {
             showsZoomChip = scale > DetailFitScale.tolerance
             guard showsZoomChip else { return }
@@ -448,10 +447,8 @@ struct DetailMarkingView: View {
                 Text(detailSubtitle)
                     .lineLimit(1)
                     .accessibilityIdentifier("clove.detail.zoom")
-                if scale <= DetailFitScale.tolerance {
-                    SaveStatusIndicator(
-                        browsing: browsing, identifierPrefix: "clove.detail.saveState")
-                }
+                SaveStatusIndicator(
+                    browsing: browsing, identifierPrefix: "clove.detail.saveState")
             }
             .font(.caption)
             .foregroundStyle(Color.clove.text.secondary)
@@ -582,7 +579,7 @@ struct DetailMarkingView: View {
             // width, and the strip's content fills that viewport up to the toolbar (#237).
             // The two regions share the photo stage's background, so no contrasting sidebar slab
             // divides them.
-            if showsFilmstrip && filmstripIsVisible {
+            if showsFilmstrip && chromeIsVisible {
                 HStack(alignment: .bottom, spacing: 0) {
                     DetailFilmstrip(
                         photos: order, current: photo.id, thumbnails: browsing.thumbnails,
@@ -653,10 +650,8 @@ struct DetailMarkingView: View {
                     HStack(spacing: 0) {
                         Text(detailSubtitle)
                             .accessibilityIdentifier("clove.detail.zoom")
-                        if scale <= DetailFitScale.tolerance {
-                            SaveStatusIndicator(
-                                browsing: browsing, identifierPrefix: "clove.detail.saveState")
-                        }
+                        SaveStatusIndicator(
+                            browsing: browsing, identifierPrefix: "clove.detail.saveState")
                     }
                 } titleAccessory: {
                     FolderPreparationIndicator(
@@ -768,9 +763,9 @@ struct DetailMarkingView: View {
                             .foregroundStyle(Color.clove.text.primary)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .cloveGlass(in: Capsule())
-                            .padding(.bottom, (showsFilmstrip && filmstripIsVisible) ? 0 : 12)
+                            .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 0 : 12)
                     }
-                    if showsFilmstrip && filmstripIsVisible {
+                    if showsFilmstrip && chromeIsVisible {
                         VStack(spacing: 8) {
                             DetailFilmstrip(
                                 photos: order, current: photo.id, thumbnails: browsing.thumbnails,
@@ -846,7 +841,7 @@ struct DetailMarkingView: View {
             image: shown?.image ?? placeholder,
             fullResolutionPixels: shown?.fullResolutionPixels,
             command: command,
-            doubleTapZoomEnabled: settings.doubleTap == .zoom,
+            doubleTapZoomEnabled: settings.doubleTap != .off,
             rules: rules,
             currentRating: browsing.shownMarks(for: photo.id).rating,
             feedback: swipeFeedback,
@@ -878,8 +873,7 @@ struct DetailMarkingView: View {
         .overlay {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
-                controlsHeight: controlsHeight,
-                chromeIsVisible: (showsFilmstrip && filmstripIsVisible) || chromeIsVisible)
+                controlsHeight: controlsHeight, chromeIsVisible: chromeIsVisible)
         }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -1005,13 +999,14 @@ struct DetailMarkingView: View {
 
     // MARK: - Pixels
 
-    /// Asks for the photo's preview and keeps the zoom the screen's policy keeps (PRD P0-04).
+    /// Asks for the photo's preview and keeps the crop only within its similar group (PRD P0-04).
     ///
-    /// Between members of one group, the new photo opens at the previous photo's crop. A
-    /// deferred answer is retried a bounded number of times because the pipeline may have been
-    /// busy with the photo that was on screen a moment ago; a refused or unreadable file is final
-    /// and shown as its own state. The neighbours' previews are prefetched after the photo's own
-    /// pixels are on screen, so a swipe to them is cheap (G1 scheduling row).
+    /// Between members of one group, the new photo opens at the previous photo's crop; every other
+    /// photo change returns to fit (#302). A deferred answer is retried a bounded number of times
+    /// because the pipeline may have been busy with the photo that was on screen a moment ago; a
+    /// refused or unreadable file is final and shown as its own state. The neighbours' previews are
+    /// prefetched after the photo's own pixels are on screen, so a swipe to them is cheap (G1
+    /// scheduling row).
     private func loadPreview(for photo: GridPhoto) async {
         let arrivalID = PerformanceSignpost.detailArrival.makeSignpostID()
         var screenArrivalInterval: OSSignpostIntervalState? = PerformanceSignpost.detailArrival
@@ -1040,26 +1035,27 @@ struct DetailMarkingView: View {
                 }
             } ?? false
         previousPhoto = photo.id
-        let keepsScale = keepsPosition || settings.keepZoom.inDetail
-        if !keepsPosition { keptZoom = nil }
-        if !keepsScale {
+        // Only members of one similar group share a crop; every other photo change returns to fit
+        // (#302). A retained zoom across unrelated photos would open on an arbitrary region before
+        // the next photo's focus analysis lands.
+        if keepsPosition {
+            if let shown {
+                // A preview that has not arrived yet leaves `shown` nil, so this branch is skipped:
+                // the zoom read before an earlier step in a run of quick steps stays pending for
+                // the photo that finally loads (PRD In-group culling, synchronized zoom).
+                let snapshot = probe.container?.zoomSnapshot
+                keptScale = snapshot?.scale
+                keptNativeScale = snapshot != nil ? nativeFullResolutionScale(for: shown) : nil
+                keptZoom = snapshot
+                // A view at fit keeps no zoom, so nothing carries into the next photo. That
+                // includes a 100% that is still waiting for the render's size: it belongs to the
+                // photo that was tapped, not to the one a swipe moves to (#111).
+                if snapshot == nil { zoomMode = .fit }
+            }
+        } else {
             keptZoom = nil
             keptScale = nil
             keptNativeScale = nil
-        } else if let shown {
-            // A preview that has not arrived yet leaves `shown` nil, so this branch is skipped:
-            // the zoom read before an earlier step in a run of quick steps stays pending for the
-            // photo that finally loads (PRD In-group culling, synchronized zoom).
-            let snapshot = probe.container?.zoomSnapshot
-            keptScale = snapshot?.scale
-            keptNativeScale = snapshot != nil ? nativeFullResolutionScale(for: shown) : nil
-            keptZoom = keepsPosition ? snapshot : nil
-            // A view at fit keeps no zoom, so nothing carries into the next photo. That includes a
-            // 100% that is still waiting for the render's size: it belongs to the photo that was
-            // tapped, not to the one a swipe moves to (#111).
-            if snapshot == nil { zoomMode = .fit }
-        }
-        if !keepsScale {
             zoomMode = .fit
             setZoom(.fit)
         }
@@ -1199,9 +1195,8 @@ struct DetailMarkingView: View {
     ///
     /// The next photo is where the zoom is converted to the new photo's native size, so 100% stays
     /// 100% and a pinched fraction of native stays that fraction (PRD In-group culling,
-    /// synchronized zoom; PRD P0-12). A group also keeps the position, and asks for the pixels
-    /// its retained zoom needs, as before; a regular detail view keeps the level only and starts
-    /// no render of its own.
+    /// synchronized zoom; PRD P0-12). A group also keeps the position, and asks for the pixels its
+    /// retained zoom needs; a photo outside the group opens at fit instead (#302).
     ///
     /// A 100% zoom is recomputed once when pixels land with a size other than the one it was
     /// computed with: a RAW render is the photo's own pixels, so it corrects a preview-sized or
@@ -1230,9 +1225,8 @@ struct DetailMarkingView: View {
                 zoomMode = .fullResolution(anchor: chosen, size: image.fullResolutionPixels)
             }
             setZoom(.scale(opening, anchor: anchor.unitPoint))
-            // A group's retained zoom may need more pixels than the preview holds (G1 "Preview,
-            // detail (I2)"); a regular detail view keeps its level without starting a render, as
-            // before.
+            // The group's retained zoom may need more pixels than the preview holds (G1 "Preview,
+            // detail (I2)").
             if keepsPosition && !isLoadingFit { upgradeIfNeeded() }
         } else if case .fullResolution(let chosen, let targetSize) = zoomMode, viewSize.width > 0 {
             if let pixels = image.fullResolutionPixels {
@@ -1383,8 +1377,12 @@ struct DetailMarkingView: View {
         return false
     }
 
-    /// The double-tap action: 100% centred on the most relevant presented focus region (or the
-    /// tapped point when none is presented), or back to fit (PRD P0-04).
+    /// The double-tap action chosen in Settings, or back to fit (PRD P0-04, PRD Gesture-related
+    /// settings).
+    ///
+    /// `Zoom to focus` (the default) centres 100% on the most relevant presented focus region and
+    /// `Zoom to tap point` always centres on the tapped image point, even while focus regions are
+    /// presented (#302). `Off` leaves double taps to the scroll view.
     ///
     /// The target is the photo's native 100%, computed from the size that arrived with the first
     /// preview, so the embedded preview is drawn enlarged and the RAW render later replaces it at
@@ -1398,7 +1396,7 @@ struct DetailMarkingView: View {
     /// wait for, so the tap inspects the preview at ``DetailZoom/inspectionScale`` instead of
     /// doing nothing for good.
     private func doubleTap(at anchor: UnitPoint) {
-        guard settings.doubleTap == .zoom else { return }
+        guard settings.doubleTap != .off else { return }
         guard scale <= DetailFitScale.tolerance else {
             inspectedFocusRegionID = nil
             zoomMode = .fit
@@ -1406,10 +1404,11 @@ struct DetailMarkingView: View {
             return
         }
         guard shown != nil else { return }
-        if let targetRegion = focusRegionState.preferredDoubleTapRegion(
-            at: anchor,
-            visible: browsing.showsFocusRegions,
-            inspectedRegionID: inspectedFocusRegionID)
+        if settings.doubleTap == .zoomToFocus,
+            let targetRegion = focusRegionState.preferredDoubleTapRegion(
+                at: anchor,
+                visible: browsing.showsFocusRegions,
+                inspectedRegionID: inspectedFocusRegionID)
         {
             inspectedFocusRegionID = targetRegion.id
             inspectFullResolution(at: targetRegion.centre)

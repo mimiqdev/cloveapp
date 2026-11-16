@@ -106,7 +106,8 @@ The pill sits centred in its own row above the filmstrip. Hide it with chrome, w
 | settings.appearance.footer | Photos are never tinted. Only the app around them changes. |
 | settings.culling | Culling & marking |
 | settings.gestures | Marking gestures |
-| settings.zoomedRatingSwipe | Zoomed rating swipe |
+| settings.zoomedGestures | While zoomed (Rate & switch / Pan) |
+| settings.zoomedGestures.footer | Rate & switch keeps one-finger rating and photo switching at fit and while zoomed, and pans with two fingers. Pan pans with one finger and rates with two. |
 | settings.ratingScale | Rating scale |
 | settings.extendedColourLabels | Extended color labels |
 | settings.autoAdvance.destination | After marking (Stay / Next photo / Next unmarked photo) |
@@ -114,8 +115,8 @@ The pill sits centred in its own row above the filmstrip. Hide it with chrome, w
 | settings.browsing | Browsing & groups |
 | settings.groups | Similar groups |
 | settings.gridDisplay | Grid display (Expanded / Collapsed) |
-| settings.doubleTap | Double-tap (Zoom to 100% / Off) |
-| settings.keepZoom | Keep zoom in detail |
+| settings.doubleTap | Double-tap (Zoom to focus / Zoom to tap point / Off) |
+| settings.detailZoom.footer | Similar groups keep zoom and position between members. Leaving a group or switching standalone photos returns to fit. |
 | settings.photoDisplay | Photo display |
 | settings.photoDisplay.mode | Show photos as (RAW / Camera preview) |
 | settings.move | Move rejects |

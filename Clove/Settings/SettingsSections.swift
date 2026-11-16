@@ -78,18 +78,15 @@ struct CullingAndMarkingSettingsSections: View {
             .accessibilityIdentifier("clove.settings.gesturesEnabled")
 
             Picker(
-                "Zoomed rating swipe",
-                selection: settingsBinding(store, \.zoomedRatingSwipe)
+                "While zoomed",
+                selection: settingsBinding(store, \.zoomedGestures)
             ) {
-                Text("Two-finger swipe").tag(ZoomedRatingSwipe.twoFinger)
-                Text("Single-finger axis lock").tag(ZoomedRatingSwipe.singleFingerAxisLock)
+                Text("Rate & switch").tag(ZoomedGestures.rateAndSwitch)
+                Text("Pan").tag(ZoomedGestures.pan)
             }
-            .accessibilityLabel("Zoomed rating swipe")
-            .accessibilityValue(
-                store.settings.zoomedRatingSwipe == .twoFinger
-                    ? "Two-finger swipe" : "Single-finger axis lock"
-            )
-            .accessibilityIdentifier("clove.settings.zoomedRatingSwipe")
+            .accessibilityLabel("While zoomed")
+            .accessibilityValue(zoomedGesturesTitle)
+            .accessibilityIdentifier("clove.settings.zoomedGestures")
         } header: {
             if showsCategoryTitle {
                 VStack(alignment: .leading, spacing: 12) {
@@ -99,6 +96,11 @@ struct CullingAndMarkingSettingsSections: View {
             } else {
                 SettingsSectionHeader("Marking & gestures", identifier: "markingGestures")
             }
+        } footer: {
+            Text(
+                "Rate & switch keeps one-finger rating and photo switching at fit and while zoomed, and pans with two fingers. Pan pans with one finger and rates with two."
+            )
+            .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
 
@@ -176,6 +178,13 @@ struct CullingAndMarkingSettingsSections: View {
         store.settings.autoAdvance.destination == .stay
     }
 
+    private var zoomedGesturesTitle: String {
+        switch store.settings.zoomedGestures {
+        case .rateAndSwitch: "Rate & switch"
+        case .pan: "Pan"
+        }
+    }
+
     private var enabledRatingsSpokenSummary: String {
         let levels = store.settings.enabledRatings.levels.compactMap(\.starCount)
         if levels.count == Self.ratingLevels.count {
@@ -224,29 +233,32 @@ struct BrowsingAndGroupsSettingsSections: View {
 
         Section {
             Picker("Double-tap", selection: settingsBinding(store, \.doubleTap)) {
-                Text("Zoom to 100%").tag(DoubleTapBehaviour.zoom)
+                Text("Zoom to focus").tag(DoubleTapBehaviour.zoomToFocus)
+                Text("Zoom to tap point").tag(DoubleTapBehaviour.zoomToTapPoint)
                 Text("Off").tag(DoubleTapBehaviour.off)
             }
             .accessibilityLabel("Double-tap")
-            .accessibilityValue(store.settings.doubleTap == .zoom ? "Zoom to 100%" : "Off")
+            .accessibilityValue(doubleTapTitle)
             .accessibilityIdentifier("clove.settings.doubleTap")
-
-            Toggle(
-                "Keep zoom in detail",
-                isOn: settingsBinding(store, \.keepZoom.inDetail)
-            )
-            .accessibilityIdentifier("clove.settings.keepZoomInDetail")
         } header: {
             SettingsSectionHeader("Detail zoom", identifier: "detailZoom")
         } footer: {
             Text(
-                "Similar groups still synchronize zoom between members, even when keeping zoom between other photos is off."
+                "Similar groups keep zoom and position between members. Leaving a group or switching standalone photos returns to fit."
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
 
         SettingsSaveFailureSection()
+    }
+
+    private var doubleTapTitle: String {
+        switch store.settings.doubleTap {
+        case .zoomToFocus: "Zoom to focus"
+        case .zoomToTapPoint: "Zoom to tap point"
+        case .off: "Off"
+        }
     }
 }
 

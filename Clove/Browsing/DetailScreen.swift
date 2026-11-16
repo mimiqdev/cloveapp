@@ -34,7 +34,8 @@ struct DetailScreen: View {
     /// The auto-advance a mark started, waiting out its pause (PRD Auto-advance).
     @State private var autoAdvance = MarkAutoAdvance()
 
-    /// C12's current settings: the double-tap behaviour, keep-zoom and the enabled ratings.
+    /// C12's current settings: the double-tap behaviour, the zoomed gestures and the enabled
+    /// ratings.
     private var settings: AppSettings { store.settings }
 
     /// Creates the screen for one browsing model.

@@ -409,29 +409,38 @@ extension CloveFlowTests {
 
         preview.doubleTap()
         XCTAssertTrue(zoom.label.hasSuffix("100%"))
+        // Chrome is one visibility across fit and zoom (#302).
         XCTAssertTrue(strip.exists, "The filmstrip should stay visible while zoomed")
+        XCTAssertTrue(
+            detailMarksControl(in: app).exists,
+            "The marking controls should stay visible while zoomed")
 
         preview.doubleTap()
         XCTAssertEqual(zoom.label, fitLabel)
 
-        // A pinch still zooms, and while zoomed a one-finger drag pans instead of marking
-        // (PRD Detail gestures: vertical marking swipes are disabled while zoomed).
+        // A pinch still zooms, and the default zoomed mode keeps the one-finger culling gestures, so
+        // a one-finger drag neither pans the image nor switches photos (#302).
         let marks = detailMarksControl(in: app)
         let marksAtFit = marks.value as? String
         preview.pinch(withScale: 2, velocity: 1)
         XCTAssertNotEqual(zoom.label, fitLabel)
         XCTAssertTrue(strip.exists, "The filmstrip should stay visible after pinching to zoom")
-
+        let centredBeforeDrag = preview.value as? String
         drag(preview, byPointsX: 0, y: -150)
+        XCTAssertEqual(
+            preview.value as? String, centredBeforeDrag,
+            "The zoomed one-finger drag panned the image instead of keeping the culling gestures")
 
         preview.doubleTap()
         XCTAssertEqual(zoom.label, fitLabel)
 
-        // A zoomed drag that marked would change the marks, and a write would show its own save
-        // state or move the detail on, so what both read here stays as it was at fit.
+        // The photo already has its highest rating, so a drag that rated it could only write a
+        // change and move the detail on; the marks and the photo both stay where they were.
         XCTAssertEqual(
-            marks.value as? String, marksAtFit, "The zoomed drag rated the photo instead of panning"
-        )
+            marks.value as? String, marksAtFit, "The zoomed drag rated the photo")
+        XCTAssertEqual(
+            element(in: app, "clove.detail.fileName").label, "MMQ02678.ARW",
+            "The zoomed drag switched photos")
     }
 
     @MainActor

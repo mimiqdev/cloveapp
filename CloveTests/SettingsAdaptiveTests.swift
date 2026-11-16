@@ -100,8 +100,8 @@ struct SettingsAdaptiveTests {
             $0.rejectsFolderName =
                 (try? RejectsFolderName.validated("_Trash")) ?? .defaultFolderName
             $0.photoDisplayMode = .rawFirst
-            $0.zoomedRatingSwipe = .singleFingerAxisLock
-            $0.keepZoom.inDetail = true
+            $0.zoomedGestures = .pan
+            $0.doubleTap = .zoomToTapPoint
             $0.appearance = AppearanceChoice(mode: .dark, family: .nord)
         }
         #expect(store.photoDisplayMode == .rawFirst)
