@@ -17,10 +17,10 @@ public struct MarkingSwipeRules: Hashable, Sendable {
 
     public func beginsSwipe(
         horizontalTravel: Double, verticalTravel: Double, isZoomed: Bool, gesturesEnabled: Bool,
-        zoomedRatingSwipe: ZoomedRatingSwipe = .twoFinger
+        zoomedGestures: ZoomedGestures = .rateAndSwitch
     ) -> Bool {
         guard gesturesEnabled else { return false }
-        if isZoomed && zoomedRatingSwipe != .singleFingerAxisLock {
+        if isZoomed && zoomedGestures != .rateAndSwitch {
             return false
         }
         return abs(verticalTravel) > 0

@@ -10,8 +10,7 @@ import CloveCore
             "enabledRatings",
             "autoAdvance",
             "doubleTap",
-            "zoomedRatingSwipe",
-            "keepZoom",
+            "zoomedGestures",
             "extendedColourLabelsEnabled",
             "rejectsFolderName",
             "moveRejectsEnabled",
@@ -22,7 +21,6 @@ import CloveCore
         ])
     #expect(propertyLabels(of: AutoAdvance()) == ["destination", "triggers"])
     #expect(propertyLabels(of: AutoAdvanceTriggers()) == ["rating", "reject", "colourLabel"])
-    #expect(propertyLabels(of: KeepZoom()) == ["inDetail"])
 }
 
 @Test func removedSettingsAreNeitherStoredNorRead() {
@@ -34,6 +32,8 @@ import CloveCore
         "embeddedWrites",
         "writeEmbeddedMetadata",
         "groupingSensitivity",
+        "detail.zoomedRatingSwipe",
+        "zoom.keepInDetail",
     ]
     let storage = InMemorySettingsStorage()
     for key in removedKeys {

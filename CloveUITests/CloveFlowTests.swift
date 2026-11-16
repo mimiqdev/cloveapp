@@ -215,7 +215,8 @@ final class CloveFlowTests: XCTestCase {
         centre.doubleTap()
         XCTAssertEqual(element(app, "clove.detail.zoom").label, "3 / 36 · 100%")
         XCTAssertTrue(strip.exists)
-        XCTAssertFalse(element(app, "clove.detail.info").exists)
+        // Chrome is one visibility across fit and zoom (#302).
+        XCTAssertTrue(element(app, "clove.detail.info").exists)
         XCTAssertTrue(rail.isHittable)
         XCTAssertEqual(preview.frame, stageFrame)
         // Toggling to Photo Preview while zoomed preserves zoom at 100%, then back to Focus View.
@@ -670,12 +671,13 @@ final class CloveFlowTests: XCTestCase {
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.doubleTap()
         XCTAssertEqual(zoom.label, "3 / 36 · 100%")
+        // Chrome is one visibility across fit and zoom: the marking controls, Info, Undo and the
+        // filmstrip all stay put until a single tap hides them (#302).
         if !isRail {
-            XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+            XCTAssertTrue(element(app, "clove.detail.capsule").exists)
         }
-        XCTAssertFalse(element(app, "clove.detail.info").exists)
-        XCTAssertFalse(element(app, "clove.detail.undo").exists)
-        // Filmstrip stays visible while zoomed; single tap toggles it without stepping (#273).
+        XCTAssertTrue(element(app, "clove.detail.info").exists)
+        XCTAssertTrue(element(app, "clove.detail.undo").exists)
         XCTAssertTrue(strip.exists)
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
@@ -697,10 +699,13 @@ final class CloveFlowTests: XCTestCase {
         }
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertEqual(preview.value as? String, zoomedPosition)
-        // A horizontal drag while zoomed pans the scroll view instead of stepping photos.
+        // A horizontal drag while zoomed switches photos in the default mode, and a photo outside
+        // the group opens at fit (#302).
         preview.swipeLeft()
-        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        centre.doubleTap()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        XCTAssertFalse(zoom.label.contains("100%"))
+        preview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         // The fit animation restores the chrome after the double tap returns, so this reads
         // the observed state instead of asserting one immediate snapshot.
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
@@ -837,7 +842,9 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertTrue(glyph.exists)
             XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
-            preview.swipeLeft()
+            // A two-finger drag pans the zoomed image in the default mode without switching or
+            // marking, and the glyph stays put with it.
+            try swipeTwoFingersVertically(in: preview, deltaY: -120, app: app)
             XCTAssertTrue(glyph.exists)
             XCTAssertEqual(glyph.frame, glyphFrame)
             XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
@@ -966,25 +973,28 @@ final class CloveFlowTests: XCTestCase {
         let strip = element(app, "clove.detail.filmstrip")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), info))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
+        // Chrome is one visibility across fit and zoom (#302).
+        XCTAssertTrue(info.exists)
         XCTAssertTrue(strip.exists)
-        // While zoomed, single taps near the edges toggle chrome and horizontal swipes do not navigate (#252, #273).
+        // Single taps near the edges toggle all togglable chrome and never navigate (#252, #273).
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
         XCTAssertEqual(fileName.label, "MMQ02678.ARW")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+        // A zoomed one-finger horizontal drag switches to the next group member and keeps the crop.
         preview.swipeLeft()
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
         XCTAssertTrue(waitForLabel("MMQ02679.ARW", fileName))
         XCTAssertTrue(
             wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
-        XCTAssertFalse(info.exists)
         XCTAssertTrue(strip.exists)
         app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        // MMQ02680 is outside the group, so leaving it returns to fit with all the chrome.
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
         XCTAssertTrue(strip.exists)
     }
@@ -1335,7 +1345,7 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.detail.info.done").tap()
             let preview = element(app, "clove.detail.preview")
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-            XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+            XCTAssertTrue(element(app, "clove.detail.capsule").exists)
             capture("detail-zoom-\(theme)")
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
             element(app, "clove.detail.capsule.reject").tap()
@@ -2383,8 +2393,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(ratedAndRed.label.contains("5 stars"))
     }
 
+    /// #302: the default zoomed mode keeps one-finger rating and photo switching, `Pan` keeps the
+    /// one-finger pan with a two-finger rating swipe, and the chrome stays steady at both scales.
     @MainActor
-    func testZoomedRatingSwipeModesAndFitGestures() throws {
+    func testZoomedRatingSwipeModesAndPinchSafety() throws {
         let app = launchSample()
         defer { app.terminate() }
         openLibrary(app)
@@ -2394,40 +2406,45 @@ final class CloveFlowTests: XCTestCase {
         let fileName = element(app, "clove.detail.fileName")
         let capsule = element(app, "clove.detail.capsule")
         let zoom = element(app, "clove.detail.zoom")
+        let strip = element(app, "clove.detail.filmstrip")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertEqual(capsule.value as? String, "Unmarked")
 
-        // Fit gestures remain unchanged in default mode.
+        // Fit gestures remain unchanged in the default mode.
         preview.swipeLeft()
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
         preview.swipeRight()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
 
-        // Pinch zooms in default mode and never rates.
+        // Pinching zooms and never rates, and every togglable chrome item stays where it was.
         preview.pinch(withScale: 2.0, velocity: 1.0)
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         XCTAssertEqual(capsule.value as? String, "Unmarked")
-
-        // 1-finger pan still pans while zoomed in default mode and never rates.
+        XCTAssertTrue(strip.exists)
+        XCTAssertTrue(element(app, "clove.detail.info").exists)
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        centre.doubleTap()
         XCTAssertEqual(zoom.label, "3 / 36 · 100%")
-        XCTAssertFalse(capsule.exists)
-        let centredBeforePan = preview.value as? String
-        let panStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-        panStart.press(
-            forDuration: 0.05, thenDragTo: panStart.withOffset(CGVector(dx: 0, dy: -150)),
-            withVelocity: .slow, thenHoldForDuration: 0)
-        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
-        XCTAssertFalse(capsule.exists)
-        XCTAssertNotEqual(preview.value as? String, centredBeforePan)
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        XCTAssertTrue(strip.exists)
 
-        // Default two-finger vertical swipe while zoomed rates, auto-advances, and returns to fit.
-        try swipeTwoFingersVertically(in: preview, deltaY: -180, app: app)
+        // A one-finger horizontal drag while zoomed switches photo instead of panning the image,
+        // and the photo outside the group opens at fit.
+        preview.swipeLeft()
+        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        preview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+
+        // A one-finger vertical drag while zoomed rates, auto-advances, and returns to fit.
+        centre.doubleTap()
+        XCTAssertEqual(zoom.label, "3 / 36 · 100%")
+        let verticalStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+        verticalStart.press(
+            forDuration: 0.02, thenDragTo: verticalStart.withOffset(CGVector(dx: 0, dy: -180)),
+            withVelocity: .slow, thenHoldForDuration: 0)
         XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName, timeout: 10))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)
@@ -2435,61 +2452,60 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         XCTAssertTrue((capsule.value as? String)?.contains("stars") == true)
 
-        // Switch setting to single-finger axis lock.
+        // Switch the zoomed mode to Pan.
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         openSettingsCategory("clove.settings.category.culling", in: app)
-        let zoomedSwipeSetting = element(app, "clove.settings.zoomedRatingSwipe")
+        let zoomedGesturesSetting = element(app, "clove.settings.zoomedGestures")
         for _ in 0..<8 {
-            if zoomedSwipeSetting.exists && zoomedSwipeSetting.isHittable { break }
+            if zoomedGesturesSetting.exists && zoomedGesturesSetting.isHittable { break }
             app.swipeUp()
         }
-        XCTAssertTrue(zoomedSwipeSetting.isHittable)
-        zoomedSwipeSetting.tap()
-        app.buttons["Single-finger axis lock"].tap()
+        XCTAssertTrue(zoomedGesturesSetting.isHittable)
+        zoomedGesturesSetting.tap()
+        app.buttons["Pan"].tap()
         XCTAssertTrue(
-            String(describing: zoomedSwipeSetting.value).contains("Single-finger axis lock")
-                || zoomedSwipeSetting.label.contains("Single-finger axis lock"))
+            String(describing: zoomedGesturesSetting.value).contains("Pan")
+                || zoomedGesturesSetting.label.contains("Pan"))
         element(app, "clove.nav.back").tap()
 
-        // Open standalone unrated photo MMQ02682.ARW in axis-lock mode.
+        // Open standalone unrated photo MMQ02682.ARW in Pan mode.
         let standalone = element(app, "clove.grid.photo.mmq02682")
         XCTAssertTrue(standalone.waitForExistence(timeout: 5))
         standalone.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        let initialAxisLockMarks = capsule.value as? String
-        XCTAssertEqual(initialAxisLockMarks, "Green")
+        let panModeMarks = capsule.value as? String
+        XCTAssertEqual(panModeMarks, "Green")
 
-        // Fit horizontal navigation still works cleanly with axis-lock zoomed setting active.
+        // Fit horizontal navigation still works with the Pan mode active.
         preview.swipeLeft()
         XCTAssertTrue(waitForLabel("MMQ02683.ARW", fileName))
         preview.swipeRight()
         XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
 
-        // Pinch still zooms in axis-lock mode and never rates.
+        // Pinching still zooms and never rates.
         preview.pinch(withScale: 2.0, velocity: 1.0)
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         XCTAssertEqual(fileName.label, "MMQ02682.ARW")
+        XCTAssertEqual(capsule.value as? String, panModeMarks)
         centre.doubleTap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
-        XCTAssertEqual(capsule.value as? String, initialAxisLockMarks)
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
 
-        // Zoom to 100%: horizontal drag pans without navigating or rating; vertical drag rates +
-        // auto-advances + returns to fit.
+        // Zoom to 100%: one-finger drags pan the image without navigating or rating, and a
+        // two-finger vertical swipe rates + auto-advances + returns to fit.
         centre.doubleTap()
         XCTAssertEqual(zoom.label, "5 / 36 · 100%")
-        XCTAssertFalse(capsule.exists)
-        let centredBeforeHorizontalPan = preview.value as? String
-        preview.swipeLeft()
-        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
-        XCTAssertFalse(capsule.exists)
-        XCTAssertNotEqual(preview.value as? String, centredBeforeHorizontalPan)
-
-        let verticalStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
-        verticalStart.press(
-            forDuration: 0.02, thenDragTo: verticalStart.withOffset(CGVector(dx: 0, dy: -180)),
+        let centredBeforePan = preview.value as? String
+        let panStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        panStart.press(
+            forDuration: 0.05, thenDragTo: panStart.withOffset(CGVector(dx: 0, dy: -150)),
             withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
+        XCTAssertEqual(zoom.label, "5 / 36 · 100%")
+        XCTAssertEqual(capsule.value as? String, panModeMarks)
+        XCTAssertNotEqual(preview.value as? String, centredBeforePan)
+
+        try swipeTwoFingersVertically(in: preview, deltaY: -180, app: app)
         XCTAssertTrue(waitForLabel("MMQ02683.ARW", fileName, timeout: 10))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)

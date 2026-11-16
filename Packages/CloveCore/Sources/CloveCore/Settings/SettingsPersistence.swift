@@ -12,8 +12,7 @@ enum SettingsKey: String, CaseIterable {
     case autoAdvanceColourLabel = "autoAdvance.trigger.colourLabel"
     case photoDisplayMode = "detail.photoDisplayMode"
     case doubleTap = "detail.doubleTap"
-    case zoomedRatingSwipe = "detail.zoomedRatingSwipe"
-    case keepZoomInDetail = "zoom.keepInDetail"
+    case zoomedGestures = "detail.zoomedGestures"
     case extendedColourLabels = "labels.extended"
     case rejectsFolderName = "rejects.folderName"
     case moveRejects = "rejects.moveEnabled"
@@ -30,7 +29,8 @@ enum SettingsKey: String, CaseIterable {
 /// a later version is simply absent from old storage and reads its default; add its key, decode
 /// it with that default, and write it in `save`. Keys this version does not know are left
 /// untouched. Legacy `appearance.matchSystem` / `appearance.theme` keys map explicitly when
-/// neither new appearance key is present.
+/// neither new appearance key is present. A legacy `detail.doubleTap` value of `zoom` no longer
+/// names a case and loads that field's default, which is the same behavior it asked for.
 public struct SettingsPersistence: Sendable {
     private static let legacyMatchSystemKey = "appearance.matchSystem"
     private static let legacyThemeKey = "appearance.theme"
@@ -60,10 +60,7 @@ public struct SettingsPersistence: Sendable {
                 )
             ),
             doubleTap: rawValue(.doubleTap) ?? defaults.doubleTap,
-            zoomedRatingSwipe: rawValue(.zoomedRatingSwipe) ?? defaults.zoomedRatingSwipe,
-            keepZoom: KeepZoom(
-                inDetail: boolean(.keepZoomInDetail) ?? defaults.keepZoom.inDetail
-            ),
+            zoomedGestures: rawValue(.zoomedGestures) ?? defaults.zoomedGestures,
             extendedColourLabelsEnabled: boolean(.extendedColourLabels)
                 ?? defaults.extendedColourLabelsEnabled,
             rejectsFolderName: rejectsFolderName() ?? defaults.rejectsFolderName,
@@ -84,8 +81,7 @@ public struct SettingsPersistence: Sendable {
         setBoolean(settings.autoAdvance.triggers.reject, .autoAdvanceReject)
         setBoolean(settings.autoAdvance.triggers.colourLabel, .autoAdvanceColourLabel)
         setText(settings.doubleTap.rawValue, .doubleTap)
-        setText(settings.zoomedRatingSwipe.rawValue, .zoomedRatingSwipe)
-        setBoolean(settings.keepZoom.inDetail, .keepZoomInDetail)
+        setText(settings.zoomedGestures.rawValue, .zoomedGestures)
         setBoolean(settings.extendedColourLabelsEnabled, .extendedColourLabels)
         setText(settings.rejectsFolderName.rawValue, .rejectsFolderName)
         setBoolean(settings.moveRejectsEnabled, .moveRejects)

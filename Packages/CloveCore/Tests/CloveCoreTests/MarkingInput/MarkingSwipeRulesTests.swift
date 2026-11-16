@@ -19,8 +19,14 @@ import Testing
         #expect(
             !MarkingInputRules(settings: settings).beginsSwipe(
                 horizontalTravel: 0, verticalTravel: -90, isZoomed: false))
+        // The default zoomed mode keeps the fit axis split, so a vertical drag while zoomed rates.
         #expect(
-            !MarkingInputRules().beginsSwipe(
+            MarkingInputRules().beginsSwipe(
+                horizontalTravel: 0, verticalTravel: 90, isZoomed: true))
+        var panSettings = AppSettings()
+        panSettings.zoomedGestures = .pan
+        #expect(
+            !MarkingInputRules(settings: panSettings).beginsSwipe(
                 horizontalTravel: 0, verticalTravel: 90, isZoomed: true))
         #expect(
             !MarkingSwipeRules(verticalToHorizontalRatio: 1.5).beginsSwipe(
@@ -39,7 +45,9 @@ import Testing
                 result == .mark(MarkChange(rating: rating), rating == .rejected ? .reject : .rating)
             )
             #expect(marks.applying(MarkChange(rating: rating)).label == marks.label)
-            #expect(rules.result(forSwipeRating: rating, marks: marks, isZoomed: true) == .noChange)
+            #expect(
+                rules.result(forSwipeRating: rating, marks: marks, isZoomed: true, touchCount: 2)
+                    == .noChange)
             var settings = AppSettings()
             settings.gesturesEnabled = false
             #expect(
@@ -48,53 +56,56 @@ import Testing
         }
     }
 
-    @Test func zoomedModeAllowsSingleOrTwoFingerPerSettingAndRespectsGesturesEnabled() throws {
+    @Test func zoomedGesturesChooseWhichDragRatesAndRespectGesturesEnabled() throws {
         let marks = PhotoMarks(rating: .unrated, label: .clear)
         let four = try #require(Rating(rawValue: 4))
 
-        var twoFinger = AppSettings()
-        twoFinger.zoomedRatingSwipe = .twoFinger
-        let twoFingerRules = MarkingInputRules(settings: twoFinger)
+        // Rate & switch keeps the fit single-finger rating and switching while zoomed.
+        var rateAndSwitch = AppSettings()
+        rateAndSwitch.zoomedGestures = .rateAndSwitch
+        let rateAndSwitchRules = MarkingInputRules(settings: rateAndSwitch)
         #expect(
-            !twoFingerRules.beginsSwipe(horizontalTravel: 0, verticalTravel: 40, isZoomed: true))
-        #expect(!twoFingerRules.allowsSwipe(isZoomed: true, touchCount: 1))
-        #expect(twoFingerRules.allowsSwipe(isZoomed: true, touchCount: 2))
+            rateAndSwitchRules.beginsSwipe(horizontalTravel: 0, verticalTravel: 40, isZoomed: true))
         #expect(
-            twoFingerRules.result(forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 1)
-                == .noChange)
+            !rateAndSwitchRules.beginsSwipe(
+                horizontalTravel: 40, verticalTravel: 10, isZoomed: true))
+        #expect(rateAndSwitchRules.allowsSwipe(isZoomed: true, touchCount: 1))
+        #expect(!rateAndSwitchRules.allowsSwipe(isZoomed: true, touchCount: 2))
         #expect(
-            twoFingerRules.result(forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 2)
-                == .mark(MarkChange(rating: four), .rating))
-
-        var axisLock = AppSettings()
-        axisLock.zoomedRatingSwipe = .singleFingerAxisLock
-        let axisLockRules = MarkingInputRules(settings: axisLock)
-        #expect(axisLockRules.beginsSwipe(horizontalTravel: 0, verticalTravel: 40, isZoomed: true))
-        #expect(
-            !axisLockRules.beginsSwipe(horizontalTravel: 40, verticalTravel: 10, isZoomed: true))
-        #expect(axisLockRules.allowsSwipe(isZoomed: true, touchCount: 1))
-        #expect(!axisLockRules.allowsSwipe(isZoomed: true, touchCount: 2))
-        #expect(
-            axisLockRules.result(forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 1)
+            rateAndSwitchRules.result(
+                forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 1)
                 == .mark(MarkChange(rating: four), .rating))
         #expect(
-            axisLockRules.result(forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 2)
+            rateAndSwitchRules.result(
+                forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 2)
                 == .noChange)
 
-        var disabledTwoFinger = twoFinger
-        disabledTwoFinger.gesturesEnabled = false
+        // Pan leaves one-finger drags to the scroll view and rates with two fingers.
+        var pan = AppSettings()
+        pan.zoomedGestures = .pan
+        let panRules = MarkingInputRules(settings: pan)
+        #expect(!panRules.beginsSwipe(horizontalTravel: 0, verticalTravel: 40, isZoomed: true))
+        #expect(!panRules.allowsSwipe(isZoomed: true, touchCount: 1))
+        #expect(panRules.allowsSwipe(isZoomed: true, touchCount: 2))
         #expect(
-            !MarkingInputRules(settings: disabledTwoFinger).allowsSwipe(
-                isZoomed: true, touchCount: 2))
+            panRules.result(forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 1)
+                == .noChange)
+        #expect(
+            panRules.result(forSwipeRating: four, marks: marks, isZoomed: true, touchCount: 2)
+                == .mark(MarkChange(rating: four), .rating))
 
-        var disabledAxisLock = axisLock
-        disabledAxisLock.gesturesEnabled = false
-        #expect(
-            !MarkingInputRules(settings: disabledAxisLock).beginsSwipe(
-                horizontalTravel: 0, verticalTravel: 40, isZoomed: true))
-        #expect(
-            !MarkingInputRules(settings: disabledAxisLock).allowsSwipe(
-                isZoomed: true, touchCount: 1))
+        // Marking gestures off stops both zoomed modes at either touch count.
+        for mode in ZoomedGestures.allCases {
+            var disabled = AppSettings()
+            disabled.zoomedGestures = mode
+            disabled.gesturesEnabled = false
+            let disabledRules = MarkingInputRules(settings: disabled)
+            #expect(
+                !disabledRules.beginsSwipe(
+                    horizontalTravel: 0, verticalTravel: 40, isZoomed: true))
+            #expect(!disabledRules.allowsSwipe(isZoomed: true, touchCount: 1))
+            #expect(!disabledRules.allowsSwipe(isZoomed: true, touchCount: 2))
+        }
     }
 
     @Test func twoFingerDisambiguationSeparatesVerticalSwipesFromPinchesAndPans() {

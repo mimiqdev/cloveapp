@@ -69,18 +69,21 @@ final class DetailZoomProbe {
 }
 
 /// The detail preview: a scroll view with pinch zoom, pan, double-tap zoom everywhere, uniform
-/// single-tap chrome toggle at fit and zoom, and fit-only swipes for navigation and marking (PRD
-/// P0-04, PRD Gestures and keyboard, PRD Detail gestures).
+/// single-tap chrome toggle at fit and zoom, and fit and zoomed swipes for navigation and marking
+/// (PRD P0-04, PRD Gestures and keyboard, PRD Detail gestures).
 ///
-/// The scroll view is the system zoom container the plan names: pinch and one-finger pan are its
-/// own, the image is drawn aspect-fit in it, and the minimum scale of 1 is the fit view. Single
-/// taps anywhere on the preview wait for the double-tap recognizer to fail so toggling chrome
-/// cannot interrupt a focus check, and toggle chrome at both fit and zoomed scales (#273).
+/// The scroll view is the system zoom container the plan names: pinch and the one-finger pan of
+/// the `.pan` zoomed mode are its own, the image is drawn aspect-fit in it, and the minimum scale
+/// of 1 is the fit view. Single taps anywhere on the preview wait for the double-tap recognizer to
+/// fail so toggling chrome cannot interrupt a focus check, and toggle chrome at both fit and
+/// zoomed scales (#273).
 ///
 /// Double taps anywhere on the preview toggle between 100% and fit (owner decision, 2026-11-14,
-/// #252). At fit, the container's one-finger pan locks its initial dominant axis: horizontal drags
-/// navigate, and vertical drags use the unchanged marking rules. While zoomed, only the scroll
-/// view pans, and pinch and double tap retain their existing recognizers.
+/// #252; target chosen by `doubleTap`). The container's one-finger pan locks its initial dominant
+/// axis at fit and in the default `.rateAndSwitch` zoomed mode: horizontal drags navigate, and
+/// vertical drags use the unchanged marking rules. In `.rateAndSwitch` the scroll view's own pan
+/// waits for a second finger, so two-finger drags pan and pinch while one-finger drags keep their
+/// culling actions (#302).
 struct DetailZoomView: UIViewRepresentable {
     /// The pixels to show, or nil while the screen is loading or has nothing to show.
     let image: CGImage?
@@ -315,9 +318,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         chromeTap.require(toFail: doubleTap)
         scrollView.addGestureRecognizer(chromeTap)
 
-        // Both marking gestures live on the container outside the scroll view. While zoomed,
-        // `twoFingerMarkingSwipe` runs in the default two-finger mode and `markingPan` runs when
-        // switched to single-finger axis-lock.
+        // Both marking gestures live on the container outside the scroll view. In the default
+        // `.rateAndSwitch` zoomed mode `markingPan` keeps the fit navigation and rating split, and
+        // `.pan` hands one-finger drags to the scroll view and rates with `twoFingerMarkingSwipe`.
         markingPan.maximumNumberOfTouches = 1
         markingPan.delegate = self
         markingPan.addTarget(self, action: #selector(handleMarkingPan))
@@ -366,6 +369,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Whether a single tap can show or hide chrome (active at both fit and zoomed scales, #273).
     var chromeTapIsEnabled: Bool { chromeTap.isEnabled }
+    /// Whether a double tap does anything (C12's `doubleTap` setting, #302).
+    var doubleTapIsEnabled: Bool { doubleTap.isEnabled }
     var markingPanIsEnabled: Bool { markingPan.isEnabled }
     var twoFingerMarkingSwipeIsEnabled: Bool { twoFingerMarkingSwipe.isEnabled }
     var isZoomed: Bool { scrollView.zoomScale > DetailFitScale.tolerance }
@@ -436,34 +441,37 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         doubleTap.isEnabled = isEnabled
     }
 
-    /// Switches fit-only navigation off while zoomed, where a one-finger drag pans the image (or
-    /// starts a zoomed rating swipe per settings), while chrome tap stays active at both fit and
-    /// zoomed scales (#273).
+    /// Applies the zoomed gesture mode: which recognizers are live, and whether the scroll view's
+    /// own pan needs a second finger (#302).
     ///
-    /// The scroll view's own pan stays enabled throughout: at fit there is nothing to scroll, so
-    /// the two pans cannot compete, and simultaneous recognition below means neither cancels the
-    /// other. Turning the scroll view's pan off at fit would also cost U5's pinch, which needs it
-    /// for two-finger panning as it zooms.
+    /// At fit the scroll view pans with one finger and markingPan runs alongside it, so the two
+    /// pans cannot compete, and simultaneous recognition below means neither cancels the other.
+    /// Turning the scroll view's pan off at fit would also cost U5's pinch, which needs it for
+    /// two-finger panning as it zooms.
+    ///
+    /// While zoomed, `.rateAndSwitch` keeps single-finger drags for navigation and rating and
+    /// asks the scroll view's pan for two fingers, so two-finger drags pan and pinch as usual.
+    /// `.pan` leaves one-finger panning with the scroll view and runs the rating ladder from the
+    /// two-finger swipe.
     private func updateGestureAvailability() {
         let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
         chromeTap.isEnabled = true
+        let mode = rules.settings.zoomedGestures
+        scrollView.panGestureRecognizer.minimumNumberOfTouches =
+            isZoomed && mode == .rateAndSwitch ? 2 : 1
         guard isZoomed else {
             markingPan.isEnabled = true
             twoFingerMarkingSwipe.isEnabled = false
             return
         }
-        guard rules.settings.gesturesEnabled else {
-            markingPan.isEnabled = false
-            twoFingerMarkingSwipe.isEnabled = false
-            return
-        }
-        switch rules.settings.zoomedRatingSwipe {
-        case .twoFinger:
-            markingPan.isEnabled = false
-            twoFingerMarkingSwipe.isEnabled = true
-        case .singleFingerAxisLock:
+        switch mode {
+        case .rateAndSwitch:
+            // Horizontal navigation stays live while marking gestures are off, exactly as at fit.
             markingPan.isEnabled = true
             twoFingerMarkingSwipe.isEnabled = false
+        case .pan:
+            markingPan.isEnabled = false
+            twoFingerMarkingSwipe.isEnabled = rules.settings.gesturesEnabled
         }
     }
 
@@ -703,9 +711,11 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         if recognizer === twoFingerMarkingSwipe {
             return isZoomed
                 && rules.settings.gesturesEnabled
-                && rules.settings.zoomedRatingSwipe == .twoFinger
+                && rules.settings.zoomedGestures == .pan
         }
         guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
+        // One-finger drags belong to the scroll view in `.pan`, so the marking pan stays out.
+        if isZoomed, rules.settings.zoomedGestures == .pan { return false }
         // `UIPanGestureRecognizer.translation(in:)` starts at recognition after pan hysteresis
         // settles, which can be `(0, 0)` when a slow drag lands right on the threshold. Measure
         // initial travel from `markingTouchStart` when real touches are attached (falling back to
@@ -720,16 +730,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         } else {
             translation = pan.translation(in: self)
         }
-        if isZoomed {
-            guard rules.settings.gesturesEnabled,
-                rules.settings.zoomedRatingSwipe == .singleFingerAxisLock
-            else { return false }
-            isNavigating = false
-            return rules.beginsSwipe(
-                horizontalTravel: Double(translation.x),
-                verticalTravel: -Double(translation.y),
-                isZoomed: true)
-        }
+        // Fit and the default zoomed mode share the split: horizontal switches photos, which stays
+        // live while marking gestures are off, and vertical runs the rating ladder.
         isNavigating =
             NavigationSwipeRules.axis(
                 horizontal: Double(translation.x), vertical: Double(translation.y)) == .horizontal
@@ -737,26 +739,24 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return rules.beginsSwipe(
             horizontalTravel: Double(translation.x),
             verticalTravel: -Double(translation.y),
-            isZoomed: false)
+            isZoomed: isZoomed)
     }
 
-    /// Requires zoomed marking gestures to resolve before scroll-view pan/pinch begin so a rating
-    /// swipe never pans or pinches, while a failed candidate yields immediately to pan/pinch.
+    /// Requires the `.pan` mode's two-finger rating swipe to resolve before scroll-view pan/pinch
+    /// begin so a rating swipe never pans or pinches, while a failed candidate yields to them.
+    ///
+    /// `.rateAndSwitch` leaves `.pan` alone: its marking pan starts from a single touch, so making
+    /// it wait for the scroll view's two-finger pan would stall every rating swipe.
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        guard scrollView.zoomScale > DetailFitScale.tolerance, rules.settings.gesturesEnabled
+        guard scrollView.zoomScale > DetailFitScale.tolerance, rules.settings.gesturesEnabled,
+            rules.settings.zoomedGestures == .pan
         else { return false }
-        switch rules.settings.zoomedRatingSwipe {
-        case .twoFinger:
-            return gestureRecognizer === twoFingerMarkingSwipe
-                && (otherGestureRecognizer === scrollView.pinchGestureRecognizer
-                    || otherGestureRecognizer === scrollView.panGestureRecognizer)
-        case .singleFingerAxisLock:
-            return gestureRecognizer === markingPan
-                && otherGestureRecognizer === scrollView.panGestureRecognizer
-        }
+        return gestureRecognizer === twoFingerMarkingSwipe
+            && (otherGestureRecognizer === scrollView.pinchGestureRecognizer
+                || otherGestureRecognizer === scrollView.panGestureRecognizer)
     }
 
     /// Lets the fit pan read drags alongside scrolling and yield to pinch.
@@ -1079,8 +1079,8 @@ private final class DetailZoomImageView: UIImageView {
     }
 }
 
-/// Fails immediately if a second touch lands while `.possible`, preventing a zoomed pinch from
-/// stalling on single-finger axis-lock failure resolution.
+/// Fails immediately if a second touch lands while `.possible`, preventing a zoomed two-finger
+/// pan or pinch from stalling on single-finger navigation and rating failure resolution.
 @MainActor
 final class DetailSingleFingerPanGestureRecognizer: UIPanGestureRecognizer {
     private var activeTouchIDs: Set<ObjectIdentifier> = []
@@ -1118,8 +1118,8 @@ final class DetailSingleFingerPanGestureRecognizer: UIPanGestureRecognizer {
     }
 }
 
-/// Recognizes a parallel two-finger vertical drag while zoomed and immediately fails pinches,
-/// horizontal two-finger drags, and single-finger drags.
+/// Recognizes a parallel two-finger vertical drag while zoomed in the `.pan` mode and immediately
+/// fails pinches, horizontal two-finger drags, and single-finger drags.
 @MainActor
 final class TwoFingerMarkingSwipeGestureRecognizer: UIGestureRecognizer {
     private var orderedTouchIDs: [ObjectIdentifier] = []

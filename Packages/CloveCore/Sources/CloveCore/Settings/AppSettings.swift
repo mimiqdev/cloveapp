@@ -1,19 +1,23 @@
 /// How a double-tap in the detail view behaves (PRD Gesture-related settings).
 public enum DoubleTapBehaviour: String, CaseIterable, Hashable, Sendable {
-    /// Zoom to 100% around the tapped point, or back to fit (PRD Detail and marking).
-    case zoom
+    /// Zoom to 100% around the presented focus region, or the tapped point when none is offered;
+    /// double-tapping again returns to fit (PRD Detail and marking).
+    case zoomToFocus
+
+    /// Zoom to 100% around the tapped point even when focus regions are presented, or back to fit.
+    case zoomToTapPoint
 
     /// No double-tap action.
     case off
 }
 
-/// How rating swipes behave while the detail preview is zoomed (PRD Gesture-related settings).
-public enum ZoomedRatingSwipe: String, CaseIterable, Hashable, Sendable {
-    /// Two-finger vertical swipe runs the rating ladder while one-finger drags pan.
-    case twoFinger
+/// How drags behave while the detail preview is zoomed (PRD Gesture-related settings).
+public enum ZoomedGestures: String, CaseIterable, Hashable, Sendable {
+    /// Single-finger drags rate and switch photos as they do at fit; two-finger drags pan.
+    case rateAndSwitch
 
-    /// Single-finger vertical drag runs the rating ladder while horizontal drags pan.
-    case singleFingerAxisLock
+    /// Single-finger drags pan the zoomed image; a two-finger vertical drag rates.
+    case pan
 }
 
 /// How similar groups appear in the grid (PRD Grid, similar-group display).
@@ -23,19 +27,6 @@ public enum GridGroupDisplay: String, CaseIterable, Hashable, Sendable {
 
     /// Show one cover cell per group with its count (PRD Grid).
     case collapsed
-}
-
-/// Whether navigation keeps the current zoom level and position (PRD Gesture-related settings
-/// and In-group culling).
-public struct KeepZoom: Hashable, Sendable {
-    /// Keep zoom in regular detail while navigating photos; off by default (PRD Gesture-related
-    /// settings).
-    public var inDetail: Bool
-
-    /// Regular detail starts at fit unless the person enables retained zoom.
-    public init(inDetail: Bool = false) {
-        self.inDetail = inDetail
-    }
 }
 
 /// Every launch setting from the PRD, with the default each one ships with.
@@ -61,15 +52,12 @@ public struct AppSettings: Hashable, Sendable {
     /// photo, with ratings and Reject triggering and colour labels not.
     public var autoAdvance: AutoAdvance
 
-    /// Double-tap behavior in detail (PRD Gesture-related settings); zoom by default.
+    /// Double-tap behavior in detail (PRD Gesture-related settings); zoom to focus by default.
     public var doubleTap: DoubleTapBehaviour
 
-    /// How vertical rating swipes behave while the detail preview is zoomed; two-finger swipe by
+    /// How drags behave while the detail preview is zoomed; single-finger rate and switch by
     /// default.
-    public var zoomedRatingSwipe: ZoomedRatingSwipe
-
-    /// Whether regular detail keeps its zoom level while navigating. Groups always sync zoom.
-    public var keepZoom: KeepZoom
+    public var zoomedGestures: ZoomedGestures
 
     /// Whether Orange and Pink join the five default labels (PRD Marking rules); off by default.
     public var extendedColourLabelsEnabled: Bool
@@ -101,9 +89,8 @@ public struct AppSettings: Hashable, Sendable {
         gesturesEnabled: Bool = true,
         enabledRatings: EnabledRatings = .all,
         autoAdvance: AutoAdvance = AutoAdvance(),
-        doubleTap: DoubleTapBehaviour = .zoom,
-        zoomedRatingSwipe: ZoomedRatingSwipe = .twoFinger,
-        keepZoom: KeepZoom = KeepZoom(),
+        doubleTap: DoubleTapBehaviour = .zoomToFocus,
+        zoomedGestures: ZoomedGestures = .rateAndSwitch,
         extendedColourLabelsEnabled: Bool = false,
         rejectsFolderName: RejectsFolderName = .defaultFolderName,
         moveRejectsEnabled: Bool = true,
@@ -116,8 +103,7 @@ public struct AppSettings: Hashable, Sendable {
         self.enabledRatings = enabledRatings
         self.autoAdvance = autoAdvance
         self.doubleTap = doubleTap
-        self.zoomedRatingSwipe = zoomedRatingSwipe
-        self.keepZoom = keepZoom
+        self.zoomedGestures = zoomedGestures
         self.extendedColourLabelsEnabled = extendedColourLabelsEnabled
         self.rejectsFolderName = rejectsFolderName
         self.moveRejectsEnabled = moveRejectsEnabled

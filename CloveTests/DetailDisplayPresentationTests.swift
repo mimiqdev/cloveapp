@@ -271,19 +271,18 @@ struct DetailDisplayPresentationTests {
     }
 
     @Test(arguments: PhotoDisplayMode.allCases)
-    func regularKeptZoomWaitsForOwnGestureBeforeUpgrading(mode: PhotoDisplayMode) async throws {
+    func standaloneNavigationReturnsToFitWithoutAskingForPixels(mode: PhotoDisplayMode) async throws
+    {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
         let store = SettingsStore.sample
-        store.update {
-            $0.photoDisplayMode = mode
-            $0.keepZoom.inDetail = true
-        }
+        store.update { $0.photoDisplayMode = mode }
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
         let photos = browsing.photos
-        let first = photos[2].id
-        let next = photos[3].id
+        // MMQ02682 and MMQ02683 are consecutive standalone photos, so the step leaves any group.
+        let first = photos[4].id
+        let next = photos[5].id
         browsing.openPhoto(first)
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
@@ -303,14 +302,17 @@ struct DetailDisplayPresentationTests {
         }
         browsing.openPhoto(next)
         try await waitFor { source.prefetched.last?.current.photo == next }
-        try await waitFor { preview.zoomSnapshot != nil }
+        // Switching to another standalone photo returns to fit, so nothing of the old crop is kept
+        // or rendered.
+        try await waitFor { !preview.isZoomed && preview.zoomSnapshot == nil }
         #expect(
             !source.requests.contains {
                 $0.0 == next && ($0.1.need == .morePixels || $0.1.need == .fullResolution)
             })
-        // Retaining zoom did not decode; a person's own pinch still does.
-        let pinchScale = try #require(preview.zoomSnapshot).scale + 1
-        preview.onZoomChange?(pinchScale)
+        // A person's own pinch still asks for the pixels it needs once the photo is on screen;
+        // the pinch has to reach past the screen render's own size to ask for more.
+        try await waitFor { source.deliveries.contains { $0.0 == next } }
+        preview.onZoomChange?(4)
         try await waitFor { source.requests.contains { $0.0 == next && $0.1.need == .morePixels } }
         if mode == .cameraPreviewFirst { #expect(source.sample.rawRenderCount == 0) }
     }
@@ -320,7 +322,6 @@ struct DetailDisplayPresentationTests {
         let source = ObservedDetailImages()
         source.prefetchEnabled = false
         let store = SettingsStore.sample
-        store.update { $0.keepZoom.inDetail = false }
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
         let group = try #require(browsing.groups.first)
@@ -347,6 +348,12 @@ struct DetailDisplayPresentationTests {
         #expect(abs(before.scale - after.scale) < 0.02)
         #expect(abs(before.anchor.x - after.anchor.x) < 0.02)
         #expect(abs(before.anchor.y - after.anchor.y) < 0.02)
+
+        // Leaving the group always returns to fit (#302).
+        let outside = try #require(browsing.photos.first { !group.members.contains($0.id) }?.id)
+        browsing.openPhoto(outside)
+        try await waitFor { source.prefetched.last?.current.photo == outside }
+        try await waitFor { !preview.isZoomed && preview.zoomSnapshot == nil }
     }
 
     @Test func attachmentUsesStableDisplayEdgeAndReturningToFirstUsesHeldRaw() async throws {
@@ -667,7 +674,68 @@ struct DetailDisplayPresentationTests {
         try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) != nil }
     }
 
-    @Test func tapsAreUniformAcrossEdgesAndZoomedHorizontalSwipesDoNotNavigate() throws {
+    /// #302: the double-tap target follows the setting, and `Off` disables the gesture.
+    @Test func doubleTapTargetFollowsTheSetting() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedFocusDetailImages()
+        let store = SettingsStore.sample
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        browsing.showsFocusRegions = true
+        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02678" })
+        browsing.openPhoto(target.id)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitFor("preview loaded") { source.prefetched.last?.current.photo == target.id }
+        let preview = try #require(findPreview(in: window))
+        try await waitFor("focus regions presented") { findFocusControl(in: preview) != nil }
+
+        // Zoom to focus (the default) centres 100% on the presented AF region.
+        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        try await waitFor("focus zoom") { preview.isZoomed }
+        let focusAnchor = try #require(preview.zoomSnapshot).anchor
+        #expect(abs(focusAnchor.x - 0.30) < 0.05)
+        #expect(abs(focusAnchor.y - 0.35) < 0.05)
+        preview.onDoubleTap?(.center)
+        try await waitFor("fit before off") { !preview.isZoomed }
+
+        // Off disables the double tap; its recognizer turning off marks the setting reaching the
+        // view, so the tap below is one the screen has already refused.
+        store.update { $0.doubleTap = .off }
+        try await waitFor("double tap recognizer off") { !preview.doubleTapIsEnabled }
+        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(!preview.isZoomed)
+
+        // Zoom to tap point centres the same tap on the tapped image point instead; the recognizer
+        // returning marks the setting reaching the view.
+        store.update { $0.doubleTap = .zoomToTapPoint }
+        try await waitFor("double tap recognizer back") { preview.doubleTapIsEnabled }
+        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        try await waitFor("tap point zoom") { preview.isZoomed }
+        let tapAnchor = try #require(preview.zoomSnapshot).anchor
+        #expect(abs(tapAnchor.x - 0.5) < 0.02)
+        #expect(abs(tapAnchor.y - 0.6) < 0.02)
+        preview.onDoubleTap?(.center)
+        try await waitFor("fit before region tap") { !preview.isZoomed }
+
+        // An actionable region tap still inspects that region in every mode.
+        let control = try #require(findFocusControl(in: preview))
+        control.sendActions(for: .touchUpInside)
+        try await waitFor("region zoom") { preview.isZoomed }
+        let regionAnchor = try #require(preview.zoomSnapshot).anchor
+        #expect(abs(regionAnchor.x - 0.30) < 0.05)
+        #expect(abs(regionAnchor.y - 0.35) < 0.05)
+    }
+
+    @Test func tapsAreUniformAcrossEdgesAndZoomedHorizontalSwipesSwitchPhotos() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
         preview.hasPrevious = true
         preview.hasNext = true
@@ -681,72 +749,113 @@ struct DetailDisplayPresentationTests {
             #expect(preview.gestureRecognizerShouldBegin(tap))
         }
 
+        // A zoomed one-finger horizontal drag keeps the fit navigation in the default mode.
         var steps = 0
         preview.onStep = { _ in steps += 1 }
         preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
         let zoomedPan = DetailTestPan()
         zoomedPan.travel = CGPoint(x: -180, y: 0)
-        #expect(!preview.gestureRecognizerShouldBegin(zoomedPan))
-        #expect(steps == 0)
+        try #require(preview.gestureRecognizerShouldBegin(zoomedPan))
+        preview.handleMarkingPan(zoomedPan)
+        zoomedPan.sampleState = .ended
+        preview.handleMarkingPan(zoomedPan)
+        #expect(steps == 1)
     }
 
-    @Test func zoomedRatingRecognizerAvailabilityFollowsModeZoomAndGesturesEnabled() throws {
+    @Test func zoomedGestureAvailabilityFollowsModeZoomAndGesturesEnabled() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
         preview.setImage(try testPixels(gray: 0))
         preview.setNeedsLayout()
         preview.layoutIfNeeded()
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
 
-        func applySettings(mode: ZoomedRatingSwipe, gesturesEnabled: Bool) {
+        func applySettings(mode: ZoomedGestures, gesturesEnabled: Bool) {
             var settings = AppSettings()
-            settings.zoomedRatingSwipe = mode
+            settings.zoomedGestures = mode
             settings.gesturesEnabled = gesturesEnabled
             preview.rules = MarkingInputRules(settings: settings)
         }
 
-        // At fit: 1-finger pan enabled (navigation still lives there), 2-finger zoomed swipe off, chrome tap on.
-        for mode in ZoomedRatingSwipe.allCases {
+        // At fit: 1-finger pan enabled (navigation still lives there), 2-finger zoomed swipe off,
+        // chrome tap on, and the scroll view pans with one finger in every zoomed mode.
+        for mode in ZoomedGestures.allCases {
             for gesturesEnabled in [true, false] {
                 applySettings(mode: mode, gesturesEnabled: gesturesEnabled)
                 #expect(!preview.isZoomed)
                 #expect(preview.chromeTapIsEnabled)
                 #expect(preview.markingPanIsEnabled)
                 #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+                #expect(scroll.panGestureRecognizer.minimumNumberOfTouches == 1)
             }
         }
 
-        // While zoomed: recognizers follow `zoomedRatingSwipe` and `gesturesEnabled`, while chrome tap stays on.
+        // While zoomed: recognizers follow `zoomedGestures` and `gesturesEnabled`, while chrome tap
+        // stays on.
         preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
         #expect(preview.isZoomed)
         #expect(preview.chromeTapIsEnabled)
 
-        applySettings(mode: .twoFinger, gesturesEnabled: true)
-        #expect(!preview.markingPanIsEnabled)
-        #expect(preview.twoFingerMarkingSwipeIsEnabled)
-
-        applySettings(mode: .singleFingerAxisLock, gesturesEnabled: true)
+        applySettings(mode: .rateAndSwitch, gesturesEnabled: true)
         #expect(preview.markingPanIsEnabled)
         #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+        // Two-finger drags pan and pinch, so a single-finger drag keeps its culling actions.
+        #expect(scroll.panGestureRecognizer.minimumNumberOfTouches == 2)
+        #expect(
+            !preview.gestureRecognizer(
+                preview.twoFingerSwipeRecognizer,
+                shouldBeRequiredToFailBy: scroll.panGestureRecognizer))
 
-        for mode in ZoomedRatingSwipe.allCases {
-            applySettings(mode: mode, gesturesEnabled: false)
+        applySettings(mode: .pan, gesturesEnabled: true)
+        #expect(!preview.markingPanIsEnabled)
+        #expect(preview.twoFingerMarkingSwipeIsEnabled)
+        #expect(scroll.panGestureRecognizer.minimumNumberOfTouches == 1)
+        #expect(
+            preview.gestureRecognizer(
+                preview.twoFingerSwipeRecognizer,
+                shouldBeRequiredToFailBy: scroll.panGestureRecognizer))
+
+        // Marking gestures off stops vertical input; horizontal switching stays live in
+        // `.rateAndSwitch`, exactly as it does at fit.
+        applySettings(mode: .rateAndSwitch, gesturesEnabled: false)
+        #expect(preview.markingPanIsEnabled)
+        #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+        let verticalOff = DetailTestPan()
+        verticalOff.travel = CGPoint(x: 0, y: -40)
+        #expect(!preview.gestureRecognizerShouldBegin(verticalOff))
+        let horizontal = DetailTestPan()
+        horizontal.travel = CGPoint(x: -60, y: 2)
+        #expect(preview.gestureRecognizerShouldBegin(horizontal))
+
+        applySettings(mode: .rateAndSwitch, gesturesEnabled: true)
+        let verticalOn = DetailTestPan()
+        verticalOn.travel = CGPoint(x: 0, y: -40)
+        #expect(preview.gestureRecognizerShouldBegin(verticalOn))
+        #expect(preview.gestureRecognizerShouldBegin(horizontal))
+
+        // `.pan` leaves one-finger drags to the scroll view, with or without marking gestures.
+        for gesturesEnabled in [true, false] {
+            applySettings(mode: .pan, gesturesEnabled: gesturesEnabled)
             #expect(!preview.markingPanIsEnabled)
-            #expect(!preview.twoFingerMarkingSwipeIsEnabled)
-            #expect(!preview.gestureRecognizerShouldBegin(preview.twoFingerSwipeRecognizer))
-            let pan = DetailTestPan()
-            pan.travel = CGPoint(x: 0, y: -40)
-            #expect(!preview.gestureRecognizerShouldBegin(pan))
+            #expect(preview.twoFingerMarkingSwipeIsEnabled == gesturesEnabled)
+            #expect(
+                preview.gestureRecognizerShouldBegin(preview.twoFingerSwipeRecognizer)
+                    == gesturesEnabled)
+            let vertical = DetailTestPan()
+            vertical.travel = CGPoint(x: 0, y: -40)
+            #expect(!preview.gestureRecognizerShouldBegin(vertical))
         }
 
         // Returning to fit restores fit availability.
-        applySettings(mode: .twoFinger, gesturesEnabled: true)
+        applySettings(mode: .pan, gesturesEnabled: true)
         preview.apply(DetailZoomCommand(id: 2, kind: .fit))
         #expect(!preview.isZoomed)
         #expect(preview.chromeTapIsEnabled)
         #expect(preview.markingPanIsEnabled)
         #expect(!preview.twoFingerMarkingSwipeIsEnabled)
+        #expect(scroll.panGestureRecognizer.minimumNumberOfTouches == 1)
     }
 
-    @Test func zoomedTwoFingerSwipeRatesWithoutPinchAndPinchNeverRates() throws {
+    @Test func zoomedPanTwoFingerSwipeRatesWithoutPinchAndPinchNeverRates() throws {
         func makeZoomedPreview() throws -> (
             preview: DetailZoomContainerView,
             feedback: DetailSwipeFeedback,
@@ -756,6 +865,9 @@ struct DetailDisplayPresentationTests {
             let preview = DetailZoomContainerView(
                 frame: CGRect(x: 0, y: 0, width: 390, height: 650))
             preview.setImage(try testPixels(gray: 0))
+            var settings = AppSettings()
+            settings.zoomedGestures = .pan
+            preview.rules = MarkingInputRules(settings: settings)
             let region = DetailFocusRegion(
                 id: "clove.detail.region.af.0",
                 evidence: RegionSharpnessEvidence(
@@ -790,7 +902,7 @@ struct DetailDisplayPresentationTests {
             let twoFingerSwipe = preview.twoFingerSwipeRecognizer
             #expect(twoFingerSwipe.isEnabled)
 
-            // While zoomed in default mode, two-finger marking requires priority over scroll pinch/pan
+            // While zoomed in `.pan`, two-finger marking requires priority over scroll pinch/pan
             // and never runs simultaneously with them.
             #expect(
                 preview.gestureRecognizer(twoFingerSwipe, shouldBeRequiredToFailBy: scrollPinch))
@@ -874,7 +986,7 @@ struct DetailDisplayPresentationTests {
             #expect(context.twoFingerCommits().isEmpty)
         }
 
-        // Single-finger vertical drag while zoomed in default mode fails two-finger swipe so scroll pan runs.
+        // Single-finger vertical drag while zoomed in `.pan` fails two-finger swipe so scroll pan runs.
         do {
             let context = try makeZoomedPreview()
             let twoFingerSwipe = context.preview.twoFingerSwipeRecognizer
@@ -920,12 +1032,15 @@ struct DetailDisplayPresentationTests {
             #expect(commits == [.rejected])
         }
 
-        // Zoomed two-finger drag from 3★: down 30pt -> Clear, down 75pt -> Reject, up 30pt -> 4★, origin -> 3★.
+        // Zoomed two-finger drag in `.pan` from 3★: down 30pt -> Clear, down 75pt -> Reject, up 30pt -> 4★, origin -> 3★.
         do {
             let three = try #require(Rating(rawValue: 3))
             let preview = DetailZoomContainerView(
                 frame: CGRect(x: 0, y: 0, width: 390, height: 650))
             preview.setImage(try testPixels(gray: 0))
+            var settings = AppSettings()
+            settings.zoomedGestures = .pan
+            preview.rules = MarkingInputRules(settings: settings)
             preview.setNeedsLayout()
             preview.layoutIfNeeded()
             preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
@@ -972,22 +1087,21 @@ struct DetailDisplayPresentationTests {
         }
     }
 
-    @Test func zoomedSingleFingerAxisLockVerticalRatesAndHorizontalPansWithoutNavigating() throws {
+    @Test func zoomedRateAndSwitchVerticalRatesAndHorizontalSwitchesWithoutPanning() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
         preview.setImage(try testPixels(gray: 0))
         preview.hasPrevious = true
         preview.hasNext = true
         preview.setNeedsLayout()
         preview.layoutIfNeeded()
-        var settings = AppSettings()
-        settings.zoomedRatingSwipe = .singleFingerAxisLock
-        preview.rules = MarkingInputRules(settings: settings)
+        // The launch default keeps the fit split while zoomed.
+        preview.rules = MarkingInputRules(settings: AppSettings())
         preview.apply(DetailZoomCommand(id: 1, kind: .scale(2, anchor: .center)))
 
         var commits: [Rating] = []
         var steps = 0
         preview.onMarkingSwipe = { commits.append($0) }
-        preview.onStep = { _ in steps += 1 }
+        preview.onStep = { steps += $0 }
 
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let scrollPan = scroll.panGestureRecognizer
@@ -996,16 +1110,14 @@ struct DetailDisplayPresentationTests {
                 .first)
         #expect(pan.isEnabled)
         #expect(!preview.twoFingerSwipeRecognizer.isEnabled)
-        #expect(preview.gestureRecognizer(pan, shouldBeRequiredToFailBy: scrollPan))
+        // The scroll view's own pan waits for a second finger, so a one-finger drag never pans; the
+        // marking pan is not made to wait for it either.
+        #expect(scrollPan.minimumNumberOfTouches == 2)
+        #expect(!preview.gestureRecognizer(pan, shouldBeRequiredToFailBy: scrollPan))
         #expect(!preview.gestureRecognizer(pan, shouldRecognizeSimultaneouslyWith: scrollPan))
 
-        // Horizontal single-finger start does not begin marking or navigation; yields to scrollView pan.
-        let horizontal = DetailTestPan()
-        horizontal.travel = CGPoint(x: -20, y: 4)
-        #expect(!preview.gestureRecognizerShouldBegin(horizontal))
-        #expect(steps == 0)
-
-        // Two touches immediately fail DetailSingleFingerPanGestureRecognizer so pinch does not stall.
+        // Two touches immediately fail DetailSingleFingerPanGestureRecognizer so two-finger pan and
+        // pinch do not stall, and they never rate or switch.
         let t1 = DetailMutableTouch(view: preview, location: CGPoint(x: 150, y: 300))
         let t2 = DetailMutableTouch(view: preview, location: CGPoint(x: 230, y: 300))
         pan.touchesBegan([t1, t2], with: UIEvent())
@@ -1030,15 +1142,32 @@ struct DetailDisplayPresentationTests {
         #expect(commits.count == 1)
         #expect(commits.first != .unrated)
         #expect(steps == 0)
+
+        // Horizontal single-finger start switches photos on release instead of panning the photo.
+        let horizontalStart = CGPoint(x: 300, y: 325)
+        let horizontal = DetailTestPan()
+        horizontal.locationPoint = horizontalStart
+        _ = preview.gestureRecognizer(
+            pan, shouldReceive: DetailMutableTouch(view: preview, location: horizontalStart))
+        horizontal.travel = CGPoint(x: -20, y: 2)
+        try #require(preview.gestureRecognizerShouldBegin(horizontal))
+        preview.handleMarkingPan(horizontal)
+        horizontal.sampleState = .changed
+        horizontal.travel = CGPoint(x: -200, y: 4)
+        horizontal.locationPoint = CGPoint(x: 100, y: 325)
+        preview.handleMarkingPan(horizontal)
+        horizontal.sampleState = .ended
+        preview.handleMarkingPan(horizontal)
+        #expect(steps == 1)
+        #expect(commits.count == 1)
     }
 
-    @Test func zoomedRatingSwipeAutoAdvancesAndReturnsToFitInDetailScreen() async throws {
+    @Test func zoomedGesturesAutoAdvanceAndReturnToFitInDetailScreen() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
         let store = SettingsStore.sample
         store.update {
-            $0.zoomedRatingSwipe = .twoFinger
-            $0.keepZoom.inDetail = false
+            $0.zoomedGestures = .pan
             $0.autoAdvance.destination = .nextPhoto
             $0.autoAdvance.triggers.rating = true
         }
@@ -1087,8 +1216,9 @@ struct DetailDisplayPresentationTests {
         #expect(browsing.shownMarks(for: first).rating != .unrated)
         try await waitFor { browsing.state.currentPhoto == second && !preview.isZoomed }
 
-        // Switch to single-finger axis lock while zoomed and verify rating + auto-advance + fit reset.
-        store.update { $0.zoomedRatingSwipe = .singleFingerAxisLock }
+        // Switch to rate & switch while zoomed and verify a one-finger vertical drag rates,
+        // auto-advances, and returns to fit.
+        store.update { $0.zoomedGestures = .rateAndSwitch }
         try await waitFor { source.prefetched.last?.current.photo == second }
         preview.onDoubleTap?(.center)
         try await waitFor { preview.isZoomed && preview.markingPanIsEnabled }
@@ -1286,7 +1416,7 @@ struct DetailDisplayPresentationTests {
         try await waitFor { spy.prefetched.last?.current.photo == photos[3].id }
     }
 
-    @Test func duoFocusSplitDoubleTapAndRegionTapKeepZoomCentredOnFocusRegionAfterChromeHides()
+    @Test func duoFocusSplitDoubleTapAndRegionTapKeepZoomCentredOnFocusRegion()
         async throws
     {
         guard #available(iOS 27.1, *) else { return }
@@ -1333,13 +1463,13 @@ struct DetailDisplayPresentationTests {
             CGPoint(x: previewFrameInWindow.midX, y: previewFrameInWindow.midY), with: nil)
         #expect(hitCenter is UIImageView)
 
-        // 1. Double-tapping the photo body away from the AF region centres 100% on AF and keeps it
-        // centred after Duo chrome hides and resizes the preview container (#272).
+        // 1. Double-tapping the photo body away from the AF region centres 100% on AF, and the
+        // chrome stays where it was, so the preview container keeps its size (#302).
         let heightBefore = preview.bounds.height
         preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
         try await waitFor { preview.isZoomed }
         try await Task.sleep(for: .milliseconds(450))
-        #expect(preview.bounds.height > heightBefore)
+        #expect(preview.bounds.height == heightBefore)
         let doubleTapSnapshot = try #require(preview.zoomSnapshot)
         #expect(abs(doubleTapSnapshot.anchor.x - 0.30) < 0.01)
         #expect(abs(doubleTapSnapshot.anchor.y - 0.35) < 0.01)
@@ -1349,7 +1479,7 @@ struct DetailDisplayPresentationTests {
             })?.accessibilityValue)
         #expect(accessibilityValue.contains("centred at 30%, 35%"))
 
-        // 2. Return to fit, then tap the AF control directly and verify it stays centred after chrome hides.
+        // 2. Return to fit, then tap the AF control directly and verify it stays centred.
         preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.5))
         try await waitFor { !preview.isZoomed }
         try await Task.sleep(for: .milliseconds(350))
@@ -1958,9 +2088,8 @@ struct DetailDisplayPresentationTests {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let store = SettingsStore.sample
         store.update {
-            $0.doubleTap = .zoom
-            $0.zoomedRatingSwipe = .twoFinger
-            $0.keepZoom.inDetail = false
+            $0.doubleTap = .zoomToFocus
+            $0.zoomedGestures = .pan
             $0.autoAdvance.destination = .nextPhoto
             $0.autoAdvance.triggers.rating = true
         }
@@ -1996,12 +2125,11 @@ struct DetailDisplayPresentationTests {
         let preview = try #require(findPreview(in: window))
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let imageView = try #require(scroll.subviews.first as? UIImageView)
-        for (round, keepZoom) in [false, true].enumerated() {
+        for round in 0..<2 {
             let expectedNext = photos[5 + round].id
             try await waitFor("detail image loaded for round \(round)") {
                 (imageView.image?.cgImage?.width ?? 0) >= SampleDetailImages.previewLongEdge
             }
-            store.update { $0.keepZoom.inDetail = keepZoom }
             if !preview.isZoomed {
                 preview.onDoubleTap?(UnitPoint(x: 0.45, y: 0.45))
             }
@@ -2032,8 +2160,7 @@ struct DetailDisplayPresentationTests {
             twoFinger.touchesEnded([t1, t2], with: event)
             preview.handleTwoFingerMarkingSwipe(twoFinger)
             try await waitFor("auto-advance settled in round \(round)") {
-                browsing.state.currentPhoto == expectedNext
-                    && (!keepZoom ? !preview.isZoomed : preview.zoomSnapshot != nil)
+                browsing.state.currentPhoto == expectedNext && !preview.isZoomed
             }
         }
     }

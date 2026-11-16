@@ -50,10 +50,9 @@ import CloveCore
         ),
         ("detail.doubleTap", invalid, { $0.doubleTap = defaults.doubleTap }),
         (
-            "detail.zoomedRatingSwipe", invalid,
-            { $0.zoomedRatingSwipe = defaults.zoomedRatingSwipe }
+            "detail.zoomedGestures", invalid,
+            { $0.zoomedGestures = defaults.zoomedGestures }
         ),
-        ("zoom.keepInDetail", invalid, { $0.keepZoom.inDetail = defaults.keepZoom.inDetail }),
         (
             "labels.extended", invalid,
             { $0.extendedColourLabelsEnabled = defaults.extendedColourLabelsEnabled }
@@ -120,7 +119,7 @@ import CloveCore
     let storage = InMemorySettingsStorage()
     var older = AppSettings()
     older.gesturesEnabled = false
-    older.keepZoom = KeepZoom(inDetail: true)
+    older.extendedColourLabelsEnabled = true
     SettingsPersistence(storage: storage).save(older)
     // What the previous version wrote: every key it knew, and none of the Appearance keys.
     storage.setString(nil, forKey: "appearance.mode")
@@ -137,14 +136,14 @@ import CloveCore
     for matchSystemValue in [Optional("true"), Optional("corrupt"), nil] {
         let storage = InMemorySettingsStorage()
         storage.setString("false", forKey: "gestures.enabled")
-        storage.setString("true", forKey: "zoom.keepInDetail")
+        storage.setString("true", forKey: "labels.extended")
         storage.setString(matchSystemValue, forKey: "appearance.matchSystem")
         storage.setString("nord", forKey: "appearance.theme")
 
         let loaded = SettingsPersistence(storage: storage).load()
         #expect(loaded.appearance == AppearanceChoice(mode: .system, family: .default))
         #expect(!loaded.gesturesEnabled)
-        #expect(loaded.keepZoom.inDetail)
+        #expect(loaded.extendedColourLabelsEnabled)
     }
 }
 
@@ -203,6 +202,22 @@ import CloveCore
     #expect(loaded == expected)
     // Keys this version does not own are left for the version that does.
     #expect(storage.string(forKey: "future.editorSetting") == "from-a-later-version")
+}
+
+/// Values stored before the zoomed gestures and double-tap choices changed no longer name a case
+/// of the new types, so each field loads its own default: the upgrade adopts `Rate & switch` and
+/// `Zoom to focus` instead of carrying the old two-finger rating mode forward.
+@Test func legacyZoomChoicesLoadTheirDefaults() {
+    let storage = InMemorySettingsStorage()
+    storage.setString("false", forKey: "gestures.enabled")
+    storage.setString("zoom", forKey: "detail.doubleTap")
+    storage.setString("twoFinger", forKey: "detail.zoomedRatingSwipe")
+    storage.setString("true", forKey: "zoom.keepInDetail")
+
+    let loaded = SettingsPersistence(storage: storage).load()
+    #expect(loaded.doubleTap == .zoomToFocus)
+    #expect(loaded.zoomedGestures == .rateAndSwitch)
+    #expect(!loaded.gesturesEnabled)
 }
 
 @Test func saveVerificationConfirmsEveryStoredSetting() throws {
