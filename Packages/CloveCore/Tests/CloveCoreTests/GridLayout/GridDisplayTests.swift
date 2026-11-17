@@ -217,12 +217,14 @@ struct GridCellLookupTests {
                 == .group(after.id))
     }
 
-    /// An expanded group keeps its members' own cells, so the grid holds the member on screen
-    /// in place rather than resolving it to the cover it no longer draws (owner decision, #225).
-    @Test func anExpandedMemberResolvesToItsOwnCell() {
+    /// Group Focus keeps its members' own cells, so the grid holds the member on screen in place
+    /// instead of resolving it to a cover it no longer draws (issue #309).
+    @Test func aFocusedMemberResolvesToItsOwnCell() throws {
         let all = photos(0...2)
         let burst = group("burst", all)
-        let grid = GridDisplay(photos: all, groups: [burst], expandedGroup: burst.id)
+        let active = try #require(
+            DetailTimeline(photos: all, groups: [burst]).activeGroup(with: burst.id))
+        let grid = GridDisplay(focusing: active)
         let shown = Set(all.map(\.id))
         for member in all {
             #expect(
@@ -248,112 +250,116 @@ struct GridCellLookupTests {
     }
 }
 
-/// Owner decision, #225 & #304 Decision 6: the split expands `expandedGroup` in place, so its
-/// visible members draw at the group's folder position while surrounding photos and other collapsed
-/// groups keep theirs.
+/// Issue #304 decision 6 and issue #309: the grid draws one Detail level at a time — the full
+/// folder's own run, or Group Focus's single run of the active group's visible members.
 @Suite("Grid sections")
 struct GridSectionTests {
-    /// A grid without an expanded group is one run.
-    @Test func aPlainGridIsOneRun() {
+    /// A grid without Group Focus is one run of the folder's own cells.
+    @Test func aTimelineGridIsOneFolderRun() {
         let burst = group("burst-one", photos(1...2))
         let grid = GridDisplay(photos: photos(0...3), groups: [burst])
-        #expect(grid.sections.map(\.id) == [.photos(0)])
+        #expect(grid.sections.map(\.id) == [.photos])
         #expect(grid.sections[0].cells == grid.cells)
         #expect(grid.sections[0].expandedGroup == nil)
     }
 
-    /// The expanded group replaces its cover, at the group's own place in the folder, with its
-    /// shown members. The photos and the other groups around it stay where they were.
-    @Test func theExpandedGroupDrawsAtItsCoverPosition() throws {
-        let all = photos(0...5)
-        let expanded = group("expanded", [all[1], all[3]])
-        let other = group("other", [all[4], all[5]])
-        let grid = GridDisplay(
-            photos: all, groups: [expanded, other], expandedGroup: expanded.id)
+    /// Group Focus draws only the focused group's visible members, in the active order Focus View
+    /// uses, and nothing else from the folder.
+    @Test func groupFocusDrawsOnlyTheFocusedGroupsVisibleMembers() throws {
+        let all = photos(0...6)
+        let focused = group("focused", [all[1], all[3], all[5]])
+        let other = group("other", [all[2], all[4]])
+        let timeline = DetailTimeline(photos: all, groups: [focused, other])
+        let active = try #require(timeline.activeGroup(with: focused.id))
+        let grid = GridDisplay(focusing: active)
+        #expect(grid.sections.map(\.id) == [.group(focused.id)])
+        #expect(grid.sections[0].expandedGroup == focused.id)
+        #expect(grid.cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id), .photo(all[5].id)])
+        #expect(active.visibleMembers.map(\.id) == grid.cells.map(\.photo.id))
+    }
+
+    /// The focused run marks its members as the group's, without a count badge or cover, and dims
+    /// only the members that are rejected.
+    @Test func focusedMembersCarryTheGroupWithoutACountBadge() throws {
+        let kept = photo("kept", time: capture(seconds(0)))
+        let rejected = photo(
+            "rejected", time: capture(seconds(1)), marks: marks(rejected: true))
+        let members = [kept, rejected]
+        let burst = group("burst", members)
+        let active = try #require(
+            DetailTimeline(photos: members, groups: [burst]).activeGroup(with: burst.id))
+        let grid = GridDisplay(focusing: active)
         #expect(
-            grid.sections.map(\.id) == [.photos(0), .group(expanded.id), .photos(1)])
-        #expect(grid.sections[0].cells.map(\.id) == [.photo(all[0].id)])
-        #expect(grid.sections[1].cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id)])
-        #expect(
-            grid.sections[2].cells.map(\.id) == [.photo(all[2].id), .group(other.id)])
-        #expect(
-            grid.sections[1].cells.allSatisfy {
-                $0.group?.id == expanded.id && $0.group?.showsCount == false
+            grid.cells.allSatisfy {
+                $0.group?.id == burst.id && $0.group?.showsCount == false
                     && $0.group?.isCover == false
             })
-        let cover = try #require(grid.sections[2].cells.last?.group)
-        #expect(cover.isCover)
-        #expect(cover.count == 2)
+        #expect(grid.cells.map(\.isDimmed) == [false, true])
     }
 
-    /// A group whose members are scattered in the folder draws as one contiguous block at its
-    /// first shown member, and the standalone photo between them follows the block.
-    @Test func theExpandedGroupIsContiguousAtItsFirstMember() {
-        let all = photos(0...3)
-        let burst = group("burst", [all[0], all[2]])
-        let grid = GridDisplay(photos: all, groups: [burst], expandedGroup: burst.id)
-        #expect(grid.sections.map(\.id) == [.group(burst.id), .photos(1)])
-        #expect(grid.sections[0].cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id)])
-        #expect(grid.sections[1].cells.map(\.id) == [.photo(all[1].id), .photo(all[3].id)])
+    /// Opening another group shows only that group's visible members.
+    @Test func focusingAnotherGroupShowsOnlyItsMembers() throws {
+        let all = photos(0...5)
+        let first = group("first", [all[0], all[1]])
+        let second = group("second", [all[3], all[4], all[5]])
+        let timeline = DetailTimeline(photos: all, groups: [first, second])
+        let secondActive = try #require(timeline.activeGroup(with: second.id))
+        let grid = GridDisplay(focusing: secondActive)
+        #expect(grid.cells.map(\.id) == [.photo(all[3].id), .photo(all[4].id), .photo(all[5].id)])
+        #expect(!grid.cells.contains { $0.group?.id == first.id })
+        #expect(!grid.cells.contains { $0.photo.id == all[0].id || $0.photo.id == all[2].id })
     }
 
-    /// A filter narrows the expanded group the same way it narrows a cover: only the shown
-    /// members draw, and the run's member count is what the block can show.
-    @Test func aFilterNarrowsTheExpandedGroup() {
+    /// A filter narrows the focused run the same way it narrows the group everywhere: only the
+    /// members the active filter shows, in the active order.
+    @Test func aFilterNarrowsTheFocusedRun() throws {
         let all = photos(0...3)
         let burst = group("burst", all)
         let shown = [all[0], all[2], all[3]]
-        let grid = GridDisplay(photos: shown, groups: [burst], expandedGroup: burst.id)
-        let run = grid.sections.first { $0.expandedGroup == burst.id }
-        #expect(run?.cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id), .photo(all[3].id)])
-        #expect(run?.cells.count == 3)
+        let active = try #require(
+            DetailTimeline(photos: shown, groups: [burst]).activeGroup(with: burst.id))
+        let grid = GridDisplay(focusing: active)
+        #expect(grid.cells.map(\.id) == [.photo(all[0].id), .photo(all[2].id), .photo(all[3].id)])
     }
 
-    /// A group narrowed below 2 visible members cannot remain expanded.
-    @Test func aGroupNarrowedToOneVisibleMemberIsNotExpanded() {
+    /// A group narrowed below two visible members has no Group Focus at all, so the folder's run
+    /// stays the only level (issue #304, decision 2).
+    @Test func aGroupNarrowedToOneVisibleMemberCannotBeFocused() {
         let all = photos(0...3)
         let burst = group("burst", Array(all[1...3]))
         let shown = [all[0], all[2]]
-        let grid = GridDisplay(photos: shown, groups: [burst], expandedGroup: burst.id)
-        #expect(grid.sections.map(\.id) == [.photos(0)])
+        let timeline = DetailTimeline(photos: shown, groups: [burst])
+        #expect(timeline.activeGroup(with: burst.id) == nil)
+        let grid = GridDisplay(photos: shown, groups: [burst])
+        #expect(grid.sections.map(\.id) == [.photos])
         #expect(grid.cells.map(\.id) == shown.map { .photo($0.id) })
-        #expect(grid.cells.allSatisfy { $0.group == nil })
     }
 
-    /// An unknown key, such as a group the folder no longer publishes, expands nothing.
-    @Test func anUnknownGroupExpandsNothing() {
-        let all = photos(0...3)
-        let burst = group("burst", [all[1], all[2]])
-        let grid = GridDisplay(
-            photos: all, groups: [burst], expandedGroup: GroupID(rawValue: "gone"))
-        #expect(grid.sections.map(\.id) == [.photos(0)])
-        #expect(
-            grid.cells.map(\.id) == [.photo(all[0].id), .group(burst.id), .photo(all[3].id)])
-    }
-
-    /// Grouping off leaves one run with no marks, whichever group the split names.
+    /// Grouping off leaves one folder run with no marks.
     @Test func groupingOffLeavesOnePlainRun() {
         let burst = group("burst", photos(1...2))
         let grid = GridDisplay(
-            photos: photos(0...3), groups: [burst], groupsEnabled: false, expandedGroup: burst.id)
-        #expect(grid.sections.map(\.id) == [.photos(0)])
+            photos: photos(0...3), groups: [burst], groupsEnabled: false)
+        #expect(grid.sections.map(\.id) == [.photos])
         #expect(grid.cells.allSatisfy { $0.group == nil })
     }
 
     /// An empty grid keeps one run, so the collection view always has a section to draw.
     @Test func anEmptyGridKeepsOneRun() {
         let grid = GridDisplay(photos: [], groups: [])
-        #expect(grid.sections.map(\.id) == [.photos(0)])
+        #expect(grid.sections.map(\.id) == [.photos])
         #expect(grid.cells.isEmpty)
     }
 
-    /// The expanded group is the only run drawn with a header, and the folder's runs never are.
-    @Test func onlyTheGroupRunNamesAGroup() {
+    /// Only Group Focus's run is drawn with a header; the folder's run never is.
+    @Test func onlyTheFocusedRunNamesAGroup() throws {
         let all = photos(0...4)
         let burst = group("burst", [all[1], all[2], all[3]])
-        let grid = GridDisplay(photos: all, groups: [burst], expandedGroup: burst.id)
+        let timeline = DetailTimeline(photos: all, groups: [burst])
+        let active = try #require(timeline.activeGroup(with: burst.id))
+        let grid = GridDisplay(focusing: active)
         #expect(grid.sections.compactMap(\.expandedGroup) == [burst.id])
-        #expect(grid.sections.filter { $0.expandedGroup == nil }.count == 2)
+        #expect(grid.sections.filter { $0.expandedGroup == nil }.isEmpty)
     }
 }
 

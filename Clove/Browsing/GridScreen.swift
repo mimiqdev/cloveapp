@@ -55,8 +55,7 @@ struct GridScreen: View {
     private var gridDisplay: GridDisplay {
         GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
-            groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
-            expandedGroup: nil)
+            groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil)
     }
 
     var body: some View {

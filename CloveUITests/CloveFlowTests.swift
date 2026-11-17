@@ -439,8 +439,12 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(rail.value as? String, marks)
     }
 
+    /// #309: Photo Preview's split grid isolates the active group the same way Focus View's
+    /// filmstrip does. Opening a stack shows only that group's visible members, choosing a member
+    /// keeps Group Focus, folding returns to the folder on the group's Representative Photo, and
+    /// opening the other group scopes the pane to it.
     @MainActor
-    func testIPadPhotoPreviewGroupNearBottomRevealsAndFolds() throws {
+    func testIPadPhotoPreviewGroupFocusIsolatesTheActiveGroup() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
         let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
         defer {
@@ -455,67 +459,81 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
         let gridCollection = splitGrid.collectionViews.firstMatch
         XCTAssertTrue(gridCollection.waitForExistence(timeout: 5))
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
 
-        // Scroll the split pane down in small steps until burst-2696 sits near the bottom edge
-        // so expanding its 3-member run would overflow the viewport.
+        // Timeline keeps the folder's own photos and its collapsed stacks.
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").exists)
+        XCTAssertTrue(element(app, "clove.grid.group.burst-2678").exists)
         let stack = element(app, "clove.grid.group.burst-2696")
-        for _ in 0..<12 {
-            if stack.exists && stack.isHittable && stack.frame.maxY <= splitGrid.frame.maxY - 4 {
-                break
-            }
-            let start = gridCollection.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.68))
-            start.press(
-                forDuration: 0.05,
-                thenDragTo: gridCollection.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.42)),
-                withVelocity: .slow, thenHoldForDuration: 0)
-            Thread.sleep(forTimeInterval: 0.25)
+        for _ in 0..<8 where !(stack.exists && stack.isHittable) {
+            gridCollection.swipeUp()
         }
         XCTAssertTrue(stack.isHittable, "burst-2696 never scrolled into the split pane")
-        let stackFrameBefore = stack.frame
-        let expandedRunHeight = stackFrameBefore.height * 2 + 40
-        XCTAssertGreaterThan(
-            stackFrameBefore.minY + expandedRunHeight, gridCollection.frame.maxY,
-            "burst-2696 should sit near enough to the bottom that expanding overflows the split pane"
-        )
-
-        // Expanding near the bottom reveals header, fold control, and all 3 members in view.
         stack.tap()
+
+        // Group Focus draws only burst-2696's visible members, with its count header and fold.
         let count = element(app, "clove.grid.group.count.burst-2696")
         let fold = element(app, "clove.grid.group.fold")
-        let member1 = element(app, "clove.grid.photo.mmq02696")
-        let member2 = element(app, "clove.grid.photo.mmq02697")
-        let member3 = element(app, "clove.grid.photo.mmq02698")
+        let first = element(app, "clove.grid.photo.mmq02696")
+        let third = element(app, "clove.grid.photo.mmq02698")
         XCTAssertTrue(count.waitForExistence(timeout: 5))
+        XCTAssertEqual(count.label, "3 photos")
         XCTAssertTrue(fold.isHittable)
-        XCTAssertTrue(member1.isHittable)
-        XCTAssertTrue(member2.isHittable)
-        XCTAssertTrue(member3.waitForExistence(timeout: 5))
-        XCTAssertTrue(member3.isHittable)
-        XCTAssertGreaterThanOrEqual(count.frame.minY, splitGrid.frame.minY - 2)
-        XCTAssertLessThanOrEqual(member3.frame.maxY, gridCollection.frame.maxY + 2)
-        XCTAssertLessThan(count.frame.minY, stackFrameBefore.minY - 20)
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(third.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02695").exists)
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02699").exists)
+        XCTAssertFalse(element(app, "clove.grid.group.burst-2678").exists)
+        XCTAssertEqual(fileName.label, "MMQ02696.ARW")
+        XCTAssertTrue(first.isSelected)
+        XCTAssertFalse(third.isSelected)
+        capture("ipad-photo-preview-group-focus")
 
-        // Folding without scrolling restores the stack to its pre-expansion viewport position.
+        // Choosing another member changes the photo without leaving Group Focus.
+        third.tap()
+        XCTAssertTrue(waitForLabel("MMQ02698.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), third))
+        XCTAssertTrue(count.exists)
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02699").exists)
+        // A mark stays with the member and is readable in the split grid.
+        element(app, "clove.detail.rail.stars.4").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "4 stars"), third))
+
+        // Folding returns to the full folder Timeline on the Representative Photo (the rated
+        // member) with the group's stack holding it.
         fold.tap()
         XCTAssertTrue(stack.waitForExistence(timeout: 5))
-        XCTAssertEqual(stack.frame.minY, stackFrameBefore.minY, accuracy: 4)
+        XCTAssertTrue(waitForLabel("MMQ02698.ARW", fileName))
+        XCTAssertTrue(stack.isSelected)
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02696").exists)
+        // The whole folder is back above and below the stack.
+        let firstGroup = element(app, "clove.grid.group.burst-2678")
+        for _ in 0..<8 where !(firstGroup.exists && firstGroup.isHittable) {
+            gridCollection.swipeDown()
+        }
+        XCTAssertTrue(firstGroup.isHittable, "burst-2678 never scrolled into the split pane")
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").exists)
+        capture("ipad-photo-preview-group-folded")
 
-        // Expanding again, manually scrolling, then folding does not yank back to stackFrameBefore.
-        stack.tap()
-        XCTAssertTrue(fold.waitForExistence(timeout: 5))
-        let dragStart = gridCollection.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
-        dragStart.press(
-            forDuration: 0.05,
-            thenDragTo: gridCollection.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)),
-            withVelocity: .slow, thenHoldForDuration: 0)
-        Thread.sleep(forTimeInterval: 0.25)
-        XCTAssertTrue(fold.isHittable)
-        fold.tap()
-        XCTAssertTrue(stack.waitForExistence(timeout: 5))
-        XCTAssertLessThan(stack.frame.minY, stackFrameBefore.minY - 20)
+        // Opening the other group scopes the pane to that group only.
+        firstGroup.tap()
+        XCTAssertTrue(
+            element(app, "clove.grid.group.count.burst-2678").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02678").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02679").exists)
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02681").exists)
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02680").exists)
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02696").exists)
+        XCTAssertFalse(element(app, "clove.grid.group.burst-2696").exists)
+        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+
+        // Folding the second group also lands on its Representative Photo in Timeline.
+        element(app, "clove.grid.group.fold").tap()
+        XCTAssertTrue(
+            element(app, "clove.grid.group.burst-2678").waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02678").exists)
     }
 
     @MainActor
@@ -1800,11 +1818,11 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.duo.capsule").exists)
     }
 
-    /// #225: a group opened in expanded Duo expands in place in the folder grid, so the folder's
-    /// own photos stay reachable around it. Folding the group keeps the photo, its marks and the
-    /// route; the stack reopens it, and Back returns to the full folder grid.
+    /// #309: a group opened in expanded Duo scopes the split grid to that group, matching the
+    /// Focus View filmstrip. Choosing a member keeps Group Focus; folding keeps the photo, its
+    /// marks and the route, and the stack reopens it; Back returns to the full folder grid.
     @MainActor
-    func testDuoExpandedGroupMembersBrowseBesideThePhoto() throws {
+    func testDuoExpandedGroupFocusScopesTheSplitGrid() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4")
         continueAfterFailure = false
@@ -1819,58 +1837,53 @@ final class CloveFlowTests: XCTestCase {
             app.windows.firstMatch.horizontalSizeClass == .regular,
             "Select Open in Device Hub to test the Duo inner display")
         prepareDuo(app)
-        // The second burst sits between folder photos, so the split pane shows both around it.
         element(app, "clove.grid.group.burst-2696").tap()
         XCTAssertTrue(element(app, "clove.duo.photoPreview").waitForExistence(timeout: 5))
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
-        // The folder's own photos stay in the pane around the expanded group.
+        // Group Focus draws only burst-2696's visible members: no neighbouring folder photos,
+        // no other group and no collapsed stack of this group.
         let before = element(app, "clove.grid.photo.mmq02695")
         let after = element(app, "clove.grid.photo.mmq02699")
-        XCTAssertTrue(before.exists, "The photo before the group left the folder grid")
-        XCTAssertTrue(after.exists, "The photo after the group left the folder grid")
+        XCTAssertFalse(before.exists, "A photo outside the group stayed in the split grid")
+        XCTAssertFalse(after.exists, "A photo outside the group stayed in the split grid")
+        XCTAssertFalse(element(app, "clove.grid.group.burst-2678").exists)
         XCTAssertFalse(element(app, "clove.grid.group.burst-2696").exists)
         let count = element(app, "clove.grid.group.count.burst-2696")
-        XCTAssertTrue(count.exists, "The expanded group has no header")
+        XCTAssertTrue(count.exists, "The focused group has no header")
         XCTAssertEqual(count.label, "3 photos")
         let first = element(app, "clove.grid.photo.mmq02696")
         let third = element(app, "clove.grid.photo.mmq02698")
         XCTAssertTrue(first.isSelected)
         XCTAssertFalse(third.isSelected)
-        // Folding changes the thumbnails only: the photo, its name and the route stay, and the
-        // group folds at its own position without jumping (#241).
-        let beforeExpanded = before.frame
-        let headerExpanded = count.frame
+        capture("duo-group-focus-split-grid")
+        // Folding changes the level only: the photo, its name and the route stay, and the full
+        // folder comes back with the group's stack.
         element(app, "clove.grid.group.fold").tap()
         XCTAssertFalse(element(app, "clove.grid.group.count.burst-2696").exists)
         let stack = element(app, "clove.grid.group.burst-2696")
         XCTAssertTrue(stack.waitForExistence(timeout: 5), "Folding did not leave the group's stack")
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
-        XCTAssertTrue(before.exists && after.exists)
-        XCTAssertEqual(before.frame.minY, beforeExpanded.minY, accuracy: 2)
-        XCTAssertEqual(stack.frame.minY, headerExpanded.minY, accuracy: 2)
-        capture("duo-group-inline-grid-folded")
-        // The stack reopens the group in place, without leaving the photo or moving neighbors.
-        let beforeCollapsed = before.frame
-        let stackCollapsed = stack.frame
+        XCTAssertTrue(before.waitForExistence(timeout: 5))
+        XCTAssertTrue(after.exists)
+        XCTAssertTrue(element(app, "clove.grid.group.burst-2678").exists)
+        capture("duo-group-focus-split-grid-folded")
+        // The stack reopens the group without leaving the photo.
         stack.tap()
         XCTAssertTrue(
             element(app, "clove.grid.group.count.burst-2696").waitForExistence(timeout: 5))
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02696").isSelected)
-        XCTAssertEqual(before.frame.minY, beforeCollapsed.minY, accuracy: 2)
-        XCTAssertEqual(count.frame.minY, stackCollapsed.minY, accuracy: 2)
-        capture("duo-group-inline-grid")
-        // A member tap moves the preview, the filename, the highlight and the marks, without jumping.
-        let firstBeforeMemberTap = first.frame
+        XCTAssertFalse(before.exists)
+        XCTAssertFalse(after.exists)
+        // A member tap moves the preview, the filename and the marks, without leaving the group.
         third.tap()
         XCTAssertTrue(waitForLabel("MMQ02698.ARW", preview))
         XCTAssertTrue(third.isSelected)
         XCTAssertFalse(first.isSelected)
-        XCTAssertTrue(before.exists && after.exists)
-        XCTAssertEqual(before.frame.minY, beforeCollapsed.minY, accuracy: 2)
-        XCTAssertEqual(first.frame.minY, firstBeforeMemberTap.minY, accuracy: 2)
+        XCTAssertTrue(count.exists)
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02699").exists)
         let capsule = element(app, "clove.duo.capsule")
         rate(4, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "4 stars"), capsule))

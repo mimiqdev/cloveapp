@@ -7,7 +7,10 @@ import UIKit
 
 @MainActor
 struct GroupAnchorTests {
-    @Test func duoGridAnchorsGroupExpandFoldAndStillCentersOffscreenNavigation() async throws {
+    /// Issue #309: the split grid draws the same two levels as the Focus View filmstrip. In Group
+    /// Focus it shows only the active group's visible members; choosing a member keeps the level,
+    /// and folding returns to the folder on the group's stack, in place, without reloading.
+    @Test func splitGridGroupFocusScopesToTheActiveGroupAndFoldsBackToItsStack() async throws {
         let model = BrowsingModel(library: TestLibrary.sample)
         model.openFolder()
         let scene = try #require(
@@ -18,7 +21,8 @@ struct GroupAnchorTests {
         let p2696 = try #require(model.photos.first { $0.id.stem == "mmq02696" }?.id)
         let p2698 = try #require(model.photos.first { $0.id.stem == "mmq02698" }?.id)
         let p2699 = try #require(model.photos.first { $0.id.stem == "mmq02699" }?.id)
-        let p2713 = try #require(model.photos.first { $0.id.stem == "mmq02713" }?.id)
+        let burst2696 = GroupID(rawValue: "burst-2696")
+        let burst2678 = GroupID(rawValue: "burst-2678")
 
         for theme in [CloveTheme.light, CloveTheme.dark] {
             let state = GridAnchorHarnessState(
@@ -37,80 +41,73 @@ struct GroupAnchorTests {
 
             let collectionView = try #require(
                 findSubview(ofType: UICollectionView.self, in: window))
+            // Timeline: the folder's own photos and its collapsed stacks. Scroll the group's
+            // stack on screen the way a tap does before the person opens it.
+            #expect(collectionView.numberOfSections == 1)
+            let stackPathBefore = try #require(
+                indexPath(for: .group(burst2696), in: collectionView, state: state))
             collectionView.scrollToItem(
-                at: IndexPath(item: 16, section: 0), at: .centeredVertically, animated: false)
+                at: stackPathBefore, at: .centeredVertically, animated: false)
             collectionView.layoutIfNeeded()
             try await Task.sleep(for: .milliseconds(150))
+            #expect(indexPath(for: .photo(p2695), in: collectionView, state: state) != nil)
+            #expect(indexPath(for: .group(burst2678), in: collectionView, state: state) != nil)
+            let stackFrameBefore = try #require(
+                itemScreenFrame(stackPathBefore, in: collectionView, window: window))
+            let folderOffsetBefore = collectionView.contentOffset.y
 
-            let yBefore = collectionView.contentOffset.y
-            let f2695Before = try #require(
-                itemScreenFrame(IndexPath(item: 15, section: 0), in: collectionView, window: window)
-            )
-            let coverBefore = try #require(
-                itemScreenFrame(IndexPath(item: 16, section: 0), in: collectionView, window: window)
-            )
-
-            // Expand burst-2696 in place: preceding cell stays put and header aligns with old cover.
+            // Opening burst-2696 replaces the folder with only that group's visible members.
             state.currentPhoto = p2696
-            state.expandedGroup = GroupID(rawValue: "burst-2696")
+            state.expandedGroup = burst2696
             try await Task.sleep(for: .milliseconds(250))
 
-            let yExpanded = collectionView.contentOffset.y
-            let f2695Expanded = try #require(
-                itemScreenFrame(IndexPath(item: 15, section: 0), in: collectionView, window: window)
-            )
-            let headerExpanded = try #require(groupHeaderFrame(in: collectionView, window: window))
+            let memberCount = try #require(
+                state.timeline.activeGroup(with: burst2696)?.visibleMembers.count)
+            let viewport = viewportScreenBounds(in: collectionView, window: window)
+            #expect(collectionView.numberOfSections == 1)
+            #expect(collectionView.numberOfItems(inSection: 0) == memberCount)
+            #expect(indexPath(for: .photo(p2696), in: collectionView, state: state) != nil)
+            #expect(indexPath(for: .photo(p2698), in: collectionView, state: state) != nil)
+            // Neither the folder's neighbouring photos nor the other group draw in Group Focus.
+            #expect(indexPath(for: .photo(p2695), in: collectionView, state: state) == nil)
+            #expect(indexPath(for: .photo(p2699), in: collectionView, state: state) == nil)
+            #expect(indexPath(for: .group(burst2678), in: collectionView, state: state) == nil)
+            let headerFrame = try #require(groupHeaderFrame(in: collectionView, window: window))
+            #expect(headerFrame.minY >= viewport.top - 0.5)
+            #expect(headerFrame.minY - viewport.top <= GridGroupRun.inset + 2)
+            #expect(findFoldButton(in: collectionView) != nil)
 
-            #expect(abs(yExpanded - yBefore) <= 0.5)
-            #expect(abs(f2695Expanded.minY - f2695Before.minY) <= 0.5)
-            #expect(abs(headerExpanded.minY - coverBefore.minY) <= 0.5)
-
-            // Move to 3rd member (still on screen) and fold back: stack replaces header with 0 jump.
+            // Choosing another member changes the open photo and keeps Group Focus and its place.
+            let offsetBeforeMemberChoice = collectionView.contentOffset.y
             state.currentPhoto = p2698
             try await Task.sleep(for: .milliseconds(200))
-            let yAt2698 = collectionView.contentOffset.y
-            #expect(abs(yAt2698 - yBefore) <= 0.5)
+            #expect(abs(collectionView.contentOffset.y - offsetBeforeMemberChoice) <= 0.5)
+            #expect(indexPath(for: .photo(p2695), in: collectionView, state: state) == nil)
+            #expect(indexPath(for: .photo(p2698), in: collectionView, state: state) != nil)
 
-            state.expandedGroup = nil
-            try await Task.sleep(for: .milliseconds(250))
-
-            let yFolded = collectionView.contentOffset.y
-            let f2695Folded = try #require(
-                itemScreenFrame(IndexPath(item: 15, section: 0), in: collectionView, window: window)
-            )
-            let coverFolded = try #require(
-                itemScreenFrame(IndexPath(item: 16, section: 0), in: collectionView, window: window)
-            )
-
-            #expect(abs(yFolded - yBefore) <= 0.5)
-            #expect(abs(f2695Folded.minY - f2695Before.minY) <= 0.5)
-            #expect(abs(coverFolded.minY - headerExpanded.minY) <= 0.5)
-
-            // Leaving the group for a visible neighbor photo keeps the viewport anchored.
+            // Folding returns to the folder Timeline on the group's Representative Photo stack,
+            // in place and without reloading the folder.
             state.currentPhoto = p2696
-            state.expandedGroup = GroupID(rawValue: "burst-2696")
-            try await Task.sleep(for: .milliseconds(250))
-            let yBeforeLeave = collectionView.contentOffset.y
-            state.currentPhoto = p2699
             state.expandedGroup = nil
             try await Task.sleep(for: .milliseconds(250))
-            #expect(abs(collectionView.contentOffset.y - yBeforeLeave) <= 0.5)
+            #expect(collectionView.numberOfSections == 1)
+            #expect(indexPath(for: .photo(p2695), in: collectionView, state: state) != nil)
+            #expect(indexPath(for: .group(burst2678), in: collectionView, state: state) != nil)
+            let stackPathAfter = try #require(
+                indexPath(for: .group(burst2696), in: collectionView, state: state))
+            let stackFrameAfter = try #require(
+                itemScreenFrame(stackPathAfter, in: collectionView, window: window))
+            #expect(abs(collectionView.contentOffset.y - folderOffsetBefore) <= 0.5)
+            #expect(abs(stackFrameAfter.minY - stackFrameBefore.minY) <= 0.5)
 
-            // Jumping to an off-screen photo still brings it into view.
-            state.currentPhoto = p2713
-            try await Task.sleep(for: .milliseconds(250))
-            let p2713Path = IndexPath(item: 31, section: 0)
-            #expect(collectionView.indexPathsForVisibleItems.contains(p2713Path))
-
-            // Expanding burst-2678 at the very top of the folder keeps its header on screen.
-            collectionView.setContentOffset(
-                CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
-            collectionView.layoutIfNeeded()
+            // Opening the other group scopes the grid to that group instead.
             state.currentPhoto = p2678
-            state.expandedGroup = GroupID(rawValue: "burst-2678")
+            state.expandedGroup = burst2678
             try await Task.sleep(for: .milliseconds(250))
-            let topHeader = try #require(groupHeaderFrame(in: collectionView, window: window))
-            #expect(topHeader.minY >= 0)
+            #expect(collectionView.numberOfItems(inSection: 0) == 3)
+            #expect(indexPath(for: .photo(p2678), in: collectionView, state: state) != nil)
+            #expect(indexPath(for: .photo(p2696), in: collectionView, state: state) == nil)
+            #expect(indexPath(for: .photo(p2695), in: collectionView, state: state) == nil)
         }
     }
 
@@ -218,7 +215,10 @@ struct GroupAnchorTests {
         }
     }
 
-    @Test func expandingGroupNearBottomRevealsRunWithMinimumScrollFor2_3_And10PlusMembers()
+    /// Entering Group Focus starts the run at its count header and fold control, and a group that
+    /// fits is reviewable in the pane without scrolling. Folding restores the folder's viewport
+    /// and its stack in place (#309).
+    @Test func enteringGroupFocusShowsTheFocusedRunFromItsHeaderFor2_3_And10Members()
         async throws
     {
         let scene = try #require(
@@ -250,8 +250,8 @@ struct GroupAnchorTests {
                 indexPath(for: .group(groupID), in: collectionView, state: state))
             let stackAttrs = try #require(collectionView.layoutAttributesForItem(at: stackPath))
 
-            // Position the collapsed stack just above the bottom edge of the viewport so expanding
-            // pushes its members below the visible bounds.
+            // Position the collapsed stack just above the bottom edge of the viewport, so the
+            // focused run has to replace the folder's content there.
             let insets = collectionView.adjustedContentInset
             let desiredOffsetY = max(
                 -insets.top,
@@ -266,84 +266,41 @@ struct GroupAnchorTests {
                 itemScreenFrame(stackPath, in: collectionView, window: window))
             #expect(stackFrameBefore.maxY <= viewport.bottom + 0.5)
 
-            // Expand the group at its first member.
             state.currentPhoto = members[0]
             state.expandedGroup = groupID
             try await Task.sleep(for: .milliseconds(250))
 
-            let yExpanded = collectionView.contentOffset.y
+            #expect(collectionView.numberOfSections == 1)
+            #expect(collectionView.numberOfItems(inSection: 0) == memberCount)
             let headerFrame = try #require(groupHeaderFrame(in: collectionView, window: window))
             let foldButton = try #require(findFoldButton(in: collectionView))
             let foldFrame = foldButton.convert(foldButton.bounds, to: window)
-            let firstMemberFrame = try #require(
-                itemScreenFrame(IndexPath(item: 0, section: 1), in: collectionView, window: window))
+            #expect(headerFrame.minY >= viewport.top - 0.5)
+            #expect(headerFrame.minY - viewport.top <= GridGroupRun.inset + 2)
+            #expect(foldFrame.minY >= viewport.top - 0.5)
             let lastMemberFrame = try #require(
                 itemScreenFrame(
-                    IndexPath(item: memberCount - 1, section: 1),
-                    in: collectionView, window: window))
-
-            // Minimum upward scroll (contentOffset.y increased), header/fold and first row visible.
-            #expect(yExpanded > yBefore)
-            #expect(headerFrame.minY >= viewport.top - 0.5)
-            #expect(foldFrame.minY >= viewport.top - 0.5)
-            #expect(firstMemberFrame.minY >= viewport.top - 0.5)
-            #expect(firstMemberFrame.maxY <= viewport.bottom + 0.5)
-
-            // All 2, 3, and 10-member runs fit in the 850pt window's 2-column viewport, so the
-            // whole run (including bottom inset) is bottom-aligned without blind centering.
+                    IndexPath(item: memberCount - 1, section: 0), in: collectionView,
+                    window: window))
             #expect(lastMemberFrame.maxY <= viewport.bottom + 0.5)
-            let expectedBottomEdge = viewport.bottom - GridGroupRun.inset
-            #expect(abs(lastMemberFrame.maxY - expectedBottomEdge) <= 2.0)
 
-            // Fold without user scroll restores the exact pre-expansion viewport.
-            state.expandedGroup = nil
-            try await Task.sleep(for: .milliseconds(250))
-            #expect(abs(collectionView.contentOffset.y - yBefore) <= 0.5)
-        }
-    }
-
-    @Test func expandingAlreadyVisibleGroupIn2_3_And10MemberRunsHasZeroDeltaOnExpandAndFold()
-        async throws
-    {
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-
-        for memberCount in [2, 3, 10] {
-            let (photos, groups, groupID, members) = makeSyntheticGrid(
-                beforeCount: 2, groupMemberCount: memberCount, afterCount: 20)
-            let beforePhoto = try #require(photos.first?.id)
-
-            let state = GridAnchorHarnessState(
-                photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
-                expandedGroup: nil, currentPhoto: beforePhoto)
-            let host = UIHostingController(
-                rootView: GridAnchorHarness(state: state, theme: .light, columnCount: 2))
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(x: 0, y: 0, width: 250, height: 950)
-            window.rootViewController = host
-            window.isHidden = false
-            defer { window.isHidden = true }
-
-            host.view.setNeedsLayout()
-            host.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(250))
-
-            let collectionView = try #require(
-                findSubview(ofType: UICollectionView.self, in: window))
-            let yBefore = collectionView.contentOffset.y
-
+            // Folding without a scroll restores the folder's exact viewport and stack place.
             state.currentPhoto = members[0]
-            state.expandedGroup = groupID
-            try await Task.sleep(for: .milliseconds(250))
-            #expect(abs(collectionView.contentOffset.y - yBefore) <= 0.5)
-
             state.expandedGroup = nil
             try await Task.sleep(for: .milliseconds(250))
+            let stackPathAfter = try #require(
+                indexPath(for: .group(groupID), in: collectionView, state: state))
+            let stackFrameAfter = try #require(
+                itemScreenFrame(stackPathAfter, in: collectionView, window: window))
             #expect(abs(collectionView.contentOffset.y - yBefore) <= 0.5)
+            #expect(abs(stackFrameAfter.minY - stackFrameBefore.minY) <= 0.5)
         }
     }
 
-    @Test func overHeightGroupRevealsCurrentMemberAndKeepsHeaderDiscoverableWithoutCentering()
+    /// A group taller than the pane opens on its first member; choosing a member far down brings
+    /// it into view without leaving Group Focus, a mark keeps the pane still, and folding returns
+    /// to the folder's stack (#309).
+    @Test func overHeightGroupFocusKeepsTheChosenMemberInViewAndFoldsBackToTheStack()
         async throws
     {
         let scene = try #require(
@@ -372,7 +329,6 @@ struct GroupAnchorTests {
         let stackPath = try #require(
             indexPath(for: .group(groupID), in: collectionView, state: state))
         let stackAttrs = try #require(collectionView.layoutAttributesForItem(at: stackPath))
-
         let insets = collectionView.adjustedContentInset
         let desiredOffsetY = max(
             -insets.top,
@@ -383,243 +339,53 @@ struct GroupAnchorTests {
 
         let viewport = viewportScreenBounds(in: collectionView, window: window)
         let yBefore = collectionView.contentOffset.y
+        let stackFrameBefore = try #require(
+            itemScreenFrame(stackPath, in: collectionView, window: window))
 
-        // Expand near bottom at first member: over-height (14 members > viewport) reveals first
-        // member at bottom edge and keeps header/fold visible, rather than centering.
         state.currentPhoto = members[0]
         state.expandedGroup = groupID
         try await Task.sleep(for: .milliseconds(250))
 
-        let yExpanded = collectionView.contentOffset.y
+        #expect(collectionView.numberOfItems(inSection: 0) == 14)
         let headerFrame = try #require(groupHeaderFrame(in: collectionView, window: window))
         let firstMemberFrame = try #require(
-            itemScreenFrame(IndexPath(item: 0, section: 1), in: collectionView, window: window))
-
-        #expect(yExpanded > yBefore)
+            itemScreenFrame(IndexPath(item: 0, section: 0), in: collectionView, window: window))
         #expect(headerFrame.minY >= viewport.top - 0.5)
         #expect(firstMemberFrame.minY >= viewport.top - 0.5)
         #expect(firstMemberFrame.maxY <= viewport.bottom + 0.5)
-        // Minimum upward scroll bottom-aligns the first member rather than centering it.
-        #expect(abs(firstMemberFrame.maxY - viewport.bottom) <= 2.0)
 
-        // Member tap inside visible row does not jump.
-        state.currentPhoto = members[1]
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(abs(collectionView.contentOffset.y - yExpanded) <= 0.5)
-
-        // Navigating to an off-screen member inside the expanded group centers it into view.
+        // A member far down the run comes into view when it is chosen.
         state.currentPhoto = members[13]
         try await Task.sleep(for: .milliseconds(250))
-        let offscreenMemberFrame = try #require(
-            itemScreenFrame(IndexPath(item: 13, section: 1), in: collectionView, window: window))
-        #expect(offscreenMemberFrame.minY >= viewport.top - 0.5)
-        #expect(offscreenMemberFrame.maxY <= viewport.bottom + 0.5)
-
-        // Fold after resetting from top, without user scroll, restores pre-expansion viewport.
-        state.expandedGroup = nil
-        try await Task.sleep(for: .milliseconds(250))
-        #expect(abs(collectionView.contentOffset.y - yBefore) <= 0.5)
-
-        // Expand while current photo is deep inside the over-height group (last member): reveals
-        // that member at the bottom edge without blind centering.
-        state.currentPhoto = members[13]
-        state.expandedGroup = groupID
-        try await Task.sleep(for: .milliseconds(250))
-
         let deepMemberFrame = try #require(
-            itemScreenFrame(IndexPath(item: 13, section: 1), in: collectionView, window: window))
+            itemScreenFrame(IndexPath(item: 13, section: 0), in: collectionView, window: window))
         #expect(deepMemberFrame.minY >= viewport.top - 0.5)
         #expect(deepMemberFrame.maxY <= viewport.bottom + 0.5)
-        #expect(abs(deepMemberFrame.maxY - viewport.bottom) <= 2.0)
+        let offsetAtMember = collectionView.contentOffset.y
 
-        // When no photo is current (currentPhoto == nil) on an over-height expansion near the
-        // bottom, the first member is revealed while keeping header/fold discoverable.
-        state.expandedGroup = nil
-        state.currentPhoto = nil
-        try await Task.sleep(for: .milliseconds(250))
-        collectionView.setContentOffset(CGPoint(x: 0, y: desiredOffsetY), animated: false)
-        collectionView.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
-
-        state.expandedGroup = groupID
-        try await Task.sleep(for: .milliseconds(250))
-        let nilCurrentHeader = try #require(groupHeaderFrame(in: collectionView, window: window))
-        let nilCurrentFirst = try #require(
-            itemScreenFrame(IndexPath(item: 0, section: 1), in: collectionView, window: window))
-        #expect(nilCurrentHeader.minY >= viewport.top - 0.5)
-        #expect(nilCurrentFirst.minY >= viewport.top - 0.5)
-        #expect(nilCurrentFirst.maxY <= viewport.bottom + 0.5)
-    }
-
-    @Test func foldAfterManualUserScrollDoesNotYankViewportBack() async throws {
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-
-        let (photos, groups, groupID, members) = makeSyntheticGrid(
-            beforeCount: 20, groupMemberCount: 6, afterCount: 10)
-        let beforePhoto = try #require(photos.first?.id)
-
-        let state = GridAnchorHarnessState(
-            photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
-            expandedGroup: nil, currentPhoto: beforePhoto)
-        let host = UIHostingController(
-            rootView: GridAnchorHarness(state: state, theme: .light, columnCount: 2))
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 250, height: 600)
-        window.rootViewController = host
-        window.isHidden = false
-        defer { window.isHidden = true }
-
-        host.view.setNeedsLayout()
-        host.view.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(250))
-
-        let collectionView = try #require(findSubview(ofType: UICollectionView.self, in: window))
-        let stackPath = try #require(
-            indexPath(for: .group(groupID), in: collectionView, state: state))
-        let stackAttrs = try #require(collectionView.layoutAttributesForItem(at: stackPath))
-
-        let insets = collectionView.adjustedContentInset
-        let desiredOffsetY = max(
-            -insets.top,
-            stackAttrs.frame.maxY + 8 - (collectionView.bounds.height - insets.bottom))
-        collectionView.setContentOffset(CGPoint(x: 0, y: desiredOffsetY), animated: false)
-        collectionView.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
-
-        let yBefore = collectionView.contentOffset.y
-
-        // Expand near bottom.
-        state.currentPhoto = members[0]
-        state.expandedGroup = groupID
-        try await Task.sleep(for: .milliseconds(250))
-        let yExpanded = collectionView.contentOffset.y
-        #expect(yExpanded > yBefore)
-
-        // Simulate user manually scrolling to inspect the run.
-        let userScrolledY = yExpanded + 80
-        collectionView.delegate?.scrollViewWillBeginDragging?(collectionView)
-        collectionView.setContentOffset(CGPoint(x: 0, y: userScrolledY), animated: false)
-        collectionView.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
-
-        // Folding after a manual scroll must NOT yank back to yBefore.
-        state.expandedGroup = nil
-        try await Task.sleep(for: .milliseconds(250))
-        let yAfterFold = collectionView.contentOffset.y
-        #expect(abs(yAfterFold - yBefore) > 30)
-        #expect(abs(yAfterFold - userScrolledY) <= 1.0)
-    }
-
-    @Test func expandingGroupClippedAtTopRevealsHeaderAndMembersWithMinimumScroll() async throws {
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-
-        let (photos, groups, groupID, members) = makeSyntheticGrid(
-            beforeCount: 16, groupMemberCount: 3, afterCount: 20)
-        let beforePhoto = try #require(photos.first?.id)
-
-        let state = GridAnchorHarnessState(
-            photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
-            expandedGroup: nil, currentPhoto: beforePhoto)
-        let host = UIHostingController(
-            rootView: GridAnchorHarness(state: state, theme: .light, columnCount: 2))
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 250, height: 600)
-        window.rootViewController = host
-        window.isHidden = false
-        defer { window.isHidden = true }
-
-        host.view.setNeedsLayout()
-        host.view.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(250))
-
-        let collectionView = try #require(findSubview(ofType: UICollectionView.self, in: window))
-        let stackPath = try #require(
-            indexPath(for: .group(groupID), in: collectionView, state: state))
-        let stackAttrs = try #require(collectionView.layoutAttributesForItem(at: stackPath))
-
-        // Scroll so the collapsed stack is clipped by 40pt at the top edge of the viewport.
-        let insets = collectionView.adjustedContentInset
-        let clippedTopY = stackAttrs.frame.minY - insets.top + 40
-        collectionView.setContentOffset(CGPoint(x: 0, y: clippedTopY), animated: false)
-        collectionView.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
-
-        let viewport = viewportScreenBounds(in: collectionView, window: window)
-
-        state.currentPhoto = members[0]
-        state.expandedGroup = groupID
-        try await Task.sleep(for: .milliseconds(250))
-
-        let headerFrame = try #require(groupHeaderFrame(in: collectionView, window: window))
-        let firstMemberFrame = try #require(
-            itemScreenFrame(IndexPath(item: 0, section: 1), in: collectionView, window: window))
-        #expect(headerFrame.minY >= viewport.top - 0.5)
-        #expect(abs(headerFrame.minY - viewport.top) <= 2.0)
-        #expect(firstMemberFrame.minY >= viewport.top - 0.5)
-    }
-
-    @Test func markingInsideExpandedGroupStillRestoresPreExpansionViewportOnFold() async throws {
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-
-        let (photos, groups, groupID, members) = makeSyntheticGrid(
-            beforeCount: 20, groupMemberCount: 4, afterCount: 10)
-        let beforePhoto = try #require(photos.first?.id)
-
-        let state = GridAnchorHarnessState(
-            photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
-            expandedGroup: nil, currentPhoto: beforePhoto)
-        let host = UIHostingController(
-            rootView: GridAnchorHarness(state: state, theme: .light, columnCount: 2))
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 250, height: 600)
-        window.rootViewController = host
-        window.isHidden = false
-        defer { window.isHidden = true }
-
-        host.view.setNeedsLayout()
-        host.view.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(250))
-
-        let collectionView = try #require(findSubview(ofType: UICollectionView.self, in: window))
-        let stackPath = try #require(
-            indexPath(for: .group(groupID), in: collectionView, state: state))
-        let stackAttrs = try #require(collectionView.layoutAttributesForItem(at: stackPath))
-
-        let insets = collectionView.adjustedContentInset
-        let desiredOffsetY = max(
-            -insets.top,
-            stackAttrs.frame.maxY + 8 - (collectionView.bounds.height - insets.bottom))
-        collectionView.setContentOffset(CGPoint(x: 0, y: desiredOffsetY), animated: false)
-        collectionView.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
-
-        let yBefore = collectionView.contentOffset.y
-
-        state.currentPhoto = members[0]
-        state.expandedGroup = groupID
-        try await Task.sleep(for: .milliseconds(250))
-        let yExpanded = collectionView.contentOffset.y
-        #expect(yExpanded > yBefore)
-
-        // Marking a member while expanded updates section items without changing structure.
+        // Marking the open member updates its cell without moving the pane.
         var updatedPhotos = state.photos
-        let memberIndex = try #require(updatedPhotos.firstIndex(where: { $0.id == members[0] }))
+        let memberIndex = try #require(updatedPhotos.firstIndex(where: { $0.id == members[13] }))
         updatedPhotos[memberIndex].marks.rating = try #require(Rating(rawValue: 4))
         state.photos = updatedPhotos
         try await Task.sleep(for: .milliseconds(200))
-        #expect(abs(collectionView.contentOffset.y - yExpanded) <= 0.5)
+        #expect(abs(collectionView.contentOffset.y - offsetAtMember) <= 0.5)
 
-        // Folding still restores the pre-expansion viewport offset.
+        // Folding returns to the folder's own viewport with the group's stack where it was.
+        state.currentPhoto = members[0]
         state.expandedGroup = nil
         try await Task.sleep(for: .milliseconds(250))
+        let stackPathAfter = try #require(
+            indexPath(for: .group(groupID), in: collectionView, state: state))
+        let stackFrameAfter = try #require(
+            itemScreenFrame(stackPathAfter, in: collectionView, window: window))
         #expect(abs(collectionView.contentOffset.y - yBefore) <= 0.5)
+        #expect(abs(stackFrameAfter.minY - stackFrameBefore.minY) <= 0.5)
     }
 
-    @Test func leavingNearBottomExpandedGroupRevealsFollowingPhotoWithoutYankingBack() async throws
-    {
+    /// Leaving Group Focus for the following Timeline photo, as auto-advance does, brings that
+    /// photo into view instead of leaving it clipped behind the group's stack.
+    @Test func leavingGroupFocusForTheFollowingPhotoShowsIt() async throws {
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
 
@@ -647,7 +413,6 @@ struct GroupAnchorTests {
         let stackPath = try #require(
             indexPath(for: .group(groupID), in: collectionView, state: state))
         let stackAttrs = try #require(collectionView.layoutAttributesForItem(at: stackPath))
-
         let insets = collectionView.adjustedContentInset
         let desiredOffsetY = max(
             -insets.top,
@@ -660,8 +425,6 @@ struct GroupAnchorTests {
         state.expandedGroup = groupID
         try await Task.sleep(for: .milliseconds(250))
 
-        // Advancing out of the group to the following photo folds the group and keeps the new
-        // current photo fully visible instead of restoring pre-expansion offset with it clipped.
         state.currentPhoto = afterPhoto
         state.expandedGroup = nil
         try await Task.sleep(for: .milliseconds(250))
@@ -720,10 +483,7 @@ struct GroupAnchorTests {
         for cellID: GridCellItem.ID, in collectionView: UICollectionView,
         state: GridAnchorHarnessState
     ) -> IndexPath? {
-        let display = GridDisplay(
-            photos: state.photos, groups: state.groups, groupsEnabled: true,
-            expandedGroup: state.expandedGroup)
-        for (sectionIndex, section) in display.sections.enumerated() {
+        for (sectionIndex, section) in state.display.sections.enumerated() {
             if let itemIndex = section.cells.firstIndex(where: { $0.id == cellID }) {
                 return IndexPath(item: itemIndex, section: sectionIndex)
             }
@@ -773,6 +533,19 @@ private final class GridAnchorHarnessState {
     var expandedGroup: GroupID?
     var currentPhoto: PhotoIdentity?
 
+    /// The two-level Detail model the split grid draws from.
+    var timeline: DetailTimeline {
+        DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
+    }
+
+    /// The grid's cells at the current level: the folder's run, or Group Focus's single run.
+    var display: GridDisplay {
+        if let focused = expandedGroup.flatMap({ timeline.activeGroup(with: $0) }) {
+            return GridDisplay(focusing: focused)
+        }
+        return GridDisplay(photos: photos, groups: groups, groupsEnabled: true)
+    }
+
     init(
         photos: [GridPhoto], groups: [BrowsingGroup], thumbnails: any GridThumbnailSource,
         expandedGroup: GroupID?, currentPhoto: PhotoIdentity?
@@ -798,9 +571,7 @@ private struct GridAnchorHarness: View {
     var followsCurrentPhoto = true
 
     var body: some View {
-        let display = GridDisplay(
-            photos: state.photos, groups: state.groups, groupsEnabled: true,
-            expandedGroup: state.expandedGroup)
+        let display = state.display
         GridCollectionView(
             sections: display.sections,
             currentPhoto: state.currentPhoto,

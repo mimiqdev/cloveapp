@@ -1,7 +1,7 @@
 import CloveCore
 import UIKit
 
-/// The measurements of one group run in the Duo's split grid (owner decision, #225).
+/// The measurements of one group run in Photo Preview's split grid (#304, #309).
 ///
 /// The run draws its members' extent with the shared ``ExpandedGroupSurface``, the same neutral
 /// `text/primary` 12% surface the grid and the filmstrip use (#226, #227), so it adds no tint of
@@ -14,11 +14,11 @@ enum GridGroupRun {
     static let inset: CGFloat = 8
 }
 
-/// The head of a group run in the Duo's split grid: how many of the group's members the filter
-/// shows, and the control that folds them back into the group's stack (owner decision, #225).
+/// The head of a group run in Photo Preview's split grid: how many of the group's members the
+/// filter shows, and the control that folds them back into the group's stack (#304, #309).
 ///
-/// Folding changes the thumbnails only. The photo on screen, its marks and the detail route stay
-/// as they are, and the stack's count badge reopens the group in place.
+/// Folding returns the pane to the folder Timeline on the group's Representative Photo. The
+/// photo on screen keeps its marks and the detail route, and the stack's cover reopens the group.
 final class GridGroupHeader: UICollectionReusableView {
     /// The supplementary kind this header is registered under.
     static let kind = "groupRunHeader"

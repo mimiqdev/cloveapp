@@ -2456,10 +2456,30 @@ struct DetailDisplayPresentationTests {
         }
         let preview = try #require(findPreview(in: window))
         let collectionView = try #require(findCollectionView(in: window))
-        // Photo Preview split grid shows the expanded group header + section alongside the preview.
-        #expect(collectionView.numberOfSections >= 2)
+        let timeline = DetailTimeline(photos: browsing.photos, groups: browsing.groups)
+        let members = try #require(timeline.activeGroup(with: group.id)?.visibleMembers)
+        // Photo Preview's split grid isolates the same group the Focus View strip does: one run
+        // with its count header, and only the group's visible members (#309).
+        try await waitFor("the split grid did not show the focused group") {
+            collectionView.numberOfSections == 1
+                && collectionView.numberOfItems(inSection: 0) == members.count
+                && collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) != nil
+        }
         #expect(!collectionView.visibleSupplementaryViews(ofKind: GridGroupHeader.kind).isEmpty)
         #expect(browsing.expandedGroup == group.id)
+
+        // Choosing another member in the split grid changes the open photo, keeps Group Focus and
+        // keeps the run scoped to the group (#309).
+        let chosenIndex = 2
+        let chosen = members[chosenIndex]
+        collectionView.delegate?.collectionView?(
+            collectionView, didSelectItemAt: IndexPath(item: chosenIndex, section: 0))
+        try await waitFor("the split grid did not select the member") {
+            browsing.state.currentPhoto == chosen.id
+        }
+        #expect(browsing.expandedGroup == group.id)
+        #expect(collectionView.numberOfSections == 1)
+        #expect(collectionView.numberOfItems(inSection: 0) == members.count)
 
         preview.onDoubleTap?(.center)
         try await waitFor("100% zoom did not settle") {
@@ -2508,6 +2528,22 @@ struct DetailDisplayPresentationTests {
         #expect(browsing.state.currentPhoto == group.members[1])
         #expect(browsing.shownMarks(for: group.members[1]).rating == two)
         #expect(source.requests.count == requestCountBeforeReturn)
+        let splitAgain = try #require(findCollectionView(in: window))
+        try await waitFor("the split grid did not come back scoped to the group") {
+            splitAgain.numberOfSections == 1
+                && splitAgain.numberOfItems(inSection: 0) == members.count
+        }
+
+        // A filter that leaves fewer than two visible members closes Group Focus, and the split
+        // grid returns to the folder's own Timeline run (#304, #309).
+        browsing.setFilter(.unmarked)
+        let folderCellCount =
+            GridDisplay(photos: browsing.photos, groups: browsing.groups).cells.count
+        try await waitFor("the filter did not return the split grid to Timeline") {
+            browsing.expandedGroup == nil
+                && splitAgain.numberOfSections == 1
+                && splitAgain.numberOfItems(inSection: 0) == folderCellCount
+        }
     }
 
     private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
