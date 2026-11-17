@@ -257,8 +257,7 @@ struct FolderPreparationPresentationTests {
                         filter: AnyView(EmptyView()),
                         more: AnyView(EmptyView()),
                         bottom: AnyView(EmptyView()),
-                        showsGrid: true,
-                        foldedGroup: nil))
+                        showsGrid: true))
             }
             .environment(SettingsStore.sample)
             .environment(\.isDuoExpanded, true)

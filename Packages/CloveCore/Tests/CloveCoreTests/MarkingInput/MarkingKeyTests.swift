@@ -163,4 +163,43 @@ import CloveCore
                 == .mark(MarkChange(rating: .unrated), .rating))
     }
 
+    @Test func readOnlyProtectionBlocksMarkingWhilePreservingNavigationUndoAndGroupKeys() throws {
+        let rules = MarkingInputRules()
+        let three = try MarkingFixtures.stars(3)
+
+        #expect(
+            rules.result(for: .rating(three), marks: PhotoMarks(), allowsMarking: false)
+                == .noChange)
+        #expect(
+            rules.result(for: .colourLabel(.red), marks: PhotoMarks(), allowsMarking: false)
+                == .noChange)
+        #expect(
+            rules.result(for: .nextRating, marks: PhotoMarks(), allowsMarking: false) == .noChange)
+        #expect(rules.result(for: .reject, marks: PhotoMarks(), allowsMarking: false) == .noChange)
+        #expect(
+            rules.result(forRating: three, marks: PhotoMarks(), allowsMarking: false) == .noChange)
+        #expect(
+            rules.result(
+                forLabel: ColourLabel(colour: .red), marks: PhotoMarks(), allowsMarking: false)
+                == .noChange)
+        #expect(rules.result(forRejectToggle: PhotoMarks(), allowsMarking: false) == .noChange)
+        #expect(
+            rules.result(
+                forSwipeRating: three, marks: PhotoMarks(), isZoomed: false, allowsMarking: false)
+                == .noChange)
+
+        #expect(
+            rules.result(for: .previousPhoto, marks: PhotoMarks(), allowsMarking: false)
+                == .previousPhoto)
+        #expect(
+            rules.result(for: .nextPhoto, marks: PhotoMarks(), allowsMarking: false) == .nextPhoto)
+        #expect(rules.result(for: .undo, marks: PhotoMarks(), allowsMarking: false) == .undo)
+        #expect(
+            rules.result(for: .toggleGroupFocus, marks: PhotoMarks(), allowsMarking: false)
+                == .toggleGroupFocus)
+        #expect(
+            rules.result(for: .collapseGroup, marks: PhotoMarks(), allowsMarking: false)
+                == .collapseGroup)
+    }
+
 }

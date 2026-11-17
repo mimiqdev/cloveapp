@@ -20,15 +20,6 @@ public enum ZoomedGestures: String, CaseIterable, Hashable, Sendable {
     case pan
 }
 
-/// How similar groups appear in the grid (PRD Grid, similar-group display).
-public enum GridGroupDisplay: String, CaseIterable, Hashable, Sendable {
-    /// Show every photo with each group outlined and counted; the launch default (PRD Grid).
-    case expanded
-
-    /// Show one cover cell per group with its count (PRD Grid).
-    case collapsed
-}
-
 /// Every launch setting from the PRD, with the default each one ships with.
 ///
 /// The type is a Sendable value with no observation or UI framework types; the settings screen
@@ -74,9 +65,6 @@ public struct AppSettings: Hashable, Sendable {
     /// is no grouping-sensitivity setting (PRD Explicitly out of launch scope).
     public var similarGroupsEnabled: Bool
 
-    /// How groups appear in the grid (PRD Grid, similar-group display); expanded by default.
-    public var gridGroupDisplay: GridGroupDisplay
-
     /// The three-way appearance mode (Light, Dark, System) and paired theme family
     /// (`design/handoff/tokens/tokens.md`); System + Default by default.
     public var appearance: AppearanceChoice
@@ -95,7 +83,6 @@ public struct AppSettings: Hashable, Sendable {
         rejectsFolderName: RejectsFolderName = .defaultFolderName,
         moveRejectsEnabled: Bool = true,
         similarGroupsEnabled: Bool = true,
-        gridGroupDisplay: GridGroupDisplay = .expanded,
         appearance: AppearanceChoice = AppearanceChoice(),
         photoDisplayMode: PhotoDisplayMode? = nil
     ) {
@@ -108,7 +95,6 @@ public struct AppSettings: Hashable, Sendable {
         self.rejectsFolderName = rejectsFolderName
         self.moveRejectsEnabled = moveRejectsEnabled
         self.similarGroupsEnabled = similarGroupsEnabled
-        self.gridGroupDisplay = gridGroupDisplay
         self.appearance = appearance
         self.photoDisplayMode = photoDisplayMode
     }

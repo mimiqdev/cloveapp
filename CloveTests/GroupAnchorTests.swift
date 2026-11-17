@@ -156,11 +156,12 @@ struct GroupAnchorTests {
         let p2696 = try #require(model.photos.first { $0.id.stem == "mmq02696" }?.id)
         let p2697 = try #require(model.photos.first { $0.id.stem == "mmq02697" }?.id)
         let p2713 = try #require(model.photos.first { $0.id.stem == "mmq02713" }?.id)
+        let burstID = GroupID(rawValue: "burst-2696")
 
         for theme in [CloveTheme.light, CloveTheme.dark] {
             let state = FilmstripAnchorHarnessState(
                 photos: model.photos, groups: model.groups, thumbnails: model.thumbnails,
-                current: p2695, isFolded: false)
+                current: p2695, expandedGroup: nil)
             let host = UIHostingController(
                 rootView: FilmstripAnchorHarness(state: state, theme: theme))
             let window = UIWindow(windowScene: scene)
@@ -174,39 +175,46 @@ struct GroupAnchorTests {
             try await Task.sleep(for: .milliseconds(500))
 
             let scrollView = try #require(findSubview(ofType: UIScrollView.self, in: window))
-            let sxCollapsed = scrollView.contentOffset.x
+            let timelineContentWidth = scrollView.contentSize.width
+            #expect(timelineContentWidth > 1200)
+            let sxTimeline = scrollView.contentOffset.x
 
-            // Enter burst-2696 while stack is already on screen: strip must not jump.
+            // Selecting burst-2696 in Timeline while stack is already on screen: strip must not jump.
             state.current = p2696
             try await Task.sleep(for: .milliseconds(500))
-            let sxExpanded = scrollView.contentOffset.x
-            #expect(abs(sxExpanded - sxCollapsed) <= 0.5)
+            #expect(abs(scrollView.contentOffset.x - sxTimeline) <= 0.5)
 
-            // Switching to the next visible member inside the expanded group does not jump.
+            // Expanding burst-2696 enters Group Focus (only group members + fold control).
+            state.expandedGroup = burstID
+            try await Task.sleep(for: .milliseconds(450))
+            let focusedWidth = scrollView.contentSize.width
+            let focusedMemberCount = try #require(
+                state.timeline.activeGroup(with: burstID)?.visibleMembers.count)
+            #expect(focusedWidth > CGFloat(focusedMemberCount) * 54)
+            #expect(focusedWidth < 300)
+            let sxFocused = scrollView.contentOffset.x
+
+            // Switching to the next visible member inside Group Focus does not jump.
             state.current = p2697
             try await Task.sleep(for: .milliseconds(450))
-            #expect(abs(scrollView.contentOffset.x - sxCollapsed) <= 0.5)
+            #expect(abs(scrollView.contentOffset.x - sxFocused) <= 0.5)
 
-            // Folding while the group is on screen keeps the offset steady.
-            state.isFolded = true
-            try await Task.sleep(for: .milliseconds(450))
-            let sxFolded = scrollView.contentOffset.x
-            #expect(abs(sxFolded - sxCollapsed) <= 0.5)
+            // Collapsing back to Timeline exits Group Focus cleanly.
+            state.expandedGroup = nil
+            state.current = p2696
+            try await Task.sleep(for: .milliseconds(500))
+            #expect(scrollView.contentSize.width > 1200)
+            let sxAfterCollapse = scrollView.contentOffset.x
 
-            // Unfolding while the stack is on screen keeps the offset steady.
-            state.isFolded = false
-            try await Task.sleep(for: .milliseconds(450))
-            #expect(abs(scrollView.contentOffset.x - sxCollapsed) <= 0.5)
-
-            // Leaving the group back to visible p2695 does not jump.
+            // Leaving the collapsed stack back to visible p2695 does not jump.
             state.current = p2695
             try await Task.sleep(for: .milliseconds(450))
-            #expect(abs(scrollView.contentOffset.x - sxCollapsed) <= 0.5)
+            #expect(abs(scrollView.contentOffset.x - sxAfterCollapse) <= 0.5)
 
             // Jumping to an off-screen photo (last photo) still scrolls it into view.
             state.current = p2713
             try await Task.sleep(for: .milliseconds(600))
-            #expect(scrollView.contentOffset.x > sxCollapsed + 100)
+            #expect(scrollView.contentOffset.x > sxAfterCollapse + 100)
         }
     }
 
@@ -714,7 +722,7 @@ struct GroupAnchorTests {
     ) -> IndexPath? {
         let display = GridDisplay(
             photos: state.photos, groups: state.groups, groupsEnabled: true,
-            display: .collapsed, expandedGroup: state.expandedGroup)
+            expandedGroup: state.expandedGroup)
         for (sectionIndex, section) in display.sections.enumerated() {
             if let itemIndex = section.cells.firstIndex(where: { $0.id == cellID }) {
                 return IndexPath(item: itemIndex, section: sectionIndex)
@@ -792,7 +800,7 @@ private struct GridAnchorHarness: View {
     var body: some View {
         let display = GridDisplay(
             photos: state.photos, groups: state.groups, groupsEnabled: true,
-            display: .collapsed, expandedGroup: state.expandedGroup)
+            expandedGroup: state.expandedGroup)
         GridCollectionView(
             sections: display.sections,
             currentPhoto: state.currentPhoto,
@@ -823,17 +831,21 @@ private final class FilmstripAnchorHarnessState {
     let groups: [BrowsingGroup]
     let thumbnails: any GridThumbnailSource
     var current: PhotoIdentity?
-    var isFolded: Bool
+    var expandedGroup: GroupID?
+
+    var timeline: DetailTimeline {
+        DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
+    }
 
     init(
         photos: [GridPhoto], groups: [BrowsingGroup], thumbnails: any GridThumbnailSource,
-        current: PhotoIdentity?, isFolded: Bool
+        current: PhotoIdentity?, expandedGroup: GroupID?
     ) {
         self.photos = photos
         self.groups = groups
         self.thumbnails = thumbnails
         self.current = current
-        self.isFolded = isFolded
+        self.expandedGroup = expandedGroup
     }
 }
 
@@ -842,16 +854,19 @@ private struct FilmstripAnchorHarness: View {
     let theme: CloveTheme
 
     var body: some View {
+        let timeline = state.timeline
         DetailFilmstrip(
-            photos: state.photos,
+            timeline: timeline,
+            expandedGroup: state.expandedGroup.flatMap { timeline.activeGroup(with: $0) },
             current: state.current,
             thumbnails: state.thumbnails,
-            open: { state.current = $0 },
-            groups: state.groups,
-            groupFold: FilmstripGroupFold(
-                isFolded: state.isFolded,
-                fold: { state.isFolded = true },
-                unfold: { state.isFolded = false })
+            openPhoto: {
+                state.expandedGroup = nil
+                state.current = $0
+            },
+            selectGroupPhoto: { state.current = $0 },
+            expandGroup: { state.expandedGroup = $0 },
+            collapseGroup: { state.expandedGroup = nil }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.tokens.stage.color)

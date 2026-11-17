@@ -49,9 +49,12 @@ public struct MarkingInputRules: Hashable, Sendable {
 
     /// Commits exactly the preview, once per release. No label change, no velocity at release.
     public func result(
-        forSwipeRating rating: Rating, marks: PhotoMarks, isZoomed: Bool, touchCount: Int = 1
+        forSwipeRating rating: Rating, marks: PhotoMarks, isZoomed: Bool, touchCount: Int = 1,
+        allowsMarking: Bool = true
     ) -> MarkingResult {
-        guard allowsSwipe(isZoomed: isZoomed, touchCount: touchCount) else { return .noChange }
+        guard allowsMarking, allowsSwipe(isZoomed: isZoomed, touchCount: touchCount) else {
+            return .noChange
+        }
         return markResult(
             MarkChange(rating: rating), kind: rating == .rejected ? .reject : .rating, marks: marks)
     }
@@ -62,8 +65,11 @@ public struct MarkingInputRules: Hashable, Sendable {
     ///
     /// The `↓` key only turns it on. The label is never touched, and a second toggle returns
     /// the photo to the other state.
-    public func result(forRejectToggle marks: PhotoMarks) -> MarkingResult {
-        markResult(
+    public func result(forRejectToggle marks: PhotoMarks, allowsMarking: Bool = true)
+        -> MarkingResult
+    {
+        guard allowsMarking else { return .noChange }
+        return markResult(
             MarkChange(rating: marks.isRejected ? .unrated : .rejected), kind: .reject,
             marks: marks)
     }
@@ -75,21 +81,27 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// that label, or clears it when it is already applied. `↓` rejects, which sets −1. `←` and
     /// `→` navigate. `⌘Z` is reported as undo for C5. A rating key behaves like the rating bar
     /// rather than the bar's toggle: pressing the level already applied changes nothing.
-    public func result(for key: MarkingKey, marks: PhotoMarks) -> MarkingResult {
+    /// `allowsMarking == false` (unexpanded collapsed group stack in Timeline) disables all
+    /// marking keys while preserving navigation, undo, and group focus keys.
+    public func result(
+        for key: MarkingKey, marks: PhotoMarks, allowsMarking: Bool = true
+    ) -> MarkingResult {
         switch key {
         case .rating(let rating):
-            guard settings.enabledRatings.canApply(rating) else { return .noChange }
+            guard allowsMarking, settings.enabledRatings.canApply(rating) else { return .noChange }
             return markResult(
                 ratingChange(applying: rating, to: marks), kind: .rating, marks: marks)
         case .colourLabel(let colour):
+            guard allowsMarking else { return .noChange }
             return result(forLabel: ColourLabel(colour: colour), marks: marks)
         case .nextRating:
-            guard let next = settings.enabledRatings.next(after: marks.rating) else {
+            guard allowsMarking, let next = settings.enabledRatings.next(after: marks.rating) else {
                 return .noChange
             }
             return markResult(
                 ratingChange(applying: next, to: marks), kind: .rating, marks: marks)
         case .reject:
+            guard allowsMarking else { return .noChange }
             return markResult(MarkChange(rating: .rejected), kind: .reject, marks: marks)
         case .previousPhoto:
             return .previousPhoto
@@ -97,6 +109,10 @@ public struct MarkingInputRules: Hashable, Sendable {
             return .nextPhoto
         case .undo:
             return .undo
+        case .toggleGroupFocus:
+            return .toggleGroupFocus
+        case .collapseGroup:
+            return .collapseGroup
         }
     }
 
@@ -105,8 +121,10 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// Tapping the level already applied clears the rating, and only enabled levels may be
     /// applied (PRD Marking rules and Enabled rating levels). A rating of 1 to 5 replaces Reject
     /// with those stars, because the same value carries both; clearing a rating sets 0.
-    public func result(forRating level: Rating, marks: PhotoMarks) -> MarkingResult {
-        guard settings.enabledRatings.canApply(level) else { return .noChange }
+    public func result(
+        forRating level: Rating, marks: PhotoMarks, allowsMarking: Bool = true
+    ) -> MarkingResult {
+        guard allowsMarking, settings.enabledRatings.canApply(level) else { return .noChange }
         let applied = level > .unrated && level == marks.rating ? Rating.unrated : level
         return markResult(ratingChange(applying: applied, to: marks), kind: .rating, marks: marks)
     }
@@ -117,7 +135,10 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// tap-again-to-clear and Lightroom's label keys; choosing another replaces it. Choosing
     /// Clear on a photo whose label is already clear changes nothing. An unknown label written
     /// by another app is replaced by the chosen colour.
-    public func result(forLabel label: ColourLabel, marks: PhotoMarks) -> MarkingResult {
+    public func result(
+        forLabel label: ColourLabel, marks: PhotoMarks, allowsMarking: Bool = true
+    ) -> MarkingResult {
+        guard allowsMarking else { return .noChange }
         let applied = label == marks.label ? ColourLabel.clear : label
         return markResult(MarkChange(label: applied), kind: .colourLabel, marks: marks)
     }

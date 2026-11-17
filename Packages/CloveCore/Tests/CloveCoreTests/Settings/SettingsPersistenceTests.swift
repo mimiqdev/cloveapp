@@ -66,7 +66,6 @@ import CloveCore
             "groups.similarEnabled", invalid,
             { $0.similarGroupsEnabled = defaults.similarGroupsEnabled }
         ),
-        ("grid.groupDisplay", invalid, { $0.gridGroupDisplay = defaults.gridGroupDisplay }),
         (
             "appearance.mode", invalid,
             { $0.appearance.mode = defaults.appearance.mode }

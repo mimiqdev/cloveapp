@@ -29,4 +29,10 @@ public enum MarkingKey: Hashable, Sendable {
 
     /// `⌘Z`: undo, reported as an action for C5's undo stack to handle (PRD Undo row).
     case undo
+
+    /// `Return`: expand the selected collapsed stack in Timeline, or collapse Group Focus.
+    case toggleGroupFocus
+
+    /// `Escape`: collapse Group Focus back to Timeline.
+    case collapseGroup
 }

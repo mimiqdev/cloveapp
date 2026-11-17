@@ -32,6 +32,12 @@ extension MarkingKey {
         case .rightArrow:
             self = .nextPhoto
             return
+        case .return:
+            self = .toggleGroupFocus
+            return
+        case .escape:
+            self = .collapseGroup
+            return
         default:
             break
         }

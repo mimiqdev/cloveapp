@@ -5,12 +5,11 @@ import SwiftUI
 /// One photo's detail: the preview, swipe navigation and the filmstrip, with the marking HUD
 /// above them (PRD P0-04, PRD Detail and marking).
 ///
-/// The screen keeps no browsing state of its own. The current photo, the grid's order and filter,
-/// the marks and the pixels all come from ``BrowsingModel`` and the open folder's
+/// The screen keeps no browsing state of its own. The current photo, expanded group focus, grid
+/// order and filter, marks and pixels all come from ``BrowsingModel`` and the open folder's
 /// ``DetailImageSource``; the preview, its zoom and the marking controls are ``DetailMarkingView``.
-/// This screen supplies the grid's order a horizontal swipe moves through, the expandable
-/// filmstrip, and the auto-advance that follows a written mark (PRD Auto-advance; PRD In-group
-/// culling).
+/// This screen supplies the two-level ``DetailTimeline`` (Timeline vs Group Focus) and the
+/// auto-advance that follows a written mark (PRD Auto-advance; PRD In-group culling; issue #304).
 ///
 /// Settings come from the app-wide ``SettingsStore`` in the environment, so a change on the
 /// settings screen applies the next time this screen draws; the screen reads no storage itself
@@ -37,6 +36,20 @@ struct DetailScreen: View {
     /// C12's current settings: the double-tap behaviour, the zoomed gestures and the enabled
     /// ratings.
     private var settings: AppSettings { store.settings }
+
+    private var groupsEnabled: Bool {
+        settings.similarGroupsEnabled && browsing.readingProgress == nil
+    }
+
+    private var timeline: DetailTimeline {
+        DetailTimeline(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: groupsEnabled)
+    }
+
+    private var activeExpandedGroup: ActiveBrowsingGroup? {
+        guard let expanded = browsing.expandedGroup else { return nil }
+        return timeline.activeGroup(with: expanded)
+    }
 
     /// Creates the screen for one browsing model.
     ///
@@ -71,6 +84,12 @@ struct DetailScreen: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail")
+        .onChange(of: settings.similarGroupsEnabled) { _, enabled in
+            if !enabled {
+                autoAdvance.cancel()
+                browsing.collapseGroup()
+            }
+        }
         .onDisappear {
             // Leaving detail drops a pending advance, so coming back never jumps photos
             // (PRD Auto-advance).
@@ -81,13 +100,17 @@ struct DetailScreen: View {
     /// The marking controls and the preview, then the filmstrip, in the order PRD Detail and
     /// marking fixes.
     private func content(for photo: GridPhoto) -> some View {
-        DetailMarkingView(
+        let currentTimeline = timeline
+        let expanded = activeExpandedGroup
+        return DetailMarkingView(
             browsing: browsing,
             photo: photo,
             settings: settings,
             images: images,
             displayMode: store.photoDisplayMode,
-            order: browsing.photos,
+            timeline: currentTimeline,
+            expandedGroup: expanded,
+            order: currentTimeline.stageOrder(expandedGroup: expanded?.id),
             actions: actions,
             duo: duo,
             presentation: presentation,
@@ -95,25 +118,24 @@ struct DetailScreen: View {
     }
 
     /// What the marking view asks this screen to do: write a mark, advance after it, and move
-    /// through the grid's order and filter (PRD P0-04, P0-06; PRD Auto-advance).
+    /// through the active Detail level's order (Timeline vs Group Focus).
     private var actions: DetailMarkingActions {
         DetailMarkingActions(
             apply: { change, photo in browsing.apply(change, to: photo.id) },
-            marked: { kind, photo in startAutoAdvance(after: kind, from: photo) },
-            step: { offset in showPhoto(offset: offset) },
+            marked: { kind, change, photo in
+                startAutoAdvance(after: kind, change: change, from: photo)
+            },
+            step: { offset in stepPhoto(offset: offset) },
             markingSwipeBegan: { autoAdvance.cancel() },
             openPhoto: { openPhoto($0) },
+            selectGroupPhoto: { selectGroupPhoto($0) },
+            expandGroup: { expandGroup($0) },
+            collapseGroup: { collapseGroup() },
             finishGroup: { plan in
-                guard browsing.canMark else { return }
+                guard browsing.canMark, let expanded = activeExpandedGroup else { return }
                 autoAdvance.cancel()
-                guard let group = browsing.currentGroup else { return }
-                let navigation = GroupPhotoNavigation(group: group)
-                let next = navigation.photoAfterGroup(
-                    orderedPhotos: browsing.allPlacedPhotos, groups: browsing.groups,
-                    visiblePhotos: Set(browsing.photos.map(\.id)))
-                let advance = rules.autoAdvancePlan(
-                    after: .reject, from: plan.currentPhoto, photos: browsing.photos,
-                    group: next.map(GroupAdvance.nextUndecidedPhoto) ?? .complete)
+                let advance = timeline.finishingAdvancePlan(
+                    groupID: expanded.id, from: plan.currentPhoto, rules: rules)
                 browsing.runGroupFinishing(plan)
                 schedule(advance)
             })
@@ -121,43 +143,53 @@ struct DetailScreen: View {
 
     // MARK: - Navigation
 
-    /// Opens another photo in the grid's current order and filter, without wrapping at the ends.
-    private func showPhoto(offset: Int) {
-        let photos = browsing.photos
+    /// Steps horizontally within the active level (Timeline slots or Group Focus members) without
+    /// crossing levels or wrapping at ends.
+    private func stepPhoto(offset: Int) {
         guard let current = browsing.state.currentPhoto,
-            let index = photos.firstIndex(where: { $0.id == current })
+            let target = timeline.steppedPhoto(
+                from: current, offset: offset, expandedGroup: activeExpandedGroup?.id)
         else { return }
-        let target = index + offset
-        guard photos.indices.contains(target) else { return }
-        openPhoto(photos[target].id)
+        if activeExpandedGroup != nil {
+            selectGroupPhoto(target)
+        } else {
+            openPhoto(target)
+        }
     }
 
-    /// Shows one photo and drops an advance that was still waiting to move (PRD Auto-advance).
+    /// Opens one photo in Timeline mode (`expandedGroup = nil`) and drops any pending advance.
     private func openPhoto(_ photo: PhotoIdentity) {
         autoAdvance.cancel()
         browsing.openPhoto(photo)
     }
 
+    /// Selects another member within the active expanded group and drops any pending advance.
+    private func selectGroupPhoto(_ photo: PhotoIdentity) {
+        autoAdvance.cancel()
+        browsing.selectGroupPhoto(photo)
+    }
+
+    /// Enters Group Focus for `groupID` and drops any pending advance.
+    private func expandGroup(_ groupID: GroupID) {
+        autoAdvance.cancel()
+        browsing.openGroup(groupID, on: browsing.state.currentPhoto)
+    }
+
+    /// Collapses Group Focus back to Timeline on the group's Representative Photo.
+    private func collapseGroup() {
+        autoAdvance.cancel()
+        browsing.collapseGroup()
+    }
+
     // MARK: - Auto-advance
 
-    /// Starts the pause-then-advance one written mark asks for (PRD Auto-advance).
+    /// Starts the pause-then-advance one written mark asks for (PRD Auto-advance, issue #304).
     ///
-    /// C13 decides where to go from the grid's current order and filter, so a filtered grid only
-    /// offers the photos it shows. Plan navigation before a mark can remove the current photo
-    /// from that filter. Inside a group, visit its visible unmarked members first, then leave for
-    /// the first visible photo after the group (PRD In-group culling). The model records the
-    /// marked photo and its edits together so Undo can return there (PRD Undo row).
-    private func startAutoAdvance(after kind: MarkKind, from photo: GridPhoto) {
-        let group = browsing.currentGroup.map { group in
-            let navigation = GroupPhotoNavigation(group: group)
-            let marks = Dictionary(
-                uniqueKeysWithValues: browsing.groupPhotos.map { ($0.id, $0.marks) })
-            return navigation.advance(
-                after: photo.id, marks: marks, orderedPhotos: browsing.allPlacedPhotos,
-                groups: browsing.groups, visiblePhotos: Set(browsing.photos.map(\.id)))
-        }
-        let plan = rules.autoAdvancePlan(
-            after: kind, from: photo.id, photos: browsing.photos, group: group)
+    /// Plan before writing desired marks so the snapshot captures `hadUnmarkedBefore` cleanly.
+    private func startAutoAdvance(after kind: MarkKind, change: MarkChange, from photo: GridPhoto) {
+        let plan = timeline.autoAdvancePlan(
+            after: kind, change: change, from: photo.id, expandedGroup: activeExpandedGroup?.id,
+            rules: rules)
         schedule(plan)
     }
 
@@ -165,8 +197,12 @@ struct DetailScreen: View {
         autoAdvance.schedule(plan) { target in
             switch target {
             case .stay:
-                break
-            case .nextPhoto(let next), .nextUnmarkedPhoto(let next), .groupUndecidedPhoto(let next):
+                if plan.exitsGroupFocus {
+                    browsing.collapseGroup()
+                }
+            case .groupUndecidedPhoto(let next):
+                browsing.selectGroupPhoto(next)
+            case .nextPhoto(let next), .nextUnmarkedPhoto(let next):
                 browsing.openPhoto(next)
             }
         }

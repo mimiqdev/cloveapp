@@ -16,9 +16,6 @@ struct GridScreen: View {
     @State private var showsFilters = false
     @State private var selectsEmpty = false
     @State private var presentation = DetailPresentation.photoPreview
-    /// The group whose expansion the person folded in Detail, so Photo Preview's grid and Focus
-    /// View's filmstrip show the same stack (#225, #256).
-    @State private var foldedGroup: GroupID?
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
     /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
     /// the grid where it opens today.
@@ -59,7 +56,6 @@ struct GridScreen: View {
         GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
             groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
-            display: store.settings.gridGroupDisplay,
             expandedGroup: nil)
     }
 
@@ -70,11 +66,7 @@ struct GridScreen: View {
                 if route == .detail { hasOpenedPhoto = true }
                 if route != .detail {
                     presentation = .photoPreview
-                    foldedGroup = nil
                 }
-            }
-            .onChange(of: browsing.currentGroup?.id) { _, _ in
-                if foldedGroup != nil { foldedGroup = nil }
             }
             .overlay(alignment: .bottomTrailing) {
                 if !isRegular, !usesDock, showsMoveRejects {
@@ -167,7 +159,7 @@ struct GridScreen: View {
                     duo: DuoDetailLayout(
                         presentation: $presentation, filter: AnyView(filterButton),
                         more: AnyView(moreMenu), bottom: AnyView(dockBottom),
-                        showsGrid: isDuoExpanded, foldedGroup: $foldedGroup))
+                        showsGrid: isDuoExpanded))
             } else {
                 grid
                     .toolbar {
@@ -249,7 +241,7 @@ struct GridScreen: View {
                     columnCount: isDuoExpanded ? 6 : nil,
                     highlightsCurrentPhoto: false,
                     followsCurrentPhoto: isDuoExpanded && hasOpenedPhoto,
-                    foldExpandedGroup: { foldedGroup = $0 },
+                    foldExpandedGroup: { _ in },
                     openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },
                     toggleSelection: { browsing.toggleSelection(of: $0) }
@@ -567,15 +559,9 @@ struct GridScreen: View {
         }
     }
 
-    /// Opens one collapsed group's first photo.
+    /// Opens one collapsed group in Group Focus on its Representative Photo.
     private func openGroup(_ id: GroupID) {
-        guard let group = browsing.groups.first(where: { $0.id == id }) else { return }
-        let visible = group.visible(in: Set(browsing.photos.map(\.id)))
-        if let first = visible.members.first(where: { browsing.shownMarks(for: $0).isUnmarked })
-            ?? visible.members.first
-        {
-            browsing.openPhoto(first)
-        }
+        browsing.openGroup(id)
     }
 
     private var tapPickerDismissTrigger: GridTapPickerDismissTrigger {

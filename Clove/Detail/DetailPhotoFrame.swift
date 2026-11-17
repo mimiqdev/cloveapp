@@ -27,6 +27,7 @@ struct DetailPhotoFrame: View {
     var side: CGFloat = 56
     var height: CGFloat?
     var showsMarks = true
+    var appliesRejectedOpacity = true
     @Environment(\.cloveTheme) private var theme
 
     @State private var thumbnail: CGImage?
@@ -40,7 +41,10 @@ struct DetailPhotoFrame: View {
             }
             // PRD In-group culling: rejected photos are dimmed, so a cull decision reads at a
             // glance in the strip (PRD In-group culling, comparison and elimination).
-            .opacity(photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)
+            .opacity(
+                appliesRejectedOpacity && photo.marks.isRejected
+                    ? theme.tokens.rejectedOpacity : 1
+            )
             .overlay { border }
             .task(id: photo.id) {
                 guard thumbnail == nil else { return }

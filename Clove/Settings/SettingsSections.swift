@@ -207,18 +207,6 @@ struct BrowsingAndGroupsSettingsSections: View {
                 isOn: settingsBinding(store, \.similarGroupsEnabled)
             )
             .accessibilityIdentifier("clove.settings.similarGroupsEnabled")
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Grid display")
-                Picker("Grid display", selection: settingsBinding(store, \.gridGroupDisplay)) {
-                    Text("Expanded").tag(GridGroupDisplay.expanded)
-                    Text("Collapsed").tag(GridGroupDisplay.collapsed)
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Grid display")
-                .accessibilityIdentifier("clove.settings.gridGroupDisplay")
-            }
-            .padding(.vertical, 2)
         } header: {
             if showsCategoryTitle {
                 VStack(alignment: .leading, spacing: 12) {

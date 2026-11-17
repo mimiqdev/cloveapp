@@ -266,8 +266,7 @@ extension CloveFlowTests {
         advanceBySwipe(in: app)
         returnToGrid(in: app)
         openSettings(in: app)
-        showGroupsAsCollapsedCovers(in: app)
-        showGroupsAsExpandedCells(in: app)
+        checkSimplifiedGroupingSettings(in: app)
         hideAndShowSimilarGroups(in: app)
         rejectPhotosForMove(in: app)
         checkMoveRejectsSetting(in: app)
@@ -331,16 +330,15 @@ extension CloveFlowTests {
 
     @MainActor
     private func checkGridOverlays(in app: XCUIApplication) {
-        let rated = element(in: app, "clove.grid.photo.mmq02678")
-        let ratedLabel = rated.label
-        XCTAssertTrue(ratedLabel.contains("MMQ02678.ARW"), "The cell lost its file name")
-        XCTAssertTrue(ratedLabel.contains("5 stars"), "The cell lost its rating: \(ratedLabel)")
-        XCTAssertTrue(ratedLabel.contains("Red"), "The cell lost its colour dot: \(ratedLabel)")
-
-        let rejected = element(in: app, "clove.grid.photo.mmq02679")
-        let rejectedLabel = rejected.label
+        let group = element(in: app, "clove.grid.group.burst-2678")
+        XCTAssertTrue(group.waitForExistence(timeout: 10), "The grid did not show burst-2678 stack")
+        let groupLabel = group.label
         XCTAssertTrue(
-            rejectedLabel.contains("Rejected"), "The cell lost its Reject flag: \(rejectedLabel)")
+            groupLabel.contains("Similar group of 3 photos"),
+            "The stack lost its group count: \(groupLabel)")
+        XCTAssertFalse(
+            element(in: app, "clove.grid.photo.mmq02679").exists,
+            "Grouped mode should collapse group members on the grid")
 
         let companion = element(in: app, "clove.grid.photo.mmq02680")
         let companionLabel = companion.label
@@ -372,8 +370,8 @@ extension CloveFlowTests {
 
     @MainActor
     private func openFirstPhoto(in app: XCUIApplication) {
-        let first = element(in: app, "clove.grid.photo.mmq02678")
-        XCTAssertTrue(first.waitForExistence(timeout: 10), "The grid did not show the first photo")
+        let first = element(in: app, "clove.grid.group.burst-2678")
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "The grid did not show the first group")
         let started = Date()
         first.tap()
 
@@ -389,7 +387,11 @@ extension CloveFlowTests {
 
         let fileName = element(in: app, "clove.detail.fileName")
         XCTAssertTrue(
-            fileName.label == "MMQ02678.ARW", "The detail view did not show the file name")
+            fileName.label == "MMQ02678.ARW",
+            "The detail view did not open on the representative photo")
+        XCTAssertTrue(
+            element(in: app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
+            "Opening a grid stack did not enter Group Focus")
 
         let marks = detailMarksControl(in: app).value as? String
         XCTAssertTrue(
@@ -489,14 +491,19 @@ extension CloveFlowTests {
         let fileName = element(in: app, "clove.detail.fileName")
         XCTAssertEqual(fileName.label, "MMQ02679.ARW")
 
-        // From two stars, two downward steps (30 pt Clear, 75 pt Reject) reach Rejected.
+        // From two stars, two downward steps (30 pt Clear, 75 pt Reject) reach Rejected and advance
+        // to the remaining unmarked member inside Group Focus.
         drag(preview, byPointsX: 0, y: 210)
-
-        // Reject also advances within the group. A swipe right then returns to the interleaved
-        // single photo for the general filmstrip and navigation checks.
         waitForFileName("MMQ02681.ARW", in: app)
+        // Swiping right stays inside Group Focus rather than leaving the burst.
         preview.swipeRight()
-        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
+        // Collapsing returns to Timeline on the Representative Photo, then swiping left moves
+        // to the standalone photo after the burst.
+        element(in: app, "clove.detail.filmstrip.group.fold").tap()
+        waitForFileName("MMQ02678.ARW", in: app)
+        preview.swipeLeft()
+        waitForFileName("MMQ02680.ARW", in: app)
     }
 
     @MainActor
@@ -513,17 +520,31 @@ extension CloveFlowTests {
 
     @MainActor
     private func expandGroupFromFilmstrip(in app: XCUIApplication) {
-        // MMQ02680 is outside the group, so the filmstrip shows the group as one stack.
+        // MMQ02680 is outside the group, so the Timeline filmstrip shows the group as one stack.
         XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02680.ARW")
         let stack = element(in: app, "clove.detail.filmstrip.group.burst-2678")
+        // Tapping an unselected stack opens its representative photo in Timeline (read-only).
         stack.tap()
         XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02678.ARW")
-        XCTAssertTrue(element(in: app, "clove.detail").exists)
-        let member = element(in: app, "clove.detail.filmstrip.mmq02679")
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        let expandPill = element(in: app, "clove.detail.expandGroup")
+        XCTAssertTrue(expandPill.waitForExistence(timeout: 5))
+        XCTAssertEqual(expandPill.label, "Expand 3 photos")
+        // Expanding enters Group Focus cleanly; collapsing returns to Timeline.
+        expandPill.tap()
         XCTAssertTrue(
-            member.exists, "The group did not expand in the filmstrip")
+            element(in: app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
+            "The group did not enter Group Focus")
+        XCTAssertTrue(
+            element(in: app, "clove.detail.filmstrip.mmq02679").exists,
+            "The group did not show its members in Group Focus")
+        XCTAssertFalse(
+            element(in: app, "clove.detail.filmstrip.mmq02680").exists,
+            "Group Focus strip should isolate the group's visible members")
+        element(in: app, "clove.detail.filmstrip.group.fold").tap()
+        XCTAssertFalse(element(in: app, "clove.detail.filmstrip.expandedGroup").exists)
         let back = element(in: app, "clove.detail.filmstrip.mmq02680")
-        XCTAssertTrue(back.exists, "The filmstrip lost the next photo")
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "The Timeline strip lost the next photo")
         back.tap()
     }
 
@@ -544,7 +565,7 @@ extension CloveFlowTests {
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), chromeTarget))
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         preview.swipeLeft()
-        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
+        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
     }
 
     @MainActor
@@ -558,24 +579,12 @@ extension CloveFlowTests {
         let back = element(in: app, "clove.nav.back")
         XCTAssertTrue(back.exists, "The detail view had no back button")
         back.tap()
-        let row = element(in: app, "clove.grid.photo.mmq02678")
-        let rowLabel = row.label
+        let group = element(in: app, "clove.grid.group.burst-2678")
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
         XCTAssertTrue(
-            rowLabel.contains("4 stars"),
-            "The grid did not show the rating the bar wrote: \(rowLabel)"
+            group.label.contains("Similar group of 3 photos"),
+            "The grid cover lost its group count: \(group.label)"
         )
-
-        let swiped = element(in: app, "clove.grid.photo.mmq02679")
-        let swipedLabel = swiped.label
-        XCTAssertTrue(
-            swipedLabel.contains("Rejected"),
-            "The grid did not show the Reject the swipe wrote: \(swipedLabel)"
-        )
-        // Reject is rating −1, so swipe down replaced the swipe up's stars.
-        XCTAssertFalse(
-            swipedLabel.contains("2 stars"), "A rejected photo kept its stars: \(swipedLabel)")
-        XCTAssertFalse(
-            swipedLabel.contains("-1"), "A rejected photo read its rating: \(swipedLabel)")
     }
 
     @MainActor
@@ -609,38 +618,12 @@ extension CloveFlowTests {
     }
 
     @MainActor
-    private func showGroupsAsCollapsedCovers(in app: XCUIApplication) {
+    private func checkSimplifiedGroupingSettings(in app: XCUIApplication) {
         openSettingsCategory("clove.settings.category.browsing", in: app)
-        setGridGroupDisplay(in: app, to: "Collapsed")
-
-        let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.exists, "Settings had no back button")
-        back.tap()
-
-        let cover = element(in: app, "clove.grid.group.burst-2678")
-        XCTAssertTrue(
-            cover.exists, "The collapsed grid showed no group cover")
-        XCTAssertEqual(
-            cover.label, "Similar group of 3 photos", "The cover lost its group's count")
         XCTAssertFalse(
-            element(in: app, "clove.grid.photo.mmq02678").exists,
-            "The collapsed grid still showed a group member as its own cell")
-    }
-
-    @MainActor
-    private func showGroupsAsExpandedCells(in app: XCUIApplication) {
-        openSettingsFromGrid(in: app)
-        openSettingsCategory("clove.settings.category.browsing", in: app)
-        setGridGroupDisplay(in: app, to: "Expanded")
-
-        let back = element(in: app, "clove.nav.back")
-        XCTAssertTrue(back.exists, "Settings had no back button")
-        back.tap()
-        // Changing the layout preserves the held photo, which can put the first member offscreen.
-        element(in: app, "clove.grid").collectionViews.firstMatch.swipeDown()
-        XCTAssertTrue(
-            element(in: app, "clove.grid.photo.mmq02678").exists,
-            "The expanded grid did not show a group member as its own cell")
+            element(in: app, "clove.settings.gridGroupDisplay").exists,
+            "Redundant Grid display setting should be removed")
+        backToGrid(in: app)
     }
 
     @MainActor
@@ -654,6 +637,18 @@ extension CloveFlowTests {
             "Turning similar groups off left the grid's similar group")
         XCTAssertFalse(
             groupingActionIsVisible(in: app), "Turning similar groups off left Run again")
+        let ratedLabel = element(in: app, "clove.grid.photo.mmq02678").label
+        XCTAssertTrue(
+            ratedLabel.contains("4 stars"),
+            "The flat grid did not show the rating the bar wrote: \(ratedLabel)")
+        let swipedLabel = element(in: app, "clove.grid.photo.mmq02679").label
+        XCTAssertTrue(
+            swipedLabel.contains("Rejected"),
+            "The flat grid did not show the Reject the swipe wrote: \(swipedLabel)")
+        XCTAssertFalse(
+            swipedLabel.contains("2 stars"), "A rejected photo kept its stars: \(swipedLabel)")
+        XCTAssertFalse(
+            swipedLabel.contains("-1"), "A rejected photo read its rating: \(swipedLabel)")
 
         openSettingsFromGrid(in: app)
         openSettingsCategory("clove.settings.category.browsing", in: app)
@@ -721,17 +716,6 @@ extension CloveFlowTests {
     }
 
     @MainActor
-    private func setGridGroupDisplay(in app: XCUIApplication, to name: String) {
-        let picker = scrollToSettingsControl("clove.settings.gridGroupDisplay", in: app)
-        XCTAssertTrue(picker.exists, "Settings had no grid display control")
-        let option = picker.buttons[name]
-        XCTAssertTrue(
-            option.exists,
-            "The grid display control offered no \(name) option")
-        option.tap()
-    }
-
-    @MainActor
     func scrollToSettingsControl(
         _ identifier: String, in app: XCUIApplication, swipes: Int = 6, scrollsUp: Bool = true
     ) -> XCUIElement {
@@ -750,7 +734,7 @@ extension CloveFlowTests {
 
     @MainActor
     private func rejectPhotosForMove(in app: XCUIApplication) {
-        let first = element(in: app, "clove.grid.photo.mmq02681")
+        let first = element(in: app, "clove.grid.photo.mmq02682")
         XCTAssertTrue(first.waitForExistence(timeout: 10), "The grid did not show the first photo")
         first.press(forDuration: 1)
         let second = element(in: app, "clove.grid.photo.mmq02689")

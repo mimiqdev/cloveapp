@@ -47,7 +47,8 @@ struct RootView: View {
         _systemAppearance = State(initialValue: Self.windowSceneAppearance)
         _browsing = State(
             initialValue: BrowsingModel(
-                library: library ?? FolderLibraryLaunch.make(settings: settings)))
+                library: library ?? FolderLibraryLaunch.make(settings: settings),
+                similarGroupsEnabled: settings.settings.similarGroupsEnabled))
     }
 
     var body: some View {
