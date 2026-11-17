@@ -117,6 +117,10 @@ struct DetailMarkingView: View {
     @State private var toolbarDragRating: Rating?
     @State private var showsZoomChip = false
     @State private var controlsHeight: CGFloat = 0
+
+    /// The floating pill's height in a pane whose chrome is a dock outside the stage: the marking
+    /// swipe's star bar must stay above the pill there too (#305).
+    @State private var duoPillHeight: CGFloat = 0
     @State private var tapPickerDismissToken = 0
     @State private var focusRegionState = DetailFocusRegionState()
     @State private var focusAnalysisID = UUID()
@@ -247,6 +251,36 @@ struct DetailMarkingView: View {
 
     /// Chrome is one visibility across fit and zoom: only the single-tap toggle changes it (#302).
     private var chromeIsVisible: Bool { !hidesChrome }
+
+    /// How much of the stage's bottom the marking swipe's star bar must stay clear of.
+    ///
+    /// The standard layout's chrome floats inside the stage and measures itself. The Duo pane's
+    /// chrome is a dock below the stage, so only its floating pill sits over the stage's bottom
+    /// edge; reserving that band keeps a low central swipe's star bar above the pill without
+    /// shrinking the photo (#305).
+    private var swipeFeedbackReservation: CGFloat {
+        Self.swipeFeedbackReservation(
+            floatingPillInStage: duo != nil,
+            pillVisible: chromeIsVisible && stagePill != nil,
+            pillHeight: duoPillHeight,
+            pillGap: showsFilmstrip ? 6 : 12,
+            measuredBand: controlsHeight)
+    }
+
+    /// The stage-bottom band a marking swipe's star bar must stay clear of (#305).
+    ///
+    /// The standard layout's chrome floats inside the stage, so the band measures itself. The Duo
+    /// pane's chrome is a dock below the stage, so there the only thing over the stage's bottom edge
+    /// is the floating pill: without reserving it the bar was free to end 8 pt above the stage's
+    /// edge and sit on the pill.
+    static func swipeFeedbackReservation(
+        floatingPillInStage: Bool, pillVisible: Bool, pillHeight: CGFloat, pillGap: CGFloat,
+        measuredBand: CGFloat
+    ) -> CGFloat {
+        guard floatingPillInStage else { return measuredBand }
+        guard pillVisible else { return 0 }
+        return pillHeight + pillGap
+    }
 
     private var displayMarks: PhotoMarks { photo.marks }
 
@@ -602,6 +636,11 @@ struct DetailMarkingView: View {
                     if chromeIsVisible, let stagePill {
                         stagePill
                             .padding(.bottom, showsFilmstrip ? 6 : 12)
+                            .onGeometryChange(for: CGFloat.self) {
+                                $0.size.height
+                            } action: {
+                                duoPillHeight = $0
+                            }
                     }
                 }
             // The failure toast sits above the filmstrip, clear of the capsule row
@@ -934,7 +973,7 @@ struct DetailMarkingView: View {
         .overlay {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
-                controlsHeight: controlsHeight, chromeIsVisible: chromeIsVisible)
+                controlsHeight: swipeFeedbackReservation, chromeIsVisible: chromeIsVisible)
         }
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
