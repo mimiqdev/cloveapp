@@ -325,7 +325,7 @@ struct DetailDisplayPresentationTests {
         let store = SettingsStore.sample
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
-        try await waitFor { !browsing.isFolderOpening }
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
         let group = try #require(browsing.groups.first)
         browsing.openGroup(group.id, on: group.members[0])
         let window = UIWindow(windowScene: scene)
@@ -679,6 +679,181 @@ struct DetailDisplayPresentationTests {
         try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) == nil }
         preview.onChromeToggle?()
         try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) != nil }
+    }
+
+    /// #305: the finishing pill is not part of the filmstrip's layout, so its availability and the
+    /// fit–zoom transitions never resize the stage or move the fitted photo. The pill floats over
+    /// the stage, above the strip, which is where the chrome already is.
+    @Test(arguments: [CloveTheme.light, CloveTheme.dark, CloveTheme.nord])
+    func finishingPillNeverResizesTheStageOrMovesTheFit(theme: CloveTheme) async throws {
+        for portrait in [false, true] {
+            try await expectStageInvariance(theme: theme, portrait: portrait, duo: false)
+        }
+    }
+
+    /// The same for the Duo cover, whose chrome is a dock below the stage: the pill floats over the
+    /// stage's bottom edge, the dock keeps its height, and a marking swipe's star bar is kept above
+    /// the pill (#305).
+    @Test(arguments: [CloveTheme.light, CloveTheme.dark, CloveTheme.nord])
+    func duoPaneFinishingPillNeverResizesTheStage(theme: CloveTheme) async throws {
+        guard #available(iOS 27.1, *) else { return }
+        for portrait in [false, true] {
+            try await expectStageInvariance(theme: theme, portrait: portrait, duo: true)
+        }
+    }
+
+    /// The star bar's reservation, which the Duo pane used to pass as 0: a low central marking swipe
+    /// could then put its bar on the floating pill (#305).
+    @Test func duoPaneReservesTheFloatingPillInTheSwipeFeedback() {
+        let band: CGFloat = 134
+        #expect(
+            DetailMarkingView.swipeFeedbackReservation(
+                floatingPillInStage: true, pillVisible: true, pillHeight: 38, pillGap: 6,
+                measuredBand: band) == 44)
+        #expect(
+            DetailMarkingView.swipeFeedbackReservation(
+                floatingPillInStage: true, pillVisible: false, pillHeight: 38, pillGap: 6,
+                measuredBand: band) == 0)
+        // The standard layout's chrome floats inside the stage and measures its own band, pill
+        // included, so its value passes straight through.
+        #expect(
+            DetailMarkingView.swipeFeedbackReservation(
+                floatingPillInStage: false, pillVisible: true, pillHeight: 38, pillGap: 6,
+                measuredBand: band) == band)
+    }
+
+    /// Builds one detail host and records the stage, the fitted photo and the strip's band at fit,
+    /// at 100% and after the group finishes (#305).
+    private func expectStageInvariance(
+        theme: CloveTheme, portrait: Bool, duo: Bool
+    ) async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = PortraitDetailImages(sample: SampleDetailImages(), portrait: portrait)
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first)
+        browsing.openGroup(group.id, on: group.members[0])
+        browsing.apply(.rating(try #require(Rating(rawValue: 2))), to: group.members[0])
+        let plan = try #require(
+            finishingPlan(for: group, currentPhoto: group.members[0], in: browsing))
+        #expect(plan.availability == .available)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(
+            origin: .zero,
+            size: duo ? CGSize(width: 466, height: 678) : CGSize(width: 402, height: 874))
+        window.rootViewController = UIHostingController(
+            rootView: detailHost(browsing: browsing, images: source, duo: duo)
+                .environment(SettingsStore.sample)
+                .environment(\.cloveTheme, theme)
+                .environment(\.usesSystemBrowsingToolbar, duo)
+                .environment(\.isDuoCover, duo))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("detail did not settle") {
+            guard source.delivered, let preview = self.findPreview(in: window),
+                let photo = self.fittedPhotoRect(in: preview, window: window)
+            else { return false }
+            // The placeholder is landscape; wait for the delivered raster so the geometry below is
+            // the photo's own shape.
+            return portrait ? photo.height > photo.width : photo.width > photo.height
+        }
+        let preview = try #require(findPreview(in: window))
+        let fit = try #require(stageGeometry(in: window))
+        let stripAtFit = try #require(fit.strip)
+        let photoAtFit = try #require(fit.photo)
+        // The strip keeps one band: the pill no longer adds a row to it (#305). The Duo dock's
+        // scroll view reaches into the bottom safe area, so its absolute height differs there; its
+        // own constancy is checked below.
+        if !duo {
+            #expect(abs(stripAtFit.height - 70) <= 1)
+        }
+        if duo {
+            // The dock still starts at the stage's bottom edge, so the stage and the dock are both
+            // at their full height with the pill floating over the stage.
+            #expect(abs(stripAtFit.minY - fit.stage.maxY) <= 1)
+        }
+
+        // 100% keeps the stage and the strip's band where they were (#302, #305).
+        preview.onDoubleTap?(.center)
+        try await waitFor("zoom did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(450))
+        let zoomed = try #require(stageGeometry(in: window))
+        #expect(sameFrame(zoomed.stage, fit.stage))
+        #expect(sameFrame(zoomed.strip, fit.strip))
+
+        // Returning to fit restores the same stage and the same fitted photo.
+        preview.onDoubleTap?(.center)
+        try await waitFor("fit did not settle") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(450))
+        let refit = try #require(stageGeometry(in: window))
+        #expect(sameFrame(refit.stage, fit.stage))
+        #expect(sameFrame(refit.photo, photoAtFit))
+
+        // Finishing the group removes the pill and leaves the stage, the fit and the strip as they
+        // were. Before #305 the pill's own row in the filmstrip changed this stage's height.
+        browsing.runGroupFinishing(plan)
+        try await waitFor("finishing did not settle") {
+            guard
+                let current = self.finishingPlan(
+                    for: group, currentPhoto: group.members[0], in: browsing)
+            else { return true }
+            return current.isEmpty || !current.availability.isAvailable
+        }
+        try await Task.sleep(for: .milliseconds(450))
+        let finished = try #require(stageGeometry(in: window))
+        #expect(sameFrame(finished.stage, fit.stage))
+        #expect(sameFrame(finished.photo, photoAtFit))
+        #expect(sameFrame(finished.strip, stripAtFit))
+    }
+
+    /// The screen for one host: the standard header layout, or the Duo pane's docked filmstrip.
+    @ViewBuilder private func detailHost(
+        browsing: BrowsingModel, images: any DetailImageSource, duo: Bool
+    ) -> some View {
+        if duo, #available(iOS 27.1, *) {
+            NavigationStack {
+                DetailScreen(
+                    browsing: browsing, images: images,
+                    duo: DuoDetailLayout(
+                        presentation: .constant(.focus), filter: AnyView(EmptyView()),
+                        more: AnyView(EmptyView()), bottom: AnyView(EmptyView()),
+                        showsGrid: true))
+            }
+        } else {
+            NavigationStack {
+                DetailScreen(browsing: browsing, images: images, presentation: .constant(.focus))
+            }
+        }
+    }
+
+    /// Whether two rects describe the same place, to within half a point: the fitted photo's rect
+    /// comes from the raster's aspect and lands on fractional points.
+    private func sameFrame(_ first: CGRect?, _ second: CGRect?) -> Bool {
+        guard let first, let second else { return first == nil && second == nil }
+        return abs(first.minX - second.minX) <= 0.5 && abs(first.minY - second.minY) <= 0.5
+            && abs(first.width - second.width) <= 0.5 && abs(first.height - second.height) <= 0.5
+    }
+
+    /// Where the stage, the fitted photo and the strip's band are, for the checks above.
+    private struct StageGeometry {
+        let stage: CGRect
+        let photo: CGRect?
+        let strip: CGRect?
+    }
+
+    private func stageGeometry(in window: UIWindow) -> StageGeometry? {
+        guard let preview = findPreview(in: window) else { return nil }
+        let strip = findFilmstripScrollView(in: window, excluding: preview)
+        return StageGeometry(
+            stage: preview.convert(preview.bounds, to: window),
+            photo: fittedPhotoRect(in: preview, window: window),
+            strip: strip.map { $0.convert($0.bounds, to: window) })
     }
 
     /// #302: the double-tap target follows the setting, and `Off` disables the gesture.
@@ -2201,7 +2376,7 @@ struct DetailDisplayPresentationTests {
         let store = SettingsStore.sample
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
-        try await waitFor { !browsing.isFolderOpening }
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
         let group = try #require(browsing.groups.first)
         let rep = try #require(
             BrowsingGroup.representative(
@@ -2251,7 +2426,7 @@ struct DetailDisplayPresentationTests {
         let source = ObservedDetailImages()
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
-        try await waitFor { !browsing.isFolderOpening }
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
         let group = try #require(browsing.groups.first)
         browsing.openGroup(group.id, on: group.members[0])
 
@@ -2404,6 +2579,98 @@ struct DetailDisplayPresentationTests {
         }
         return nil
     }
+
+    /// The finishing action the screen offers for `group` right now, from the model's marks, so a
+    /// test can tell when the pill is available and when it is not (#304, #305).
+    private func finishingPlan(
+        for group: BrowsingGroup, currentPhoto: PhotoIdentity, in browsing: BrowsingModel
+    ) -> GroupFinishingPlan? {
+        let timeline = DetailTimeline(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+        guard let expanded = timeline.activeGroup(with: group.id) else { return nil }
+        return GroupFinishingPlan(
+            group: expanded, action: .rejectUnmarked, currentPhoto: currentPhoto)
+    }
+
+    /// The rect the photo's pixels occupy at fit: the stage, less the letterbox the aspect fit
+    /// leaves around them. The chrome floats over the stage, so a test can tell whether a floating
+    /// control reaches the photo.
+    private func fittedPhotoRect(
+        in preview: DetailZoomContainerView, window: UIWindow
+    ) -> CGRect? {
+        guard
+            let imageView = preview.subviews.compactMap({ $0 as? UIScrollView })
+                .first?.subviews.compactMap({ $0 as? UIImageView }).first,
+            let image = imageView.image,
+            image.size.width > 0, image.size.height > 0
+        else { return nil }
+        let bounds = imageView.bounds
+        let scale = min(bounds.width / image.size.width, bounds.height / image.size.height)
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let rect = CGRect(
+            x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2,
+            width: size.width, height: size.height)
+        return imageView.convert(rect, to: window)
+    }
+}
+
+/// The sample's photos with a portrait raster, so the fitted band fills the stage's height the way
+/// a camera's portrait photograph does. Everything else is the sample's behaviour (#305).
+@MainActor
+private final class PortraitDetailImages: DetailImageSource {
+    private let sample: SampleDetailImages
+    private let portrait: Bool
+    private(set) var delivered = false
+
+    init(sample: SampleDetailImages, portrait: Bool) {
+        self.sample = sample
+        self.portrait = portrait
+    }
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        await sample.placeholder(for: photo, gridThumbnails: gridThumbnails)
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async { await sample.prepare(window) }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        let outcome = await sample.image(for: photo, request: request)
+        guard case .image(let image) = outcome else { return outcome }
+        delivered = true
+        guard portrait, let pixels = Self.portraitPixels else { return outcome }
+        return .image(
+            DetailImage(
+                image: pixels, source: image.source, quality: image.quality,
+                hasRAW: image.hasRAW,
+                fullResolutionSize: CGSize(width: 2_000, height: 3_000)))
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async { await sample.leave(window: window) }
+
+    /// One 800 × 1200 raster, drawn once: tall enough that the fit is height-limited.
+    private static let portraitPixels: CGImage? = {
+        guard
+            let context = CGContext(
+                data: nil, width: 800, height: 1_200, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.setFillColor(gray: 0.42, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 800, height: 1_200))
+        context.setFillColor(gray: 0.72, alpha: 1)
+        context.fill(CGRect(x: 0, y: 800, width: 800, height: 400))
+        return context.makeImage()
+    }()
 }
 
 @MainActor

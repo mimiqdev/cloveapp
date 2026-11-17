@@ -10,6 +10,10 @@ import SwiftUI
 /// - Group Focus (`expandedGroup != nil`): renders ONLY the expanded group's `visibleMembers` inside
 ///   `ExpandedGroupSurface`, with a leading `chevron.down` collapse button. Dragging downward
 ///   anywhere on the strip collapses back to Timeline.
+///
+/// The strip is one constant band (`strip`). The screen draws the finishing pill itself, so the
+/// strip's height never changes with that pill's availability and its layout can never take photo
+/// space (#305).
 struct DetailFilmstrip: View {
     let timeline: DetailTimeline
     let expandedGroup: ActiveBrowsingGroup?
@@ -19,7 +23,6 @@ struct DetailFilmstrip: View {
     let selectGroupPhoto: (PhotoIdentity) -> Void
     let expandGroup: (GroupID) -> Void
     let collapseGroup: () -> Void
-    var pillAction: PillAction?
 
     private static let viewportSpace = "clove.detail.filmstrip.viewport"
     @State private var layoutState = FilmstripLayoutState()
@@ -28,12 +31,9 @@ struct DetailFilmstrip: View {
     @Environment(\.cloveTheme) private var theme
 
     var body: some View {
-        VStack(spacing: 6) {
-            if let pillAction { pillAction }
-            strip
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.detail.filmstrip")
+        strip
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("clove.detail.filmstrip")
     }
 
     private var strip: some View {
