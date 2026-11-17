@@ -1,8 +1,23 @@
 # Model correspondence and run evidence
 
-Source sync commit: `29702ce651a7de77cf642b38d1898023ae775476`.
-The two newly covered marking files were read at this revision and have no source diff from it.
-The sync commit has not advanced. No product defect is diagnosed by this verification revision.
+Source sync commit: `ee5fa221f2c2665ee07b0c7630d6d52aa240013e`.
+No product defect is diagnosed by this verification revision.
+
+## Integration-base correspondence refresh
+
+Independent review of verification head `68926826ce8d7e023f75333c02d5507405494a9e` found
+no remaining semantic model defect within the documented bounds. It identified a maintenance
+blocker: #308 had changed three covered paths on `main` since the original reviewed source
+`29702ce651a7de77cf642b38d1898023ae775476`.
+
+Those changes were reviewed before advancing the sync commit: `DetailFilmstrip` removes its pill
+layout row, `DetailMarkingView` draws that pill as floating chrome and reserves clearance for swipe
+feedback, and `interactions.md` describes the floating placement. They do not change the modeled
+navigation, marks, Undo, auto-advance, zoom restoration, or write transitions. Current `main` was
+merged into this task branch without conflicts. The sync record and skill now refer to that reviewed
+integration base, `ee5fa221f2c2665ee07b0c7630d6d52aa240013e`; model and configuration are unchanged.
+The evidence below records the earlier model-development corrections and scratch experiments at
+their original revisions. Final integrated checks are recorded in the PR review handoff.
 
 ## Corrections to the verification
 
@@ -52,7 +67,8 @@ another member. A changed target outside that resulting group resets to fit.
 
 The action now checks same photo first, then target-group membership. The reference separately
 derives the result from `event.before.currentPhoto`, the old Undo target, and the resulting group.
-Neither reads the action's primed scale/anchor. No covered product source or sync commit changed.
+Neither reads the action's primed scale/anchor. That model correction changed no covered product
+source or sync commit; the subsequent integration-base refresh is recorded above.
 
 | Undo transition at 100% | Expected zoom | Focused witness length | Executed bad-effect mutation |
 | --- | --- | --- | --- |
