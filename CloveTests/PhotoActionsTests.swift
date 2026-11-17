@@ -444,6 +444,42 @@ struct PhotoActionsTests {
         }
         throw PhotoActionWaitFailure()
     }
+
+    /// Issue #309: a filter that leaves at least two members visible keeps Group Focus, and one
+    /// that drops the group below the two-visible-member threshold closes it.
+    @Test func aFilterKeepsAValidGroupFocusAndClosesOneBelowTwoVisibleMembers() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["a", "b", "c", "d"])
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "burst"),
+            members: ["a", "b", "c"].map { library.identity($0) })
+        library.groups = [group]
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 4 }
+        model.openGroup(group.id, on: library.identity("a"))
+        #expect(model.expandedGroup == group.id)
+
+        // Filtering alone never resets a group that still has two visible members.
+        model.setFilter(.unmarked)
+        #expect(model.expandedGroup == group.id)
+        #expect(
+            model.photos.map(\.id) == ["a", "b", "c", "d"].map { library.identity($0) })
+
+        // One marked member still leaves two visible, so Group Focus stays.
+        let three = try #require(Rating(rawValue: 3))
+        model.apply(.rating(three), to: library.identity("a"))
+        await model.drainActions()
+        #expect(model.photos.map(\.id) == ["b", "c", "d"].map { library.identity($0) })
+        #expect(model.expandedGroup == group.id)
+
+        // A second marked member narrows the group to one visible member, below the threshold,
+        // and Detail leaves Group Focus for Timeline.
+        model.apply(.rating(three), to: library.identity("b"))
+        await model.drainActions()
+        #expect(model.photos.map(\.id) == ["c", "d"].map { library.identity($0) })
+        #expect(model.expandedGroup == nil)
+    }
 }
 
 private struct PhotoActionWaitFailure: Error {}
@@ -581,6 +617,12 @@ private final class ControlledPhotoLibrary: FolderLibrary {
                 folder: folder,
                 loss: FolderLocationLoss(reason: .externalVolumeDisconnected, date: Date()),
                 generation: openGeneration))
+    }
+
+    /// Publishes the finished scan, so the model enables grouping and detail actions.
+    func reportScanFinished() {
+        continuation.yield(
+            .scanFinished(FolderScanSummary(photoCount: photos.count, status: .complete)))
     }
 
     func closeFolder() async {

@@ -2,8 +2,10 @@ import CloveCore
 import SwiftUI
 
 /// The 30% filtered folder grid shown beside the photo in Photo Preview on both iPad and expanded
-/// Duo. Groups follow `browsing.expandedGroup`: collapsed stacks when nil (highlighting the stack
-/// containing `currentPhoto`), or the expanded group inline when active (issue #304, decision 6).
+/// Duo. It draws the same two levels as Focus View's filmstrip (issue #304, #309): the full folder
+/// with collapsed group stacks when `browsing.expandedGroup` is nil, or only the focused group's
+/// visible members when it is set. A member tap keeps Group Focus; the header's fold control
+/// returns to Timeline on the group's Representative Photo.
 struct SplitFolderGridPane: View {
     let browsing: BrowsingModel
     let thumbnails: any GridThumbnailSource
@@ -29,15 +31,15 @@ struct SplitFolderGridPane: View {
         return timeline.activeGroup(with: expanded)
     }
 
-    private var gridDisplay: GridDisplay {
-        GridDisplay(
-            photos: browsing.photos,
-            groups: browsing.groups,
-            groupsEnabled: groupsEnabled,
-            expandedGroup: activeExpandedGroup?.id)
+    private func gridDisplay(focused: ActiveBrowsingGroup?) -> GridDisplay {
+        if let focused { return GridDisplay(focusing: focused) }
+        return GridDisplay(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: groupsEnabled)
     }
 
     var body: some View {
+        let focused = activeExpandedGroup
+        let display = gridDisplay(focused: focused)
         VStack(spacing: 0) {
             if let progress = browsing.readingProgress {
                 ProgressLine(
@@ -46,9 +48,9 @@ struct SplitFolderGridPane: View {
             } else if browsing.isFindingSimilarShots, similarGroupsEnabled {
                 ProgressLine(progress: 1, tone: .grouping)
             }
-            if !gridDisplay.cells.isEmpty || browsing.isFolderOpening {
+            if !display.cells.isEmpty || browsing.isFolderOpening {
                 GridCollectionView(
-                    sections: gridDisplay.sections,
+                    sections: display.sections,
                     currentPhoto: browsing.state.currentPhoto,
                     groups: browsing.groups,
                     shownPhotos: Set(browsing.photos.map(\.id)),
@@ -63,13 +65,9 @@ struct SplitFolderGridPane: View {
                     followsCurrentPhoto: true,
                     foldExpandedGroup: { _ in collapseGroup() },
                     openPhoto: { tapped in
-                        if let activeExpandedGroup,
-                            activeExpandedGroup.visibleMembers.contains(where: { $0.id == tapped })
-                        {
-                            selectGroupPhoto(tapped)
-                        } else {
-                            openPhoto(tapped)
-                        }
+                        // Group Focus draws only the active group's members, so a tile there is
+                        // always another member; Timeline tiles open their photo.
+                        if focused == nil { openPhoto(tapped) } else { selectGroupPhoto(tapped) }
                     },
                     openGroup: openGroup,
                     beginSelection: { _ in },

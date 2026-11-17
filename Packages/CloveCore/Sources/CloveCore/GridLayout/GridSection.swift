@@ -1,24 +1,18 @@
 import Foundation
 
-/// One run of the folder grid drawn together (PRD Grid, P0-11; owner decision, #225).
+/// One run of the folder grid drawn together (PRD Grid, P0-11).
 ///
-/// ``GridDisplay`` joins the shown photos with the published groups. A section adds the one
-/// thing the expanded Duo's split needs: the photo's group draws as its own run, with a
-/// header and a shared surface, instead of one collapsed cover. That run sits at the group's
-/// place in the folder, so the surrounding photos and other collapsed groups keep theirs.
-///
-/// The folder's own cells are a section too, so the grid always draws from sections and a
-/// plain grid is one run. Only a group run gets a header and a surface, which leaves the
-/// iPhone, iPad and folded Duo grids exactly as they were.
+/// ``GridDisplay`` joins the shown photos with the published groups. A run is either the folder's
+/// own cells, or the one group Detail is focused on: its visible members draw with a header and a
+/// shared surface in place of their collapsed cover (issue #309). Only a group run gets a header
+/// and a surface, which leaves every other grid exactly as it was.
 public struct GridSection: Identifiable, Hashable, Sendable {
-    /// What the run draws: the folder's own cells, or one group expanded in place.
+    /// What the run draws: the folder's own cells, or the group in Group Focus.
     public enum ID: Hashable, Sendable {
-        /// A run of the folder's own photos and its collapsed groups. A split expanded group
-        /// leaves one run before it (0) and one after it (1), so the plain runs keep their
-        /// identity while a group opens and closes.
-        case photos(Int)
+        /// A run of the folder's own photos and its collapsed groups.
+        case photos
 
-        /// The photo's group, expanded in place in the Duo's split (owner decision, #225).
+        /// The group Detail is focused on (Group Focus).
         case group(GroupID)
     }
 
@@ -34,7 +28,7 @@ public struct GridSection: Identifiable, Hashable, Sendable {
         self.cells = cells
     }
 
-    /// The expanded group this run draws, or nil for one of the folder's own runs.
+    /// The focused group this run draws, or nil for the folder's own run.
     public var expandedGroup: GroupID? {
         guard case .group(let id) = id else { return nil }
         return id

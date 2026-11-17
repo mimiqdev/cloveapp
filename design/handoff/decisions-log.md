@@ -8,6 +8,14 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Scoped Group Focus in Photo Preview's split grid (#309)
+
+Owner feedback, 2026-11-17: Photo Preview's split grid expanded the active group inline at its folder position, so Group Focus still showed and accepted taps on every other group and standalone photo. Focus View's filmstrip already isolated the group, so the two Group Focus models disagreed.
+
+- **One Group Focus model**: `SplitFolderGridPane` draws the same two levels as `DetailFilmstrip`. Timeline (`expandedGroup == nil`) keeps the filtered folder with its collapsed stacks. Group Focus (`expandedGroup == group.id`) replaces the pane's content with only that group's `visibleMembers`, in the same active order, inside the `{n} photos` run with its `chevron.up` fold control. No other photo or group draws or accepts taps while focused, so no second group-navigation route exists.
+- **Selection and fold**: choosing a member changes `currentPhoto` and keeps Group Focus, marks, zoom and the Focus View filmstrip. Entering starts the pane on the group's `{n} photos` header and fold control even when the Representative Photo is far down a long group, so the fold is always findable; later member navigation follows the chosen photo into view. Folding returns to Timeline on the Representative Photo and restores the folder's pre-focus viewport, so the stack stays where the person left it. Photo Preview and Focus View still share `expandedGroup`, `currentPhoto`, marks and zoom across toggles.
+- **Unchanged**: the visible-member `>= 2` threshold, the unified Representative Photo rule, read-only collapsed stacks in Timeline, filtering (a filter that leaves fewer than two visible members exits Group Focus while a filter that keeps them does not), auto-advance, finishing/Undo, grid multi-select, batch marking and Move Rejects.
+
 ## Floating finishing pill outside the filmstrip's layout (#305)
 
 Owner feedback, 2026-11-16: the `Reject {N} unmarked` pill looked like it took photo space. It did in the Duo poses, where the strip's list is a dock below the stage: the pill's own row grew that dock by its height plus the gap, so the pill appearing, or the fit/zoom transition that reveals it, resized the photo stage and moved the fitted photo.
