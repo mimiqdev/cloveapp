@@ -681,67 +681,6 @@ struct DetailDisplayPresentationTests {
         try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) != nil }
     }
 
-    @Test func tempMeasureHeaderGrowth() async throws {
-        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
-        let source = ObservedDetailImages()
-        let browsing = BrowsingModel(library: TestLibrary.sample())
-        browsing.openFolder()
-        try await waitFor("folder did not open") { !browsing.isFolderOpening }
-        let group = try #require(browsing.groups.first)
-        browsing.openGroup(group.id, on: group.members[0])
-
-        func measure(
-            _ name: String, duo: Bool, cover: Bool, expanded: Bool, size: CGSize
-        ) async throws {
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(origin: .zero, size: size)
-            let screen = DetailScreen(
-                browsing: browsing, images: source,
-                duo: duo
-                    ? DuoDetailLayout(
-                        presentation: .constant(.focus), filter: AnyView(EmptyView()),
-                        more: AnyView(EmptyView()), bottom: AnyView(EmptyView()),
-                        showsGrid: true)
-                    : nil,
-                presentation: .constant(.focus))
-            let root = AnyView(duo ? AnyView(NavigationStack { screen }) : AnyView(screen))
-                .environment(SettingsStore.sample)
-                .environment(\.usesSystemBrowsingToolbar, duo)
-                .environment(\.usesVerticalBrowsingToolbar, expanded)
-                .environment(\.isDuoExpanded, expanded)
-                .environment(\.hasFoldRegion, false)
-                .environment(\.isDuoCover, cover)
-            window.rootViewController = UIHostingController(rootView: root)
-            window.makeKeyAndVisible()
-            defer {
-                window.isHidden = true
-                window.rootViewController = nil
-            }
-            try await Task.sleep(for: .milliseconds(700))
-            guard let preview = findPreview(in: window) else {
-                print("STAGE \(name) missing")
-                return
-            }
-            let stage = preview.convert(preview.bounds, to: window)
-            let filmstrip = findFilmstripScrollView(in: window, excluding: preview)
-            print(
-                "STAGE \(name) \(stage) strip=\(filmstrip.map { "\($0.convert($0.bounds, to: window))" } ?? "none")"
-            )
-        }
-        try await measure(
-            "custom-402", duo: false, cover: false, expanded: false,
-            size: CGSize(width: 402, height: 874))
-        try await measure(
-            "custom-375", duo: false, cover: false, expanded: false,
-            size: CGSize(width: 375, height: 812))
-        try await measure(
-            "duo-cover", duo: true, cover: true, expanded: false,
-            size: CGSize(width: 466, height: 678))
-        try await measure(
-            "duo-expanded", duo: true, cover: false, expanded: true,
-            size: CGSize(width: 1376, height: 1032))
-    }
-
     /// #305: the finishing pill is not part of the filmstrip's layout, so its availability and the
     /// fit–zoom transitions never resize the stage or move the fitted photo. The pill floats over
     /// the stage, above the strip, which is where the chrome already is.
@@ -2673,12 +2612,6 @@ struct DetailDisplayPresentationTests {
             width: size.width, height: size.height)
         return imageView.convert(rect, to: window)
     }
-}
-
-/// Header control frames reported by the detail header, so a test can check where the finishing
-/// pill is without reaching into SwiftUI's layout (#305).
-private final class FrameStoreBox {
-    var frames: [String: CGRect] = [:]
 }
 
 /// The sample's photos with a portrait raster, so the fitted band fills the stage's height the way

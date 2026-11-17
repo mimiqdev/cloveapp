@@ -635,12 +635,12 @@ struct DetailMarkingView: View {
                     // the photo stage (#305).
                     if chromeIsVisible, let stagePill {
                         stagePill
-                            .padding(.bottom, showsFilmstrip ? 6 : 12)
                             .onGeometryChange(for: CGFloat.self) {
                                 $0.size.height
                             } action: {
                                 duoPillHeight = $0
                             }
+                            .padding(.bottom, showsFilmstrip ? 6 : 12)
                     }
                 }
             // The failure toast sits above the filmstrip, clear of the capsule row
