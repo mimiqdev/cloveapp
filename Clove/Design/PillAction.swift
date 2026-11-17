@@ -34,6 +34,7 @@ struct PillAction: View {
     /// What the tap does.
     let action: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isNudged = false
 
     var body: some View {
@@ -46,9 +47,9 @@ struct PillAction: View {
                 .contentShape(Capsule())
                 .cloveGlass(in: Capsule())
         }
-        .buttonStyle(.plain)
-        .scaleEffect(isNudged ? 1.08 : 1)
-        .animation(.spring(response: 0.22, dampingFraction: 0.52), value: isNudged)
+        .buttonStyle(.cloveGlassPress)
+        .scaleEffect(isNudged && !reduceMotion ? 1.08 : 1)
+        .animation(CloveMotion.nudge(reduceMotion: reduceMotion), value: isNudged)
         .task(id: nudgeTrigger) {
             guard nudgeTrigger > 0 else { return }
             isNudged = true

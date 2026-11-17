@@ -8,6 +8,7 @@ struct MoveRejectsSheet: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
     @State private var detent: PresentationDetent = .height(330)
 
@@ -58,43 +59,61 @@ struct MoveRejectsSheet: View {
         let copy = RejectMoveConfirmation(selection: selection)
         return VStack(spacing: 16) {
             if expanded {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(
-                        "\(selection.movingCount.formatted()) of \(selection.totalCount.formatted()) will move"
-                    )
-                    .font(.headline)
-                    .accessibilityIdentifier("clove.moves.partial")
-                    Text("Tap a photo to keep it.")
-                        .font(.footnote).foregroundStyle(Color.clove.text.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                ScrollView { keepGrid(plan, selection: selection) }
-                    .accessibilityIdentifier("clove.moves.keepGrid")
-            } else {
-                Button {
-                    expanded = true
-                    detent = .large
-                } label: {
-                    fannedStack(plan)
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(
+                            "\(selection.movingCount.formatted()) of \(selection.totalCount.formatted()) will move"
+                        )
+                        .font(.headline)
+                        .accessibilityIdentifier("clove.moves.partial")
+                        Text("Tap a photo to keep it.")
+                            .font(.footnote).foregroundStyle(Color.clove.text.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    ScrollView { keepGrid(plan, selection: selection) }
+                        .accessibilityIdentifier("clove.moves.keepGrid")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Review rejected photos")
-                .accessibilityHint("Opens the grid. Tap a photo to keep it.")
-                .accessibilityIdentifier("clove.moves.expand")
-                Text(copy.title)
-                    .font(.title3.bold())
-                    .accessibilityIdentifier("clove.moves.confirmation")
-                Text(copy.body)
-                    .font(.footnote)
-                    .foregroundStyle(Color.clove.text.secondary)
-                    .multilineTextAlignment(.center)
-                    .accessibilityIdentifier("clove.moves.body")
+                .transition(
+                    .asymmetric(
+                        insertion: CloveMotion.scaleOpacityTransition(
+                            scale: 0.96, anchor: .center, reduceMotion: reduceMotion),
+                        removal: .identity))
+            } else {
+                VStack(spacing: 16) {
+                    Button {
+                        withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                            expanded = true
+                            detent = .large
+                        }
+                    } label: {
+                        fannedStack(plan)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Review rejected photos")
+                    .accessibilityHint("Opens the grid. Tap a photo to keep it.")
+                    .accessibilityIdentifier("clove.moves.expand")
+                    Text(copy.title)
+                        .font(.title3.bold())
+                        .accessibilityIdentifier("clove.moves.confirmation")
+                    Text(copy.body)
+                        .font(.footnote)
+                        .foregroundStyle(Color.clove.text.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("clove.moves.body")
+                }
+                .transition(.asymmetric(insertion: .opacity, removal: .identity))
             }
             if let refused = copy.refusedMessage {
                 Text(refused).font(.footnote).foregroundStyle(Color.clove.reject)
                     .accessibilityIdentifier("clove.moves.refused")
             }
-            Button(expanded ? "Move \(selection.movingCount.formatted())" : copy.moveButtonTitle) {
+            Button {
                 flow.move(plan) { dismiss() }
+            } label: {
+                Text(expanded ? "Move \(selection.movingCount.formatted())" : copy.moveButtonTitle)
+                    .contentTransition(reduceMotion ? .identity : .numericText())
+                    .animation(
+                        CloveMotion.micro(reduceMotion: reduceMotion), value: selection.movingCount
+                    )
             }
             .buttonStyle(MoveSheetButtonStyle())
             .disabled(selection.movingCount == 0)
@@ -130,11 +149,14 @@ struct MoveRejectsSheet: View {
             ForEach(plan.readyEntries) { entry in
                 let kept = selection.isKept(entry.identity)
                 Button {
-                    flow.toggleKeep(entry.identity)
+                    withAnimation(CloveMotion.micro(reduceMotion: reduceMotion)) {
+                        flow.toggleKeep(entry.identity)
+                    }
                 } label: {
                     MoveRejectsThumbnail(photo: entry.identity, source: flow.thumbnails)
                         .aspectRatio(1, contentMode: .fit)
                         .opacity(kept ? 1 : theme.tokens.rejectedOpacity)
+                        .animation(CloveMotion.micro(reduceMotion: reduceMotion), value: kept)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(
@@ -166,6 +188,8 @@ struct MoveRejectsSheet: View {
 struct MoveSheetButtonStyle: ButtonStyle {
     var secondary = false
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
@@ -173,6 +197,8 @@ struct MoveSheetButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 50)
             .background(secondary ? Color.clove.surface.card : Color.clove.accent, in: Capsule())
             .opacity(configuration.isPressed ? 0.75 : 1)
+            .animation(
+                CloveMotion.micro(reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 
     private var primaryForeground: CloveColour {

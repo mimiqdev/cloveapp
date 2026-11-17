@@ -177,6 +177,34 @@ struct TapPickerPlacement: Equatable, Sendable {
     private static func clamp(_ value: CGFloat, min lower: CGFloat, max upper: CGFloat) -> CGFloat {
         Swift.min(Swift.max(value, lower), upper)
     }
+
+    static func bloomAnchor(
+        for frame: CGRect,
+        anchor: CGRect,
+        preferredEdge: Edge = .top
+    ) -> UnitPoint {
+        guard frame.width > 0, frame.height > 0 else { return .center }
+        let normalizedX = clamp((anchor.midX - frame.minX) / frame.width, min: 0, max: 1)
+        let normalizedY = clamp((anchor.midY - frame.minY) / frame.height, min: 0, max: 1)
+        if frame.maxY <= anchor.minY + 1 {
+            return UnitPoint(x: normalizedX, y: 1)
+        }
+        if frame.minY >= anchor.maxY - 1 {
+            return UnitPoint(x: normalizedX, y: 0)
+        }
+        if frame.maxX <= anchor.minX + 1 {
+            return UnitPoint(x: 1, y: normalizedY)
+        }
+        if frame.minX >= anchor.maxX - 1 {
+            return UnitPoint(x: 0, y: normalizedY)
+        }
+        switch preferredEdge {
+        case .top: return UnitPoint(x: normalizedX, y: 1)
+        case .bottom: return UnitPoint(x: normalizedX, y: 0)
+        case .leading: return UnitPoint(x: 1, y: normalizedY)
+        case .trailing: return UnitPoint(x: 0, y: normalizedY)
+        }
+    }
 }
 
 enum TapPickerSpace {
@@ -242,6 +270,7 @@ extension EnvironmentValues {
 }
 
 private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var controller = TapPickerController()
     let dismissTrigger: Trigger
 
@@ -253,32 +282,46 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
                 controller.dismiss()
             }
             .overlay {
-                if let active = controller.active {
-                    GeometryReader { proxy in
-                        let placement = TapPickerPlacement.resolve(
-                            anchor: active.anchor,
-                            containerSize: proxy.size,
-                            safeAreaInsets: proxy.safeAreaInsets,
-                            horizontalSize: active.horizontalSize,
-                            verticalSize: active.verticalSize,
-                            preferredEdge: active.preferredEdge)
-                        ZStack(alignment: .topLeading) {
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .ignoresSafeArea()
-                                .onTapGesture { controller.dismiss() }
-                                .accessibilityHidden(true)
-                            active.content(placement.axis) {
-                                controller.dismiss()
+                Group {
+                    if let active = controller.active {
+                        GeometryReader { proxy in
+                            let placement = TapPickerPlacement.resolve(
+                                anchor: active.anchor,
+                                containerSize: proxy.size,
+                                safeAreaInsets: proxy.safeAreaInsets,
+                                horizontalSize: active.horizontalSize,
+                                verticalSize: active.verticalSize,
+                                preferredEdge: active.preferredEdge)
+                            let bloomAnchor = TapPickerPlacement.bloomAnchor(
+                                for: placement.frame,
+                                anchor: active.anchor,
+                                preferredEdge: active.preferredEdge)
+                            ZStack(alignment: .topLeading) {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .ignoresSafeArea()
+                                    .onTapGesture { controller.dismiss() }
+                                    .accessibilityHidden(true)
+                                active.content(placement.axis) {
+                                    controller.dismiss()
+                                }
+                                .accessibilityAction(.escape) {
+                                    controller.dismiss()
+                                }
+                                .transition(
+                                    CloveMotion.bloomTransition(
+                                        anchor: bloomAnchor, reduceMotion: reduceMotion)
+                                )
+                                .id(active.id)
+                                .position(x: placement.frame.midX, y: placement.frame.midY)
                             }
-                            .accessibilityAction(.escape) {
-                                controller.dismiss()
-                            }
-                            .position(x: placement.frame.midX, y: placement.frame.midY)
                         }
                     }
-                    .transition(.opacity.animation(.easeOut(duration: 0.15)))
                 }
+                .animation(
+                    controller.active != nil ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                    value: controller.active?.id
+                )
             }
     }
 }

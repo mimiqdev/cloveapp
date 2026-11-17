@@ -20,7 +20,7 @@ struct DuoMarkControls: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .bottomBar) {
             ToolbarRatingButton(
-                marks: marks, settings: settings, previewRating: previewRating,
+                photoID: photoID, marks: marks, settings: settings, previewRating: previewRating,
                 showsStars: $showsStars, dragRating: $dragRating,
                 rate: rate, markingBegan: markingBegan
             )
@@ -42,7 +42,8 @@ struct DuoMarkControls: ToolbarContent {
         .visibilityPriority(.high)
         ToolbarItem(placement: .bottomBar) {
             ToolbarLabelButton(
-                marks: marks, settings: settings, label: label, markingBegan: markingBegan
+                photoID: photoID, marks: marks, settings: settings, label: label,
+                markingBegan: markingBegan
             )
             .disabled(!canMark)
             .id(photoID)
@@ -54,6 +55,7 @@ struct DuoMarkControls: ToolbarContent {
 
 @available(iOS 27.1, *)
 private struct ToolbarRatingButton: View {
+    let photoID: PhotoIdentity
     let marks: PhotoMarks
     let settings: AppSettings
     let previewRating: Rating?
@@ -87,7 +89,8 @@ private struct ToolbarRatingButton: View {
                 enabledRatings: settings.enabledRatings,
                 allowsTapCurrentToClear: dragRating == nil,
                 axis: verticalEdge == nil ? .horizontal : .vertical,
-                identifier: "clove.duo.stars"
+                identifier: "clove.duo.stars",
+                photoID: photoID
             ) { chosen in
                 rate(chosen)
                 dragRating = nil
@@ -101,6 +104,7 @@ private struct ToolbarRatingButton: View {
 
 @available(iOS 27.1, *)
 private struct ToolbarLabelButton: View {
+    let photoID: PhotoIdentity
     let marks: PhotoMarks
     let settings: AppSettings
     let label: (ColourLabel) -> Void
@@ -134,7 +138,8 @@ private struct ToolbarLabelButton: View {
                     label($0.map { ColourLabel(colour: $0) } ?? .clear)
                     showsLabels = false
                 },
-                axis: verticalEdge == nil ? .horizontal : .vertical
+                axis: verticalEdge == nil ? .horizontal : .vertical,
+                photoID: photoID
             )
             .presentationCompactAdaptation(.popover)
         }

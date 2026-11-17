@@ -10,6 +10,7 @@ struct BrowseShell: View {
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var settingsNavigation = SettingsNavigationState()
     @State private var availableWidth: CGFloat = 0
@@ -59,7 +60,9 @@ struct BrowseShell: View {
             guard browsing.failureToastMessage != nil else { return }
             try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
-            browsing.dismissFailureToast()
+            withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                browsing.dismissFailureToast()
+            }
         }
     }
 

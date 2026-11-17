@@ -29,8 +29,14 @@ struct RatingPicker: View {
     /// Accessibility identifier prefix; targets use `"<identifier>.clear"` and `"<identifier>.1"`…`"5"`.
     var identifier = "clove.mark.ratingPicker"
 
+    /// Optional photo identity so cross-photo switches snap marks instead of animating.
+    var photoID: PhotoIdentity? = nil
+
     /// Applies the chosen rating (`.unrated` for Clear, or `1...5`).
     let onPick: (Rating) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settledPhotoID: PhotoIdentity?
 
     static let itemCount = 6
     static let targetExtent: CGFloat = 44
@@ -49,11 +55,16 @@ struct RatingPicker: View {
             : CGSize(width: minor, height: major)
     }
 
+    private var shouldAnimateMarks: Bool {
+        CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
+
     var body: some View {
         let layout =
             axis == .horizontal
             ? AnyLayout(HStackLayout(spacing: Self.itemSpacing))
             : AnyLayout(VStackLayout(spacing: Self.itemSpacing))
+        let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
         layout {
             ForEach(orderedItems, id: \.self) { item in
                 itemButton(for: item)
@@ -61,6 +72,11 @@ struct RatingPicker: View {
         }
         .padding(Self.containerPadding)
         .cloveGlass(in: Capsule())
+        .animation(markAnimation, value: selection)
+        .animation(markAnimation, value: isMixed)
+        .onChange(of: photoID, initial: true) { _, newID in
+            settledPhotoID = newID
+        }
         .accessibilityElement(children: .contain)
         .accessibilityValue(accessibilityValue)
         .accessibilityIdentifier(identifier)

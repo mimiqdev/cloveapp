@@ -21,7 +21,7 @@ struct MoveRejectsButton: View {
                 .contentShape(Circle())
                 .cloveGlass(in: Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
         .accessibilityLabel("Move rejects")
         .accessibilityIdentifier(identifier)
     }

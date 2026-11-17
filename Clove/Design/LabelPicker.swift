@@ -34,6 +34,12 @@ struct LabelPicker: View {
     /// Neutralises dot fills when the iPad rail displays a rejected photo.
     var isNeutral = false
 
+    /// Optional photo identity so cross-photo switches snap marks instead of animating.
+    var photoID: PhotoIdentity? = nil
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settledPhotoID: PhotoIdentity?
+
     /// None, then red, yellow, green, blue and purple (components.md).
     static let defaultLabels: [LabelColour?] =
         [nil] + LabelColour.allCases.filter { !$0.isExtended }
@@ -54,13 +60,26 @@ struct LabelPicker: View {
             : CGSize(width: minor, height: major)
     }
 
+    private var shouldAnimateMarks: Bool {
+        CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
+
     var body: some View {
-        if showsGlass {
-            dots(spacing: Self.itemSpacing, targetSize: Self.targetExtent)
-                .padding(Self.containerPadding)
-                .cloveGlass(in: Capsule())
-        } else {
-            dots(spacing: 0, targetSize: 32)
+        let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
+        Group {
+            if showsGlass {
+                dots(spacing: Self.itemSpacing, targetSize: Self.targetExtent)
+                    .padding(Self.containerPadding)
+                    .cloveGlass(in: Capsule())
+            } else {
+                dots(spacing: 0, targetSize: 32)
+            }
+        }
+        .animation(markAnimation, value: selection)
+        .animation(markAnimation, value: isMixed)
+        .animation(markAnimation, value: isNeutral)
+        .onChange(of: photoID, initial: true) { _, newID in
+            settledPhotoID = newID
         }
     }
 

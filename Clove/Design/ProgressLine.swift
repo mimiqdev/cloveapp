@@ -30,20 +30,26 @@ struct ProgressLine: View {
         }
     }
 
-    @ViewBuilder
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        if let progress {
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(Color.clove.separator)
-                    Rectangle()
-                        .fill(tone.colour)
-                        .frame(width: proxy.size.width * min(max(progress, 0), 1))
+        Group {
+            if let progress {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color.clove.separator)
+                        Rectangle()
+                            .fill(tone.colour)
+                            .frame(width: proxy.size.width * min(max(progress, 0), 1))
+                    }
                 }
+                .frame(height: 2)
+                .accessibilityHidden(true)
+                .transition(.opacity)
             }
-            .frame(height: 2)
-            .accessibilityHidden(true)
         }
+        .animation(CloveMotion.progress(reduceMotion: reduceMotion), value: progress)
+        .animation(CloveMotion.progress(reduceMotion: reduceMotion), value: tone)
     }
 }
 

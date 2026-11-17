@@ -11,6 +11,7 @@ struct DetailMarkRail: View {
     let marks: PhotoMarks
     let settings: AppSettings
     let previewRating: Rating?
+    var photoID: PhotoIdentity? = nil
     let rate: (Rating) -> Void
     let label: (ColourLabel) -> Void
     let toggleReject: () -> Void
@@ -21,13 +22,14 @@ struct DetailMarkRail: View {
             VerticalStarBar(
                 rating: previewRating ?? (marks.isRejected ? .unrated : marks.rating),
                 enabledRatings: settings.enabledRatings, size: .pad, showsRejectChip: false,
-                identifier: "clove.detail.rail.stars", onPreview: { _ in },
+                identifier: "clove.detail.rail.stars", photoID: photoID, onPreview: { _ in },
                 onCommit: rate, onReject: toggleReject, onBegin: markingBegan)
             Rectangle()
                 .fill(Color.clove.separator)
                 .frame(width: 48, height: 1)
             MarkRejectAction(
                 isRejected: marks.isRejected, identifier: "clove.detail.rail.reject",
+                photoID: photoID,
                 onToggle: toggleReject
             )
             .help(marks.isRejected ? "Rejected" : "Reject")
@@ -37,7 +39,8 @@ struct DetailMarkRail: View {
                 labels: settings.availableLabels.map { Optional($0) },
                 identifier: "clove.detail.rail.label",
                 onPick: { label($0.map { ColourLabel(colour: $0) } ?? .clear) },
-                axis: .vertical, showsGlass: false, isNeutral: marks.isRejected)
+                axis: .vertical, showsGlass: false, isNeutral: marks.isRejected,
+                photoID: photoID)
             Spacer(minLength: 0)
         }
         .padding(18)

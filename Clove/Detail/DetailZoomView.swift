@@ -998,20 +998,40 @@ extension DetailZoomContainerView {
             }
             return
         }
+        let regionsChanged = regions != focusRegions
+        let previousIDs = Set(focusRegions.map(\.id))
         focusRegions = regions
         inspectedFocusRegionID = inspectedRegionID
         renderedFocusRegionColours = focusRegionColours
         for control in focusRegionControls { control.removeFromSuperview() }
+        var arrivingControls: [DetailFocusRegionControl] = []
         focusRegionControls = regions.map { region in
             let control = DetailFocusRegionControl(
                 region: region, colours: focusRegionColours)
             control.addTarget(
                 self, action: #selector(handleFocusRegionTap(_:)), for: .touchUpInside)
+            if regionsChanged && !previousIDs.contains(region.id)
+                && !CloveMotion.isReduceMotionEnabled
+            {
+                control.alpha = 0.05
+                arrivingControls.append(control)
+            }
             imageView.addSubview(control)
             return control
         }
         accessibilityElements = [previewAccessibilityView] + focusRegionControls
         layoutFocusRegions()
+        if !arrivingControls.isEmpty {
+            UIView.animate(
+                withDuration: CloveMotion.focusArrivalDuration,
+                delay: 0,
+                options: [.allowUserInteraction, .curveEaseOut]
+            ) {
+                for control in arrivingControls {
+                    control.alpha = 1
+                }
+            }
+        }
     }
 
     @objc private func handleFocusRegionTap(_ control: DetailFocusRegionControl) {

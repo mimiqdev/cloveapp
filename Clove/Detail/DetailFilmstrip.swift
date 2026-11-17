@@ -28,7 +28,11 @@ struct DetailFilmstrip: View {
     @State private var layoutState = FilmstripLayoutState()
     @State private var isTrackingVerticalStackDrag = false
     @State private var lastVerticalStackDragDate = Date.distantPast
+    @State private var levelTransitionOpacity: Double = 1
+    @State private var levelTransitionOffset: CGFloat = 0
+    @State private var levelRevealTask: Task<Void, Never>?
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         strip
@@ -63,6 +67,8 @@ struct DetailFilmstrip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
             }
+            .opacity(levelTransitionOpacity)
+            .offset(y: levelTransitionOffset)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12)
                     .onEnded { value in
@@ -83,12 +89,35 @@ struct DetailFilmstrip: View {
             .onChange(of: current, initial: true) { _, photo in
                 scheduleScroll(for: photo, using: proxy, forceScroll: false)
             }
-            .onChange(of: expandedGroup?.id) { _, _ in
+            .onChange(of: expandedGroup?.id) { _, newID in
                 layoutState.frames.removeAll()
                 scheduleScroll(for: current, using: proxy, forceScroll: true)
+                animateLevelEntrance(expanding: newID != nil)
+            }
+            .onDisappear {
+                levelRevealTask?.cancel()
             }
         }
         .frame(height: 70)
+    }
+
+    private func animateLevelEntrance(expanding: Bool) {
+        levelRevealTask?.cancel()
+        guard !reduceMotion else {
+            levelTransitionOpacity = 1
+            levelTransitionOffset = 0
+            return
+        }
+        levelTransitionOpacity = 0.05
+        levelTransitionOffset = expanding ? 5 : -5
+        levelRevealTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                levelTransitionOpacity = 1
+                levelTransitionOffset = 0
+            }
+        }
     }
 
     @ViewBuilder
@@ -235,7 +264,9 @@ struct DetailFilmstrip: View {
                 proxy.scrollTo(target, anchor: .center)
             } else {
                 guard !layoutState.isVisible(target) else { return }
-                withAnimation { proxy.scrollTo(target, anchor: .center) }
+                withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                    proxy.scrollTo(target, anchor: .center)
+                }
             }
         }
     }
