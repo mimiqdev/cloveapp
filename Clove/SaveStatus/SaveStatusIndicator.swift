@@ -23,6 +23,7 @@ struct SaveStatusIndicator: View {
 struct FolderSaveBanner: View {
     let browsing: BrowsingModel
     let identifierPrefix: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPickingFolder = false
 
     var body: some View {
@@ -37,8 +38,17 @@ struct FolderSaveBanner: View {
                     }
                 }
                 .padding(12)
+                .transition(
+                    .asymmetric(
+                        insertion: CloveMotion.slideTransition(
+                            edge: .top, offset: 8, reduceMotion: reduceMotion),
+                        removal: .identity))
             }
         }
+        .animation(
+            browsing.folderSituation != nil ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+            value: browsing.folderSituation
+        )
         .folderPicker(isPresented: $isPickingFolder) { url in
             await browsing.openPickedFolder(url)
         }

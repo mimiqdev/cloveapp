@@ -45,6 +45,9 @@ struct MarkingToolbar: View {
     /// set-only semantics and clear through the picker's explicit Clear action.
     var allowsTapCurrentToClear = true
 
+    /// Optional photo identity so cross-photo switches snap marks instead of animating.
+    var photoID: PhotoIdentity? = nil
+
     /// Applies a rating the picker resolved, or clears it with unrated (PRD Marking rules).
     let onRate: (Rating) -> Void
 
@@ -60,18 +63,21 @@ struct MarkingToolbar: View {
     var body: some View {
         HStack(spacing: 0) {
             MarkRejectAction(
-                isRejected: isRejected, identifier: "\(identifier).reject", onToggle: onReject)
+                isRejected: isRejected, identifier: "\(identifier).reject", photoID: photoID,
+                onToggle: onReject)
             Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
             MarkRatingAction(
                 rating: rating, enabledRatings: enabledRatings, isMixed: isMixed,
                 allowsTapCurrentToClear: allowsTapCurrentToClear,
                 identifier: "\(identifier).rating", pickerIdentifier: "\(identifier).stars",
+                photoID: photoID,
                 onRate: onRate, onBegin: onBegin)
             Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
             MarkLabelAction(
                 label: label, labels: labels, isMixed: isMixed,
                 identifier: "\(identifier).label",
                 pickerIdentifier: labelPickerIdentifier ?? "\(identifier).labels",
+                photoID: photoID,
                 onPick: onLabel, onBegin: onBegin)
         }
         .frame(width: Self.size.width, height: Self.size.height)
@@ -94,13 +100,23 @@ struct MarkRejectAction: View {
     /// The identifier the screen's UI test uses.
     var identifier = "clove.mark.reject"
 
+    /// Optional photo identity so cross-photo switches snap marks instead of animating.
+    var photoID: PhotoIdentity? = nil
+
     /// Toggles Reject (PRD Marking rules).
     let onToggle: () -> Void
 
     /// The theme in effect, for the neutral glyph colour that is not a token (tokens.md).
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settledPhotoID: PhotoIdentity?
+
+    private var shouldAnimateMarks: Bool {
+        CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
 
     var body: some View {
+        let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
         Button(action: onToggle) {
             Image(systemName: isRejected ? "flag.slash.fill" : "flag.slash")
                 .font(.system(size: 15, weight: .medium))
@@ -111,8 +127,12 @@ struct MarkRejectAction: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
+                .animation(markAnimation, value: isRejected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
+        .onChange(of: photoID, initial: true) { _, newID in
+            settledPhotoID = newID
+        }
         .accessibilityLabel(isRejected ? "Rejected" : "Reject")
         .accessibilityAddTraits(isRejected ? .isSelected : [])
         .accessibilityIdentifier(identifier)
@@ -144,6 +164,9 @@ struct MarkRatingAction: View {
     /// The picker's identifier; its targets are `"<pickerIdentifier>.clear"` and `".1"…"5"`.
     var pickerIdentifier = "clove.mark.stars"
 
+    /// Optional photo identity so cross-photo switches snap marks instead of animating.
+    var photoID: PhotoIdentity? = nil
+
     /// Applies a rating the picker resolved, or clears it with unrated (PRD Marking rules).
     let onRate: (Rating) -> Void
 
@@ -151,8 +174,10 @@ struct MarkRatingAction: View {
     var onBegin: () -> Void = {}
 
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var anchor: CGRect = .zero
     @State private var fallbackOpen = false
+    @State private var settledPhotoID: PhotoIdentity?
 
     /// The value the photo carries, 1–5 stars or unrated (`copy.md` `a11y.rating`).
     private var stars: Int { rating.starCount ?? 0 }
@@ -161,7 +186,12 @@ struct MarkRatingAction: View {
         stars == 1 ? "1 star" : stars > 1 ? "\(stars) stars" : "Unrated"
     }
 
+    private var shouldAnimateMarks: Bool {
+        CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
+
     var body: some View {
+        let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
         Button {
             onBegin()
             openPicker()
@@ -180,10 +210,13 @@ struct MarkRatingAction: View {
                         .font(.system(size: 13, weight: .medium).monospacedDigit())
                         .foregroundStyle(Color.clove.text.primary)
                         .frame(width: 9)
+                        .contentTransition(
+                            shouldAnimateMarks && !reduceMotion ? .numericText() : .identity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
+            .animation(markAnimation, value: stars)
             .onGeometryChange(for: CGRect.self) { proxy in
                 proxy.frame(in: .named(TapPickerSpace.name))
             } action: { rect in
@@ -191,7 +224,10 @@ struct MarkRatingAction: View {
                 tapPicker?.updateAnchor(id: pickerIdentifier, anchor: rect)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
+        .onChange(of: photoID, initial: true) { _, newID in
+            settledPhotoID = newID
+        }
         .accessibilityLabel("Rating")
         .accessibilityValue(accessibilityRating)
         .accessibilityIdentifier(identifier)
@@ -227,7 +263,8 @@ struct MarkRatingAction: View {
             enabledRatings: enabledRatings,
             allowsTapCurrentToClear: allowsTapCurrentToClear,
             axis: axis,
-            identifier: pickerIdentifier
+            identifier: pickerIdentifier,
+            photoID: photoID
         ) { chosen in
             onRate(chosen)
             dismiss()
@@ -253,6 +290,9 @@ struct MarkLabelAction: View {
     /// The picker's identifier; each dot is `"<pickerIdentifier>.<label>"`.
     var pickerIdentifier = "clove.mark.labels"
 
+    /// Optional photo identity so cross-photo switches snap marks instead of animating.
+    var photoID: PhotoIdentity? = nil
+
     /// Applies a label, or clears it with nil (PRD Marking rules).
     let onPick: (LabelColour?) -> Void
 
@@ -260,10 +300,17 @@ struct MarkLabelAction: View {
     var onBegin: () -> Void = {}
 
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var anchor: CGRect = .zero
     @State private var fallbackOpen = false
+    @State private var settledPhotoID: PhotoIdentity?
+
+    private var shouldAnimateMarks: Bool {
+        CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
 
     var body: some View {
+        let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
         Button {
             onBegin()
             openPicker()
@@ -279,6 +326,7 @@ struct MarkLabelAction: View {
             .frame(width: 16, height: 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
+            .animation(markAnimation, value: label)
             .onGeometryChange(for: CGRect.self) { proxy in
                 proxy.frame(in: .named(TapPickerSpace.name))
             } action: { rect in
@@ -286,7 +334,10 @@ struct MarkLabelAction: View {
                 tapPicker?.updateAnchor(id: pickerIdentifier, anchor: rect)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
+        .onChange(of: photoID, initial: true) { _, newID in
+            settledPhotoID = newID
+        }
         .accessibilityLabel(label.map { "Label, \($0.rawValue)" } ?? "Label")
         .accessibilityAddTraits(label != nil ? .isSelected : [])
         .accessibilityIdentifier(identifier)
@@ -321,7 +372,7 @@ struct MarkLabelAction: View {
             onPick: { colour in
                 onPick(colour)
                 dismiss()
-            }, axis: axis)
+            }, axis: axis, photoID: photoID)
     }
 }
 

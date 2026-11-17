@@ -183,14 +183,9 @@ struct FolderPreparationIndicator: View {
                     guard status.phase == .complete, !isShowingDetails else { return }
                     try? await Task.sleep(for: .seconds(2))
                     guard !Task.isCancelled else { return }
-                    if reduceMotion {
+                    withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
                         browsing.dismissPreparationCompletion(
                             folder: status.folder, generation: status.generation)
-                    } else {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            browsing.dismissPreparationCompletion(
-                                folder: status.folder, generation: status.generation)
-                        }
                     }
                 }
         }
@@ -265,7 +260,7 @@ struct FolderPreparationIndicator: View {
                     )
                     .rotationEffect(.degrees(-90))
                     .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.25),
+                        CloveMotion.progress(reduceMotion: reduceMotion),
                         value: fraction)
             }
         case .waiting:

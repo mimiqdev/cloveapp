@@ -49,7 +49,7 @@ struct GlassIconButton: View {
             .contentShape(Circle())
             .cloveGlass(in: Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
         .accessibilityLabel(label)
         .modifier(
             ActiveStateAccessibility(isActive: isActive, valueOverride: activeAccessibilityValue)

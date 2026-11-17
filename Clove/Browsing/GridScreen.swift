@@ -23,6 +23,7 @@ struct GridScreen: View {
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum MoveSheetRoute: Identifiable {
         case flow(MoveRejectsFlow)
@@ -49,6 +50,32 @@ struct GridScreen: View {
             && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
     }
 
+    private var activeToastKey: String? {
+        if !(usesDock && browsing.state.route == .detail),
+            browsing.failureToastMessage != nil
+        {
+            return "failure-\(browsing.failureToastBurst)"
+        }
+        if browsing.completedRename != nil, browsing.isRenameToastVisible {
+            return "rename-\(browsing.renameToastAttempt)"
+        }
+        if browsing.lastRejectMove != nil, browsing.isRejectMoveToastVisible {
+            return "rejectMove-\(browsing.rejectMoveToastAttempt)"
+        }
+        return nil
+    }
+
+    private var gridProgressLine: (progress: Double?, tone: ProgressLine.Tone) {
+        if let progress = browsing.readingProgress {
+            let value = progress.total > 0 ? Double(progress.read) / Double(progress.total) : 0
+            return (value, .reading)
+        }
+        if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
+            return (1, .grouping)
+        }
+        return (nil, .reading)
+    }
+
     private var cells: [GridCellItem] { gridDisplay.cells }
 
     /// How the grid joins the folder and its groups.
@@ -73,8 +100,18 @@ struct GridScreen: View {
                         moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
                     }
                     .padding(16)
+                    .transition(
+                        .asymmetric(
+                            insertion: CloveMotion.scaleOpacityTransition(
+                                scale: 0.9, anchor: .bottomTrailing, reduceMotion: reduceMotion),
+                            removal: .identity))
                 }
             }
+            .animation(
+                (!isRegular && !usesDock && showsMoveRejects)
+                    ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                value: showsMoveRejects
+            )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting {
                     VStack(spacing: 8) {
@@ -88,8 +125,17 @@ struct GridScreen: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .transition(
+                        .asymmetric(
+                            insertion: CloveMotion.slideTransition(
+                                edge: .bottom, offset: 14, reduceMotion: reduceMotion),
+                            removal: .identity))
                 }
             }
+            .animation(
+                isSelecting ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                value: isSelecting
+            )
             .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
             .overlay(alignment: .bottom) {
                 if !(usesDock && browsing.state.route == .detail),
@@ -98,9 +144,15 @@ struct GridScreen: View {
                     Toast(message: message, identifier: "clove.save.toast")
                         .padding(.horizontal)
                         .padding(.bottom, 12)
+                        .transition(
+                            CloveMotion.slideTransition(
+                                edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                 } else if let completed = browsing.completedRename, browsing.isRenameToastVisible {
                     BatchRenameToast(completed: completed) { showsRenameDetails = true }
                         .padding(.horizontal).padding(.bottom, 12)
+                        .transition(
+                            CloveMotion.slideTransition(
+                                edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                 } else if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible
                 {
                     MoveRejectsToast(browsing: browsing, completed: completed) {
@@ -108,19 +160,30 @@ struct GridScreen: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 12)
+                    .transition(
+                        CloveMotion.slideTransition(
+                            edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                 }
             }
+            .animation(
+                CloveMotion.chrome(reduceMotion: reduceMotion),
+                value: activeToastKey
+            )
             .task(id: browsing.rejectMoveToastAttempt) {
                 guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
                 try? await Task.sleep(for: .seconds(6))
                 guard !Task.isCancelled else { return }
-                browsing.dismissRejectMoveToast()
+                withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                    browsing.dismissRejectMoveToast()
+                }
             }
             .task(id: browsing.renameToastAttempt) {
                 guard browsing.isRenameToastVisible, !TestLibrary.keepsMoveToast else { return }
                 try? await Task.sleep(for: .seconds(6))
                 guard !Task.isCancelled else { return }
-                browsing.dismissRenameToast()
+                withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                    browsing.dismissRenameToast()
+                }
             }
             .fullScreenCover(
                 item: $renameFlow,
@@ -217,13 +280,7 @@ struct GridScreen: View {
     private var grid: some View {
         VStack(spacing: 0) {
             if !usesSystemToolbar { header }
-            if let progress = browsing.readingProgress {
-                ProgressLine(
-                    progress: progress.total > 0
-                        ? Double(progress.read) / Double(progress.total) : 0)
-            } else if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
-                ProgressLine(progress: 1, tone: .grouping)
-            }
+            ProgressLine(progress: gridProgressLine.progress, tone: gridProgressLine.tone)
             FolderSaveBanner(browsing: browsing, identifierPrefix: "clove.grid.saveState.failure")
             if cells.isEmpty && !browsing.isFolderOpening {
                 emptyState
@@ -246,6 +303,9 @@ struct GridScreen: View {
                     toggleSelection: { browsing.toggleSelection(of: $0) }
                 )
                 .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
+                .animation(
+                    CloveMotion.chrome(reduceMotion: reduceMotion),
+                    value: browsing.folderLocationLoss == nil)
             }
         }
         .background(Color.clove.bg.canvas)
@@ -582,6 +642,7 @@ private struct GridBatchRenameButton: View {
     let disabled: Bool
     let action: () -> Void
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let obscured = tapPicker?.isPresented == true
@@ -592,9 +653,10 @@ private struct GridBatchRenameButton: View {
                 .padding(.horizontal, 20).padding(.vertical, 10)
                 .cloveGlass(in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
         .disabled(disabled)
         .opacity(obscured ? 0 : 1)
+        .animation(CloveMotion.micro(reduceMotion: reduceMotion), value: obscured)
         .allowsHitTesting(!obscured)
         .accessibilityHidden(obscured)
         .accessibilityIdentifier("clove.grid.batch.rename")

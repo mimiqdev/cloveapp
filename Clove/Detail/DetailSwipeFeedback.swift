@@ -30,6 +30,8 @@ struct DetailSwipeFeedbackBadge: View {
     let controlsHeight: CGFloat
     let chromeIsVisible: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         GeometryReader { proxy in
             if feedback.isShowing {
@@ -37,6 +39,7 @@ struct DetailSwipeFeedbackBadge: View {
                     rating: feedback.rating ?? .unrated, enabledRatings: enabledRatings,
                     isReject: feedback.isReject
                 )
+                .transition(CloveMotion.swipeFeedbackTransition(reduceMotion: reduceMotion))
                 .position(
                     Self.position(
                         in: proxy.size, startLocation: feedback.startLocation,
@@ -53,6 +56,10 @@ struct DetailSwipeFeedbackBadge: View {
                             ? "Clear rating" : "\(feedback.rating?.starCount ?? 0) stars"))
             }
         }
+        .animation(
+            feedback.isShowing ? CloveMotion.micro(reduceMotion: reduceMotion) : nil,
+            value: feedback.isShowing
+        )
     }
     static func position(
         in size: CGSize, startLocation: CGPoint, controlsHeight: CGFloat, chromeIsVisible: Bool

@@ -37,6 +37,9 @@ struct VerticalStarBar: View {
     /// The identifier the screen's UI test uses; each star is `"<identifier>.<n>"`.
     var identifier = "clove.mark.starBar"
 
+    /// Optional photo identity so cross-photo switches snap marks instead of animating.
+    var photoID: PhotoIdentity? = nil
+
     /// The live value while a drag runs, before release (interactions.md).
     let onPreview: (Rating) -> Void
 
@@ -48,6 +51,9 @@ struct VerticalStarBar: View {
 
     /// Touching the bar cancels the previous mark's pending auto-advance.
     var onBegin: () -> Void = {}
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settledPhotoID: PhotoIdentity?
 
     /// The value the drag is showing, or nil when no drag has run since the last commit.
     @State private var preview: Rating?
@@ -68,13 +74,22 @@ struct VerticalStarBar: View {
     /// The value the stars fill to: the drag's live value while one runs, else the photo's rating.
     private var shownRating: Rating { preview ?? rating }
     private var metrics: VerticalStarBarMetrics { VerticalStarBarMetrics(size: size) }
+    private var shouldAnimateMarks: Bool {
+        CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
 
     var body: some View {
+        let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
         VStack(spacing: metrics.chipGap) {
             pill
+                .animation(markAnimation, value: shownRating)
             if showsRejectChip {
                 rejectChip
+                    .animation(markAnimation, value: isRejectStage)
             }
+        }
+        .onChange(of: photoID, initial: true) { _, newID in
+            settledPhotoID = newID
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
@@ -269,6 +284,7 @@ struct VerticalStarBarDisplay: View {
     var enabledRatings: EnabledRatings = .all
     var isReject = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let metrics = VerticalStarBarMetrics(size: .phone)
 
     /// The whole read-out, including the gap and reject chip, for stage placement.
@@ -285,15 +301,18 @@ struct VerticalStarBarDisplay: View {
     }
 
     var body: some View {
+        let stepAnimation = CloveMotion.micro(reduceMotion: reduceMotion)
         VStack(spacing: metrics.chipGap) {
             VerticalStarBarStars(rating: rating, enabledRatings: enabledRatings, size: .phone)
                 .frame(width: metrics.width, height: metrics.height)
                 .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius))
+                .animation(stepAnimation, value: rating)
             Image(systemName: isReject ? "flag.slash.fill" : "star.slash")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(isReject ? Color.clove.reject : Color.clove.text.secondary)
                 .frame(width: metrics.chip, height: metrics.chip)
                 .cloveGlass(in: Circle())
+                .animation(stepAnimation, value: isReject)
         }
         .allowsHitTesting(false)
     }

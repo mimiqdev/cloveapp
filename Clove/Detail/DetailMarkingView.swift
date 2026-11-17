@@ -100,6 +100,7 @@ struct DetailMarkingView: View {
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.hasFoldRegion) private var hasFoldRegion
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hidesChrome = false
     @State private var widePresentation: DetailPresentation
     @State private var expandPillNudgeCount = 0
@@ -346,13 +347,18 @@ struct DetailMarkingView: View {
                 containerSize = size
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: chromeIsVisible)
+        .animation(CloveMotion.chrome(reduceMotion: reduceMotion), value: chromeIsVisible)
         .task(id: scale > DetailFitScale.tolerance) {
-            showsZoomChip = scale > DetailFitScale.tolerance
-            guard showsZoomChip else { return }
+            let zoomed = scale > DetailFitScale.tolerance
+            withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                showsZoomChip = zoomed
+            }
+            guard zoomed else { return }
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            showsZoomChip = false
+            withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                showsZoomChip = false
+            }
         }
         .sheet(isPresented: $showsInformation) {
             PhotoInformationSheet(browsing: browsing, photo: photo)
@@ -641,13 +647,25 @@ struct DetailMarkingView: View {
                                 duoPillHeight = $0
                             }
                             .padding(.bottom, showsFilmstrip ? 6 : 12)
+                            .transition(
+                                .asymmetric(
+                                    insertion: CloveMotion.slideTransition(
+                                        edge: .bottom, offset: 8, reduceMotion: reduceMotion),
+                                    removal: .identity))
                     }
                 }
+                .animation(
+                    chromeIsVisible && stagePill != nil
+                        ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                    value: stagePill?.identifier)
             // The failure toast sits above the filmstrip, clear of the capsule row
             // (handoff screens.md §03, components.md Toast).
             if let message = browsing.failureToastMessage {
                 Toast(message: message, identifier: "clove.save.toast")
                     .padding(.horizontal, 16)
+                    .transition(
+                        CloveMotion.slideTransition(
+                            edge: .bottom, offset: 12, reduceMotion: reduceMotion))
             }
             // The marking toolbar gets its own reserved bottom-right area beside the narrowed
             // filmstrip, never over the image and never in the system side toolbar (#200, #227).
@@ -677,6 +695,10 @@ struct DetailMarkingView: View {
                     .padding(.vertical, 8)
             }
         }
+        .animation(
+            CloveMotion.chrome(reduceMotion: reduceMotion),
+            value: browsing.failureToastMessage
+        )
         .contentMargins(for: .container, edges: .horizontal)
         .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
         .accessibilityElement(children: .contain)
@@ -695,6 +717,7 @@ struct DetailMarkingView: View {
                 enabledRatings: settings.enabledRatings,
                 labels: [nil] + settings.availableLabels.map { Optional($0) },
                 identifier: "clove.duo.capsule", labelPickerIdentifier: "clove.duo.labels",
+                photoID: photo.id,
                 onRate: { rate($0) }, onReject: { toggleReject() },
                 onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
                 onBegin: actions.markingSwipeBegan
@@ -778,6 +801,7 @@ struct DetailMarkingView: View {
                 DetailMarkRail(
                     marks: displayMarks, settings: settings,
                     previewRating: swipeFeedback.rating,
+                    photoID: photo.id,
                     rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
                     toggleReject: { toggleReject() }, markingBegan: beginMarkingGesture
                 )
@@ -822,10 +846,19 @@ struct DetailMarkingView: View {
                     // The save/read failure toast sits above the filmstrip so it never
                     // covers the mark capsule (handoff screens.md §03, components.md Toast).
                     // It is transient feedback, not chrome, and remains visible at 100% zoom.
-                    if let message = browsing.failureToastMessage {
-                        Toast(message: message, identifier: "clove.save.toast")
-                            .padding(.horizontal, 16)
+                    Group {
+                        if let message = browsing.failureToastMessage {
+                            Toast(message: message, identifier: "clove.save.toast")
+                                .padding(.horizontal, 16)
+                                .transition(
+                                    CloveMotion.slideTransition(
+                                        edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                        }
                     }
+                    .animation(
+                        CloveMotion.chrome(reduceMotion: reduceMotion),
+                        value: browsing.failureToastMessage
+                    )
                     if showsZoomChip && scale > DetailFitScale.tolerance {
                         Text(zoomName)
                             .font(.caption.weight(.medium))
@@ -833,13 +866,30 @@ struct DetailMarkingView: View {
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .cloveGlass(in: Capsule())
                             .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 0 : 12)
+                            .transition(.opacity)
                     }
                     if showsFilmstrip && chromeIsVisible {
                         // The pill rides the floating chrome band above the strip. The band is an
                         // overlay, so its height never moves the stage (handoff components.md,
                         // Pill action; #305).
                         VStack(spacing: 8) {
-                            if let stagePill { stagePill }
+                            Group {
+                                if let stagePill {
+                                    stagePill
+                                        .transition(
+                                            .asymmetric(
+                                                insertion: CloveMotion.slideTransition(
+                                                    edge: .bottom, offset: 8,
+                                                    reduceMotion: reduceMotion
+                                                ),
+                                                removal: .identity))
+                                }
+                            }
+                            .animation(
+                                stagePill != nil
+                                    ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                                value: stagePill?.identifier
+                            )
                             DetailFilmstrip(
                                 timeline: timeline,
                                 expandedGroup: expandedGroup,
@@ -861,6 +911,7 @@ struct DetailMarkingView: View {
                                     labels: [nil] + settings.availableLabels.map { Optional($0) },
                                     identifier: "clove.detail.capsule",
                                     labelPickerIdentifier: "clove.detail.labels",
+                                    photoID: photo.id,
                                     onRate: { rate($0) }, onReject: { toggleReject() },
                                     onLabel: {
                                         choose($0.map { ColourLabel(colour: $0) } ?? .clear)
@@ -873,9 +924,24 @@ struct DetailMarkingView: View {
                             }
                         }
                         .padding(.bottom, 8)
-                    } else if !showsFilmstrip && chromeIsVisible, let stagePill {
-                        stagePill
-                            .padding(.bottom, 12)
+                    } else if !showsFilmstrip && chromeIsVisible {
+                        Group {
+                            if let stagePill {
+                                stagePill
+                                    .padding(.bottom, 12)
+                                    .transition(
+                                        .asymmetric(
+                                            insertion: CloveMotion.slideTransition(
+                                                edge: .bottom, offset: 8,
+                                                reduceMotion: reduceMotion),
+                                            removal: .identity))
+                            }
+                        }
+                        .animation(
+                            stagePill != nil
+                                ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                            value: stagePill?.identifier
+                        )
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) {
@@ -995,17 +1061,7 @@ struct DetailMarkingView: View {
         .overlay(alignment: .top) { focusRegionStatus }
         .overlay(alignment: .topLeading) { limitationNote }
         .overlay(alignment: .topTrailing) {
-            if displayMarks.isRejected {
-                Image(systemName: "flag.slash.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(Color.clove.reject, in: Circle())
-                    .padding(8)
-                    .allowsHitTesting(false)
-                    .accessibilityIdentifier("clove.detail.rejectGlyph")
-                    .accessibilityHidden(true)
-            }
+            DetailRejectGlyphOverlay(photoID: photo.id, isRejected: displayMarks.isRejected)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clove.bg.stage)
@@ -1889,4 +1945,45 @@ private enum DetailMarkingZoomMode: Equatable {
     case fullResolution(anchor: DetailZoomAnchor, size: CGSize?)
     /// A scale the user pinched.
     case manual
+}
+
+private struct DetailRejectGlyphOverlay: View {
+    let photoID: PhotoIdentity
+    let isRejected: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settledPhotoID: PhotoIdentity?
+
+    private var shouldAnimate: Bool {
+        CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
+
+    var body: some View {
+        Group {
+            if isRejected {
+                Image(systemName: "flag.slash.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(Color.clove.reject, in: Circle())
+                    .padding(8)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("clove.detail.rejectGlyph")
+                    .accessibilityHidden(true)
+                    .transition(
+                        .asymmetric(
+                            insertion: CloveMotion.scaleOpacityTransition(
+                                scale: 0.85, anchor: .topTrailing, reduceMotion: reduceMotion),
+                            removal: .identity))
+            }
+        }
+        .animation(
+            shouldAnimate && isRejected ? CloveMotion.micro(reduceMotion: reduceMotion) : nil,
+            value: isRejected
+        )
+        .onAppear { settledPhotoID = photoID }
+        .onChange(of: photoID) { _, newValue in
+            settledPhotoID = newValue
+        }
+    }
 }
