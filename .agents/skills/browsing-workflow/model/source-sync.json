@@ -1,0 +1,17 @@
+{
+  "commit": "ee5fa221f2c2665ee07b0c7630d6d52aa240013e",
+  "coveredFiles": [
+    "Clove/Browsing/BrowsingModel.swift",
+    "Clove/Browsing/FolderLibrary.swift",
+    "Clove/Folder/FolderLibrarySession.swift",
+    "Clove/Browsing/GridScreen.swift",
+    "Clove/Browsing/DetailScreen.swift",
+    "Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift",
+    "Clove/Detail/DetailMarkingView.swift",
+    "Clove/Detail/DetailFilmstrip.swift",
+    "Clove/Detail/MarkAutoAdvance.swift",
+    "Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift",
+    "Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift",
+    "design/handoff/interactions.md"
+  ]
+}

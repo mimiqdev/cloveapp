@@ -1,0 +1,644 @@
+#!/usr/bin/env python3
+"""Run TLC on the browsing workflow and prove that selected defects are caught."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+TLA_VERSION = "1.7.4"
+TLA_URL = f"https://github.com/tlaplus/tlaplus/releases/download/v{TLA_VERSION}/tla2tools.jar"
+TLA_SHA256 = "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+JAVA_TOOL = "java@temurin-25.0.5+8.0.LTS"
+SKILL_DIR = Path(__file__).resolve().parent.parent
+ROOT = SKILL_DIR.parent.parent.parent
+MODEL = SKILL_DIR / "model" / "BrowsingWorkflow.tla"
+CONFIG = SKILL_DIR / "model" / "BrowsingWorkflow.cfg"
+SOURCE_SYNC = SKILL_DIR / "model" / "source-sync.json"
+ACTION_CONTRACTS = SKILL_DIR / "model" / "action-contracts.json"
+BUILD = ROOT / ".build" / "formal-verification"
+JAR = BUILD / "tools" / f"tla2tools-{TLA_VERSION}.jar"
+
+MUTANTS = {
+    "collapsed-stack-marking": {
+        "old": '/\\ (route = "GroupFocus" \\/ ~grouped \\/ currentPhoto = Standalone(activeFolder))',
+        "new": "/\\ TRUE",
+        "invariant": "CollapsedStackIsReadOnly",
+        "defect": "DetailMarkingView.allowsMarkingInput accepts a collapsed Timeline stack.",
+    },
+    "early-group-exit": {
+        "old": "ELSE IF NextUnmarkedAfter(f, p, m) /= NoPhoto THEN",
+        "new": "ELSE IF FALSE THEN",
+        "invariant": "OnlyLastUnmarkedPlansGroupExit",
+        "defect": "DetailTimeline.autoAdvancePlan exits before the final unmarked member.",
+    },
+    "second-pass-group-exit": {
+        "old": """IF ~HasUnmarked(f, m) THEN
+        IF NextGroupMember(f, p) = NoPhoto THEN NoAdvance
+        ELSE [kind |-> "group", target |-> NextGroupMember(f, p),
+              source |-> f, secondPass |-> TRUE]""",
+        "new": """IF ~HasUnmarked(f, m) THEN
+        [kind |-> "exit", target |-> Standalone(f),
+         source |-> f, secondPass |-> TRUE]""",
+        "invariant": "SecondPassNeverPlansGroupExit",
+        "defect": "DetailTimeline.autoAdvancePlan ejects a second-pass edit from Group Focus.",
+    },
+    "stale-generation-result": {
+        "old": "sourceGeneration' = IF retiredGeneration = generation",
+        "new": "sourceGeneration' = IF TRUE",
+        "invariant": "FreshFolderMarksUseCurrentGeneration",
+        "alsoCaughtBy": ["SessionActionEffects"],
+        "defect": "An old scan/preparation callback publishes into the replacement session.",
+    },
+    "disconnected-publication": {
+        "old": 'CanPublish ==\n    /\\ connected',
+        "new": 'CanPublish ==\n    /\\ TRUE',
+        "invariant": "WriteResultsRequireConnection",
+        "defect": "BrowsingModel.persist refreshes desired state after folderLocationLoss.",
+    },
+    "stale-reconnect-detail": {
+        "old": r"""Reconnect ==
+    /\ activeFolder \in Folders
+    /\ ~connected
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
+    /\ steps < MaxSteps
+    /\ generation' = generation + 1
+    /\ retiredGeneration' = generation
+    /\ route' = "Grid"
+    /\ scanning' = TRUE
+    /\ connected' = TRUE
+    /\ expandedGroup' = NoFolder
+    /\ currentPhoto' = NoPhoto""",
+        "new": r"""Reconnect ==
+    /\ activeFolder \in Folders
+    /\ ~connected
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
+    /\ steps < MaxSteps
+    /\ generation' = generation + 1
+    /\ retiredGeneration' = generation
+    /\ route' = route
+    /\ scanning' = TRUE
+    /\ connected' = TRUE
+    /\ expandedGroup' = NoFolder
+    /\ currentPhoto' = currentPhoto""",
+        "invariant": "ReconnectHidesOldState",
+        "defect": "BrowsingModel.reopenNow keeps old Detail visible while the fresh scan runs.",
+    },
+    "changed-collapse-retains-zoom": {
+        "old": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = IF currentPhoto = Representative(activeFolder, marks) THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = Representative(activeFolder, marks) THEN anchor ELSE "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "new": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = scale
+    /\ anchor' = anchor
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "invariant": "CollapseZoomFollowsRepresentative",
+        "defect": "DetailMarkingView retains zoom when collapseGroup changes to the Representative.",
+    },
+    "representative-collapse-resets-zoom": {
+        "old": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = IF currentPhoto = Representative(activeFolder, marks) THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = Representative(activeFolder, marks) THEN anchor ELSE "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "new": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = "fit"
+    /\ anchor' = "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "invariant": "CollapseZoomFollowsRepresentative",
+        "defect": "DetailMarkingView resets zoom when collapseGroup leaves the Representative on stage.",
+    },
+    "group-step-resets-zoom": {
+        "action": "StepGroup(offset)",
+        "old": r"""expandedGroup, scale, anchor, diskMarks""",
+        "new": r"""expandedGroup, diskMarks""",
+        "extra": [(r"/\ advance' = NoAdvance", r"/\ scale' = " + '"fit"' + "\n    " + r"/\ anchor' = " + '"centre"' + "\n    " + r"/\ advance' = NoAdvance")],
+        "invariant": "GroupNavigationKeepsZoom",
+        "defect": "Group navigation incorrectly resets zoom.",
+    },
+    "undo-does-not-restore": {
+        "action": "UndoLastMark",
+        "old": r"/\ marks' = [marks EXCEPT ![undo.photo] = undo.before]",
+        "new": r"/\ marks' = marks",
+        "invariant": "UndoRestoresPriorMark",
+        "defect": "Undo submits a restore but fails to restore the immediate shown mark.",
+    },
+    "undo-wrong-photo": {
+        "action": "UndoLastMark",
+        "old": r"/\ currentPhoto' = undo.photo",
+        "new": r"/\ currentPhoto' = IF undo.photo = Member(activeFolder, 1) THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)",
+        "invariant": "UndoReturnsToTarget",
+        "defect": "Undo navigates to another photo instead of the edited photo.",
+    },
+    "undo-wrong-level": {
+        "action": "UndoLastMark",
+        "old": r"""/\ route' = IF grouped /\ undo.photo \in MemberSet(activeFolder)
+        THEN "GroupFocus" ELSE "Timeline"
+    /\ expandedGroup' = IF grouped /\ undo.photo \in MemberSet(activeFolder)
+        THEN activeFolder ELSE NoFolder""",
+        "new": r"""/\ route' = "Timeline"
+    /\ expandedGroup' = NoFolder""",
+        "invariant": "UndoReturnsToTarget",
+        "defect": "Undo returns a grouped member in collapsed Timeline instead of Group Focus.",
+    },
+    "undo-keeps-auto-advance": {
+        "action": "UndoLastMark",
+        "old": r"/\ advance' = NoAdvance",
+        "new": r"/\ advance' = advance",
+        "invariant": "UndoCancelsAutoAdvance",
+        "defect": "Undo fails to cancel the pending DetailScreen advance.",
+    },
+    "undo-same-photo-timeline-resets-zoom": {
+        "action": "UndoLastMark",
+        "old": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "new": r"""/\ scale' = IF grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder)
+        THEN scale ELSE "fit"
+    /\ anchor' = IF grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder)
+        THEN anchor ELSE "centre"
+""",
+        "invariant": "UndoActionEffects",
+        "defect": "Same-photo Timeline Undo incorrectly resets the existing 100% scale and anchor.",
+    },
+    "undo-group-reentry-resets-zoom": {
+        "action": "UndoLastMark",
+        "old": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "new": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (route = "GroupFocus" /\ expandedGroup = activeFolder /\ undo.photo \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (route = "GroupFocus" /\ expandedGroup = activeFolder /\ undo.photo \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "invariant": "UndoActionEffects",
+        "defect": "Undo to another member resets zoom when re-entering its group from Timeline.",
+    },
+    "undo-outside-change-keeps-zoom": {
+        "action": "UndoLastMark",
+        "old": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "new": r"""/\ scale' = scale
+    /\ anchor' = anchor""",
+        "invariant": "UndoActionEffects",
+        "defect": "Changed-photo Undo retains an unrelated crop when the previous photo is outside the target group.",
+    },
+    "older-finish-overwrites-desired": {
+        "action": "FinishWrite",
+        "old": '[p \\in Photos |-> IF desired\'[p] /= "none" THEN desired\'[p] ELSE libraryMarks[p]] ELSE marks',
+        "new": 'libraryMarks ELSE marks',
+        "invariant": "NewerDesiredInputWins",
+        "defect": "Older persist completion overwrites a newer shown mark while it is queued.",
+    },
+    "older-finish-clears-newer-desired": {
+        "action": "FinishWrite",
+        "old": r"CanPublish /\ ~HasQueuedPhoto(Head(writeQueue).photo)",
+        "new": "CanPublish",
+        "invariant": "NewerDesiredInputWins",
+        "defect": "finishPendingMarks clears a newer queued desired input with the older action.",
+    },
+    "older-read-overwrites-desired": {
+        "action": "ReadConfirmation",
+        "old": r"""/\ marks' = [p \in Photos |-> IF desired[p] /= "none" THEN desired[p] ELSE libraryMarks[p]]""",
+        "new": r"/\ marks' = libraryMarks",
+        "invariant": "NewerDesiredInputWins",
+        "defect": "Buffered library confirmation overrides DesiredPhotoMarks.",
+    },
+    "loss-keeps-desired": {
+        "action": "LoseLocation",
+        "old": r"""/\ marks' = [p \in Photos |->
+        IF FolderOf[p] = activeFolder THEN confirmedMarks[p] ELSE marks[p]]""",
+        "new": r"/\ marks' = marks",
+        "invariant": "LocationLossShowsLatestConfirmed",
+        "defect": "Location loss leaves the dropped desired input on screen.",
+    },
+    "loss-uses-unpublished-disk": {
+        "action": "LoseLocation",
+        "old": 'THEN confirmedMarks[p] ELSE marks[p]',
+        "new": 'THEN diskMarks[p] ELSE marks[p]',
+        "invariant": "LocationLossShowsLatestConfirmed",
+        "defect": "Location loss fabricates a UI confirmation from an unpublished disk write.",
+    },
+    "disk-completes-newest-input": {
+        "action": "CompleteDisk",
+        "old": r"""/\ diskMarks' = [diskMarks EXCEPT ![Head(writeQueue).photo] = Head(writeQueue).value]""",
+        "new": r"""/\ diskMarks' = [diskMarks EXCEPT ![Head(writeQueue).photo] = writeQueue[Len(writeQueue)].value]""",
+        "invariant": "DiskCompletionIsFIFO",
+        "defect": "An older active write commits the newest queued input instead of its own value.",
+    },
+}
+
+
+# Outcome mutants change assignments. Boundary mutants admit an invalid outward request.
+# None merely disables an action and calls the resulting absence a counterexample.
+ACTION_EFFECT_MUTANTS = {
+    "open-folder-wrong-request": {"action": "OpenFolder(f)", "old": "/\\ activeFolder' = f", "new": '/\\ activeFolder\' = IF f = "A" THEN "B" ELSE "A"', "invariant": "SessionActionEffects"},
+    "open-folder-keeps-generation": {"action": "OpenFolder(f)", "old": "/\\ generation' = generation + 1", "new": "/\\ generation' = generation", "invariant": "SessionActionEffects"},
+    "close-stays-in-grid": {"action": "CloseFolder", "old": '/\\ route\' = "Entry"', "new": '/\\ route\' = "Grid"', "invariant": "SessionActionEffects"},
+    "close-keeps-photo": {"action": "CloseFolder", "old": "/\\ currentPhoto' = NoPhoto", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "SessionActionEffects"},
+    "reconnect-stays-disconnected": {"action": "Reconnect", "old": "/\\ connected' = TRUE", "new": "/\\ connected' = FALSE", "invariant": "SessionActionEffects"},
+    "scan-remains-scanning": {"action": "ScanFinish", "old": "/\\ scanning' = FALSE", "new": "/\\ scanning' = scanning", "invariant": "SessionActionEffects"},
+    "scan-keeps-old-marks": {"action": "ScanFinish", "old": r"""/\ marks' = [p \in Photos |->
+        IF FolderOf[p] = activeFolder THEN diskMarks[p] ELSE marks[p]]""", "new": "/\\ marks' = marks", "invariant": "SessionActionEffects"},
+    "grouping-ignores-request": {"action": "SetGrouping(value)", "old": "/\\ grouped' = value", "new": "/\\ grouped' = grouped", "invariant": "GroupingActionEffects"},
+    "loss-keeps-connected": {"action": "LoseLocation", "old": "/\\ connected' = FALSE", "new": "/\\ connected' = connected", "invariant": "SessionActionEffects"},
+    "open-photo-discards-selection": {"action": "OpenPhoto(p)", "old": "/\\ currentPhoto' = p", "new": "/\\ currentPhoto' = NoPhoto", "invariant": "NavigationActionEffects"},
+    "burst-opens-wrong-member": {"action": "OpenBurst", "old": "/\\ currentPhoto' = Representative(activeFolder, marks)", "new": "/\\ currentPhoto' = Member(activeFolder, 2)", "invariant": "BurstOpensRepresentativeGroupFocus"},
+    "expand-keeps-timeline": {"action": "ExpandGroup", "old": '/\\ route\' = "GroupFocus"', "new": "/\\ route' = route", "invariant": "NavigationActionEffects"},
+    "collapse-keeps-current-photo": {"action": "CollapseGroup", "old": "/\\ currentPhoto' = Representative(activeFolder, marks)", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "CollapseUsesRepresentative"},
+    "back-keeps-detail": {"action": "Back", "old": '/\\ route\' = "Grid"', "new": "/\\ route' = route", "invariant": "BackReturnsToGrid"},
+    "timeline-step-keeps-photo": {"action": "StepTimeline(offset)", "old": r"""/\ currentPhoto' = TimelinePhotoAt(
+        activeFolder, TimelineIndex(activeFolder, currentPhoto, grouped) + offset,
+        grouped, marks)""", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "NavigationActionEffects"},
+    "group-step-keeps-member": {"action": "StepGroup(offset)", "old": "/\\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "NavigationActionEffects"},
+    "group-step-accepts-outward-request": {"action": "StepGroup(offset)", "old": r"""/\ (currentPhoto = Member(activeFolder, 1) /\ offset = 1)
+        \/ (currentPhoto = Member(activeFolder, 2) /\ offset = 0 - 1)""", "new": "/\\ TRUE", "invariant": "NavigationActionEffects"},
+    "timeline-step-accepts-outward-request": {"action": "StepTimeline(offset)", "old": r"""/\ TimelineIndex(activeFolder, currentPhoto, grouped) + offset \in
+        1..TimelineLength(grouped)""", "new": "/\\ TRUE", "invariant": "NavigationActionEffects"},
+    "inspection-keeps-fit": {"action": "Inspect100", "old": '/\\ scale\' = "100"', "new": "/\\ scale' = scale", "extra": [("/\\ anchor' = \"eye\"", "/\\ anchor' = anchor")], "invariant": "InspectionActionEffects"},
+    "inspection-ignores-anchor": {"action": "Inspect100", "old": '/\\ anchor\' = "eye"', "new": "/\\ anchor' = anchor", "invariant": "InspectionActionEffects"},
+    "fit-keeps-inspection": {"action": "ReturnFit", "old": '/\\ scale\' = "fit"', "new": "/\\ scale' = scale", "invariant": "InspectionActionEffects"},
+    "mark-does-not-enqueue": {"action": "Mark(p, value)", "old": "/\\ writeQueue' = Append(writeQueue, [photo |-> p, value |-> value, generation |-> generation])", "new": "/\\ writeQueue' = writeQueue", "invariant": "MarkActionEffects"},
+    "mark-wrong-requested-value": {"action": "Mark(p, value)", "old": "/\\ marks' = [marks EXCEPT ![p] = value]", "new": '/\\ marks\' = [marks EXCEPT ![p] = IF value = "R" THEN "X" ELSE "R"]', "extra": [
+        ("/\\ desired' = [desired EXCEPT ![p] = value]", '/\\ desired\' = [desired EXCEPT ![p] = IF value = "R" THEN "X" ELSE "R"]'),
+        ("/\\ writeQueue' = Append(writeQueue, [photo |-> p, value |-> value, generation |-> generation])", '/\\ writeQueue\' = Append(writeQueue, [photo |-> p, value |-> IF value = "R" THEN "X" ELSE "R", generation |-> generation])')], "invariant": "MarkActionEffects"},
+    "begin-write-stays-idle": {"action": "BeginWrite", "old": '/\\ writePhase\' = "writing"', "new": "/\\ writePhase' = writePhase", "invariant": "QueueActionEffects"},
+    "record-does-not-confirm": {"action": "RecordWrite", "old": "/\\ libraryMarks' = [libraryMarks EXCEPT ![Head(writeQueue).photo] = Head(writeQueue).value]", "new": "/\\ libraryMarks' = libraryMarks", "invariant": "QueueActionEffects"},
+    "read-keeps-old-confirmation": {"action": "ReadConfirmation", "old": "/\\ confirmedMarks' = libraryMarks", "new": "/\\ confirmedMarks' = confirmedMarks", "invariant": "QueueActionEffects"},
+    "finish-keeps-old-confirmation": {"action": "FinishWrite", "old": "/\\ confirmedMarks' = IF CanPublish THEN libraryMarks ELSE confirmedMarks", "new": "/\\ confirmedMarks' = confirmedMarks", "invariant": "QueueActionEffects"},
+    "advance-keeps-current-photo": {"action": "FireAdvance", "old": "/\\ currentPhoto' = advance.target", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "NavigationActionEffects"},
+}
+for name, mutation in ACTION_EFFECT_MUTANTS.items():
+    mutation["defect"] = f"Incorrect effect in {mutation['action']}: {name}."
+MUTANTS.update(ACTION_EFFECT_MUTANTS)
+
+
+def check_source_drift() -> bool:
+    """Require review when covered source differs from the manually reviewed revision."""
+    sync = json.loads(SOURCE_SYNC.read_text())
+    result = subprocess.run(
+        ["git", "diff", "--name-only", sync["commit"], "--", *sync["coveredFiles"]],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Source-drift detection failed: {result.stderr.strip()}")
+    changed = [line for line in result.stdout.splitlines() if line]
+    if changed:
+        print(
+            f"FAIL source-drift gate: covered source changed since reviewed sync "
+            f"{sync['commit']}"
+        )
+        for path in changed:
+            print(f"  {path}")
+        print(
+            "This is drift detection, not semantic proof. Review the source and model, "
+            "then rerun. Do not advance the sync commit merely to bypass review."
+        )
+        return False
+    print(
+        f"PASS source-drift gate: covered source matches reviewed sync {sync['commit']} "
+        "(drift detection only)"
+    )
+    return True
+
+
+def java_executable() -> str:
+    if os.environ.get("JAVA"):
+        return os.environ["JAVA"]
+    mise = shutil.which("mise")
+    if mise:
+        result = subprocess.run(
+            [mise, "which", "java", "--tool", JAVA_TOOL],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    java = shutil.which("java")
+    if java:
+        return java
+    raise RuntimeError(f"Java is required. Set JAVA or install {JAVA_TOOL} with mise.")
+
+
+def install_tlc() -> None:
+    if JAR.is_file():
+        digest = hashlib.sha256(JAR.read_bytes()).hexdigest()
+        if digest == TLA_SHA256:
+            return
+        raise RuntimeError(f"{JAR} does not match the pinned TLA+ {TLA_VERSION} release.")
+    JAR.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=JAR.parent, delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        with urllib.request.urlopen(TLA_URL) as response, temporary_path.open("wb") as output:
+            shutil.copyfileobj(response, output)
+        digest = hashlib.sha256(temporary_path.read_bytes()).hexdigest()
+        if digest != TLA_SHA256:
+            raise RuntimeError("The downloaded TLA+ tools do not match the pinned release.")
+        temporary_path.replace(JAR)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def run_tlc(spec: Path, run_dir: Path, java: str, config: Path = CONFIG) -> tuple[int, str]:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    local_config = run_dir / CONFIG.name
+    if config != local_config:
+        shutil.copyfile(config, local_config)
+    local_spec = run_dir / MODEL.name
+    if spec != local_spec:
+        shutil.copyfile(spec, local_spec)
+    command = [
+        java,
+        "-XX:+UseParallelGC",
+        "-jar",
+        str(JAR),
+        "-workers",
+        "1",
+        "-fp",
+        "0",
+        "-lncheck",
+        "final",
+        "-nowarning",
+        "-config",
+        local_config.name,
+        local_spec.name,
+    ]
+    result = subprocess.run(command, cwd=run_dir, text=True, capture_output=True)
+    output = result.stdout + result.stderr
+    (run_dir / "tlc.out").write_text(output)
+    return result.returncode, output
+
+
+def action_path(output: str) -> list[str]:
+    return re.findall(r"^State \d+: <([^ >]+)", output, flags=re.MULTILINE)
+
+
+def state_count(output: str) -> str:
+    matches = re.findall(r"(\d+) states generated, (\d+) distinct states found, 0 states left on queue", output)
+    if not matches:
+        return "state count unavailable"
+    generated, distinct = matches[-1]
+    return f"{generated} states generated, {distinct} distinct, queue empty"
+
+
+def check_action_frames(source: str) -> None:
+    """Reject contradictory TLA+ action frames that silently disable interleavings."""
+    variables = set(re.findall(r"[A-Za-z][A-Za-z0-9_]*", source.split("VARIABLES\n", 1)[1].split("\n\nvars ==", 1)[0]))
+    for block in source.split("\n\n"):
+        frame = re.search(r"UNCHANGED <<([^>]+)>>", block)
+        if frame is None:
+            continue
+        unchanged = set(re.findall(r"[A-Za-z][A-Za-z0-9_]*", frame[1]))
+        assigned = set(re.findall(r"([A-Za-z][A-Za-z0-9_]*)' =", block))
+        overlap = assigned & unchanged
+        missing = variables - assigned - unchanged
+        if overlap or missing:
+            action = block.split(" ==", 1)[0].strip()
+            raise RuntimeError(f"TLA+ action frame {action}: assigned and unchanged {sorted(overlap)}, missing {sorted(missing)}")
+
+
+def check_good(java: str) -> bool:
+    check_action_frames(MODEL.read_text())
+    chart_config = CONFIG.with_name("BrowsingWorkflowChart.cfg")
+    if CONFIG.read_text().split("INVARIANTS", 1)[1] != chart_config.read_text().split("INVARIANTS", 1)[1]:
+        raise RuntimeError("Full and chart configuration invariant lists differ")
+    code, output = run_tlc(MODEL, BUILD / "good", java)
+    passed = code == 0 and "Model checking completed. No error has been found." in output
+    print(f"{'PASS' if passed else 'FAIL'} current model: {state_count(output)}")
+    if not passed:
+        print(output[-8000:])
+    return passed
+
+
+def check_mutant(name: str, java: str) -> bool:
+    mutant = MUTANTS[name]
+    source = MODEL.read_text()
+    if "action" in mutant:
+        start = source.index(mutant["action"] + " ==")
+        end = source.index("\n\n", start)
+        block = source[start:end]
+        for old, new in [(mutant["old"], mutant["new"]), *mutant.get("extra", [])]:
+            if block.count(old) != 1:
+                raise RuntimeError(f"{name}: scoped mutation anchor count {block.count(old)}, expected 1")
+            block = block.replace(old, new)
+        source = source[:start] + block + source[end:]
+    elif source.count(mutant["old"]) != 1:
+        print(f"FAIL {name}: mutation anchor count is {source.count(mutant['old'])}, expected 1")
+        return False
+    run_dir = BUILD / "mutants" / name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    spec = run_dir / MODEL.name
+    spec.write_text(source if "action" in mutant else source.replace(mutant["old"], mutant["new"]))
+    check_action_frames(spec.read_text())
+    code, output = run_tlc(spec, run_dir, java)
+    acceptable = [mutant["invariant"], *mutant.get("alsoCaughtBy", [])]
+    violation = re.search(r"Invariant (\w+) is violated\.", output)
+    actual = violation[1] if violation else None
+    passed = code == 12 and actual in acceptable
+    path = action_path(output)
+    result = {
+        "mutant": name,
+        "defect": mutant["defect"],
+        "expectedInvariant": mutant["invariant"],
+        "actualInvariant": actual,
+        "caught": passed,
+        "counterexample": path,
+    }
+    (run_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    if passed:
+        print(f"PASS {name}: {actual}")
+        print("  " + " -> ".join(path))
+    else:
+        print(f"FAIL {name}: expected {mutant['invariant']}; TLC exit {code}")
+        print(output[-8000:])
+    return passed
+
+
+def check_rollback_witness(java: str) -> bool:
+    """Expect one reachability predicate to fail, not a production safety rule."""
+    run_dir = BUILD / "rated-rollback-witness"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    config = run_dir / CONFIG.name
+    config.write_text(CONFIG.read_text() + "  NoRatedRollbackWitness\n")
+    code, output = run_tlc(MODEL, run_dir, java, config)
+    passed = code == 12 and "Invariant NoRatedRollbackWitness is violated." in output
+    print(f"{'PASS' if passed else 'FAIL'} reachability: older Rated confirmed while Reject pending, then loss shows Rated")
+    if passed:
+        print("  " + " -> ".join(action_path(output)))
+    else:
+        print(output[-8000:])
+    return passed
+
+
+def check_action_inventory() -> dict:
+    contracts = json.loads(ACTION_CONTRACTS.read_text())
+    source = MODEL.read_text()
+    next_block = source.split("\nNext ==\n", 1)[1].split("\n\n", 1)[0]
+    # Next deliberately uses explicit bare actions and existential action calls.
+    # Read those references even if an action is later refactored into an alias.
+    actions = set(re.findall(r"\b(\w+)\(", next_block))
+    actions.update(re.findall(r"\\/\s*([A-Za-z]\w*)\b", next_block))
+    if actions != set(contracts):
+        raise RuntimeError(f"Action inventory differs from Next: missing {sorted(actions - set(contracts))}, extra {sorted(set(contracts) - actions)}")
+    assigned = set()
+    configured = CONFIG.read_text().split("INVARIANTS", 1)[1].split()
+    for name, contract in contracts.items():
+        if not contract["witnesses"] or not contract["negativeMutations"]:
+            raise RuntimeError(f"{name}: every claimed action needs reachability and a bad-effect mutation")
+        if any(rule not in configured for rule in contract["invariants"]):
+            raise RuntimeError(f"{name}: contract property absent from normal configuration")
+        for mutant in contract["negativeMutations"]:
+            if mutant not in MUTANTS:
+                raise RuntimeError(f"{name}: unknown mutation {mutant}")
+            assigned.add(mutant)
+    if assigned != set(MUTANTS):
+        raise RuntimeError(f"Mutations absent from action inventory: {sorted(set(MUTANTS) - assigned)}")
+    return contracts
+
+
+def write_action_table(contracts: dict, results: dict) -> None:
+    rows = [
+        "# Browsing action contracts", "",
+        "Generated by `.agents/skills/browsing-workflow/scripts/check --actions-only` from",
+        "`model/action-contracts.json` and successful full-depth action witness queries.",
+        "Copy `.build/formal-verification/action-coverage.md` here after an intentional inventory update.",
+        "",
+        "Each action has an independent pre-state/request effect check in addition to the existing",
+        "safety invariants. This is an immediate transition contract, not liveness. The observer's",
+        "raw pre-state snapshot and request capture are trusted; the mutated assignments never supply",
+        "the expected post-state. Shared pure domain rules remain model assumptions reviewed against Swift.",
+        "",
+        "All rows inherit depth 12. Mark and Undo require FIFO space (total capacity two). Close/Open/",
+        "Reconnect cover drained transitions only. System write rows cover successful rating-only actions.",
+        "`Init` fixes the small world's initial unmarked data; it is an initial predicate, not a Next action.",
+        "",
+        "| Action | Agreed precondition | Request or input | Expected result | Configured properties | Enabled witnesses (shortest steps) | Negative effect mutations |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for name, contract in contracts.items():
+        witnesses = "; ".join(f"{case['name']}: {case['steps']}" for case in results[name])
+        values = [f"`{name}`", contract["precondition"], contract["request"], contract["postcondition"],
+                  ", ".join(f"`{x}`" for x in contract["invariants"]), witnesses,
+                  ", ".join(f"`{x}`" for x in contract["negativeMutations"])]
+        rows.append("| " + " | ".join(values) + " |")
+    rows.extend(["", "## Reachability conditions", "",
+                 "Each query adds `NoActionWitness` after every normal safety and effect invariant.",
+                 "Only its intentional violation counts as an enabled-action witness. A tool error,",
+                 "another invariant violation, or an exhausted queue without reaching the action fails the check.",
+                 "No mutation is credited merely because it disables an action. The extra boundary mutants",
+                 "admit an invalid outward request; outcome mutants execute with incorrect assignments.", "",
+                 "| Action | Witness | Predicate on captured request/pre-state | Shortest steps |",
+                 "| --- | --- | --- | --- |"])
+    for name, contract in contracts.items():
+        for case, result in zip(contract["witnesses"], results[name]):
+            rows.append(f"| `{name}` | {case['name']} | `{case['condition']}` | {result['steps']} |")
+    (BUILD / "action-coverage.md").write_text("\n".join(rows) + "\n")
+
+
+def check_action_reachability(java: str, contracts: dict) -> bool:
+    results = {}
+    passed_all = True
+    for action, contract in contracts.items():
+        results[action] = []
+        for case in contract["witnesses"]:
+            run_dir = BUILD / "actions" / action / case["name"]
+            run_dir.mkdir(parents=True, exist_ok=True)
+            spec = run_dir / MODEL.name
+            query = f'NoActionWitness == ~(event.action = "{action}" /\\ ({case["condition"]}))\n'
+            spec.write_text(MODEL.read_text().replace("=============================================================================", query + "\n============================================================================="))
+            config = run_dir / CONFIG.name
+            config.write_text(CONFIG.read_text() + "  NoActionWitness\n")
+            code, output = run_tlc(spec, run_dir, java, config)
+            passed = code == 12 and "Invariant NoActionWitness is violated." in output
+            path = action_path(output)
+            record = {"name": case["name"], "passed": passed, "steps": len(path) - 1, "path": path}
+            results[action].append(record)
+            passed_all &= passed
+            if not passed:
+                print(f"FAIL action reachability {action}/{case['name']}")
+                print(output[-8000:])
+        if all(result["passed"] for result in results[action]):
+            summary = ", ".join(f"{x['name']}={x['steps']}" for x in results[action])
+            print(f"PASS action reachability {action}: {summary}", flush=True)
+    (BUILD / "action-coverage.json").write_text(json.dumps(results, indent=2) + "\n")
+    if passed_all:
+        write_action_table(contracts, results)
+    queries = sum(len(x) for x in results.values())
+    print(f"Action reachability: {sum(all(x['passed'] for x in cases) for cases in results.values())}/{len(contracts)} actions, {queries} queries")
+    return passed_all
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--good-only", action="store_true")
+    selection.add_argument("--witness-only", action="store_true")
+    selection.add_argument("--actions-only", action="store_true")
+    selection.add_argument("--mutant", choices=sorted(MUTANTS))
+    args = parser.parse_args()
+
+    if not check_source_drift():
+        return 1
+    contracts = check_action_inventory()
+    install_tlc()
+    java = java_executable()
+    print(f"TLA+ tools {TLA_VERSION}; Java: {java}")
+    if args.actions_only:
+        return 0 if check_action_reachability(java, contracts) else 1
+    if args.witness_only:
+        return 0 if check_rollback_witness(java) else 1
+    if args.mutant:
+        return 0 if check_mutant(args.mutant, java) else 1
+    if not check_good(java):
+        return 1
+    if args.good_only:
+        return 0
+    results = [check_mutant(name, java) for name in MUTANTS]
+    passed = sum(results)
+    print(f"Mutation score: {passed}/{len(results)} expected failures caught")
+    witness_passed = check_rollback_witness(java)
+    actions_passed = check_action_reachability(java, contracts)
+    return 0 if all(results) and witness_passed and actions_passed else 1
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)
+    try:
+        sys.exit(main())
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
