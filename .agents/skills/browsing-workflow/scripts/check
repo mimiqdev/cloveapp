@@ -24,6 +24,7 @@ ROOT = SKILL_DIR.parent.parent.parent
 MODEL = SKILL_DIR / "model" / "BrowsingWorkflow.tla"
 CONFIG = SKILL_DIR / "model" / "BrowsingWorkflow.cfg"
 SOURCE_SYNC = SKILL_DIR / "model" / "source-sync.json"
+ACTION_CONTRACTS = SKILL_DIR / "model" / "action-contracts.json"
 BUILD = ROOT / ".build" / "formal-verification"
 JAR = BUILD / "tools" / f"tla2tools-{TLA_VERSION}.jar"
 
@@ -55,6 +56,7 @@ MUTANTS = {
         "old": "sourceGeneration' = IF retiredGeneration = generation",
         "new": "sourceGeneration' = IF TRUE",
         "invariant": "FreshFolderMarksUseCurrentGeneration",
+        "alsoCaughtBy": ["SessionActionEffects"],
         "defect": "An old scan/preparation callback publishes into the replacement session.",
     },
     "disconnected-publication": {
@@ -205,6 +207,50 @@ MUTANTS = {
         "defect": "An older active write commits the newest queued input instead of its own value.",
     },
 }
+
+
+# Outcome mutants change assignments. Boundary mutants admit an invalid outward request.
+# None merely disables an action and calls the resulting absence a counterexample.
+ACTION_EFFECT_MUTANTS = {
+    "open-folder-wrong-request": {"action": "OpenFolder(f)", "old": "/\\ activeFolder' = f", "new": '/\\ activeFolder\' = IF f = "A" THEN "B" ELSE "A"', "invariant": "SessionActionEffects"},
+    "open-folder-keeps-generation": {"action": "OpenFolder(f)", "old": "/\\ generation' = generation + 1", "new": "/\\ generation' = generation", "invariant": "SessionActionEffects"},
+    "close-stays-in-grid": {"action": "CloseFolder", "old": '/\\ route\' = "Entry"', "new": '/\\ route\' = "Grid"', "invariant": "SessionActionEffects"},
+    "close-keeps-photo": {"action": "CloseFolder", "old": "/\\ currentPhoto' = NoPhoto", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "SessionActionEffects"},
+    "reconnect-stays-disconnected": {"action": "Reconnect", "old": "/\\ connected' = TRUE", "new": "/\\ connected' = FALSE", "invariant": "SessionActionEffects"},
+    "scan-remains-scanning": {"action": "ScanFinish", "old": "/\\ scanning' = FALSE", "new": "/\\ scanning' = scanning", "invariant": "SessionActionEffects"},
+    "scan-keeps-old-marks": {"action": "ScanFinish", "old": r"""/\ marks' = [p \in Photos |->
+        IF FolderOf[p] = activeFolder THEN diskMarks[p] ELSE marks[p]]""", "new": "/\\ marks' = marks", "invariant": "SessionActionEffects"},
+    "grouping-ignores-request": {"action": "SetGrouping(value)", "old": "/\\ grouped' = value", "new": "/\\ grouped' = grouped", "invariant": "GroupingActionEffects"},
+    "loss-keeps-connected": {"action": "LoseLocation", "old": "/\\ connected' = FALSE", "new": "/\\ connected' = connected", "invariant": "SessionActionEffects"},
+    "open-photo-discards-selection": {"action": "OpenPhoto(p)", "old": "/\\ currentPhoto' = p", "new": "/\\ currentPhoto' = NoPhoto", "invariant": "NavigationActionEffects"},
+    "burst-opens-wrong-member": {"action": "OpenBurst", "old": "/\\ currentPhoto' = Representative(activeFolder, marks)", "new": "/\\ currentPhoto' = Member(activeFolder, 2)", "invariant": "BurstOpensRepresentativeGroupFocus"},
+    "expand-keeps-timeline": {"action": "ExpandGroup", "old": '/\\ route\' = "GroupFocus"', "new": "/\\ route' = route", "invariant": "NavigationActionEffects"},
+    "collapse-keeps-current-photo": {"action": "CollapseGroup", "old": "/\\ currentPhoto' = Representative(activeFolder, marks)", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "CollapseUsesRepresentative"},
+    "back-keeps-detail": {"action": "Back", "old": '/\\ route\' = "Grid"', "new": "/\\ route' = route", "invariant": "BackReturnsToGrid"},
+    "timeline-step-keeps-photo": {"action": "StepTimeline(offset)", "old": r"""/\ currentPhoto' = TimelinePhotoAt(
+        activeFolder, TimelineIndex(activeFolder, currentPhoto, grouped) + offset,
+        grouped, marks)""", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "NavigationActionEffects"},
+    "group-step-keeps-member": {"action": "StepGroup(offset)", "old": "/\\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "NavigationActionEffects"},
+    "group-step-accepts-outward-request": {"action": "StepGroup(offset)", "old": r"""/\ (currentPhoto = Member(activeFolder, 1) /\ offset = 1)
+        \/ (currentPhoto = Member(activeFolder, 2) /\ offset = 0 - 1)""", "new": "/\\ TRUE", "invariant": "NavigationActionEffects"},
+    "timeline-step-accepts-outward-request": {"action": "StepTimeline(offset)", "old": r"""/\ TimelineIndex(activeFolder, currentPhoto, grouped) + offset \in
+        1..TimelineLength(grouped)""", "new": "/\\ TRUE", "invariant": "NavigationActionEffects"},
+    "inspection-keeps-fit": {"action": "Inspect100", "old": '/\\ scale\' = "100"', "new": "/\\ scale' = scale", "extra": [("/\\ anchor' = \"eye\"", "/\\ anchor' = anchor")], "invariant": "InspectionActionEffects"},
+    "inspection-ignores-anchor": {"action": "Inspect100", "old": '/\\ anchor\' = "eye"', "new": "/\\ anchor' = anchor", "invariant": "InspectionActionEffects"},
+    "fit-keeps-inspection": {"action": "ReturnFit", "old": '/\\ scale\' = "fit"', "new": "/\\ scale' = scale", "invariant": "InspectionActionEffects"},
+    "mark-does-not-enqueue": {"action": "Mark(p, value)", "old": "/\\ writeQueue' = Append(writeQueue, [photo |-> p, value |-> value, generation |-> generation])", "new": "/\\ writeQueue' = writeQueue", "invariant": "MarkActionEffects"},
+    "mark-wrong-requested-value": {"action": "Mark(p, value)", "old": "/\\ marks' = [marks EXCEPT ![p] = value]", "new": '/\\ marks\' = [marks EXCEPT ![p] = IF value = "R" THEN "X" ELSE "R"]', "extra": [
+        ("/\\ desired' = [desired EXCEPT ![p] = value]", '/\\ desired\' = [desired EXCEPT ![p] = IF value = "R" THEN "X" ELSE "R"]'),
+        ("/\\ writeQueue' = Append(writeQueue, [photo |-> p, value |-> value, generation |-> generation])", '/\\ writeQueue\' = Append(writeQueue, [photo |-> p, value |-> IF value = "R" THEN "X" ELSE "R", generation |-> generation])')], "invariant": "MarkActionEffects"},
+    "begin-write-stays-idle": {"action": "BeginWrite", "old": '/\\ writePhase\' = "writing"', "new": "/\\ writePhase' = writePhase", "invariant": "QueueActionEffects"},
+    "record-does-not-confirm": {"action": "RecordWrite", "old": "/\\ libraryMarks' = [libraryMarks EXCEPT ![Head(writeQueue).photo] = Head(writeQueue).value]", "new": "/\\ libraryMarks' = libraryMarks", "invariant": "QueueActionEffects"},
+    "read-keeps-old-confirmation": {"action": "ReadConfirmation", "old": "/\\ confirmedMarks' = libraryMarks", "new": "/\\ confirmedMarks' = confirmedMarks", "invariant": "QueueActionEffects"},
+    "finish-keeps-old-confirmation": {"action": "FinishWrite", "old": "/\\ confirmedMarks' = IF CanPublish THEN libraryMarks ELSE confirmedMarks", "new": "/\\ confirmedMarks' = confirmedMarks", "invariant": "QueueActionEffects"},
+    "advance-keeps-current-photo": {"action": "FireAdvance", "old": "/\\ currentPhoto' = advance.target", "new": "/\\ currentPhoto' = currentPhoto", "invariant": "NavigationActionEffects"},
+}
+for name, mutation in ACTION_EFFECT_MUTANTS.items():
+    mutation["defect"] = f"Incorrect effect in {mutation['action']}: {name}."
+MUTANTS.update(ACTION_EFFECT_MUTANTS)
 
 
 def check_source_drift() -> bool:
@@ -369,19 +415,22 @@ def check_mutant(name: str, java: str) -> bool:
     spec.write_text(source if "action" in mutant else source.replace(mutant["old"], mutant["new"]))
     check_action_frames(spec.read_text())
     code, output = run_tlc(spec, run_dir, java)
-    expected = f"Invariant {mutant['invariant']} is violated."
-    passed = code == 12 and expected in output
+    acceptable = [mutant["invariant"], *mutant.get("alsoCaughtBy", [])]
+    violation = re.search(r"Invariant (\w+) is violated\.", output)
+    actual = violation[1] if violation else None
+    passed = code == 12 and actual in acceptable
     path = action_path(output)
     result = {
         "mutant": name,
         "defect": mutant["defect"],
         "expectedInvariant": mutant["invariant"],
+        "actualInvariant": actual,
         "caught": passed,
         "counterexample": path,
     }
     (run_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     if passed:
-        print(f"PASS {name}: {mutant['invariant']}")
+        print(f"PASS {name}: {actual}")
         print("  " + " -> ".join(path))
     else:
         print(f"FAIL {name}: expected {mutant['invariant']}; TLC exit {code}")
@@ -405,19 +454,121 @@ def check_rollback_witness(java: str) -> bool:
     return passed
 
 
+def check_action_inventory() -> dict:
+    contracts = json.loads(ACTION_CONTRACTS.read_text())
+    source = MODEL.read_text()
+    next_block = source.split("\nNext ==\n", 1)[1].split("\n\n", 1)[0]
+    # Next deliberately uses explicit bare actions and existential action calls.
+    # Read those references even if an action is later refactored into an alias.
+    actions = set(re.findall(r"\b(\w+)\(", next_block))
+    actions.update(re.findall(r"\\/\s*([A-Za-z]\w*)\b", next_block))
+    if actions != set(contracts):
+        raise RuntimeError(f"Action inventory differs from Next: missing {sorted(actions - set(contracts))}, extra {sorted(set(contracts) - actions)}")
+    assigned = set()
+    configured = CONFIG.read_text().split("INVARIANTS", 1)[1].split()
+    for name, contract in contracts.items():
+        if not contract["witnesses"] or not contract["negativeMutations"]:
+            raise RuntimeError(f"{name}: every claimed action needs reachability and a bad-effect mutation")
+        if any(rule not in configured for rule in contract["invariants"]):
+            raise RuntimeError(f"{name}: contract property absent from normal configuration")
+        for mutant in contract["negativeMutations"]:
+            if mutant not in MUTANTS:
+                raise RuntimeError(f"{name}: unknown mutation {mutant}")
+            assigned.add(mutant)
+    if assigned != set(MUTANTS):
+        raise RuntimeError(f"Mutations absent from action inventory: {sorted(set(MUTANTS) - assigned)}")
+    return contracts
+
+
+def write_action_table(contracts: dict, results: dict) -> None:
+    rows = [
+        "# Browsing action contracts", "",
+        "Generated by `.agents/skills/browsing-workflow/scripts/check --actions-only` from",
+        "`model/action-contracts.json` and successful full-depth action witness queries.",
+        "Copy `.build/formal-verification/action-coverage.md` here after an intentional inventory update.",
+        "",
+        "Each action has an independent pre-state/request effect check in addition to the existing",
+        "safety invariants. This is an immediate transition contract, not liveness. The observer's",
+        "raw pre-state snapshot and request capture are trusted; the mutated assignments never supply",
+        "the expected post-state. Shared pure domain rules remain model assumptions reviewed against Swift.",
+        "",
+        "All rows inherit depth 12. Mark and Undo require FIFO space (total capacity two). Close/Open/",
+        "Reconnect cover drained transitions only. System write rows cover successful rating-only actions.",
+        "`Init` fixes the small world's initial unmarked data; it is an initial predicate, not a Next action.",
+        "",
+        "| Action | Agreed precondition | Request or input | Expected result | Configured properties | Enabled witnesses (shortest steps) | Negative effect mutations |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for name, contract in contracts.items():
+        witnesses = "; ".join(f"{case['name']}: {case['steps']}" for case in results[name])
+        values = [f"`{name}`", contract["precondition"], contract["request"], contract["postcondition"],
+                  ", ".join(f"`{x}`" for x in contract["invariants"]), witnesses,
+                  ", ".join(f"`{x}`" for x in contract["negativeMutations"])]
+        rows.append("| " + " | ".join(values) + " |")
+    rows.extend(["", "## Reachability conditions", "",
+                 "Each query adds `NoActionWitness` after every normal safety and effect invariant.",
+                 "Only its intentional violation counts as an enabled-action witness. A tool error,",
+                 "another invariant violation, or an exhausted queue without reaching the action fails the check.",
+                 "No mutation is credited merely because it disables an action. The extra boundary mutants",
+                 "admit an invalid outward request; outcome mutants execute with incorrect assignments.", "",
+                 "| Action | Witness | Predicate on captured request/pre-state | Shortest steps |",
+                 "| --- | --- | --- | --- |"])
+    for name, contract in contracts.items():
+        for case, result in zip(contract["witnesses"], results[name]):
+            rows.append(f"| `{name}` | {case['name']} | `{case['condition']}` | {result['steps']} |")
+    (BUILD / "action-coverage.md").write_text("\n".join(rows) + "\n")
+
+
+def check_action_reachability(java: str, contracts: dict) -> bool:
+    results = {}
+    passed_all = True
+    for action, contract in contracts.items():
+        results[action] = []
+        for case in contract["witnesses"]:
+            run_dir = BUILD / "actions" / action / case["name"]
+            run_dir.mkdir(parents=True, exist_ok=True)
+            spec = run_dir / MODEL.name
+            query = f'NoActionWitness == ~(event.action = "{action}" /\\ ({case["condition"]}))\n'
+            spec.write_text(MODEL.read_text().replace("=============================================================================", query + "\n============================================================================="))
+            config = run_dir / CONFIG.name
+            config.write_text(CONFIG.read_text() + "  NoActionWitness\n")
+            code, output = run_tlc(spec, run_dir, java, config)
+            passed = code == 12 and "Invariant NoActionWitness is violated." in output
+            path = action_path(output)
+            record = {"name": case["name"], "passed": passed, "steps": len(path) - 1, "path": path}
+            results[action].append(record)
+            passed_all &= passed
+            if not passed:
+                print(f"FAIL action reachability {action}/{case['name']}")
+                print(output[-8000:])
+        if all(result["passed"] for result in results[action]):
+            summary = ", ".join(f"{x['name']}={x['steps']}" for x in results[action])
+            print(f"PASS action reachability {action}: {summary}", flush=True)
+    (BUILD / "action-coverage.json").write_text(json.dumps(results, indent=2) + "\n")
+    if passed_all:
+        write_action_table(contracts, results)
+    queries = sum(len(x) for x in results.values())
+    print(f"Action reachability: {sum(all(x['passed'] for x in cases) for cases in results.values())}/{len(contracts)} actions, {queries} queries")
+    return passed_all
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--good-only", action="store_true")
     selection.add_argument("--witness-only", action="store_true")
+    selection.add_argument("--actions-only", action="store_true")
     selection.add_argument("--mutant", choices=sorted(MUTANTS))
     args = parser.parse_args()
 
     if not check_source_drift():
         return 1
+    contracts = check_action_inventory()
     install_tlc()
     java = java_executable()
     print(f"TLA+ tools {TLA_VERSION}; Java: {java}")
+    if args.actions_only:
+        return 0 if check_action_reachability(java, contracts) else 1
     if args.witness_only:
         return 0 if check_rollback_witness(java) else 1
     if args.mutant:
@@ -430,10 +581,12 @@ def main() -> int:
     passed = sum(results)
     print(f"Mutation score: {passed}/{len(results)} expected failures caught")
     witness_passed = check_rollback_witness(java)
-    return 0 if all(results) and witness_passed else 1
+    actions_passed = check_action_reachability(java, contracts)
+    return 0 if all(results) and witness_passed and actions_passed else 1
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)
     try:
         sys.exit(main())
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:

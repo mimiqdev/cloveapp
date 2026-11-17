@@ -18,18 +18,21 @@ From the repository root, run:
 .agents/skills/browsing-workflow/scripts/check
 ```
 
-The command checks source drift, runs the current model, and runs nineteen model variants. A
+The command checks source drift, runs the current model, and runs 47 model variants. A
 successful run has these results:
 
 - Covered source matches the reviewed sync commit.
 - The current model passes every invariant with an empty TLC queue.
-- Nineteen model mutations fail on their named invariants.
-- The mutation summary reports `Mutation score: 19/19 expected failures caught`.
+- All 47 model mutations fail on their named invariants.
+- The mutation summary reports `Mutation score: 47/47 expected failures caught`.
+- All 24 `Next` actions execute in full-depth reachability queries; 49 queries cover selected request
+  and pre-state branches. The manifest must agree with `Next`, configured properties, and mutants.
 - The separate reachability query finds the Rated-confirmed, Reject-pending, location-loss rollback
   state. Its intentionally failing predicate is a witness, not a failed safety invariant.
 
 Use `--good-only` for only the current model. Use `--mutant <name>` to reproduce one counterexample.
-Use `--witness-only` for the rollback reachability query. All modes enforce source drift.
+Use `--witness-only` for the rollback reachability query. Use `--actions-only` for the 49 action
+queries and regenerated coverage table. All modes enforce source drift.
 The script prints each counterexample as an action path and stores full TLC output under
 `.build/formal-verification/`. The TLA+ version, download URL, checksum, and Java selection are in
 [the tool decision record](../../../docs/decisions/tla-plus-workflow-verification.md).
@@ -114,6 +117,40 @@ The earlier always-fit interpretation was a specification error. Correcting it f
 owner-approved exception; it does not weaken a rule to conceal a product bug. See
 [the correspondence record](references/findings.md).
 
+## Audit every claimed action
+
+Read [the complete action/property/mutation table](references/actions.md). The authoritative inventory
+is `model/action-contracts.json`. Each of the 24 actions lists its agreed precondition, input or
+request, intended target and effect, configured properties, positive witnesses, and negative mutations.
+The runner refuses an omitted action, unassigned mutant, or unconfigured property. After changing
+an intentional contract, run the normal command and copy the regenerated
+`.build/formal-verification/action-coverage.md` to `references/actions.md`.
+
+The original safety properties constrained allowed states but missed requested action effects.
+For example, keeping the old photo on auto-advance could preserve zoom and membership while failing
+to navigate. The eight additional grouped contracts cover session effects, navigation targets,
+inspection, grouping requests, Mark, Undo, FIFO phases, and request admissibility.
+
+The observer captures the raw pre-state and request before each atomic action. Reference functions
+use only those inputs. In particular, FireAdvance expects the pre-state plan's target, OpenPhoto
+expects the selected input photo, and inspection expects the bounded eye anchor at 100%. Group
+and Timeline steps check requested direction and valid indices, not just post-state membership.
+The reference must never read a primed value or use a value copied from the resulting state as its
+expected target. Shared pure domain functions and the observer capture remain reviewed model
+assumptions; these checks are not an independent proof of arbitrary Swift or those functions.
+
+All outcome mutations execute their actions with an incorrect assignment. Extra boundary mutations
+admit illegal outward requests; none is credited for merely making an action unreachable. Each
+positive query retains all normal properties and intentionally violates only its action witness.
+An unreachable action or branch causes that query to fail. The 49 witnesses establish existence,
+not that every enabled request is eventually performed or that every possible guard change is caught.
+These are transition postconditions and bounded safety checks, not liveness.
+
+The full command now makes 98 TLC runs: one baseline, 47 mutations, one rollback witness, and
+49 action/branch witnesses. Its total runtime can exceed a shell tool's 60-second invocation window;
+allow the command to finish and inspect its exit code. No depth, queue, state, or mutation-search
+bound was reduced. Logs and generated tables remain under the ignored build directory.
+
 ## Check Undo and ordered writes
 
 Read [the correspondence and evidence record](references/findings.md) for the source await boundaries
@@ -146,7 +183,7 @@ prove those Swift implementations. Keep the full and chart configurations' invar
 ## Separate the evidence
 
 - Bounded model safety covers all enabled action orders through depth 12 in the stated small world.
-- Model mutation sensitivity covers nineteen injected defects and their expected invariants.
+- Model mutation sensitivity covers 47 injected defects and their expected invariants.
 - Source correspondence comes from manual review at the sync commit and Git drift detection after
   that review. The drift gate requires another review when covered source changes. It does not
   establish arbitrary Swift behavior with regexes or model-only mutations.
@@ -164,8 +201,8 @@ The current model uses these limits and assumptions:
 - TLC explores all enabled action orders through depth 12. Deadlock checking is off because the
   depth bound creates terminal states. This is a bounded safety check, not liveness or a proof at
   every folder size.
-- Scan completion is atomic. The model does not open photos from partial scan batches or refine
-  groups over time.
+- OpenFolder models a successful pick or reopen. Picker cancellation and access failures are
+  excluded. Scan completion is atomic; partial-scan interaction and group refinement are excluded.
 - Auto-advance uses the default `nextPhoto` destination and an explicit fire action. The 300 ms
   timer, `stay`, `nextUnmarkedPhoto`, and `Reject N unmarked` finishing are outside the model.
 - One latest rating-only Undo is modeled. A global FIFO holds at most two actions total, including
@@ -176,6 +213,9 @@ The current model uses these limits and assumptions:
 - Close, Open, and Reconnect are modeled only after this FIFO drains. The UI's immediate departure
   while writes drain, concurrent open requests, and delayed close installation are outside this
   bounded check. Pending-write states are explored within Detail and across Back to Grid.
+  Session clearing means Entry, no active folder/current photo/expanded group, and cleared Undo
+  and advance. The global per-photo maps remain bookkeeping for the small world, not displayed
+  Entry state or a proof of the source arrays being deallocated.
 - A successful admitted disk write may finish after loss. The physical disk, library-confirmed
   store, scene-confirmed marks, desired overlay, and shown marks are separate. A queued read
   confirmation may still update confirmed marks after loss, as the source stream permits.
@@ -184,7 +224,9 @@ The current model uses these limits and assumptions:
 - Replaced sessions cannot carry active writes across a drained replacement. A deliberately
   hostile old-generation scan/preparation callback probes the generation-publication boundary
   instead. It over-approximates a buffered callback; it is not a stale-write interleaving.
-- Zoom has only fit and 100%, with centre and eye anchors. Pinch values, native-scale conversion,
+- Inspection assumes a shown, inspectable image and a known native 100% target. The model does
+  not represent waiting for image readiness or a disabled double-tap setting. Zoom has only fit
+  and 100%, with centre and eye anchors. Pinch values, native-scale conversion,
   pan geometry, RAW rendering, Vision, focus analysis, and UIKit layout are outside the model.
 - Filters, one-visible-member groups, several bursts per folder, selection, batch marks, Move
   Rejects, rename, Settings navigation, and device posture changes are outside the model.

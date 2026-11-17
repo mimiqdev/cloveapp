@@ -19,8 +19,22 @@ model verification defects:
 - Per-photo latest-value coalescing removed the intermediate state in which an older action was
   confirmed while a newer desired input remained queued. It did not describe `PhotoActionPipeline`.
 
-The current model replaces that abstraction with a bounded FIFO and adds immediate Undo restore,
-navigation, and cancellation invariants. These changes repair the model, not Swift defects.
+The model replaces that abstraction with a bounded FIFO and immediate Undo restore, navigation,
+and cancellation invariants. Those resolved checks are retained. These changes repair the model,
+not Swift defects.
+
+Fresh review at verification head `75ab5eaea6a620d4ce1183c07d21cb5f2563957e` found a systemic
+coverage defect: valid-state safety did not assert that requested actions actually had their intended
+effects. Keeping the old photo during FireAdvance, staying at fit during Inspect100, not moving a
+group step, dropping the selected OpenPhoto target, remaining in Grid on Close, and ignoring a
+grouping request all passed. These were verification defects, not diagnosed Swift defects.
+
+The current audit covers every claimed Next action with a precondition/request/effect contract,
+a reachable positive example, and a meaningful negative assignment mutation. See the complete
+[action correspondence table](actions.md), generated from `model/action-contracts.json`.
+Eight grouped contracts supplement the original safety checks. Expected effects are computed only
+from the raw pre-state snapshot and request, independently of primed implementation assignments.
+Shared pure domain helpers and observer capture are trusted model assumptions checked by review.
 
 ## Source boundaries and abstractions
 
@@ -63,10 +77,33 @@ Run from the repository root:
 ```
 
 The current run uses TLA+ tools 1.7.4, one TLC worker, depth 12, two folders with three photos each,
-and `MaxPending = 2`. It generated 1,178,603 states, found 345,913 distinct states, exhausted the
-queue, and passed all 27 safety invariants. Nineteen model mutations failed on their named rules.
-These counts changed because FIFO phases and drained-replacement bounds replace the earlier
-coalescing abstraction, not because pending-write states were removed.
+and `MaxPending = 2`. It generated 1,245,725 states, found 370,189 distinct states, exhausted the
+queue, and passed all 35 configured safety and transition-effect invariants. All 47 model mutations
+failed on relevant configured properties. The separate full-depth reachability pass found all 24
+actions and all 49 selected branch witnesses.
+
+No world, queue, or depth bound changed in this action audit. The larger state count comes from
+capturing the pre-state/request for effect assertions. The normal command now makes 98 TLC runs,
+so a 60-second shell invocation window was insufficient for the complete batch. The same normal
+command was allowed to finish with logged output and exit 0; no checker limit was reduced.
+
+The six independently reproduced action-effect failures are now rejected:
+
+| Incorrect executed assignment | Relevant effect property | Shortest steps |
+| --- | --- | --- |
+| FireAdvance keeps current photo instead of old plan target | `NavigationActionEffects` | 5 |
+| Inspect100 keeps fit scale and centre anchor | `InspectionActionEffects` | 4 |
+| StepGroup keeps the same member | `NavigationActionEffects` | 4 |
+| OpenPhoto selects NoPhoto | `NavigationActionEffects` | 3 |
+| CloseFolder stays in Grid | `SessionActionEffects` | 2 |
+| SetGrouping ignores the requested value | `GroupingActionEffects` | 3 |
+
+These are action effects, not eventual-progress properties. Expected values come from pre-state or
+request inputs, never a resulting state copied into event metadata. Negative assignment mutations
+retain executable actions. The extra boundary mutations allow an invalid outward request rather than
+disabling actions. Positive queries keep every normal invariant and succeed only when their
+`NoActionWitness` predicate is intentionally violated. A completed search without reaching the
+action fails. Existential action witnesses are not an exhaustive proof of all guards or liveness.
 
 The new Undo counterexamples are:
 
@@ -109,7 +146,7 @@ After loss the queued Reject and desired overlay are gone, the active head remai
 are Rated. The query requires those values and queue length, not just an action-name sequence. Its
 intentional violation is evidence of reachability, not a failed safety invariant or a source bug.
 
-`statechart` read the full result, all nineteen variants, and the reachability query. The full model
+`statechart` reads the full result, mutation counterexamples, and reachability queries. The full model
 exceeds the 500-state chart budget. Mutant reruns can leave other rules under `Rules not checked`;
 those are not counted as passes on broken variants.
 
@@ -141,7 +178,9 @@ This is drift detection, not semantic proof. Review the source and model, then r
 ```
 
 The source was restored. Covered product files have no diff, the sync commit is unchanged, and the
-normal command passed the drift gate, all 27 invariants, all 19 mutants, and the reachability query.
+normal command passed the drift gate, the model, mutation checks, and the rollback witness.
+The current action audit additionally checks all 35 invariants, 47 mutants, and 49 action/branch
+witnesses. The reviewed source commit and 12 covered paths have not changed.
 
 ## Evidence limits
 

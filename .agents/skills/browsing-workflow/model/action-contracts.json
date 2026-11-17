@@ -1,0 +1,585 @@
+{
+  "OpenFolder": {
+    "precondition": "Entry; FIFO empty/idle",
+    "request": "folder f",
+    "postcondition": "Grid scans requested f under new generation; connected; clear current/group/Undo/advance; fit",
+    "invariants": [
+      "SessionActionEffects",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "open-folder-wrong-request",
+      "open-folder-keeps-generation"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "folder-A",
+        "condition": "event.request.folder = \"A\""
+      },
+      {
+        "name": "folder-B",
+        "condition": "event.request.folder = \"B\""
+      }
+    ]
+  },
+  "CloseFolder": {
+    "precondition": "Grid; FIFO empty/idle",
+    "request": "close session",
+    "postcondition": "Entry; clear active folder/current/group/Undo/advance; advance generation; stop scan",
+    "invariants": [
+      "SessionActionEffects",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "close-stays-in-grid",
+      "close-keeps-photo"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "with-selected-photo",
+        "condition": "event.before.currentPhoto \\in Photos"
+      }
+    ]
+  },
+  "Reconnect": {
+    "precondition": "Disconnected active folder; FIFO empty/idle",
+    "request": "reopen same folder",
+    "postcondition": "Grid scans same folder under new generation; connected; clear old Detail and timer",
+    "invariants": [
+      "SessionActionEffects",
+      "ReconnectHidesOldState",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "reconnect-stays-disconnected",
+      "stale-reconnect-detail"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "ScanFinish": {
+    "precondition": "Active folder scanning",
+    "request": "fresh scan completion",
+    "postcondition": "Stop scanning; current-folder shown/library/confirmed marks equal pre-state disk; current provenance",
+    "invariants": [
+      "SessionActionEffects",
+      "FreshFolderMarksUseCurrentGeneration",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "scan-remains-scanning",
+      "scan-keeps-old-marks"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "reads-changed-disk",
+        "condition": "event.before.marks[\"aS\"] /= event.before.diskMarks[\"aS\"] /\\ event.before.activeFolder = \"A\""
+      }
+    ]
+  },
+  "SetGrouping": {
+    "precondition": "Ready Grid; requested value differs",
+    "request": "grouped boolean",
+    "postcondition": "Grouping equals requested boolean; preserve other state",
+    "invariants": [
+      "GroupingActionEffects",
+      "FlatGridHasNoGroupFocus",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "grouping-ignores-request"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "turn-off",
+        "condition": "~event.request.grouped"
+      },
+      {
+        "name": "turn-on",
+        "condition": "event.request.grouped"
+      }
+    ]
+  },
+  "LoseLocation": {
+    "precondition": "Connected active folder",
+    "request": "location-loss event",
+    "postcondition": "Disconnect; show latest scene-confirmed marks; clear desired/Undo; drop queue but retain active head",
+    "invariants": [
+      "SessionActionEffects",
+      "LocationLossShowsLatestConfirmed",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "loss-keeps-connected",
+      "loss-keeps-desired",
+      "loss-uses-unpublished-disk"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "OpenPhoto": {
+    "precondition": "Ready Grid; visible standalone or Flat member",
+    "request": "selected photo p",
+    "postcondition": "Timeline on requested p; no group; fit; cancel advance",
+    "invariants": [
+      "NavigationActionEffects",
+      "StandaloneOpensTimeline",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "open-photo-discards-selection"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "flat-member",
+        "condition": "~event.before.grouped /\\ event.request.photo \\in MemberSet(event.before.activeFolder)"
+      }
+    ]
+  },
+  "OpenBurst": {
+    "precondition": "Ready Grouped Grid",
+    "request": "tap burst stack",
+    "postcondition": "Group Focus on pre-state Representative; fit; cancel advance",
+    "invariants": [
+      "NavigationActionEffects",
+      "BurstOpensRepresentativeGroupFocus",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "burst-opens-wrong-member"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "ExpandGroup": {
+    "precondition": "Grouped Timeline on collapsed burst",
+    "request": "expand burst",
+    "postcondition": "Group Focus on same photo; keep scale/anchor; cancel advance",
+    "invariants": [
+      "NavigationActionEffects",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "expand-keeps-timeline"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "CollapseGroup": {
+    "precondition": "Group Focus",
+    "request": "collapse burst",
+    "postcondition": "Timeline on pre-state Representative; same-photo keeps zoom; changed-photo returns fit; cancel advance",
+    "invariants": [
+      "NavigationActionEffects",
+      "CollapseUsesRepresentative",
+      "CollapseZoomFollowsRepresentative",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "collapse-keeps-current-photo",
+      "changed-collapse-retains-zoom",
+      "representative-collapse-resets-zoom"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "same-photo",
+        "condition": "event.before.currentPhoto = Representative(event.before.activeFolder, event.before.marks)"
+      },
+      {
+        "name": "changed-photo",
+        "condition": "event.before.currentPhoto /= Representative(event.before.activeFolder, event.before.marks)"
+      }
+    ]
+  },
+  "Back": {
+    "precondition": "Timeline or Group Focus",
+    "request": "back to Grid",
+    "postcondition": "Grid; no expanded group; fit; cancel advance; preserve current photo/folder",
+    "invariants": [
+      "NavigationActionEffects",
+      "BackReturnsToGrid",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "back-keeps-detail"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "StepTimeline": {
+    "precondition": "Timeline; old slot index plus offset valid",
+    "request": "offset -1 or +1",
+    "postcondition": "Exactly requested slot and stage photo; fit; no group; no wrap; cancel advance",
+    "invariants": [
+      "NavigationActionEffects",
+      "OutsideGroupNavigationReturnsFit",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "timeline-step-keeps-photo",
+      "timeline-step-accepts-outward-request"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "previous",
+        "condition": "event.request.offset = (0 - 1)"
+      },
+      {
+        "name": "next",
+        "condition": "event.request.offset = 1"
+      }
+    ]
+  },
+  "StepGroup": {
+    "precondition": "Group Focus; old visible-member index plus offset in 1..2",
+    "request": "offset -1 or +1",
+    "postcondition": "Exactly requested visible member; keep level/scale/anchor; no wrap; cancel advance",
+    "invariants": [
+      "NavigationActionEffects",
+      "GroupFocusStaysWithinVisibleMembers",
+      "GroupNavigationKeepsZoom",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "group-step-keeps-member",
+      "group-step-accepts-outward-request",
+      "group-step-resets-zoom"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "previous",
+        "condition": "event.request.offset = (0 - 1)"
+      },
+      {
+        "name": "next",
+        "condition": "event.request.offset = 1"
+      }
+    ]
+  },
+  "Inspect100": {
+    "precondition": "Detail at fit; inspectable image and native target assumed available",
+    "request": "100% at bounded eye anchor",
+    "postcondition": "Scale 100% and requested eye anchor; preserve photo/level/marks",
+    "invariants": [
+      "InspectionActionEffects",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "inspection-keeps-fit",
+      "inspection-ignores-anchor"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "ReturnFit": {
+    "precondition": "Detail above fit",
+    "request": "return to fit",
+    "postcondition": "Fit scale and centre anchor; preserve photo/level/marks",
+    "invariants": [
+      "InspectionActionEffects",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "fit-keeps-inspection"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "Mark": {
+    "precondition": "Connected ready admitted Detail; not collapsed stack; changed value; FIFO room",
+    "request": "Rated or Rejected",
+    "postcondition": "Show requested mark; update desired and append exact request; capture Undo and plan from pre-state",
+    "invariants": [
+      "MarkActionEffects",
+      "CollapsedStackIsReadOnly",
+      "NewerDesiredInputWins",
+      "OnlyLastUnmarkedPlansGroupExit",
+      "SecondPassNeverPlansGroupExit",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "mark-does-not-enqueue",
+      "mark-wrong-requested-value",
+      "collapsed-stack-marking",
+      "early-group-exit",
+      "second-pass-group-exit"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "rated",
+        "condition": "event.request.mark = \"R\""
+      },
+      {
+        "name": "rejected",
+        "condition": "event.request.mark = \"X\""
+      }
+    ]
+  },
+  "UndoLastMark": {
+    "precondition": "Connected ready; expected shown mark; matching-generation Undo; FIFO room",
+    "request": "undo latest rating edit",
+    "postcondition": "Restore pre-state prior mark and enqueue restore; return to edited photo/correct level; cancel timer; consume Undo",
+    "invariants": [
+      "UndoActionEffects",
+      "UndoRestoresPriorMark",
+      "UndoReturnsToTarget",
+      "UndoCancelsAutoAdvance",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "undo-does-not-restore",
+      "undo-wrong-photo",
+      "undo-wrong-level",
+      "undo-keeps-auto-advance"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "group-target",
+        "condition": "event.before.grouped /\\ event.before.undo.photo \\in MemberSet(event.before.activeFolder)"
+      },
+      {
+        "name": "timeline-target",
+        "condition": "~event.before.grouped \\/ event.before.undo.photo = Standalone(event.before.activeFolder)"
+      },
+      {
+        "name": "returns-to-another-photo",
+        "condition": "event.before.currentPhoto /= event.before.undo.photo"
+      }
+    ]
+  },
+  "BeginWrite": {
+    "precondition": "Nonempty idle FIFO; connected current folder/generation",
+    "request": "admit oldest action",
+    "postcondition": "Writing phase; immutable head and all domain values retained",
+    "invariants": [
+      "QueueActionEffects",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "begin-write-stays-idle"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "CompleteDisk": {
+    "precondition": "Nonempty writing FIFO",
+    "request": "active disk operation succeeds",
+    "postcondition": "Disk receives immutable head value; diskDone; no visible publication",
+    "invariants": [
+      "QueueActionEffects",
+      "DiskCompletionIsFIFO",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "disk-completes-newest-input"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "after-loss",
+        "condition": "~event.before.connected"
+      }
+    ]
+  },
+  "RecordWrite": {
+    "precondition": "Nonempty diskDone FIFO",
+    "request": "library receives success",
+    "postcondition": "Library records head value; recorded phase; scene/desired unchanged",
+    "invariants": [
+      "QueueActionEffects",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "record-does-not-confirm"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "ReadConfirmation": {
+    "precondition": "Open ready folder; library differs from scene confirmation",
+    "request": "buffered reads update",
+    "postcondition": "Scene confirms pre-state library; desired input still wins on screen",
+    "invariants": [
+      "QueueActionEffects",
+      "NewerDesiredInputWins",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "read-keeps-old-confirmation",
+      "older-read-overwrites-desired"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "newer-same-photo-pending",
+        "condition": "Len(event.before.writeQueue) = 2 /\\ event.before.writeQueue[1].photo = event.before.writeQueue[2].photo /\\ event.before.writeQueue[1].value /= event.before.writeQueue[2].value"
+      }
+    ]
+  },
+  "FinishWrite": {
+    "precondition": "Nonempty recorded FIFO",
+    "request": "persist return and consumer loop",
+    "postcondition": "Pop head; guarded publication preserves later desired; immediately start next queued write if connected",
+    "invariants": [
+      "QueueActionEffects",
+      "NewerDesiredInputWins",
+      "WriteResultsRequireConnection",
+      "WriteResultsUseCurrentGeneration",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "finish-keeps-old-confirmation",
+      "older-finish-overwrites-desired",
+      "older-finish-clears-newer-desired",
+      "disconnected-publication"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "newer-same-photo-pending",
+        "condition": "Len(event.before.writeQueue) = 2 /\\ event.before.writeQueue[1].photo = event.before.writeQueue[2].photo /\\ event.before.writeQueue[1].value /= event.before.writeQueue[2].value"
+      },
+      {
+        "name": "after-loss",
+        "condition": "~event.before.connected"
+      }
+    ]
+  },
+  "StaleResult": {
+    "precondition": "Active folder; positive retired generation",
+    "request": "hostile old scan/preparation callback",
+    "postcondition": "Ignore callback; preserve every domain field",
+    "invariants": [
+      "SessionActionEffects",
+      "FreshFolderMarksUseCurrentGeneration",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "stale-generation-result"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      }
+    ]
+  },
+  "FireAdvance": {
+    "precondition": "Pending pre-state plan",
+    "request": "timer fires",
+    "postcondition": "Actual target equals pre-state advance.target; planned level/zoom; consume plan",
+    "invariants": [
+      "NavigationActionEffects",
+      "GroupNavigationKeepsZoom",
+      "LastUnmarkedAdvanceLeavesGroup",
+      "SecondPassAdvanceStaysInGroup",
+      "RequestedActionWasAdmissible"
+    ],
+    "negativeMutations": [
+      "advance-keeps-current-photo"
+    ],
+    "witnesses": [
+      {
+        "name": "enabled",
+        "condition": "TRUE"
+      },
+      {
+        "name": "group-target",
+        "condition": "event.before.advance.kind = \"group\""
+      },
+      {
+        "name": "exit-target",
+        "condition": "event.before.advance.kind = \"exit\""
+      },
+      {
+        "name": "timeline-target",
+        "condition": "event.before.advance.kind = \"timeline\""
+      }
+    ]
+  }
+}

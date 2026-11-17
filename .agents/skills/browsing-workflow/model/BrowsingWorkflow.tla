@@ -101,8 +101,37 @@ vars == <<
     writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo, advance, event, steps
 >>
 
+Snapshot == [
+    route |-> route,
+    activeFolder |-> activeFolder,
+    generation |-> generation,
+    scanning |-> scanning,
+    grouped |-> grouped,
+    connected |-> connected,
+    expandedGroup |-> expandedGroup,
+    currentPhoto |-> currentPhoto,
+    scale |-> scale,
+    anchor |-> anchor,
+    diskMarks |-> diskMarks,
+    marks |-> marks,
+    sourceGeneration |-> sourceGeneration,
+    writeQueue |-> writeQueue,
+    writePhase |-> writePhase,
+    desired |-> desired,
+    confirmedMarks |-> confirmedMarks,
+    libraryMarks |-> libraryMarks,
+    retiredGeneration |-> retiredGeneration,
+    undo |-> undo,
+    advance |-> advance
+]
+
+Request == [folder |-> NoFolder, photo |-> NoPhoto, mark |-> "U",
+            grouped |-> FALSE, offset |-> 0, anchor |-> "eye"]
+
 BaseEvent(a, oldScale, oldAnchor, oldPhoto, oldRoute, oldExpanded) == [
     action |-> a,
+    before |-> Snapshot,
+    request |-> Request,
     writeApplied |-> FALSE,
     writeGeneration |-> 0,
     writeFolder |-> NoFolder,
@@ -173,7 +202,7 @@ OpenFolder(f) ==
     /\ anchor' = "centre"
     /\ undo' = NoUndo
     /\ advance' = NoAdvance
-    /\ event' = Event("OpenFolder")
+    /\ event' = [Event("OpenFolder") EXCEPT !.request.folder = f]
     /\ steps' = steps + 1
     /\ UNCHANGED <<grouped, diskMarks, marks, sourceGeneration, writeQueue,
                    writePhase, desired, confirmedMarks, libraryMarks>>
@@ -246,7 +275,7 @@ SetGrouping(value) ==
     /\ grouped /= value
     /\ steps < MaxSteps
     /\ grouped' = value
-    /\ event' = Event("SetGrouping")
+    /\ event' = [Event("SetGrouping") EXCEPT !.request.grouped = value]
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, connected, expandedGroup,
                    currentPhoto, scale, anchor, diskMarks, marks, sourceGeneration,
@@ -281,7 +310,7 @@ OpenPhoto(p) ==
     /\ scale' = "fit"
     /\ anchor' = "centre"
     /\ advance' = NoAdvance
-    /\ event' = Event("OpenPhoto")
+    /\ event' = [Event("OpenPhoto") EXCEPT !.request.photo = p]
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, diskMarks,
                    marks, sourceGeneration, writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
@@ -362,7 +391,7 @@ StepTimeline(offset) ==
     /\ scale' = "fit"
     /\ anchor' = "centre"
     /\ advance' = NoAdvance
-    /\ event' = Event("StepTimeline")
+    /\ event' = [Event("StepTimeline") EXCEPT !.request.offset = offset]
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
                    diskMarks, marks, sourceGeneration, writeQueue,
@@ -379,7 +408,7 @@ StepGroup(offset) ==
     /\ steps < MaxSteps
     /\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)
     /\ advance' = NoAdvance
-    /\ event' = Event("StepGroup")
+    /\ event' = [Event("StepGroup") EXCEPT !.request.offset = offset]
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
                    expandedGroup, scale, anchor, diskMarks, marks, sourceGeneration,
@@ -433,7 +462,7 @@ Mark(p, value) ==
     /\ advance' =
         IF route = "GroupFocus" THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
         ELSE TimelineAdvance(activeFolder, p, grouped, marks)
-    /\ event' = Event("Mark")
+    /\ event' = [Event("Mark") EXCEPT !.request.mark = value]
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
                    expandedGroup, currentPhoto, scale, anchor, diskMarks, writePhase, confirmedMarks, libraryMarks, retiredGeneration>>
@@ -747,5 +776,177 @@ NoRatedRollbackWitness ==
       /\ event.oldActiveValue = "R"
       /\ confirmedMarks["aS"] = "R" /\ marks["aS"] = "R"
       /\ diskMarks["aS"] = "R")
+
+
+\* Action-effect reference: inputs are only the captured pre-state and request.
+\* No primed implementation value or post-state value supplies the expected result.
+SessionActions == {"OpenFolder", "CloseFolder", "Reconnect", "ScanFinish", "LoseLocation", "StaleResult"}
+NavigationActions == {"OpenPhoto", "OpenBurst", "ExpandGroup", "CollapseGroup", "Back", "StepTimeline", "StepGroup", "FireAdvance"}
+InspectionActions == {"Inspect100", "ReturnFit"}
+QueueActions == {"BeginWrite", "CompleteDisk", "RecordWrite", "ReadConfirmation", "FinishWrite"}
+
+ReferenceSession(b, a, r) ==
+    CASE a = "OpenFolder" -> [b EXCEPT
+        !.activeFolder = r.folder, !.generation = b.generation + 1,
+        !.retiredGeneration = b.generation, !.route = "Grid", !.scanning = TRUE,
+        !.connected = TRUE, !.expandedGroup = NoFolder, !.currentPhoto = NoPhoto,
+        !.scale = "fit", !.anchor = "centre", !.undo = NoUndo, !.advance = NoAdvance]
+    [] a = "CloseFolder" -> [b EXCEPT
+        !.activeFolder = NoFolder, !.generation = b.generation + 1,
+        !.retiredGeneration = b.generation, !.route = "Entry", !.scanning = FALSE,
+        !.connected = TRUE, !.expandedGroup = NoFolder, !.currentPhoto = NoPhoto,
+        !.scale = "fit", !.anchor = "centre", !.undo = NoUndo, !.advance = NoAdvance]
+    [] a = "Reconnect" -> [b EXCEPT
+        !.generation = b.generation + 1, !.retiredGeneration = b.generation,
+        !.route = "Grid", !.scanning = TRUE, !.connected = TRUE,
+        !.expandedGroup = NoFolder, !.currentPhoto = NoPhoto,
+        !.scale = "fit", !.anchor = "centre", !.undo = NoUndo, !.advance = NoAdvance]
+    [] a = "ScanFinish" -> [b EXCEPT
+        !.scanning = FALSE,
+        !.confirmedMarks = [p \in Photos |-> IF FolderOf[p] = b.activeFolder THEN b.diskMarks[p] ELSE b.confirmedMarks[p]],
+        !.libraryMarks = [p \in Photos |-> IF FolderOf[p] = b.activeFolder THEN b.diskMarks[p] ELSE b.libraryMarks[p]],
+        !.marks = [p \in Photos |-> IF FolderOf[p] = b.activeFolder THEN b.diskMarks[p] ELSE b.marks[p]],
+        !.sourceGeneration = [p \in Photos |-> IF FolderOf[p] = b.activeFolder THEN b.generation ELSE b.sourceGeneration[p]]]
+    [] a = "LoseLocation" -> [b EXCEPT
+        !.connected = FALSE, !.undo = NoUndo,
+        !.marks = [p \in Photos |-> IF FolderOf[p] = b.activeFolder THEN b.confirmedMarks[p] ELSE b.marks[p]],
+        !.desired = [p \in Photos |-> "none"],
+        !.writeQueue = IF b.writePhase = "idle" THEN <<>> ELSE <<Head(b.writeQueue)>>]
+    [] a = "StaleResult" -> b
+
+ReferenceNavigation(b, a, r) ==
+    CASE a = "OpenPhoto" -> [b EXCEPT
+        !.route = "Timeline", !.expandedGroup = NoFolder, !.currentPhoto = r.photo,
+        !.scale = "fit", !.anchor = "centre", !.advance = NoAdvance]
+    [] a = "OpenBurst" -> [b EXCEPT
+        !.route = "GroupFocus", !.expandedGroup = b.activeFolder,
+        !.currentPhoto = Representative(b.activeFolder, b.marks),
+        !.scale = "fit", !.anchor = "centre", !.advance = NoAdvance]
+    [] a = "ExpandGroup" -> [b EXCEPT
+        !.route = "GroupFocus", !.expandedGroup = b.activeFolder, !.advance = NoAdvance]
+    [] a = "CollapseGroup" -> [b EXCEPT
+        !.route = "Timeline", !.expandedGroup = NoFolder,
+        !.currentPhoto = Representative(b.activeFolder, b.marks),
+        !.scale = IF b.currentPhoto = Representative(b.activeFolder, b.marks) THEN b.scale ELSE "fit",
+        !.anchor = IF b.currentPhoto = Representative(b.activeFolder, b.marks) THEN b.anchor ELSE "centre",
+        !.advance = NoAdvance]
+    [] a = "Back" -> [b EXCEPT
+        !.route = "Grid", !.expandedGroup = NoFolder, !.scale = "fit", !.anchor = "centre", !.advance = NoAdvance]
+    [] a = "StepTimeline" -> [b EXCEPT
+        !.currentPhoto = TimelinePhotoAt(b.activeFolder,
+            TimelineIndex(b.activeFolder, b.currentPhoto, b.grouped) + r.offset, b.grouped, b.marks),
+        !.expandedGroup = NoFolder, !.scale = "fit", !.anchor = "centre", !.advance = NoAdvance]
+    [] a = "StepGroup" -> [b EXCEPT
+        !.currentPhoto = Member(b.activeFolder,
+            (IF b.currentPhoto = Member(b.activeFolder, 1) THEN 1 ELSE 2) + r.offset),
+        !.advance = NoAdvance]
+    [] a = "FireAdvance" -> [b EXCEPT
+        !.currentPhoto = b.advance.target,
+        !.route = IF b.advance.kind = "group" THEN "GroupFocus" ELSE "Timeline",
+        !.expandedGroup = IF b.advance.kind = "group" THEN b.advance.source ELSE NoFolder,
+        !.scale = IF b.advance.kind = "group" THEN b.scale ELSE "fit",
+        !.anchor = IF b.advance.kind = "group" THEN b.anchor ELSE "centre", !.advance = NoAdvance]
+
+ReferenceMark(b, r) ==
+    LET p == b.currentPhoto IN [b EXCEPT
+        !.marks = [b.marks EXCEPT ![p] = r.mark],
+        !.desired = [b.desired EXCEPT ![p] = r.mark],
+        !.sourceGeneration = [b.sourceGeneration EXCEPT ![p] = b.generation],
+        !.writeQueue = Append(b.writeQueue, [photo |-> p, value |-> r.mark, generation |-> b.generation]),
+        !.undo = [folder |-> b.activeFolder, generation |-> b.generation,
+                  photo |-> p, before |-> b.marks[p], after |-> r.mark],
+        !.advance = IF b.route = "GroupFocus" THEN GroupAdvanceBeforeMark(b.activeFolder, p, b.marks)
+                    ELSE TimelineAdvance(b.activeFolder, p, b.grouped, b.marks)]
+
+ReferenceUndo(b) ==
+    LET p == b.undo.photo
+        inGroup == b.grouped /\ p \in MemberSet(b.activeFolder)
+        keepsZoom == b.route = "GroupFocus" /\ b.expandedGroup = b.activeFolder /\ p \in MemberSet(b.activeFolder)
+    IN [b EXCEPT
+        !.marks = [b.marks EXCEPT ![p] = b.undo.before],
+        !.desired = [b.desired EXCEPT ![p] = b.undo.before],
+        !.sourceGeneration = [b.sourceGeneration EXCEPT ![p] = b.generation],
+        !.writeQueue = Append(b.writeQueue, [photo |-> p, value |-> b.undo.before, generation |-> b.generation]),
+        !.route = IF inGroup THEN "GroupFocus" ELSE "Timeline",
+        !.expandedGroup = IF inGroup THEN b.activeFolder ELSE NoFolder,
+        !.currentPhoto = p, !.scale = IF keepsZoom THEN b.scale ELSE "fit",
+        !.anchor = IF keepsZoom THEN b.anchor ELSE "centre", !.undo = NoUndo, !.advance = NoAdvance]
+
+ReferenceQueue(b, a) ==
+    CASE a = "BeginWrite" -> [b EXCEPT !.writePhase = "writing"]
+    [] a = "CompleteDisk" -> [b EXCEPT !.writePhase = "diskDone",
+        !.diskMarks = [b.diskMarks EXCEPT ![Head(b.writeQueue).photo] = Head(b.writeQueue).value]]
+    [] a = "RecordWrite" -> [b EXCEPT !.writePhase = "recorded",
+        !.libraryMarks = [b.libraryMarks EXCEPT ![Head(b.writeQueue).photo] = Head(b.writeQueue).value]]
+    [] a = "ReadConfirmation" -> [b EXCEPT !.confirmedMarks = b.libraryMarks,
+        !.marks = [p \in Photos |-> IF b.desired[p] /= "none" THEN b.desired[p] ELSE b.libraryMarks[p]]]
+    [] a = "FinishWrite" ->
+        LET head == Head(b.writeQueue)
+            publish == b.connected /\ b.activeFolder = FolderOf[head.photo] /\ b.generation = head.generation
+            hasLater == \E i \in 2..Len(b.writeQueue): b.writeQueue[i].photo = head.photo
+            nextDesired == IF publish /\ ~hasLater THEN [b.desired EXCEPT ![head.photo] = "none"] ELSE b.desired
+        IN [b EXCEPT !.writeQueue = Tail(b.writeQueue),
+            !.writePhase = IF Len(b.writeQueue) > 1 /\ b.connected THEN "writing" ELSE "idle",
+            !.desired = nextDesired, !.confirmedMarks = IF publish THEN b.libraryMarks ELSE b.confirmedMarks,
+            !.marks = IF publish THEN [p \in Photos |-> IF nextDesired[p] /= "none" THEN nextDesired[p] ELSE b.libraryMarks[p]] ELSE b.marks]
+
+SessionActionEffects == event.action \in SessionActions => Snapshot = ReferenceSession(event.before, event.action, event.request)
+NavigationActionEffects ==
+    /\ event.action \in NavigationActions => Snapshot = ReferenceNavigation(event.before, event.action, event.request)
+    /\ event.action = "StepGroup" =>
+        (IF event.before.currentPhoto = Member(event.before.activeFolder, 1) THEN 1 ELSE 2)
+            + event.request.offset \in 1..2
+    /\ event.action = "StepTimeline" =>
+        TimelineIndex(event.before.activeFolder, event.before.currentPhoto, event.before.grouped)
+            + event.request.offset \in 1..TimelineLength(event.before.grouped)
+InspectionActionEffects == event.action \in InspectionActions =>
+    Snapshot = [event.before EXCEPT
+        !.scale = IF event.action = "Inspect100" THEN "100" ELSE "fit",
+        !.anchor = IF event.action = "Inspect100" THEN event.request.anchor ELSE "centre"]
+GroupingActionEffects == event.action = "SetGrouping" => Snapshot = [event.before EXCEPT !.grouped = event.request.grouped]
+MarkActionEffects == event.action = "Mark" => Snapshot = ReferenceMark(event.before, event.request)
+UndoActionEffects == event.action = "UndoLastMark" => Snapshot = ReferenceUndo(event.before)
+QueueActionEffects == event.action \in QueueActions => Snapshot = ReferenceQueue(event.before, event.action)
+
+\* Preconditions are obligations on the captured request/pre-state, not post-state
+\* validity checks. The depth counter is checker infrastructure, not a user precondition.
+ReferenceAdmissible(b, a, r) ==
+    CASE a = "OpenFolder" -> b.route = "Entry" /\ r.folder \in Folders /\ b.writeQueue = <<>> /\ b.writePhase = "idle"
+    [] a = "CloseFolder" -> b.route = "Grid" /\ b.writeQueue = <<>> /\ b.writePhase = "idle"
+    [] a = "Reconnect" -> b.activeFolder \in Folders /\ ~b.connected /\ b.writeQueue = <<>> /\ b.writePhase = "idle"
+    [] a = "ScanFinish" -> b.activeFolder \in Folders /\ b.scanning
+    [] a = "SetGrouping" -> b.route = "Grid" /\ b.activeFolder \in Folders /\ ~b.scanning /\ r.grouped \in BOOLEAN /\ r.grouped /= b.grouped
+    [] a = "LoseLocation" -> b.activeFolder \in Folders /\ b.connected
+    [] a = "OpenPhoto" -> b.route = "Grid" /\ b.activeFolder \in Folders /\ ~b.scanning
+        /\ r.photo \in FolderPhotos(b.activeFolder) /\ (~b.grouped \/ r.photo = Standalone(b.activeFolder))
+    [] a = "OpenBurst" -> b.route = "Grid" /\ b.activeFolder \in Folders /\ ~b.scanning /\ b.grouped
+    [] a = "ExpandGroup" -> b.route = "Timeline" /\ b.activeFolder \in Folders /\ b.grouped /\ b.currentPhoto \in MemberSet(b.activeFolder)
+    [] a = "CollapseGroup" -> b.route = "GroupFocus" /\ b.activeFolder \in Folders /\ b.expandedGroup = b.activeFolder
+    [] a = "Back" -> b.route \in {"Timeline", "GroupFocus"}
+    [] a = "StepTimeline" -> b.route = "Timeline" /\ b.activeFolder \in Folders /\ r.offset \in {0 - 1, 1}
+        /\ TimelineIndex(b.activeFolder, b.currentPhoto, b.grouped) + r.offset \in 1..TimelineLength(b.grouped)
+    [] a = "StepGroup" -> b.route = "GroupFocus" /\ b.activeFolder \in Folders /\ b.expandedGroup = b.activeFolder
+        /\ b.currentPhoto \in MemberSet(b.activeFolder) /\ r.offset \in {0 - 1, 1}
+        /\ (IF b.currentPhoto = Member(b.activeFolder, 1) THEN 1 ELSE 2) + r.offset \in 1..2
+    [] a = "Inspect100" -> b.route \in {"Timeline", "GroupFocus"} /\ b.scale = "fit" /\ r.anchor = "eye"
+    [] a = "ReturnFit" -> b.route \in {"Timeline", "GroupFocus"} /\ b.scale /= "fit"
+    [] a = "Mark" -> b.activeFolder \in Folders /\ b.connected /\ ~b.scanning
+        /\ b.route \in {"Timeline", "GroupFocus"} /\ b.currentPhoto \in FolderPhotos(b.activeFolder)
+        /\ (b.route = "GroupFocus" \/ ~b.grouped \/ b.currentPhoto = Standalone(b.activeFolder))
+        /\ r.mark \in {"R", "X"} /\ b.marks[b.currentPhoto] /= r.mark /\ Len(b.writeQueue) < MaxPending
+    [] a = "UndoLastMark" -> b.undo /= NoUndo /\ b.activeFolder \in Folders /\ b.connected /\ ~b.scanning
+        /\ b.undo.folder = b.activeFolder /\ b.undo.generation = b.generation
+        /\ b.marks[b.undo.photo] = b.undo.after /\ Len(b.writeQueue) < MaxPending
+    [] a = "BeginWrite" -> b.writeQueue /= <<>> /\ b.writePhase = "idle" /\ b.connected
+        /\ b.activeFolder = FolderOf[Head(b.writeQueue).photo] /\ b.generation = Head(b.writeQueue).generation
+    [] a = "CompleteDisk" -> b.writeQueue /= <<>> /\ b.writePhase = "writing"
+    [] a = "RecordWrite" -> b.writeQueue /= <<>> /\ b.writePhase = "diskDone"
+    [] a = "ReadConfirmation" -> b.activeFolder \in Folders /\ ~b.scanning
+        /\ \E p \in FolderPhotos(b.activeFolder): b.libraryMarks[p] /= b.confirmedMarks[p]
+    [] a = "FinishWrite" -> b.writeQueue /= <<>> /\ b.writePhase = "recorded"
+    [] a = "StaleResult" -> b.activeFolder \in Folders /\ b.retiredGeneration > 0
+    [] a = "FireAdvance" -> b.advance /= NoAdvance
+
+RequestedActionWasAdmissible == event.action /= "Init" => ReferenceAdmissible(event.before, event.action, event.request)
 
 =============================================================================
