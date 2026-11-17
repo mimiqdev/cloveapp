@@ -353,7 +353,7 @@ extension GridCollectionView {
         /// old place is measured and after the new cells arrive (PRD Grid, P0-11).
         ///
         /// Group Focus replaces the folder's run with the group's own run: entering starts that
-        /// run at its header, folding gives the folder back its place, and both levels bring the
+        /// run at its header, folding gives the folder back its place, and later changes bring the
         /// current photo into view (issue #309).
         func apply(
             sections newSections: [GridSection], groups newGroups: [BrowsingGroup],
@@ -480,13 +480,15 @@ extension GridCollectionView {
                 if collectionView.bounds.height > 0 {
                     collectionView.layoutIfNeeded()
                 }
-                // The focused run starts at its count header and fold control.
+                // Group Focus opens on its count header and fold control, so the fold is always
+                // discoverable even when the Representative Photo is far down a long run. A member
+                // beyond that first viewport is not centered away from them (#290, #309).
                 scrollToClampedOffsetY(-collectionView.adjustedContentInset.top)
+            } else if leavesFocus || followsMoved {
+                // Later changes follow their photo: the member the person chooses inside Group
+                // Focus, or the stack a fold leaves (#225, #241, #290).
+                follow()
             }
-
-            // Each level brings the current photo into view: the member the person chose inside
-            // Group Focus, or the stack the fold left (#225, #241, #290, #309).
-            if entersFocus || leavesFocus || followsMoved { follow() }
         }
 
         /// One cell tapped: multi-select toggles it, a collapsed cover opens its group, and any
@@ -607,8 +609,9 @@ extension GridCollectionView {
             return nil
         }
 
-        /// Keeps the photo on screen in view, so the Duo's split pane always shows the open
-        /// member and its grid reopens on the photo the person left (#225, #241).
+        /// Keeps the photo on screen in view for a change inside a level: the member chosen in
+        /// Group Focus, or the stack a fold leaves (#225, #241, #290). Entry does not use it, so a
+        /// long run's header and fold control stay where the person can find them (#309).
         private func follow() {
             guard followsCurrentPhoto, let collectionView, let currentPhoto,
                 let cell = GridCellItem.cell(

@@ -383,6 +383,139 @@ struct GroupAnchorTests {
         #expect(abs(stackFrameAfter.minY - stackFrameBefore.minY) <= 0.5)
     }
 
+    /// #290, #309: direct entry uses the group's Representative Photo, which can be its last
+    /// member. Entering then keeps the run's count header and fold control on screen instead of
+    /// centering that member away from them, and later navigation still follows the chosen member.
+    @Test func timelineEntryOnALateRepresentativeKeepsTheHeaderAndFoldOnScreen() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        let (photos, groups, groupID, members) = makeSyntheticGrid(
+            beforeCount: 16, groupMemberCount: 14, afterCount: 6)
+
+        // The Representative Photo rule picks the highest-rated member, so a late member can be
+        // the photo Detail opens on through BrowsingModel.openGroup.
+        var ratedPhotos = photos
+        let lateIndex = try #require(ratedPhotos.firstIndex(where: { $0.id == members[13] }))
+        ratedPhotos[lateIndex].marks.rating = try #require(Rating(rawValue: 5))
+        let representative = try #require(
+            BrowsingGroup.representative(
+                of: ratedPhotos.filter { members.contains($0.id) }))
+        #expect(representative.id == members[13])
+
+        let state = GridAnchorHarnessState(
+            photos: ratedPhotos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
+            expandedGroup: nil, currentPhoto: representative.id)
+        let host = UIHostingController(
+            rootView: GridAnchorHarness(state: state, theme: .light, columnCount: 2))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 250, height: 480)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(250))
+
+        let collectionView = try #require(findSubview(ofType: UICollectionView.self, in: window))
+        let stackPath = try #require(
+            indexPath(for: .group(groupID), in: collectionView, state: state))
+        let stackAttrs = try #require(collectionView.layoutAttributesForItem(at: stackPath))
+        let insets = collectionView.adjustedContentInset
+        let desiredOffsetY = max(
+            -insets.top,
+            stackAttrs.frame.maxY + 8 - (collectionView.bounds.height - insets.bottom))
+        collectionView.setContentOffset(CGPoint(x: 0, y: desiredOffsetY), animated: false)
+        collectionView.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+
+        // The tap that opens the group, at the late Representative Photo.
+        state.expandedGroup = groupID
+        try await Task.sleep(for: .milliseconds(250))
+
+        let viewport = viewportScreenBounds(in: collectionView, window: window)
+        let currentInsets = collectionView.adjustedContentInset
+        let headerFrame = try #require(groupHeaderFrame(in: collectionView, window: window))
+        let foldButton = try #require(findFoldButton(in: collectionView))
+        let foldFrame = foldButton.convert(foldButton.bounds, to: window)
+        let firstMemberFrame = try #require(
+            itemScreenFrame(IndexPath(item: 0, section: 0), in: collectionView, window: window))
+        let lateMemberFrame = try #require(
+            itemScreenFrame(IndexPath(item: 13, section: 0), in: collectionView, window: window))
+
+        #expect(collectionView.numberOfItems(inSection: 0) == 14)
+        // Entry keeps the run's own top as the viewport, not the late member centered.
+        #expect(abs(collectionView.contentOffset.y + currentInsets.top) <= 0.5)
+        #expect(headerFrame.minY >= viewport.top - 0.5)
+        #expect(headerFrame.minY - viewport.top <= GridGroupRun.inset + 2)
+        #expect(foldFrame.minY >= viewport.top - 0.5)
+        #expect(firstMemberFrame.minY >= viewport.top - 0.5)
+        #expect(firstMemberFrame.maxY <= viewport.bottom + 0.5)
+        #expect(lateMemberFrame.minY > viewport.bottom - 0.5)
+
+        // Later navigation still follows the chosen member into view.
+        state.currentPhoto = members[12]
+        try await Task.sleep(for: .milliseconds(250))
+        let chosenFrame = try #require(
+            itemScreenFrame(IndexPath(item: 12, section: 0), in: collectionView, window: window))
+        #expect(chosenFrame.minY >= viewport.top - 0.5)
+        #expect(chosenFrame.maxY <= viewport.bottom + 0.5)
+    }
+
+    /// #309: the pane can open already in Group Focus, as a stack tapped in Grid does. It still
+    /// starts on the run's header and fold control, and folding hands the folder back with the
+    /// group's stack on screen instead of leaving it out of view.
+    @Test func groupFocusOpenedDirectlyOnALateRepresentativeFoldsBackToTheStack() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        let (photos, groups, groupID, members) = makeSyntheticGrid(
+            beforeCount: 16, groupMemberCount: 14, afterCount: 6)
+
+        let state = GridAnchorHarnessState(
+            photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
+            expandedGroup: groupID, currentPhoto: members[13])
+        let host = UIHostingController(
+            rootView: GridAnchorHarness(state: state, theme: .light, columnCount: 2))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 250, height: 480)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+
+        let collectionView = try #require(findSubview(ofType: UICollectionView.self, in: window))
+        let viewport = viewportScreenBounds(in: collectionView, window: window)
+        let insets = collectionView.adjustedContentInset
+        let headerFrame = try #require(groupHeaderFrame(in: collectionView, window: window))
+        let foldButton = try #require(findFoldButton(in: collectionView))
+        let foldFrame = foldButton.convert(foldButton.bounds, to: window)
+        let lateMemberFrame = try #require(
+            itemScreenFrame(IndexPath(item: 13, section: 0), in: collectionView, window: window))
+        #expect(collectionView.numberOfItems(inSection: 0) == 14)
+        #expect(abs(collectionView.contentOffset.y + insets.top) <= 0.5)
+        #expect(headerFrame.minY >= viewport.top - 0.5)
+        #expect(headerFrame.minY - viewport.top <= GridGroupRun.inset + 2)
+        #expect(foldFrame.minY >= viewport.top - 0.5)
+        #expect(lateMemberFrame.minY > viewport.bottom - 0.5)
+
+        // Folding hands the folder back with the group's stack brought on screen.
+        state.expandedGroup = nil
+        try await Task.sleep(for: .milliseconds(250))
+        let stackPath = try #require(
+            indexPath(for: .group(groupID), in: collectionView, state: state))
+        let stackFrame = try #require(
+            itemScreenFrame(stackPath, in: collectionView, window: window))
+        #expect(collectionView.numberOfSections == 1)
+        #expect(collectionView.numberOfItems(inSection: 0) == 23)
+        #expect(stackFrame.minY >= viewport.top - 0.5)
+        #expect(stackFrame.maxY <= viewport.bottom + 0.5)
+    }
+
     /// Leaving Group Focus for the following Timeline photo, as auto-advance does, brings that
     /// photo into view instead of leaving it clipped behind the group's stack.
     @Test func leavingGroupFocusForTheFollowingPhotoShowsIt() async throws {
