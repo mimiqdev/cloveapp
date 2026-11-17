@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""Run TLC on the browsing workflow and prove that selected defects are caught."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+TLA_VERSION = "1.7.4"
+TLA_URL = f"https://github.com/tlaplus/tlaplus/releases/download/v{TLA_VERSION}/tla2tools.jar"
+TLA_SHA256 = "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+JAVA_TOOL = "java@temurin-25.0.5+8.0.LTS"
+SKILL_DIR = Path(__file__).resolve().parent.parent
+ROOT = SKILL_DIR.parent.parent.parent
+MODEL = SKILL_DIR / "model" / "BrowsingWorkflow.tla"
+CONFIG = SKILL_DIR / "model" / "BrowsingWorkflow.cfg"
+BUILD = ROOT / ".build" / "formal-verification"
+JAR = BUILD / "tools" / f"tla2tools-{TLA_VERSION}.jar"
+
+MUTANTS = {
+    "collapsed-stack-marking": {
+        "old": '/\\ (route = "GroupFocus" \\/ ~grouped \\/ currentPhoto = Standalone(activeFolder))',
+        "new": "/\\ TRUE",
+        "invariant": "CollapsedStackIsReadOnly",
+        "defect": "DetailMarkingView.allowsMarkingInput accepts a collapsed Timeline stack.",
+    },
+    "early-group-exit": {
+        "old": "ELSE IF NextUnmarkedAfter(f, p, m) /= NoPhoto THEN",
+        "new": "ELSE IF FALSE THEN",
+        "invariant": "OnlyLastUnmarkedPlansGroupExit",
+        "defect": "DetailTimeline.autoAdvancePlan exits before the final unmarked member.",
+    },
+    "second-pass-group-exit": {
+        "old": """IF ~HasUnmarked(f, m) THEN
+        IF NextGroupMember(f, p) = NoPhoto THEN NoAdvance
+        ELSE [kind |-> "group", target |-> NextGroupMember(f, p),
+              source |-> f, secondPass |-> TRUE]""",
+        "new": """IF ~HasUnmarked(f, m) THEN
+        [kind |-> "exit", target |-> Standalone(f),
+         source |-> f, secondPass |-> TRUE]""",
+        "invariant": "SecondPassNeverPlansGroupExit",
+        "defect": "DetailTimeline.autoAdvancePlan ejects a second-pass edit from Group Focus.",
+    },
+    "stale-generation-write": {
+        "old": "/\\ generation = pendingGeneration[p]",
+        "new": "/\\ TRUE",
+        "invariant": "WriteResultsUseCurrentGeneration",
+        "defect": "FolderLibrarySession publishes a write from an older openGeneration.",
+    },
+    "disconnected-write": {
+        "old": 'CanPublish(p) ==\n    /\\ connected',
+        "new": 'CanPublish(p) ==\n    /\\ TRUE',
+        "invariant": "WriteResultsRequireConnection",
+        "defect": "BrowsingModel.persist applies a write after folderLocationLoss.",
+    },
+    "stale-reconnect-detail": {
+        "old": r"""Reconnect ==
+    /\ activeFolder \in Folders
+    /\ ~connected
+    /\ steps < MaxSteps
+    /\ generation' = generation + 1
+    /\ route' = "Grid"
+    /\ scanning' = TRUE
+    /\ connected' = TRUE
+    /\ expandedGroup' = NoFolder
+    /\ currentPhoto' = NoPhoto""",
+        "new": r"""Reconnect ==
+    /\ activeFolder \in Folders
+    /\ ~connected
+    /\ steps < MaxSteps
+    /\ generation' = generation + 1
+    /\ route' = route
+    /\ scanning' = TRUE
+    /\ connected' = TRUE
+    /\ expandedGroup' = NoFolder
+    /\ currentPhoto' = currentPhoto""",
+        "invariant": "ReconnectHidesOldState",
+        "defect": "BrowsingModel.reopenNow keeps old Detail visible while the fresh scan runs.",
+    },
+    "representative-collapse-keeps-zoom": {
+        "old": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = "fit"
+    /\ anchor' = "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "new": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = IF currentPhoto = Representative(activeFolder, marks) THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = Representative(activeFolder, marks) THEN anchor ELSE "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "invariant": "OutsideGroupNavigationReturnsFit",
+        "defect": "DetailMarkingView keeps zoom when collapseGroup stays on the Representative.",
+        "sourceFinding": True,
+    },
+    "group-step-resets-zoom": {
+        "old": r"""/\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)
+    /\ advance' = NoAdvance
+    /\ event' = Event("StepGroup")
+    /\ steps' = steps + 1
+    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
+                   expandedGroup, scale, anchor, diskMarks, marks, sourceGeneration,
+                   pendingWrites, pendingGeneration, pendingValue, undo>>""",
+        "new": r"""/\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)
+    /\ scale' = "fit"
+    /\ anchor' = "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("StepGroup")
+    /\ steps' = steps + 1
+    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
+                   expandedGroup, diskMarks, marks, sourceGeneration,
+                   pendingWrites, pendingGeneration, pendingValue, undo>>""",
+        "invariant": "GroupNavigationKeepsZoom",
+        "defect": "DetailMarkingView resets scale and anchor while moving inside Group Focus.",
+    },
+}
+
+
+def java_executable() -> str:
+    if os.environ.get("JAVA"):
+        return os.environ["JAVA"]
+    mise = shutil.which("mise")
+    if mise:
+        result = subprocess.run(
+            [mise, "which", "java", "--tool", JAVA_TOOL],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    java = shutil.which("java")
+    if java:
+        return java
+    raise RuntimeError(f"Java is required. Set JAVA or install {JAVA_TOOL} with mise.")
+
+
+def install_tlc() -> None:
+    if JAR.is_file():
+        digest = hashlib.sha256(JAR.read_bytes()).hexdigest()
+        if digest == TLA_SHA256:
+            return
+        raise RuntimeError(f"{JAR} does not match the pinned TLA+ {TLA_VERSION} release.")
+    JAR.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=JAR.parent, delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        with urllib.request.urlopen(TLA_URL) as response, temporary_path.open("wb") as output:
+            shutil.copyfileobj(response, output)
+        digest = hashlib.sha256(temporary_path.read_bytes()).hexdigest()
+        if digest != TLA_SHA256:
+            raise RuntimeError("The downloaded TLA+ tools do not match the pinned release.")
+        temporary_path.replace(JAR)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def run_tlc(spec: Path, run_dir: Path, java: str) -> tuple[int, str]:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    local_config = run_dir / CONFIG.name
+    shutil.copyfile(CONFIG, local_config)
+    local_spec = run_dir / MODEL.name
+    if spec != local_spec:
+        shutil.copyfile(spec, local_spec)
+    command = [
+        java,
+        "-XX:+UseParallelGC",
+        "-jar",
+        str(JAR),
+        "-workers",
+        "1",
+        "-fp",
+        "0",
+        "-lncheck",
+        "final",
+        "-nowarning",
+        "-config",
+        local_config.name,
+        local_spec.name,
+    ]
+    result = subprocess.run(command, cwd=run_dir, text=True, capture_output=True)
+    output = result.stdout + result.stderr
+    (run_dir / "tlc.out").write_text(output)
+    return result.returncode, output
+
+
+def action_path(output: str) -> list[str]:
+    return re.findall(r"^State \d+: <([^ >]+)", output, flags=re.MULTILINE)
+
+
+def state_count(output: str) -> str:
+    matches = re.findall(r"(\d+) states generated, (\d+) distinct states found, 0 states left on queue", output)
+    if not matches:
+        return "state count unavailable"
+    generated, distinct = matches[-1]
+    return f"{generated} states generated, {distinct} distinct, queue empty"
+
+
+def check_good(java: str) -> bool:
+    code, output = run_tlc(MODEL, BUILD / "good", java)
+    passed = code == 0 and "Model checking completed. No error has been found." in output
+    print(f"{'PASS' if passed else 'FAIL'} current model: {state_count(output)}")
+    if not passed:
+        print(output[-8000:])
+    return passed
+
+
+def check_mutant(name: str, java: str) -> bool:
+    mutant = MUTANTS[name]
+    source = MODEL.read_text()
+    if source.count(mutant["old"]) != 1:
+        print(f"FAIL {name}: mutation anchor count is {source.count(mutant['old'])}, expected 1")
+        return False
+    run_dir = BUILD / "mutants" / name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    spec = run_dir / MODEL.name
+    spec.write_text(source.replace(mutant["old"], mutant["new"]))
+    code, output = run_tlc(spec, run_dir, java)
+    expected = f"Invariant {mutant['invariant']} is violated."
+    passed = code != 0 and expected in output
+    path = action_path(output)
+    result = {
+        "mutant": name,
+        "defect": mutant["defect"],
+        "expectedInvariant": mutant["invariant"],
+        "caught": passed,
+        "counterexample": path,
+    }
+    (run_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    if passed:
+        print(f"PASS {name}: {mutant['invariant']}")
+        print("  " + " -> ".join(path))
+    else:
+        print(f"FAIL {name}: expected {mutant['invariant']}; TLC exit {code}")
+        print(output[-8000:])
+    return passed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--good-only", action="store_true")
+    selection.add_argument("--mutant", choices=sorted(MUTANTS))
+    args = parser.parse_args()
+
+    install_tlc()
+    java = java_executable()
+    print(f"TLA+ tools {TLA_VERSION}; Java: {java}")
+    if args.mutant:
+        return 0 if check_mutant(args.mutant, java) else 1
+    if not check_good(java):
+        return 1
+    if args.good_only:
+        return 0
+    results = [check_mutant(name, java) for name in MUTANTS]
+    passed = sum(results)
+    print(f"Mutation score: {passed}/{len(results)} expected failures caught")
+    return 0 if all(results) else 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
