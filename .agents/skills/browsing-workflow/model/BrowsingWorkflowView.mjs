@@ -52,10 +52,15 @@ export function step(action, from, to) {
     StepGroup: "you move inside the burst",
     Inspect100: "you inspect at 100%",
     ReturnFit: "you return to fit",
-    Mark: "you mark the photo",
+    Mark: `you mark the photo ${to.marks?.[to.currentPhoto] === "R" ? "Rated" : "Rejected"}`,
     UndoLastMark: "you undo the last mark",
     FireAdvance: "auto-advance fires",
-    CompleteWrite: "the write result arrives",
+    BeginWrite: "the oldest action starts writing",
+    CompleteDisk: "the active disk write completes",
+    RecordWrite: "the library records the completed action",
+    ReadConfirmation: "the scene reads the confirmation and preserves desired input",
+    FinishWrite: "the consumer returns and starts the next queued action",
+    StaleResult: "an old scan or preparation callback arrives",
   };
   return labels[action] ?? action;
 }

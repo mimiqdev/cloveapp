@@ -18,15 +18,18 @@ From the repository root, run:
 .agents/skills/browsing-workflow/scripts/check
 ```
 
-The command checks source drift, runs the current model, and runs nine behavior variants. A
+The command checks source drift, runs the current model, and runs nineteen model variants. A
 successful run has these results:
 
 - Covered source matches the reviewed sync commit.
 - The current model passes every invariant with an empty TLC queue.
-- Nine model mutations fail on their named invariants.
-- The final line reports `Mutation score: 9/9 expected failures caught`.
+- Nineteen model mutations fail on their named invariants.
+- The mutation summary reports `Mutation score: 19/19 expected failures caught`.
+- The separate reachability query finds the Rated-confirmed, Reject-pending, location-loss rollback
+  state. Its intentionally failing predicate is a witness, not a failed safety invariant.
 
 Use `--good-only` for only the current model. Use `--mutant <name>` to reproduce one counterexample.
+Use `--witness-only` for the rollback reachability query. All modes enforce source drift.
 The script prints each counterexample as an action path and stores full TLC output under
 `.build/formal-verification/`. The TLA+ version, download URL, checksum, and Java selection are in
 [the tool decision record](../../../docs/decisions/tla-plus-workflow-verification.md).
@@ -64,6 +67,8 @@ The model was manually compared with these functions at that commit:
 | `Clove/Detail/DetailMarkingView.swift` | `isReadOnlyCollapsedGroup`, `allowsMarkingInput`, `apply`, `loadPreview`, `refreshPrefetchForOrderChange`, zoom capture and restoration |
 | `Clove/Detail/DetailFilmstrip.swift` | Timeline and Group Focus dispatch to open, select, expand, and collapse |
 | `Clove/Detail/MarkAutoAdvance.swift` | `schedule` and `cancel` |
+| `Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift` | `apply`, `shown`, `finish`, `removeAll`, and `DesiredMarkRestore.change` |
+| `Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift` | `submit`, `beginNext`, `hasPendingMark`, `removePending`, and `finish` |
 | `design/handoff/interactions.md` | App flow, Groups in detail, Opening a folder, and Errors |
 
 Before trusting a run after a source change, compare the covered files with the sync commit:
@@ -79,6 +84,8 @@ git diff 29702ce651a7de77cf642b38d1898023ae775476 -- \
   Clove/Detail/DetailMarkingView.swift \
   Clove/Detail/DetailFilmstrip.swift \
   Clove/Detail/MarkAutoAdvance.swift \
+  Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift \
+  Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift \
   design/handoff/interactions.md
 ```
 
@@ -107,10 +114,39 @@ The earlier always-fit interpretation was a specification error. Correcting it f
 owner-approved exception; it does not weaken a rule to conceal a product bug. See
 [the correspondence record](references/findings.md).
 
+## Check Undo and ordered writes
+
+Read [the correspondence and evidence record](references/findings.md) for the source await boundaries
+and the exact limitations of each action. The prior model could pass when Undo restored nothing and
+coalesced same-photo actions into one latest value. Those were model verification defects, not
+Swift defects. The old 9/9 mutation result provides no evidence of Undo correctness.
+
+The current model checks immediate prior-mark restoration, return to the edited photo and correct
+Timeline or Group Focus level, and cancellation of pending auto-advance. Four separate Undo mutants
+break those guarantees. Undo uses the source's compare-and-restore guard and one latest edit, with
+rating-only marks in this small world.
+
+The write FIFO has a total capacity of two immutable actions, including the active action. It can
+hold an older Rated action and a newer Rejected action for the same photo. Disk completion, library
+recording, scene confirmation reads, and consumer completion are distinct transitions. Pending
+desired input wins over an older confirmation. Location loss drops queued work and desired marks,
+then shows the scene's latest confirmed marks. An admitted disk operation can still complete after
+loss; a new write cannot start and the disconnected persist return cannot publish desired state.
+
+The normal command also queries reachability of this state sequence:
+
+```text
+enqueue Rated -> enqueue Rejected -> start older Rated -> complete Rated on disk -> record Rated
+-> scene confirms Rated but still shows desired Rejected -> lose location -> show confirmed Rated
+```
+
+Git drift detection covers both the desired-mark store and the FIFO implementation. It does not
+prove those Swift implementations. Keep the full and chart configurations' invariant lists aligned.
+
 ## Separate the evidence
 
 - Bounded model safety covers all enabled action orders through depth 12 in the stated small world.
-- Model mutation sensitivity covers nine injected defects and their expected invariants.
+- Model mutation sensitivity covers nineteen injected defects and their expected invariants.
 - Source correspondence comes from manual review at the sync commit and Git drift detection after
   that review. The drift gate requires another review when covered source changes. It does not
   establish arbitrary Swift behavior with regexes or model-only mutations.
@@ -132,12 +168,22 @@ The current model uses these limits and assumptions:
   groups over time.
 - Auto-advance uses the default `nextPhoto` destination and an explicit fire action. The 300 ms
   timer, `stay`, `nextUnmarkedPhoto`, and `Reject N unmarked` finishing are outside the model.
-- One latest Undo is modeled. Pending writes coalesce per photo. FIFO ordering across different
-  photos, write failures other than location loss, and storage retries are outside the model.
-  Open and Reconnect retain abstract old completion events to stress the generation guard, even
-  though the implementation drains admitted writes. This over-approximates possible schedules.
-  Location loss blocks new result publication; an operation already touching a file is outside
-  the model.
+- One latest rating-only Undo is modeled. A global FIFO holds at most two actions total, including
+  its active head. Admission is bounded when full. It never coalesces newer input into an active
+  write. Same-photo ordering and both confirmation/publication paths are explicit. Multi-item
+  batches, longer queues, the full cross-photo scheduling design, connected write failures, and
+  storage retries are outside the model.
+- Close, Open, and Reconnect are modeled only after this FIFO drains. The UI's immediate departure
+  while writes drain, concurrent open requests, and delayed close installation are outside this
+  bounded check. Pending-write states are explored within Detail and across Back to Grid.
+- A successful admitted disk write may finish after loss. The physical disk, library-confirmed
+  store, scene-confirmed marks, desired overlay, and shown marks are separate. A queued read
+  confirmation may still update confirmed marks after loss, as the source stream permits.
+  The connection invariant guards new admission and the persist-return publication, not every
+  physical completion or confirmation read.
+- Replaced sessions cannot carry active writes across a drained replacement. A deliberately
+  hostile old-generation scan/preparation callback probes the generation-publication boundary
+  instead. It over-approximates a buffered callback; it is not a stale-write interleaving.
 - Zoom has only fit and 100%, with centre and eye anchors. Pinch values, native-scale conversion,
   pan geometry, RAW rendering, Vision, focus analysis, and UIKit layout are outside the model.
 - Filters, one-visible-member groups, several bursts per folder, selection, batch marks, Move

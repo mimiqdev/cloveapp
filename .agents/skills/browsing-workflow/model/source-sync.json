@@ -10,6 +10,8 @@
     "Clove/Detail/DetailMarkingView.swift",
     "Clove/Detail/DetailFilmstrip.swift",
     "Clove/Detail/MarkAutoAdvance.swift",
+    "Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift",
+    "Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift",
     "design/handoff/interactions.md"
   ]
 }

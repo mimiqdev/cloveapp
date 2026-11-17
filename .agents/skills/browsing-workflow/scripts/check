@@ -51,24 +51,27 @@ MUTANTS = {
         "invariant": "SecondPassNeverPlansGroupExit",
         "defect": "DetailTimeline.autoAdvancePlan ejects a second-pass edit from Group Focus.",
     },
-    "stale-generation-write": {
-        "old": "/\\ generation = pendingGeneration[p]",
-        "new": "/\\ TRUE",
-        "invariant": "WriteResultsUseCurrentGeneration",
-        "defect": "FolderLibrarySession publishes a write from an older openGeneration.",
+    "stale-generation-result": {
+        "old": "sourceGeneration' = IF retiredGeneration = generation",
+        "new": "sourceGeneration' = IF TRUE",
+        "invariant": "FreshFolderMarksUseCurrentGeneration",
+        "defect": "An old scan/preparation callback publishes into the replacement session.",
     },
-    "disconnected-write": {
-        "old": 'CanPublish(p) ==\n    /\\ connected',
-        "new": 'CanPublish(p) ==\n    /\\ TRUE',
+    "disconnected-publication": {
+        "old": 'CanPublish ==\n    /\\ connected',
+        "new": 'CanPublish ==\n    /\\ TRUE',
         "invariant": "WriteResultsRequireConnection",
-        "defect": "BrowsingModel.persist applies a write after folderLocationLoss.",
+        "defect": "BrowsingModel.persist refreshes desired state after folderLocationLoss.",
     },
     "stale-reconnect-detail": {
         "old": r"""Reconnect ==
     /\ activeFolder \in Folders
     /\ ~connected
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
     /\ steps < MaxSteps
     /\ generation' = generation + 1
+    /\ retiredGeneration' = generation
     /\ route' = "Grid"
     /\ scanning' = TRUE
     /\ connected' = TRUE
@@ -77,8 +80,11 @@ MUTANTS = {
         "new": r"""Reconnect ==
     /\ activeFolder \in Folders
     /\ ~connected
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
     /\ steps < MaxSteps
     /\ generation' = generation + 1
+    /\ retiredGeneration' = generation
     /\ route' = route
     /\ scanning' = TRUE
     /\ connected' = TRUE
@@ -116,24 +122,87 @@ MUTANTS = {
         "defect": "DetailMarkingView resets zoom when collapseGroup leaves the Representative on stage.",
     },
     "group-step-resets-zoom": {
-        "old": r"""/\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)
-    /\ advance' = NoAdvance
-    /\ event' = Event("StepGroup")
-    /\ steps' = steps + 1
-    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
-                   expandedGroup, scale, anchor, diskMarks, marks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue, undo>>""",
-        "new": r"""/\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)
-    /\ scale' = "fit"
-    /\ anchor' = "centre"
-    /\ advance' = NoAdvance
-    /\ event' = Event("StepGroup")
-    /\ steps' = steps + 1
-    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
-                   expandedGroup, diskMarks, marks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue, undo>>""",
+        "action": "StepGroup(offset)",
+        "old": r"""expandedGroup, scale, anchor, diskMarks""",
+        "new": r"""expandedGroup, diskMarks""",
+        "extra": [(r"/\ advance' = NoAdvance", r"/\ scale' = " + '"fit"' + "\n    " + r"/\ anchor' = " + '"centre"' + "\n    " + r"/\ advance' = NoAdvance")],
         "invariant": "GroupNavigationKeepsZoom",
-        "defect": "DetailMarkingView resets scale and anchor while moving inside Group Focus.",
+        "defect": "Group navigation incorrectly resets zoom.",
+    },
+    "undo-does-not-restore": {
+        "action": "UndoLastMark",
+        "old": r"/\ marks' = [marks EXCEPT ![undo.photo] = undo.before]",
+        "new": r"/\ marks' = marks",
+        "invariant": "UndoRestoresPriorMark",
+        "defect": "Undo submits a restore but fails to restore the immediate shown mark.",
+    },
+    "undo-wrong-photo": {
+        "action": "UndoLastMark",
+        "old": r"/\ currentPhoto' = undo.photo",
+        "new": r"/\ currentPhoto' = IF undo.photo = Member(activeFolder, 1) THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)",
+        "invariant": "UndoReturnsToTarget",
+        "defect": "Undo navigates to another photo instead of the edited photo.",
+    },
+    "undo-wrong-level": {
+        "action": "UndoLastMark",
+        "old": r"""/\ route' = IF grouped /\ undo.photo \in MemberSet(activeFolder)
+        THEN "GroupFocus" ELSE "Timeline"
+    /\ expandedGroup' = IF grouped /\ undo.photo \in MemberSet(activeFolder)
+        THEN activeFolder ELSE NoFolder""",
+        "new": r"""/\ route' = "Timeline"
+    /\ expandedGroup' = NoFolder""",
+        "invariant": "UndoReturnsToTarget",
+        "defect": "Undo returns a grouped member in collapsed Timeline instead of Group Focus.",
+    },
+    "undo-keeps-auto-advance": {
+        "action": "UndoLastMark",
+        "old": r"/\ advance' = NoAdvance",
+        "new": r"/\ advance' = advance",
+        "invariant": "UndoCancelsAutoAdvance",
+        "defect": "Undo fails to cancel the pending DetailScreen advance.",
+    },
+    "older-finish-overwrites-desired": {
+        "action": "FinishWrite",
+        "old": '[p \\in Photos |-> IF desired\'[p] /= "none" THEN desired\'[p] ELSE libraryMarks[p]] ELSE marks',
+        "new": 'libraryMarks ELSE marks',
+        "invariant": "NewerDesiredInputWins",
+        "defect": "Older persist completion overwrites a newer shown mark while it is queued.",
+    },
+    "older-finish-clears-newer-desired": {
+        "action": "FinishWrite",
+        "old": r"CanPublish /\ ~HasQueuedPhoto(Head(writeQueue).photo)",
+        "new": "CanPublish",
+        "invariant": "NewerDesiredInputWins",
+        "defect": "finishPendingMarks clears a newer queued desired input with the older action.",
+    },
+    "older-read-overwrites-desired": {
+        "action": "ReadConfirmation",
+        "old": r"""/\ marks' = [p \in Photos |-> IF desired[p] /= "none" THEN desired[p] ELSE libraryMarks[p]]""",
+        "new": r"/\ marks' = libraryMarks",
+        "invariant": "NewerDesiredInputWins",
+        "defect": "Buffered library confirmation overrides DesiredPhotoMarks.",
+    },
+    "loss-keeps-desired": {
+        "action": "LoseLocation",
+        "old": r"""/\ marks' = [p \in Photos |->
+        IF FolderOf[p] = activeFolder THEN confirmedMarks[p] ELSE marks[p]]""",
+        "new": r"/\ marks' = marks",
+        "invariant": "LocationLossShowsLatestConfirmed",
+        "defect": "Location loss leaves the dropped desired input on screen.",
+    },
+    "loss-uses-unpublished-disk": {
+        "action": "LoseLocation",
+        "old": 'THEN confirmedMarks[p] ELSE marks[p]',
+        "new": 'THEN diskMarks[p] ELSE marks[p]',
+        "invariant": "LocationLossShowsLatestConfirmed",
+        "defect": "Location loss fabricates a UI confirmation from an unpublished disk write.",
+    },
+    "disk-completes-newest-input": {
+        "action": "CompleteDisk",
+        "old": r"""/\ diskMarks' = [diskMarks EXCEPT ![Head(writeQueue).photo] = Head(writeQueue).value]""",
+        "new": r"""/\ diskMarks' = [diskMarks EXCEPT ![Head(writeQueue).photo] = writeQueue[Len(writeQueue)].value]""",
+        "invariant": "DiskCompletionIsFIFO",
+        "defect": "An older active write commits the newest queued input instead of its own value.",
     },
 }
 
@@ -208,10 +277,11 @@ def install_tlc() -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def run_tlc(spec: Path, run_dir: Path, java: str) -> tuple[int, str]:
+def run_tlc(spec: Path, run_dir: Path, java: str, config: Path = CONFIG) -> tuple[int, str]:
     run_dir.mkdir(parents=True, exist_ok=True)
     local_config = run_dir / CONFIG.name
-    shutil.copyfile(CONFIG, local_config)
+    if config != local_config:
+        shutil.copyfile(config, local_config)
     local_spec = run_dir / MODEL.name
     if spec != local_spec:
         shutil.copyfile(spec, local_spec)
@@ -249,7 +319,27 @@ def state_count(output: str) -> str:
     return f"{generated} states generated, {distinct} distinct, queue empty"
 
 
+def check_action_frames(source: str) -> None:
+    """Reject contradictory TLA+ action frames that silently disable interleavings."""
+    variables = set(re.findall(r"[A-Za-z][A-Za-z0-9_]*", source.split("VARIABLES\n", 1)[1].split("\n\nvars ==", 1)[0]))
+    for block in source.split("\n\n"):
+        frame = re.search(r"UNCHANGED <<([^>]+)>>", block)
+        if frame is None:
+            continue
+        unchanged = set(re.findall(r"[A-Za-z][A-Za-z0-9_]*", frame[1]))
+        assigned = set(re.findall(r"([A-Za-z][A-Za-z0-9_]*)' =", block))
+        overlap = assigned & unchanged
+        missing = variables - assigned - unchanged
+        if overlap or missing:
+            action = block.split(" ==", 1)[0].strip()
+            raise RuntimeError(f"TLA+ action frame {action}: assigned and unchanged {sorted(overlap)}, missing {sorted(missing)}")
+
+
 def check_good(java: str) -> bool:
+    check_action_frames(MODEL.read_text())
+    chart_config = CONFIG.with_name("BrowsingWorkflowChart.cfg")
+    if CONFIG.read_text().split("INVARIANTS", 1)[1] != chart_config.read_text().split("INVARIANTS", 1)[1]:
+        raise RuntimeError("Full and chart configuration invariant lists differ")
     code, output = run_tlc(MODEL, BUILD / "good", java)
     passed = code == 0 and "Model checking completed. No error has been found." in output
     print(f"{'PASS' if passed else 'FAIL'} current model: {state_count(output)}")
@@ -261,16 +351,26 @@ def check_good(java: str) -> bool:
 def check_mutant(name: str, java: str) -> bool:
     mutant = MUTANTS[name]
     source = MODEL.read_text()
-    if source.count(mutant["old"]) != 1:
+    if "action" in mutant:
+        start = source.index(mutant["action"] + " ==")
+        end = source.index("\n\n", start)
+        block = source[start:end]
+        for old, new in [(mutant["old"], mutant["new"]), *mutant.get("extra", [])]:
+            if block.count(old) != 1:
+                raise RuntimeError(f"{name}: scoped mutation anchor count {block.count(old)}, expected 1")
+            block = block.replace(old, new)
+        source = source[:start] + block + source[end:]
+    elif source.count(mutant["old"]) != 1:
         print(f"FAIL {name}: mutation anchor count is {source.count(mutant['old'])}, expected 1")
         return False
     run_dir = BUILD / "mutants" / name
     run_dir.mkdir(parents=True, exist_ok=True)
     spec = run_dir / MODEL.name
-    spec.write_text(source.replace(mutant["old"], mutant["new"]))
+    spec.write_text(source if "action" in mutant else source.replace(mutant["old"], mutant["new"]))
+    check_action_frames(spec.read_text())
     code, output = run_tlc(spec, run_dir, java)
     expected = f"Invariant {mutant['invariant']} is violated."
-    passed = code != 0 and expected in output
+    passed = code == 12 and expected in output
     path = action_path(output)
     result = {
         "mutant": name,
@@ -289,10 +389,27 @@ def check_mutant(name: str, java: str) -> bool:
     return passed
 
 
+def check_rollback_witness(java: str) -> bool:
+    """Expect one reachability predicate to fail, not a production safety rule."""
+    run_dir = BUILD / "rated-rollback-witness"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    config = run_dir / CONFIG.name
+    config.write_text(CONFIG.read_text() + "  NoRatedRollbackWitness\n")
+    code, output = run_tlc(MODEL, run_dir, java, config)
+    passed = code == 12 and "Invariant NoRatedRollbackWitness is violated." in output
+    print(f"{'PASS' if passed else 'FAIL'} reachability: older Rated confirmed while Reject pending, then loss shows Rated")
+    if passed:
+        print("  " + " -> ".join(action_path(output)))
+    else:
+        print(output[-8000:])
+    return passed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--good-only", action="store_true")
+    selection.add_argument("--witness-only", action="store_true")
     selection.add_argument("--mutant", choices=sorted(MUTANTS))
     args = parser.parse_args()
 
@@ -301,6 +418,8 @@ def main() -> int:
     install_tlc()
     java = java_executable()
     print(f"TLA+ tools {TLA_VERSION}; Java: {java}")
+    if args.witness_only:
+        return 0 if check_rollback_witness(java) else 1
     if args.mutant:
         return 0 if check_mutant(args.mutant, java) else 1
     if not check_good(java):
@@ -310,7 +429,8 @@ def main() -> int:
     results = [check_mutant(name, java) for name in MUTANTS]
     passed = sum(results)
     print(f"Mutation score: {passed}/{len(results)} expected failures caught")
-    return 0 if all(results) else 1
+    witness_passed = check_rollback_witness(java)
+    return 0 if all(results) and witness_passed else 1
 
 
 if __name__ == "__main__":

@@ -1,14 +1,14 @@
 ----------------------- MODULE BrowsingWorkflow -----------------------
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANT MaxSteps
+CONSTANTS MaxSteps, MaxPending
 
 Folders == {"A", "B"}
 Photos == {"a0", "a1", "aS", "b0", "b1", "bS"}
 NoFolder == "none"
 NoPhoto == "none"
 NoAdvance == [kind |-> "none", target |-> "none", source |-> "none", secondPass |-> FALSE]
-NoUndo == [folder |-> "none", generation |-> 0, photo |-> "none", before |-> "U"]
+NoUndo == [folder |-> "none", generation |-> 0, photo |-> "none", before |-> "U", after |-> "U"]
 
 FolderOf == [
     a0 |-> "A", a1 |-> "A", aS |-> "A",
@@ -84,9 +84,12 @@ VARIABLES
     diskMarks,
     marks,
     sourceGeneration,
-    pendingWrites,
-    pendingGeneration,
-    pendingValue,
+    writeQueue,
+    writePhase,
+    desired,
+    confirmedMarks,
+    libraryMarks,
+    retiredGeneration,
     undo,
     advance,
     event,
@@ -94,8 +97,8 @@ VARIABLES
 
 vars == <<
     route, activeFolder, generation, scanning, grouped, connected, expandedGroup,
-    currentPhoto, scale, anchor, diskMarks, marks, sourceGeneration, pendingWrites,
-    pendingGeneration, pendingValue, undo, advance, event, steps
+    currentPhoto, scale, anchor, diskMarks, marks, sourceGeneration, writeQueue,
+    writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo, advance, event, steps
 >>
 
 BaseEvent(a, oldScale, oldAnchor, oldPhoto, oldRoute, oldExpanded) == [
@@ -111,9 +114,21 @@ BaseEvent(a, oldScale, oldAnchor, oldPhoto, oldRoute, oldExpanded) == [
     oldAnchor |-> oldAnchor,
     oldPhoto |-> oldPhoto,
     oldRoute |-> oldRoute,
-    oldExpanded |-> oldExpanded
+    oldExpanded |-> oldExpanded,
+    undoPhoto |-> NoPhoto,
+    undoBefore |-> "U",
+    completedValue |-> "U",
+    oldShown |-> "U",
+    lastPendingValue |-> "none",
+    oldQueueLength |-> 0,
+    oldWritePhase |-> "idle",
+    oldActiveValue |-> "none"
 ]
-Event(a) == BaseEvent(a, scale, anchor, currentPhoto, route, expandedGroup)
+Event(a) == [BaseEvent(a, scale, anchor, currentPhoto, route, expandedGroup) EXCEPT
+    !.oldShown = IF currentPhoto \in Photos THEN marks[currentPhoto] ELSE "U",
+    !.lastPendingValue = IF writeQueue /= <<>> THEN writeQueue[Len(writeQueue)].value ELSE "none",
+    !.oldQueueLength = Len(writeQueue), !.oldWritePhase = writePhase,
+    !.oldActiveValue = IF writeQueue /= <<>> THEN Head(writeQueue).value ELSE "none"]
 
 Init ==
     /\ route = "Entry"
@@ -129,9 +144,12 @@ Init ==
     /\ diskMarks = [p \in Photos |-> "U"]
     /\ marks = diskMarks
     /\ sourceGeneration = [p \in Photos |-> 0]
-    /\ pendingWrites = {}
-    /\ pendingGeneration = [p \in Photos |-> 0]
-    /\ pendingValue = [p \in Photos |-> "U"]
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
+    /\ desired = [p \in Photos |-> "none"]
+    /\ confirmedMarks = diskMarks
+    /\ libraryMarks = diskMarks
+    /\ retiredGeneration = 0
     /\ undo = NoUndo
     /\ advance = NoAdvance
     /\ event = BaseEvent("Init", "fit", "centre", NoPhoto, "Entry", NoFolder)
@@ -140,8 +158,11 @@ Init ==
 OpenFolder(f) ==
     /\ route = "Entry"
     /\ f \in Folders
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
     /\ steps < MaxSteps
     /\ generation' = generation + 1
+    /\ retiredGeneration' = generation
     /\ activeFolder' = f
     /\ route' = "Grid"
     /\ scanning' = TRUE
@@ -154,13 +175,16 @@ OpenFolder(f) ==
     /\ advance' = NoAdvance
     /\ event' = Event("OpenFolder")
     /\ steps' = steps + 1
-    /\ UNCHANGED <<grouped, diskMarks, marks, sourceGeneration, pendingWrites,
-                   pendingGeneration, pendingValue>>
+    /\ UNCHANGED <<grouped, diskMarks, marks, sourceGeneration, writeQueue,
+                   writePhase, desired, confirmedMarks, libraryMarks>>
 
 CloseFolder ==
     /\ route = "Grid"
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
     /\ steps < MaxSteps
     /\ generation' = generation + 1
+    /\ retiredGeneration' = generation
     /\ activeFolder' = NoFolder
     /\ route' = "Entry"
     /\ scanning' = FALSE
@@ -173,14 +197,17 @@ CloseFolder ==
     /\ advance' = NoAdvance
     /\ event' = Event("CloseFolder")
     /\ steps' = steps + 1
-    /\ UNCHANGED <<grouped, diskMarks, marks, sourceGeneration, pendingWrites,
-                   pendingGeneration, pendingValue>>
+    /\ UNCHANGED <<grouped, diskMarks, marks, sourceGeneration, writeQueue,
+                   writePhase, desired, confirmedMarks, libraryMarks>>
 
 Reconnect ==
     /\ activeFolder \in Folders
     /\ ~connected
+    /\ writeQueue = <<>>
+    /\ writePhase = "idle"
     /\ steps < MaxSteps
     /\ generation' = generation + 1
+    /\ retiredGeneration' = generation
     /\ route' = "Grid"
     /\ scanning' = TRUE
     /\ connected' = TRUE
@@ -193,13 +220,15 @@ Reconnect ==
     /\ event' = Event("Reconnect")
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, grouped, diskMarks, marks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue>>
+                   writeQueue, writePhase, desired, confirmedMarks, libraryMarks>>
 
 ScanFinish ==
     /\ activeFolder \in Folders
     /\ scanning
     /\ steps < MaxSteps
     /\ scanning' = FALSE
+    /\ confirmedMarks' = [p \in Photos |-> IF FolderOf[p] = activeFolder THEN diskMarks[p] ELSE confirmedMarks[p]]
+    /\ libraryMarks' = [p \in Photos |-> IF FolderOf[p] = activeFolder THEN diskMarks[p] ELSE libraryMarks[p]]
     /\ marks' = [p \in Photos |->
         IF FolderOf[p] = activeFolder THEN diskMarks[p] ELSE marks[p]]
     /\ sourceGeneration' = [p \in Photos |->
@@ -207,8 +236,8 @@ ScanFinish ==
     /\ event' = Event("ScanFinish")
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, grouped, connected, expandedGroup,
-                   currentPhoto, scale, anchor, diskMarks, pendingWrites,
-                   pendingGeneration, pendingValue, undo, advance>>
+                   currentPhoto, scale, anchor, diskMarks, writeQueue,
+                   writePhase, desired, retiredGeneration, undo, advance>>
 
 SetGrouping(value) ==
     /\ route = "Grid"
@@ -221,7 +250,7 @@ SetGrouping(value) ==
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, connected, expandedGroup,
                    currentPhoto, scale, anchor, diskMarks, marks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue, undo, advance>>
+                   writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo, advance>>
 
 LoseLocation ==
     /\ activeFolder \in Folders
@@ -229,13 +258,15 @@ LoseLocation ==
     /\ steps < MaxSteps
     /\ connected' = FALSE
     /\ marks' = [p \in Photos |->
-        IF FolderOf[p] = activeFolder THEN diskMarks[p] ELSE marks[p]]
+        IF FolderOf[p] = activeFolder THEN confirmedMarks[p] ELSE marks[p]]
+    /\ desired' = [p \in Photos |-> "none"]
+    /\ writeQueue' = IF writePhase = "idle" THEN <<>> ELSE <<Head(writeQueue)>>
     /\ undo' = NoUndo
     /\ event' = Event("LoseLocation")
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, expandedGroup,
                    currentPhoto, scale, anchor, diskMarks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue, advance>>
+                   writePhase, confirmedMarks, libraryMarks, retiredGeneration, advance>>
 
 OpenPhoto(p) ==
     /\ route = "Grid"
@@ -253,8 +284,7 @@ OpenPhoto(p) ==
     /\ event' = Event("OpenPhoto")
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, diskMarks,
-                   marks, sourceGeneration, pendingWrites, pendingGeneration,
-                   pendingValue, undo>>
+                   marks, sourceGeneration, writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 OpenBurst ==
     /\ route = "Grid"
@@ -271,8 +301,7 @@ OpenBurst ==
     /\ event' = Event("OpenBurst")
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, diskMarks,
-                   marks, sourceGeneration, pendingWrites, pendingGeneration,
-                   pendingValue, undo>>
+                   marks, sourceGeneration, writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 ExpandGroup ==
     /\ route = "Timeline"
@@ -286,8 +315,8 @@ ExpandGroup ==
     /\ event' = Event("ExpandGroup")
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, currentPhoto,
-                   scale, anchor, diskMarks, marks, sourceGeneration, pendingWrites,
-                   pendingGeneration, pendingValue, undo>>
+                   scale, anchor, diskMarks, marks, sourceGeneration, writeQueue,
+                   writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 CollapseGroup ==
     /\ route = "GroupFocus"
@@ -303,8 +332,7 @@ CollapseGroup ==
     /\ event' = Event("CollapseGroup")
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, diskMarks,
-                   marks, sourceGeneration, pendingWrites, pendingGeneration,
-                   pendingValue, undo>>
+                   marks, sourceGeneration, writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 Back ==
     /\ route \in {"Timeline", "GroupFocus"}
@@ -317,8 +345,8 @@ Back ==
     /\ event' = Event("Back")
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, currentPhoto,
-                   diskMarks, marks, sourceGeneration, pendingWrites,
-                   pendingGeneration, pendingValue, undo>>
+                   diskMarks, marks, sourceGeneration, writeQueue,
+                   writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 StepTimeline(offset) ==
     /\ route = "Timeline"
@@ -337,8 +365,8 @@ StepTimeline(offset) ==
     /\ event' = Event("StepTimeline")
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
-                   diskMarks, marks, sourceGeneration, pendingWrites,
-                   pendingGeneration, pendingValue, undo>>
+                   diskMarks, marks, sourceGeneration, writeQueue,
+                   writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 StepGroup(offset) ==
     /\ route = "GroupFocus"
@@ -355,7 +383,7 @@ StepGroup(offset) ==
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
                    expandedGroup, scale, anchor, diskMarks, marks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue, undo>>
+                   writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 Inspect100 ==
     /\ route \in {"Timeline", "GroupFocus"}
@@ -367,7 +395,7 @@ Inspect100 ==
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
                    expandedGroup, currentPhoto, diskMarks, marks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue, undo, advance>>
+                   writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo, advance>>
 
 ReturnFit ==
     /\ route \in {"Timeline", "GroupFocus"}
@@ -379,7 +407,7 @@ ReturnFit ==
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
                    expandedGroup, currentPhoto, diskMarks, marks, sourceGeneration,
-                   pendingWrites, pendingGeneration, pendingValue, undo, advance>>
+                   writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo, advance>>
 
 CanMarkCurrent ==
     /\ activeFolder \in Folders
@@ -394,21 +422,21 @@ Mark(p, value) ==
     /\ p = currentPhoto
     /\ value \in {"R", "X"}
     /\ marks[p] /= value
+    /\ Len(writeQueue) < MaxPending
     /\ steps < MaxSteps
     /\ marks' = [marks EXCEPT ![p] = value]
     /\ sourceGeneration' = [sourceGeneration EXCEPT ![p] = generation]
-    /\ pendingWrites' = pendingWrites \union {p}
-    /\ pendingGeneration' = [pendingGeneration EXCEPT ![p] = generation]
-    /\ pendingValue' = [pendingValue EXCEPT ![p] = value]
+    /\ writeQueue' = Append(writeQueue, [photo |-> p, value |-> value, generation |-> generation])
+    /\ desired' = [desired EXCEPT ![p] = value]
     /\ undo' = [folder |-> activeFolder, generation |-> generation,
-                photo |-> p, before |-> marks[p]]
+                photo |-> p, before |-> marks[p], after |-> value]
     /\ advance' =
         IF route = "GroupFocus" THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
         ELSE TimelineAdvance(activeFolder, p, grouped, marks)
     /\ event' = Event("Mark")
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
-                   expandedGroup, currentPhoto, scale, anchor, diskMarks>>
+                   expandedGroup, currentPhoto, scale, anchor, diskMarks, writePhase, confirmedMarks, libraryMarks, retiredGeneration>>
 
 UndoLastMark ==
     /\ (undo /= NoUndo)
@@ -417,12 +445,13 @@ UndoLastMark ==
     /\ ~scanning
     /\ undo.folder = activeFolder
     /\ undo.generation = generation
+    /\ marks[undo.photo] = undo.after
+    /\ Len(writeQueue) < MaxPending
     /\ steps < MaxSteps
     /\ marks' = [marks EXCEPT ![undo.photo] = undo.before]
     /\ sourceGeneration' = [sourceGeneration EXCEPT ![undo.photo] = generation]
-    /\ pendingWrites' = pendingWrites \union {undo.photo}
-    /\ pendingGeneration' = [pendingGeneration EXCEPT ![undo.photo] = generation]
-    /\ pendingValue' = [pendingValue EXCEPT ![undo.photo] = undo.before]
+    /\ writeQueue' = Append(writeQueue, [photo |-> undo.photo, value |-> undo.before, generation |-> generation])
+    /\ desired' = [desired EXCEPT ![undo.photo] = undo.before]
     /\ route' = IF grouped /\ undo.photo \in MemberSet(activeFolder)
         THEN "GroupFocus" ELSE "Timeline"
     /\ expandedGroup' = IF grouped /\ undo.photo \in MemberSet(activeFolder)
@@ -434,34 +463,105 @@ UndoLastMark ==
         /\ undo.photo \in MemberSet(activeFolder) THEN anchor ELSE "centre"
     /\ undo' = NoUndo
     /\ advance' = NoAdvance
-    /\ event' = Event("UndoLastMark")
+    /\ event' = [Event("UndoLastMark") EXCEPT !.undoPhoto = undo.photo, !.undoBefore = undo.before]
     /\ steps' = steps + 1
-    /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, diskMarks>>
+    /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, diskMarks, writePhase, confirmedMarks, libraryMarks, retiredGeneration>>
 
-CanPublish(p) ==
+HasQueuedPhoto(p) == \E i \in 2..Len(writeQueue): writeQueue[i].photo = p
+CanPublish ==
     /\ connected
-    /\ activeFolder = FolderOf[p]
-    /\ generation = pendingGeneration[p]
+    /\ activeFolder = FolderOf[Head(writeQueue).photo]
+    /\ generation = Head(writeQueue).generation
 
-CompleteWrite(p) ==
-    /\ p \in pendingWrites
+BeginWrite ==
+    /\ writeQueue /= <<>>
+    /\ writePhase = "idle"
+    /\ CanPublish
     /\ steps < MaxSteps
-    /\ pendingWrites' = pendingWrites \ {p}
-    /\ diskMarks' = IF CanPublish(p)
-        THEN [diskMarks EXCEPT ![p] = pendingValue[p]] ELSE diskMarks
-    /\ marks' = IF CanPublish(p)
-        THEN [marks EXCEPT ![p] = pendingValue[p]] ELSE marks
-    /\ sourceGeneration' = IF CanPublish(p)
-        THEN [sourceGeneration EXCEPT ![p] = pendingGeneration[p]] ELSE sourceGeneration
-    /\ event' = [Event("CompleteWrite") EXCEPT
-        !.writeApplied = CanPublish(p),
-        !.writeGeneration = pendingGeneration[p],
-        !.writeFolder = FolderOf[p],
-        !.writePhoto = p]
+    /\ writePhase' = "writing"
+    /\ event' = Event("BeginWrite")
     /\ steps' = steps + 1
     /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
-                   expandedGroup, currentPhoto, scale, anchor, pendingGeneration,
-                   pendingValue, undo, advance>>
+                   expandedGroup, currentPhoto, scale, anchor, diskMarks, marks,
+                   sourceGeneration, writeQueue, desired, confirmedMarks, libraryMarks,
+                   retiredGeneration, undo, advance>>
+
+CompleteDisk ==
+    /\ writeQueue /= <<>>
+    /\ writePhase = "writing"
+    /\ steps < MaxSteps
+    /\ diskMarks' = [diskMarks EXCEPT ![Head(writeQueue).photo] = Head(writeQueue).value]
+    /\ writePhase' = "diskDone"
+    /\ event' = [Event("CompleteDisk") EXCEPT
+        !.writePhoto = Head(writeQueue).photo, !.completedValue = Head(writeQueue).value]
+    /\ steps' = steps + 1
+    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
+                   expandedGroup, currentPhoto, scale, anchor, marks, sourceGeneration,
+                   writeQueue, desired, confirmedMarks, libraryMarks, retiredGeneration,
+                   undo, advance>>
+
+RecordWrite ==
+    /\ writeQueue /= <<>>
+    /\ writePhase = "diskDone"
+    /\ steps < MaxSteps
+    /\ libraryMarks' = [libraryMarks EXCEPT ![Head(writeQueue).photo] = Head(writeQueue).value]
+    /\ writePhase' = "recorded"
+    /\ event' = Event("RecordWrite")
+    /\ steps' = steps + 1
+    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
+                   expandedGroup, currentPhoto, scale, anchor, diskMarks, marks,
+                   sourceGeneration, writeQueue, desired, confirmedMarks, retiredGeneration,
+                   undo, advance>>
+
+ReadConfirmation ==
+    /\ activeFolder \in Folders
+    /\ ~scanning
+    /\ \E p \in FolderPhotos(activeFolder): libraryMarks[p] /= confirmedMarks[p]
+    /\ steps < MaxSteps
+    /\ confirmedMarks' = libraryMarks
+    /\ marks' = [p \in Photos |-> IF desired[p] /= "none" THEN desired[p] ELSE libraryMarks[p]]
+    /\ event' = Event("ReadConfirmation")
+    /\ steps' = steps + 1
+    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
+                   expandedGroup, currentPhoto, scale, anchor, diskMarks, sourceGeneration,
+                   writeQueue, writePhase, desired, libraryMarks, retiredGeneration, undo, advance>>
+
+FinishWrite ==
+    /\ writeQueue /= <<>>
+    /\ writePhase = "recorded"
+    /\ steps < MaxSteps
+    /\ writeQueue' = Tail(writeQueue)
+    \* The consumer loops to beginNext without suspension after persist returns.
+    /\ writePhase' = IF Len(writeQueue) > 1 /\ connected THEN "writing" ELSE "idle"
+    /\ desired' = IF CanPublish /\ ~HasQueuedPhoto(Head(writeQueue).photo)
+        THEN [desired EXCEPT ![Head(writeQueue).photo] = "none"] ELSE desired
+    /\ confirmedMarks' = IF CanPublish THEN libraryMarks ELSE confirmedMarks
+    /\ marks' = IF CanPublish THEN
+        [p \in Photos |-> IF desired'[p] /= "none" THEN desired'[p] ELSE libraryMarks[p]] ELSE marks
+    /\ event' = [Event("FinishWrite") EXCEPT
+        !.writeApplied = CanPublish,
+        !.writeGeneration = Head(writeQueue).generation,
+        !.writeFolder = FolderOf[Head(writeQueue).photo], !.writePhoto = Head(writeQueue).photo]
+    /\ steps' = steps + 1
+    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
+                   expandedGroup, currentPhoto, scale, anchor, diskMarks,
+                   sourceGeneration, libraryMarks, retiredGeneration, undo, advance>>
+
+\* A buffered old-generation callback. Writes drain before replacement; they cannot supply
+\* a realistic stale-write witness. This deliberately hostile callback probes the boundary
+\* shared by generation-checked scan/preparation publications instead.
+StaleResult ==
+    /\ activeFolder \in Folders
+    /\ retiredGeneration > 0
+    /\ steps < MaxSteps
+    /\ sourceGeneration' = IF retiredGeneration = generation
+        THEN [p \in Photos |-> retiredGeneration] ELSE sourceGeneration
+    /\ event' = Event("StaleResult")
+    /\ steps' = steps + 1
+    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
+                   expandedGroup, currentPhoto, scale, anchor, diskMarks, marks,
+                   writeQueue, writePhase, desired, confirmedMarks, libraryMarks,
+                   retiredGeneration, undo, advance>>
 
 FireAdvance ==
     /\ advance /= NoAdvance
@@ -478,8 +578,7 @@ FireAdvance ==
         !.firedSource = advance.source]
     /\ steps' = steps + 1
     /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected, diskMarks,
-                   marks, sourceGeneration, pendingWrites, pendingGeneration,
-                   pendingValue, undo>>
+                   marks, sourceGeneration, writeQueue, writePhase, desired, confirmedMarks, libraryMarks, retiredGeneration, undo>>
 
 Next ==
     \/ \E f \in Folders: OpenFolder(f)
@@ -498,7 +597,12 @@ Next ==
     \/ ReturnFit
     \/ \E p \in Photos, value \in {"R", "X"}: Mark(p, value)
     \/ UndoLastMark
-    \/ \E p \in Photos: CompleteWrite(p)
+    \/ BeginWrite
+    \/ CompleteDisk
+    \/ RecordWrite
+    \/ ReadConfirmation
+    \/ FinishWrite
+    \/ StaleResult
     \/ FireAdvance
 
 TypeOK ==
@@ -512,7 +616,9 @@ TypeOK ==
     /\ currentPhoto \in Photos \union {NoPhoto}
     /\ scale \in {"fit", "100"}
     /\ anchor \in {"centre", "eye"}
-    /\ pendingWrites \subseteq Photos
+    /\ Len(writeQueue) <= MaxPending
+    /\ writePhase \in {"idle", "writing", "diskDone", "recorded"}
+    /\ (writePhase /= "idle" => Len(writeQueue) > 0)
     /\ steps \in 0..MaxSteps
 
 BackReturnsToGrid ==
@@ -600,5 +706,46 @@ ReconnectHidesOldState ==
 
 ScanningNeverShowsOldDetail ==
     scanning => route = "Grid" /\ currentPhoto = NoPhoto /\ expandedGroup = NoFolder
+
+UndoRestoresPriorMark ==
+    event.action = "UndoLastMark" => marks[event.undoPhoto] = event.undoBefore
+
+UndoReturnsToTarget ==
+    event.action = "UndoLastMark" =>
+        /\ currentPhoto = event.undoPhoto
+        /\ IF grouped /\ event.undoPhoto \in MemberSet(activeFolder)
+           THEN route = "GroupFocus" /\ expandedGroup = activeFolder
+           ELSE route = "Timeline" /\ expandedGroup = NoFolder
+
+UndoCancelsAutoAdvance ==
+    event.action = "UndoLastMark" => advance = NoAdvance
+
+LatestQueuedValue(p) ==
+    LET indices == {i \in DOMAIN writeQueue: writeQueue[i].photo = p}
+        latest == CHOOSE i \in indices: \A j \in indices: i >= j
+    IN writeQueue[latest].value
+
+NewerDesiredInputWins ==
+    /\ \A p \in Photos: desired[p] /= "none" => marks[p] = desired[p]
+    /\ connected => \A i \in DOMAIN writeQueue:
+        LET p == writeQueue[i].photo IN
+            desired[p] = LatestQueuedValue(p) /\ marks[p] = LatestQueuedValue(p)
+
+LocationLossShowsLatestConfirmed ==
+    event.action = "LoseLocation" =>
+        \A p \in FolderPhotos(activeFolder): marks[p] = confirmedMarks[p] /\ desired[p] = "none"
+
+DiskCompletionIsFIFO ==
+    event.action = "CompleteDisk" => diskMarks[event.writePhoto] = event.completedValue
+
+\* Reachability query only. The runner expects this predicate to fail, proving the
+\* rated -> rejected -> older rated confirmation -> loss rollback state exists.
+NoRatedRollbackWitness ==
+    ~(event.action = "LoseLocation" /\ event.oldPhoto = "aS"
+      /\ event.oldShown = "X" /\ event.lastPendingValue = "X"
+      /\ event.oldQueueLength = 2 /\ event.oldWritePhase = "recorded"
+      /\ event.oldActiveValue = "R"
+      /\ confirmedMarks["aS"] = "R" /\ marks["aS"] = "R"
+      /\ diskMarks["aS"] = "R")
 
 =============================================================================
