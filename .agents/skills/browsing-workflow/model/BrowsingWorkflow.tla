@@ -486,10 +486,12 @@ UndoLastMark ==
     /\ expandedGroup' = IF grouped /\ undo.photo \in MemberSet(activeFolder)
         THEN activeFolder ELSE NoFolder
     /\ currentPhoto' = undo.photo
-    /\ scale' = IF route = "GroupFocus" /\ expandedGroup = activeFolder
-        /\ undo.photo \in MemberSet(activeFolder) THEN scale ELSE "fit"
-    /\ anchor' = IF route = "GroupFocus" /\ expandedGroup = activeFolder
-        /\ undo.photo \in MemberSet(activeFolder) THEN anchor ELSE "centre"
+    /\ scale' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
     /\ undo' = NoUndo
     /\ advance' = NoAdvance
     /\ event' = [Event("UndoLastMark") EXCEPT !.undoPhoto = undo.photo, !.undoBefore = undo.before]
@@ -861,7 +863,7 @@ ReferenceMark(b, r) ==
 ReferenceUndo(b) ==
     LET p == b.undo.photo
         inGroup == b.grouped /\ p \in MemberSet(b.activeFolder)
-        keepsZoom == b.route = "GroupFocus" /\ b.expandedGroup = b.activeFolder /\ p \in MemberSet(b.activeFolder)
+        keepsZoom == p = b.currentPhoto \/ (inGroup /\ b.currentPhoto \in MemberSet(b.activeFolder))
     IN [b EXCEPT
         !.marks = [b.marks EXCEPT ![p] = b.undo.before],
         !.desired = [b.desired EXCEPT ![p] = b.undo.before],

@@ -163,6 +163,56 @@ MUTANTS = {
         "invariant": "UndoCancelsAutoAdvance",
         "defect": "Undo fails to cancel the pending DetailScreen advance.",
     },
+    "undo-same-photo-timeline-resets-zoom": {
+        "action": "UndoLastMark",
+        "old": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "new": r"""/\ scale' = IF grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder)
+        THEN scale ELSE "fit"
+    /\ anchor' = IF grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder)
+        THEN anchor ELSE "centre"
+""",
+        "invariant": "UndoActionEffects",
+        "defect": "Same-photo Timeline Undo incorrectly resets the existing 100% scale and anchor.",
+    },
+    "undo-group-reentry-resets-zoom": {
+        "action": "UndoLastMark",
+        "old": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "new": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (route = "GroupFocus" /\ expandedGroup = activeFolder /\ undo.photo \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (route = "GroupFocus" /\ expandedGroup = activeFolder /\ undo.photo \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "invariant": "UndoActionEffects",
+        "defect": "Undo to another member resets zoom when re-entering its group from Timeline.",
+    },
+    "undo-outside-change-keeps-zoom": {
+        "action": "UndoLastMark",
+        "old": r"""/\ scale' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = undo.photo \/
+        (grouped /\ undo.photo \in MemberSet(activeFolder) /\ currentPhoto \in MemberSet(activeFolder))
+        THEN anchor ELSE "centre"
+""",
+        "new": r"""/\ scale' = scale
+    /\ anchor' = anchor""",
+        "invariant": "UndoActionEffects",
+        "defect": "Changed-photo Undo retains an unrelated crop when the previous photo is outside the target group.",
+    },
     "older-finish-overwrites-desired": {
         "action": "FinishWrite",
         "old": '[p \\in Photos |-> IF desired\'[p] /= "none" THEN desired\'[p] ELSE libraryMarks[p]] ELSE marks',

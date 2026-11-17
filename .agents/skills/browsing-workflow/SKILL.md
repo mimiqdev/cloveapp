@@ -18,20 +18,20 @@ From the repository root, run:
 .agents/skills/browsing-workflow/scripts/check
 ```
 
-The command checks source drift, runs the current model, and runs 47 model variants. A
+The command checks source drift, runs the current model, and runs 50 model variants. A
 successful run has these results:
 
 - Covered source matches the reviewed sync commit.
 - The current model passes every invariant with an empty TLC queue.
-- All 47 model mutations fail on their named invariants.
-- The mutation summary reports `Mutation score: 47/47 expected failures caught`.
-- All 24 `Next` actions execute in full-depth reachability queries; 49 queries cover selected request
+- All 50 model mutations fail on their named invariants.
+- The mutation summary reports `Mutation score: 50/50 expected failures caught`.
+- All 24 `Next` actions execute in full-depth reachability queries; 53 queries cover selected request
   and pre-state branches. The manifest must agree with `Next`, configured properties, and mutants.
 - The separate reachability query finds the Rated-confirmed, Reject-pending, location-loss rollback
   state. Its intentionally failing predicate is a witness, not a failed safety invariant.
 
 Use `--good-only` for only the current model. Use `--mutant <name>` to reproduce one counterexample.
-Use `--witness-only` for the rollback reachability query. Use `--actions-only` for the 49 action
+Use `--witness-only` for the rollback reachability query. Use `--actions-only` for the 53 action
 queries and regenerated coverage table. All modes enforce source drift.
 The script prints each counterexample as an action path and stores full TLC output under
 `.build/formal-verification/`. The TLA+ version, download URL, checksum, and Java selection are in
@@ -142,12 +142,12 @@ assumptions; these checks are not an independent proof of arbitrary Swift or tho
 All outcome mutations execute their actions with an incorrect assignment. Extra boundary mutations
 admit illegal outward requests; none is credited for merely making an action unreachable. Each
 positive query retains all normal properties and intentionally violates only its action witness.
-An unreachable action or branch causes that query to fail. The 49 witnesses establish existence,
+An unreachable action or branch causes that query to fail. The 53 witnesses establish existence,
 not that every enabled request is eventually performed or that every possible guard change is caught.
 These are transition postconditions and bounded safety checks, not liveness.
 
-The full command now makes 98 TLC runs: one baseline, 47 mutations, one rollback witness, and
-49 action/branch witnesses. Its total runtime can exceed a shell tool's 60-second invocation window;
+The full command now makes 105 TLC runs: one baseline, 50 mutations, one rollback witness, and
+53 action/branch witnesses. Its total runtime can exceed a shell tool's 60-second invocation window;
 allow the command to finish and inspect its exit code. No depth, queue, state, or mutation-search
 bound was reduced. Logs and generated tables remain under the ignored build directory.
 
@@ -159,9 +159,20 @@ coalesced same-photo actions into one latest value. Those were model verificatio
 Swift defects. The old 9/9 mutation result provides no evidence of Undo correctness.
 
 The current model checks immediate prior-mark restoration, return to the edited photo and correct
-Timeline or Group Focus level, and cancellation of pending auto-advance. Four separate Undo mutants
-break those guarantees. Undo uses the source's compare-and-restore guard and one latest edit, with
-rating-only marks in this small world.
+Timeline or Group Focus level, and cancellation of pending auto-advance. Four mark/target/timer
+mutants and three focused zoom mutants break those guarantees. Undo uses the source's
+compare-and-restore guard and one latest edit, with rating-only marks in this small world.
+
+Undo keeps scale and anchor when the target is the currently displayed photo, including Timeline
+at 100%. For a changed target, it also keeps the crop when both photos belong to the resulting
+Group Focus. This includes re-entering Group Focus from a collapsed Timeline stack. A changed photo
+outside that resulting group returns to fit. The implementation action and independent pre-state
+reference encode these conditions separately. Four focused reachability queries cover same-photo
+Timeline Undo, changed-member Focus Undo, changed-member group reentry, and outside-photo reset.
+
+The directly related Expand and #304 Collapse transitions already preserve same-photo zoom. In this
+bounded world nonzero step and pending advance targets change the photo. OpenPhoto and OpenBurst
+model Grid entry; retapping a photo inside an already-mounted Detail view remains excluded.
 
 The write FIFO has a total capacity of two immutable actions, including the active action. It can
 hold an older Rated action and a newer Rejected action for the same photo. Disk completion, library
@@ -183,7 +194,7 @@ prove those Swift implementations. Keep the full and chart configurations' invar
 ## Separate the evidence
 
 - Bounded model safety covers all enabled action orders through depth 12 in the stated small world.
-- Model mutation sensitivity covers 47 injected defects and their expected invariants.
+- Model mutation sensitivity covers 50 injected defects and their expected invariants.
 - Source correspondence comes from manual review at the sync commit and Git drift detection after
   that review. The drift gate requires another review when covered source changes. It does not
   establish arbitrary Swift behavior with regexes or model-only mutations.

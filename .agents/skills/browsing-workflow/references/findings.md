@@ -36,6 +36,45 @@ Eight grouped contracts supplement the original safety checks. Expected effects 
 from the raw pre-state snapshot and request, independently of primed implementation assignments.
 Shared pure domain helpers and observer capture are trusted model assumptions checked by review.
 
+## Same-photo Undo zoom fidelity
+
+Review at `9959de5830de3e624bfdc4ad835c2b5ae5449124` found that both the model action and its
+reference incorrectly reset a same-photo Timeline Undo to fit. This was a source-correspondence
+defect in the verification, not a Swift defect or a product specification decision.
+
+`BrowsingModel.undoLastMark` restores marks and navigates through `openPhoto` or `openGroup`. In
+`DetailMarkingView`, preview loading is keyed by `photo.id`, and order-only changes go through
+`refreshPrefetchForOrderChange` without resetting zoom. The same-photo Undo therefore retains its
+existing scale/anchor. When the photo changes, `loadPreview` keeps the crop if both the previous
+and target photos belong to the resulting expanded group. Its predicate reads the new group, not
+the previous route. This also preserves zoom when Undo re-enters Group Focus from Timeline on
+another member. A changed target outside that resulting group resets to fit.
+
+The action now checks same photo first, then target-group membership. The reference separately
+derives the result from `event.before.currentPhoto`, the old Undo target, and the resulting group.
+Neither reads the action's primed scale/anchor. No covered product source or sync commit changed.
+
+| Undo transition at 100% | Expected zoom | Focused witness length | Executed bad-effect mutation |
+| --- | --- | --- | --- |
+| Timeline, same standalone photo | Retain scale and anchor | 6 | `undo-same-photo-timeline-resets-zoom` |
+| Group Focus, another member | Retain scale and anchor | 7 | Existing group-preservation path retained |
+| Timeline, another member in the resulting Group Focus | Retain scale and anchor | 7 | `undo-group-reentry-resets-zoom` |
+| Changed photo outside the resulting group | Fit, centre | 7 | `undo-outside-change-keeps-zoom` |
+
+The first mutation gives the requested six-action counterexample:
+
+```text
+OpenFolder -> ScanFinish -> OpenPhoto(aS) -> Inspect100 -> Mark -> UndoLastMark
+Invariant UndoActionEffects is violated.
+```
+
+Direct siblings were checked against the same identity rule. Expand preserves the current photo
+and zoom; #304 Collapse already keeps zoom only when its Representative stays on stage. Nonzero
+steps and advance targets change the photo in this small world. OpenPhoto/OpenBurst model Grid
+entry, not a same-photo retap within an already-mounted Detail view. No other action or domain
+was expanded by this correction. The zoom fields model the resulting inspection presentation,
+not UIKit task scheduling or rendering correctness.
+
 ## Source boundaries and abstractions
 
 | Model action | Source boundary |
@@ -78,12 +117,14 @@ Run from the repository root:
 
 The current run uses TLA+ tools 1.7.4, one TLC worker, depth 12, two folders with three photos each,
 and `MaxPending = 2`. It generated 1,245,725 states, found 370,189 distinct states, exhausted the
-queue, and passed all 35 configured safety and transition-effect invariants. All 47 model mutations
+queue, and passed all 35 configured safety and transition-effect invariants. All 50 model mutations
 failed on relevant configured properties. The separate full-depth reachability pass found all 24
-actions and all 49 selected branch witnesses.
+actions and all 53 selected branch witnesses. The full normal gate on this revision's final
+verification content exited 0 in 101.666 seconds. No new run mode was added.
 
-No world, queue, or depth bound changed in this action audit. The larger state count comes from
-capturing the pre-state/request for effect assertions. The normal command now makes 98 TLC runs,
+No world, queue, or depth bound changed in the action audit or Undo zoom correction. The state
+count remains 1,245,725 generated and 370,189 distinct after the zoom fix. The earlier increase
+from the FIFO-only model came from capturing pre-state/request observations. The normal command now makes 105 TLC runs,
 so a 60-second shell invocation window was insufficient for the complete batch. The same normal
 command was allowed to finish with logged output and exit 0; no checker limit was reduced.
 
@@ -179,7 +220,7 @@ This is drift detection, not semantic proof. Review the source and model, then r
 
 The source was restored. Covered product files have no diff, the sync commit is unchanged, and the
 normal command passed the drift gate, the model, mutation checks, and the rollback witness.
-The current action audit additionally checks all 35 invariants, 47 mutants, and 49 action/branch
+The current action audit additionally checks all 35 invariants, 50 mutants, and 53 action/branch
 witnesses. The reviewed source commit and 12 covered paths have not changed.
 
 ## Evidence limits
