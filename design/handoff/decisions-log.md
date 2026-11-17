@@ -8,6 +8,15 @@ iPad: sidebar and full grid; detail opens full screen; no grid-beside-detail lay
 
 iPad detail: the right rail replaces the capsule and never hides; swipe marking stays (supervisor, 2026-11-12, issue #150)
 
+## Floating finishing pill outside the filmstrip's layout (#305)
+
+Owner feedback, 2026-11-16: the `Reject {N} unmarked` pill looked like it took photo space. It did in the Duo poses, where the strip's list is a dock below the stage: the pill's own row grew that dock by its height plus the gap, so the pill appearing, or the fit/zoom transition that reveals it, resized the photo stage and moved the fitted photo.
+
+- **The pill is not part of the filmstrip:** `DetailFilmstrip` is one constant 70 pt band. The detail chrome draws the pill itself, centred above the strip (or at the bottom of the stage in Photo Preview), so its availability, and the fit–zoom transitions, never change the stage's height or the fitted photo's anchor.
+- **Floating chrome, docked chrome:** where the strip floats over the stage (iPhone and iPad Focus View), the pill rides that floating band above the strip, and the swipe star bar stays above it. Where the strip is a dock below the stage (Duo cover and expanded Duo Focus View), the pill floats over the stage's bottom edge, 6 pt above the dock, and the dock keeps its height. Expanded Duo Photo Preview has no filmstrip: its pill floats 12 pt above the photo stage's bottom edge, above the docked marking toolbar.
+- **The chrome still floats over the stage:** the pill sits above the strip inside the same floating band as the rest of the chrome, so it may sit over the picture exactly as the strip and the capsule do. The Duo pane reserves the floating pill in the marking swipe's star-bar clamp, so a low central swipe's bar stays above the pill without shrinking the photo.
+- **Unchanged behavior:** the same actions, `clove.detail.expandGroup` / `clove.detail.rejectUnmarked` identifiers, availability rules, accessible labels and values, chrome-visibility behavior (#302), read-only stack bounce, and Group Focus finishing/Undo semantics (#304).
+
 ## Two-level group filmstrip, unified representative rule, and simplified grouping (#304)
 
 Owner decisions, 2026-11-16. Replaces Detail's inline-expanding accordion filmstrip and the `Grid display (Expanded / Collapsed)` setting with an explicit two-level burst workflow (inspired by Sony camera group playback):

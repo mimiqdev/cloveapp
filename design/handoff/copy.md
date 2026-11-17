@@ -80,7 +80,7 @@ Show one toast per failure burst, above the bottom edge in the Move rejects toas
 | group.expand | Expand {n} photos |
 | group.rejectRest | Reject {n} unmarked |
 
-The active pill sits centred in its own row above the filmstrip (or at the bottom of the stage in Photo Preview when chrome is visible): `"Expand {n} photos"` when browsing an unexpanded multi-photo group stack in Timeline (marking disabled; vertical stage drags gently pulse the pill), and `"Reject {n} unmarked"` in Group Focus once the visible group has both a rated or labeled member and an unmarked member. Both hide with chrome; nothing replaces them.
+The active pill floats centred above the filmstrip, outside its layout height (or at the bottom of the stage in Photo Preview when chrome is visible): `"Expand {n} photos"` when browsing an unexpanded multi-photo group stack in Timeline (marking disabled; vertical stage drags gently pulse the pill), and `"Reject {n} unmarked"` in Group Focus once the visible group has both a rated or labeled member and an unmarked member. Both hide with chrome; nothing replaces them.
 
 ## Move Rejects
 | Key | String |
