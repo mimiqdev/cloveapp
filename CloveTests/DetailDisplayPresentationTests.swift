@@ -325,7 +325,7 @@ struct DetailDisplayPresentationTests {
         let store = SettingsStore.sample
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
-        try await waitFor { !browsing.isFolderOpening }
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
         let group = try #require(browsing.groups.first)
         browsing.openGroup(group.id, on: group.members[0])
         let window = UIWindow(windowScene: scene)
@@ -679,6 +679,150 @@ struct DetailDisplayPresentationTests {
         try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) == nil }
         preview.onChromeToggle?()
         try await waitFor { self.findFilmstripScrollView(in: window, excluding: preview) != nil }
+    }
+
+    /// #305: the Reject N unmarked pill is drawn by the floating chrome, not by the filmstrip, so
+    /// its availability and the fit–zoom transitions never resize the stage or move the fit.
+    @Test(arguments: [CloveTheme.light, CloveTheme.dark, CloveTheme.nord])
+    func finishingPillNeverResizesTheStageOrMovesTheFit(theme: CloveTheme) async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first)
+        browsing.openGroup(group.id, on: group.members[0])
+        browsing.apply(.rating(try #require(Rating(rawValue: 2))), to: group.members[0])
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = UIHostingController(
+            rootView: NavigationStack {
+                DetailScreen(browsing: browsing, images: source, presentation: .constant(.focus))
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveTheme, theme)
+            .environment(\.usesSystemBrowsingToolbar, true))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let plan = try #require(
+            finishingPlan(for: group, currentPhoto: group.members[0], in: browsing))
+        #expect(plan.availability == .available)
+        try await waitFor("preview did not settle") {
+            guard let preview = self.findPreview(in: window),
+                source.delivered.contains(.screenRAW)
+            else { return false }
+            return self.findFilmstripScrollView(in: window, excluding: preview) != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let strip = try #require(findFilmstripScrollView(in: window, excluding: preview))
+        let stageAtFit = preview.convert(preview.bounds, to: window)
+        let photoAtFit = try #require(fittedPhotoRect(in: preview, window: window))
+        let stripAtFit = strip.convert(strip.bounds, to: window)
+
+        // 100% zoom keeps the stage and the filmstrip's band where they were (#302, #305).
+        preview.onDoubleTap?(.center)
+        try await waitFor("zoom did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(preview.convert(preview.bounds, to: window) == stageAtFit)
+        #expect(strip.convert(strip.bounds, to: window) == stripAtFit)
+
+        // Returning to fit restores the same stage and the same fitted photo.
+        preview.onDoubleTap?(.center)
+        try await waitFor("fit did not settle") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(preview.convert(preview.bounds, to: window) == stageAtFit)
+        #expect(try #require(fittedPhotoRect(in: preview, window: window)) == photoAtFit)
+
+        // Finishing the group removes the pill and leaves the stage, the fit and the strip as they
+        // were. Before #305 the filmstrip's own pill row changed this stage's height.
+        browsing.runGroupFinishing(plan)
+        try await waitFor("finishing did not settle") {
+            guard
+                let current = self.finishingPlan(
+                    for: group, currentPhoto: group.members[0], in: browsing)
+            else { return true }
+            return current.isEmpty || !current.availability.isAvailable
+        }
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(preview.convert(preview.bounds, to: window) == stageAtFit)
+        #expect(try #require(fittedPhotoRect(in: preview, window: window)) == photoAtFit)
+        let stripAfterFinishing = try #require(
+            findFilmstripScrollView(in: window, excluding: preview))
+        #expect(stripAfterFinishing.convert(stripAfterFinishing.bounds, to: window) == stripAtFit)
+    }
+
+    /// #305: the Duo pane docks the strip below the stage, so the pill floats above the dock. Its
+    /// availability must not grow the dock and shrink the stage as it did before this fix.
+    @Test(arguments: [CloveTheme.light, CloveTheme.dark, CloveTheme.nord])
+    func duoPaneFinishingPillNeverResizesTheStage(theme: CloveTheme) async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first)
+        browsing.openGroup(group.id, on: group.members[0])
+        browsing.apply(.rating(try #require(Rating(rawValue: 2))), to: group.members[0])
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
+        window.rootViewController = UIHostingController(
+            rootView: NavigationStack {
+                DetailScreen(
+                    browsing: browsing, images: source,
+                    duo: DuoDetailLayout(
+                        presentation: .constant(.focus), filter: AnyView(EmptyView()),
+                        more: AnyView(EmptyView()), bottom: AnyView(EmptyView()),
+                        showsGrid: true))
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveTheme, theme)
+            .environment(\.usesSystemBrowsingToolbar, true)
+            .environment(\.isDuoCover, true))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let plan = try #require(
+            finishingPlan(for: group, currentPhoto: group.members[0], in: browsing))
+        #expect(plan.availability == .available)
+        try await waitFor {
+            guard let preview = self.findPreview(in: window),
+                source.delivered.contains(.screenRAW)
+            else { return false }
+            return self.findFilmstripScrollView(in: window, excluding: preview) != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let strip = try #require(findFilmstripScrollView(in: window, excluding: preview))
+        let stageAtFit = preview.convert(preview.bounds, to: window)
+        let photoAtFit = try #require(fittedPhotoRect(in: preview, window: window))
+        let stripAtFit = strip.convert(strip.bounds, to: window)
+        // The dock sits directly below the stage, so the stage's bottom edge is the dock's top.
+        #expect(abs(stripAtFit.minY - stageAtFit.maxY) <= 1)
+
+        browsing.runGroupFinishing(plan)
+        try await waitFor {
+            guard
+                let current = self.finishingPlan(
+                    for: group, currentPhoto: group.members[0], in: browsing)
+            else { return true }
+            return current.isEmpty || !current.availability.isAvailable
+        }
+        try await Task.sleep(for: .milliseconds(450))
+
+        #expect(preview.convert(preview.bounds, to: window) == stageAtFit)
+        #expect(try #require(fittedPhotoRect(in: preview, window: window)) == photoAtFit)
+        let stripAfterFinishing = try #require(
+            findFilmstripScrollView(in: window, excluding: preview))
+        #expect(stripAfterFinishing.convert(stripAfterFinishing.bounds, to: window) == stripAtFit)
     }
 
     /// #302: the double-tap target follows the setting, and `Off` disables the gesture.
@@ -2201,7 +2345,7 @@ struct DetailDisplayPresentationTests {
         let store = SettingsStore.sample
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
-        try await waitFor { !browsing.isFolderOpening }
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
         let group = try #require(browsing.groups.first)
         let rep = try #require(
             BrowsingGroup.representative(
@@ -2251,7 +2395,7 @@ struct DetailDisplayPresentationTests {
         let source = ObservedDetailImages()
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
-        try await waitFor { !browsing.isFolderOpening }
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
         let group = try #require(browsing.groups.first)
         browsing.openGroup(group.id, on: group.members[0])
 
@@ -2403,6 +2547,39 @@ struct DetailDisplayPresentationTests {
             }
         }
         return nil
+    }
+
+    /// The finishing action the screen offers for `group` right now, from the model's marks, so a
+    /// test can tell when the pill is available and when it is not (#304, #305).
+    private func finishingPlan(
+        for group: BrowsingGroup, currentPhoto: PhotoIdentity, in browsing: BrowsingModel
+    ) -> GroupFinishingPlan? {
+        let timeline = DetailTimeline(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+        guard let expanded = timeline.activeGroup(with: group.id) else { return nil }
+        return GroupFinishingPlan(
+            group: expanded, action: .rejectUnmarked, currentPhoto: currentPhoto)
+    }
+
+    /// The rect the photo's pixels occupy at fit: the stage, less the letterbox the aspect fit
+    /// leaves around them. The chrome floats over the stage, so a test can tell whether a floating
+    /// control reaches the photo.
+    private func fittedPhotoRect(
+        in preview: DetailZoomContainerView, window: UIWindow
+    ) -> CGRect? {
+        guard
+            let imageView = preview.subviews.compactMap({ $0 as? UIScrollView })
+                .first?.subviews.compactMap({ $0 as? UIImageView }).first,
+            let image = imageView.image,
+            image.size.width > 0, image.size.height > 0
+        else { return nil }
+        let bounds = imageView.bounds
+        let scale = min(bounds.width / image.size.width, bounds.height / image.size.height)
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let rect = CGRect(
+            x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2,
+            width: size.width, height: size.height)
+        return imageView.convert(rect, to: window)
     }
 }
 

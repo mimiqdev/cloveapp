@@ -344,6 +344,47 @@ final class CloveFlowTests: XCTestCase {
         checkDisabledRail()
     }
 
+    /// #305: with the pill out of the filmstrip's layout, Focus View and Photo Preview keep the
+    /// stage's height while the pill appears, moves and finishes the group.
+    @MainActor
+    func testIPadFinishingPillNeverResizesTheStage() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
+        let app = launchSample()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        openLibrary(app)
+        element(app, "clove.grid.group.burst-2678").tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        // Photo Preview opens first: the pill sits at the stage's bottom, clear of the photo.
+        let pill = element(app, "clove.detail.rejectUnmarked")
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
+        XCTAssertGreaterThanOrEqual(pill.frame.minY, fittedPhotoBottom(preview))
+        element(app, "clove.detail.gridToggle").tap()
+        let strip = element(app, "clove.detail.filmstrip")
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        let stage = preview.frame
+        // Focus View floats the strip and the pill over the stage without taking its height. A
+        // photograph wider than tall fills a wide stage from edge to edge, so the strip's own band
+        // already reaches its lower edge here; the pill only ever sits above that band.
+        XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
+
+        // 100% zoom and then finishing never resize the stage.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
+        assertSameFrame(preview.frame, stage, "zoom resized the iPad stage")
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded"), preview))
+        pill.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), pill))
+        assertSameFrame(preview.frame, stage, "finishing resized the iPad stage")
+    }
+
     @MainActor
     private func prepareRailComparison(_ app: XCUIApplication) {
         element(app, "clove.grid.more").tap()
@@ -1014,6 +1055,50 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
         XCTAssertTrue(strip.exists)
+    }
+
+    /// #305: the Reject N unmarked pill is drawn by the floating chrome, never by the filmstrip, so
+    /// it can neither resize the stage nor move the fit, and it stays clear of the photo, the
+    /// strip's thumbnails, the marking controls and the header, in every theme.
+    @MainActor
+    func testFinishingPillNeverResizesTheStageOrCoversThePhoto() {
+        for theme in ["light", "dark", "nord"] {
+            let app = launchSample()
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+            element(app, "clove.grid.group.burst-2678").tap()
+            let preview = element(app, "clove.detail.preview")
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+            let pill = element(app, "clove.detail.rejectUnmarked")
+            XCTAssertTrue(pill.waitForExistence(timeout: 5), "\(theme): no finishing pill")
+            let strip = element(app, "clove.detail.filmstrip")
+            let capsule = element(app, "clove.detail.capsule")
+            let fileName = element(app, "clove.detail.fileName")
+            let stage = preview.frame
+            let pillFrame = pill.frame
+            XCTAssertGreaterThan(pillFrame.width, 60)
+            XCTAssertLessThanOrEqual(pillFrame.maxY, strip.frame.minY)
+            XCTAssertGreaterThanOrEqual(capsule.frame.minY, strip.frame.maxY)
+            XCTAssertGreaterThan(pillFrame.minY, fileName.frame.maxY)
+            XCTAssertGreaterThanOrEqual(pillFrame.minY, preview.frame.minY)
+            XCTAssertGreaterThanOrEqual(pillFrame.minY, fittedPhotoBottom(preview))
+
+            // Chrome is one visibility across fit and zoom, so 100% changes neither the stage
+            // nor the pill's place (#302, #305).
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+            XCTAssertTrue(
+                wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
+            assertSameFrame(preview.frame, stage, "\(theme): zoom resized the stage")
+            assertSameFrame(pill.frame, pillFrame, "\(theme): zoom moved the pill")
+
+            // Finishing the group removes the pill and leaves the stage where it was.
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+            pill.tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), pill))
+            assertSameFrame(preview.frame, stage, "\(theme): finishing resized the stage")
+            app.terminate()
+        }
     }
 
     @MainActor
@@ -1941,14 +2026,29 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        // #305: the dock keeps its height as the pill comes and goes, so the stage never resizes.
+        // Every member starts unmarked, so Group Focus offers no pill; folding to Timeline on the
+        // collapsed stack offers "Expand N photos" above the dock.
+        let duoPreview = element(app, "clove.detail.preview")
+        let stageWithoutPill = duoPreview.frame
+        XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
         element(app, "clove.detail.filmstrip.group.fold").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "exists == false"),
                 element(app, "clove.detail.filmstrip.expandedGroup")))
+        let expandPill = element(app, "clove.detail.expandGroup")
+        XCTAssertTrue(expandPill.waitForExistence(timeout: 5))
+        assertSameFrame(
+            duoPreview.frame, stageWithoutPill, "the pill resized the Duo cover stage")
+        XCTAssertLessThanOrEqual(expandPill.frame.maxY, strip.frame.minY)
+        XCTAssertGreaterThanOrEqual(expandPill.frame.minY, fittedPhotoBottom(duoPreview))
         element(app, "clove.detail.filmstrip.mmq02680").tap()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         XCTAssertTrue(element(app, "clove.detail.filmstrip.group.burst-2678").exists)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), expandPill))
+        assertSameFrame(
+            duoPreview.frame, stageWithoutPill, "the pill leaving resized the Duo cover stage")
         // The strip shows its content around the current photo, not blank.
         let current = element(app, "clove.detail.filmstrip.mmq02680")
         XCTAssertTrue(
@@ -3119,6 +3219,25 @@ final class CloveFlowTests: XCTestCase {
             for: [XCTNSPredicateExpectation(predicate: predicate, object: target)], timeout: timeout
         )
             == .completed
+    }
+
+    /// The bottom edge of the fitted photo's pixels: the sample photos are 3:2, so the fitted band
+    /// is centred in the stage with equal letterbox above and below it. The chrome floats over the
+    /// stage, so this is the line a floating control must stay below to leave the photo alone.
+    @MainActor
+    func fittedPhotoBottom(_ preview: XCUIElement) -> CGFloat {
+        let stage = preview.frame
+        return stage.midY + stage.width / 1.5 / 2
+    }
+
+    @MainActor
+    func assertSameFrame(
+        _ first: CGRect, _ second: CGRect, _ message: String, accuracy: CGFloat = 0.5
+    ) {
+        XCTAssertEqual(first.minX, second.minX, accuracy: accuracy, message)
+        XCTAssertEqual(first.minY, second.minY, accuracy: accuracy, message)
+        XCTAssertEqual(first.width, second.width, accuracy: accuracy, message)
+        XCTAssertEqual(first.height, second.height, accuracy: accuracy, message)
     }
 
     @MainActor

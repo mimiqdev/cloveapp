@@ -58,7 +58,9 @@ struct DetailMarkingActions {
 /// Folder access problems appear in the header's indicator and banner (PRD P0-08). A change
 /// that did not confirm brings the shared failure toast, and the files supply the marks again.
 /// The stage pill (`Expand N photos` in Timeline or `Reject N unmarked` in Group Focus) sits centred
-/// above the filmstrip (or at the bottom of the stage in Photo Preview).
+/// above the filmstrip (or at the bottom of the stage in Photo Preview). It is drawn by the floating
+/// chrome, never by the filmstrip, so its availability and the fit–zoom transitions never change the
+/// stage's height or the fitted photo's anchor (#305).
 struct DetailMarkingView: View {
     /// The scene's browsing state and ordered marking actions
     /// (PRD P0-08).
@@ -594,9 +596,12 @@ struct DetailMarkingView: View {
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             previewArea
                 .overlay(alignment: .bottom) {
-                    if !showsFilmstrip && chromeIsVisible, let stagePill {
+                    // The finishing pill floats over the stage's bottom edge, above the dock. It
+                    // is not part of the dock's height, so showing or hiding it never resizes
+                    // the photo stage (#305).
+                    if chromeIsVisible, let stagePill {
                         stagePill
-                            .padding(.bottom, 12)
+                            .padding(.bottom, showsFilmstrip ? 6 : 12)
                     }
                 }
             // The failure toast sits above the filmstrip, clear of the capsule row
@@ -621,8 +626,7 @@ struct DetailMarkingView: View {
                         openPhoto: actions.openPhoto,
                         selectGroupPhoto: actions.selectGroupPhoto,
                         expandGroup: actions.expandGroup,
-                        collapseGroup: actions.collapseGroup,
-                        pillAction: stagePill)
+                        collapseGroup: actions.collapseGroup)
                     if isDuoExpanded {
                         duoMarkingToolbar
                     }
@@ -792,7 +796,11 @@ struct DetailMarkingView: View {
                             .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 0 : 12)
                     }
                     if showsFilmstrip && chromeIsVisible {
+                        // The pill rides the floating chrome band above the strip. The band is an
+                        // overlay, so its height never moves the stage (handoff components.md,
+                        // Pill action; #305).
                         VStack(spacing: 8) {
+                            if let stagePill { stagePill }
                             DetailFilmstrip(
                                 timeline: timeline,
                                 expandedGroup: expandedGroup,
@@ -801,8 +809,7 @@ struct DetailMarkingView: View {
                                 openPhoto: actions.openPhoto,
                                 selectGroupPhoto: actions.selectGroupPhoto,
                                 expandGroup: actions.expandGroup,
-                                collapseGroup: actions.collapseGroup,
-                                pillAction: stagePill)
+                                collapseGroup: actions.collapseGroup)
                             if chromeIsVisible && !usesRail {
                                 MarkingToolbar(
                                     rating: swipeFeedback.rating
