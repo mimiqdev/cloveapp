@@ -1,0 +1,15 @@
+{
+  "commit": "29702ce651a7de77cf642b38d1898023ae775476",
+  "coveredFiles": [
+    "Clove/Browsing/BrowsingModel.swift",
+    "Clove/Browsing/FolderLibrary.swift",
+    "Clove/Folder/FolderLibrarySession.swift",
+    "Clove/Browsing/GridScreen.swift",
+    "Clove/Browsing/DetailScreen.swift",
+    "Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift",
+    "Clove/Detail/DetailMarkingView.swift",
+    "Clove/Detail/DetailFilmstrip.swift",
+    "Clove/Detail/MarkAutoAdvance.swift",
+    "design/handoff/interactions.md"
+  ]
+}

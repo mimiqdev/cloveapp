@@ -23,6 +23,7 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 ROOT = SKILL_DIR.parent.parent.parent
 MODEL = SKILL_DIR / "model" / "BrowsingWorkflow.tla"
 CONFIG = SKILL_DIR / "model" / "BrowsingWorkflow.cfg"
+SOURCE_SYNC = SKILL_DIR / "model" / "source-sync.json"
 BUILD = ROOT / ".build" / "formal-verification"
 JAR = BUILD / "tools" / f"tla2tools-{TLA_VERSION}.jar"
 
@@ -86,20 +87,33 @@ MUTANTS = {
         "invariant": "ReconnectHidesOldState",
         "defect": "BrowsingModel.reopenNow keeps old Detail visible while the fresh scan runs.",
     },
-    "representative-collapse-keeps-zoom": {
+    "changed-collapse-retains-zoom": {
         "old": r"""/\ currentPhoto' = Representative(activeFolder, marks)
-    /\ scale' = "fit"
-    /\ anchor' = "centre"
-    /\ advance' = NoAdvance
-    /\ event' = Event("CollapseGroup")""",
-        "new": r"""/\ currentPhoto' = Representative(activeFolder, marks)
     /\ scale' = IF currentPhoto = Representative(activeFolder, marks) THEN scale ELSE "fit"
     /\ anchor' = IF currentPhoto = Representative(activeFolder, marks) THEN anchor ELSE "centre"
     /\ advance' = NoAdvance
     /\ event' = Event("CollapseGroup")""",
-        "invariant": "OutsideGroupNavigationReturnsFit",
-        "defect": "DetailMarkingView keeps zoom when collapseGroup stays on the Representative.",
-        "sourceFinding": True,
+        "new": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = scale
+    /\ anchor' = anchor
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "invariant": "CollapseZoomFollowsRepresentative",
+        "defect": "DetailMarkingView retains zoom when collapseGroup changes to the Representative.",
+    },
+    "representative-collapse-resets-zoom": {
+        "old": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = IF currentPhoto = Representative(activeFolder, marks) THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = Representative(activeFolder, marks) THEN anchor ELSE "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "new": r"""/\ currentPhoto' = Representative(activeFolder, marks)
+    /\ scale' = "fit"
+    /\ anchor' = "centre"
+    /\ advance' = NoAdvance
+    /\ event' = Event("CollapseGroup")""",
+        "invariant": "CollapseZoomFollowsRepresentative",
+        "defect": "DetailMarkingView resets zoom when collapseGroup leaves the Representative on stage.",
     },
     "group-step-resets-zoom": {
         "old": r"""/\ currentPhoto' = IF offset = 1 THEN Member(activeFolder, 2) ELSE Member(activeFolder, 1)
@@ -122,6 +136,37 @@ MUTANTS = {
         "defect": "DetailMarkingView resets scale and anchor while moving inside Group Focus.",
     },
 }
+
+
+def check_source_drift() -> bool:
+    """Require review when covered source differs from the manually reviewed revision."""
+    sync = json.loads(SOURCE_SYNC.read_text())
+    result = subprocess.run(
+        ["git", "diff", "--name-only", sync["commit"], "--", *sync["coveredFiles"]],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Source-drift detection failed: {result.stderr.strip()}")
+    changed = [line for line in result.stdout.splitlines() if line]
+    if changed:
+        print(
+            f"FAIL source-drift gate: covered source changed since reviewed sync "
+            f"{sync['commit']}"
+        )
+        for path in changed:
+            print(f"  {path}")
+        print(
+            "This is drift detection, not semantic proof. Review the source and model, "
+            "then rerun. Do not advance the sync commit merely to bypass review."
+        )
+        return False
+    print(
+        f"PASS source-drift gate: covered source matches reviewed sync {sync['commit']} "
+        "(drift detection only)"
+    )
+    return True
 
 
 def java_executable() -> str:
@@ -251,6 +296,8 @@ def main() -> int:
     selection.add_argument("--mutant", choices=sorted(MUTANTS))
     args = parser.parse_args()
 
+    if not check_source_drift():
+        return 1
     install_tlc()
     java = java_executable()
     print(f"TLA+ tools {TLA_VERSION}; Java: {java}")

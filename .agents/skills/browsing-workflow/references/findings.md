@@ -1,39 +1,61 @@
-# Source finding: Representative collapse keeps zoom
+# Source correspondence and specification correction
 
 Source sync commit: `29702ce651a7de77cf642b38d1898023ae775476`.
 
-## Contract
+## Collapse semantics were corrected
 
-The requested workflow rule says that leaving Group Focus returns to fit. Group Focus navigation
-keeps scale and anchor, but Timeline navigation and leaving the group reset them.
+An earlier version of this verification treated every Group Focus collapse as a return to fit. That
+summary was imprecise. Owner-approved #304 explicitly keeps scale and anchor when collapse leaves
+the same Representative on stage. Detail returns to fit only when collapse changes the displayed
+photo to the Representative.
 
-## Code path
+The current `DetailMarkingView` behavior matches that exception. There is no current-source finding
+for Representative collapse. The model now implements both branches in
+`CollapseZoomFollowsRepresentative`:
 
-1. `BrowsingModel.collapseGroup()` sets `expandedGroup = nil` and snaps `currentPhoto` to the active
-   group's Representative.
-2. `DetailScreen.collapseGroup()` cancels auto-advance and calls that model function.
-3. `DetailMarkingView` reloads preview state through `.task(id: photo.id)`.
-4. If the previous Group Focus photo was not the Representative, the photo ID changes and
-   `loadPreview` resets zoom to fit.
-5. If the previous photo already was the Representative, the photo ID does not change. Only
-   `refreshPrefetchForOrderChange` runs for the new Timeline order. Its comment explicitly says it
-   keeps pixels and zoom untouched when expanding or collapsing on the Representative.
+- `changed-collapse-retains-zoom` breaks the changed-photo branch. Its counterexample is
+  `OpenBurst -> StepGroup -> Inspect100 -> CollapseGroup`.
+- `representative-collapse-resets-zoom` breaks the unchanged-Representative branch. Its
+  counterexample is `OpenBurst -> Inspect100 -> CollapseGroup`.
 
-The relevant files are `Clove/Browsing/BrowsingModel.swift`, `Clove/Browsing/DetailScreen.swift`,
-and `Clove/Detail/DetailMarkingView.swift`. `CloveUITests/CloveFlowTests.swift` covers the
-Representative-changed case and says that it resets zoom. It does not clear the same-photo case.
+This is a specification correction based on the owner-approved rule, not an invariant weakened to
+hide a source defect. No product code was changed.
 
-## Executable comparison
+## Evidence has separate meanings
 
-The `representative-collapse-keeps-zoom` variant in `scripts/check` changes only the collapse zoom
-rule. It keeps scale and anchor when the current photo is already the Representative and resets them
-otherwise, matching the code path above. TLC produces:
+The depth-12 TLA+ run establishes bounded model safety for all enabled action orders in the small
+world. The nine mutations establish sensitivity to selected model defects. Manual review at the
+sync commit establishes the initial source correspondence. The Git source-drift gate detects later
+changes to covered paths and requires another review.
 
-```text
-OpenFolder -> ScanFinish -> OpenBurst -> Inspect100 -> CollapseGroup
-Invariant OutsideGroupNavigationReturnsFit is violated.
+The drift gate does not parse Swift, prove that the model matches a changed function, or establish
+Swift or UIKit correctness. The TLA+ run also does not establish liveness. These limitations apply
+to every passing result.
+
+## A real covered-source scratch break
+
+On 2026-11-17, the normal workflow was exercised against a temporary semantic break in the covered
+`BrowsingModel.collapseGroup()` function. The experiment changed this real Swift line:
+
+```diff
+- let representative = active.representative.id
++ let representative = active.visibleMembers[0].id
 ```
 
-The default model uses fit on every collapse and passes after all injected variants are removed.
-The source-comparison variant remains a report of the current code, not a product fix. This finding
-was established by source inspection and TLC on Linux. An iOS runtime reproduction remains undone.
+The unchanged normal command, `.agents/skills/browsing-workflow/scripts/check`, exited 1 before
+starting TLC and printed:
+
+```text
+FAIL source-drift gate: covered source changed since reviewed sync 29702ce651a7de77cf642b38d1898023ae775476
+  Clove/Browsing/BrowsingModel.swift
+This is drift detection, not semantic proof. Review the source and model, then rerun. Do not advance the sync commit merely to bypass review.
+```
+
+The Swift line was then restored to `active.representative.id`. `git diff` for the product file was
+empty and the sync commit remained `29702ce651a7de77cf642b38d1898023ae775476`. The same normal
+command then passed the drift gate, completed the depth-12 model with 2,449,379 generated states,
+883,363 distinct states, and an empty queue, and caught all nine expected mutation failures.
+
+This experiment demonstrates drift detection and the required maintenance stop on an actual covered
+Swift edit. It does not claim semantic verification of that edit. Product code was restored, and no
+macOS or iOS checks were claimed on the Linux host.

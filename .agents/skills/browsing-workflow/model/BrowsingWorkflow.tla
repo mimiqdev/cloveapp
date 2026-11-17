@@ -297,8 +297,8 @@ CollapseGroup ==
     /\ route' = "Timeline"
     /\ expandedGroup' = NoFolder
     /\ currentPhoto' = Representative(activeFolder, marks)
-    /\ scale' = "fit"
-    /\ anchor' = "centre"
+    /\ scale' = IF currentPhoto = Representative(activeFolder, marks) THEN scale ELSE "fit"
+    /\ anchor' = IF currentPhoto = Representative(activeFolder, marks) THEN anchor ELSE "centre"
     /\ advance' = NoAdvance
     /\ event' = Event("CollapseGroup")
     /\ steps' = steps + 1
@@ -544,8 +544,14 @@ GroupNavigationKeepsZoom ==
         scale = event.oldScale /\ anchor = event.oldAnchor
 
 OutsideGroupNavigationReturnsFit ==
-    event.action \in {"OpenPhoto", "StepTimeline", "CollapseGroup", "Back"} =>
+    event.action \in {"OpenPhoto", "StepTimeline", "Back"} =>
         scale = "fit" /\ anchor = "centre"
+
+CollapseZoomFollowsRepresentative ==
+    event.action = "CollapseGroup" =>
+        IF event.oldPhoto = Representative(activeFolder, marks)
+        THEN scale = event.oldScale /\ anchor = event.oldAnchor
+        ELSE scale = "fit" /\ anchor = "centre"
 
 CollapseUsesRepresentative ==
     event.action = "CollapseGroup" =>
