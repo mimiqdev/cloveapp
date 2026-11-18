@@ -15,46 +15,31 @@ sync.
 ### en-US
 
 ```text
-Clove helps photographers cull photos directly where they live on iPhone and iPad. Open any folder in place through Files—on internal storage, an external drive, or an SD card—with no importing or copying.
+Clove is a fast, native photo culling app for iPhone and iPad. Open folders directly on SD cards, external SSDs, or in Files—with no importing and no duplicated storage.
 
-Highlights in this beta:
-- RAW + JPEG/HIF pairing managed as a single photo set.
-- Fast swipe-to-rate and Reject gestures with an interactive gesture guide, toolbar controls, and external keyboard shortcuts.
-- 100% zoom inspection with face detection and camera autofocus (AF) point indicators.
-- On-device similar-shot grouping with synchronized zoom and quick "Reject unmarked" cleanup.
-- Non-destructive XMP sidecars compatible with Lightroom, Capture One, and Photo Mechanic (standalone JPEG/HIF marks are stored inside Clove).
-- Safe Move rejects that moves rejected sets into a `_Rejected` subfolder after confirmation with full Undo—never deleting files.
-- Drag-to-select Batch Rename for organizing keepers directly in place.
+- Swipe to rate, color-label, and reject, with instant 100% zoom and face / camera AF inspection
+- Compare bursts effortlessly with on-device grouping and synchronized zoom
+- Save standard XMP sidecars ready for Lightroom, Capture One, and Photo Mechanic
 ```
 
 ### zh-Hans
 
 ```text
-Clove 帮助摄影师在 iPhone 和 iPad 上直接于原文件夹中高效筛选照片。通过“文件”应用原地打开设备存储、外接硬盘或 SD 卡中的文件夹，无需导入或复制。
+Clove 是一款专为 iPhone 与 iPad 打造的原生选片工具。直接打开存储卡、移动硬盘或「文件」中的文件夹原位选片，无需导入、不占额外空间。
 
-本测试版主要功能：
-- RAW + JPEG/HIF 自动配对，作为同一组照片统一浏览与标记。
-- 快速滑动评分与淘汰手势，配合交互式手势指南、底部工具栏及外接键盘快捷键。
-- 100% 放大检视，支持人脸识别与相机自动对焦点（AF）框显示。
-- 端侧相似照片分组，支持组内同步缩放与“淘汰未标记”一键清理。
-- 兼容 Lightroom、Capture One 与 Photo Mechanic 的无损 XMP 附属文件（独立 JPEG/HIF 的标记保存在 Clove 内部）。
-- 安全“整理淘汰片”流程：确认后将淘汰照片集移至 `_Rejected` 子文件夹并支持撤销，绝不删除原始文件。
-- 拖选批量重命名，直接在原文件夹中整理保留照片。
+- 单手滑动快速评星、标色与淘汰，双击 100% 放大配合人脸与相机对焦点精准查焦
+- 自动聚合相似连拍并支持同步缩放对比，快速挑出最佳一张
+- RAW 标记直接写入标准 XMP，无缝衔接 Lightroom、Capture One 与 Photo Mechanic
 ```
 
 ### zh-Hant
 
 ```text
-Clove 協助攝影師在 iPhone 與 iPad 上直接於原檔案夾中高效篩選相片。透過「檔案」App 原地開啟裝置儲存空間、外接硬碟或 SD 卡中的檔案夾，無需匯入或複製。
+Clove 是一款專為 iPhone 與 iPad 打造的原生選片工具。直接開啟記憶卡、外接硬碟或「檔案」中的資料夾原位選片，無需匯入、不佔額外空間。
 
-本測試版主要功能：
-- RAW + JPEG/HIF 自動配對，作為同一組相片統一瀏覽與標記。
-- 快速滑動評分與淘汰手勢，搭配互動式手勢指南、工具列按鈕與外接鍵盤快速鍵。
-- 100% 放大檢視，支援人臉偵測與相機自動對焦點（AF）框顯示。
-- 裝置端相似相片分組，支援組內同步縮放與「淘汰未標記」一鍵清理。
-- 相容 Lightroom、Capture One 與 Photo Mechanic 的無損 XMP 附屬檔案（獨立 JPEG/HIF 的標記會儲存在 Clove 內部）。
-- 安全「整理淘汰片」流程：確認後將淘汰相片組移至 `_Rejected` 子檔案夾並支援復原，絕不刪除原始檔案。
-- 拖選批次重新命名，直接在原檔案夾中整理保留相片。
+- 單手滑動快速評星、標色與淘汰，點兩下 100% 放大搭配人臉與相機對焦點精準查焦
+- 自動聚合相似連拍並支援同步縮放對比，快速挑出最佳一張
+- RAW 標記直接寫入標準 XMP，無縫銜接 Lightroom、Capture One 與 Photo Mechanic
 ```
 
 ## What to test
@@ -62,34 +47,28 @@ Clove 協助攝影師在 iPhone 與 iPad 上直接於原檔案夾中高效篩選
 ### en-US
 
 ```text
-- Open a folder with JPEG or RAW+JPEG/HIF photos via Files, then reopen it from Recents.
-- Browse, sort, and filter the grid; tap into Detail View and double-tap or use 100% zoom to inspect focus and camera AF / face indicators.
-- Rate, apply color labels, and Reject using swipe gestures (see the gesture guide in Settings), toolbar controls, or an external keyboard; try auto-advance and Undo.
-- Review on-device similar-shot groups with synchronized zoom, try Reject unmarked, and Undo.
-- Drag to multi-select photos in the grid and test Batch Rename in place.
-- Run Move rejects to move rejected sets to `_Rejected`, confirm Undo restores them cleanly, and verify RAW XMP sidecars update as expected.
+Welcome to the Clove Public Beta! Try culling a real shoot from an SD card, external SSD, or local folder in Files:
+- Test swipe rating/rejecting, 100% focus inspection, and burst comparison at your normal culling pace
+- Check XMP sidecar round-tripping with your desktop editor (Lightroom, Capture One, Photo Mechanic)
+- Share anything via TestFlight feedback that feels slow, awkward, or gets in your way
 ```
 
 ### zh-Hans
 
 ```text
-- 通过“文件”打开包含 JPEG 或 RAW+JPEG/HIF 照片的文件夹，并尝试从“最近项目”重新打开。
-- 在网格中浏览、排序与筛选照片；进入大图视图，双击或使用 100% 缩放检查对焦及人脸/相机 AF 对焦框。
-- 使用滑动手势（可在“设置”中查看手势指南）、底部按钮或外接键盘进行星级评分、颜色标签与淘汰标记，并测试自动跳转与撤销。
-- 体验端侧相似照片分组与组内同步缩放，测试“淘汰未标记”及撤销效果。
-- 在网格中拖动多选照片，测试原地批量重命名功能。
-- 使用“整理淘汰片”将淘汰照片移入 `_Rejected` 文件夹，验证撤销可完整还原，并检查 RAW 的 XMP 附属文件保存是否正常。
+欢迎参与 Clove 公开测试！建议直接用你日常拍摄的存储卡、外接 SSD 或本地照片文件夹体验完整选片流程：
+- 体验滑动评星/淘汰、100% 放大查焦与连拍对比的手感与速度
+- 验证 RAW 的 XMP 标记与桌面后期软件（Lightroom / Capture One 等）的衔接是否顺畅
+- 任何卡顿、误触或不顺手的细节，欢迎随时通过 TestFlight 截屏反馈
 ```
 
 ### zh-Hant
 
 ```text
-- 透過「檔案」開啟包含 JPEG 或 RAW+JPEG/HIF 相片的檔案夾，並嘗試從「最近項目」重新開啟。
-- 在格線中瀏覽、排序與篩選相片；進入大圖檢視，點兩下或使用 100% 縮放檢查對焦與人臉／相機 AF 對焦框。
-- 使用滑動手勢（可在「設定」中查看手勢指南）、工具列按鈕或外接鍵盤進行星級評分、顏色標籤與淘汰標記，並測試自動跳轉與復原。
-- 體驗裝置端相似相片分組與組內同步縮放，測試「淘汰未標記」及復原效果。
-- 在格線中拖曳多選相片，測試原地批次重新命名功能。
-- 使用「整理淘汰片」將淘汰相片移入 `_Rejected` 檔案夾，確認復原可完整還原，並檢查 RAW 的 XMP 附屬檔案寫入是否正常。
+歡迎參與 Clove 公開測試！建議直接用你日常拍攝的記憶卡、外接 SSD 或本機相片資料夾體驗完整選片流程：
+- 體驗滑動評星／淘汰、100% 放大查焦與連拍對比的手感與速度
+- 驗證 RAW 的 XMP 標記與桌面後製軟體（Lightroom / Capture One 等）的銜接是否順暢
+- 任何卡頓、誤觸或不順手的細節，歡迎隨時透過 TestFlight 截圖回饋
 ```
 
 ## Beta App Review notes

@@ -287,7 +287,7 @@ class MaterialsTests(QuietTestCase):
             self.assertLessEqual(len(wn), 4000)
 
         en_desc = materials["descriptions"]["en-US"]
-        for keyword in ("Files", "RAW", "100% zoom", "similar-shot", "XMP", "Move rejects", "Batch Rename"):
+        for keyword in ("Files", "100% zoom", "XMP", "Lightroom"):
             self.assertIn(keyword, en_desc)
 
         notes = materials["review_notes"]
