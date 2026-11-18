@@ -14,6 +14,7 @@ struct GridScreen: View {
     @State private var showsRenameDetails = false
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
+    @State private var isFilterAnchorReady = false
     @State private var selectsEmpty = false
     @State private var presentation = DetailPresentation.photoPreview
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
@@ -23,7 +24,11 @@ struct GridScreen: View {
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
+    @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
+    @Environment(\.hasFoldRegion) private var hasFoldRegion
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var filterPopoverTrigger: Int = 0
 
     private enum MoveSheetRoute: Identifiable {
         case flow(MoveRejectsFlow)
@@ -37,13 +42,22 @@ struct GridScreen: View {
         }
     }
 
-    init(browsing: BrowsingModel, thumbnails: (any GridThumbnailSource)? = nil) {
+    init(
+        browsing: BrowsingModel,
+        thumbnails: (any GridThumbnailSource)? = nil,
+        filterPopoverTrigger: Int = 0
+    ) {
         self.browsing = browsing
         self.thumbnails = thumbnails ?? browsing.thumbnails
+        self.filterPopoverTrigger = filterPopoverTrigger
     }
 
     private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }
-    private var isRegular: Bool { horizontalSizeClass == .regular && !isDuoExpanded }
+    private var isRegular: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+            && horizontalSizeClass == .regular
+            && !isDuoExpanded
+    }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
     private var showsMoveRejects: Bool {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
@@ -92,6 +106,19 @@ struct GridScreen: View {
                 if route == .detail { hasOpenedPhoto = true }
                 if route != .detail {
                     presentation = .photoPreview
+                }
+            }
+            .onChange(of: filterPopoverTrigger) { _, _ in
+                if isFilterAnchorReady, scenePhase == .active {
+                    showsFilters = true
+                }
+            }
+            .onChange(of: filterDismissTrigger) { _, _ in
+                showsFilters = false
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active {
+                    showsFilters = false
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -452,8 +479,19 @@ struct GridScreen: View {
                 ) { showsFilters.toggle() }
             }
         }
-        .popover(isPresented: $showsFilters) {
+        .popover(
+            isPresented: Binding(
+                get: { showsFilters && isFilterAnchorReady && scenePhase == .active },
+                set: { showsFilters = $0 })
+        ) {
             filterMenu.presentationCompactAdaptation(.popover)
+        }
+        .onAppear {
+            isFilterAnchorReady = true
+        }
+        .onDisappear {
+            isFilterAnchorReady = false
+            showsFilters = false
         }
     }
 
@@ -623,6 +661,19 @@ struct GridScreen: View {
         browsing.openGroup(id)
     }
 
+    private var filterDismissTrigger: GridFilterDismissTrigger {
+        GridFilterDismissTrigger(
+            route: browsing.state.route,
+            folder: browsing.state.folder,
+            isRegular: isRegular,
+            isSelecting: isSelecting,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            usesVerticalToolbar: usesVerticalToolbar,
+            hasFoldRegion: hasFoldRegion,
+            horizontalSizeClass: horizontalSizeClass)
+    }
+
     private var tapPickerDismissTrigger: GridTapPickerDismissTrigger {
         GridTapPickerDismissTrigger(
             isSelecting: isSelecting,
@@ -661,6 +712,18 @@ private struct GridBatchRenameButton: View {
         .accessibilityHidden(obscured)
         .accessibilityIdentifier("clove.grid.batch.rename")
     }
+}
+
+private struct GridFilterDismissTrigger: Equatable {
+    let route: BrowserRoute
+    let folder: FolderIdentity?
+    let isRegular: Bool
+    let isSelecting: Bool
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let usesVerticalToolbar: Bool
+    let hasFoldRegion: Bool
+    let horizontalSizeClass: UserInterfaceSizeClass?
 }
 
 private struct GridTapPickerDismissTrigger: Equatable {

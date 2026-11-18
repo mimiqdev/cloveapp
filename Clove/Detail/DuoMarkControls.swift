@@ -16,6 +16,7 @@ struct DuoMarkControls: ToolbarContent {
     let label: (ColourLabel) -> Void
     let toggleReject: () -> Void
     let markingBegan: () -> Void
+    var labelPopoverTrigger: Int = 0
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .bottomBar) {
@@ -43,7 +44,7 @@ struct DuoMarkControls: ToolbarContent {
         ToolbarItem(placement: .bottomBar) {
             ToolbarLabelButton(
                 photoID: photoID, marks: marks, settings: settings, label: label,
-                markingBegan: markingBegan
+                markingBegan: markingBegan, labelPopoverTrigger: labelPopoverTrigger
             )
             .disabled(!canMark)
             .id(photoID)
@@ -64,8 +65,30 @@ private struct ToolbarRatingButton: View {
     let rate: (Rating) -> Void
     let markingBegan: () -> Void
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.hasFoldRegion) private var hasFoldRegion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isAnchorReady = false
 
     private var rating: Rating { dragRating ?? previewRating ?? marks.rating }
+
+    private var arrowEdge: Edge {
+        verticalEdge == .leading ? .leading : (verticalEdge == .trailing ? .trailing : .bottom)
+    }
+
+    private var dismissTrigger: DuoPopoverDismissTrigger {
+        DuoPopoverDismissTrigger(
+            photoID: photoID,
+            arrowEdge: arrowEdge,
+            horizontalSizeClass: horizontalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            hasFoldRegion: hasFoldRegion,
+            isEnabled: isEnabled)
+    }
 
     var body: some View {
         Button(
@@ -80,9 +103,11 @@ private struct ToolbarRatingButton: View {
         .accessibilityValue(MarkSummary.text(for: marks))
         .accessibilityIdentifier("clove.duo.rating")
         .popover(
-            isPresented: $showsStars, attachmentAnchor: .rect(.bounds),
-            arrowEdge: verticalEdge == .leading
-                ? .leading : (verticalEdge == .trailing ? .trailing : .bottom)
+            isPresented: Binding(
+                get: { showsStars && isAnchorReady && scenePhase == .active && isEnabled },
+                set: { showsStars = $0 }),
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: arrowEdge
         ) {
             RatingPicker(
                 selection: rating,
@@ -99,6 +124,24 @@ private struct ToolbarRatingButton: View {
             .presentationCompactAdaptation(.popover)
             .presentationBackgroundInteraction(.enabled)
         }
+        .onChange(of: dismissTrigger) { _, _ in
+            showsStars = false
+            dragRating = nil
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                showsStars = false
+                dragRating = nil
+            }
+        }
+        .onAppear {
+            isAnchorReady = true
+        }
+        .onDisappear {
+            isAnchorReady = false
+            showsStars = false
+            dragRating = nil
+        }
     }
 }
 
@@ -109,8 +152,31 @@ private struct ToolbarLabelButton: View {
     let settings: AppSettings
     let label: (ColourLabel) -> Void
     let markingBegan: () -> Void
+    var labelPopoverTrigger: Int = 0
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.hasFoldRegion) private var hasFoldRegion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isEnabled) private var isEnabled
     @State private var showsLabels = false
+    @State private var isAnchorReady = false
+
+    private var arrowEdge: Edge {
+        verticalEdge == .leading ? .leading : (verticalEdge == .trailing ? .trailing : .bottom)
+    }
+
+    private var dismissTrigger: DuoPopoverDismissTrigger {
+        DuoPopoverDismissTrigger(
+            photoID: photoID,
+            arrowEdge: arrowEdge,
+            horizontalSizeClass: horizontalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            hasFoldRegion: hasFoldRegion,
+            isEnabled: isEnabled)
+    }
 
     var body: some View {
         Button(
@@ -126,9 +192,11 @@ private struct ToolbarLabelButton: View {
         .accessibilityValue(MarkSummary.text(for: marks))
         .accessibilityIdentifier("clove.duo.label")
         .popover(
-            isPresented: $showsLabels, attachmentAnchor: .rect(.bounds),
-            arrowEdge: verticalEdge == .leading
-                ? .leading : (verticalEdge == .trailing ? .trailing : .bottom)
+            isPresented: Binding(
+                get: { showsLabels && isAnchorReady && scenePhase == .active && isEnabled },
+                set: { showsLabels = $0 }),
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: arrowEdge
         ) {
             LabelPicker(
                 selection: marks.label.colour,
@@ -143,5 +211,36 @@ private struct ToolbarLabelButton: View {
             )
             .presentationCompactAdaptation(.popover)
         }
+        .onChange(of: labelPopoverTrigger) { _, _ in
+            if isAnchorReady, scenePhase == .active, isEnabled {
+                showsLabels = true
+            }
+        }
+        .onChange(of: dismissTrigger) { _, _ in
+            showsLabels = false
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                showsLabels = false
+            }
+        }
+        .onAppear {
+            isAnchorReady = true
+        }
+        .onDisappear {
+            isAnchorReady = false
+            showsLabels = false
+        }
     }
+}
+
+@available(iOS 27.1, *)
+private struct DuoPopoverDismissTrigger: Equatable {
+    let photoID: PhotoIdentity
+    let arrowEdge: Edge
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let hasFoldRegion: Bool
+    let isEnabled: Bool
 }

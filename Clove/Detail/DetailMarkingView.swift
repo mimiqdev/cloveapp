@@ -99,6 +99,7 @@ struct DetailMarkingView: View {
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.hasFoldRegion) private var hasFoldRegion
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hidesChrome = false
@@ -230,6 +231,16 @@ struct DetailMarkingView: View {
                 inspectedFocusRegionID = nil
                 pendingRestoredZoom = nil
             }
+            .onChange(of: duoPopoverDismissTrigger) { _, _ in
+                showsToolbarStars = false
+                toolbarDragRating = nil
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active {
+                    showsToolbarStars = false
+                    toolbarDragRating = nil
+                }
+            }
             .task(id: photo.id) {
                 await loadPreview(for: photo)
             }
@@ -243,6 +254,8 @@ struct DetailMarkingView: View {
                 await loadFocusRegions(for: photo)
             }
             .onDisappear {
+                showsToolbarStars = false
+                toolbarDragRating = nil
                 upgradeTask?.cancel()
                 shown = nil
                 currentWindow = nil
@@ -1840,6 +1853,18 @@ struct DetailMarkingView: View {
             dismissToken: tapPickerDismissToken)
     }
 
+    private var duoPopoverDismissTrigger: DetailDuoPopoverDismissTrigger {
+        DetailDuoPopoverDismissTrigger(
+            route: browsing.state.route,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            usesVerticalToolbar: usesVerticalToolbar,
+            hasFoldRegion: hasFoldRegion,
+            horizontalSizeClass: horizontalSizeClass,
+            allowsMarkingInput: allowsMarkingInput,
+            hasDuo: duo != nil)
+    }
+
     // MARK: - Geometry
 
     /// The image's long edge in device pixels at a scale, which is what I2 compares with the
@@ -1913,6 +1938,17 @@ private struct DetailTapPickerDismissTrigger: Equatable {
     let chromeIsVisible: Bool
     let showsInformation: Bool
     let dismissToken: Int
+}
+
+private struct DetailDuoPopoverDismissTrigger: Equatable {
+    let route: BrowserRoute
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let usesVerticalToolbar: Bool
+    let hasFoldRegion: Bool
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let allowsMarkingInput: Bool
+    let hasDuo: Bool
 }
 
 /// Filtering a group can change neighbours without changing its current photo.

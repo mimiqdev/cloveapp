@@ -18,7 +18,9 @@ struct BrowseShell: View {
     private var usesVerticalBar: Bool { isDuoExpanded || isDuoCover }
 
     private var isRegular: Bool {
-        horizontalSizeClass == .regular && !isDuoExpanded
+        UIDevice.current.userInterfaceIdiom == .pad
+            && horizontalSizeClass == .regular
+            && !isDuoExpanded
     }
 
     private var isWideSettings: Bool {
