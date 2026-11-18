@@ -8,6 +8,8 @@ struct GridScreen: View {
     let thumbnails: any GridThumbnailSource
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.cloveUserInterfaceIdiom) private var overrideUserInterfaceIdiom
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
     @State private var moveSheet: MoveSheetRoute?
@@ -17,6 +19,7 @@ struct GridScreen: View {
     @State private var showsFilters = false
     @State private var isFilterAnchorReady = false
     @State private var selectsEmpty = false
+    @State private var isLandscapeContainer = false
     @State private var presentation = DetailPresentation.photoPreview
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
     /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
@@ -55,11 +58,21 @@ struct GridScreen: View {
         _presentation = State(initialValue: initialPresentation)
     }
 
+    private var userInterfaceIdiom: UIUserInterfaceIdiom {
+        overrideUserInterfaceIdiom ?? UIDevice.current.userInterfaceIdiom
+    }
     private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }
     private var isRegular: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
+        userInterfaceIdiom == .pad
             && horizontalSizeClass == .regular
             && !isDuoExpanded
+    }
+    private var isOrdinaryPhoneLandscape: Bool {
+        userInterfaceIdiom == .phone
+            && !isDuoExpanded
+            && !isDuoCover
+            && !hasFoldRegion
+            && (verticalSizeClass == .compact || isLandscapeContainer)
     }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
     private var showsMoveRejects: Bool {
@@ -105,6 +118,11 @@ struct GridScreen: View {
     var body: some View {
         surface
             .background(Color.clove.bg.canvas)
+            .onGeometryChange(for: Bool.self) {
+                $0.size.width > $0.size.height && $0.size.width > 0
+            } action: {
+                isLandscapeContainer = $0
+            }
             .onChange(of: browsing.state.route) { _, route in
                 if route == .detail { hasOpenedPhoto = true }
                 if route != .detail {
@@ -403,6 +421,8 @@ struct GridScreen: View {
                     "%lld selected", language: language, Int64(browsing.state.selection.count))
                 : browsing.localizedFolderTitle(language: language),
             titleIdentifier: isSelecting ? "clove.grid.batch.count" : "clove.grid.title",
+            usesInlineFlow: isOrdinaryPhoneLandscape,
+            height: isOrdinaryPhoneLandscape ? 54 : 64,
             back: { browsing.back() }
         ) {
             HStack(spacing: 0) {
@@ -740,7 +760,9 @@ struct GridScreen: View {
             isDuoCover: isDuoCover,
             usesVerticalToolbar: usesVerticalToolbar,
             hasFoldRegion: hasFoldRegion,
-            horizontalSizeClass: horizontalSizeClass)
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isLandscapeContainer: isLandscapeContainer)
     }
 
     private var tapPickerDismissTrigger: GridTapPickerDismissTrigger {
@@ -754,7 +776,10 @@ struct GridScreen: View {
             hasBatchTargets: !browsing.batchTargets.isEmpty,
             hasMoveSheet: moveSheet != nil,
             hasRenameFlow: renameFlow != nil,
-            showsFilters: showsFilters)
+            showsFilters: showsFilters,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isLandscapeContainer: isLandscapeContainer)
     }
 }
 
@@ -794,6 +819,8 @@ private struct GridFilterDismissTrigger: Equatable {
     let usesVerticalToolbar: Bool
     let hasFoldRegion: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isLandscapeContainer: Bool
 }
 
 private struct GridTapPickerDismissTrigger: Equatable {
@@ -807,4 +834,7 @@ private struct GridTapPickerDismissTrigger: Equatable {
     let hasMoveSheet: Bool
     let hasRenameFlow: Bool
     let showsFilters: Bool
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isLandscapeContainer: Bool
 }

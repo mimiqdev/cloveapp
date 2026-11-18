@@ -376,10 +376,17 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// opens on the same spot at the same zoom (PRD In-group culling, comparison and elimination).
     /// A view at fit has no position to keep and answers nil.
     var zoomSnapshot: DetailZoomSnapshot? {
+        if needsResetBeforeZoom,
+            case .layoutRetarget(let pendingScale, let pendingAnchor) = pendingZoom,
+            pendingScale > DetailFitScale.tolerance
+        {
+            return DetailZoomSnapshot(scale: pendingScale, anchor: pendingAnchor)
+        }
+        let referenceSize = laidOutSize != .zero ? laidOutSize : bounds.size
         guard
             let anchor = DetailZoom.centreAnchor(
                 scale: scrollView.zoomScale, contentOffset: scrollView.contentOffset,
-                imagePixels: shownPixels, viewSize: bounds.size)
+                imagePixels: shownPixels, viewSize: referenceSize)
         else { return nil }
         return DetailZoomSnapshot(scale: scrollView.zoomScale, anchor: anchor)
     }

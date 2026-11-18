@@ -17,10 +17,50 @@ import UIKit
 /// neighboring thumbnails (#318). The screen draws the finishing pill itself, so the strip's height
 /// never changes with that pill's availability and its layout can never take photo space (#305).
 struct DetailFilmstrip: View {
+    struct Metrics: Equatable {
+        let thumbnailWidth: CGFloat
+        let thumbnailHeight: CGFloat
+        let stackHeight: CGFloat
+        let timelineSpacing: CGFloat
+        let bandHeight: CGFloat
+        let collapseCapWidth: CGFloat
+        let horizontalPadding: CGFloat
+        let verticalTrackPadding: CGFloat
+        let groupTrayCornerRadius: CGFloat
+        let groupStackPeek: CGFloat
+
+        static let standard = Metrics(
+            thumbnailWidth: 54,
+            thumbnailHeight: 60,
+            stackHeight: 64,
+            timelineSpacing: 8,
+            bandHeight: 70,
+            collapseCapWidth: 30,
+            horizontalPadding: 10,
+            verticalTrackPadding: 3,
+            groupTrayCornerRadius: 9,
+            groupStackPeek: 4
+        )
+
+        static let compact = Metrics(
+            thumbnailWidth: 48,
+            thumbnailHeight: 48,
+            stackHeight: 52,
+            timelineSpacing: 4,
+            bandHeight: 56,
+            collapseCapWidth: 28,
+            horizontalPadding: 8,
+            verticalTrackPadding: 2,
+            groupTrayCornerRadius: 8,
+            groupStackPeek: 4
+        )
+    }
+
     let timeline: DetailTimeline
     let expandedGroup: ActiveBrowsingGroup?
     let current: PhotoIdentity?
     let thumbnails: any GridThumbnailSource
+    let metrics: Metrics
     let openPhoto: (PhotoIdentity) -> Void
     let selectGroupPhoto: (PhotoIdentity) -> Void
     let expandGroup: (GroupID) -> Void
@@ -28,12 +68,8 @@ struct DetailFilmstrip: View {
 
     private static let timelineViewportSpace = "clove.detail.filmstrip.timeline.viewport"
     private static let groupViewportSpace = "clove.detail.filmstrip.group.viewport"
-    private static let thumbnailWidth: CGFloat = 54
-    private static let thumbnailHeight: CGFloat = 60
-    private static let timelineSpacing: CGFloat = 8
     private static let groupRestingSpacing: CGFloat = 3
     private static let groupCompressedSpacing: CGFloat = -8
-    private static let collapseCapWidth: CGFloat = 30
     private static let rollOffset: CGFloat = 18
     private static let rollDegrees: Double = 24
     private static let rollPerspective: CGFloat = 0.4
@@ -70,6 +106,7 @@ struct DetailFilmstrip: View {
         expandedGroup: ActiveBrowsingGroup?,
         current: PhotoIdentity?,
         thumbnails: any GridThumbnailSource,
+        metrics: Metrics = .standard,
         openPhoto: @escaping (PhotoIdentity) -> Void,
         selectGroupPhoto: @escaping (PhotoIdentity) -> Void,
         expandGroup: @escaping (GroupID) -> Void,
@@ -79,6 +116,7 @@ struct DetailFilmstrip: View {
         self.expandedGroup = expandedGroup
         self.current = current
         self.thumbnails = thumbnails
+        self.metrics = metrics
         self.openPhoto = openPhoto
         self.selectGroupPhoto = selectGroupPhoto
         self.expandGroup = expandGroup
@@ -96,7 +134,7 @@ struct DetailFilmstrip: View {
                 groupFocusTrack(activeGroup)
             }
         }
-        .frame(height: 70)
+        .frame(height: metrics.bandHeight)
         .clipped()
         .onChange(of: expandedGroup) { _, newValue in
             if let newValue {
@@ -114,6 +152,7 @@ struct DetailFilmstrip: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.filmstrip")
+        .reportTapPickerFrame("clove.detail.filmstrip")
     }
 
     // MARK: - Timeline Track
@@ -121,15 +160,15 @@ struct DetailFilmstrip: View {
     private var timelineTrack: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .bottom, spacing: Self.timelineSpacing) {
+                LazyHStack(alignment: .bottom, spacing: metrics.timelineSpacing) {
                     ForEach(timeline.slots) { slot in
                         timelineSlotView(slot)
                     }
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("clove.detail.filmstrip.timeline")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.vertical, metrics.verticalTrackPadding)
             }
             .coordinateSpace(name: Self.timelineViewportSpace)
             .onGeometryChange(for: CGFloat.self) {
@@ -150,6 +189,12 @@ struct DetailFilmstrip: View {
                         for: current, using: proxy, forceScroll: false, animated: false)
                 }
             }
+            .onChange(of: metrics) { _, _ in
+                if expandedGroup == nil {
+                    scheduleTimelineScroll(
+                        for: current, using: proxy, forceScroll: true, animated: false)
+                }
+            }
         }
         .scaleEffect(timelinePulseScale)
         .rotation3DEffect(
@@ -168,13 +213,15 @@ struct DetailFilmstrip: View {
 
     private func groupFocusTrack(_ group: ActiveBrowsingGroup) -> some View {
         let currentMembersWidth = max(
-            Self.thumbnailWidth,
-            CGFloat(group.visibleMembers.count) * Self.thumbnailWidth
+            metrics.thumbnailWidth,
+            CGFloat(group.visibleMembers.count) * metrics.thumbnailWidth
                 + CGFloat(max(0, group.visibleMembers.count - 1)) * groupMemberSpacing
         )
 
         return Color.clear
-            .frame(maxWidth: .infinity, minHeight: 70, maxHeight: 70)
+            .frame(
+                maxWidth: .infinity, minHeight: metrics.bandHeight, maxHeight: metrics.bandHeight
+            )
             .overlay {
                 HStack(spacing: 3) {
                     ScrollViewReader { proxy in
@@ -216,20 +263,25 @@ struct DetailFilmstrip: View {
                             groupLayoutState.frames.removeAll()
                             scheduleGroupScroll(for: current, using: proxy, forceScroll: true)
                         }
+                        .onChange(of: metrics) { _, _ in
+                            guard expandedGroup != nil else { return }
+                            groupLayoutState.frames.removeAll()
+                            scheduleGroupScroll(for: current, using: proxy, forceScroll: true)
+                        }
                     }
                     .frame(maxWidth: currentMembersWidth)
-                    .frame(height: Self.thumbnailHeight)
+                    .frame(height: metrics.thumbnailHeight)
 
                     collapseCapButton
                         .layoutPriority(1)
                 }
                 .padding(3)
                 .background {
-                    ExpandedGroupSurface(cornerRadius: 9)
+                    ExpandedGroupSurface(cornerRadius: metrics.groupTrayCornerRadius)
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
-                .padding(.horizontal, 10)
+                .padding(.horizontal, metrics.horizontalPadding)
             }
             .contentShape(Rectangle())
             .simultaneousGesture(
@@ -283,7 +335,7 @@ struct DetailFilmstrip: View {
             Image(systemName: "chevron.up")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.clove.text.primary)
-                .frame(width: Self.collapseCapWidth, height: Self.thumbnailHeight)
+                .frame(width: metrics.collapseCapWidth, height: metrics.thumbnailHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -475,9 +527,12 @@ struct DetailFilmstrip: View {
                 isCurrent: holdsCurrent,
                 isDimmed: isDimmed,
                 visibleCount: active.visibleMembers.count,
+                thumbnailWidth: metrics.thumbnailWidth,
+                thumbnailHeight: metrics.thumbnailHeight,
+                peek: metrics.groupStackPeek,
                 thumbnails: thumbnails
             )
-            .frame(width: Self.thumbnailWidth, height: 64)
+            .frame(width: metrics.thumbnailWidth, height: metrics.stackHeight)
         }
         .buttonStyle(.plain)
         .simultaneousGesture(
@@ -541,7 +596,7 @@ struct DetailFilmstrip: View {
         } label: {
             DetailPhotoFrame(
                 photo: photo, isCurrent: photo.id == current, thumbnails: thumbnails,
-                side: Self.thumbnailWidth, height: Self.thumbnailHeight
+                side: metrics.thumbnailWidth, height: metrics.thumbnailHeight
             )
             .scaleEffect(x: scaleX, y: 1, anchor: .center)
         }
@@ -653,19 +708,23 @@ private struct FilmstripGroupStack: View {
     let isCurrent: Bool
     let isDimmed: Bool
     let visibleCount: Int
+    let thumbnailWidth: CGFloat
+    let thumbnailHeight: CGFloat
+    let peek: CGFloat
     let thumbnails: any GridThumbnailSource
     @State private var peekingThumbnails: [PhotoIdentity: CGImage] = [:]
     @Environment(\.cloveTheme) private var theme
 
     var body: some View {
         GroupStack(
-            peek: 4,
+            peek: peek,
             peekingImages: peekingIDs.map { peekingThumbnails[$0] },
             cardBacking: Color.clove.bg.stage
         ) {
             DetailPhotoFrame(
                 photo: cover, isCurrent: false, thumbnails: thumbnails,
-                side: 54, height: 60, showsMarks: true, appliesRejectedOpacity: false)
+                side: thumbnailWidth, height: thumbnailHeight,
+                showsMarks: true, appliesRejectedOpacity: false)
         }
         .opacity(isDimmed ? theme.tokens.rejectedOpacity : 1)
         .overlay(alignment: .topTrailing) {

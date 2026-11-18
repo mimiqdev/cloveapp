@@ -7,6 +7,7 @@ struct BrowseShell: View {
     let browsing: BrowsingModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    @Environment(\.cloveUserInterfaceIdiom) private var overrideUserInterfaceIdiom
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
@@ -16,10 +17,13 @@ struct BrowseShell: View {
     @State private var settingsNavigation = SettingsNavigationState()
     @State private var availableWidth: CGFloat = 0
 
+    private var userInterfaceIdiom: UIUserInterfaceIdiom {
+        overrideUserInterfaceIdiom ?? UIDevice.current.userInterfaceIdiom
+    }
     private var usesVerticalBar: Bool { isDuoExpanded || isDuoCover }
 
     private var isRegular: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
+        userInterfaceIdiom == .pad
             && horizontalSizeClass == .regular
             && !isDuoExpanded
     }

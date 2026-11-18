@@ -1878,11 +1878,13 @@ struct DetailDisplayPresentationTests {
                     DetailScreen(browsing: browsing, images: source)
                 }
                 .environment(SettingsStore.sample)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
                 .environment(\.usesSystemBrowsingToolbar, true))
         } else {
             rootView = AnyView(
                 DetailScreen(browsing: browsing, images: source)
-                    .environment(SettingsStore.sample))
+                    .environment(SettingsStore.sample)
+                    .environment(\.cloveUserInterfaceIdiom, .pad))
         }
         let host = UIHostingController(rootView: rootView)
         host.traitOverrides.horizontalSizeClass = .regular
@@ -2613,6 +2615,300 @@ struct DetailDisplayPresentationTests {
         #expect(steps == [1])
     }
 
+    @Test func ordinaryMaxPhoneLandscapeStaysInFocusViewWithoutPhotoPreviewOrRail() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedFocusDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let photo = try #require(browsing.photos.first?.id)
+        browsing.openPhoto(photo)
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let tapFrames = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 932, height: 430)
+        let host = UIHostingController(
+            rootView: TestDetailPresentationHost(
+                browsing: browsing, images: source, presentation: presentationBox,
+                usesSystemToolbar: false, idiom: .phone
+            )
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                tapFrames.frames = frames
+            })
+        // Pro Max iPhone reports regular horizontal / compact vertical in landscape.
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .compact
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("Pro Max iPhone landscape Detail did not settle") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return source.delivered.contains(.screenRAW)
+                && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+                && tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
+                && tapFrames.frames["clove.detail.capsule"] != nil
+        }
+        // Ordinary iPhones must never mount Photo Preview's split grid or iPad's mark rail.
+        #expect(findCollectionView(in: window) == nil)
+        #expect(tapFrames.frames["clove.detail.gridToggle"] == nil)
+        #expect(
+            DetailPresentationPolicy(
+                isRegularWidth: true, isPhone: true, isDuoExpanded: false, isDuoCover: false,
+                hasFoldRegion: false, availableWidth: 932, availableHeight: 430
+            ).supportsPhotoPreview == false)
+    }
+
+    @Test func ordinaryPhoneLandscapeHeaderBottomRowAndGroupFocusMetricsAcrossSizesAndThemes()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let sizes: [CGSize] = [
+            CGSize(width: 667, height: 375),
+            CGSize(width: 844, height: 390),
+            CGSize(width: 932, height: 430),
+        ]
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            for size in sizes {
+                let source = SampleDetailImages()
+                let browsing = BrowsingModel(library: TestLibrary.sample())
+                browsing.openFolder()
+                try await waitFor("folder did not open") { !browsing.isFolderOpening }
+                let group = try #require(browsing.groups.first)
+                // Open representative on collapsed stack in Timeline first -> Expand N photos pill.
+                browsing.openPhoto(group.members[0])
+
+                let headerFrames = DetailFrameBox()
+                let tapFrames = DetailFrameBox()
+                let triggerBox = DetailPickerTriggerBox()
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(origin: .zero, size: size)
+
+                struct HostView: View {
+                    let browsing: BrowsingModel
+                    let source: SampleDetailImages
+                    let theme: CloveTheme
+                    @Bindable var triggerBox: DetailPickerTriggerBox
+                    var body: some View {
+                        DetailScreen(browsing: browsing, images: source)
+                            .environment(SettingsStore.sample)
+                            .environment(\.cloveTheme, theme)
+                            .environment(\.cloveUserInterfaceIdiom, .phone)
+                            .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                            .environment(\.scenePhase, .active)
+                    }
+                }
+
+                let host = UIHostingController(
+                    rootView: HostView(
+                        browsing: browsing, source: source, theme: theme, triggerBox: triggerBox
+                    )
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                        headerFrames.frames = $0
+                    }
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    })
+                host.traitOverrides.horizontalSizeClass = size.width >= 900 ? .regular : .compact
+                host.traitOverrides.verticalSizeClass = .compact
+                window.rootViewController = host
+                window.makeKeyAndVisible()
+                defer {
+                    window.isHidden = true
+                    window.rootViewController = nil
+                }
+
+                try await waitFor("landscape timeline controls did not lay out at \(size)") {
+                    headerFrames.frames["clove.nav.back"] != nil
+                        && headerFrames.frames["clove.detail.focusToggle"] != nil
+                        && headerFrames.frames["clove.detail.fileName"] != nil
+                        && headerFrames.frames["clove.detail.expandGroup"] != nil
+                        && headerFrames.frames["clove.detail.info"] != nil
+                        && headerFrames.frames["clove.detail.undo"] != nil
+                        && tapFrames.frames["clove.detail.filmstrip"] != nil
+                        && tapFrames.frames["clove.detail.capsule"] != nil
+                }
+
+                func expectHeaderOrder(_ pillID: String) throws {
+                    let back = try #require(headerFrames.frames["clove.nav.back"])
+                    let focus = try #require(headerFrames.frames["clove.detail.focusToggle"])
+                    let file = try #require(headerFrames.frames["clove.detail.fileName"])
+                    let pill = try #require(headerFrames.frames[pillID])
+                    let info = try #require(headerFrames.frames["clove.detail.info"])
+                    let undo = try #require(headerFrames.frames["clove.detail.undo"])
+                    #expect(back.maxX <= focus.minX + 1)
+                    #expect(focus.maxX <= file.minX + 1)
+                    #expect(file.maxX <= pill.minX + 1)
+                    #expect(pill.maxX <= info.minX + 1)
+                    #expect(info.maxX <= undo.minX + 1)
+                }
+
+                try expectHeaderOrder("clove.detail.expandGroup")
+
+                let stripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
+                let capsuleFrame = try #require(tapFrames.frames["clove.detail.capsule"])
+                #expect(stripFrame.height <= 58)
+                #expect(stripFrame.maxX <= capsuleFrame.minX + 1)
+                #expect(abs(capsuleFrame.width - 168) <= 2)
+                #expect(abs(capsuleFrame.height - 48) <= 2)
+
+                // Enter Group Focus -> header swaps to Reject N unmarked pill without overlap.
+                browsing.openGroup(group.id, on: group.members[0])
+                try await waitFor("Group Focus pill did not update in header") {
+                    headerFrames.frames["clove.detail.rejectUnmarked"] != nil
+                        && headerFrames.frames["clove.detail.expandGroup"] == nil
+                }
+                try expectHeaderOrder("clove.detail.rejectUnmarked")
+
+                // Horizontal RatingPicker and LabelPicker open cleanly above the bottom capsule.
+                for (buttonID, pickerID) in [
+                    ("clove.detail.capsule.rating", "clove.detail.capsule.stars"),
+                    ("clove.detail.capsule.label", "clove.detail.labels"),
+                ] {
+                    triggerBox.sendTrigger(buttonID)
+                    try await waitFor("horizontal picker \(pickerID) did not open") {
+                        tapFrames.frames[pickerID] != nil
+                    }
+                    let pickerFrame = try #require(tapFrames.frames[pickerID])
+                    #expect(pickerFrame.width > pickerFrame.height)
+                    #expect(pickerFrame.maxY <= capsuleFrame.minY + 1)
+                    triggerBox.sendTrigger(buttonID)
+                    try await waitFor("picker \(pickerID) did not dismiss") {
+                        tapFrames.frames[pickerID] == nil
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func ordinaryPhoneRotationAndChromeHidePreserveZoomAndDismissPickers() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedFocusDetailImages()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first)
+        let rep = group.members[0]
+        browsing.openGroup(group.id, on: rep)
+        browsing.showsFocusRegions = true
+        let four = try #require(Rating(rawValue: 4))
+        browsing.apply(.rating(four), to: rep)
+
+        let tapFrames = DetailFrameBox()
+        let triggerBox = DetailPickerTriggerBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
+
+        struct HostView: View {
+            let browsing: BrowsingModel
+            let source: ObservedFocusDetailImages
+            @Bindable var triggerBox: DetailPickerTriggerBox
+            var body: some View {
+                DetailScreen(browsing: browsing, images: source)
+                    .environment(SettingsStore.sample)
+                    .environment(\.cloveUserInterfaceIdiom, .phone)
+                    .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                    .environment(\.scenePhase, .active)
+            }
+        }
+
+        let host = UIHostingController(
+            rootView: HostView(browsing: browsing, source: source, triggerBox: triggerBox)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    tapFrames.frames = $0
+                })
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("portrait phone detail did not settle") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return source.delivered.contains(.screenRAW)
+                && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let portraitStripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
+        #expect(portraitStripFrame.height >= 68)
+        #expect(tapFrames.frames["clove.detail.landscapeBottomRow"] == nil)
+
+        // Zoom to a non-center anchor, open the Label tap picker, and capture pixel request count.
+        preview.onDoubleTap?(UnitPoint(x: 0.35, y: 0.4))
+        try await waitFor("zoom did not settle in portrait") {
+            preview.isZoomed && source.delivered.contains(.nativeRAW)
+        }
+        try await Task.sleep(for: .milliseconds(300))
+
+        triggerBox.sendTrigger("clove.detail.capsule.label")
+        try await waitFor("portrait label picker did not open") {
+            tapFrames.frames["clove.detail.labels"] != nil
+        }
+
+        let requestsBeforeRotate = source.requests.count
+        let anchorBeforeRotate = try #require(preview.zoomSnapshot?.anchor)
+
+        // Rotate to Pro Max landscape: open tap picker dismisses, state + zoom stay intact,
+        // no redundant image load occurs, and landscapeBottomRow mounts.
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .compact
+        window.frame = CGRect(x: 0, y: 0, width: 932, height: 430)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+
+        try await waitFor("landscape layout did not settle after rotation") {
+            tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
+                && tapFrames.frames["clove.detail.labels"] == nil
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(browsing.state.currentPhoto == rep)
+        #expect(browsing.expandedGroup == group.id)
+        #expect(browsing.shownMarks(for: rep).rating == four)
+        #expect(browsing.showsFocusRegions)
+        #expect(preview.isZoomed)
+        #expect(source.requests.count == requestsBeforeRotate)
+        let anchorAfterRotate = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(anchorAfterRotate.x - anchorBeforeRotate.x) < 0.08)
+        #expect(abs(anchorAfterRotate.y - anchorBeforeRotate.y) < 0.08)
+
+        // Single tap to hide chrome removes landscapeBottomRow and expands previewArea height cleanly.
+        let stageHeightWithChrome = preview.bounds.height
+        preview.onChromeToggle?()
+        try await waitFor("chrome did not hide and expand stage in landscape") {
+            tapFrames.frames["clove.detail.landscapeBottomRow"] == nil
+                && preview.bounds.height > stageHeightWithChrome + 30
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(preview.isZoomed)
+        let anchorAfterChromeHide = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(anchorAfterChromeHide.x - anchorAfterRotate.x) < 0.08)
+        #expect(abs(anchorAfterChromeHide.y - anchorAfterRotate.y) < 0.08)
+
+        // Restore chrome, rotate back to portrait -> landscapeBottomRow disappears, portrait strip returns.
+        preview.onChromeToggle?()
+        try await waitFor("chrome did not restore in landscape") {
+            tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
+        }
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor("portrait layout did not restore after rotation back") {
+            tapFrames.frames["clove.detail.landscapeBottomRow"] == nil
+                && (tapFrames.frames["clove.detail.filmstrip"]?.height ?? 0) >= 68
+        }
+        #expect(browsing.state.currentPhoto == rep)
+        #expect(browsing.expandedGroup == group.id)
+        #expect(preview.isZoomed)
+    }
+
     private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
         let start = CGPoint(x: 195, y: 300)
         let pan = DetailTestPan()
@@ -2952,6 +3248,7 @@ private struct TestDetailPresentationHost: View {
     let images: any DetailImageSource
     @Bindable var presentation: TestPresentationBox
     let usesSystemToolbar: Bool
+    var idiom: UIUserInterfaceIdiom = .pad
 
     var body: some View {
         Group {
@@ -2967,6 +3264,7 @@ private struct TestDetailPresentationHost: View {
             }
         }
         .environment(SettingsStore.sample)
+        .environment(\.cloveUserInterfaceIdiom, idiom)
     }
 }
 
@@ -3081,5 +3379,22 @@ private final class GatedLateFocusDetailImages: DetailImageSource, DetailRegionS
         for photo in Array(pendingFinish.keys) {
             deliverLateResults(for: photo)
         }
+    }
+}
+
+@MainActor
+private final class DetailFrameBox {
+    var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+@Observable
+private final class DetailPickerTriggerBox {
+    var trigger: TapPickerTriggerRequest?
+    private var nonce = 0
+
+    func sendTrigger(_ id: String) {
+        nonce += 1
+        trigger = TapPickerTriggerRequest(id: id, nonce: nonce)
     }
 }

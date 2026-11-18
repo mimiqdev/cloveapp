@@ -7,6 +7,8 @@ struct BrowsingHeader<
     let title: String
     var titleIdentifier = "clove.browsing.title"
     var backTitle: String? = nil
+    var usesInlineFlow = false
+    var height: CGFloat = 64
     let back: () -> Void
     @ViewBuilder let subtitle: () -> Subtitle
     @ViewBuilder let titleAccessory: () -> TitleAccessory
@@ -19,6 +21,8 @@ struct BrowsingHeader<
         title: String,
         titleIdentifier: String = "clove.browsing.title",
         backTitle: String? = nil,
+        usesInlineFlow: Bool = false,
+        height: CGFloat = 64,
         back: @escaping () -> Void,
         @ViewBuilder subtitle: @escaping () -> Subtitle,
         @ViewBuilder titleAccessory: @escaping () -> TitleAccessory = { EmptyView() },
@@ -28,6 +32,8 @@ struct BrowsingHeader<
         self.title = title
         self.titleIdentifier = titleIdentifier
         self.backTitle = backTitle
+        self.usesInlineFlow = usesInlineFlow
+        self.height = height
         self.back = back
         self.subtitle = subtitle
         self.titleAccessory = titleAccessory
@@ -37,51 +43,83 @@ struct BrowsingHeader<
 
     var body: some View {
         let backLabel = AppLocalization.string("Back", language: language)
-        GeometryReader { proxy in
-            ZStack {
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        Text(title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .accessibilityIdentifier(titleIdentifier)
-                        titleAccessory()
-                            .layoutPriority(1)
-                    }
-                    subtitle()
-                        .font(.caption)
-                        .foregroundStyle(Color.clove.text.secondary)
-                }
-                .frame(maxWidth: max(proxy.size.width - (backTitle != nil ? 520 : 240), 100))
+        Group {
+            if usesInlineFlow {
                 HStack(spacing: 8) {
-                    if let backTitle {
-                        Button(action: back) {
-                            Label(backTitle, systemImage: "chevron.left")
-                                .labelStyle(.titleAndIcon)
-                                .lineLimit(1)
-                                .frame(maxWidth: 160, alignment: .leading)
-                                .frame(height: 40)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.clove.accent)
-                        .accessibilityLabel(backLabel)
-                        .accessibilityIdentifier("clove.nav.back")
-                    } else {
-                        GlassIconButton(
-                            label: backLabel, symbol: "chevron.left",
-                            identifier: "clove.nav.back", action: back)
-                    }
+                    backButton(label: backLabel)
+                        .layoutPriority(1)
                     leadingTools()
-                    Spacer(minLength: 0)
+                        .layoutPriority(1)
+                    titleBlock
+                        .frame(maxWidth: .infinity)
+                        .layoutPriority(0)
                     tools()
+                        .layoutPriority(1)
                 }
                 .padding(.horizontal, 16)
+            } else {
+                GeometryReader { proxy in
+                    ZStack {
+                        titleBlock
+                            .frame(
+                                maxWidth: max(
+                                    proxy.size.width - (backTitle != nil ? 520 : 240), 100))
+                        HStack(spacing: 8) {
+                            backButton(label: backLabel)
+                            leadingTools()
+                            Spacer(minLength: 0)
+                            tools()
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .frame(height: 64)
+        .frame(height: height)
         .foregroundStyle(Color.clove.text.primary)
         .background(Color.clove.bg.canvas)
+    }
+
+    private var titleBlock: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier(titleIdentifier)
+                    .reportHeaderControlFrame(titleIdentifier)
+                titleAccessory()
+                    .layoutPriority(1)
+            }
+            subtitle()
+                .font(.caption)
+                .foregroundStyle(Color.clove.text.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func backButton(label backLabel: String) -> some View {
+        if let backTitle {
+            Button(action: back) {
+                Label(backTitle, systemImage: "chevron.left")
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
+                    .frame(maxWidth: 160, alignment: .leading)
+                    .frame(height: 40)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.clove.accent)
+            .accessibilityLabel(backLabel)
+            .accessibilityIdentifier("clove.nav.back")
+            .reportHeaderControlFrame("clove.nav.back")
+        } else {
+            GlassIconButton(
+                label: backLabel, symbol: "chevron.left",
+                identifier: "clove.nav.back", action: back
+            )
+            .reportHeaderControlFrame("clove.nav.back")
+        }
     }
 }

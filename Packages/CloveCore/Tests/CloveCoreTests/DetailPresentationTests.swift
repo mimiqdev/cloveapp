@@ -75,5 +75,28 @@ struct DetailPresentationTests {
             hasFoldRegion: true, availableWidth: 678, availableHeight: 870)
         #expect(duoExpandedPortraitFold.supportsPhotoPreview)
         #expect(duoExpandedPortraitFold.effectivePresentation(for: .photoPreview) == .photoPreview)
+
+        // Ordinary Max/Plus iPhones report regular horizontal size class in landscape, but must
+        // always enter Focus View rather than 30/70 Photo Preview.
+        let maxIPhoneLandscape = DetailPresentationPolicy(
+            isRegularWidth: true, isPhone: true, isDuoExpanded: false, isDuoCover: false,
+            hasFoldRegion: false, availableWidth: 932, availableHeight: 430)
+        #expect(!maxIPhoneLandscape.supportsPhotoPreview)
+        #expect(maxIPhoneLandscape.effectivePresentation(for: .photoPreview) == .focus)
+        #expect(maxIPhoneLandscape.effectivePresentation(for: .focus) == .focus)
+        #expect(maxIPhoneLandscape.effectivePresentation(for: .grid) == .grid)
+
+        let compactIPhoneLandscape = DetailPresentationPolicy(
+            isRegularWidth: false, isPhone: true, isDuoExpanded: false, isDuoCover: false,
+            hasFoldRegion: false, availableWidth: 852, availableHeight: 393)
+        #expect(!compactIPhoneLandscape.supportsPhotoPreview)
+        #expect(compactIPhoneLandscape.effectivePresentation(for: .photoPreview) == .focus)
+
+        let duoExpandedWithPhoneIdiom = DetailPresentationPolicy(
+            isRegularWidth: true, isPhone: true, isDuoExpanded: true, isDuoCover: false,
+            hasFoldRegion: true, availableWidth: 870, availableHeight: 678)
+        #expect(duoExpandedWithPhoneIdiom.supportsPhotoPreview)
+        #expect(
+            duoExpandedWithPhoneIdiom.effectivePresentation(for: .photoPreview) == .photoPreview)
     }
 }

@@ -31,6 +31,9 @@ struct PillAction: View {
     /// Incrementing this counter pulses a subtle scale bounce (used for read-only nudges).
     var nudgeTrigger: Int = 0
 
+    /// Compact header presentation trims padding slightly while preserving capsule tap ergonomics.
+    var compact = false
+
     /// What the tap does.
     let action: () -> Void
 
@@ -41,12 +44,14 @@ struct PillAction: View {
         Button(action: action) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
                 .foregroundStyle(tone.textColor)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
+                .padding(.horizontal, compact ? 14 : 20)
+                .padding(.vertical, compact ? 8 : 10)
                 .contentShape(Capsule())
                 .cloveGlass(in: Capsule())
         }
+        .frame(minHeight: compact ? 44 : nil)
         .buttonStyle(.cloveGlassPress)
         .scaleEffect(isNudged && !reduceMotion ? 1.08 : 1)
         .animation(CloveMotion.nudge(reduceMotion: reduceMotion), value: isNudged)

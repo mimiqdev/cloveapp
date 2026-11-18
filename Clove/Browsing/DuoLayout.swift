@@ -1,5 +1,6 @@
 import CloveCore
 import SwiftUI
+import UIKit
 
 /// The system identifies the vertical bar and the inner display's reserved fold region.
 /// Size classes select a presentation only after those system signals identify the context.
@@ -35,6 +36,7 @@ private struct SystemBrowsingLayout: ViewModifier {
 }
 
 extension EnvironmentValues {
+    @Entry var cloveUserInterfaceIdiom: UIUserInterfaceIdiom? = nil
     @Entry var usesSystemBrowsingToolbar = false
     @Entry var usesVerticalBrowsingToolbar = false
     @Entry var hasFoldRegion = false

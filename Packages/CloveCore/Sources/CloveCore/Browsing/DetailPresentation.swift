@@ -50,6 +50,7 @@ public struct DetailPresentationPolicy: Sendable, Equatable {
     public static let minimumHeight: Double = 420
 
     public let isRegularWidth: Bool
+    public let isPhone: Bool
     public let isDuoExpanded: Bool
     public let isDuoCover: Bool
     public let hasFoldRegion: Bool
@@ -58,6 +59,7 @@ public struct DetailPresentationPolicy: Sendable, Equatable {
 
     public init(
         isRegularWidth: Bool,
+        isPhone: Bool = false,
         isDuoExpanded: Bool,
         isDuoCover: Bool,
         hasFoldRegion: Bool,
@@ -65,6 +67,7 @@ public struct DetailPresentationPolicy: Sendable, Equatable {
         availableHeight: Double
     ) {
         self.isRegularWidth = isRegularWidth
+        self.isPhone = isPhone
         self.isDuoExpanded = isDuoExpanded
         self.isDuoCover = isDuoCover
         self.hasFoldRegion = hasFoldRegion
@@ -73,8 +76,12 @@ public struct DetailPresentationPolicy: Sendable, Equatable {
     }
 
     /// Whether the current layout can present both the 30% folder grid and the 70% photo stage.
-    /// Compact widths, ordinary phones, Duo cover, and narrow iPad windows retain Focus View.
+    /// Compact widths, ordinary phones (even at regular landscape width), Duo cover, and narrow
+    /// iPad windows retain Focus View.
     public var supportsPhotoPreview: Bool {
+        if isPhone, !isDuoExpanded, !isDuoCover, !hasFoldRegion {
+            return false
+        }
         guard isRegularWidth, !isDuoCover else { return false }
         if isDuoExpanded {
             if hasFoldRegion { return true }
