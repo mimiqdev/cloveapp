@@ -72,6 +72,9 @@ public struct AppSettings: Hashable, Sendable {
     /// An explicit display choice. Absent means use the measured device default.
     public var photoDisplayMode: PhotoDisplayMode?
 
+    /// User-selected app language preference (issue #325); Follow System by default.
+    public var language: AppLanguage
+
     /// Creates every launch setting, defaulting each one to its PRD launch value.
     public init(
         gesturesEnabled: Bool = true,
@@ -84,7 +87,8 @@ public struct AppSettings: Hashable, Sendable {
         moveRejectsEnabled: Bool = true,
         similarGroupsEnabled: Bool = true,
         appearance: AppearanceChoice = AppearanceChoice(),
-        photoDisplayMode: PhotoDisplayMode? = nil
+        photoDisplayMode: PhotoDisplayMode? = nil,
+        language: AppLanguage = .system
     ) {
         self.gesturesEnabled = gesturesEnabled
         self.enabledRatings = enabledRatings
@@ -97,6 +101,7 @@ public struct AppSettings: Hashable, Sendable {
         self.similarGroupsEnabled = similarGroupsEnabled
         self.appearance = appearance
         self.photoDisplayMode = photoDisplayMode
+        self.language = language
     }
 
     /// The colour labels the marking HUD, menu, and keyboard offer (PRD Marking rules).

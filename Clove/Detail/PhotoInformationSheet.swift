@@ -8,6 +8,7 @@ struct PhotoInformationSheet: View {
     let photo: GridPhoto
     @Environment(\.dismiss) private var dismiss
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     @State private var information: PhotoInformation?
     @State private var isLoading = true
 
@@ -15,15 +16,22 @@ struct PhotoInformationSheet: View {
         NavigationStack {
             List {
                 if isLoading {
-                    ProgressView().accessibilityLabel("Loading photo information")
+                    ProgressView().accessibilityLabel(
+                        AppLocalization.string("Loading photo information", language: language))
                 } else if let information {
                     capture(information.image)
-                    Section("File") {
+                    Section(AppLocalization.string("File", language: language)) {
                         if !information.relativeFolder.isEmpty {
-                            row("Folder", information.relativeFolder)
+                            row(
+                                AppLocalization.string("Folder", language: language),
+                                information.relativeFolder)
                         }
-                        if let size = sizeText(information.image) { row("Size", size) }
-                        row("Marks", "", trailing: marksTrailing(information))
+                        if let size = sizeText(information.image) {
+                            row(AppLocalization.string("Size", language: language), size)
+                        }
+                        row(
+                            AppLocalization.string("Marks", language: language), "",
+                            trailing: marksTrailing(information))
                     }
                     .listRowBackground(theme.tokens.card.color)
                 }
@@ -47,7 +55,7 @@ struct PhotoInformationSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button(AppLocalization.string("Done", language: language)) { dismiss() }
                         .foregroundStyle(Color.clove.accent)
                         .accessibilityIdentifier("clove.detail.info.done")
                 }
@@ -71,13 +79,21 @@ struct PhotoInformationSheet: View {
             image.captureWallTime != nil || image.camera != nil || image.bodySerial != nil
                 || image.lens != nil || exposureText(image) != nil
         {
-            Section("Capture") {
-                if let taken = takenText(image) { row("Taken", taken) }
+            Section(AppLocalization.string("Capture", language: language)) {
+                if let taken = takenText(image) {
+                    row(AppLocalization.string("Taken", language: language), taken)
+                }
                 let camera = [image.camera, image.bodySerial].compactMap { $0 }.joined(
                     separator: " · ")
-                if !camera.isEmpty { row("Camera", camera) }
-                if let lens = image.lens { row("Lens", lens) }
-                if let exposure = exposureText(image) { row("Exposure", exposure) }
+                if !camera.isEmpty {
+                    row(AppLocalization.string("Camera", language: language), camera)
+                }
+                if let lens = image.lens {
+                    row(AppLocalization.string("Lens", language: language), lens)
+                }
+                if let exposure = exposureText(image) {
+                    row(AppLocalization.string("Exposure", language: language), exposure)
+                }
             }
             .listRowBackground(theme.tokens.card.color)
         }
@@ -98,7 +114,9 @@ struct PhotoInformationSheet: View {
                     marks.content
                     Text("·").foregroundStyle(Color.clove.text.secondary)
                     Text(
-                        information?.usesSidecar == true ? "XMP sidecar" : "Clove only"
+                        AppLocalization.string(
+                            information?.usesSidecar == true ? "XMP sidecar" : "Clove only",
+                            language: language)
                     )
                     .foregroundStyle(Color.clove.text.secondary)
                 }
@@ -120,20 +138,24 @@ struct PhotoInformationSheet: View {
             parts.append(String(repeating: "★", count: stars))
         }
         if let colour = photo.marks.label.colour {
-            parts.append(colour.rawValue)
+            parts.append(AppLocalization.colourName(colour, language: language))
         } else if !photo.marks.label.isClear {
             parts.append(photo.marks.label.rawValue)
         }
         if photo.marks.isRejected {
             parts.append("✕")
         }
-        let text = parts.isEmpty ? Text("Unmarked") : Text(parts.joined(separator: " · "))
+        let text =
+            parts.isEmpty
+            ? Text(AppLocalization.string("Unmarked", language: language))
+            : Text(parts.joined(separator: " · "))
         return (6, text.foregroundStyle(Color.clove.rating.on))
     }
 
     private func takenText(_ image: ImageInformation) -> String? {
         guard let date = image.captureWallTime else { return nil }
         let formatter = DateFormatter()
+        formatter.locale = language.locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .medium
         // EXIF's wall time is a zone-free surrogate, not a UTC instant to shift into local time.
@@ -157,7 +179,7 @@ struct PhotoInformationSheet: View {
             parts.append("\(width) × \(height)")
         }
         if let bytes = image.fileSizeBytes {
-            parts.append(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
+            parts.append(bytes.formatted(.byteCount(style: .file).locale(language.locale)))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

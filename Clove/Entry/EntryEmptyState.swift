@@ -6,6 +6,7 @@ struct EntryEmptyState: View {
     var isEmptyFolder = false
     let openFolder: () -> Void
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,22 +17,32 @@ struct EntryEmptyState: View {
             }
             .frame(height: 190)
             .padding(.bottom, 26)
-            Text(isEmptyFolder ? "No photos in this folder." : "Cull where your photos live.")
-                .font(.title2.bold())
-                .foregroundStyle(Color.clove.text.primary)
-                .multilineTextAlignment(.center)
+            Text(
+                AppLocalization.string(
+                    isEmptyFolder
+                        ? "No photos in this folder."
+                        : "Cull where your photos live.",
+                    language: language)
+            )
+            .font(.title2.bold())
+            .foregroundStyle(Color.clove.text.primary)
+            .multilineTextAlignment(.center)
             if !isEmptyFolder {
-                Text("Open a folder on a card, drive or Files. Nothing is imported or copied.")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.clove.text.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-                    .padding(.top, 12)
+                Text(
+                    AppLocalization.string(
+                        "Open a folder on a card, drive or Files. Nothing is imported or copied.",
+                        language: language)
+                )
+                .font(.subheadline)
+                .foregroundStyle(Color.clove.text.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+                .padding(.top, 12)
             }
             Button(action: openFolder) {
                 // Text-only, filled with the accent, centred inside the shared 168 × 48 bounds
                 // (owner decision, 2026-11-13, #227).
-                Text("Open folder")
+                Text(AppLocalization.string("Open folder", language: language))
                     .font(.headline)
                     .frame(width: 168, height: 48)
                     .contentShape(Rectangle())

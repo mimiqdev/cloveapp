@@ -16,6 +16,7 @@ struct DetailMarkRail: View {
     let label: (ColourLabel) -> Void
     let toggleReject: () -> Void
     let markingBegan: () -> Void
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         VStack(spacing: 10) {
@@ -32,7 +33,9 @@ struct DetailMarkRail: View {
                 photoID: photoID,
                 onToggle: toggleReject
             )
-            .help(marks.isRejected ? "Rejected" : "Reject")
+            .help(
+                AppLocalization.string(marks.isRejected ? "Rejected" : "Reject", language: language)
+            )
             .frame(width: 48, height: 40)
             LabelPicker(
                 selection: marks.isRejected ? nil : marks.label.colour,
@@ -49,6 +52,6 @@ struct DetailMarkRail: View {
         .background(Color.clove.bg.canvas)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.rail")
-        .accessibilityValue(MarkSummary.text(for: marks))
+        .accessibilityValue(MarkSummary.text(for: marks, language: language))
     }
 }

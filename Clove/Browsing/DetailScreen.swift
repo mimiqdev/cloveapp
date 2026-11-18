@@ -29,6 +29,7 @@ struct DetailScreen: View {
     /// The app-wide settings, read live so a change on the settings screen applies the next time
     /// this screen draws (PRD Gesture-related settings).
     @Environment(SettingsStore.self) private var store
+    @Environment(\.appLanguage) private var language
 
     /// The auto-advance a mark started, waiting out its pause (PRD Auto-advance).
     @State private var autoAdvance = MarkAutoAdvance()
@@ -75,9 +76,11 @@ struct DetailScreen: View {
                 content(for: photo)
             } else {
                 ContentUnavailableView {
-                    Label("No photo", systemImage: "photo")
+                    Label(
+                        AppLocalization.string("No photo", language: language),
+                        systemImage: "photo")
                 } description: {
-                    Text("Choose a photo in the grid.")
+                    Text(AppLocalization.string("Choose a photo in the grid.", language: language))
                 }
                 .accessibilityIdentifier("clove.detail.noPhoto")
             }

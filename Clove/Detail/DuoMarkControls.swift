@@ -17,6 +17,7 @@ struct DuoMarkControls: ToolbarContent {
     let toggleReject: () -> Void
     let markingBegan: () -> Void
     var labelPopoverTrigger: Int = 0
+    @Environment(\.appLanguage) private var language
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .bottomBar) {
@@ -31,12 +32,13 @@ struct DuoMarkControls: ToolbarContent {
         .visibilityPriority(.high)
         ToolbarItem(placement: .bottomBar) {
             Button(
-                marks.isRejected ? "Rejected" : "Reject",
+                AppLocalization.string(
+                    marks.isRejected ? "Rejected" : "Reject", language: language),
                 systemImage: marks.isRejected ? "flag.slash.fill" : "flag.slash"
             ) { toggleReject() }
             .tint(Color.clove.reject)
             .disabled(!canMark)
-            .accessibilityValue(MarkSummary.text(for: marks))
+            .accessibilityValue(MarkSummary.text(for: marks, language: language))
             .accessibilityIdentifier("clove.duo.reject")
         }
         .axisBehavior(.verticalPreferred)
@@ -71,6 +73,7 @@ private struct ToolbarRatingButton: View {
     @Environment(\.hasFoldRegion) private var hasFoldRegion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.appLanguage) private var language
     @State private var isAnchorReady = false
 
     private var rating: Rating { dragRating ?? previewRating ?? marks.rating }
@@ -92,7 +95,8 @@ private struct ToolbarRatingButton: View {
 
     var body: some View {
         Button(
-            "Rating, \(rating.starCount ?? 0) stars",
+            AppLocalization.format(
+                "Rating, %lld stars", language: language, Int64(rating.starCount ?? 0)),
             systemImage: (rating.starCount ?? 0) > 0 ? "star.fill" : "star"
         ) {
             markingBegan()
@@ -100,7 +104,7 @@ private struct ToolbarRatingButton: View {
         }
         .badge(rating.starCount ?? 0)
         .tint(Color.clove.rating.on)
-        .accessibilityValue(MarkSummary.text(for: marks))
+        .accessibilityValue(MarkSummary.text(for: marks, language: language))
         .accessibilityIdentifier("clove.duo.rating")
         .popover(
             isPresented: Binding(
@@ -160,6 +164,7 @@ private struct ToolbarLabelButton: View {
     @Environment(\.hasFoldRegion) private var hasFoldRegion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.appLanguage) private var language
     @State private var showsLabels = false
     @State private var isAnchorReady = false
 
@@ -178,9 +183,19 @@ private struct ToolbarLabelButton: View {
             isEnabled: isEnabled)
     }
 
+    private var labelValueName: String {
+        if let colour = marks.label.colour {
+            return AppLocalization.colourName(colour, language: language)
+        }
+        if marks.label.isClear {
+            return AppLocalization.string("None", language: language)
+        }
+        return marks.label.rawValue
+    }
+
     var body: some View {
         Button(
-            "Label, \(marks.label.isClear ? "None" : marks.label.rawValue)",
+            AppLocalization.format("Label, %@", language: language, labelValueName),
             systemImage: marks.label.colour == nil ? "circle" : "circle.fill"
         ) {
             markingBegan()
@@ -189,7 +204,7 @@ private struct ToolbarLabelButton: View {
         .tint(
             marks.label.colour.map { Color.clove.label.colour(for: $0) } ?? Color.clove.text.primary
         )
-        .accessibilityValue(MarkSummary.text(for: marks))
+        .accessibilityValue(MarkSummary.text(for: marks, language: language))
         .accessibilityIdentifier("clove.duo.label")
         .popover(
             isPresented: Binding(

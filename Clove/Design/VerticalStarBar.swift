@@ -53,6 +53,7 @@ struct VerticalStarBar: View {
     var onBegin: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
     @State private var settledPhotoID: PhotoIdentity?
 
     /// The value the drag is showing, or nil when no drag has run since the last commit.
@@ -166,7 +167,8 @@ struct VerticalStarBar: View {
     /// The reject stage the swipe down lands on (components.md): `flag.slash` on its own native
     /// glass chip, filled in `reject` when the swipe has reached it.
     private var rejectChip: some View {
-        Button(action: onReject) {
+        let rejectTitle = AppLocalization.string("Reject", language: language)
+        return Button(action: onReject) {
             Image(systemName: isRejectStage ? "flag.slash.fill" : "flag.slash")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(isRejectStage ? Color.clove.reject : Color.clove.text.secondary)
@@ -175,9 +177,9 @@ struct VerticalStarBar: View {
                 .cloveGlass(in: Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Reject")
+        .accessibilityLabel(rejectTitle)
         .accessibilityIdentifier("\(identifier).reject")
-        .help("Reject")
+        .help(rejectTitle)
     }
 
     /// Whether the ladder is showing the reject stage: only the display variant can, while a
@@ -249,8 +251,7 @@ struct VerticalStarBar: View {
 
     /// The rating the bar reports to VoiceOver (copy.md `a11y.rating`).
     private var accessibilityValue: String {
-        guard let stars = rating.starCount else { return "Unrated" }
-        return stars == 1 ? "1 star" : "\(stars) stars"
+        AppLocalization.ratingTitle(rating, language: language)
     }
 
     /// The star a drag at `y` points at: the stars fill from the bottom (components.md).
@@ -326,13 +327,15 @@ private struct VerticalStarBarStars: View {
     var identifier = "clove.mark.starBar"
     var onRate: ((Rating) -> Void)?
 
+    @Environment(\.appLanguage) private var language
+
     private var metrics: VerticalStarBarMetrics { VerticalStarBarMetrics(size: size) }
 
     var body: some View {
         VStack(spacing: metrics.gap) {
             ForEach(EnabledRatings.all.levels.reversed(), id: \.rawValue) { level in
                 let filled = level <= rating
-                let label = "\(level.starCount ?? 0) stars"
+                let label = AppLocalization.starCount(level.starCount ?? 0, language: language)
                 if let onRate {
                     Button {
                         onRate(level)
@@ -367,13 +370,15 @@ private struct StarBarAccessibility: ViewModifier {
     let value: String
     let adjust: (AccessibilityAdjustmentDirection) -> Void
 
+    @Environment(\.appLanguage) private var language
+
     func body(content: Content) -> some View {
         if individualStars {
             content.accessibilityElement(children: .contain)
         } else {
             content
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Rating")
+                .accessibilityLabel(AppLocalization.string("Rating", language: language))
                 .accessibilityValue(value)
                 .accessibilityAdjustableAction(adjust)
         }

@@ -25,12 +25,19 @@ final class SettingsStore {
     private let persistence: SettingsPersistence
     private let rememberedAdvanceStorage: any SettingsStorage
     private static let rememberedAdvanceKey = "autoAdvance.lastEnabledDestination"
+    private static let languageSystemBaselineKey = "app.language.systemBaseline"
     private let physicalMemory: UInt64
+    private let systemPreferredLanguages: @Sendable () -> [String]
 
     /// Reset clears the explicit choice and returns to the memory-only default.
     var photoDisplayMode: PhotoDisplayMode {
         PhotoDisplayDefault.mode(
             physicalMemory: physicalMemory, choice: settings.photoDisplayMode)
+    }
+
+    /// The active language resolved for the current settings and system preferences.
+    var resolvedLanguage: ResolvedAppLanguage {
+        settings.language.resolved(preferredLanguages: systemPreferredLanguages())
     }
 
     /// The last enabled destination, persisted so an off/on toggle survives an app relaunch.
@@ -51,12 +58,29 @@ final class SettingsStore {
         persistence: SettingsPersistence = SettingsPersistence(
             storage: UserDefaultsSettingsStorage()),
         rememberedAdvanceStorage: any SettingsStorage = UserDefaultsSettingsStorage(),
-        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory,
+        systemPreferredLanguages: @escaping @Sendable () -> [String] = {
+            Bundle.main.preferredLocalizations + Locale.preferredLanguages
+        }
     ) {
         self.persistence = persistence
         self.rememberedAdvanceStorage = rememberedAdvanceStorage
         self.physicalMemory = physicalMemory
-        let loaded = persistence.load()
+        self.systemPreferredLanguages = systemPreferredLanguages
+        var loaded = persistence.load()
+        let currentBaseline = AppLanguage.resolveSystem(
+            preferredLanguages: systemPreferredLanguages()
+        ).rawValue
+        let storedBaseline = rememberedAdvanceStorage.string(forKey: Self.languageSystemBaselineKey)
+        if loaded.language != .system,
+            let storedBaseline,
+            storedBaseline != currentBaseline
+        {
+            loaded.language = .system
+            persistence.save(loaded)
+        }
+        rememberedAdvanceStorage.setString(
+            currentBaseline, forKey: Self.languageSystemBaselineKey)
         self.settings = loaded
         let remembered = rememberedAdvanceStorage.string(forKey: Self.rememberedAdvanceKey)
             .flatMap(AutoAdvanceDestination.init(rawValue:))
@@ -105,8 +129,21 @@ final class SettingsStore {
         let rememberedSaved =
             rememberedAdvanceStorage.string(forKey: Self.rememberedAdvanceKey)
             == rememberedAdvanceDestination.rawValue
+        let baselineSaved: Bool
+        if next.language != settings.language {
+            let currentBaseline = AppLanguage.resolveSystem(
+                preferredLanguages: systemPreferredLanguages()
+            ).rawValue
+            rememberedAdvanceStorage.setString(
+                currentBaseline, forKey: Self.languageSystemBaselineKey)
+            baselineSaved =
+                rememberedAdvanceStorage.string(forKey: Self.languageSystemBaselineKey)
+                == currentBaseline
+        } else {
+            baselineSaved = true
+        }
         settings = next
-        if persistence.saveVerified(next) && rememberedSaved {
+        if persistence.saveVerified(next) && rememberedSaved && baselineSaved {
             saveFailureMessage = nil
         } else {
             saveFailureMessage =

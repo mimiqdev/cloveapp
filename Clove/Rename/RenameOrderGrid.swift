@@ -11,6 +11,8 @@ struct RenameOrderGrid: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(flow: flow, open: open) }
 
     func makeUIView(context: Context) -> UICollectionView {
+        context.coordinator.theme = context.environment.cloveTheme
+        context.coordinator.appLanguage = context.environment.appLanguage
         let layout = UICollectionViewCompositionalLayout { _, environment in
             let columns = environment.traitCollection.horizontalSizeClass == .regular ? 6 : 3
             let side =
@@ -45,6 +47,7 @@ struct RenameOrderGrid: UIViewRepresentable {
     func updateUIView(_ view: UICollectionView, context: Context) {
         context.coordinator.open = open
         context.coordinator.theme = context.environment.cloveTheme
+        context.coordinator.appLanguage = context.environment.appLanguage
         if !context.coordinator.isDragging { view.reloadData() }
     }
 
@@ -53,6 +56,7 @@ struct RenameOrderGrid: UIViewRepresentable {
         let flow: BatchRenameFlow
         var open: (GridPhoto) -> Void
         var theme: CloveTheme?
+        var appLanguage: ResolvedAppLanguage = .english
         weak var collection: UICollectionView?
         private(set) var isDragging = false
         private var draggingPhoto: PhotoIdentity?
@@ -88,18 +92,30 @@ struct RenameOrderGrid: UIViewRepresentable {
                             .background(Color.clove.accent, in: Circle()).padding(6)
                     }
                     .environment(\.cloveTheme, theme ?? .light)
+                    .environment(\.appLanguage, appLanguage)
+                    .environment(\.locale, appLanguage.locale)
                     .id(photo.id)
             }.margins(.all, 0)
             cell.isAccessibilityElement = true
             cell.accessibilityLabel = photo.fileName
-            cell.accessibilityValue = "Position \(position + 1) of \(flow.order.count)"
+            cell.accessibilityValue = AppLocalization.format(
+                "Position %lld of %lld", language: appLanguage,
+                Int64(position + 1), Int64(flow.order.count))
             cell.accessibilityIdentifier = "clove.rename.tile.\(photo.id.stem)"
             cell.accessibilityTraits = .button
             cell.accessibilityCustomActions = [
-                action("Move earlier", photo: photo.id, position: position - 1),
-                action("Move later", photo: photo.id, position: position + 1),
-                action("Move to start", photo: photo.id, position: 0),
-                action("Move to end", photo: photo.id, position: flow.order.count - 1),
+                action(
+                    AppLocalization.string("Move earlier", language: appLanguage),
+                    photo: photo.id, position: position - 1),
+                action(
+                    AppLocalization.string("Move later", language: appLanguage),
+                    photo: photo.id, position: position + 1),
+                action(
+                    AppLocalization.string("Move to start", language: appLanguage),
+                    photo: photo.id, position: 0),
+                action(
+                    AppLocalization.string("Move to end", language: appLanguage),
+                    photo: photo.id, position: flow.order.count - 1),
             ]
         }
 

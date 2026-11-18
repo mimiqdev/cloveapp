@@ -6,8 +6,21 @@ struct FolderSidebar: View {
     let browsing: BrowsingModel
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     private static let ratings = (1...5).compactMap { Rating(rawValue: $0) }
+
+    private var folderDisplayName: String {
+        browsing.recents.first(where: { $0.identity == browsing.state.folder }).map {
+            RecentFolderSummary.name(for: $0, language: language)
+        } ?? AppLocalization.string("Photos", language: language)
+    }
+
+    private var folderDisplaySource: String? {
+        browsing.recents.first(where: { $0.identity == browsing.state.folder }).map {
+            RecentFolderSummary.location(for: $0, language: language)
+        }
+    }
 
     var body: some View {
         let counts = browsing.sidebarCounts
@@ -18,12 +31,12 @@ struct FolderSidebar: View {
                         Button {
                             browsing.back()
                         } label: {
-                            Label(browsing.folderTitle, systemImage: "chevron.left")
+                            Label(folderDisplayName, systemImage: "chevron.left")
                                 .font(.headline)
                                 .lineLimit(1)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Back")
+                        .accessibilityLabel(AppLocalization.string("Back", language: language))
                         .accessibilityIdentifier("clove.nav.back")
                         FolderPreparationIndicator(
                             browsing: browsing,
@@ -32,7 +45,7 @@ struct FolderSidebar: View {
                         )
                         .layoutPriority(1)
                     }
-                    if let source = browsing.folderSource {
+                    if let source = folderDisplaySource {
                         Text(source).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -40,8 +53,10 @@ struct FolderSidebar: View {
                 .listRowBackground(Color.clear)
             }
             if counts.folders.count > 1 {
-                Section("Locations") {
-                    filterRow("All", count: counts.all, filter: .all, identifier: "all")
+                Section(AppLocalization.string("Locations", language: language)) {
+                    filterRow(
+                        AppLocalization.string("All", language: language), count: counts.all,
+                        filter: .all, identifier: "all")
                     ForEach(counts.subfolders, id: \.self) { path in
                         filterRow(
                             path, count: counts.folders[path, default: 0], filter: .subfolder(path),
@@ -49,27 +64,34 @@ struct FolderSidebar: View {
                     }
                 }
             } else {
-                filterRow("All", count: counts.all, filter: .all, identifier: "all")
+                filterRow(
+                    AppLocalization.string("All", language: language), count: counts.all,
+                    filter: .all, identifier: "all")
             }
-            Section("Filters") {
+            Section(AppLocalization.string("Filters", language: language)) {
                 filterRow(
-                    "Unmarked", count: counts.unmarked, filter: .unmarked, identifier: "unmarked")
+                    AppLocalization.string("Unmarked", language: language), count: counts.unmarked,
+                    filter: .unmarked, identifier: "unmarked")
                 filterRow(
-                    "Rejected", count: counts.rejected, filter: .rejected, identifier: "rejected")
+                    AppLocalization.string("Rejected", language: language), count: counts.rejected,
+                    filter: .rejected, identifier: "rejected")
                 ForEach(Self.ratings, id: \.self) { rating in
                     if let count = counts.ratings[rating], count > 0 {
                         filterRow(
-                            "★\(rating.starCount ?? 0)+", count: count,
+                            AppLocalization.format(
+                                "★%lld+", language: language, Int64(rating.starCount ?? 0)),
+                            count: count,
                             filter: .ratedAtLeast(rating), identifier: "rating.\(rating.rawValue)")
                     }
                 }
             }
             if !counts.labels.isEmpty {
-                Section("Color labels") {
+                Section(AppLocalization.string("Color labels", language: language)) {
                     ForEach(LabelColour.allCases, id: \.self) { colour in
                         if let count = counts.labels[colour], count > 0 {
                             row(
-                                colour.rawValue, count: count,
+                                AppLocalization.colourName(colour, language: language),
+                                count: count,
                                 selected: browsing.labelFilter == colour,
                                 identifier: "label.\(colour.rawValue.lowercased())", colour: colour
                             ) {
@@ -80,13 +102,17 @@ struct FolderSidebar: View {
                 }
             }
             if store.settings.similarGroupsEnabled {
-                Section("Similar groups") {
+                Section(AppLocalization.string("Similar groups", language: language)) {
                     HStack {
-                        Text("^[\(browsing.groups.count) group](inflect: true)")
+                        Text(
+                            AppLocalization.format(
+                                "%lld group", language: language, Int64(browsing.groups.count)))
                         Spacer()
                         if browsing.isFindingSimilarShots {
                             ProgressView().controlSize(.small)
-                                .accessibilityLabel("Finding similar shots")
+                                .accessibilityLabel(
+                                    AppLocalization.string(
+                                        "Finding similar shots", language: language))
                         } else {
                             Button {
                                 Task { await browsing.runGroupingAgain() }
@@ -96,7 +122,10 @@ struct FolderSidebar: View {
                             }
                             .buttonStyle(.borderless)
                             .disabled(browsing.readingProgress != nil)
-                            .accessibilityLabel("Find similar shots again")
+                            .accessibilityLabel(
+                                AppLocalization.string(
+                                    "Find similar shots again", language: language)
+                            )
                             .accessibilityIdentifier("clove.sidebar.grouping.runAgain")
                         }
                     }
@@ -132,7 +161,7 @@ struct FolderSidebar: View {
                 }
                 Text(title)
                 Spacer()
-                Text(count.formatted()).font(.caption)
+                Text(count.formatted(.number.locale(language.locale))).font(.caption)
                     .foregroundStyle(
                         selected ? Color.white.opacity(0.8) : theme.tokens.secondaryText.color)
             }

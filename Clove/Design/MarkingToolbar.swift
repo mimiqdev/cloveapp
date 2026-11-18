@@ -109,6 +109,7 @@ struct MarkRejectAction: View {
 
     /// The theme in effect, for the neutral glyph colour that is not a token (tokens.md).
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var settledPhotoID: PhotoIdentity?
 
@@ -118,6 +119,8 @@ struct MarkRejectAction: View {
 
     var body: some View {
         let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
+        let rejectTitle = AppLocalization.string(
+            isRejected ? "Rejected" : "Reject", language: language)
         Button(action: onToggle) {
             Image(systemName: isRejected ? "flag.slash.fill" : "flag.slash")
                 .font(.system(size: 15, weight: .medium))
@@ -134,10 +137,10 @@ struct MarkRejectAction: View {
         .onChange(of: photoID, initial: true) { _, newID in
             settledPhotoID = newID
         }
-        .accessibilityLabel(isRejected ? "Rejected" : "Reject")
+        .accessibilityLabel(rejectTitle)
         .accessibilityAddTraits(isRejected ? .isSelected : [])
         .accessibilityIdentifier(identifier)
-        .help(isRejected ? "Rejected" : "Reject")
+        .help(rejectTitle)
     }
 }
 
@@ -183,6 +186,7 @@ struct MarkRatingAction: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
     @State private var anchor: CGRect = .zero
     @State private var fallbackOpen = false
     @State private var isAnchorReady = false
@@ -192,7 +196,7 @@ struct MarkRatingAction: View {
     private var stars: Int { rating.starCount ?? 0 }
 
     private var accessibilityRating: String {
-        stars == 1 ? "1 star" : stars > 1 ? "\(stars) stars" : "Unrated"
+        AppLocalization.ratingTitle(rating, language: language)
     }
 
     private var shouldAnimateMarks: Bool {
@@ -274,7 +278,7 @@ struct MarkRatingAction: View {
             isAnchorReady = false
             fallbackOpen = false
         }
-        .accessibilityLabel("Rating")
+        .accessibilityLabel(AppLocalization.string("Rating", language: language))
         .accessibilityValue(accessibilityRating)
         .accessibilityIdentifier(identifier)
         .help(accessibilityRating)
@@ -360,6 +364,7 @@ struct MarkLabelAction: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
     @State private var anchor: CGRect = .zero
     @State private var fallbackOpen = false
     @State private var isAnchorReady = false
@@ -382,6 +387,12 @@ struct MarkLabelAction: View {
     var body: some View {
         let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
         let coordinateSpaceName = tapPicker?.coordinateSpaceName
+        let accessibleLabel =
+            label.map {
+                AppLocalization.format(
+                    "Label, %@", language: language,
+                    AppLocalization.colourName($0, language: language))
+            } ?? AppLocalization.string("Label", language: language)
         Button {
             onBegin()
             openPicker()
@@ -435,10 +446,10 @@ struct MarkLabelAction: View {
             isAnchorReady = false
             fallbackOpen = false
         }
-        .accessibilityLabel(label.map { "Label, \($0.rawValue)" } ?? "Label")
+        .accessibilityLabel(accessibleLabel)
         .accessibilityAddTraits(label != nil ? .isSelected : [])
         .accessibilityIdentifier(identifier)
-        .help(label.map { "Label, \($0.rawValue)" } ?? "Label")
+        .help(accessibleLabel)
         .popover(
             isPresented: Binding(
                 get: { fallbackOpen && isAnchorReady && scenePhase == .active && isEnabled },

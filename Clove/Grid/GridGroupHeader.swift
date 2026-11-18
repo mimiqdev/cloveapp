@@ -41,6 +41,11 @@ final class GridGroupHeader: UICollectionReusableView {
         didSet { draw() }
     }
 
+    /// The resolved app language in effect, so a language change redraws the label and control.
+    var language: ResolvedAppLanguage = .english {
+        didSet { draw() }
+    }
+
     /// Folds the group this header stands for.
     var fold: (GroupID) -> Void = { _ in }
 
@@ -50,7 +55,7 @@ final class GridGroupHeader: UICollectionReusableView {
         countLabel.adjustsFontForContentSizeCategory = true
         countLabel.numberOfLines = 1
         foldButton.setImage(UIImage(systemName: "chevron.up"), for: .normal)
-        foldButton.accessibilityLabel = "Collapse group"
+        foldButton.accessibilityLabel = AppLocalization.string("Collapse group", language: language)
         foldButton.accessibilityIdentifier = "clove.grid.group.fold"
         foldButton.addTarget(self, action: #selector(foldGroup), for: .touchUpInside)
         for view in [countLabel, foldButton] {
@@ -74,17 +79,22 @@ final class GridGroupHeader: UICollectionReusableView {
 
     /// Shows one run's count and fold control.
     func configure(
-        count: Int, group: GroupID, theme: CloveTheme, fold: @escaping (GroupID) -> Void
+        count: Int, group: GroupID, theme: CloveTheme,
+        language: ResolvedAppLanguage = .english,
+        fold: @escaping (GroupID) -> Void
     ) {
         self.count = count
         self.group = group
         self.theme = theme
+        self.language = language
         self.fold = fold
     }
 
     private func draw() {
+        foldButton.accessibilityLabel = AppLocalization.string("Collapse group", language: language)
         guard let group else { return }
-        countLabel.text = count == 1 ? "1 photo" : "\(count.formatted()) photos"
+        countLabel.text = AppLocalization.format(
+            "%lld photos", language: language, Int64(count))
         countLabel.accessibilityIdentifier = "clove.grid.group.count.\(group.rawValue)"
         guard let theme else { return }
         countLabel.textColor = UIColor(theme.tokens.primaryText.color)

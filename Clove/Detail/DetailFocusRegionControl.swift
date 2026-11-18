@@ -1,3 +1,4 @@
+import CloveCore
 import SwiftUI
 import UIKit
 
@@ -35,14 +36,18 @@ final class DetailFocusRegionControl: UIControl {
     private var drawnRect: CGRect = .zero
     private var currentZoomScale: CGFloat = 1
     private var isInspectionSelected = false
+    private var language: ResolvedAppLanguage
 
-    init(region: DetailFocusRegion, colours: DetailFocusRegionColours) {
+    init(
+        region: DetailFocusRegion, colours: DetailFocusRegionColours,
+        language: ResolvedAppLanguage = .english
+    ) {
         self.region = region
         self.colours = colours
+        self.language = language
         super.init(frame: .zero)
         isAccessibilityElement = true
         accessibilityIdentifier = region.id
-        accessibilityLabel = region.kind.accessibilityName
         isExclusiveTouch = true
 
         for shape in [contrastOutline, outline] {
@@ -54,12 +59,27 @@ final class DetailFocusRegionControl: UIControl {
 
         if !region.isActionable {
             accessibilityTraits = [.image, .notEnabled]
-            accessibilityValue = region.unavailableAccessibilityDescription
         } else {
             accessibilityTraits = .button
-            accessibilityHint = "Shows 100% zoom centred on this region"
         }
+        applyLocalizedAccessibility()
         applyVisualStyle()
+    }
+
+    func setLanguage(_ language: ResolvedAppLanguage) {
+        guard self.language != language else { return }
+        self.language = language
+        applyLocalizedAccessibility()
+    }
+
+    private func applyLocalizedAccessibility() {
+        accessibilityLabel = region.kind.accessibilityName(language: language)
+        if !region.isActionable {
+            accessibilityValue = region.unavailableAccessibilityDescription(language: language)
+        } else {
+            accessibilityHint = AppLocalization.string(
+                "Shows 100% zoom centred on this region", language: language)
+        }
     }
 
     @available(*, unavailable)

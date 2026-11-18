@@ -19,6 +19,7 @@ enum SettingsKey: String, CaseIterable {
     case similarGroups = "groups.similarEnabled"
     case appearanceMode = "appearance.mode"
     case appearanceFamily = "appearance.family"
+    case language = "app.language"
 }
 
 /// Reads and writes `AppSettings` through `SettingsStorage`, one key per field.
@@ -66,7 +67,8 @@ public struct SettingsPersistence: Sendable {
             moveRejectsEnabled: boolean(.moveRejects) ?? defaults.moveRejectsEnabled,
             similarGroupsEnabled: boolean(.similarGroups) ?? defaults.similarGroupsEnabled,
             appearance: loadAppearance(defaults: defaults.appearance),
-            photoDisplayMode: rawValue(.photoDisplayMode)
+            photoDisplayMode: rawValue(.photoDisplayMode),
+            language: rawValue(.language) ?? defaults.language
         )
     }
 
@@ -86,6 +88,7 @@ public struct SettingsPersistence: Sendable {
         setBoolean(settings.similarGroupsEnabled, .similarGroups)
         setText(settings.appearance.mode.rawValue, .appearanceMode)
         setText(settings.appearance.family.rawValue, .appearanceFamily)
+        setText(settings.language.rawValue, .language)
         storage.setString(
             settings.photoDisplayMode?.rawValue, forKey: SettingsKey.photoDisplayMode.rawValue)
     }

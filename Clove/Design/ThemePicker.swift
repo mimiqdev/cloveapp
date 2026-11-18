@@ -12,6 +12,8 @@ struct ThemePicker: View {
     /// Chosen family.
     let onSelect: (ThemeFamily) -> Void
 
+    @Environment(\.appLanguage) private var language
+
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     var body: some View {
@@ -25,7 +27,7 @@ struct ThemePicker: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(family.name)
+                .accessibilityLabel(AppLocalization.themeTitle(family, language: language))
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
                 .accessibilityIdentifier("clove.settings.appearance.family.\(family.id)")
             }

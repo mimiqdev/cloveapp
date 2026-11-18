@@ -710,4 +710,130 @@ extension CloveFlowTests {
         XCTAssertFalse(element(in: app, "clove.settings.rejectsFolderNameProblem").exists)
     }
 
+    /// Switching language in Settings updates Settings, Grid, Detail, and Info sheet live
+    /// without restarting the process, and restores English when returned to Follow System.
+    @MainActor @objc
+    func testLiveLanguageSwitchingAcrossSettingsGridAndDetail() {
+        let app = launchSample()
+
+        // 1. Verify Language category sits immediately after Appearance and starts on Follow System.
+        openSettings(in: app)
+        let appearanceCategory = element(in: app, "clove.settings.category.appearance")
+        let languageCategory = element(in: app, "clove.settings.category.language")
+        XCTAssertTrue(appearanceCategory.waitForExistence(timeout: 5))
+        XCTAssertTrue(languageCategory.waitForExistence(timeout: 5))
+        XCTAssertLessThan(appearanceCategory.frame.minY, languageCategory.frame.minY)
+
+        languageCategory.tap()
+        let systemOption = element(in: app, "clove.settings.language.system")
+        let hansOption = element(in: app, "clove.settings.language.simplifiedChinese")
+        let hantOption = element(in: app, "clove.settings.language.traditionalChinese")
+        XCTAssertTrue(systemOption.waitForExistence(timeout: 5))
+        XCTAssertTrue(systemOption.isSelected)
+        XCTAssertEqual(systemOption.label, "Follow System")
+
+        // 2. Switch to Simplified Chinese live.
+        hansOption.tap()
+        XCTAssertTrue(hansOption.isSelected)
+        XCTAssertEqual(systemOption.label, "跟随系统")
+
+        returnFromSettingsCategoryToRoot(in: app)
+        openLibrary(app)
+
+        let filterButton = element(in: app, "clove.grid.filter")
+        if filterButton.exists {
+            XCTAssertEqual(filterButton.label, "筛选")
+        } else {
+            XCTAssertEqual(element(in: app, "clove.grid.title").label, "全部")
+        }
+        XCTAssertEqual(element(in: app, "clove.grid.moveRejects").label, "整理淘汰片")
+
+        element(in: app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertTrue(element(in: app, "clove.detail").waitForExistence(timeout: 10))
+        XCTAssertEqual(element(in: app, "clove.detail.info").label, "信息")
+        let capsuleReject = element(in: app, "clove.detail.capsule.reject")
+        if capsuleReject.exists {
+            XCTAssertEqual(capsuleReject.label, "淘汰")
+        }
+        element(in: app, "clove.detail.info").tap()
+        XCTAssertTrue(element(in: app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
+        XCTAssertEqual(element(in: app, "clove.detail.info.done").label, "完成")
+        XCTAssertTrue(app.staticTexts["文件"].waitForExistence(timeout: 5))
+        element(in: app, "clove.detail.info.done").tap()
+
+        element(in: app, "clove.nav.back").tap()
+        XCTAssertTrue(element(in: app, "clove.grid").waitForExistence(timeout: 5))
+
+        // 3. Switch to Traditional Chinese live from Grid -> Settings.
+        element(in: app, "clove.grid.more").tap()
+        app.buttons["设置"].tap()
+        XCTAssertTrue(element(in: app, "clove.settings").waitForExistence(timeout: 5))
+        openSettingsCategory("clove.settings.category.language", in: app)
+
+        XCTAssertTrue(hantOption.waitForExistence(timeout: 5))
+        hantOption.tap()
+        XCTAssertTrue(hantOption.isSelected)
+        XCTAssertEqual(systemOption.label, "跟隨系統")
+
+        returnFromSettingsCategoryToGrid(in: app)
+        if filterButton.exists {
+            XCTAssertEqual(filterButton.label, "篩選")
+        } else {
+            XCTAssertEqual(element(in: app, "clove.grid.title").label, "全部")
+        }
+        XCTAssertEqual(element(in: app, "clove.grid.moveRejects").label, "整理淘汰片")
+
+        element(in: app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertTrue(element(in: app, "clove.detail").waitForExistence(timeout: 10))
+        XCTAssertEqual(element(in: app, "clove.detail.info").label, "資訊")
+        element(in: app, "clove.detail.info").tap()
+        XCTAssertTrue(element(in: app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["檔案"].waitForExistence(timeout: 5))
+        element(in: app, "clove.detail.info.done").tap()
+
+        element(in: app, "clove.nav.back").tap()
+        XCTAssertTrue(element(in: app, "clove.grid").waitForExistence(timeout: 5))
+
+        // 4. Return to Follow System and verify English returns live.
+        element(in: app, "clove.grid.more").tap()
+        app.buttons["設定"].tap()
+        XCTAssertTrue(element(in: app, "clove.settings").waitForExistence(timeout: 5))
+        openSettingsCategory("clove.settings.category.language", in: app)
+
+        XCTAssertTrue(systemOption.waitForExistence(timeout: 5))
+        systemOption.tap()
+        XCTAssertTrue(systemOption.isSelected)
+        XCTAssertEqual(systemOption.label, "Follow System")
+
+        returnFromSettingsCategoryToGrid(in: app)
+        if filterButton.exists {
+            XCTAssertEqual(filterButton.label, "Filter")
+        } else {
+            XCTAssertEqual(element(in: app, "clove.grid.title").label, "All")
+        }
+        XCTAssertEqual(element(in: app, "clove.grid.moveRejects").label, "Move rejects")
+    }
+
+    @MainActor
+    private func returnFromSettingsCategoryToRoot(in app: XCUIApplication) {
+        if !element(in: app, "clove.nav.back").exists {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        let back = element(in: app, "clove.nav.back")
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(element(in: app, "clove.entry.openFolder").waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func returnFromSettingsCategoryToGrid(in app: XCUIApplication) {
+        if !element(in: app, "clove.nav.back").exists {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        let back = element(in: app, "clove.nav.back")
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(element(in: app, "clove.grid").waitForExistence(timeout: 5))
+    }
+
 }

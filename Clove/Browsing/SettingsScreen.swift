@@ -6,6 +6,7 @@ import SwiftUI
 struct SettingsScreen: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @Bindable var navigation: SettingsNavigationState
@@ -50,14 +51,20 @@ struct SettingsScreen: View {
         .onChange(of: isWide) { _, wide in
             navigation.layoutChanged(isWide: wide)
         }
-        .alert("Reset settings to defaults?", isPresented: $showsResetConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) {
+        .alert(
+            AppLocalization.string("Reset settings to defaults?", language: language),
+            isPresented: $showsResetConfirmation
+        ) {
+            Button(AppLocalization.string("Cancel", language: language), role: .cancel) {}
+            Button(AppLocalization.string("Reset", language: language), role: .destructive) {
                 store.resetToDefaults()
                 resetRevision += 1
             }
         } message: {
-            Text("Preferences return to launch defaults. Photos and their marks stay untouched.")
+            Text(
+                AppLocalization.string(
+                    "Preferences return to launch defaults. Photos and their marks stay untouched.",
+                    language: language))
         }
     }
 
@@ -65,13 +72,14 @@ struct SettingsScreen: View {
         List {
             Section {
                 ForEach(SettingsCategory.allCases) { category in
+                    let categoryTitle = category.title(language: language)
                     NavigationLink(value: BrowseDestination.settingsCategory(category)) {
                         HStack(spacing: 12) {
                             Image(systemName: category.symbol)
                                 .foregroundStyle(Color.clove.accent)
                                 .frame(width: 24)
                                 .accessibilityHidden(true)
-                            Text(category.title)
+                            Text(categoryTitle)
                                 .foregroundStyle(Color.clove.text.primary)
                             Spacer(minLength: 8)
                             if let summary = compactSummary(for: category) {
@@ -82,7 +90,7 @@ struct SettingsScreen: View {
                             }
                         }
                     }
-                    .accessibilityLabel(category.title)
+                    .accessibilityLabel(categoryTitle)
                     .accessibilityValue(compactSummary(for: category) ?? "")
                     .accessibilityIdentifier(category.identifier)
                 }
@@ -103,10 +111,11 @@ struct SettingsScreen: View {
                 Section {
                     ForEach(SettingsCategory.allCases) { category in
                         let isSelected = navigation.selectedCategory == category
+                        let categoryTitle = category.title(language: language)
                         Button {
                             navigation.selectCategory(category, wide: true)
                         } label: {
-                            Label(category.title, systemImage: category.symbol)
+                            Label(categoryTitle, systemImage: category.symbol)
                                 .foregroundStyle(
                                     isSelected ? Color.clove.accent : Color.clove.text.primary
                                 )
@@ -156,16 +165,28 @@ struct SettingsScreen: View {
     private func compactSummary(for category: SettingsCategory) -> String? {
         switch category {
         case .appearance:
-            "\(store.settings.appearance.mode.title) · \(store.settings.appearance.family.name)"
+            let mode = AppLocalization.appearanceTitle(
+                store.settings.appearance.mode, language: language)
+            let family = AppLocalization.themeTitle(
+                store.settings.appearance.family, language: language)
+            return "\(mode) · \(family)"
+        case .language:
+            if store.settings.language == .system {
+                return AppLocalization.string("Follow System", language: language)
+            }
+            return AppLocalization.resolvedLanguageAutonym(store.resolvedLanguage)
         case .cullingAndMarking:
-            nil
+            return nil
         case .browsingAndGroups:
-            nil
+            return nil
         case .photoDisplay:
-            store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview"
+            return AppLocalization.string(
+                store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview",
+                language: language)
         case .moveRejects:
-            store.settings.moveRejectsEnabled
-                ? store.settings.rejectsFolderName.rawValue : "Off"
+            return store.settings.moveRejectsEnabled
+                ? store.settings.rejectsFolderName.rawValue
+                : AppLocalization.string("Off", language: language)
         }
     }
 }
@@ -173,6 +194,7 @@ struct SettingsScreen: View {
 /// Pushed category detail screen in compact layouts.
 struct SettingsCategoryScreen: View {
     let category: SettingsCategory
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         List {
@@ -185,7 +207,7 @@ struct SettingsCategoryScreen: View {
         .scrollContentBackground(.hidden)
         .background(Color.clove.surface.sheet)
         .foregroundStyle(Color.clove.text.primary)
-        .navigationTitle(category.title)
+        .navigationTitle(category.title(language: language))
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.settings.detail")
@@ -195,6 +217,7 @@ struct SettingsCategoryScreen: View {
 /// Nested subpage under Culling & marking (Rating scale or After marking destination).
 struct SettingsSubpageScreen: View {
     let subpage: SettingsSubpage
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         Group {
@@ -205,7 +228,7 @@ struct SettingsSubpageScreen: View {
                 AutoAdvanceDestinationSettingsList()
             }
         }
-        .navigationTitle(subpage.title)
+        .navigationTitle(subpage.title(language: language))
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.settings.subpage.\(subpage.rawValue)")

@@ -31,6 +31,7 @@ struct DetailSwipeFeedbackBadge: View {
     let chromeIsVisible: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         GeometryReader { proxy in
@@ -51,9 +52,11 @@ struct DetailSwipeFeedbackBadge: View {
                 .accessibilityIdentifier("clove.detail.swipeFeedback")
                 .accessibilityLabel(
                     feedback.isReject
-                        ? "Reject"
+                        ? AppLocalization.string("Reject", language: language)
                         : (feedback.rating == .unrated
-                            ? "Clear rating" : "\(feedback.rating?.starCount ?? 0) stars"))
+                            ? AppLocalization.string("Clear rating", language: language)
+                            : AppLocalization.starCount(
+                                feedback.rating?.starCount ?? 0, language: language)))
             }
         }
         .animation(

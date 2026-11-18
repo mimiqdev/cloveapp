@@ -5,6 +5,7 @@ import SwiftUI
 /// Reading Recents and app-private previews never opens or enumerates a remembered folder.
 struct EntryScreen: View {
     let browsing: BrowsingModel
+    @Environment(\.appLanguage) private var language
     @State private var isPickingFolder = false
 
     var body: some View {
@@ -13,7 +14,8 @@ struct EntryScreen: View {
                 Text("Clove").font(.title.bold())
                 Spacer()
                 GlassIconButton(
-                    label: "Settings", symbol: "gearshape", identifier: "clove.nav.settings"
+                    label: AppLocalization.string("Settings", language: language),
+                    symbol: "gearshape", identifier: "clove.nav.settings"
                 ) {
                     browsing.showSettings()
                 }
@@ -42,7 +44,7 @@ struct EntryScreen: View {
                     VStack(alignment: .leading, spacing: 20) {
                         heroCard(hero)
                         if browsing.recents.count > 1 {
-                            Text("Earlier")
+                            Text(AppLocalization.string("Earlier", language: language))
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(Color.clove.text.secondary)
                             VStack(spacing: 0) {
@@ -66,7 +68,7 @@ struct EntryScreen: View {
                         isPickingFolder = true
                     } label: {
                         // Text-only: no folder or plus glyph (owner decision, 2026-11-13, #227).
-                        Text("Open folder")
+                        Text(AppLocalization.string("Open folder", language: language))
                             .font(.headline)
                             .frame(width: 168, height: 48)
                             .contentShape(Rectangle())
@@ -94,7 +96,8 @@ struct EntryScreen: View {
     }
 
     private func heroCard(_ recent: RecentFolder) -> some View {
-        Button {
+        let folderName = RecentFolderSummary.name(for: recent, language: language)
+        return Button {
             if needsReconnect(recent) || browsing.recentFailure(for: recent.id) != nil {
                 isPickingFolder = true
             } else {
@@ -112,30 +115,34 @@ struct EntryScreen: View {
                     ],
                     startPoint: .center, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(RecentFolderSummary.name(for: recent))
+                    Text(folderName)
                         .font(.title.bold())
                         .lineLimit(2)
                     HStack(alignment: .bottom, spacing: 12) {
-                        Text(RecentFolderSummary.location(for: recent))
+                        Text(RecentFolderSummary.location(for: recent, language: language))
                             .font(.subheadline)
                             .lineLimit(2)
                         Spacer(minLength: 0)
                         if needsReconnect(recent) {
-                            Text("Reconnect").font(.subheadline.weight(.semibold))
+                            Text(AppLocalization.string("Reconnect", language: language))
+                                .font(.subheadline.weight(.semibold))
                         } else if let progress = recent.progress,
                             progress.isComplete || progress.total > 0
                         {
                             Text(
                                 progress.isComplete
-                                    ? "\(progress.left.formatted()) left"
-                                    : "At least \(progress.left.formatted()) left"
+                                    ? AppLocalization.format(
+                                        "%lld left", language: language, Int64(progress.left))
+                                    : AppLocalization.format(
+                                        "At least %lld left", language: language,
+                                        Int64(progress.left))
                             )
                             .font(.subheadline.weight(.semibold))
                         }
                     }
                     if let failure = browsing.recentFailure(for: recent.id), !needsReconnect(recent)
                     {
-                        Text(FolderFailureExplanation.text(for: failure))
+                        Text(AppLocalization.folderFailureText(for: failure, language: language))
                             .font(.caption)
                             .accessibilityIdentifier("clove.entry.recentFailure")
                     }
@@ -148,18 +155,23 @@ struct EntryScreen: View {
             }
             .frame(height: 380)
             .overlay(alignment: .topLeading) {
-                Text("Continue · \(RecentFolderSummary.relativeDate(recent.lastOpened))")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(CloveTheme.dark.tokens.primaryText.color)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(CloveTheme.dark.tokens.stage.color.opacity(0.45), in: Capsule())
-                    .padding(16)
+                Text(
+                    AppLocalization.format(
+                        "Continue · %@", language: language,
+                        RecentFolderSummary.relativeDate(recent.lastOpened, language: language))
+                )
+                .font(.caption.weight(.medium))
+                .foregroundStyle(CloveTheme.dark.tokens.primaryText.color)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(CloveTheme.dark.tokens.stage.color.opacity(0.45), in: Capsule())
+                .padding(16)
             }
             .clipShape(RoundedRectangle(cornerRadius: 20))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("clove.entry.openFolder")
-        .accessibilityLabel("Continue · \(RecentFolderSummary.name(for: recent))")
+        .accessibilityLabel(
+            AppLocalization.format("Continue · %@", language: language, folderName))
     }
 
     private func progressLine(_ progress: FolderProgress) -> some View {
@@ -179,7 +191,9 @@ struct EntryScreen: View {
         .frame(height: 3)
         .clipShape(Capsule())
         .accessibilityLabel(
-            "\(progress.marked) marked, \(progress.rejected) rejected, \(progress.left) left")
+            AppLocalization.format(
+                "%lld marked, %lld rejected, %lld left", language: language,
+                Int64(progress.marked), Int64(progress.rejected), Int64(progress.left)))
     }
 
     private func recentRow(_ recent: RecentFolder) -> some View {
@@ -203,14 +217,16 @@ struct EntryScreen: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .opacity(reconnect ? 0.5 : 1)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(RecentFolderSummary.name(for: recent)).font(.subheadline.weight(.semibold))
+                    Text(RecentFolderSummary.name(for: recent, language: language))
+                        .font(.subheadline.weight(.semibold))
                     Text(
                         reconnect
-                            ? "Drive not connected" : RecentFolderSummary.location(for: recent)
+                            ? AppLocalization.string("Drive not connected", language: language)
+                            : RecentFolderSummary.location(for: recent, language: language)
                     )
                     .font(.caption).foregroundStyle(Color.clove.text.secondary)
                     if let failure = browsing.recentFailure(for: recent.id), !reconnect {
-                        Text(FolderFailureExplanation.text(for: failure))
+                        Text(AppLocalization.folderFailureText(for: failure, language: language))
                             .font(.caption).foregroundStyle(Color.clove.text.secondary)
                             .lineLimit(nil)
                             .accessibilityIdentifier("clove.entry.recentFailure")
@@ -220,20 +236,26 @@ struct EntryScreen: View {
                 .opacity(reconnect ? 0.5 : 1)
                 Spacer(minLength: 0)
                 if reconnect {
-                    Text("Reconnect")
+                    Text(AppLocalization.string("Reconnect", language: language))
                         .font(.caption.weight(.medium))
                         .padding(.horizontal, 10).padding(.vertical, 7)
                         .background(Color.clove.surface.card, in: Capsule())
                         .accessibilityIdentifier("clove.entry.reconnect")
                 } else {
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text(RecentFolderSummary.count(for: recent)).font(.subheadline)
+                        Text(RecentFolderSummary.count(for: recent, language: language))
+                            .font(.subheadline)
                         if recent.progress?.finished == true {
-                            Text("Done").foregroundStyle(Color.clove.status.saved)
+                            Text(AppLocalization.string("Done", language: language))
+                                .foregroundStyle(Color.clove.status.saved)
                                 .accessibilityIdentifier("clove.entry.done")
                         } else {
-                            Text(recent.lastOpened, format: .dateTime.month(.abbreviated).day())
-                                .foregroundStyle(Color.clove.text.secondary)
+                            Text(
+                                recent.lastOpened.formatted(
+                                    Date.FormatStyle().month(.abbreviated).day()
+                                        .locale(language.locale))
+                            )
+                            .foregroundStyle(Color.clove.text.secondary)
                         }
                     }
                     .font(.caption)
@@ -247,13 +269,16 @@ struct EntryScreen: View {
 
     @ViewBuilder private var failureText: some View {
         if let failure = browsing.folderFailure {
-            Text(FolderFailureExplanation.text(for: failure))
+            Text(AppLocalization.folderFailureText(for: failure, language: language))
                 .font(.footnote).foregroundStyle(Color.clove.text.secondary)
                 .accessibilityIdentifier("clove.entry.folderFailure")
         } else if browsing.recentsFailure != nil {
-            Text("Clove could not read its list of recent folders.")
-                .font(.footnote).foregroundStyle(Color.clove.text.secondary)
-                .accessibilityIdentifier("clove.entry.recentsFailure")
+            Text(
+                AppLocalization.string(
+                    "Clove could not read its list of recent folders.", language: language)
+            )
+            .font(.footnote).foregroundStyle(Color.clove.text.secondary)
+            .accessibilityIdentifier("clove.entry.recentsFailure")
         }
     }
 }

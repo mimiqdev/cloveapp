@@ -36,6 +36,7 @@ struct RatingPicker: View {
     let onPick: (Rating) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
     @State private var settledPhotoID: PhotoIdentity?
 
     static let itemCount = 6
@@ -105,6 +106,7 @@ struct RatingPicker: View {
 
     private var clearButton: some View {
         let isSelected = !isMixed && selection == .unrated
+        let clearTitle = AppLocalization.string("Clear rating", language: language)
         return Button {
             onPick(.unrated)
         } label: {
@@ -116,10 +118,10 @@ struct RatingPicker: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Clear rating")
+        .accessibilityLabel(clearTitle)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("\(identifier).clear")
-        .help("Clear rating")
+        .help(clearTitle)
     }
 
     private func starButton(_ level: Rating) -> some View {
@@ -128,7 +130,7 @@ struct RatingPicker: View {
         let isSelected = !isMixed && level == selection
         let canClearDisabledCurrent = allowsTapCurrentToClear && isSelected
         let stars = level.starCount ?? 0
-        let label = stars == 1 ? "1 star" : "\(stars) stars"
+        let label = AppLocalization.starCount(stars, language: language)
 
         return Button {
             onPick(allowsTapCurrentToClear && isSelected ? .unrated : level)
@@ -162,10 +164,9 @@ struct RatingPicker: View {
     }
 
     private var accessibilityValue: String {
-        if isMixed { return "Mixed" }
-        if selection == .rejected { return "Rejected" }
-        guard let stars = selection.starCount else { return "Unrated" }
-        return stars == 1 ? "1 star" : "\(stars) stars"
+        if isMixed { return AppLocalization.string("Mixed", language: language) }
+        if selection == .rejected { return AppLocalization.string("Rejected", language: language) }
+        return AppLocalization.ratingTitle(selection, language: language)
     }
 }
 

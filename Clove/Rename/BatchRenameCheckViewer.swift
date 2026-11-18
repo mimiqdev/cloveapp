@@ -8,6 +8,7 @@ struct BatchRenameCheckViewer: View {
     let initialPhoto: PhotoIdentity
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.appLanguage) private var language
     @State private var current: PhotoIdentity?
     @State private var pixels: RenameCheckImages
     @State private var scale: CGFloat = 1
@@ -41,8 +42,12 @@ struct BatchRenameCheckViewer: View {
                 title: photo.fileName, titleIdentifier: "clove.rename.viewer.name",
                 back: { dismiss() }
             ) {
-                Text("\(index + 1) of \(flow.order.count) · swipe for the next in this order")
-                    .accessibilityIdentifier("clove.rename.viewer.position")
+                Text(
+                    AppLocalization.format(
+                        "%lld of %lld · swipe for the next in this order", language: language,
+                        Int64(index + 1), Int64(flow.order.count))
+                )
+                .accessibilityIdentifier("clove.rename.viewer.position")
             } tools: {
             }
             DetailZoomView(
@@ -60,13 +65,21 @@ struct BatchRenameCheckViewer: View {
                 onSwipeBegin: {}, hasPrevious: index > 0, hasNext: index + 1 < flow.order.count
             )
             .accessibilityLabel(photo.fileName)
-            .accessibilityValue(scale > DetailFitScale.tolerance ? "Zoomed" : "Fit")
+            .accessibilityValue(
+                AppLocalization.string(
+                    scale > DetailFitScale.tolerance ? "Zoomed" : "Fit", language: language)
+            )
             .accessibilityIdentifier("clove.rename.viewer.preview")
-            .accessibilityAction(named: "Previous photo") { step(-1) }
-            .accessibilityAction(named: "Next photo") { step(1) }
+            .accessibilityAction(
+                named: AppLocalization.string("Previous photo", language: language)
+            ) { step(-1) }
+            .accessibilityAction(
+                named: AppLocalization.string("Next photo", language: language)
+            ) { step(1) }
             .overlay {
                 if pixels.unavailable {
-                    Text("No preview available").foregroundStyle(Color.clove.text.secondary)
+                    Text(AppLocalization.string("No preview available", language: language))
+                        .foregroundStyle(Color.clove.text.secondary)
                 }
             }
             .onGeometryChange(for: CGSize.self) {

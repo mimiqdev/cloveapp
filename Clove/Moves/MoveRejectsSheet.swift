@@ -9,6 +9,7 @@ struct MoveRejectsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.cloveTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
     @State private var expanded = false
     @State private var detent: PresentationDetent = .height(330)
 
@@ -33,7 +34,8 @@ struct MoveRejectsSheet: View {
     @ViewBuilder private var content: some View {
         switch flow.stage {
         case .planning:
-            ProgressView("Preparing…").accessibilityIdentifier("clove.moves.preparing")
+            ProgressView(AppLocalization.string("Preparing…", language: language))
+                .accessibilityIdentifier("clove.moves.preparing")
         case .confirming(let plan):
             confirmation(plan)
         case .moving(let finished, let total):
@@ -41,32 +43,57 @@ struct MoveRejectsSheet: View {
                 ProgressView(value: Double(finished), total: Double(max(total, 1)))
                 Text(
                     total == 0
-                        ? "Clearing kept rejects"
+                        ? AppLocalization.string("Clearing kept rejects", language: language)
                         : total == 1
-                            ? "Moving 1 photo"
-                            : "Moving \(min(finished + 1, total)) of \(total) photos"
+                            ? AppLocalization.string("Moving 1 photo", language: language)
+                            : AppLocalization.format(
+                                "Moving %lld of %lld photos", language: language,
+                                Int64(min(finished + 1, total)), Int64(total))
                 )
                 .accessibilityIdentifier("clove.moves.progress")
             }
-        case .failed(let message): failure(message, identifier: "failure")
-        case .readOnly: failure(RejectMoveCopy.viewOnlyLocation, identifier: "viewOnly")
-        case .disabled: failure("Move rejects is turned off.", identifier: "disabled")
+        case .failed(let message):
+            failure(AppLocalization.string(message, language: language), identifier: "failure")
+        case .readOnly:
+            failure(
+                AppLocalization.string(RejectMoveCopy.viewOnlyLocation, language: language),
+                identifier: "viewOnly")
+        case .disabled:
+            failure(
+                AppLocalization.string("Move rejects is turned off.", language: language),
+                identifier: "disabled")
         }
     }
 
     private func confirmation(_ plan: RejectMovePlan) -> some View {
         let selection = flow.keepSelection ?? RejectMoveKeepSelection(plan: plan)
-        let copy = RejectMoveConfirmation(selection: selection)
+        let title = AppLocalization.format(
+            "Move %lld rejected photos", language: language, Int64(plan.photoCount))
+        let bodyText = AppLocalization.format(
+            "To %@ in this folder. Nothing is deleted.", language: language,
+            plan.configuration.rejectsFolderName.rawValue)
+        let refusedMessage: String? =
+            plan.refusedCount == 0
+            ? nil
+            : AppLocalization.format(
+                "%lld photos can't be moved right now.", language: language,
+                Int64(plan.refusedCount))
+        let moveButtonTitle =
+            selection.movingCount == plan.photoCount
+            ? AppLocalization.string("Move", language: language)
+            : AppLocalization.format("Move %lld", language: language, Int64(selection.movingCount))
         return VStack(spacing: 16) {
             if expanded {
                 VStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(
-                            "\(selection.movingCount.formatted()) of \(selection.totalCount.formatted()) will move"
+                            AppLocalization.format(
+                                "%lld of %lld will move", language: language,
+                                Int64(selection.movingCount), Int64(selection.totalCount))
                         )
                         .font(.headline)
                         .accessibilityIdentifier("clove.moves.partial")
-                        Text("Tap a photo to keep it.")
+                        Text(AppLocalization.string("Tap a photo to keep it.", language: language))
                             .font(.footnote).foregroundStyle(Color.clove.text.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     ScrollView { keepGrid(plan, selection: selection) }
@@ -88,13 +115,18 @@ struct MoveRejectsSheet: View {
                         fannedStack(plan)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Review rejected photos")
-                    .accessibilityHint("Opens the grid. Tap a photo to keep it.")
+                    .accessibilityLabel(
+                        AppLocalization.string("Review rejected photos", language: language)
+                    )
+                    .accessibilityHint(
+                        AppLocalization.string(
+                            "Opens the grid. Tap a photo to keep it.", language: language)
+                    )
                     .accessibilityIdentifier("clove.moves.expand")
-                    Text(copy.title)
+                    Text(title)
                         .font(.title3.bold())
                         .accessibilityIdentifier("clove.moves.confirmation")
-                    Text(copy.body)
+                    Text(bodyText)
                         .font(.footnote)
                         .foregroundStyle(Color.clove.text.secondary)
                         .multilineTextAlignment(.center)
@@ -102,18 +134,23 @@ struct MoveRejectsSheet: View {
                 }
                 .transition(.asymmetric(insertion: .opacity, removal: .identity))
             }
-            if let refused = copy.refusedMessage {
+            if let refused = refusedMessage {
                 Text(refused).font(.footnote).foregroundStyle(Color.clove.reject)
                     .accessibilityIdentifier("clove.moves.refused")
             }
             Button {
                 flow.move(plan) { dismiss() }
             } label: {
-                Text(expanded ? "Move \(selection.movingCount.formatted())" : copy.moveButtonTitle)
-                    .contentTransition(reduceMotion ? .identity : .numericText())
-                    .animation(
-                        CloveMotion.micro(reduceMotion: reduceMotion), value: selection.movingCount
-                    )
+                Text(
+                    expanded
+                        ? AppLocalization.format(
+                            "Move %lld", language: language, Int64(selection.movingCount))
+                        : moveButtonTitle
+                )
+                .contentTransition(reduceMotion ? .identity : .numericText())
+                .animation(
+                    CloveMotion.micro(reduceMotion: reduceMotion), value: selection.movingCount
+                )
             }
             .buttonStyle(MoveSheetButtonStyle())
             .disabled(selection.movingCount == 0)
@@ -163,7 +200,9 @@ struct MoveRejectsSheet: View {
                     entry.files.first(where: { $0.role == .primary })?.source.lastPathComponent
                         ?? entry.identity.stem
                 )
-                .accessibilityValue(kept ? "Kept" : "Will move")
+                .accessibilityValue(
+                    AppLocalization.string(kept ? "Kept" : "Will move", language: language)
+                )
                 .accessibilityIdentifier("clove.moves.keep.\(entry.identity.stem)")
             }
         }
@@ -172,9 +211,11 @@ struct MoveRejectsSheet: View {
     private func failure(_ message: String, identifier: String) -> some View {
         VStack(spacing: 20) {
             Text(message).accessibilityIdentifier("clove.moves.\(identifier)")
-            Button("Cancel", role: .cancel) { dismiss() }
-                .buttonStyle(MoveSheetButtonStyle())
-                .accessibilityIdentifier("clove.moves.cancel")
+            Button(AppLocalization.string("Cancel", language: language), role: .cancel) {
+                dismiss()
+            }
+            .buttonStyle(MoveSheetButtonStyle())
+            .accessibilityIdentifier("clove.moves.cancel")
         }
     }
 

@@ -12,6 +12,8 @@ struct SettingsCategoryContent: View {
         switch category {
         case .appearance:
             AppearanceSettingsSections(showsCategoryTitle: showsCategoryTitle)
+        case .language:
+            LanguageSettingsSections(showsCategoryTitle: showsCategoryTitle)
         case .cullingAndMarking:
             CullingAndMarkingSettingsSections(showsCategoryTitle: showsCategoryTitle)
         case .browsingAndGroups:
@@ -28,20 +30,21 @@ struct SettingsCategoryContent: View {
 struct AppearanceSettingsSections: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     let showsCategoryTitle: Bool
 
     var body: some View {
         Section {
             Picker(
-                "Appearance mode",
+                AppLocalization.string("Appearance mode", language: language),
                 selection: settingsBinding(store, \.appearance.mode)
             ) {
                 ForEach(AppearanceMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+                    Text(AppLocalization.appearanceTitle(mode, language: language)).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
-            .accessibilityLabel("Appearance mode")
+            .accessibilityLabel(AppLocalization.string("Appearance mode", language: language))
             .accessibilityIdentifier("clove.settings.appearance.mode")
 
             ThemePicker(selection: store.settings.appearance.family) { family in
@@ -50,11 +53,67 @@ struct AppearanceSettingsSections: View {
             .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
         } header: {
             if showsCategoryTitle {
-                SettingsDetailTitleHeader(title: SettingsCategory.appearance.title)
+                SettingsDetailTitleHeader(
+                    title: SettingsCategory.appearance.title(language: language))
             }
         } footer: {
-            Text("Photos are never tinted. Only the app around them changes.")
-                .foregroundStyle(Color.clove.text.secondary)
+            Text(
+                AppLocalization.string(
+                    "Photos are never tinted. Only the app around them changes.", language: language
+                )
+            )
+            .foregroundStyle(Color.clove.text.secondary)
+        }
+        .listRowBackground(theme.tokens.card.color)
+
+        SettingsSaveFailureSection()
+    }
+}
+
+struct LanguageSettingsSections: View {
+    @Environment(SettingsStore.self) private var store
+    @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
+    let showsCategoryTitle: Bool
+
+    var body: some View {
+        Section {
+            ForEach(AppLanguage.allCases) { option in
+                let isSelected = store.settings.language == option
+                let optionTitle = AppLocalization.languageDisplayName(option, language: language)
+                Button {
+                    store.update { $0.language = option }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(optionTitle)
+                            .foregroundStyle(Color.clove.text.primary)
+                        Spacer(minLength: 8)
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(Color.clove.accent)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(optionTitle)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityIdentifier("clove.settings.language.\(option.rawValue)")
+            }
+        } header: {
+            if showsCategoryTitle {
+                SettingsDetailTitleHeader(
+                    title: SettingsCategory.language.title(language: language))
+            }
+        } footer: {
+            Text(
+                AppLocalization.string(
+                    "Language changes apply immediately. You can also set Clove's preferred language in iOS Settings.",
+                    language: language)
+            )
+            .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
 
@@ -65,6 +124,7 @@ struct AppearanceSettingsSections: View {
 struct CullingAndMarkingSettingsSections: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     let showsCategoryTitle: Bool
 
     private static let ratingLevels = (1...5).compactMap { Rating(rawValue: $0) }
@@ -72,33 +132,42 @@ struct CullingAndMarkingSettingsSections: View {
     var body: some View {
         Section {
             Toggle(
-                "Marking gestures",
+                AppLocalization.string("Marking gestures", language: language),
                 isOn: settingsBinding(store, \.gesturesEnabled)
             )
             .accessibilityIdentifier("clove.settings.gesturesEnabled")
 
             Picker(
-                "While zoomed",
+                AppLocalization.string("While zoomed", language: language),
                 selection: settingsBinding(store, \.zoomedGestures)
             ) {
-                Text("Rate & switch").tag(ZoomedGestures.rateAndSwitch)
-                Text("Pan").tag(ZoomedGestures.pan)
+                Text(AppLocalization.string("Rate & switch", language: language))
+                    .tag(ZoomedGestures.rateAndSwitch)
+                Text(AppLocalization.string("Pan", language: language))
+                    .tag(ZoomedGestures.pan)
             }
-            .accessibilityLabel("While zoomed")
+            .accessibilityLabel(AppLocalization.string("While zoomed", language: language))
             .accessibilityValue(zoomedGesturesTitle)
             .accessibilityIdentifier("clove.settings.zoomedGestures")
         } header: {
             if showsCategoryTitle {
                 VStack(alignment: .leading, spacing: 12) {
-                    SettingsDetailTitleHeader(title: SettingsCategory.cullingAndMarking.title)
-                    SettingsSectionHeader("Marking & gestures", identifier: "markingGestures")
+                    SettingsDetailTitleHeader(
+                        title: SettingsCategory.cullingAndMarking.title(language: language))
+                    SettingsSectionHeader(
+                        AppLocalization.string("Marking & gestures", language: language),
+                        identifier: "markingGestures")
                 }
             } else {
-                SettingsSectionHeader("Marking & gestures", identifier: "markingGestures")
+                SettingsSectionHeader(
+                    AppLocalization.string("Marking & gestures", language: language),
+                    identifier: "markingGestures")
             }
         } footer: {
             Text(
-                "Rate & switch keeps one-finger rating and photo switching at fit and while zoomed, and pans with two fingers. Pan pans with one finger and rates with two."
+                AppLocalization.string(
+                    "Rate & switch keeps one-finger rating and photo switching at fit and while zoomed, and pans with two fingers. Pan pans with one finger and rates with two.",
+                    language: language)
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
@@ -107,65 +176,79 @@ struct CullingAndMarkingSettingsSections: View {
         Section {
             NavigationLink(value: BrowseDestination.settingsSubpage(.ratingScale)) {
                 HStack {
-                    Text("Rating scale")
+                    Text(AppLocalization.string("Rating scale", language: language))
                     Spacer(minLength: 12)
                     EnabledRatingSummaryStars(enabledRatings: store.settings.enabledRatings)
                 }
             }
-            .accessibilityLabel("Rating scale")
+            .accessibilityLabel(AppLocalization.string("Rating scale", language: language))
             .accessibilityValue(enabledRatingsSpokenSummary)
             .accessibilityIdentifier("clove.settings.ratingScale")
 
             Toggle(
-                "Extended color labels",
+                AppLocalization.string("Extended color labels", language: language),
                 isOn: settingsBinding(store, \.extendedColourLabelsEnabled)
             )
             .accessibilityIdentifier("clove.settings.extendedColourLabels")
         } header: {
-            SettingsSectionHeader("Rating scale & labels", identifier: "ratingLabels")
+            SettingsSectionHeader(
+                AppLocalization.string("Rating scale & labels", language: language),
+                identifier: "ratingLabels")
         } footer: {
-            Text("Extended labels add Orange and Pink to the five standard color labels.")
-                .foregroundStyle(Color.clove.text.secondary)
+            Text(
+                AppLocalization.string(
+                    "Extended labels add Orange and Pink to the five standard color labels.",
+                    language: language)
+            )
+            .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
 
         Section {
             NavigationLink(value: BrowseDestination.settingsSubpage(.autoAdvanceDestination)) {
                 LabeledContent(
-                    "After marking",
-                    value: AutoAdvanceCopy.title(for: store.settings.autoAdvance.destination))
+                    AppLocalization.string("After marking", language: language),
+                    value: AutoAdvanceCopy.title(
+                        for: store.settings.autoAdvance.destination, language: language))
             }
-            .accessibilityLabel("After marking")
-            .accessibilityValue(AutoAdvanceCopy.title(for: store.settings.autoAdvance.destination))
+            .accessibilityLabel(AppLocalization.string("After marking", language: language))
+            .accessibilityValue(
+                AutoAdvanceCopy.title(
+                    for: store.settings.autoAdvance.destination, language: language)
+            )
             .accessibilityIdentifier("clove.settings.autoAdvanceDestination")
 
             Toggle(
-                "Ratings advance",
+                AppLocalization.string("Ratings advance", language: language),
                 isOn: settingsBinding(store, \.autoAdvance.triggers.rating)
             )
             .disabled(isAutoAdvanceOff)
             .accessibilityIdentifier("clove.settings.autoAdvanceRating")
 
             Toggle(
-                "Reject advances",
+                AppLocalization.string("Reject advances", language: language),
                 isOn: settingsBinding(store, \.autoAdvance.triggers.reject)
             )
             .disabled(isAutoAdvanceOff)
             .accessibilityIdentifier("clove.settings.autoAdvanceReject")
 
             Toggle(
-                "Color labels advance",
+                AppLocalization.string("Color labels advance", language: language),
                 isOn: settingsBinding(store, \.autoAdvance.triggers.colourLabel)
             )
             .disabled(isAutoAdvanceOff)
             .accessibilityIdentifier("clove.settings.autoAdvanceColourLabel")
         } header: {
-            SettingsSectionHeader("Auto-advance", identifier: "autoAdvance")
+            SettingsSectionHeader(
+                AppLocalization.string("Auto-advance", language: language),
+                identifier: "autoAdvance")
         } footer: {
             Text(
-                isAutoAdvanceOff
-                    ? "Stay disables advancing after marking. Your trigger preferences are kept."
-                    : "Chosen marks move to the selected destination after a brief pause."
+                AppLocalization.string(
+                    isAutoAdvanceOff
+                        ? "Stay disables advancing after marking. Your trigger preferences are kept."
+                        : "Chosen marks move to the selected destination after a brief pause.",
+                    language: language)
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
@@ -180,59 +263,73 @@ struct CullingAndMarkingSettingsSections: View {
 
     private var zoomedGesturesTitle: String {
         switch store.settings.zoomedGestures {
-        case .rateAndSwitch: "Rate & switch"
-        case .pan: "Pan"
+        case .rateAndSwitch: AppLocalization.string("Rate & switch", language: language)
+        case .pan: AppLocalization.string("Pan", language: language)
         }
     }
 
     private var enabledRatingsSpokenSummary: String {
         let levels = store.settings.enabledRatings.levels.compactMap(\.starCount)
         if levels.count == Self.ratingLevels.count {
-            return "All 5 star levels"
+            return AppLocalization.string("All 5 star levels", language: language)
         }
-        let joined = levels.map(String.init).joined(separator: ", ")
-        return levels.count == 1 ? "\(joined) star" : "\(joined) stars"
+        let joined = levels.map { $0.formatted() }.joined(separator: ", ")
+        return AppLocalization.format(
+            levels.count == 1 ? "%@ star" : "%@ stars", language: language, joined)
     }
 }
 
 struct BrowsingAndGroupsSettingsSections: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     let showsCategoryTitle: Bool
 
     var body: some View {
         Section {
             Toggle(
-                "Similar groups",
+                AppLocalization.string("Similar groups", language: language),
                 isOn: settingsBinding(store, \.similarGroupsEnabled)
             )
             .accessibilityIdentifier("clove.settings.similarGroupsEnabled")
         } header: {
             if showsCategoryTitle {
                 VStack(alignment: .leading, spacing: 12) {
-                    SettingsDetailTitleHeader(title: SettingsCategory.browsingAndGroups.title)
-                    SettingsSectionHeader("Groups", identifier: "groups")
+                    SettingsDetailTitleHeader(
+                        title: SettingsCategory.browsingAndGroups.title(language: language))
+                    SettingsSectionHeader(
+                        AppLocalization.string("Groups", language: language), identifier: "groups")
                 }
             } else {
-                SettingsSectionHeader("Groups", identifier: "groups")
+                SettingsSectionHeader(
+                    AppLocalization.string("Groups", language: language), identifier: "groups")
             }
         }
         .listRowBackground(theme.tokens.card.color)
 
         Section {
-            Picker("Double-tap", selection: settingsBinding(store, \.doubleTap)) {
-                Text("Zoom to focus").tag(DoubleTapBehaviour.zoomToFocus)
-                Text("Zoom to tap point").tag(DoubleTapBehaviour.zoomToTapPoint)
-                Text("Off").tag(DoubleTapBehaviour.off)
+            Picker(
+                AppLocalization.string("Double-tap", language: language),
+                selection: settingsBinding(store, \.doubleTap)
+            ) {
+                Text(AppLocalization.string("Zoom to focus", language: language))
+                    .tag(DoubleTapBehaviour.zoomToFocus)
+                Text(AppLocalization.string("Zoom to tap point", language: language))
+                    .tag(DoubleTapBehaviour.zoomToTapPoint)
+                Text(AppLocalization.string("Off", language: language))
+                    .tag(DoubleTapBehaviour.off)
             }
-            .accessibilityLabel("Double-tap")
+            .accessibilityLabel(AppLocalization.string("Double-tap", language: language))
             .accessibilityValue(doubleTapTitle)
             .accessibilityIdentifier("clove.settings.doubleTap")
         } header: {
-            SettingsSectionHeader("Detail zoom", identifier: "detailZoom")
+            SettingsSectionHeader(
+                AppLocalization.string("Detail zoom", language: language), identifier: "detailZoom")
         } footer: {
             Text(
-                "Similar groups keep zoom and position between members. Leaving a group or switching standalone photos returns to fit."
+                AppLocalization.string(
+                    "Similar groups keep zoom and position between members. Leaving a group or switching standalone photos returns to fit.",
+                    language: language)
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
@@ -243,9 +340,9 @@ struct BrowsingAndGroupsSettingsSections: View {
 
     private var doubleTapTitle: String {
         switch store.settings.doubleTap {
-        case .zoomToFocus: "Zoom to focus"
-        case .zoomToTapPoint: "Zoom to tap point"
-        case .off: "Off"
+        case .zoomToFocus: AppLocalization.string("Zoom to focus", language: language)
+        case .zoomToTapPoint: AppLocalization.string("Zoom to tap point", language: language)
+        case .off: AppLocalization.string("Off", language: language)
         }
     }
 }
@@ -253,30 +350,40 @@ struct BrowsingAndGroupsSettingsSections: View {
 struct PhotoDisplaySettingsSections: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     let showsCategoryTitle: Bool
 
     var body: some View {
         Section {
             Picker(
-                "Show photos as",
+                AppLocalization.string("Show photos as", language: language),
                 selection: Binding(
                     get: { store.photoDisplayMode },
                     set: { mode in store.update { $0.photoDisplayMode = mode } }
                 )
             ) {
-                Text("RAW").tag(PhotoDisplayMode.rawFirst)
-                Text("Camera preview").tag(PhotoDisplayMode.cameraPreviewFirst)
+                Text(AppLocalization.string("RAW", language: language))
+                    .tag(PhotoDisplayMode.rawFirst)
+                Text(AppLocalization.string("Camera preview", language: language))
+                    .tag(PhotoDisplayMode.cameraPreviewFirst)
             }
-            .accessibilityLabel("Show photos as")
-            .accessibilityValue(store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview")
+            .accessibilityLabel(AppLocalization.string("Show photos as", language: language))
+            .accessibilityValue(
+                AppLocalization.string(
+                    store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview",
+                    language: language)
+            )
             .accessibilityIdentifier("clove.settings.photoDisplayMode")
         } header: {
             if showsCategoryTitle {
-                SettingsDetailTitleHeader(title: SettingsCategory.photoDisplay.title)
+                SettingsDetailTitleHeader(
+                    title: SettingsCategory.photoDisplay.title(language: language))
             }
         } footer: {
             Text(
-                "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter."
+                AppLocalization.string(
+                    "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter.",
+                    language: language)
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
@@ -289,6 +396,7 @@ struct PhotoDisplaySettingsSections: View {
 struct MoveRejectsSettingsSections: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     let showsCategoryTitle: Bool
     let resetRevision: Int
 
@@ -297,17 +405,17 @@ struct MoveRejectsSettingsSections: View {
     var body: some View {
         Section {
             Toggle(
-                "Move Rejects",
+                AppLocalization.string("Move Rejects", language: language),
                 isOn: settingsBinding(store, \.moveRejectsEnabled)
             )
             .accessibilityIdentifier("clove.settings.moveRejectsEnabled")
 
-            LabeledContent("Folder name") {
+            LabeledContent(AppLocalization.string("Folder name", language: language)) {
                 TextField("_Rejected", text: $rejectsFolderNameDraft)
                     .multilineTextAlignment(.trailing)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                    .accessibilityLabel("Folder name")
+                    .accessibilityLabel(AppLocalization.string("Folder name", language: language))
                     .accessibilityIdentifier("clove.settings.rejectsFolderName")
                     .onChange(of: rejectsFolderNameDraft) { _, text in
                         commitRejectsFolderName(text)
@@ -322,11 +430,14 @@ struct MoveRejectsSettingsSections: View {
             }
         } header: {
             if showsCategoryTitle {
-                SettingsDetailTitleHeader(title: SettingsCategory.moveRejects.title)
+                SettingsDetailTitleHeader(
+                    title: SettingsCategory.moveRejects.title(language: language))
             }
         } footer: {
             Text(
-                "Rejected photos are moved, never deleted. Marking and filtering Rejects still work when Move Rejects is off."
+                AppLocalization.string(
+                    "Rejected photos are moved, never deleted. Marking and filtering Rejects still work when Move Rejects is off.",
+                    language: language)
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
@@ -351,7 +462,7 @@ struct MoveRejectsSettingsSections: View {
             _ = try RejectsFolderName.validated(rejectsFolderNameDraft)
             return nil
         } catch {
-            return error.message
+            return AppLocalization.string(error.message, language: language)
         }
     }
 
@@ -365,6 +476,7 @@ struct MoveRejectsSettingsSections: View {
 struct RatingScaleSettingsList: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     private static let ratingLevels = (1...5).compactMap { Rating(rawValue: $0) }
 
@@ -381,13 +493,18 @@ struct RatingScaleSettingsList: View {
                     .disabled(isLast)
                     .accessibilityLabel(ratingName(rating))
                     .accessibilityHint(
-                        isLast ? "At least one rating level must remain enabled." : ""
+                        isLast
+                            ? AppLocalization.string(
+                                "At least one rating level must remain enabled.",
+                                language: language) : ""
                     )
                     .accessibilityIdentifier("clove.settings.rating.\(rating.rawValue)")
                 }
             } footer: {
                 Text(
-                    "Quick swipe input follows the enabled levels. Keep at least one level enabled. Ratings read from other apps still show when their level is off."
+                    AppLocalization.string(
+                        "Quick swipe input follows the enabled levels. Keep at least one level enabled. Ratings read from other apps still show when their level is off.",
+                        language: language)
                 )
                 .foregroundStyle(Color.clove.text.secondary)
             }
@@ -416,8 +533,7 @@ struct RatingScaleSettingsList: View {
     }
 
     private func ratingName(_ rating: Rating) -> String {
-        let stars = rating.starCount ?? 0
-        return stars == 1 ? "1 star" : "\(stars) stars"
+        AppLocalization.starCount(rating.starCount ?? 0, language: language)
     }
 }
 
@@ -425,6 +541,7 @@ struct RatingScaleSettingsList: View {
 struct AutoAdvanceDestinationSettingsList: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         List {
@@ -436,11 +553,13 @@ struct AutoAdvanceDestinationSettingsList: View {
                     } label: {
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(AutoAdvanceCopy.title(for: destination))
+                                Text(AutoAdvanceCopy.title(for: destination, language: language))
                                     .foregroundStyle(Color.clove.text.primary)
-                                Text(AutoAdvanceCopy.subtitle(for: destination))
-                                    .font(.caption)
-                                    .foregroundStyle(Color.clove.text.secondary)
+                                Text(
+                                    AutoAdvanceCopy.subtitle(for: destination, language: language)
+                                )
+                                .font(.caption)
+                                .foregroundStyle(Color.clove.text.secondary)
                             }
                             Spacer(minLength: 8)
                             if isSelected {
@@ -453,14 +572,18 @@ struct AutoAdvanceDestinationSettingsList: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(AutoAdvanceCopy.title(for: destination))
-                    .accessibilityValue(AutoAdvanceCopy.subtitle(for: destination))
+                    .accessibilityLabel(AutoAdvanceCopy.title(for: destination, language: language))
+                    .accessibilityValue(
+                        AutoAdvanceCopy.subtitle(for: destination, language: language)
+                    )
                     .accessibilityAddTraits(isSelected ? .isSelected : [])
                     .accessibilityIdentifier("clove.settings.autoAdvance.\(destination.rawValue)")
                 }
             } footer: {
                 Text(
-                    "Stay disables auto-advance after marking while preserving your trigger preferences."
+                    AppLocalization.string(
+                        "Stay disables auto-advance after marking while preserving your trigger preferences.",
+                        language: language)
                 )
                 .foregroundStyle(Color.clove.text.secondary)
             }
@@ -478,13 +601,17 @@ struct AutoAdvanceDestinationSettingsList: View {
 struct SettingsSaveFailureSection: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         if let message = store.saveFailureMessage {
             Section {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(Color.clove.status.failed)
-                    .accessibilityIdentifier("clove.settings.saveFailure")
+                Label(
+                    AppLocalization.string(message, language: language),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .foregroundStyle(Color.clove.status.failed)
+                .accessibilityIdentifier("clove.settings.saveFailure")
             }
             .listRowBackground(theme.tokens.card.color)
         }
@@ -493,12 +620,13 @@ struct SettingsSaveFailureSection: View {
 
 struct SettingsResetSection: View {
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     let onTapReset: () -> Void
 
     var body: some View {
         Section {
             Button(role: .destructive, action: onTapReset) {
-                Text("Reset to defaults")
+                Text(AppLocalization.string("Reset to defaults", language: language))
                     .foregroundStyle(Color.clove.reject)
             }
             .accessibilityIdentifier("clove.settings.reset")
@@ -574,19 +702,29 @@ private struct SettingsSectionHeader: View {
 }
 
 enum AutoAdvanceCopy {
-    static func title(for destination: AutoAdvanceDestination) -> String {
+    static func title(
+        for destination: AutoAdvanceDestination, language: ResolvedAppLanguage = .english
+    ) -> String {
         switch destination {
-        case .stay: "Stay"
-        case .nextPhoto: "Next photo"
-        case .nextUnmarkedPhoto: "Next unmarked photo"
+        case .stay: AppLocalization.string("Stay", language: language)
+        case .nextPhoto: AppLocalization.string("Next photo", language: language)
+        case .nextUnmarkedPhoto:
+            AppLocalization.string("Next unmarked photo", language: language)
         }
     }
 
-    static func subtitle(for destination: AutoAdvanceDestination) -> String {
+    static func subtitle(
+        for destination: AutoAdvanceDestination, language: ResolvedAppLanguage = .english
+    ) -> String {
         switch destination {
-        case .stay: "Keep the current photo after marking."
-        case .nextPhoto: "Move to the next photo in order."
-        case .nextUnmarkedPhoto: "Skip already marked photos."
+        case .stay:
+            AppLocalization.string(
+                "Keep the current photo after marking.", language: language)
+        case .nextPhoto:
+            AppLocalization.string(
+                "Move to the next photo in order.", language: language)
+        case .nextUnmarkedPhoto:
+            AppLocalization.string("Skip already marked photos.", language: language)
         }
     }
 }

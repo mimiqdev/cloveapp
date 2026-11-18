@@ -5,13 +5,17 @@ struct BatchRenameNameSheet: View {
     @Bindable var flow: BatchRenameFlow
     let completion: () -> Void
     @Environment(SettingsStore.self) private var store
+    @Environment(\.appLanguage) private var language
     @FocusState private var editing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(
                 flow.isRunning
-                    ? "Renaming \(flow.order.count) photos…" : "Rename \(flow.order.count) photos"
+                    ? AppLocalization.format(
+                        "Renaming %lld photos…", language: language, Int64(flow.order.count))
+                    : AppLocalization.format(
+                        "Rename %lld photos", language: language, Int64(flow.order.count))
             )
             .font(.title3.bold()).padding(.top, 8)
             .onTapGesture { editing = false }
@@ -44,22 +48,30 @@ struct BatchRenameNameSheet: View {
     private var fields: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Prefix")
-                TextField("e.g. Wedding_", text: $flow.options.prefix)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($editing)
-                    .accessibilityIdentifier("clove.rename.prefix")
+                Text(AppLocalization.string("Prefix", language: language))
+                TextField(
+                    AppLocalization.string("e.g. Wedding_", language: language),
+                    text: $flow.options.prefix
+                )
+                .multilineTextAlignment(.trailing)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .focused($editing)
+                .accessibilityIdentifier("clove.rename.prefix")
             }
             .frame(minHeight: 44)
             Divider()
-            Toggle("Add capture date", isOn: $flow.options.addsCaptureDate)
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("clove.rename.captureDate")
+            Toggle(
+                AppLocalization.string("Add capture date", language: language),
+                isOn: $flow.options.addsCaptureDate
+            )
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("clove.rename.captureDate")
             Divider()
             Stepper(value: $flow.options.start, in: 0...Int.max) {
                 HStack {
-                    Text("Start number"); Spacer(); Text("\(flow.options.start)")
+                    Text(AppLocalization.string("Start number", language: language))
+                    Spacer()
+                    Text("\(flow.options.start)")
                 }
             }
             .frame(minHeight: 44)
@@ -67,7 +79,9 @@ struct BatchRenameNameSheet: View {
             Divider()
             Stepper(value: $flow.options.digits, in: 1...255) {
                 HStack {
-                    Text("Digits"); Spacer(); Text("\(flow.options.digits)")
+                    Text(AppLocalization.string("Digits", language: language))
+                    Spacer()
+                    Text("\(flow.options.digits)")
                 }
             }
             .frame(minHeight: 44)
@@ -79,17 +93,24 @@ struct BatchRenameNameSheet: View {
 
     private var destination: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("Where")
+            sectionTitle(AppLocalization.string("Where", language: language))
             VStack(spacing: 0) {
-                whereChoice("Keep in place", moves: false, identifier: "inPlace")
+                whereChoice(
+                    AppLocalization.string("Keep in place", language: language), moves: false,
+                    identifier: "inPlace")
                 Divider()
-                whereChoice("Move to a new folder", moves: true, identifier: "newFolder")
+                whereChoice(
+                    AppLocalization.string("Move to a new folder", language: language), moves: true,
+                    identifier: "newFolder")
                 if flow.options.movesToFolder {
                     Divider()
-                    TextField("Folder name", text: $flow.options.folderName)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .focused($editing).frame(minHeight: 44)
-                        .accessibilityIdentifier("clove.rename.folderName")
+                    TextField(
+                        AppLocalization.string("Folder name", language: language),
+                        text: $flow.options.folderName
+                    )
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($editing).frame(minHeight: 44)
+                    .accessibilityIdentifier("clove.rename.folderName")
                 }
             }
             .padding(.horizontal, 16)
@@ -114,7 +135,7 @@ struct BatchRenameNameSheet: View {
 
     private var preview: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("Preview · in this order")
+            sectionTitle(AppLocalization.string("Preview · in this order", language: language))
             if let plan = flow.preview {
                 VStack(spacing: 0) {
                     ForEach(Array(plan.rows.enumerated()), id: \.element.id) { index, row in
@@ -124,7 +145,8 @@ struct BatchRenameNameSheet: View {
                 }
                 .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
             } else {
-                ProgressView("Preparing preview…").frame(maxWidth: .infinity).padding()
+                ProgressView(AppLocalization.string("Preparing preview…", language: language))
+                    .frame(maxWidth: .infinity).padding()
             }
         }
     }
@@ -138,16 +160,24 @@ struct BatchRenameNameSheet: View {
                     .foregroundStyle(
                         row.problems.isEmpty ? Color.clove.text.primary : Color.clove.reject)
                 if !row.problems.isEmpty {
-                    Text(row.problems.map(\.explanation).joined(separator: " "))
-                        .font(.caption).foregroundStyle(Color.clove.reject)
+                    Text(
+                        row.problems.map { $0.explanation(language: language) }.joined(
+                            separator: " ")
+                    )
+                    .font(.caption).foregroundStyle(Color.clove.reject)
                 } else if row.replacement != nil {
-                    Text("Replaces a file with this name").font(.caption)
+                    Text(
+                        AppLocalization.string(
+                            "Replaces a file with this name", language: language)
+                    )
+                    .font(.caption)
                 } else {
                     Text(oldName(row)).font(.caption).foregroundStyle(Color.clove.text.secondary)
                 }
                 Text(
                     row.destinationRelativeFolder.isEmpty
-                        ? "This folder" : row.destinationRelativeFolder
+                        ? AppLocalization.string("This folder", language: language)
+                        : row.destinationRelativeFolder
                 )
                 .font(.caption2).foregroundStyle(Color.clove.text.secondary)
             }
@@ -157,7 +187,10 @@ struct BatchRenameNameSheet: View {
                     .foregroundStyle(
                         row.problems.isEmpty ? Color.clove.label.yellow : Color.clove.reject
                     )
-                    .accessibilityLabel(row.problems.isEmpty ? "Replace warning" : "Problem")
+                    .accessibilityLabel(
+                        AppLocalization.string(
+                            row.problems.isEmpty ? "Replace warning" : "Problem",
+                            language: language))
             }
         }
         .padding(12)
@@ -179,22 +212,26 @@ struct BatchRenameNameSheet: View {
     private var footer: some View {
         VStack(spacing: 8) {
             if let message = flow.message {
-                Text(message).font(.footnote).foregroundStyle(Color.clove.reject)
+                Text(AppLocalization.string(message, language: language))
+                    .font(.footnote).foregroundStyle(Color.clove.reject)
                     .accessibilityIdentifier("clove.rename.failure")
             }
             let replacements = flow.preview?.replacementCount ?? 0
             if replacements > 0 {
                 Text(
-                    "\(replacements) \(replacements == 1 ? "name is" : "names are") already used in the destination."
+                    AppLocalization.format(
+                        "%lld name is already used in the destination.", language: language,
+                        Int64(replacements))
                 )
                 .font(.caption)
                 .accessibilityIdentifier("clove.rename.replacementCount")
             }
             Text(
-                "Renaming can't be undone."
-                    + (replacements > 0
-                        ? " Replaced files move to \(store.settings.rejectsFolderName.rawValue)."
-                        : "")
+                replacements > 0
+                    ? AppLocalization.format(
+                        "Renaming can't be undone. Replaced files move to %@.",
+                        language: language, store.settings.rejectsFolderName.rawValue)
+                    : AppLocalization.string("Renaming can't be undone.", language: language)
             )
             .font(.caption).foregroundStyle(Color.clove.text.secondary)
             .multilineTextAlignment(.center)
@@ -202,7 +239,10 @@ struct BatchRenameNameSheet: View {
                 ProgressView(
                     value: Double(flow.finishedCount), total: Double(max(flow.order.count, 1)))
                 Text(
-                    "Renaming \(min(flow.finishedCount + 1, flow.order.count)) of \(flow.order.count)…"
+                    AppLocalization.format(
+                        "Renaming %lld of %lld…", language: language,
+                        Int64(min(flow.finishedCount + 1, flow.order.count)),
+                        Int64(flow.order.count))
                 )
                 .font(.footnote).accessibilityIdentifier("clove.rename.progress")
             } else {
@@ -212,8 +252,11 @@ struct BatchRenameNameSheet: View {
                 } label: {
                     Text(
                         replacements > 0
-                            ? "Rename \(flow.order.count) · Replace \(replacements)"
-                            : "Rename \(flow.order.count) photos"
+                            ? AppLocalization.format(
+                                "Rename %lld · Replace %lld", language: language,
+                                Int64(flow.order.count), Int64(replacements))
+                            : AppLocalization.format(
+                                "Rename %lld photos", language: language, Int64(flow.order.count))
                     )
                     .font(.body.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 50)
