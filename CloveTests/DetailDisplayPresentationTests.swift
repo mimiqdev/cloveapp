@@ -2501,8 +2501,10 @@ struct DetailDisplayPresentationTests {
                 } == true
         }
         #expect(browsing.expandedGroup == group.id)
-        let filmstrip = try #require(findFilmstripScrollView(in: window, excluding: preview))
-        #expect(filmstrip.contentSize.width < 300)
+        let filmstrips = findFilmstripScrollViews(in: window, excluding: preview)
+        #expect(filmstrips.count == 2)
+        #expect(filmstrips.contains { $0.contentSize.width > 1200 })
+        #expect(filmstrips.contains { $0.contentSize.width < 300 })
         #expect(preview.isZoomed)
         let zoomAfterToggle = try #require(preview.zoomSnapshot)
         #expect(abs(zoomAfterToggle.anchor.x - zoomBeforeToggle.anchor.x) < 0.05)
@@ -2544,6 +2546,69 @@ struct DetailDisplayPresentationTests {
                 && splitAgain.numberOfSections == 1
                 && splitAgain.numberOfItems(inSection: 0) == folderCellCount
         }
+    }
+
+    @Test func timelineNavigationAvailabilitySupportsNonRepresentativePhoto() throws {
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let timeline = DetailTimeline(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+        let group = try #require(
+            timeline.slots.compactMap { slot -> ActiveBrowsingGroup? in
+                if case .group(let active) = slot { return active }
+                return nil
+            }.last)
+        let nonRepresentative = try #require(
+            group.visibleMembers.first { $0.id != group.representative.id })
+        let detail = DetailMarkingView(
+            browsing: browsing, photo: nonRepresentative,
+            settings: AppSettings(),
+            images: browsing.detailImages,
+            timeline: timeline, expandedGroup: nil,
+            order: timeline.stagePhotos,
+            actions: DetailMarkingActions(
+                apply: { _, _ in },
+                marked: { _, _, _ in },
+                step: { _ in },
+                markingSwipeBegan: {}))
+        let availability = detail.navigationAvailability
+        #expect(availability.previous)
+        #expect(availability.next)
+    }
+
+    @Test func fastNavigationFlickUsesTouchStartDistanceWhenPostRecognitionTranslationIsSmall()
+        throws
+    {
+        let preview = DetailZoomContainerView(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 700))
+        preview.hasPrevious = true
+        preview.hasNext = true
+        var steps: [Int] = []
+        preview.onStep = { steps.append($0) }
+
+        // Real UIKit fast flicks eat pre-recognition displacement before `.began` (leaving tiny
+        // `translation.x`) and report `numberOfTouches == 0` on `.ended`.
+        let start = CGPoint(x: 240, y: 350)
+        let markingPan = try #require(
+            preview.gestureRecognizers?.compactMap { $0 as? DetailSingleFingerPanGestureRecognizer }
+                .first)
+        let pan = DetailTrackedTouchPan()
+        _ = preview.gestureRecognizer(
+            markingPan, shouldReceive: DetailMutableTouch(view: preview, location: start))
+        pan.trackedNumberOfTouches = 1
+        pan.travel = CGPoint(x: -5, y: 0)
+        pan.velocityPoint = CGPoint(x: -750, y: 0)
+        pan.locationPoint = CGPoint(x: 230, y: 350)
+        try #require(preview.gestureRecognizerShouldBegin(pan))
+        preview.handleMarkingPan(pan)
+
+        pan.sampleState = .ended
+        pan.trackedNumberOfTouches = 0
+        pan.travel = CGPoint(x: -6, y: 0)
+        pan.locationPoint = CGPoint(x: 222, y: 350)
+        preview.handleMarkingPan(pan)
+
+        #expect(steps == [1])
     }
 
     private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
@@ -2604,16 +2669,21 @@ struct DetailDisplayPresentationTests {
     private func findFilmstripScrollView(
         in view: UIView, excluding preview: DetailZoomContainerView
     ) -> UIScrollView? {
-        if view === preview { return nil }
+        findFilmstripScrollViews(in: view, excluding: preview).first
+    }
+
+    private func findFilmstripScrollViews(
+        in view: UIView, excluding preview: DetailZoomContainerView
+    ) -> [UIScrollView] {
+        if view === preview { return [] }
+        var matches: [UIScrollView] = []
         if let scrollView = view as? UIScrollView, !(view is UICollectionView) {
-            return scrollView
+            matches.append(scrollView)
         }
         for child in view.subviews {
-            if let found = findFilmstripScrollView(in: child, excluding: preview) {
-                return found
-            }
+            matches.append(contentsOf: findFilmstripScrollViews(in: child, excluding: preview))
         }
-        return nil
+        return matches
     }
 
     /// The finishing action the screen offers for `group` right now, from the model's marks, so a
@@ -2791,6 +2861,27 @@ private final class DetailTestPan: UIPanGestureRecognizer {
         locationPoint ?? super.location(in: view)
     }
     override func velocity(in view: UIView?) -> CGPoint { .zero }
+}
+
+@MainActor
+private final class DetailTrackedTouchPan: UIPanGestureRecognizer {
+    var trackedNumberOfTouches = 0
+    var travel: CGPoint = .zero
+    var velocityPoint: CGPoint = .zero
+    var locationPoint: CGPoint?
+    var sampleState: UIGestureRecognizer.State = .began
+
+    override var state: UIGestureRecognizer.State {
+        get { sampleState }
+        set { sampleState = newValue }
+    }
+
+    override var numberOfTouches: Int { trackedNumberOfTouches }
+    override func translation(in view: UIView?) -> CGPoint { travel }
+    override func location(in view: UIView?) -> CGPoint {
+        locationPoint ?? super.location(in: view)
+    }
+    override func velocity(in view: UIView?) -> CGPoint { velocityPoint }
 }
 
 @MainActor

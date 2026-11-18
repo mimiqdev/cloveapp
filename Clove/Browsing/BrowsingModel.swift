@@ -473,19 +473,13 @@ final class BrowsingModel {
 
     /// Switches to another visible member of the expanded group while remaining in Group Focus.
     func selectGroupPhoto(_ photo: PhotoIdentity) {
-        guard let expanded = expandedGroup else {
-            openPhoto(photo)
-            return
-        }
+        guard let expanded = expandedGroup else { return }
         let timeline = DetailTimeline(
             photos: photos, groups: groups,
             groupsEnabled: similarGroupsEnabled && readingProgress == nil)
         guard let active = timeline.activeGroup(with: expanded),
             active.visibleMembers.contains(where: { $0.id == photo })
-        else {
-            openPhoto(photo)
-            return
-        }
+        else { return }
         state.currentPhoto = photo
         library.setEntryResumePhoto(photo)
         state.route = .detail

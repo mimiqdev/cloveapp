@@ -171,47 +171,112 @@ struct GroupAnchorTests {
             host.view.layoutIfNeeded()
             try await Task.sleep(for: .milliseconds(500))
 
-            let scrollView = try #require(findSubview(ofType: UIScrollView.self, in: window))
-            let timelineContentWidth = scrollView.contentSize.width
+            let initialScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+            #expect(initialScrollViews.count == 1)
+            let timelineScrollView = try #require(initialScrollViews.first)
+            let timelineContentWidth = timelineScrollView.contentSize.width
             #expect(timelineContentWidth > 1200)
-            let sxTimeline = scrollView.contentOffset.x
+            let sxTimeline = timelineScrollView.contentOffset.x
 
             // Selecting burst-2696 in Timeline while stack is already on screen: strip must not jump.
             state.current = p2696
             try await Task.sleep(for: .milliseconds(500))
-            #expect(abs(scrollView.contentOffset.x - sxTimeline) <= 0.5)
+            #expect(abs(timelineScrollView.contentOffset.x - sxTimeline) <= 0.5)
 
-            // Expanding burst-2696 enters Group Focus (only group members + fold control).
+            // Expanding burst-2696 mounts Group Focus as a second track while keeping Timeline alive.
             state.expandedGroup = burstID
             try await Task.sleep(for: .milliseconds(450))
-            let focusedWidth = scrollView.contentSize.width
+            let expandedScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+            #expect(expandedScrollViews.count == 2)
+            #expect(expandedScrollViews.contains { $0 === timelineScrollView })
+            #expect(timelineScrollView.contentSize.width > 1200)
+            #expect(abs(timelineScrollView.contentOffset.x - sxTimeline) <= 0.5)
+
+            let groupScrollView = try #require(
+                expandedScrollViews.first { $0 !== timelineScrollView })
+            let focusedWidth = groupScrollView.contentSize.width
             let focusedMemberCount = try #require(
                 state.timeline.activeGroup(with: burstID)?.visibleMembers.count)
-            #expect(focusedWidth > CGFloat(focusedMemberCount) * 54)
+            #expect(focusedWidth >= CGFloat(focusedMemberCount) * 54)
             #expect(focusedWidth < 300)
-            let sxFocused = scrollView.contentOffset.x
+            let sxFocused = groupScrollView.contentOffset.x
 
             // Switching to the next visible member inside Group Focus does not jump.
             state.current = p2697
             try await Task.sleep(for: .milliseconds(450))
-            #expect(abs(scrollView.contentOffset.x - sxFocused) <= 0.5)
+            #expect(abs(groupScrollView.contentOffset.x - sxFocused) <= 0.5)
 
-            // Collapsing back to Timeline exits Group Focus cleanly.
+            // Collapsing back to Timeline exits Group Focus cleanly without resetting Timeline's offset.
             state.expandedGroup = nil
             state.current = p2696
-            try await Task.sleep(for: .milliseconds(500))
-            #expect(scrollView.contentSize.width > 1200)
-            let sxAfterCollapse = scrollView.contentOffset.x
+            try await Task.sleep(for: .milliseconds(550))
+            let collapsedScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+            #expect(collapsedScrollViews.count == 1)
+            #expect(collapsedScrollViews.first === timelineScrollView)
+            #expect(timelineScrollView.contentSize.width > 1200)
+            let sxAfterCollapse = timelineScrollView.contentOffset.x
+            #expect(abs(sxAfterCollapse - sxTimeline) <= 0.5)
 
             // Leaving the collapsed stack back to visible p2695 does not jump.
             state.current = p2695
             try await Task.sleep(for: .milliseconds(450))
-            #expect(abs(scrollView.contentOffset.x - sxAfterCollapse) <= 0.5)
+            #expect(abs(timelineScrollView.contentOffset.x - sxAfterCollapse) <= 0.5)
 
             // Jumping to an off-screen photo (last photo) still scrolls it into view.
             state.current = p2713
             try await Task.sleep(for: .milliseconds(600))
-            #expect(scrollView.contentOffset.x > sxAfterCollapse + 100)
+            #expect(timelineScrollView.contentOffset.x > sxAfterCollapse + 100)
+        }
+    }
+
+    @Test func filmstripGroupFocusPinsTrailingCollapseCapAndHugsShortGroup() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        for memberCount in [2, 10] {
+            let (photos, groups, groupID, members) = makeSyntheticGrid(
+                beforeCount: 2, groupMemberCount: memberCount, afterCount: 2)
+            let firstMember = try #require(members.first)
+            let state = FilmstripAnchorHarnessState(
+                photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
+                current: firstMember, expandedGroup: groupID)
+            let host = UIHostingController(
+                rootView: FilmstripAnchorHarness(state: state, theme: .light))
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 110)
+            window.rootViewController = host
+            window.isHidden = false
+            defer { window.isHidden = true }
+
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(400))
+
+            let scrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+            #expect(scrollViews.count == 2)
+            let timelineScrollView = try #require(
+                scrollViews.first { $0.contentSize.width < 400 && memberCount == 10 }
+                    ?? scrollViews.first)
+            let groupScrollView = try #require(
+                scrollViews.first {
+                    abs(
+                        $0.contentSize.width
+                            - (CGFloat(memberCount) * 54 + CGFloat(memberCount - 1) * 3))
+                        < 12
+                } ?? scrollViews.last { $0 !== timelineScrollView })
+            let groupScrollFrameInWindow = groupScrollView.convert(
+                groupScrollView.bounds, to: window)
+            #expect(groupScrollView !== timelineScrollView)
+            if memberCount == 2 {
+                // Short groups hug their natural member width + trailing cap centered in the band.
+                #expect(groupScrollFrameInWindow.width < 130)
+                #expect(groupScrollFrameInWindow.minX > 100)
+                #expect(groupScrollFrameInWindow.maxX < 390 - 100)
+            } else {
+                // Long groups scroll members on the left while leaving room for the trailing cap.
+                #expect(groupScrollView.contentSize.width > groupScrollFrameInWindow.width + 100)
+                #expect(groupScrollFrameInWindow.maxX <= 390 - 40)
+            }
         }
     }
 
@@ -654,6 +719,15 @@ struct GroupAnchorTests {
             if let found = findSubview(ofType: type, in: subview) { return found }
         }
         return nil
+    }
+
+    private func findSubviews<T: UIView>(ofType type: T.Type, in root: UIView) -> [T] {
+        var matches: [T] = []
+        if let match = root as? T { matches.append(match) }
+        for subview in root.subviews {
+            matches.append(contentsOf: findSubviews(ofType: type, in: subview))
+        }
+        return matches
     }
 }
 
