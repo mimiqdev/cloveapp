@@ -2089,6 +2089,60 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testGroupFocusUpSwipeOverMemberCollapsesAndAllowsImmediateTimelineFlick() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.photo.mmq02695").tap()
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
+
+        let stack = element(app, "clove.detail.filmstrip.group.burst-2696")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), stack))
+        stack.tap()
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+
+        // Downward vertical swipe on the collapsed stack enters Group Focus.
+        let stackCenter = stack.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        stackCenter.press(
+            forDuration: 0.05,
+            thenDragTo: stackCenter.withOffset(CGVector(dx: 0, dy: 70)))
+        let expandedTray = element(app, "clove.detail.filmstrip.expandedGroup")
+        XCTAssertTrue(expandedTray.waitForExistence(timeout: 5))
+
+        let fold = element(app, "clove.detail.filmstrip.group.fold")
+        let firstMember = element(app, "clove.detail.filmstrip.mmq02696")
+        let secondMember = element(app, "clove.detail.filmstrip.mmq02697")
+        let thirdMember = element(app, "clove.detail.filmstrip.mmq02698")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), fold))
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), thirdMember))
+        XCTAssertGreaterThanOrEqual(fold.frame.minX, thirdMember.frame.maxX - 1)
+        XCTAssertLessThan(fold.frame.maxX - firstMember.frame.minX, 230)
+
+        secondMember.tap()
+        XCTAssertTrue(waitForLabel("MMQ02697.ARW", fileName))
+
+        // Upward vertical swipe directly over a non-first member collapses to Timeline on the
+        // Representative Photo without firing the underlying member tap action.
+        let thirdCenter = thirdMember.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        thirdCenter.press(
+            forDuration: 0.05,
+            thenDragTo: thirdCenter.withOffset(CGVector(dx: 0, dy: -80)))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), expandedTray))
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        XCTAssertTrue(element(app, "clove.detail.expandGroup").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "isHittable == true"),
+                element(app, "clove.detail.filmstrip.mmq02695")))
+
+        // Immediately flicking left on the stage advances cleanly across Timeline slots.
+        element(app, "clove.detail.preview").swipeLeft(velocity: .fast)
+        XCTAssertTrue(waitForLabel("MMQ02699.ARW", fileName))
+    }
+
+    @MainActor
     func testDetailFocusRegionsCentreNativeZoom() throws {
         let app = launchSample()
         defer { app.terminate() }

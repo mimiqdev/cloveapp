@@ -55,6 +55,33 @@ struct PhotoActionsTests {
         #expect(library.photos.filter { $0.marks.isRejected }.isEmpty)
     }
 
+    @Test func selectGroupPhotoIsANoOpWhenNotInGroupFocus() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["a", "b", "c", "next"])
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "burst"),
+            members: ["a", "b", "c"].map { library.identity($0) })
+        library.groups = [group]
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 4 }
+        model.openGroup(group.id, on: library.identity("a"))
+        #expect(model.expandedGroup == group.id)
+        model.selectGroupPhoto(library.identity("b"))
+        #expect(model.state.currentPhoto == library.identity("b"))
+
+        model.collapseGroup()
+        #expect(model.expandedGroup == nil)
+        #expect(model.state.currentPhoto == library.identity("a"))
+
+        // A stale group-member selection after collapse must never overwrite the Representative
+        // Photo in Timeline (matches TLA+ SelectGroupPhoto expandedGroup /= None guard).
+        model.selectGroupPhoto(library.identity("c"))
+        #expect(model.expandedGroup == nil)
+        #expect(model.state.currentPhoto == library.identity("a"))
+        await model.drainActions()
+    }
+
     @Test func detailUndoRecordsTheActionAndABatchClearsTheWholeStep() async {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)

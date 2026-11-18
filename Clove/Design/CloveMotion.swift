@@ -10,6 +10,7 @@ enum CloveMotion {
     static let microDuration: TimeInterval = 0.16
     static let chromeDuration: TimeInterval = 0.19
     static let progressDuration: TimeInterval = 0.22
+    static let filmstripLevelDuration: TimeInterval = 0.24
     static let focusArrivalDuration: TimeInterval = 0.15
 
     static let pressScale: CGFloat = 0.95
@@ -26,6 +27,12 @@ enum CloveMotion {
 
     static func chrome(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeInOut(duration: chromeDuration)
+    }
+
+    static func filmstripLevel(reduceMotion: Bool) -> Animation {
+        reduceMotion
+            ? .easeInOut(duration: chromeDuration)
+            : .spring(duration: filmstripLevelDuration, bounce: 0.12)
     }
 
     static func progress(reduceMotion: Bool) -> Animation? {

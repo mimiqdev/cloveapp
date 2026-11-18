@@ -337,18 +337,18 @@ public struct DetailTimeline: Hashable, Sendable {
     }
 }
 
-/// Symmetric vertical drag thresholds on Detail's filmstrip (issue #304, decision 5).
+/// Symmetric vertical drag thresholds on Detail's filmstrip (issue #304, decision 5; #318).
 public enum FilmstripVerticalGesture: Sendable {
     public static let minimumVerticalDistance: Double = 24
     public static let dominanceRatio: Double = 1.5
 
-    /// Upward vertical-dominant drag starting on a collapsed group stack in Timeline mode.
+    /// Downward vertical-dominant drag starting on a collapsed group stack in Timeline mode.
     public static func shouldExpand(horizontal: Double, vertical: Double) -> Bool {
-        vertical <= -minimumVerticalDistance && abs(vertical) > dominanceRatio * abs(horizontal)
+        vertical >= minimumVerticalDistance && abs(vertical) > dominanceRatio * abs(horizontal)
     }
 
-    /// Downward vertical-dominant drag anywhere on the strip in Group Focus mode.
+    /// Upward vertical-dominant drag anywhere on the strip in Group Focus mode.
     public static func shouldCollapse(horizontal: Double, vertical: Double) -> Bool {
-        vertical >= minimumVerticalDistance && abs(vertical) > dominanceRatio * abs(horizontal)
+        vertical <= -minimumVerticalDistance && abs(vertical) > dominanceRatio * abs(horizontal)
     }
 }

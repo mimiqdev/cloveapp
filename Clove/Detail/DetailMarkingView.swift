@@ -1724,12 +1724,19 @@ struct DetailMarkingView: View {
 
     // MARK: - Navigation
 
-    /// The neighbours horizontal swipes and keyboard shortcuts use in grid order.
+    /// The neighbours horizontal swipes and keyboard shortcuts use in the active Detail level.
     var navigationAvailability: (previous: Bool, next: Bool) {
-        guard let index = order.firstIndex(where: { $0.id == photo.id }) else {
+        if let expandedGroup {
+            guard let index = expandedGroup.visibleMembers.firstIndex(where: { $0.id == photo.id })
+            else {
+                return (false, false)
+            }
+            return (index > 0, index + 1 < expandedGroup.visibleMembers.count)
+        }
+        guard let index = timeline.slotIndex(containing: photo.id) else {
             return (false, false)
         }
-        return (index > 0, index + 1 < order.count)
+        return (index > 0, index + 1 < timeline.slots.count)
     }
 
     /// Toggles chrome visibility when single-tapping anywhere on the preview, at both fit and

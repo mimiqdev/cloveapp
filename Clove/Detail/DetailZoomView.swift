@@ -223,6 +223,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private let twoFingerMarkingSwipe = TwoFingerMarkingSwipeGestureRecognizer()
     private let haptics = MarkingSwipeHaptics()
     private var isNavigating = false
+    private var navigationHasTrackedTouches = false
 
     /// One preview session for either direction, discarded on cancel.
     private var markingSession: MarkingSwipeSession?
@@ -870,19 +871,31 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private func handleNavigationPan(_ pan: UIPanGestureRecognizer) {
         switch pan.state {
         case .began:
+            navigationHasTrackedTouches = pan.numberOfTouches > 0
             onSwipeBegin?()
         case .changed:
-            break
+            if pan.numberOfTouches > 0 {
+                navigationHasTrackedTouches = true
+            }
         case .ended:
+            let travel: Double
+            if pan.numberOfTouches > 0 || navigationHasTrackedTouches {
+                let delta = Double(pan.location(in: self).x - markingTouchStart.x)
+                travel = delta != 0 ? delta : Double(pan.translation(in: self).x)
+            } else {
+                travel = Double(pan.translation(in: self).x)
+            }
             let step = NavigationSwipeRules.step(
-                travel: Double(pan.translation(in: self).x),
+                travel: travel,
                 velocity: Double(pan.velocity(in: self).x),
                 width: Double(bounds.width), hasPrevious: hasPrevious, hasNext: hasNext)
+            navigationHasTrackedTouches = false
             isNavigating = false
             if step != 0 {
                 onStep?(step)
             }
         case .cancelled, .failed:
+            navigationHasTrackedTouches = false
             isNavigating = false
         default:
             break

@@ -212,18 +212,18 @@ struct DetailTimelineTests {
     }
 
     @Test func filmstripVerticalGestureRequires24ptAndVerticalDominance() {
-        // Expand requires vertical <= -24 and |vertical| > 1.5 * |horizontal|.
-        #expect(!FilmstripVerticalGesture.shouldExpand(horizontal: 0, vertical: -23.9))
-        #expect(FilmstripVerticalGesture.shouldExpand(horizontal: 0, vertical: -24))
-        #expect(FilmstripVerticalGesture.shouldExpand(horizontal: 15, vertical: -24))
-        #expect(!FilmstripVerticalGesture.shouldExpand(horizontal: 16, vertical: -24))
-        #expect(!FilmstripVerticalGesture.shouldExpand(horizontal: 0, vertical: 30))
+        // Expand requires vertical >= 24 and |vertical| > 1.5 * |horizontal|.
+        #expect(!FilmstripVerticalGesture.shouldExpand(horizontal: 0, vertical: 23.9))
+        #expect(FilmstripVerticalGesture.shouldExpand(horizontal: 0, vertical: 24))
+        #expect(FilmstripVerticalGesture.shouldExpand(horizontal: 15, vertical: 24))
+        #expect(!FilmstripVerticalGesture.shouldExpand(horizontal: 16, vertical: 24))
+        #expect(!FilmstripVerticalGesture.shouldExpand(horizontal: 0, vertical: -30))
 
-        // Collapse requires vertical >= 24 and |vertical| > 1.5 * |horizontal|.
-        #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: 0, vertical: 23.9))
-        #expect(FilmstripVerticalGesture.shouldCollapse(horizontal: 0, vertical: 24))
-        #expect(FilmstripVerticalGesture.shouldCollapse(horizontal: -15, vertical: 24))
-        #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: -16, vertical: 24))
-        #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: 0, vertical: -30))
+        // Collapse requires vertical <= -24 and |vertical| > 1.5 * |horizontal|.
+        #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: 0, vertical: -23.9))
+        #expect(FilmstripVerticalGesture.shouldCollapse(horizontal: 0, vertical: -24))
+        #expect(FilmstripVerticalGesture.shouldCollapse(horizontal: -15, vertical: -24))
+        #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: -16, vertical: -24))
+        #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: 0, vertical: 30))
     }
 }
