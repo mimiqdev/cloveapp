@@ -26,6 +26,7 @@ final class SettingsStore {
     private let rememberedAdvanceStorage: any SettingsStorage
     private static let rememberedAdvanceKey = "autoAdvance.lastEnabledDestination"
     private static let languageSystemBaselineKey = "app.language.systemBaseline"
+    private static let gestureGuideSeenKey = "onboarding.gestureGuideSeen"
     private let physicalMemory: UInt64
     private let systemPreferredLanguages: @Sendable () -> [String]
 
@@ -42,6 +43,9 @@ final class SettingsStore {
 
     /// The last enabled destination, persisted so an off/on toggle survives an app relaunch.
     private(set) var rememberedAdvanceDestination: AutoAdvanceDestination
+
+    /// Whether the first-use Detail gesture guide has been seen or dismissed.
+    private(set) var hasSeenGestureGuide: Bool
 
     /// The current settings every screen reads.
     ///
@@ -88,6 +92,8 @@ final class SettingsStore {
             loaded.autoAdvance.destination != .stay
             ? loaded.autoAdvance.destination
             : (remembered == .nextUnmarkedPhoto ? .nextUnmarkedPhoto : .nextPhoto)
+        self.hasSeenGestureGuide =
+            rememberedAdvanceStorage.string(forKey: Self.gestureGuideSeenKey) == "true"
         self.saveFailureMessage = nil
     }
 
@@ -102,7 +108,13 @@ final class SettingsStore {
         guard environment[TestLibrary.launchVariable] == "1" else {
             return SettingsStore()
         }
-        return sample
+        let storage = SampleSettingsStorage()
+        if environment["CLOVE_SHOW_GESTURE_GUIDE"] != "1" {
+            storage.setString("true", forKey: gestureGuideSeenKey)
+        }
+        return SettingsStore(
+            persistence: SettingsPersistence(storage: storage),
+            rememberedAdvanceStorage: storage)
     }
 
     /// A store that keeps its settings in memory, for the sample library and the previews.
@@ -110,6 +122,13 @@ final class SettingsStore {
         let storage = SampleSettingsStorage()
         return SettingsStore(
             persistence: SettingsPersistence(storage: storage), rememberedAdvanceStorage: storage)
+    }
+
+    /// Records that the first-use Detail gesture guide has been seen or dismissed.
+    func markGestureGuideSeen() {
+        guard !hasSeenGestureGuide else { return }
+        hasSeenGestureGuide = true
+        rememberedAdvanceStorage.setString("true", forKey: Self.gestureGuideSeenKey)
     }
 
     /// Applies one change to a copy of the current settings and stores it.
