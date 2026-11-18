@@ -12,6 +12,8 @@ struct MoveRejectsButton: View {
     /// What the tap does.
     let action: () -> Void
 
+    @Environment(\.appLanguage) private var language
+
     var body: some View {
         Button(action: action) {
             Image(systemName: "tray.and.arrow.down")
@@ -22,7 +24,7 @@ struct MoveRejectsButton: View {
                 .cloveGlass(in: Circle())
         }
         .buttonStyle(.cloveGlassPress)
-        .accessibilityLabel("Move rejects")
+        .accessibilityLabel(AppLocalization.string("Move rejects", language: language))
         .accessibilityIdentifier(identifier)
     }
 }

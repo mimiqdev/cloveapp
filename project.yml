@@ -6,6 +6,12 @@ options:
   bundleIdPrefix: com.mimiqdev
   deploymentTarget:
     iOS: "18.0"
+  developmentLanguage: en
+  knownRegions:
+    - en
+    - Base
+    - zh-Hans
+    - zh-Hant
   createIntermediateGroups: true
   generateEmptyDirectories: true
 

@@ -7,6 +7,7 @@ struct GridBatchBar: View {
     let browsing: BrowsingModel
     let cells: [GridCellItem]
     @Environment(SettingsStore.self) private var store
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         MarkingToolbar(
@@ -23,10 +24,14 @@ struct GridBatchBar: View {
             onLabel: { apply(.label($0.map { ColourLabel(colour: $0) } ?? .clear)) }
         )
         .contextMenu {
-            Button("Clear rating") { apply(.rating(.unrated)) }
-                .accessibilityIdentifier("clove.grid.batch.clearRating")
-            Button("Select all") { browsing.selectAllVisible(cells) }
-                .accessibilityIdentifier("clove.grid.batch.selectAll")
+            Button(AppLocalization.string("Clear rating", language: language)) {
+                apply(.rating(.unrated))
+            }
+            .accessibilityIdentifier("clove.grid.batch.clearRating")
+            Button(AppLocalization.string("Select all", language: language)) {
+                browsing.selectAllVisible(cells)
+            }
+            .accessibilityIdentifier("clove.grid.batch.selectAll")
         }
         .disabled(browsing.batchTargets.isEmpty || !browsing.canMark)
     }

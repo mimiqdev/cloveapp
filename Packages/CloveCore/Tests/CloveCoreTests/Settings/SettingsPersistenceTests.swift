@@ -74,6 +74,10 @@ import CloveCore
             "appearance.family", invalid,
             { $0.appearance.family = defaults.appearance.family }
         ),
+        (
+            "app.language", invalid,
+            { $0.language = defaults.language }
+        ),
         ("detail.photoDisplayMode", invalid, { $0.photoDisplayMode = nil }),
     ]
     // The table covers every persisted key, so a new key cannot skip the fallback rule.

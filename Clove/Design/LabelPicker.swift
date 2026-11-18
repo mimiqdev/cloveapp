@@ -38,6 +38,7 @@ struct LabelPicker: View {
     var photoID: PhotoIdentity? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
     @State private var settledPhotoID: PhotoIdentity?
 
     /// None, then red, yellow, green, blue and purple (components.md).
@@ -103,6 +104,12 @@ struct LabelPicker: View {
     private func dot(_ label: LabelColour?, targetSize: CGFloat) -> some View {
         let isSelected = !isMixed && label == selection
         let ringSize = targetSize >= Self.targetExtent ? 34.0 : 32.0
+        let accessibleName =
+            label.map {
+                AppLocalization.format(
+                    "Label, %@", language: language,
+                    AppLocalization.colourName($0, language: language))
+            } ?? AppLocalization.string("No label", language: language)
         return Button {
             onPick(label)
         } label: {
@@ -128,15 +135,16 @@ struct LabelPicker: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label.map { "Label, \($0.rawValue)" } ?? "No label")
+        .accessibilityLabel(accessibleName)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("\(identifier).\(label?.rawValue.lowercased() ?? "none")")
-        .help(label.map { "Label, \($0.rawValue)" } ?? "No label")
+        .help(accessibleName)
     }
 
     private var accessibilityValue: String {
-        if isMixed { return "Mixed" }
-        return selection?.rawValue ?? "None"
+        if isMixed { return AppLocalization.string("Mixed", language: language) }
+        if let selection { return AppLocalization.colourName(selection, language: language) }
+        return AppLocalization.string("None", language: language)
     }
 }
 

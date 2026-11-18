@@ -125,20 +125,43 @@ enum RenameFlowError: LocalizedError {
 
 extension RenameProblem {
     var explanation: String {
+        explanation(language: .english)
+    }
+
+    func explanation(language: ResolvedAppLanguage) -> String {
         switch self {
         case .invalidName:
-            "The name contains an invalid character or starts or ends with a dot or space."
-        case .nameTooLong: "The filename is over 255 bytes."
-        case .invalidSequence: "Use a nonnegative start number and 1–255 digits."
-        case .sequenceOverflow: "The sequence number is too large."
-        case .dateUnavailable: "No capture date or file creation date is available."
-        case .destinationIsFile: "The destination name belongs to a file."
-        case .rejectsDestination: "Choose a folder other than the rejects folder."
-        case .duplicateTarget: "Two photos in this batch would have the same name."
-        case .duplicateSource: "This photo appears twice in the batch."
-        case .ambiguousSidecar: "More than one sidecar matches this photo."
-        case .outsideOpenedFolder: "The photo or destination is outside the opened folder."
-        case .fileSystem(let reason): "The folder couldn't be read: \(reason)"
+            AppLocalization.string(
+                "The name contains an invalid character or starts or ends with a dot or space.",
+                language: language)
+        case .nameTooLong:
+            AppLocalization.string("The filename is over 255 bytes.", language: language)
+        case .invalidSequence:
+            AppLocalization.string(
+                "Use a nonnegative start number and 1–255 digits.", language: language)
+        case .sequenceOverflow:
+            AppLocalization.string("The sequence number is too large.", language: language)
+        case .dateUnavailable:
+            AppLocalization.string(
+                "No capture date or file creation date is available.", language: language)
+        case .destinationIsFile:
+            AppLocalization.string(
+                "The destination name belongs to a file.", language: language)
+        case .rejectsDestination:
+            AppLocalization.string(
+                "Choose a folder other than the rejects folder.", language: language)
+        case .duplicateTarget:
+            AppLocalization.string(
+                "Two photos in this batch would have the same name.", language: language)
+        case .duplicateSource:
+            AppLocalization.string("This photo appears twice in the batch.", language: language)
+        case .ambiguousSidecar:
+            AppLocalization.string("More than one sidecar matches this photo.", language: language)
+        case .outsideOpenedFolder:
+            AppLocalization.string(
+                "The photo or destination is outside the opened folder.", language: language)
+        case .fileSystem(let reason):
+            AppLocalization.format("The folder couldn't be read: %@", language: language, reason)
         }
     }
 }
@@ -159,6 +182,21 @@ struct CompletedBatchRename {
     var detail: String? { result.failure?.message ?? rescanFailure }
     var hasDetails: Bool {
         result.failure != nil || !result.temporarySets.isEmpty || rescanFailure != nil
+    }
+
+    func localizedMessage(language: ResolvedAppLanguage) -> String {
+        if result.failure == nil {
+            return AppLocalization.format(
+                "Renamed %lld photos", language: language, Int64(result.renamedCount))
+        }
+        return AppLocalization.format(
+            "Renamed %lld of %lld", language: language, Int64(result.renamedCount),
+            Int64(plan.rows.count))
+    }
+
+    func localizedDetail(language: ResolvedAppLanguage) -> String? {
+        if let message = result.failure?.message { return message }
+        return rescanFailure.map { AppLocalization.string($0, language: language) }
     }
 
     func newIdentity(for original: PhotoIdentity) -> PhotoIdentity {

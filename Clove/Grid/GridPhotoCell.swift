@@ -18,6 +18,7 @@ final class GridPhotoCell: UICollectionViewCell {
     private var showsSelection = false
     private var showsCurrent = false
     private var theme = CloveTheme.light
+    private var language = ResolvedAppLanguage.english
     private var isSelecting = false
     private var onOpenGroup: (GroupID) -> Void = { _ in }
     private var pixelLoadSignpost: (token: UUID, state: OSSignpostIntervalState)?
@@ -40,6 +41,7 @@ final class GridPhotoCell: UICollectionViewCell {
     func configure(
         with item: GridCellItem, isSelected: Bool, isCurrent: Bool = false, isSelecting: Bool,
         thumbnails: any GridThumbnailSource, theme: CloveTheme,
+        language: ResolvedAppLanguage = .english,
         onOpenGroup: @escaping (GroupID) -> Void
     ) {
         let configureInterval = PerformanceSignpost.gridCell.beginInterval(
@@ -52,6 +54,7 @@ final class GridPhotoCell: UICollectionViewCell {
         showsSelection = isSelected
         showsCurrent = isCurrent
         self.theme = theme
+        self.language = language
         self.isSelecting = isSelecting
         self.onOpenGroup = onOpenGroup
         if changesPhoto {
@@ -142,8 +145,12 @@ final class GridPhotoCell: UICollectionViewCell {
             isUnavailable: isUnavailable, isSelected: showsSelection, isCurrent: showsCurrent,
             isSelecting: isSelecting, openGroup: onOpenGroup)
         let theme = theme
+        let language = language
         contentConfiguration = UIHostingConfiguration {
-            tile.environment(\.cloveTheme, theme)
+            tile
+                .environment(\.cloveTheme, theme)
+                .environment(\.appLanguage, language)
+                .environment(\.locale, language.locale)
         }
         .margins(.all, 0)
     }
@@ -307,6 +314,7 @@ private struct GridTile: View {
     let isSelecting: Bool
     let openGroup: (GroupID) -> Void
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     private var isCover: Bool { item.group?.isCover == true }
 
@@ -364,7 +372,11 @@ private struct GridTile: View {
                 .buttonStyle(.plain)
                 .allowsHitTesting(!isSelecting)
                 .accessibilityHidden(isSelecting)
-                .accessibilityLabel("Open the similar group of \(group.count) photos")
+                .accessibilityLabel(
+                    AppLocalization.format(
+                        "Open the similar group of %lld photos", language: language,
+                        Int64(group.count))
+                )
                 .accessibilityIdentifier("clove.grid.group.\(group.id.rawValue)")
             }
         }
@@ -377,7 +389,7 @@ private struct GridTile: View {
             VStack(spacing: 3) {
                 Text((item.photo.fileName as NSString).pathExtension.uppercased())
                     .font(.caption.weight(.semibold))
-                Text("No preview").font(.caption2)
+                Text(AppLocalization.string("No preview", language: language)).font(.caption2)
             }
             .foregroundStyle(Color.clove.text.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -391,7 +403,7 @@ private struct GridTile: View {
         if !isCover, let stars = item.photo.marks.rating.starCount {
             HStack(spacing: 1) {
                 Image(systemName: "star.fill").foregroundStyle(Color.clove.rating.on)
-                Text(stars.formatted()).foregroundStyle(
+                Text(stars.formatted(.number.locale(language.locale))).foregroundStyle(
                     Color.clove.text.primary)
             }
             .font(.system(size: 9, weight: .semibold))
@@ -425,22 +437,34 @@ private struct GridTile: View {
 
     private var accessibilityLabel: String {
         if isCover {
-            return "Similar group of \(item.group?.count ?? 0) photos"
+            return AppLocalization.format(
+                "Similar group of %lld photos", language: language,
+                Int64(item.group?.count ?? 0))
         }
         var parts = [item.photo.fileName]
         if let stars = item.photo.marks.rating.starCount {
-            parts.append("\(stars) stars")
+            parts.append(AppLocalization.starCount(stars, language: language))
         }
         if let colour = item.photo.marks.label.colour {
-            parts.append(colour.rawValue)
+            parts.append(AppLocalization.colourName(colour, language: language))
         } else if !item.photo.marks.label.isClear {
             parts.append(item.photo.marks.label.rawValue)
         }
-        if item.photo.marks.isRejected { parts.append("Rejected") }
-        if companions.hasJPEG { parts.append("JPEG companion") }
-        if companions.hasHEIF { parts.append("HIF companion") }
-        if isUnavailable { parts.append("No preview") }
-        if isSelected { parts.append("Selected") }
+        if item.photo.marks.isRejected {
+            parts.append(AppLocalization.string("Rejected", language: language))
+        }
+        if companions.hasJPEG {
+            parts.append(AppLocalization.string("JPEG companion", language: language))
+        }
+        if companions.hasHEIF {
+            parts.append(AppLocalization.string("HIF companion", language: language))
+        }
+        if isUnavailable {
+            parts.append(AppLocalization.string("No preview", language: language))
+        }
+        if isSelected {
+            parts.append(AppLocalization.string("Selected", language: language))
+        }
         return parts.joined(separator: ", ")
     }
 }

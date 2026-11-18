@@ -63,6 +63,7 @@ struct DetailFilmstrip: View {
 
     @Environment(\.cloveTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
 
     init(
         timeline: DetailTimeline,
@@ -286,7 +287,7 @@ struct DetailFilmstrip: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Collapse group")
+        .accessibilityLabel(AppLocalization.string("Collapse group", language: language))
         .accessibilityIdentifier("clove.detail.filmstrip.group.fold")
     }
 
@@ -515,8 +516,12 @@ struct DetailFilmstrip: View {
                 id: .group(active.id), coordinateSpace: Self.timelineViewportSpace,
                 layoutState: timelineLayoutState)
         )
-        .accessibilityLabel("Similar group of \(active.visibleMembers.count) photos")
-        .accessibilityValue(MarkSummary.text(for: active.representative.marks))
+        .accessibilityLabel(
+            AppLocalization.format(
+                "Similar group of %lld photos", language: language,
+                Int64(active.visibleMembers.count))
+        )
+        .accessibilityValue(MarkSummary.text(for: active.representative.marks, language: language))
         .accessibilityAddTraits(holdsCurrent ? [.isSelected] : [])
         .accessibilityIdentifier("clove.detail.filmstrip.group.\(active.id.rawValue)")
     }

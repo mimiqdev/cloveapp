@@ -157,10 +157,12 @@ struct DetailZoomView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> DetailZoomContainerView {
         let view = DetailZoomContainerView()
+        let language = context.environment.appLanguage
         probe?.container = view
+        view.setLanguage(language)
         view.focusRegionColours = focusRegionColours
         view.onFocusRegionTap = onFocusRegionTap
-        view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
+        view.setPreviewAccessibilityLabel(resolvedPreviewAccessibilityLabel(language: language))
         view.onZoomChange = onZoomChange
         view.onChromeToggle = onChromeToggle
         view.onStep = onStep
@@ -179,9 +181,11 @@ struct DetailZoomView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: DetailZoomContainerView, context: Context) {
+        let language = context.environment.appLanguage
+        view.setLanguage(language)
         view.focusRegionColours = focusRegionColours
         view.onFocusRegionTap = onFocusRegionTap
-        view.setPreviewAccessibilityLabel(previewAccessibilityLabel)
+        view.setPreviewAccessibilityLabel(resolvedPreviewAccessibilityLabel(language: language))
         view.onZoomChange = onZoomChange
         view.onChromeToggle = onChromeToggle
         view.onStep = onStep
@@ -204,6 +208,12 @@ struct DetailZoomView: UIViewRepresentable {
         view.setFocusRegions(focusRegions, inspectedRegionID: inspectedFocusRegionID)
         if let command { view.scheduleCommand(command) }
     }
+
+    private func resolvedPreviewAccessibilityLabel(language: ResolvedAppLanguage) -> String {
+        previewAccessibilityLabel == "Detail preview"
+            ? AppLocalization.string("Detail preview", language: language)
+            : previewAccessibilityLabel
+    }
 }
 
 /// The scroll view and its one image view, plus the chrome tap, double-tap zoom, and the marking
@@ -217,6 +227,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private var focusRegions: [DetailFocusRegion] = []
     private var inspectedFocusRegionID: String?
     private var renderedFocusRegionColours: DetailFocusRegionColours?
+    private var language: ResolvedAppLanguage = .english
     private let doubleTap = UITapGestureRecognizer()
     private let chromeTap = UITapGestureRecognizer()
     private let markingPan = DetailSingleFingerPanGestureRecognizer()
@@ -999,6 +1010,21 @@ extension DetailZoomContainerView {
         onDoubleTap?(imageAnchor(of: location))
     }
 
+    func setLanguage(_ newLanguage: ResolvedAppLanguage) {
+        guard language != newLanguage else { return }
+        language = newLanguage
+        previewAccessibilityView.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(
+                name: AppLocalization.string("Show or hide controls", language: newLanguage),
+                target: self,
+                selector: #selector(toggleChromeFromAccessibility))
+        ]
+        for control in focusRegionControls {
+            control.setLanguage(newLanguage)
+        }
+        updatePreviewAccessibility()
+    }
+
     func setPreviewAccessibilityLabel(_ label: String) {
         previewAccessibilityView.accessibilityLabel = label
     }
@@ -1021,7 +1047,7 @@ extension DetailZoomContainerView {
         var arrivingControls: [DetailFocusRegionControl] = []
         focusRegionControls = regions.map { region in
             let control = DetailFocusRegionControl(
-                region: region, colours: focusRegionColours)
+                region: region, colours: focusRegionColours, language: language)
             control.addTarget(
                 self, action: #selector(handleFocusRegionTap(_:)), for: .touchUpInside)
             if regionsChanged && !previousIDs.contains(region.id)
@@ -1072,13 +1098,15 @@ extension DetailZoomContainerView {
     private func updatePreviewAccessibility() {
         let newValue: String
         if imageView.image == nil {
-            newValue = "Loading"
+            newValue = AppLocalization.string("Loading", language: language)
         } else if let snapshot = zoomSnapshot {
             let percentX = Int((snapshot.anchor.x * 100).rounded())
             let percentY = Int((snapshot.anchor.y * 100).rounded())
-            newValue = "Loaded, centred at \(percentX)%, \(percentY)% of the photo"
+            newValue = AppLocalization.format(
+                "Loaded, centred at %lld%%, %lld%% of the photo", language: language,
+                Int64(percentX), Int64(percentY))
         } else {
-            newValue = "Loaded"
+            newValue = AppLocalization.string("Loaded", language: language)
         }
         if previewAccessibilityView.accessibilityValue != newValue {
             previewAccessibilityView.accessibilityValue = newValue

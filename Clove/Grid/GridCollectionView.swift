@@ -123,11 +123,15 @@ struct GridCollectionView: UIViewRepresentable {
             currentPhoto: currentPhoto, selection: selection,
             sizeClass: context.environment.horizontalSizeClass,
             theme: context.environment.cloveTheme,
+            language: context.environment.appLanguage,
             isSelectingEmpty: isSelectingEmpty)
         for case let header as GridGroupHeader in collectionView.visibleSupplementaryViews(
-            ofKind: GridGroupHeader.kind) where header.theme != context.environment.cloveTheme
+            ofKind: GridGroupHeader.kind)
+        where header.theme != context.environment.cloveTheme
+            || header.language != context.environment.appLanguage
         {
             header.theme = context.environment.cloveTheme
+            header.language = context.environment.appLanguage
             header.fold = foldExpandedGroup
         }
         for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
@@ -242,6 +246,7 @@ extension GridCollectionView {
         private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
         private var theme = CloveTheme.light
+        private var language = ResolvedAppLanguage.english
         private var isSelectingEmpty = false
         fileprivate var sectionPlans: [GridCollectionView.SectionPlan] = []
         var placeholderCount = 0
@@ -287,7 +292,8 @@ extension GridCollectionView {
                     with: item, isSelected: self.showsSelected(item),
                     isCurrent: self.highlightsCurrentPhoto && self.highlightedCellID == item.id,
                     isSelecting: self.isSelecting, thumbnails: self.thumbnails,
-                    theme: self.theme
+                    theme: self.theme,
+                    language: self.language
                 ) { [weak self] group in
                     self?.openGroup(group)
                 }
@@ -319,7 +325,9 @@ extension GridCollectionView {
                     else { return header }
                     header.configure(
                         count: self.sections[indexPath.section].cells.count, group: group,
-                        theme: self.theme, fold: self.foldExpandedGroup)
+                        theme: self.theme,
+                        language: self.language,
+                        fold: self.foldExpandedGroup)
                     return header
                 }
                 let footer = view.dequeueReusableSupplementaryView(
@@ -360,13 +368,15 @@ extension GridCollectionView {
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
             selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?,
             theme newTheme: CloveTheme,
+            language newLanguage: ResolvedAppLanguage,
             isSelectingEmpty newSelectingEmpty: Bool
         ) {
             guard let collectionView, let dataSource else { return }
             let newItems = newSections.flatMap(\.cells)
             let wasEmpty = items.isEmpty
             let styleChanged =
-                theme != newTheme || isSelectingEmpty != newSelectingEmpty
+                theme != newTheme || language != newLanguage
+                || isSelectingEmpty != newSelectingEmpty
                 || drawnHighlight != highlightsCurrentPhoto
             let newHighlightedCellID: GridCellItem.ID? =
                 highlightsCurrentPhoto
@@ -387,6 +397,7 @@ extension GridCollectionView {
             drawnHighlight = highlightsCurrentPhoto
             self.currentPhoto = currentPhoto
             theme = newTheme
+            language = newLanguage
             isSelectingEmpty = newSelectingEmpty
             if sizeClass != lastSizeClass {
                 lastSizeClass = sizeClass

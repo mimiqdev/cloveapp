@@ -97,11 +97,15 @@ private struct ActiveStateAccessibility: ViewModifier {
     /// The active state, or nil for a button without one.
     let isActive: Bool?
     let valueOverride: String?
+    @Environment(\.appLanguage) private var language
 
     func body(content: Content) -> some View {
         if let isActive {
             content
-                .accessibilityValue(valueOverride ?? (isActive ? "On" : "Off"))
+                .accessibilityValue(
+                    valueOverride
+                        ?? AppLocalization.string(isActive ? "On" : "Off", language: language)
+                )
                 .accessibilityAddTraits(isActive ? .isSelected : [])
         } else {
             content

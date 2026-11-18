@@ -35,6 +35,7 @@ final class DroppingSettingsStorage: SettingsStorage {
 /// The literal, rather than `SettingsKey`, makes the test fail when a key is added, renamed, or
 /// brought back for a setting the PRD removed.
 let launchSettingKeys = [
+    "app.language",
     "appearance.family",
     "appearance.mode",
     "autoAdvance.destination",
@@ -72,6 +73,7 @@ func nonDefaultSettings() throws -> AppSettings {
         moveRejectsEnabled: false,
         similarGroupsEnabled: false,
         appearance: AppearanceChoice(mode: .dark, family: .nord),
-        photoDisplayMode: .cameraPreviewFirst
+        photoDisplayMode: .cameraPreviewFirst,
+        language: .simplifiedChinese
     )
 }

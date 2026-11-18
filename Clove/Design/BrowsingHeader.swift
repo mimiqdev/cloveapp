@@ -13,6 +13,8 @@ struct BrowsingHeader<
     @ViewBuilder let leadingTools: () -> LeadingTools
     @ViewBuilder let tools: () -> Tools
 
+    @Environment(\.appLanguage) private var language
+
     init(
         title: String,
         titleIdentifier: String = "clove.browsing.title",
@@ -34,6 +36,7 @@ struct BrowsingHeader<
     }
 
     var body: some View {
+        let backLabel = AppLocalization.string("Back", language: language)
         GeometryReader { proxy in
             ZStack {
                 VStack(spacing: 0) {
@@ -62,12 +65,12 @@ struct BrowsingHeader<
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.clove.accent)
-                        .accessibilityLabel("Back")
+                        .accessibilityLabel(backLabel)
                         .accessibilityIdentifier("clove.nav.back")
                     } else {
                         GlassIconButton(
-                            label: "Back", symbol: "chevron.left", identifier: "clove.nav.back",
-                            action: back)
+                            label: backLabel, symbol: "chevron.left",
+                            identifier: "clove.nav.back", action: back)
                     }
                     leadingTools()
                     Spacer(minLength: 0)

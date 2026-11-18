@@ -9,6 +9,7 @@ struct GridScreen: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(SettingsStore.self) private var store
+    @Environment(\.appLanguage) private var language
     @State private var moveSheet: MoveSheetRoute?
     @State private var renameFlow: BatchRenameFlow?
     @State private var showsRenameDetails = false
@@ -170,12 +171,15 @@ struct GridScreen: View {
                 if !(usesDock && browsing.state.route == .detail),
                     let message = browsing.failureToastMessage
                 {
-                    Toast(message: message, identifier: "clove.save.toast")
-                        .padding(.horizontal)
-                        .padding(.bottom, 12)
-                        .transition(
-                            CloveMotion.slideTransition(
-                                edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                    Toast(
+                        message: AppLocalization.string(message, language: language),
+                        identifier: "clove.save.toast"
+                    )
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+                    .transition(
+                        CloveMotion.slideTransition(
+                            edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                 } else if let completed = browsing.completedRename, browsing.isRenameToastVisible {
                     BatchRenameToast(completed: completed) { showsRenameDetails = true }
                         .padding(.horizontal).padding(.bottom, 12)
@@ -270,9 +274,12 @@ struct GridScreen: View {
                                 HStack(spacing: 0) {
                                     Text(
                                         isSelecting
-                                            ? "\(browsing.state.selection.count.formatted()) selected"
+                                            ? AppLocalization.format(
+                                                "%lld selected", language: language,
+                                                Int64(browsing.state.selection.count))
                                             : (isRegular
-                                                ? browsing.filterTitle : browsing.folderTitle)
+                                                ? browsing.localizedFilterTitle(language: language)
+                                                : browsing.localizedFolderTitle(language: language))
                                     )
                                     .font(.subheadline.weight(.semibold))
                                     .lineLimit(1)
@@ -344,7 +351,10 @@ struct GridScreen: View {
     private var dockBottom: some View {
         Group {
             if showsMoveRejects {
-                Button("Move rejects", systemImage: "tray.and.arrow.down") {
+                Button(
+                    AppLocalization.string("Move rejects", language: language),
+                    systemImage: "tray.and.arrow.down"
+                ) {
                     moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
                 }
                 .accessibilityIdentifier("clove.grid.moveRejects")
@@ -358,8 +368,10 @@ struct GridScreen: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(
                         isSelecting
-                            ? "\(browsing.state.selection.count.formatted()) selected"
-                            : browsing.filterTitle
+                            ? AppLocalization.format(
+                                "%lld selected", language: language,
+                                Int64(browsing.state.selection.count))
+                            : browsing.localizedFilterTitle(language: language)
                     )
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
@@ -387,7 +399,9 @@ struct GridScreen: View {
     private var compactHeader: some View {
         BrowsingHeader(
             title: isSelecting
-                ? "\(browsing.state.selection.count.formatted()) selected" : browsing.folderTitle,
+                ? AppLocalization.format(
+                    "%lld selected", language: language, Int64(browsing.state.selection.count))
+                : browsing.localizedFolderTitle(language: language),
             titleIdentifier: isSelecting ? "clove.grid.batch.count" : "clove.grid.title",
             back: { browsing.back() }
         ) {
@@ -410,36 +424,45 @@ struct GridScreen: View {
     @ViewBuilder private var headerTools: some View {
         if isSelecting && usesSystemToolbar {
             Menu {
-                Button("Select all") { browsing.selectAllVisible(cells) }
-                    .accessibilityIdentifier("clove.grid.batch.selectAll")
+                Button(AppLocalization.string("Select all", language: language)) {
+                    browsing.selectAllVisible(cells)
+                }
+                .accessibilityIdentifier("clove.grid.batch.selectAll")
             } label: {
-                Label("Selection options", systemImage: "ellipsis")
+                Label(
+                    AppLocalization.string("Selection options", language: language),
+                    systemImage: "ellipsis")
             }
             .accessibilityIdentifier("clove.grid.selectionOptions")
-            Button("Done", systemImage: "checkmark") {
+            Button(
+                AppLocalization.string("Done", language: language),
+                systemImage: "checkmark"
+            ) {
                 browsing.clearSelection()
                 selectsEmpty = false
             }
             .accessibilityIdentifier("clove.grid.batch.done")
         } else if isSelecting {
             Menu {
-                Button("Select all") { browsing.selectAllVisible(cells) }
-                    .accessibilityIdentifier("clove.grid.batch.selectAll")
+                Button(AppLocalization.string("Select all", language: language)) {
+                    browsing.selectAllVisible(cells)
+                }
+                .accessibilityIdentifier("clove.grid.batch.selectAll")
             } label: {
                 Image(systemName: "ellipsis")
                     .foregroundStyle(Color.clove.text.primary)
                     .frame(width: isRegular ? 40 : 44, height: isRegular ? 40 : 44)
                     .cloveGlass(in: Circle())
             }
-            .accessibilityLabel("Selection options")
+            .accessibilityLabel(AppLocalization.string("Selection options", language: language))
             .accessibilityIdentifier("clove.grid.selectionOptions")
             Button {
                 browsing.clearSelection()
                 selectsEmpty = false
             } label: {
-                Text("Done")
+                Text(AppLocalization.string("Done", language: language))
             }
-            .accessibilityLabel("Done")
+            .accessibilityLabel(AppLocalization.string("Done", language: language))
             .foregroundStyle(Color.clove.accent)
             .padding(.horizontal, 16)
             .frame(height: 44)
@@ -452,7 +475,8 @@ struct GridScreen: View {
                         dockBottom
                     } else {
                         GlassIconButton(
-                            label: "Move rejects", symbol: "tray.and.arrow.down", size: .pad,
+                            label: AppLocalization.string("Move rejects", language: language),
+                            symbol: "tray.and.arrow.down", size: .pad,
                             identifier: "clove.grid.moveRejects"
                         ) {
                             moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
@@ -469,14 +493,18 @@ struct GridScreen: View {
     private var filterButton: some View {
         Group {
             if usesSystemToolbar {
-                Button("Filter", systemImage: "line.3.horizontal.decrease") {
+                Button(
+                    AppLocalization.string("Filter", language: language),
+                    systemImage: "line.3.horizontal.decrease"
+                ) {
                     showsFilters.toggle()
                 }
                 .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
                 .accessibilityIdentifier("clove.grid.filter")
             } else {
                 GlassIconButton(
-                    label: "Filter", symbol: "line.3.horizontal.decrease", isActive: hasFilter,
+                    label: AppLocalization.string("Filter", language: language),
+                    symbol: "line.3.horizontal.decrease", isActive: hasFilter,
                     size: isRegular ? .pad : .phone, identifier: "clove.grid.filter"
                 ) { showsFilters.toggle() }
             }
@@ -499,12 +527,12 @@ struct GridScreen: View {
 
     private var moreMenu: some View {
         Menu {
-            Section("Sort by") {
+            Section(AppLocalization.string("Sort by", language: language)) {
                 Button {
                     browsing.setOrder(.captureTime)
                 } label: {
                     Label(
-                        "Capture time",
+                        AppLocalization.string("Capture time", language: language),
                         systemImage: browsing.state.order == .captureTime ? "checkmark" : "")
                 }
                 .accessibilityIdentifier("clove.grid.order.captureTime")
@@ -512,27 +540,31 @@ struct GridScreen: View {
                     browsing.setOrder(.fileName)
                 } label: {
                     Label(
-                        "Filename",
+                        AppLocalization.string("Filename", language: language),
                         systemImage: browsing.state.order == .fileName ? "checkmark" : "")
                 }
                 .accessibilityIdentifier("clove.grid.order.fileName")
             }
-            Button("Select") {
+            Button(AppLocalization.string("Select", language: language)) {
                 if usesDock && browsing.state.route == .detail { browsing.back() }
                 selectsEmpty = true
             }
             .accessibilityIdentifier("clove.grid.select")
             if !isRegular, store.settings.similarGroupsEnabled {
-                Button("Find similar shots again") { Task { await browsing.runGroupingAgain() } }
-                    .accessibilityIdentifier("clove.grid.grouping.runAgain")
+                Button(AppLocalization.string("Find similar shots again", language: language)) {
+                    Task { await browsing.runGroupingAgain() }
+                }
+                .accessibilityIdentifier("clove.grid.grouping.runAgain")
             }
             Section {
-                Button("Settings") { browsing.showSettings() }
-                    .accessibilityIdentifier("clove.nav.settings")
+                Button(AppLocalization.string("Settings", language: language)) {
+                    browsing.showSettings()
+                }
+                .accessibilityIdentifier("clove.nav.settings")
             }
         } label: {
             if usesSystemToolbar {
-                Label("More", systemImage: "ellipsis")
+                Label(AppLocalization.string("More", language: language), systemImage: "ellipsis")
             } else {
                 Image(systemName: "ellipsis")
                     .font(.title3)
@@ -541,18 +573,23 @@ struct GridScreen: View {
                     .cloveGlass(in: Circle())
             }
         }
-        .accessibilityLabel("More")
+        .accessibilityLabel(AppLocalization.string("More", language: language))
         .accessibilityIdentifier("clove.grid.more")
     }
 
     private var filterMenu: some View {
         VStack(spacing: 0) {
-            filterRow("All", filter: .all, identifier: "all")
-            filterRow("Unmarked", filter: .unmarked, identifier: "unmarked")
-            filterRow("Rejected", filter: .rejected, identifier: "rejected")
+            filterRow(
+                AppLocalization.string("All", language: language), filter: .all, identifier: "all")
+            filterRow(
+                AppLocalization.string("Unmarked", language: language), filter: .unmarked,
+                identifier: "unmarked")
+            filterRow(
+                AppLocalization.string("Rejected", language: language), filter: .rejected,
+                identifier: "rejected")
             Divider().overlay(Color.clove.separator)
             HStack {
-                Text("Rating ≥")
+                Text(AppLocalization.string("Rating ≥", language: language))
                 Spacer()
                 FilterStarRow(rating: minimumRating, identifier: "clove.grid.filter.stars") {
                     rating in
@@ -563,7 +600,7 @@ struct GridScreen: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
             HStack(spacing: 12) {
-                Text("Label")
+                Text(AppLocalization.string("Label", language: language))
                 Spacer()
                 ForEach(LabelColour.allCases.filter { !$0.isExtended }, id: \.self) { label in
                     Button {
@@ -574,7 +611,11 @@ struct GridScreen: View {
                             .frame(width: 16, height: 16)
                             .frame(height: 32)
                     }
-                    .accessibilityLabel("Label, \(label.rawValue)")
+                    .accessibilityLabel(
+                        AppLocalization.format(
+                            "Label, %@", language: language,
+                            AppLocalization.colourName(label, language: language))
+                    )
                     .accessibilityIdentifier(
                         "clove.grid.filter.label.\(label.rawValue.lowercased())")
                 }
@@ -602,7 +643,7 @@ struct GridScreen: View {
                 Text(
                     browsing.allPlacedPhotos.filter {
                         filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
-                    }.count.formatted()
+                    }.count.formatted(.number.locale(language.locale))
                 )
                 .foregroundStyle(Color.clove.text.secondary)
             }
@@ -622,24 +663,44 @@ struct GridScreen: View {
     private var hasFilter: Bool { browsing.state.filter != .all || browsing.labelFilter != nil }
 
     private var subtitle: String {
-        if isSelecting { return browsing.folderTitle }
+        if isSelecting { return browsing.localizedFolderTitle(language: language) }
         if let progress = browsing.readingProgress {
             return progress.total == 0
-                ? "Reading photos…"
-                : "\(progress.read.formatted()) of \(progress.total.formatted())"
+                ? AppLocalization.string("Reading photos…", language: language)
+                : AppLocalization.format(
+                    "%lld of %lld", language: language, Int64(progress.read),
+                    Int64(progress.total))
         }
         if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
-            return "Finding similar shots…"
+            return AppLocalization.string("Finding similar shots…", language: language)
         }
-        let count = browsing.photos.count.formatted()
-        if isRegular { return "\(count) photos" }
-        if let label = browsing.labelFilter { return "\(label.rawValue) · \(count)" }
+        let count = browsing.photos.count
+        let countText = count.formatted(.number.locale(language.locale))
+        if isRegular {
+            return AppLocalization.format("%lld photos", language: language, Int64(count))
+        }
+        if let label = browsing.labelFilter {
+            return AppLocalization.format(
+                "%@ · %@", language: language,
+                AppLocalization.colourName(label, language: language), countText)
+        }
         switch browsing.state.filter {
-        case .all: return "\(count) photos"
-        case .unmarked: return "Unmarked · \(count)"
-        case .rejected: return "Rejected · \(count)"
-        case .ratedAtLeast(let rating): return "Rating ≥ \(rating.starCount ?? 0) · \(count)"
-        case .subfolder(let path): return "\(path) · \(count)"
+        case .all:
+            return AppLocalization.format("%lld photos", language: language, Int64(count))
+        case .unmarked:
+            return AppLocalization.format(
+                "%@ · %@", language: language,
+                AppLocalization.string("Unmarked", language: language), countText)
+        case .rejected:
+            return AppLocalization.format(
+                "%@ · %@", language: language,
+                AppLocalization.string("Rejected", language: language), countText)
+        case .ratedAtLeast(let rating):
+            let stars = (rating.starCount ?? 0).formatted(.number.locale(language.locale))
+            let filterLabel = "\(AppLocalization.string("Rating ≥", language: language)) \(stars)"
+            return AppLocalization.format("%@ · %@", language: language, filterLabel, countText)
+        case .subfolder(let path):
+            return AppLocalization.format("%@ · %@", language: language, path, countText)
         }
     }
 
@@ -649,9 +710,15 @@ struct GridScreen: View {
                 .accessibilityIdentifier("clove.grid.empty")
         } else {
             ContentUnavailableView {
-                Label("No photos", systemImage: "photo.on.rectangle")
+                Label(
+                    AppLocalization.string("No photos", language: language),
+                    systemImage: "photo.on.rectangle")
             } description: {
-                Text(browsing.isFolderOpening ? "Reading photos…" : "No photos match this filter.")
+                Text(
+                    AppLocalization.string(
+                        browsing.isFolderOpening
+                            ? "Reading photos…" : "No photos match this filter.",
+                        language: language))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("clove.grid.empty")
@@ -696,11 +763,12 @@ private struct GridBatchRenameButton: View {
     let action: () -> Void
     @Environment(\.tapPickerController) private var tapPicker
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         let obscured = tapPicker?.isPresented == true
         Button(action: action) {
-            Text("Rename…")
+            Text(AppLocalization.string("Rename…", language: language))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.clove.accent)
                 .padding(.horizontal, 20).padding(.vertical, 10)

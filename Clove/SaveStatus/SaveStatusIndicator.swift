@@ -5,6 +5,7 @@ import SwiftUI
 struct SaveStatusIndicator: View {
     let browsing: BrowsingModel
     let identifierPrefix: String
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         if let situation = browsing.folderSituation {
@@ -14,7 +15,11 @@ struct SaveStatusIndicator: View {
             )
             .foregroundStyle(Color.clove.text.secondary)
             .frame(width: 28, height: 24)
-            .accessibilityLabel(situation == .driveDisconnected ? "Not connected" : "View only")
+            .accessibilityLabel(
+                AppLocalization.string(
+                    situation == .driveDisconnected ? "Not connected" : "View only",
+                    language: language)
+            )
             .accessibilityIdentifier(identifierPrefix)
         }
     }
@@ -59,19 +64,25 @@ struct SaveFailureBanner: View {
     let situation: SaveSituation
     let identifierPrefix: String
     let perform: (SaveAction) -> Void
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         if situation == .driveDisconnected {
             ErrorBanner(
-                message: "The drive disconnected.",
-                detail: "Reconnect it, then reopen this folder.",
-                actionTitle: "Reopen", identifier: identifierPrefix
+                message: AppLocalization.string("The drive disconnected.", language: language),
+                detail: AppLocalization.string(
+                    "Reconnect it, then reopen this folder.", language: language),
+                actionTitle: AppLocalization.string("Reopen", language: language),
+                identifier: identifierPrefix
             ) { perform(.reopenFolder) }
         } else {
             ErrorBanner(
-                message: "Access to this folder is no longer available.",
-                detail: "Open it again to keep marking.",
-                actionTitle: "Open", identifier: identifierPrefix
+                message: AppLocalization.string(
+                    "Access to this folder is no longer available.", language: language),
+                detail: AppLocalization.string(
+                    "Open it again to keep marking.", language: language),
+                actionTitle: AppLocalization.string("Open", language: language),
+                identifier: identifierPrefix
             ) { perform(.openFolder) }
         }
     }

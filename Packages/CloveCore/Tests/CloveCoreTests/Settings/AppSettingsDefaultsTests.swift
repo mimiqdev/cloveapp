@@ -22,6 +22,7 @@ import CloveCore
     #expect(settings.appearance.family == .default)
     #expect(settings.appearance.resolvedTheme(inSystemAppearance: .light) == .light)
     #expect(settings.appearance.resolvedTheme(inSystemAppearance: .dark) == .dark)
+    #expect(settings.language == .system)
 }
 
 @Test func settingChoicesAreTheLaunchChoices() {
@@ -34,6 +35,10 @@ import CloveCore
     #expect(CloveTheme.allCases.first == .light)
     #expect(CloveTheme.allCases.count == 12)
     #expect(ThemeAppearance.allCases == [.light, .dark])
+    #expect(
+        AppLanguage.allCases == [.system, .english, .simplifiedChinese, .traditionalChinese])
+    #expect(
+        ResolvedAppLanguage.allCases == [.english, .simplifiedChinese, .traditionalChinese])
 }
 
 @Test func labelsOfferedFollowExtendedColours() {
@@ -53,6 +58,8 @@ import CloveCore
     requireSendable(AutoAdvanceTriggers.self)
     requireSendable(RejectsFolderName.self)
     requireSendable(AppearanceChoice.self)
+    requireSendable(AppLanguage.self)
+    requireSendable(ResolvedAppLanguage.self)
     requireSendable(SettingsPersistence.self)
     requireSendable(UserDefaultsSettingsStorage.self)
 }

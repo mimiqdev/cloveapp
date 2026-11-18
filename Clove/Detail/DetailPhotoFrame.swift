@@ -29,6 +29,7 @@ struct DetailPhotoFrame: View {
     var showsMarks = true
     var appliesRejectedOpacity = true
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     @State private var thumbnail: CGImage?
 
@@ -55,7 +56,7 @@ struct DetailPhotoFrame: View {
                 }
             }
             .accessibilityLabel(photo.fileName)
-            .accessibilityValue(MarkSummary.text(for: photo.marks))
+            .accessibilityValue(MarkSummary.text(for: photo.marks, language: language))
             .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
     }
 

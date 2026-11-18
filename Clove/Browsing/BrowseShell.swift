@@ -11,6 +11,7 @@ struct BrowseShell: View {
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
 
     @State private var settingsNavigation = SettingsNavigationState()
     @State private var availableWidth: CGFloat = 0
@@ -42,7 +43,8 @@ struct BrowseShell: View {
                 }
             }
             .browsingChrome(
-                title: title, browsing: browsing, usesSystemBar: usesSystemToolbar && !isRegular
+                title: title, browsing: browsing, usesSystemBar: usesSystemToolbar && !isRegular,
+                language: language
             )
             .navigationDestination(for: BrowseDestination.self) { destination in
                 screen(for: destination)
@@ -138,7 +140,8 @@ struct BrowseShell: View {
         case .detail:
             DetailScreen(browsing: browsing)
                 .browsingChrome(
-                    title: title, browsing: browsing, usesSystemBar: usesSystemToolbar
+                    title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
+                    language: language
                 )
                 .navigationBarBackButtonHidden()
         case .settings:
@@ -148,23 +151,31 @@ struct BrowseShell: View {
             .browsingChrome(
                 title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
                 backTitle: isRegular && browsing.state.folder != nil
-                    ? browsing.filterTitle : nil
+                    ? AppLocalization.filterTitle(
+                        for: browsing.state.filter, labelFilter: browsing.labelFilter,
+                        language: language)
+                    : nil,
+                language: language
             )
             .navigationBarBackButtonHidden()
         case .settingsCategory(let category):
             SettingsCategoryScreen(category: category)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { browsing.back() }
-                            .accessibilityIdentifier("clove.nav.back")
+                        Button(AppLocalization.string("Done", language: language)) {
+                            browsing.back()
+                        }
+                        .accessibilityIdentifier("clove.nav.back")
                     }
                 }
         case .settingsSubpage(let subpage):
             SettingsSubpageScreen(subpage: subpage)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { browsing.back() }
-                            .accessibilityIdentifier("clove.nav.back")
+                        Button(AppLocalization.string("Done", language: language)) {
+                            browsing.back()
+                        }
+                        .accessibilityIdentifier("clove.nav.back")
                     }
                 }
         }
@@ -173,9 +184,10 @@ struct BrowseShell: View {
     private var title: String {
         switch browsing.state.route {
         case .entry: "Clove"
-        case .grid: "Photos"
-        case .detail: browsing.currentPhoto?.fileName ?? "Photo"
-        case .settings: "Settings"
+        case .grid: AppLocalization.string("Photos", language: language)
+        case .detail:
+            browsing.currentPhoto?.fileName ?? AppLocalization.string("Photo", language: language)
+        case .settings: AppLocalization.string("Settings", language: language)
         }
     }
 }
@@ -184,7 +196,7 @@ extension View {
     /// Entry owns its header; regular-width Settings returns to the named grid filter.
     func browsingChrome(
         title: String, browsing: BrowsingModel, usesSystemBar: Bool = false,
-        backTitle: String? = nil
+        backTitle: String? = nil, language: ResolvedAppLanguage = .english
     )
         -> some View
     {
@@ -212,13 +224,15 @@ extension View {
                                 Text(backTitle)
                             }
                         }
-                        .accessibilityLabel("Back")
+                        .accessibilityLabel(AppLocalization.string("Back", language: language))
                         .accessibilityIdentifier("clove.nav.back")
                     }
                 } else if browsing.state.route == .settings {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { browsing.back() }
-                            .accessibilityIdentifier("clove.nav.back")
+                        Button(AppLocalization.string("Done", language: language)) {
+                            browsing.back()
+                        }
+                        .accessibilityIdentifier("clove.nav.back")
                     }
                 }
                 // Entry owns its header (screens.md §01): its own large title and gear,

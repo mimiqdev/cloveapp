@@ -102,6 +102,7 @@ struct DetailMarkingView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appLanguage) private var language
     @State private var hidesChrome = false
     @State private var widePresentation: DetailPresentation
     @State private var expandPillNudgeCount = 0
@@ -392,8 +393,11 @@ struct DetailMarkingView: View {
                     focusRegionsToggle
                 } tools: {
                     if chromeIsVisible {
-                        Button("Info", systemImage: "info.circle") { showsInformation = true }
-                            .accessibilityIdentifier("clove.detail.info")
+                        Button(
+                            AppLocalization.string("Info", language: language),
+                            systemImage: "info.circle"
+                        ) { showsInformation = true }
+                        .accessibilityIdentifier("clove.detail.info")
                     }
                 } marks: {
                     Optional<ToolbarItem<Void, EmptyView>>.none
@@ -408,8 +412,10 @@ struct DetailMarkingView: View {
 
     @ViewBuilder private var photoGridToggle: some View {
         let gridShown = showsPhotoGrid
-        let actionTitle = gridShown ? "Hide photo grid" : "Show photo grid"
-        let stateValue = gridShown ? "Photo Preview" : "Focus View"
+        let actionTitle = AppLocalization.string(
+            gridShown ? "Hide photo grid" : "Show photo grid", language: language)
+        let stateValue = AppLocalization.string(
+            gridShown ? "Photo Preview" : "Focus View", language: language)
         if usesSystemToolbar {
             Button {
                 togglePresentation()
@@ -444,6 +450,9 @@ struct DetailMarkingView: View {
 
     @ViewBuilder
     private func focusRegionsButton(inStageHeader: Bool) -> some View {
+        let focusLabel = AppLocalization.string("Focus regions", language: language)
+        let focusValue = AppLocalization.string(
+            browsing.showsFocusRegions ? "On" : "Off", language: language)
         if inStageHeader {
             Group {
                 if #available(iOS 26.0, *) {
@@ -465,13 +474,13 @@ struct DetailMarkingView: View {
                     .tint(
                         browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary
                     )
-                    .accessibilityLabel("Focus regions")
-                    .accessibilityValue(browsing.showsFocusRegions ? "On" : "Off")
+                    .accessibilityLabel(focusLabel)
+                    .accessibilityValue(focusValue)
                     .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
                     .accessibilityIdentifier("clove.detail.focusToggle")
                 } else {
                     GlassIconButton(
-                        label: "Focus regions",
+                        label: focusLabel,
                         symbol: "viewfinder",
                         isActive: browsing.showsFocusRegions,
                         size: .pad,
@@ -491,13 +500,13 @@ struct DetailMarkingView: View {
                         browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
             }
             .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
-            .accessibilityLabel("Focus regions")
-            .accessibilityValue(browsing.showsFocusRegions ? "On" : "Off")
+            .accessibilityLabel(focusLabel)
+            .accessibilityValue(focusValue)
             .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
             .accessibilityIdentifier("clove.detail.focusToggle")
         } else {
             GlassIconButton(
-                label: "Focus regions",
+                label: focusLabel,
                 symbol: "viewfinder",
                 isActive: browsing.showsFocusRegions,
                 size: usesRail ? .pad : .phone,
@@ -586,8 +595,11 @@ struct DetailMarkingView: View {
                     if !isDuoExpanded {
                         focusRegionsToggle
                     }
-                    Button("Info", systemImage: "info.circle") { showsInformation = true }
-                        .accessibilityIdentifier("clove.detail.info")
+                    Button(
+                        AppLocalization.string("Info", language: language),
+                        systemImage: "info.circle"
+                    ) { showsInformation = true }
+                    .accessibilityIdentifier("clove.detail.info")
                 } marks: {
                     // Expanded Duo marks live in the capsule row beneath the photo, so
                     // system status activity cannot push them into overflow (#200). The
@@ -674,11 +686,14 @@ struct DetailMarkingView: View {
             // The failure toast sits above the filmstrip, clear of the capsule row
             // (handoff screens.md §03, components.md Toast).
             if let message = browsing.failureToastMessage {
-                Toast(message: message, identifier: "clove.save.toast")
-                    .padding(.horizontal, 16)
-                    .transition(
-                        CloveMotion.slideTransition(
-                            edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                Toast(
+                    message: AppLocalization.string(message, language: language),
+                    identifier: "clove.save.toast"
+                )
+                .padding(.horizontal, 16)
+                .transition(
+                    CloveMotion.slideTransition(
+                        edge: .bottom, offset: 12, reduceMotion: reduceMotion))
             }
             // The marking toolbar gets its own reserved bottom-right area beside the narrowed
             // filmstrip, never over the image and never in the system side toolbar (#200, #227).
@@ -737,7 +752,7 @@ struct DetailMarkingView: View {
                 onBegin: actions.markingSwipeBegan
             )
             .disabled(!allowsMarkingInput)
-            .accessibilityValue(MarkSummary.text(for: displayMarks))
+            .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
             .transition(.opacity)
         }
     }
@@ -748,7 +763,8 @@ struct DetailMarkingView: View {
                 BrowsingHeader(
                     title: photo.fileName,
                     titleIdentifier: "clove.detail.fileName",
-                    backTitle: horizontalSizeClass == .regular ? browsing.filterTitle : nil,
+                    backTitle: horizontalSizeClass == .regular
+                        ? browsing.localizedFilterTitle(language: language) : nil,
                     back: { browsing.back() }
                 ) {
                     HStack(spacing: 0) {
@@ -769,11 +785,13 @@ struct DetailMarkingView: View {
                 } tools: {
                     if chromeIsVisible {
                         GlassIconButton(
-                            label: "Info", symbol: "info.circle", size: usesRail ? .pad : .phone,
+                            label: AppLocalization.string("Info", language: language),
+                            symbol: "info.circle", size: usesRail ? .pad : .phone,
                             identifier: "clove.detail.info"
                         ) { showsInformation = true }
                         GlassIconButton(
-                            label: "Undo", symbol: "arrow.uturn.backward",
+                            label: AppLocalization.string("Undo", language: language),
+                            symbol: "arrow.uturn.backward",
                             size: usesRail ? .pad : .phone,
                             identifier: "clove.detail.undo",
                             action: undo
@@ -862,11 +880,14 @@ struct DetailMarkingView: View {
                     // It is transient feedback, not chrome, and remains visible at 100% zoom.
                     Group {
                         if let message = browsing.failureToastMessage {
-                            Toast(message: message, identifier: "clove.save.toast")
-                                .padding(.horizontal, 16)
-                                .transition(
-                                    CloveMotion.slideTransition(
-                                        edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                            Toast(
+                                message: AppLocalization.string(message, language: language),
+                                identifier: "clove.save.toast"
+                            )
+                            .padding(.horizontal, 16)
+                            .transition(
+                                CloveMotion.slideTransition(
+                                    edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                         }
                     }
                     .animation(
@@ -933,7 +954,9 @@ struct DetailMarkingView: View {
                                     onBegin: actions.markingSwipeBegan
                                 )
                                 .disabled(!allowsMarkingInput)
-                                .accessibilityValue(MarkSummary.text(for: displayMarks))
+                                .accessibilityValue(
+                                    MarkSummary.text(for: displayMarks, language: language)
+                                )
                                 .padding(.horizontal, 16)
                             }
                         }
@@ -976,14 +999,16 @@ struct DetailMarkingView: View {
                 currentPhoto: photo.id)
             guard plan.availability.isAvailable, !plan.isEmpty else { return nil }
             return PillAction(
-                title: "Reject \(plan.rejects.count.formatted()) unmarked",
+                title: AppLocalization.format(
+                    "Reject %lld unmarked", language: language, Int64(plan.rejects.count)),
                 identifier: "clove.detail.rejectUnmarked",
                 tone: .destructive
             ) { actions.finishGroup(plan) }
         }
         if let group = currentTimelineGroup {
             return PillAction(
-                title: "Expand \(group.visibleMembers.count.formatted()) photos",
+                title: AppLocalization.format(
+                    "Expand %lld photos", language: language, Int64(group.visibleMembers.count)),
                 identifier: "clove.detail.expandGroup",
                 tone: .neutral,
                 nudgeTrigger: expandPillNudgeCount
@@ -997,11 +1022,15 @@ struct DetailMarkingView: View {
         if let expandedGroup,
             let index = expandedGroup.visibleMembers.firstIndex(where: { $0.id == photo.id })
         {
-            parts.append(
-                "Group · \((index + 1).formatted()) / \(expandedGroup.visibleMembers.count.formatted())"
-            )
+            let pos = AppLocalization.format(
+                "%lld / %lld", language: language, Int64(index + 1),
+                Int64(expandedGroup.visibleMembers.count))
+            parts.append(AppLocalization.format("Group · %@", language: language, pos))
         } else if let index = timeline.slotIndex(containing: photo.id) {
-            parts.append("\((index + 1).formatted()) / \(timeline.slots.count.formatted())")
+            parts.append(
+                AppLocalization.format(
+                    "%lld / %lld", language: language, Int64(index + 1),
+                    Int64(timeline.slots.count)))
         }
         if scale > DetailFitScale.tolerance {
             parts.append(zoomName)
@@ -1048,7 +1077,8 @@ struct DetailMarkingView: View {
                 unavailable: UIColor(theme.tokens.focusOutline.color.opacity(0.58))),
             onFocusRegionTap: { focusRegionTapped($0) },
             previewAccessibilityLabel: displayMarks.isRejected
-                ? "\(photo.fileName), Rejected" : photo.fileName
+                ? AppLocalization.format("%@, Rejected", language: language, photo.fileName)
+                : photo.fileName
         )
         .overlay {
             DetailSwipeFeedbackBadge(
@@ -1098,7 +1128,7 @@ struct DetailMarkingView: View {
                     .padding()
                     .accessibilityIdentifier("clove.detail.unavailable")
             case .deferred:
-                Text("The preview did not load.")
+                Text(AppLocalization.string("The preview did not load.", language: language))
                     .foregroundStyle(.secondary)
                     .padding()
                     .accessibilityIdentifier("clove.detail.unavailable")
@@ -1110,7 +1140,9 @@ struct DetailMarkingView: View {
 
     /// Advisory progress and explicit unavailable answers live in the existing floating chrome.
     @ViewBuilder private var focusRegionStatus: some View {
-        if chromeIsVisible, browsing.showsFocusRegions, let status = focusRegionState.status {
+        if chromeIsVisible, browsing.showsFocusRegions,
+            let status = focusRegionState.status(language: language)
+        {
             Text(status)
                 .font(.caption)
                 .foregroundStyle(Color.clove.text.primary)
@@ -1904,15 +1936,18 @@ struct DetailMarkingView: View {
     /// sizes, and only the photo whose own 100% is on screen may read 100% (PRD In-group culling,
     /// synchronized zoom).
     private var zoomName: String {
-        if scale <= DetailFitScale.tolerance { return "Fit" }
+        if scale <= DetailFitScale.tolerance {
+            return AppLocalization.string("Fit", language: language)
+        }
         if let shown, viewSize.width > 0, let pixels = shown.fullResolutionPixels,
             DetailZoom.isFullResolution(
                 scale: scale, nativePixels: pixels, viewSize: viewSize,
                 screenScale: displayScale)
         {
-            return "100%"
+            return AppLocalization.format("%lld%%", language: language, Int64(100))
         }
-        return "\(Int((scale * 100).rounded()))%"
+        return AppLocalization.format(
+            "%lld%%", language: language, Int64((scale * 100).rounded()))
     }
 
     // MARK: - Words
@@ -1921,11 +1956,11 @@ struct DetailMarkingView: View {
     private func unavailableText(_ failure: DetailFailure) -> String {
         switch failure {
         case .cannotOpen:
-            "This file cannot be opened as an image."
+            AppLocalization.string("This file cannot be opened as an image.", language: language)
         case .noUsablePreview:
-            "This file has no preview Clove can show."
+            AppLocalization.string("This file has no preview Clove can show.", language: language)
         case .sourceChanged:
-            "The file changed while it was opening."
+            AppLocalization.string("The file changed while it was opening.", language: language)
         }
     }
 
@@ -1933,9 +1968,10 @@ struct DetailMarkingView: View {
     private func limitationText(_ limitation: DetailLimitation) -> String {
         switch limitation {
         case .rawRenderFailed:
-            "Preview only — the RAW render failed."
+            AppLocalization.string("Preview only — the RAW render failed.", language: language)
         case .noHigherResolution:
-            "Preview only — full resolution is unavailable."
+            AppLocalization.string(
+                "Preview only — full resolution is unavailable.", language: language)
         }
     }
 }

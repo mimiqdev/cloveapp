@@ -17,7 +17,10 @@ struct ThemeTile: View {
     /// Whether this family is currently selected, so the tile draws the `accent` ring.
     var isSelected = false
 
+    @Environment(\.appLanguage) private var language
+
     var body: some View {
+        let localizedName = AppLocalization.themeTitle(family, language: language)
         VStack(spacing: 6) {
             preview
                 .frame(width: 70, height: 82)
@@ -32,14 +35,14 @@ struct ThemeTile: View {
                             .strokeBorder(Color.clove.accent, lineWidth: 2)
                     }
                 }
-            Text(family.name)
+            Text(localizedName)
                 .font(.caption2)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .foregroundStyle(isSelected ? Color.clove.accent : Color.clove.text.secondary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(family.name)
+        .accessibilityLabel(localizedName)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

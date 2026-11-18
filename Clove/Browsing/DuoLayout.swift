@@ -62,6 +62,7 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
     var showsBack = true
     var showsUndo = true
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
+    @Environment(\.appLanguage) private var language
     @ViewBuilder var navigationTools: NavigationTools
     @ViewBuilder var tools: Tools
     @ToolbarContentBuilder var marks: Marks
@@ -126,14 +127,20 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
     private var usesVerticalBar: Bool { verticalEdge != nil }
 
     private var backButton: some View {
-        Button("Back", systemImage: "chevron.left", action: back)
-            .accessibilityIdentifier("clove.nav.back")
+        Button(
+            AppLocalization.string("Back", language: language), systemImage: "chevron.left",
+            action: back
+        )
+        .accessibilityIdentifier("clove.nav.back")
     }
 
     private var undoButton: some View {
-        Button("Undo", systemImage: "arrow.uturn.backward", action: undo)
-            .disabled(!canUndo)
-            .accessibilityIdentifier(usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo")
+        Button(
+            AppLocalization.string("Undo", language: language), systemImage: "arrow.uturn.backward",
+            action: undo
+        )
+        .disabled(!canUndo)
+        .accessibilityIdentifier(usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo")
     }
 }
 
@@ -143,6 +150,7 @@ struct SplitDivider: View {
     let horizontal: Bool
     let contentExtent: CGFloat
     let back: () -> Void
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         Divider()
@@ -156,8 +164,10 @@ struct SplitDivider: View {
                     if next == .grid { back() } else { presentation = next }
                 }
             )
-            .accessibilityLabel("Photo split")
-            .accessibilityValue("Grid 30 percent, photo 70 percent")
+            .accessibilityLabel(AppLocalization.string("Photo split", language: language))
+            .accessibilityValue(
+                AppLocalization.string("Grid 30 percent, photo 70 percent", language: language)
+            )
             .accessibilityAdjustableAction { direction in
                 if direction == .decrement { presentation = .focus } else { back() }
             }

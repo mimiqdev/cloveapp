@@ -37,10 +37,14 @@ enum DetailFocusRegionKind: String, Hashable, Sendable {
     }
 
     var accessibilityName: String {
+        accessibilityName(language: .english)
+    }
+
+    func accessibilityName(language: ResolvedAppLanguage) -> String {
         switch self {
-        case .autofocus: "Autofocus region"
-        case .face: "Face region"
-        case .eye: "Eye region"
+        case .autofocus: AppLocalization.string("Autofocus region", language: language)
+        case .face: AppLocalization.string("Face region", language: language)
+        case .eye: AppLocalization.string("Eye region", language: language)
         }
     }
 }
@@ -110,18 +114,22 @@ struct DetailFocusRegion: Hashable, Identifiable, Sendable {
     }
 
     var unavailableAccessibilityDescription: String? {
+        unavailableAccessibilityDescription(language: .english)
+    }
+
+    func unavailableAccessibilityDescription(language: ResolvedAppLanguage) -> String? {
         guard let unavailableReason else { return nil }
         switch unavailableReason {
         case RegionScoreUnavailable.regionTooSmall.rawValue:
-            return "Unavailable: region too small"
+            return AppLocalization.string("Unavailable: region too small", language: language)
         case RegionScoreUnavailable.regionOutsideImage.rawValue:
-            return "Unavailable: outside the image"
+            return AppLocalization.string("Unavailable: outside the image", language: language)
         case RegionScoreUnavailable.pixelsUnavailable.rawValue:
-            return "Unavailable: pixels unavailable"
+            return AppLocalization.string("Unavailable: pixels unavailable", language: language)
         case RegionScoreUnavailable.staleSource.rawValue:
-            return "Unavailable: photo changed"
+            return AppLocalization.string("Unavailable: photo changed", language: language)
         default:
-            return "Unavailable"
+            return AppLocalization.string("Unavailable", language: language)
         }
     }
 }
@@ -208,31 +216,45 @@ struct DetailFocusRegionState {
     }
 
     var status: String? {
-        if analysisUnavailable { return "Analysis unavailable" }
+        status(language: .english)
+    }
+
+    func status(language: ResolvedAppLanguage) -> String? {
+        if analysisUnavailable {
+            return AppLocalization.string("Analysis unavailable", language: language)
+        }
         var messages: [String] = []
         if let autofocus, case .unavailable(let reason) = autofocus {
-            if case .noAutofocusMetadata = reason { messages.append("No AF metadata") }
+            if case .noAutofocusMetadata = reason {
+                messages.append(AppLocalization.string("No AF metadata", language: language))
+            }
         }
         if let faces, case .unavailable(let reason) = faces {
             switch reason {
             case .noFacesDetected:
-                messages.append("No faces")
+                messages.append(AppLocalization.string("No faces", language: language))
             case .faceDetectionFailed, .previewFailed:
-                messages.append("Face analysis unavailable")
+                messages.append(
+                    AppLocalization.string("Face analysis unavailable", language: language))
             case .noAutofocusMetadata:
                 break
             }
         }
         if isAnalyzing {
-            messages.append(autofocus == nil ? "Analyzing focus regions…" : "Analyzing faces…")
+            messages.append(
+                AppLocalization.string(
+                    autofocus == nil ? "Analyzing focus regions…" : "Analyzing faces…",
+                    language: language))
         }
         let presented = regions
         if presented.contains(where: { $0.unavailableReason != nil }) {
             messages.append(
-                presented.contains {
-                    $0.unavailableReason == RegionScoreUnavailable.regionTooSmall.rawValue
-                }
-                    ? "Tiny focus region unavailable" : "Focus region unavailable")
+                AppLocalization.string(
+                    presented.contains {
+                        $0.unavailableReason == RegionScoreUnavailable.regionTooSmall.rawValue
+                    }
+                        ? "Tiny focus region unavailable" : "Focus region unavailable",
+                    language: language))
         }
         return messages.isEmpty ? nil : messages.joined(separator: " · ")
     }

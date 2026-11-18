@@ -16,6 +16,8 @@ struct FilterStarRow: View {
     /// Sets the rating floor, or clears it with unrated.
     let onSelect: (Rating) -> Void
 
+    @Environment(\.appLanguage) private var language
+
     var body: some View {
         HStack(spacing: 4) {
             ForEach(EnabledRatings.all.levels, id: \.rawValue) { level in
@@ -31,7 +33,9 @@ struct FilterStarRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(level.starCount ?? 0) stars")
+                .accessibilityLabel(
+                    AppLocalization.starCount(level.starCount ?? 0, language: language)
+                )
                 .accessibilityAddTraits(level == rating ? .isSelected : [])
                 .accessibilityIdentifier("\(identifier).\(level.rawValue)")
             }

@@ -92,10 +92,14 @@ final class BrowsingModel {
 
     /// The opened folder's display name, without its device path.
     var folderTitle: String {
+        localizedFolderTitle(language: .english)
+    }
+
+    func localizedFolderTitle(language: ResolvedAppLanguage) -> String {
         recents.first(where: { $0.identity == state.folder }).map {
-            RecentFolderSummary.name(for: $0)
+            RecentFolderSummary.name(for: $0, language: language)
         }
-            ?? "Photos"
+            ?? AppLocalization.string("Photos", language: language)
     }
 
     /// Label filtering is a presentation filter over the same ordered photos.
@@ -113,14 +117,11 @@ final class BrowsingModel {
 
     /// Sidebar and regular-width navigation use the same name for the active filter.
     var filterTitle: String {
-        if let labelFilter { return labelFilter.rawValue }
-        switch state.filter {
-        case .all: return "All"
-        case .unmarked: return "Unmarked"
-        case .rejected: return "Rejected"
-        case .ratedAtLeast(let rating): return "★\(rating.starCount ?? 0)+"
-        case .subfolder(let path): return path
-        }
+        localizedFilterTitle(language: .english)
+    }
+
+    func localizedFilterTitle(language: ResolvedAppLanguage) -> String {
+        AppLocalization.filterTitle(for: state.filter, labelFilter: labelFilter, language: language)
     }
 
     var folderSource: String? {

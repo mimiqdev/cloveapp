@@ -6,16 +6,31 @@ struct MoveRejectsToast: View {
     let browsing: BrowsingModel
     let completed: CompletedRejectMove
     let showDetails: () -> Void
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
-        let copy = RejectMoveToast(
-            result: completed.result, rejectsFolderName: completed.rejectsFolderName)
+        let result = completed.result
+        let message = AppLocalization.format(
+            "Moved %lld to %@", language: language, Int64(result.movedCount),
+            completed.rejectsFolderName.rawValue)
+        let failureMessage: String? =
+            result.unmovedCount == 0
+            ? nil
+            : AppLocalization.format(
+                "%lld couldn't be moved", language: language, Int64(result.unmovedCount))
+        let skippedMessage: String? =
+            result.skippedCount > 0
+            ? AppLocalization.format(
+                "%lld photos were skipped.", language: language, Int64(result.skippedCount))
+            : nil
         Toast(
-            message: copy.message,
-            detail: [copy.failureMessage, copy.skippedMessage].compactMap { $0 }
+            message: message,
+            detail: [failureMessage, skippedMessage].compactMap { $0 }
                 .joined(separator: " ").nilIfEmpty,
-            actionTitle: browsing.canUndoRejectMove(completed) ? "Undo" : nil,
-            secondaryActionTitle: copy.showsDetails ? "Details" : nil,
+            actionTitle: browsing.canUndoRejectMove(completed)
+                ? AppLocalization.string("Undo", language: language) : nil,
+            secondaryActionTitle: result.unmovedCount > 0
+                ? AppLocalization.string("Details", language: language) : nil,
             onSecondaryAction: showDetails,
             identifier: "clove.moves.toast",
             onAction: { browsing.undoRejectMove(completed) })
@@ -26,14 +41,30 @@ struct MoveRejectsDetailsSheet: View {
     let browsing: BrowsingModel
     let completed: CompletedRejectMove
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         let details = RejectMoveDetails(result: completed.result)
+        let skippedMessage: String? =
+            completed.result.skippedCount > 0
+            ? AppLocalization.format(
+                "%lld photos were skipped.", language: language,
+                Int64(completed.result.skippedCount))
+            : nil
         VStack(alignment: .leading, spacing: 16) {
-            Text(details.title).font(.title3.bold())
-                .accessibilityIdentifier("clove.moves.details.title")
-            Text(details.subtitle).font(.footnote).foregroundStyle(Color.clove.text.secondary)
-                .accessibilityIdentifier("clove.moves.details.subtitle")
+            Text(
+                AppLocalization.format(
+                    "%lld photos couldn't be moved", language: language,
+                    Int64(completed.result.unmovedCount))
+            )
+            .font(.title3.bold())
+            .accessibilityIdentifier("clove.moves.details.title")
+            Text(
+                AppLocalization.string(
+                    "They stay rejected in place. Nothing was deleted.", language: language)
+            )
+            .font(.footnote).foregroundStyle(Color.clove.text.secondary)
+            .accessibilityIdentifier("clove.moves.details.subtitle")
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(details.rows) { row in
@@ -44,9 +75,9 @@ struct MoveRejectsDetailsSheet: View {
                     }
                 }
                 .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 14))
-                if let skipped = details.skippedMessage { Text(skipped).font(.footnote) }
+                if let skipped = skippedMessage { Text(skipped).font(.footnote) }
             }
-            Button("Done") { dismiss() }
+            Button(AppLocalization.string("Done", language: language)) { dismiss() }
                 .buttonStyle(MoveSheetButtonStyle(secondary: true))
                 .accessibilityIdentifier("clove.moves.details.done")
         }
@@ -66,7 +97,8 @@ struct MoveRejectsDetailsSheet: View {
                 .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.fileName).font(.subheadline.weight(.semibold))
-                Text(row.reason).font(.footnote).foregroundStyle(Color.clove.reject)
+                Text(AppLocalization.string(row.reason, language: language))
+                    .font(.footnote).foregroundStyle(Color.clove.reject)
             }
             Spacer(minLength: 0)
         }

@@ -11,62 +11,90 @@ enum FolderPreparationPresentationMode: Equatable, Sendable {
 }
 
 enum FolderPreparationAccessibility {
-    static func summaryText(for status: FolderPreparationStatus) -> String {
+    static func summaryText(
+        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+    ) -> String {
         if status.phase == .enumeratingUnknown {
-            return "Scanning folder…"
+            return AppLocalization.string("Scanning folder…", language: language)
         }
         if let reason = status.waitingReason, status.totalPhotos == 0 {
-            return waitingTitle(for: reason)
+            return waitingTitle(for: reason, language: language)
         }
-        return "\(status.readyForBothCount.formatted()) of \(status.totalPhotos.formatted()) ready"
+        return AppLocalization.format(
+            "%lld of %lld ready", language: language, Int64(status.readyForBothCount),
+            Int64(status.totalPhotos))
     }
 
-    static func analysisCountText(for status: FolderPreparationStatus) -> String {
+    static func analysisCountText(
+        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+    ) -> String {
         guard status.totalPhotos > 0 else {
-            return "Waiting for photo count"
+            return AppLocalization.string("Waiting for photo count", language: language)
         }
-        return
-            "\(status.analysis.completed.formatted()) of \(status.totalPhotos.formatted()) analyzed"
+        return AppLocalization.format(
+            "%lld of %lld analyzed", language: language, Int64(status.analysis.completed),
+            Int64(status.totalPhotos))
     }
 
-    static func previewsCountText(for status: FolderPreparationStatus) -> String {
+    static func previewsCountText(
+        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+    ) -> String {
         guard status.totalPhotos > 0 else {
-            return "Waiting for photo count"
+            return AppLocalization.string("Waiting for photo count", language: language)
         }
-        return
-            "\(status.previews.completed.formatted()) of \(status.totalPhotos.formatted()) prepared"
+        return AppLocalization.format(
+            "%lld of %lld prepared", language: language, Int64(status.previews.completed),
+            Int64(status.totalPhotos))
     }
 
-    static func taskIssueSummary(_ counts: FolderPreparationTaskCounts) -> String? {
+    static func taskIssueSummary(
+        _ counts: FolderPreparationTaskCounts, language: ResolvedAppLanguage = .english
+    ) -> String? {
         guard counts.issueCount > 0 else { return nil }
         var parts: [String] = []
-        if counts.failed > 0 { parts.append("\(counts.failed.formatted()) failed") }
-        if counts.unsupported > 0 {
-            parts.append("\(counts.unsupported.formatted()) unsupported")
+        if counts.failed > 0 {
+            parts.append(
+                AppLocalization.format("%lld failed", language: language, Int64(counts.failed)))
         }
-        if counts.deferred > 0 { parts.append("\(counts.deferred.formatted()) deferred") }
+        if counts.unsupported > 0 {
+            parts.append(
+                AppLocalization.format(
+                    "%lld unsupported", language: language, Int64(counts.unsupported)))
+        }
+        if counts.deferred > 0 {
+            parts.append(
+                AppLocalization.format("%lld deferred", language: language, Int64(counts.deferred)))
+        }
         return parts.joined(separator: " · ")
     }
 
-    static func waitingTitle(for reason: FolderPreparationWaitingReason) -> String {
+    static func waitingTitle(
+        for reason: FolderPreparationWaitingReason, language: ResolvedAppLanguage = .english
+    ) -> String {
         switch reason {
         case .memoryPressure:
-            return "Paused for memory"
+            return AppLocalization.string("Paused for memory", language: language)
         case .folderUnavailable(.externalVolumeDisconnected):
-            return "Paused · drive disconnected"
+            return AppLocalization.string("Paused · drive disconnected", language: language)
         case .folderUnavailable(.locationUnavailable):
-            return "Paused · folder unavailable"
+            return AppLocalization.string("Paused · folder unavailable", language: language)
         }
     }
 
-    static func waitingDetail(for reason: FolderPreparationWaitingReason) -> String {
+    static func waitingDetail(
+        for reason: FolderPreparationWaitingReason, language: ResolvedAppLanguage = .english
+    ) -> String {
         switch reason {
         case .memoryPressure:
-            return "Preparation paused while memory is low and will resume automatically."
+            return AppLocalization.string(
+                "Preparation paused while memory is low and will resume automatically.",
+                language: language)
         case .folderUnavailable(.externalVolumeDisconnected):
-            return "Reconnect the drive to continue preparing this folder."
+            return AppLocalization.string(
+                "Reconnect the drive to continue preparing this folder.", language: language)
         case .folderUnavailable(.locationUnavailable):
-            return "Reopen the folder to continue preparing photos."
+            return AppLocalization.string(
+                "Reopen the folder to continue preparing photos.", language: language)
         }
     }
 
@@ -81,30 +109,40 @@ enum FolderPreparationAccessibility {
         }
     }
 
-    static func indicatorAccessibilityValue(for status: FolderPreparationStatus) -> String {
+    static func indicatorAccessibilityValue(
+        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+    ) -> String {
         switch status.phase {
         case .idle:
             return ""
         case .enumeratingUnknown:
-            return "Scanning folder"
+            return AppLocalization.string("Scanning folder", language: language)
         case .preparing:
-            return
-                "\(status.readyForBothCount.formatted()) of \(status.totalPhotos.formatted()) ready"
+            return AppLocalization.format(
+                "%lld of %lld ready", language: language, Int64(status.readyForBothCount),
+                Int64(status.totalPhotos))
         case .waiting(let reason):
-            let prefix = waitingTitle(for: reason)
+            let prefix = waitingTitle(for: reason, language: language)
             if status.totalPhotos > 0 {
-                let ready =
-                    "\(status.readyForBothCount.formatted()) of \(status.totalPhotos.formatted()) ready"
-                return "\(prefix), \(ready)"
+                let ready = AppLocalization.format(
+                    "%lld of %lld ready", language: language, Int64(status.readyForBothCount),
+                    Int64(status.totalPhotos))
+                return AppLocalization.format("%@, %@", language: language, prefix, ready)
             }
             return prefix
         case .complete:
-            return
-                "Complete, \(status.readyForBothCount.formatted()) of \(status.totalPhotos.formatted()) ready"
+            let ready = AppLocalization.format(
+                "%lld of %lld ready", language: language, Int64(status.readyForBothCount),
+                Int64(status.totalPhotos))
+            return AppLocalization.format("Complete, %@", language: language, ready)
         case .completeWithIssues:
-            let issues = String(localized: "^[\(status.totalIssueCount) issue](inflect: true)")
-            return
-                "Finished with \(issues), \(status.readyForBothCount.formatted()) of \(status.totalPhotos.formatted()) ready"
+            let issues = AppLocalization.format(
+                "%lld issue", language: language, Int64(status.totalIssueCount))
+            let ready = AppLocalization.format(
+                "%lld of %lld ready", language: language, Int64(status.readyForBothCount),
+                Int64(status.totalPhotos))
+            return AppLocalization.format(
+                "Finished with %@, %@", language: language, issues, ready)
         }
     }
 }
@@ -163,6 +201,7 @@ struct FolderPreparationIndicator: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
     @State private var presentedMode: FolderPreparationPresentationMode?
     @State private var isAnchorReady = false
 
@@ -228,11 +267,15 @@ struct FolderPreparationIndicator: View {
         .padding(.vertical, -11)
         .padding(.leading, -9)
         .padding(.trailing, -15)
-        .accessibilityLabel("Folder preparation")
+        .accessibilityLabel(AppLocalization.string("Folder preparation", language: language))
         .accessibilityValue(
-            FolderPreparationAccessibility.indicatorAccessibilityValue(for: status)
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: status, language: language)
         )
-        .accessibilityHint("Shows folder analysis and preview preparation details.")
+        .accessibilityHint(
+            AppLocalization.string(
+                "Shows folder analysis and preview preparation details.", language: language)
+        )
         .accessibilityIdentifier(identifierPrefix)
 
         let styledButton = Group {
@@ -348,13 +391,15 @@ struct FolderPreparationDetails: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
 
     private var status: FolderPreparationStatus {
         browsing.preparationStatus
     }
 
     private var folderDisplayName: String {
-        status.folderName.isEmpty ? browsing.folderTitle : status.folderName
+        status.folderName.isEmpty
+            ? browsing.localizedFolderTitle(language: language) : status.folderName
     }
 
     var body: some View {
@@ -366,11 +411,13 @@ struct FolderPreparationDetails: View {
                             .padding(16)
                     }
                     .background(Color.clove.surface.sheet)
-                    .navigationTitle("Folder preparation")
+                    .navigationTitle(
+                        AppLocalization.string("Folder preparation", language: language)
+                    )
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { dismiss() }
+                            Button(AppLocalization.string("Done", language: language)) { dismiss() }
                                 .foregroundStyle(Color.clove.accent)
                                 .accessibilityIdentifier("clove.preparation.done")
                         }
@@ -421,16 +468,19 @@ struct FolderPreparationDetails: View {
                     .lineLimit(2)
                     .accessibilityIdentifier("clove.preparation.folderName")
             }
-            Text(FolderPreparationAccessibility.summaryText(for: status))
+            Text(FolderPreparationAccessibility.summaryText(for: status, language: language))
                 .font(.subheadline)
                 .foregroundStyle(Color.clove.text.secondary)
                 .accessibilityIdentifier("clove.preparation.summary")
             if status.isEnumerating && status.totalPhotos > 0 {
-                Text("Still counting photos in this folder.")
-                    .font(.caption)
-                    .foregroundStyle(Color.clove.text.secondary)
+                Text(
+                    AppLocalization.string(
+                        "Still counting photos in this folder.", language: language)
+                )
+                .font(.caption)
+                .foregroundStyle(Color.clove.text.secondary)
             } else if status.isPartialScan {
-                Text("Showing partial folder scan.")
+                Text(AppLocalization.string("Showing partial folder scan.", language: language))
                     .font(.caption)
                     .foregroundStyle(Color.clove.text.secondary)
             }
@@ -447,9 +497,9 @@ struct FolderPreparationDetails: View {
                 .foregroundStyle(Color.clove.text.secondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(FolderPreparationAccessibility.waitingTitle(for: reason))
+                Text(FolderPreparationAccessibility.waitingTitle(for: reason, language: language))
                     .font(.subheadline.weight(.semibold))
-                Text(FolderPreparationAccessibility.waitingDetail(for: reason))
+                Text(FolderPreparationAccessibility.waitingDetail(for: reason, language: language))
                     .font(.caption)
                     .foregroundStyle(Color.clove.text.secondary)
             }
@@ -468,20 +518,24 @@ struct FolderPreparationDetails: View {
             : theme.tokens.accent.color
         return VStack(alignment: .leading, spacing: 12) {
             taskRow(
-                title: "Focus analysis",
-                countText: FolderPreparationAccessibility.analysisCountText(for: status),
+                title: AppLocalization.string("Focus analysis", language: language),
+                countText: FolderPreparationAccessibility.analysisCountText(
+                    for: status, language: language),
                 completed: status.analysis.completed,
                 total: status.totalPhotos,
-                issueSummary: FolderPreparationAccessibility.taskIssueSummary(status.analysis),
+                issueSummary: FolderPreparationAccessibility.taskIssueSummary(
+                    status.analysis, language: language),
                 tint: barTint,
                 identifierPrefix: "clove.preparation.analysis")
             Divider()
             taskRow(
-                title: "Previews",
-                countText: FolderPreparationAccessibility.previewsCountText(for: status),
+                title: AppLocalization.string("Previews", language: language),
+                countText: FolderPreparationAccessibility.previewsCountText(
+                    for: status, language: language),
                 completed: status.previews.completed,
                 total: status.totalPhotos,
-                issueSummary: FolderPreparationAccessibility.taskIssueSummary(status.previews),
+                issueSummary: FolderPreparationAccessibility.taskIssueSummary(
+                    status.previews, language: language),
                 tint: barTint,
                 identifierPrefix: "clove.preparation.previews")
         }
@@ -535,10 +589,10 @@ struct FolderPreparationDetails: View {
     private var issuesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Issues")
+                Text(AppLocalization.string("Issues", language: language))
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text(status.totalIssueCount.formatted())
+                Text(status.totalIssueCount.formatted(.number.locale(language.locale)))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Color.clove.text.secondary)
             }
@@ -550,11 +604,15 @@ struct FolderPreparationDetails: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer(minLength: 4)
-                        Text(issue.task == .analysis ? "Focus analysis" : "Preview")
-                            .font(.caption2)
-                            .foregroundStyle(Color.clove.text.secondary)
+                        Text(
+                            AppLocalization.string(
+                                issue.task == .analysis ? "Focus analysis" : "Preview",
+                                language: language)
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(Color.clove.text.secondary)
                     }
-                    Text(issue.reason)
+                    Text(AppLocalization.string(issue.reason, language: language))
                         .font(.caption)
                         .foregroundStyle(Color.clove.status.failed)
                 }
@@ -564,7 +622,9 @@ struct FolderPreparationDetails: View {
             }
             if status.totalIssueCount > status.issues.count {
                 Text(
-                    "Showing \(status.issues.count.formatted()) of \(status.totalIssueCount.formatted()) issues"
+                    AppLocalization.format(
+                        "Showing %lld of %lld issues", language: language,
+                        Int64(status.issues.count), Int64(status.totalIssueCount))
                 )
                 .font(.caption)
                 .foregroundStyle(Color.clove.text.secondary)

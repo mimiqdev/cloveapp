@@ -2,9 +2,10 @@ import CloveCore
 import Observation
 import SwiftUI
 
-/// The five top-level categories of the Settings screen (issue #264).
+/// The top-level categories of the Settings screen (issue #264, #325).
 enum SettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
     case appearance
+    case language
     case cullingAndMarking
     case browsingAndGroups
     case photoDisplay
@@ -13,18 +14,24 @@ enum SettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
     var id: String { rawValue }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: ResolvedAppLanguage) -> String {
         switch self {
-        case .appearance: "Appearance"
-        case .cullingAndMarking: "Culling & marking"
-        case .browsingAndGroups: "Browsing & groups"
-        case .photoDisplay: "Photo display"
-        case .moveRejects: "Move rejects"
+        case .appearance: AppLocalization.string("Appearance", language: language)
+        case .language: AppLocalization.string("Language", language: language)
+        case .cullingAndMarking: AppLocalization.string("Culling & marking", language: language)
+        case .browsingAndGroups: AppLocalization.string("Browsing & groups", language: language)
+        case .photoDisplay: AppLocalization.string("Photo display", language: language)
+        case .moveRejects: AppLocalization.string("Move rejects", language: language)
         }
     }
 
     var symbol: String {
         switch self {
         case .appearance: "paintpalette"
+        case .language: "globe"
         case .cullingAndMarking: "slider.horizontal.3"
         case .browsingAndGroups: "rectangle.stack"
         case .photoDisplay: "photo"
@@ -35,6 +42,7 @@ enum SettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
     var identifier: String {
         switch self {
         case .appearance: "clove.settings.category.appearance"
+        case .language: "clove.settings.category.language"
         case .cullingAndMarking: "clove.settings.category.culling"
         case .browsingAndGroups: "clove.settings.category.browsing"
         case .photoDisplay: "clove.settings.category.photoDisplay"
@@ -51,9 +59,13 @@ enum SettingsSubpage: String, CaseIterable, Hashable, Identifiable, Sendable {
     var id: String { rawValue }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: ResolvedAppLanguage) -> String {
         switch self {
-        case .ratingScale: "Rating scale"
-        case .autoAdvanceDestination: "After marking"
+        case .ratingScale: AppLocalization.string("Rating scale", language: language)
+        case .autoAdvanceDestination: AppLocalization.string("After marking", language: language)
         }
     }
 
