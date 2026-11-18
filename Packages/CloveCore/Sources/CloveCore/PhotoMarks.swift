@@ -83,68 +83,102 @@ public struct ColourLabel: RawRepresentable, Hashable, Sendable {
     public var isClear: Bool { rawValue.isEmpty }
 }
 
-/// The marks on a logical photo: one rating, which carries Reject, and one colour label
+/// Keyword list normalization shared across metadata reading, persistence, and editing.
+public enum PhotoKeywords: Sendable {
+    /// Drops empty strings while preserving exact case and first-seen order.
+    public static func deduplicated(_ keywords: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        result.reserveCapacity(keywords.count)
+        for keyword in keywords {
+            guard !keyword.isEmpty, seen.insert(keyword).inserted else { continue }
+            result.append(keyword)
+        }
+        return result
+    }
+}
+
+/// The marks on a logical photo: one rating (which carries Reject), one colour label, and keywords
 /// (PRD P0-05).
 public struct PhotoMarks: Hashable, Sendable {
     /// The −1…5 rating: −1 is Rejected, 0 unrated, 1–5 stars (PRD P0-05).
     public var rating: Rating
     /// A clear, known or preserved external label (PRD disk rules 9–10).
     public var label: ColourLabel
+    /// Ordered, deduplicated keywords (`dc:subject`).
+    public var keywords: [String]
 
     /// Whether the photo is rejected; Reject is the rating value −1 (PRD P0-05).
     public var isRejected: Bool { rating.isRejected }
 
     /// Creates marks; the default is unmarked (PRD P0-05).
-    public init(rating: Rating = .unrated, label: ColourLabel = .clear) {
+    public init(rating: Rating = .unrated, label: ColourLabel = .clear, keywords: [String] = []) {
         self.rating = rating
         self.label = label
+        self.keywords = PhotoKeywords.deduplicated(keywords)
     }
 
     /// The marks Clove stores for a photo, before its sidecar read finishes (PRD P0-05, P0-08).
     ///
     /// A photo enters the grid with these so a standalone JPEG's marks are visible at once; the
-    /// sidecar read that follows replaces them with ``init(stored:xmp:persistence:)``'s routing.
+    /// sidecar read that follows replaces them with ``init(stored:embedded:xmp:persistence:)``'s routing.
     public init(stored: CloveStoredMarks?) {
-        self.init(rating: stored?.rating ?? .unrated, label: stored?.label ?? .clear)
+        self.init(
+            rating: stored?.rating ?? .unrated,
+            label: stored?.label ?? .clear,
+            keywords: stored?.keywords ?? [])
     }
 
     /// The marks a photo shows, from the storages its persistence routes them to
     /// (PRD P0-05, P0-07; G1 decisions 2 and 6).
     ///
     /// G1 decides a destination per field, so reading follows the same route:
-    /// - a RAW set's rating (Reject included) and label come from its sidecar only, and an
-    ///   explicit `0` or a clear label is the user's choice rather than a reason to fall back to
-    ///   a value Clove happens to store for the same identity (G1 decision 2);
-    /// - a standalone JPEG or HIF keeps its rating and label in Clove storage only, because it is
-    ///   never given a sidecar (G1 decision 6).
+    /// - a RAW set's rating (Reject included), label, and keywords come from its sidecar only,
+    ///   and an explicit `0`, clear label, or empty keywords is the user's choice rather than a
+    ///   reason to fall back to a value Clove happens to store for the same identity (G1 decision 2);
+    /// - a standalone JPEG or HIF reads embedded file metadata when Clove has not stored an
+    ///   override for that field, and writes changes to Clove storage only (G1 decision 6).
     ///
-    /// `xmp` is the packet C3 read for the photo, or nil when it has none. An `xmp:Rating` of −1
+    /// `xmp` is the packet read for the photo, or nil when it has none. An `xmp:Rating` of −1
     /// reads as Rejected (PRD P0-07); any other value outside −1…5 is an external value with no
     /// place in these marks, so it reads as unrated and stays on disk unchanged.
     public init(
-        stored: CloveStoredMarks? = nil, xmp: XMPMarks? = nil, persistence: MarkPersistence
+        stored: CloveStoredMarks? = nil,
+        embedded: XMPMarks? = nil,
+        xmp: XMPMarks? = nil,
+        persistence: MarkPersistence
     ) {
         let rating: Rating
         switch persistence.rating {
         case .xmpSidecar:
             rating = xmp?.rating.rating ?? .unrated
         case .cloveStorage:
-            rating = stored?.rating ?? .unrated
+            rating = stored?.rating ?? embedded?.rating.rating ?? .unrated
         }
         let label: ColourLabel
         switch persistence.label {
         case .xmpSidecar:
             label = xmp?.label ?? .clear
         case .cloveStorage:
-            label = stored?.label ?? .clear
+            label = stored?.label ?? embedded?.label ?? .clear
         }
-        self.init(rating: rating, label: label)
+        let keywords: [String]
+        switch persistence.keywords {
+        case .xmpSidecar:
+            keywords = xmp?.keywords ?? []
+        case .cloveStorage:
+            keywords = stored?.keywords ?? embedded?.keywords ?? []
+        }
+        self.init(rating: rating, label: label, keywords: keywords)
     }
 }
 
 extension PhotoMarks {
     /// The marks after a request, replacing only the fields it names.
     public func applying(_ change: MarkChange) -> PhotoMarks {
-        PhotoMarks(rating: change.rating ?? rating, label: change.label ?? label)
+        PhotoMarks(
+            rating: change.rating ?? rating,
+            label: change.label ?? label,
+            keywords: change.keywords ?? keywords)
     }
 }

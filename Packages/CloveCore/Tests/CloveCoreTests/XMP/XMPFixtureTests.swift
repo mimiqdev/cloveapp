@@ -19,17 +19,21 @@ private func expectation(for name: String, data: Data) -> Expectation {
 
 /// Sets rating 3 and Green, reads them back, and proves nothing else moved.
 private func assertRoundTrip(_ data: Data, _ name: String) throws {
+    let before = try xmpCodec.read(data)
     let rating = try #require(Rating(rawValue: 3))
     let edited = try xmpCodec.write(
         XMPEdit(rating: .set(rating), label: .set(targetLabel)), into: data)
 
     #expect(
-        try xmpCodec.read(edited) == XMPMarks(rating: .rated(rating), label: targetLabel), "\(name)"
+        try xmpCodec.read(edited)
+            == XMPMarks(rating: .rated(rating), label: targetLabel, keywords: before.keywords),
+        "\(name)"
     )
     let interop = try #require(
         XMPImageIOReader.marks(from: edited), "\(name) was refused by ImageIO")
     #expect(interop.rating == "3", "\(name)")
     #expect(interop.label == "Green", "\(name)")
+    #expect(interop.keywords == before.keywords, "\(name)")
     #expect(
         try XMPPreservation.outsideOwnedMarks(data)
             == XMPPreservation.outsideOwnedMarks(edited),
@@ -38,24 +42,35 @@ private func assertRoundTrip(_ data: Data, _ name: String) throws {
     #expect(try xmpCodec.write(XMPEdit(), into: data) == data, "\(name)")
 }
 
-private let committedMarks: [(name: String, rating: XMPRating, label: ColourLabel)] = [
-    ("capture-one.xmp", XMPRating(3), ColourLabel(colour: .green)),
-    ("custom-namespace-nested.xmp", XMPRating(2), ColourLabel(colour: .blue)),
-    ("empty-description.xmp", .unrated, .clear),
-    ("label-orange.xmp", XMPRating(1), ColourLabel(colour: .orange)),
-    ("label-pink.xmp", XMPRating(2), ColourLabel(colour: .pink)),
-    ("lightroom-full.xmp", XMPRating(5), ColourLabel(colour: .purple)),
-    ("photo-mechanic.xmp", XMPRating(4), ColourLabel(colour: .red)),
-    ("rating-minus-one.xmp", .rated(.rejected), .clear),
-]
+private let committedMarks:
+    [(name: String, rating: XMPRating, label: ColourLabel, keywords: [String])] = [
+        ("capture-one.xmp", XMPRating(3), ColourLabel(colour: .green), ["studio", "test shot"]),
+        ("custom-namespace-nested.xmp", XMPRating(2), ColourLabel(colour: .blue), []),
+        ("empty-description.xmp", .unrated, .clear, []),
+        ("label-orange.xmp", XMPRating(1), ColourLabel(colour: .orange), ["to review"]),
+        ("label-pink.xmp", XMPRating(2), ColourLabel(colour: .pink), ["portfolio"]),
+        (
+            "lightroom-full.xmp", XMPRating(5), ColourLabel(colour: .purple),
+            ["harbour", "winter", "Norway"]
+        ),
+        (
+            "photo-mechanic.xmp", XMPRating(4), ColourLabel(colour: .red),
+            ["fishing", "harbour", "dawn"]
+        ),
+        (
+            "rating-minus-one.xmp", .rated(.rejected), .clear,
+            ["soft focus", "reject candidate"]
+        ),
+    ]
 
 @Test func readsTheCommittedSidecars() throws {
     let packets = try XMPTestFixtures.committedPackets()
-    for (name, rating, label) in committedMarks {
+    for (name, rating, label, keywords) in committedMarks {
         let data = try #require(packets.first { $0.name == name }?.data, "\(name) is missing")
         let marks = try xmpCodec.read(data)
         #expect(marks.rating == rating, "\(name)")
         #expect(marks.label == label, "\(name)")
+        #expect(marks.keywords == keywords, "\(name)")
     }
 }
 
@@ -80,7 +95,7 @@ private let committedMarks: [(name: String, rating: XMPRating, label: ColourLabe
 
 @Test func imageIOReadsTheSameMarksAsTheCodec() throws {
     let packets = try XMPTestFixtures.committedPackets()
-    for (name, rating, label) in committedMarks where name != "empty-description.xmp" {
+    for (name, rating, label, keywords) in committedMarks where name != "empty-description.xmp" {
         let data = try #require(packets.first { $0.name == name }?.data, "\(name) is missing")
         let interop = try #require(
             XMPImageIOReader.marks(from: data), "\(name) was refused by ImageIO")
@@ -96,6 +111,7 @@ private let committedMarks: [(name: String, rating: XMPRating, label: ColourLabe
         } else {
             #expect(interop.label == label.rawValue, "\(name)")
         }
+        #expect(interop.keywords == keywords, "\(name)")
     }
 }
 

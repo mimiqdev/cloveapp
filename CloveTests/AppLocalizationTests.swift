@@ -37,6 +37,9 @@ struct AppLocalizationTests {
         #expect(AppLocalization.string("Open folder…", language: .traditionalChinese) == "開啟檔案夾…")
         #expect(AppLocalization.string("Folder name", language: .simplifiedChinese) == "文件夹名称")
         #expect(AppLocalization.string("Folder name", language: .traditionalChinese) == "檔案夾名稱")
+        #expect(AppLocalization.string("Keywords", language: .english) == "Keywords")
+        #expect(AppLocalization.string("Keywords", language: .simplifiedChinese) == "关键词")
+        #expect(AppLocalization.string("Keywords", language: .traditionalChinese) == "關鍵字")
     }
 
     @Test func pluralStringsFormatSingularAndPluralInAllSupportedLanguages() {

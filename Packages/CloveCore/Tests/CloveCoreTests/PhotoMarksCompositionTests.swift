@@ -93,4 +93,50 @@ struct PhotoMarksCompositionTests {
         #expect(marks.label.colour == nil)
         #expect(!marks.label.isClear)
     }
+
+    @Test func deduplicatesKeywordsPreservingCaseAndFirstSeenOrder() {
+        #expect(
+            PhotoKeywords.deduplicated(["", "Harbour", "harbour", "", "Harbour", "dawn", "dawn"])
+                == ["Harbour", "harbour", "dawn"])
+    }
+
+    @Test func aRawSetReadsKeywordsFromSidecarOnly() throws {
+        let marks = PhotoMarks(
+            stored: CloveStoredMarks(keywords: ["stored-ignored"]),
+            embedded: XMPMarks(keywords: ["embedded-ignored"]),
+            xmp: XMPMarks(keywords: ["sidecar", "sidecar", ""]),
+            persistence: try rawPersistence())
+        #expect(marks.keywords == ["sidecar"])
+    }
+
+    @Test func aStandaloneSetFallsBackToEmbeddedKeywordsAndRespectsExplicitClear() throws {
+        let persistence = try standalonePersistence()
+        let embedded = XMPMarks(
+            rating: XMPRating(4),
+            label: ColourLabel(colour: .blue),
+            keywords: ["fjord", "winter"])
+
+        let untouched = PhotoMarks(stored: nil, embedded: embedded, persistence: persistence)
+        #expect(untouched.rating.rawValue == 4)
+        #expect(untouched.label.colour == .blue)
+        #expect(untouched.keywords == ["fjord", "winter"])
+
+        let clearedInClove = PhotoMarks(
+            stored: CloveStoredMarks(keywords: []),
+            embedded: embedded,
+            persistence: persistence)
+        #expect(clearedInClove.rating.rawValue == 4)
+        #expect(clearedInClove.label.colour == .blue)
+        #expect(clearedInClove.keywords.isEmpty)
+
+        let editedInClove = PhotoMarks(
+            stored: CloveStoredMarks(keywords: ["dawn", "dawn"]),
+            embedded: embedded,
+            persistence: persistence)
+        #expect(editedInClove.keywords == ["dawn"])
+
+        let updated = editedInClove.applying(.keywords(["", "Norway", "Norway"]))
+        #expect(updated.keywords == ["Norway"])
+        #expect(updated.rating.rawValue == 4)
+    }
 }

@@ -232,6 +232,44 @@ struct MainActorPerformanceTests {
         #expect(retried[scanned.id] == PhotoMarks(rating: three))
     }
 
+    @Test func readMarksReadsEmbeddedStandaloneKeywordsAndHonorsExplicitCloveClear() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let jpegURL = directory.appendingPathComponent("standalone.jpg")
+        let worker = DispatchQueueMarkHelper()
+        try await worker.writeJPEGWithEmbeddedKeywords(
+            to: jpegURL, keywords: ["harbour", "dawn"], rating: 4, label: "Green")
+
+        let set = try PhotoSet(
+            folderID: FolderIdentity(rawValue: "standalone-embedded-marks-test"),
+            relativeFolderPath: "",
+            jpegURL: jpegURL)
+        let scanned = ScannedPhotoSet(photoSet: set, sidecar: .absent, imageFiles: [])
+
+        let fromEmbedded = try await worker.readMarks(
+            for: [scanned], storedMarks: [:], codec: XMPCodec())
+        #expect(
+            fromEmbedded[scanned.id]
+                == PhotoMarks(
+                    rating: try #require(Rating(rawValue: 4)),
+                    label: ColourLabel(colour: .green),
+                    keywords: ["harbour", "dawn"]))
+
+        let clearedInClove = try await worker.readMarks(
+            for: [scanned],
+            storedMarks: [scanned.id: CloveStoredMarks(keywords: [])],
+            codec: XMPCodec())
+        #expect(
+            clearedInClove[scanned.id]
+                == PhotoMarks(
+                    rating: try #require(Rating(rawValue: 4)),
+                    label: ColourLabel(colour: .green),
+                    keywords: []))
+    }
+
     @Test func folderSessionScanCoalescesBatchUpdatesWithoutIntermediatePendingPhotos() async throws
     {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -529,5 +567,41 @@ private final class StreamingOrderingLibrary: FolderLibrary {
         continuation.yield(.reads(times: [:], marks: confirmedMarks))
         return MarkBatchResult(
             id: MarkBatchID(), change: items.first?.change ?? MarkChange(), outcomes: outcomes)
+    }
+}
+
+private actor DispatchQueueMarkHelper {
+    private nonisolated let queue = DispatchSerialQueue(label: "CloveTests.MarkHelper")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
+    func writeJPEGWithEmbeddedKeywords(
+        to url: URL, keywords: [String], rating: Int, label: String
+    ) throws {
+        let context = try #require(
+            CGContext(
+                data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 16 * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let pixels = try #require(context.makeImage())
+        let packet = try XMPCodec().write(
+            XMPEdit(
+                rating: .set(try #require(Rating(rawValue: rating))),
+                label: .set(ColourLabel(rawValue: label)),
+                keywords: .set(keywords)),
+            into: nil)
+        let metadata = try #require(CGImageMetadataCreateFromXMPData(packet as CFData))
+        let destination = try #require(
+            CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImageAndMetadata(destination, pixels, metadata, nil)
+        #expect(CGImageDestinationFinalize(destination))
+    }
+
+    func readMarks(
+        for sets: [ScannedPhotoSet],
+        storedMarks: [PhotoIdentity: CloveStoredMarks],
+        codec: XMPCodec
+    ) throws -> [PhotoIdentity: PhotoMarks] {
+        try FolderLibrarySession.readMarks(
+            for: sets, storedMarks: storedMarks, codec: codec, trustAbsentSidecar: false)
     }
 }

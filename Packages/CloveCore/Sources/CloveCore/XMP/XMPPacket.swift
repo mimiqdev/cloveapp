@@ -50,9 +50,13 @@ struct XMPPacket {
 
     static let rdfDescriptionName = Name(namespace: rdfNamespace, localName: "Description")
     static let rdfRDFName = Name(namespace: rdfNamespace, localName: "RDF")
+    static let rdfBagName = Name(namespace: rdfNamespace, localName: "Bag")
+    static let rdfLiName = Name(namespace: rdfNamespace, localName: "li")
     static let rdfAboutName = Name(namespace: rdfNamespace, localName: "about")
     static let rdfNodeIDName = Name(namespace: rdfNamespace, localName: "nodeID")
     static let rdfIDName = Name(namespace: rdfNamespace, localName: "ID")
+    static let lightroomHierarchicalSubjectName = Name(
+        namespace: XMPProperty.lightroomNamespaceURI, localName: "hierarchicalSubject")
 
     let bytes: [UInt8]
     let elements: [Element]
@@ -142,12 +146,17 @@ struct XMPPacket {
 
     /// The owned property an expanded name names, if any.
     static func property(named name: Name) -> XMPProperty? {
-        guard name.namespace == XMPProperty.namespaceURI else { return nil }
-        switch name.localName {
-        case "Rating": return .rating
-        case "Label": return .label
-        default: return nil
+        if name.namespace == XMPProperty.namespaceURI {
+            switch name.localName {
+            case "Rating": return .rating
+            case "Label": return .label
+            default: return nil
+            }
         }
+        if name.namespace == XMPProperty.dublinCoreNamespaceURI && name.localName == "subject" {
+            return .keywords
+        }
+        return nil
     }
 }
 

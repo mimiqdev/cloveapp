@@ -62,6 +62,9 @@ public enum XMPCodecError: Error, Hashable, Sendable {
     /// XML 1.0 cannot carry this text, so no byte-preserving write can represent it.
     case unsupportedLabelText
 
+    /// XML 1.0 cannot carry this keyword text, so no byte-preserving write can represent it.
+    case unsupportedKeywordText
+
     /// The written packet did not read back as the requested marks; no bytes are returned.
     case writeVerificationFailed
 }
@@ -100,6 +103,8 @@ extension XMPCodecError: CustomStringConvertible {
             return "The XMP rating \(text.debugDescription) is not an integer."
         case .unsupportedLabelText:
             return "The label contains a character XML 1.0 cannot carry."
+        case .unsupportedKeywordText:
+            return "A keyword contains a character XML 1.0 cannot carry."
         case .writeVerificationFailed:
             return "The edited XMP packet did not read back as requested."
         }

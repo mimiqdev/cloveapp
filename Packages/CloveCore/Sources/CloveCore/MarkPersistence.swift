@@ -19,6 +19,8 @@ public struct MarkPersistence: Hashable, Sendable {
     public let rating: MarkDestination
     /// Where a new label is saved (G1 decisions 2 and 6).
     public let label: MarkDestination
+    /// Where new keywords are saved (G1 decisions 2 and 6).
+    public let keywords: MarkDestination
 
     /// Routes RAW marks to a resolved sidecar, or models a new extension-replacing destination.
     /// Existing spelling is reused when supplied; discovery remains the caller's job.
@@ -34,5 +36,6 @@ public struct MarkPersistence: Hashable, Sendable {
         }
         self.rating = metadata
         self.label = metadata
+        self.keywords = metadata
     }
 }

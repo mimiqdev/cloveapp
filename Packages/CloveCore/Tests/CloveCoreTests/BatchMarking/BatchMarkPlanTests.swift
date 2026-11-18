@@ -123,4 +123,57 @@ struct BatchMarkPlanTests {
         #expect(item.photo == BatchMarkFixtures.photo("a"))
         #expect(item.change == MarkChange(rating: .rejected))
     }
+
+    @Test func addRemoveAndSetKeywordsResolvePerPhotoAndSkipUnchangedPhotos() {
+        let photoA = GridPhoto(
+            id: BatchMarkFixtures.photo("a"),
+            fileName: "a.JPG",
+            time: .unavailable,
+            marks: PhotoMarks(keywords: ["sea", "dawn"]))
+        let photoB = GridPhoto(
+            id: BatchMarkFixtures.photo("b"),
+            fileName: "b.JPG",
+            time: .unavailable,
+            marks: PhotoMarks(keywords: ["dawn"]))
+        let photoC = GridPhoto(
+            id: BatchMarkFixtures.photo("c"),
+            fileName: "c.JPG",
+            time: .unavailable,
+            marks: PhotoMarks())
+
+        let addPlan = BatchMarkPlan(
+            action: .addKeywords(["", "sea", "winter"]),
+            photos: [photoA, photoB, photoC])
+        #expect(
+            addPlan.items == [
+                BatchMarkItem(
+                    photo: photoA.id, change: .keywords(["sea", "dawn", "winter"])),
+                BatchMarkItem(
+                    photo: photoB.id, change: .keywords(["dawn", "sea", "winter"])),
+                BatchMarkItem(
+                    photo: photoC.id, change: .keywords(["sea", "winter"])),
+            ])
+
+        let addAlreadyPresent = BatchMarkPlan(
+            action: .addKeywords(["dawn"]), photos: [photoA, photoB])
+        #expect(addAlreadyPresent.isEmpty)
+
+        let removePlan = BatchMarkPlan(
+            action: .removeKeywords(["dawn", "missing"]),
+            photos: [photoA, photoB, photoC])
+        #expect(
+            removePlan.items == [
+                BatchMarkItem(photo: photoA.id, change: .keywords(["sea"])),
+                BatchMarkItem(photo: photoB.id, change: .keywords([])),
+            ])
+
+        let setPlan = BatchMarkPlan(
+            action: .setKeywords(["dawn", "dawn"]),
+            photos: [photoA, photoB, photoC])
+        #expect(
+            setPlan.items == [
+                BatchMarkItem(photo: photoA.id, change: .keywords(["dawn"])),
+                BatchMarkItem(photo: photoC.id, change: .keywords(["dawn"])),
+            ])
+    }
 }

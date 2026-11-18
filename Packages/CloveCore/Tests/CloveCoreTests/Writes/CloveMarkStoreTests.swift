@@ -231,6 +231,67 @@ private func makeStore(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(try folder.stagingNames(in: "store").isEmpty)
 }
 
+@Test func storedKeywordsDistinguishExplicitClearFromUntouchedAndKeepV1JSONCompatible()
+    async throws
+{
+    let folder = try WriteTestFolder()
+    defer { folder.remove() }
+    let store = makeStore(folder, WriteFileSystemDouble())
+    let identity = try makeIdentity()
+
+    // Legacy version-1 JSON without a `keywords` key decodes as `keywords == nil`.
+    try FileManager.default.createDirectory(
+        at: folder.file("store"), withIntermediateDirectories: true)
+    let file = await store.fileURL(for: identity.folderID)
+    let legacyJSON = """
+        {"version":1,"folderID":"\(identity.folderID.rawValue)","photos":\
+        [{"relativeFolderPath":"\(identity.relativeFolderPath)","stem":"\(identity.stem)",\
+        "rating":4,"label":"Green"}]}
+        """
+    try Data(legacyJSON.utf8).write(to: file)
+
+    let legacyStored = try #require(try await store.marks(for: identity))
+    #expect(legacyStored.rating?.rawValue == 4)
+    #expect(legacyStored.label == green)
+    #expect(legacyStored.keywords == nil)
+
+    // Setting keywords preserves order and drops empties; clearing keeps `[]` non-nil.
+    try await store.apply(
+        CloveMarkChange(keywords: ["Harbour", "", "harbour", "Harbour"]), to: identity)
+    #expect(try await store.marks(for: identity)?.keywords == ["Harbour", "harbour"])
+
+    try await store.apply(
+        CloveMarkChange(rating: .unrated, label: .clear, keywords: []), to: identity)
+    let cleared = try #require(try await store.marks(for: identity))
+    #expect(cleared.rating == nil)
+    #expect(cleared.label == nil)
+    #expect(cleared.keywords == [])
+}
+
+@Test func clearRejectAndRekeyPreserveStoredKeywords() async throws {
+    let folder = try WriteTestFolder()
+    defer { folder.remove() }
+    let store = makeStore(folder, WriteFileSystemDouble())
+    let source = try makeIdentity("rekey")
+    let destination = PhotoIdentity(
+        folderID: source.folderID, relativeFolderPath: "Sub", stem: "RENAMED")
+
+    try await store.apply(
+        CloveMarkChange(rating: .rejected, label: green, keywords: ["sea", "dawn"]),
+        to: source)
+    #expect(try await store.clearReject(for: source))
+    let afterReject = try #require(try await store.marks(for: source))
+    #expect(afterReject.rating == nil)
+    #expect(afterReject.label == green)
+    #expect(afterReject.keywords == ["sea", "dawn"])
+
+    try await store.rekey(from: source, to: destination)
+    #expect(try await store.marks(for: source) == nil)
+    let moved = try #require(try await store.marks(for: destination))
+    #expect(moved.label == green)
+    #expect(moved.keywords == ["sea", "dawn"])
+}
+
 /// A photo identity for a test folder.
 private func makeIdentity(_ name: String = "folder") throws -> PhotoIdentity {
     PhotoIdentity(

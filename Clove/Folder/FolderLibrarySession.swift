@@ -371,9 +371,7 @@ final class FolderLibrarySession: FolderLibrary {
         let codec = codec
         let marks = try await session.withAdmittedWork {
             let stored = try await stores.writes.storedMarks(for: session.folder.id)
-            return try await Task.detached {
-                try Self.readMarks(for: sets, storedMarks: stored, codec: codec)
-            }.value
+            return try await Self.readMarksOffPool(for: sets, storedMarks: stored, codec: codec)
         }
         for (photo, marks) in marks { store.setMarks(marks, for: photo) }
         publish(.reads(times: [:], marks: marks))
@@ -905,15 +903,10 @@ final class FolderLibrarySession: FolderLibrary {
                         // I4 reads the primary file of each set off the main actor; a RAW set's
                         // capture time comes from the RAW (G1 decision 1, I4).
                         let reads = await metadata.read(urls: sets.map { $0.photoSet.primary.url })
-                        var marks: [PhotoIdentity: PhotoMarks] = [:]
-                        for set in sets {
-                            if let read = try? Self.readMarks(
-                                for: [set], storedMarks: storedMarks, codec: codec,
-                                trustAbsentSidecar: true)
-                            {
-                                marks.merge(read) { _, new in new }
-                            }
-                        }
+                        let marks =
+                            (try? await Self.readMarksOffPool(
+                                for: sets, storedMarks: storedMarks, codec: codec,
+                                trustAbsentSidecar: true)) ?? [:]
                         await self.applyReads(
                             reads, marks: marks, sets: sets, generation: generation)
                     }
@@ -1057,13 +1050,39 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
-    /// Reads each RAW set's sidecar through C3 and combines it with Clove's stored marks
-    /// (PRD P0-05, P0-07; G1 decisions 2, 5–6).
+    private nonisolated static let markReadQueue = DispatchQueue(
+        label: "Clove.FolderLibrarySession.MarkRead", qos: .userInitiated, attributes: .concurrent)
+
+    /// Runs ``readMarks(for:storedMarks:codec:trustAbsentSidecar:)`` on a Dispatch queue so ImageIO
+    /// calls for standalone photos stay off Swift concurrency's cooperative thread pool.
+    private nonisolated static func readMarksOffPool(
+        for sets: [ScannedPhotoSet],
+        storedMarks: [PhotoIdentity: CloveStoredMarks],
+        codec: XMPCodec,
+        trustAbsentSidecar: Bool = false
+    ) async throws -> [PhotoIdentity: PhotoMarks] {
+        try await withCheckedThrowingContinuation { continuation in
+            markReadQueue.async {
+                do {
+                    continuation.resume(
+                        returning: try readMarks(
+                            for: sets, storedMarks: storedMarks, codec: codec,
+                            trustAbsentSidecar: trustAbsentSidecar))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Reads each RAW set's sidecar through C3, reads embedded metadata for standalone JPEGs/HIFs,
+    /// and combines them with Clove's stored marks (PRD P0-05, P0-07; G1 decisions 2, 5–6).
     ///
-    /// Only a RAW set reads a packet: a standalone JPEG or HIF is never given a sidecar, so a
-    /// stray packet beside it cannot override the marks Clove stores for it. A packet C3 refuses
-    /// contributes nothing and is not repaired, so the photo keeps whatever Clove stores and U7
-    /// can report the refusal with its own copy.
+    /// Only a RAW set reads a sidecar packet: a standalone JPEG or HIF is never given a sidecar, so
+    /// a stray packet beside it cannot override the photo's marks. Standalone files fall back to
+    /// their embedded XMP/IPTC metadata via ``EmbeddedPhotoMarksReader`` when Clove has not stored
+    /// a field. A packet C3 refuses contributes nothing and is not repaired, so the photo keeps
+    /// whatever Clove stores and U7 can report the refusal with its own copy.
     nonisolated static func readMarks(
         for sets: [ScannedPhotoSet],
         storedMarks: [PhotoIdentity: CloveStoredMarks],
@@ -1073,30 +1092,35 @@ final class FolderLibrarySession: FolderLibrary {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
         for set in sets {
             var packet: XMPMarks?
-            let sidecar: URL?
-            switch set.sidecar {
-            case .resolved(let url): sidecar = url
-            case .absent:
-                if trustAbsentSidecar {
-                    sidecar = nil
-                } else {
-                    switch set.photoSet.markPersistence.rating {
-                    case .xmpSidecar(let url): sidecar = url
-                    case .cloveStorage: sidecar = nil
+            var embedded: XMPMarks?
+            if set.photoSet.primary.format == .raw {
+                let sidecar: URL?
+                switch set.sidecar {
+                case .resolved(let url): sidecar = url
+                case .absent:
+                    if trustAbsentSidecar {
+                        sidecar = nil
+                    } else {
+                        switch set.photoSet.markPersistence.rating {
+                        case .xmpSidecar(let url): sidecar = url
+                        case .cloveStorage: sidecar = nil
+                        }
+                    }
+                case .ambiguous: sidecar = nil
+                }
+                if let sidecar {
+                    do {
+                        let data = try Data(contentsOf: sidecar)
+                        packet = try? codec.read(data)
+                    } catch CocoaError.fileReadNoSuchFile {
+                        // A missing sidecar has no marks; other read failures must not erase them.
                     }
                 }
-            case .ambiguous: sidecar = nil
-            }
-            if set.photoSet.primary.format == .raw, let sidecar {
-                do {
-                    let data = try Data(contentsOf: sidecar)
-                    packet = try? codec.read(data)
-                } catch CocoaError.fileReadNoSuchFile {
-                    // A missing sidecar has no marks; other read failures must not erase them.
-                }
+            } else {
+                embedded = EmbeddedPhotoMarksReader.read(at: set.photoSet.primary.url)
             }
             marks[set.id] = PhotoMarks(
-                stored: storedMarks[set.id], xmp: packet,
+                stored: storedMarks[set.id], embedded: embedded, xmp: packet,
                 persistence: set.photoSet.markPersistence)
         }
         return marks

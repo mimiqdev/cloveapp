@@ -136,4 +136,37 @@ struct MarkUndoSinglePhotoTests {
         #expect(result.photoToReturnTo == marked.id)
         #expect(result.photoToReturnTo != next.id)
     }
+
+    @Test func aKeywordUndoRestoresPreviousKeywordsAndRespectsNewerMarks() async throws {
+        let fixture = try UndoTestFixture()
+        defer { fixture.remove() }
+        let set = try #require(fixture.photoSets.first)
+        await undoSeedSidecar(
+            PhotoMarks(rating: undoRating(4), label: undoGreen, keywords: ["harbour"]),
+            at: fixture.sidecar())
+
+        let status = await fixture.record(
+            .keywords(["harbour", "winter", "harbour", ""]), on: set.id)
+        #expect(status?.state == .savedInSidecar)
+        #expect(await fixture.history.nextUndoActionName == "Keywords")
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).keywords == ["harbour", "winter"])
+
+        let undoResult = try #require(await undoStep(fixture))
+        #expect(undoResult.actionName == "Keywords")
+        #expect(undoResult.outcomes[0].leftAlone.isEmpty)
+        #expect(
+            try undoSidecarMarks(at: fixture.sidecar())
+                == XMPMarks(rating: .rated(undoRating(4)), label: undoGreen, keywords: ["harbour"]))
+
+        _ = try #require(await undoRedoStep(fixture))
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).keywords == ["harbour", "winter"])
+
+        // An external keyword edit is never overwritten on undo.
+        _ = await fixture.queue.apply(.keywords(["external"]), to: set)
+        let skippedUndo = try #require(await undoStep(fixture))
+        #expect(
+            skippedUndo.outcomes[0].leftAlone
+                == [MarkUndoLeftAloneField(field: .keywords, reason: .newerMark)])
+        #expect(try undoSidecarMarks(at: fixture.sidecar()).keywords == ["external"])
+    }
 }

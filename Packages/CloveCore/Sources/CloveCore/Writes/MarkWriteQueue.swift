@@ -106,10 +106,14 @@ public actor MarkWriteQueue {
     }
 
     private func result(_ request: Request, failure: MarkWriteFailure?) -> MarkChangeStatus {
-        let destination =
-            request.change.rating != nil
-            ? request.set.photoSet.markPersistence.rating
-            : request.set.photoSet.markPersistence.label
+        let destination: MarkDestination
+        if request.change.rating != nil {
+            destination = request.set.photoSet.markPersistence.rating
+        } else if request.change.label != nil {
+            destination = request.set.photoSet.markPersistence.label
+        } else {
+            destination = request.set.photoSet.markPersistence.keywords
+        }
         let state: MarkChangeState
         if let failure {
             state = .failed(failure)
@@ -154,6 +158,17 @@ public actor MarkWriteQueue {
                 usesSidecar = true
             case .cloveStorage:
                 stored.label = label
+                usesCloveStorage = true
+            }
+        }
+        if let keywords = change.keywords {
+            switch persistence.keywords {
+            case .xmpSidecar(let url):
+                edit.keywords = .set(keywords)
+                proposedSidecar = proposedSidecar ?? url
+                usesSidecar = true
+            case .cloveStorage:
+                stored.keywords = keywords
                 usesCloveStorage = true
             }
         }

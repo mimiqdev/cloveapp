@@ -11,6 +11,8 @@ extension XMPCodec {
     static func newPacket(for edit: XMPEdit) throws -> Data {
         var propertyLines: [String] = []
         var expected = XMPMarks()
+        var namespaces = "xmlns:xmp=\"\(XMPProperty.namespaceURI)\""
+
         if case .set(let rating) = edit.rating {
             propertyLines.append("   <xmp:Rating>\(rating.rawValue)</xmp:Rating>")
             expected.rating = .rated(rating)
@@ -20,6 +22,24 @@ extension XMPCodec {
             propertyLines.append("   <xmp:Label>\(escaped)</xmp:Label>")
             expected.label = label
         }
+        if case .set(let rawKeywords) = edit.keywords {
+            for keyword in rawKeywords {
+                try XMPText.validate(keyword, error: .unsupportedKeywordText)
+            }
+            let keywords = PhotoKeywords.deduplicated(rawKeywords)
+            if !keywords.isEmpty {
+                namespaces += " xmlns:dc=\"\(XMPProperty.dublinCoreNamespaceURI)\""
+                propertyLines.append("   <dc:subject>")
+                propertyLines.append("    <rdf:Bag>")
+                for keyword in keywords {
+                    let escaped = try XMPText.elementText(keyword, error: .unsupportedKeywordText)
+                    propertyLines.append("     <rdf:li>\(escaped)</rdf:li>")
+                }
+                propertyLines.append("    </rdf:Bag>")
+                propertyLines.append("   </dc:subject>")
+                expected.keywords = keywords
+            }
+        }
 
         var lines = [
             "<?xpacket begin=\"\u{FEFF}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>",
@@ -28,10 +48,10 @@ extension XMPCodec {
         ]
         if propertyLines.isEmpty {
             lines.append(
-                "  <rdf:Description rdf:about=\"\" xmlns:xmp=\"\(XMPProperty.namespaceURI)\"/>")
+                "  <rdf:Description rdf:about=\"\" \(namespaces)/>")
         } else {
             lines.append(
-                "  <rdf:Description rdf:about=\"\" xmlns:xmp=\"\(XMPProperty.namespaceURI)\">")
+                "  <rdf:Description rdf:about=\"\" \(namespaces)>")
             lines.append(contentsOf: propertyLines)
             lines.append("  </rdf:Description>")
         }

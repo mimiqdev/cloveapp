@@ -16,6 +16,7 @@ let xmpCodec = XMPCodec()
     let marks = try xmpCodec.read(packet)
     #expect(marks.rating == .rated(try #require(Rating(rawValue: 3))))
     #expect(marks.label == ColourLabel(colour: .green))
+    #expect(marks.keywords == ["keep me"])
 }
 
 @Test func readsMarksInElementForm() throws {

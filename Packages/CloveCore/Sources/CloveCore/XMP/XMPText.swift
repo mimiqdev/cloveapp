@@ -8,8 +8,10 @@ import Foundation
 /// so escaping never normalizes or trims the value.
 enum XMPText {
     /// Escapes text for an element body such as `<xmp:Label>Green</xmp:Label>`.
-    static func elementText(_ text: String) throws -> String {
-        try validate(text)
+    static func elementText(
+        _ text: String, error: XMPCodecError = .unsupportedLabelText
+    ) throws -> String {
+        try validate(text, error: error)
         var escaped = String()
         escaped.reserveCapacity(text.utf8.count)
         for character in text {
@@ -30,8 +32,10 @@ enum XMPText {
     ///
     /// Character references are used for tab, newline and carriage return because XML
     /// attribute-value normalization would turn the literal characters into spaces.
-    static func attributeValue(_ text: String) throws -> String {
-        try validate(text)
+    static func attributeValue(
+        _ text: String, error: XMPCodecError = .unsupportedLabelText
+    ) throws -> String {
+        try validate(text, error: error)
         var escaped = String()
         escaped.reserveCapacity(text.utf8.count)
         for character in text {
@@ -55,7 +59,9 @@ enum XMPText {
     /// Swift strings cannot hold unpaired surrogates, so only the control characters,
     /// U+FFFE and U+FFFF remain. Writing them would emit a packet other parsers refuse,
     /// which would break the read-back guarantee in PRD P0-08.
-    static func validate(_ text: String) throws {
+    static func validate(
+        _ text: String, error: XMPCodecError = .unsupportedLabelText
+    ) throws {
         for scalar in text.unicodeScalars {
             switch scalar.value {
             case 0x09, 0x0A, 0x0D:
@@ -63,7 +69,7 @@ enum XMPText {
             case 0x20...0xD7FF, 0xE000...0xFFFD, 0x10000...0x10FFFF:
                 continue
             default:
-                throw XMPCodecError.unsupportedLabelText
+                throw error
             }
         }
     }

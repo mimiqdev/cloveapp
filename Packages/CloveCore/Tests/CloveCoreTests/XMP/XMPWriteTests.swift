@@ -238,17 +238,22 @@ func roundTripKeepsEveryUnrelatedByte(fixture: String) throws {
     let original = try Data(
         contentsOf: XMPTestFixtures.repositoryRoot.appendingPathComponent("fixtures/xmp/\(fixture)")
     )
+    let before = try xmpCodec.read(original)
     let output = try xmpCodec.write(
         XMPEdit(rating: .set(try #require(Rating(rawValue: 3))), label: .set(green)),
         into: original)
 
     #expect(
         try xmpCodec.read(output)
-            == XMPMarks(rating: .rated(try #require(Rating(rawValue: 3))), label: green))
+            == XMPMarks(
+                rating: .rated(try #require(Rating(rawValue: 3))),
+                label: green,
+                keywords: before.keywords))
     let interop = try #require(
         XMPImageIOReader.marks(from: output), "\(fixture) was refused by ImageIO")
     #expect(interop.rating == "3")
     #expect(interop.label == "Green")
+    #expect(interop.keywords == before.keywords)
     #expect(
         try XMPPreservation.outsideOwnedMarks(original) == XMPPreservation.outsideOwnedMarks(output)
     )
