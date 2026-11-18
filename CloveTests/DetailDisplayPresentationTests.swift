@@ -171,11 +171,13 @@ struct DetailDisplayPresentationTests {
         browsing.openFolder()
         let photo = browsing.photos[2]
         browsing.openPhoto(photo.id)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
         window.rootViewController = UIHostingController(
             rootView: DetailScreen(browsing: browsing, images: source)
-                .environment(SettingsStore.sample))
+                .environment(store))
         window.makeKeyAndVisible()
         defer {
             window.isHidden = true
@@ -739,13 +741,15 @@ struct DetailDisplayPresentationTests {
             finishingPlan(for: group, currentPhoto: group.members[0], in: browsing))
         #expect(plan.availability == .available)
 
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(
             origin: .zero,
             size: duo ? CGSize(width: 466, height: 678) : CGSize(width: 402, height: 874))
         window.rootViewController = UIHostingController(
             rootView: detailHost(browsing: browsing, images: source, duo: duo)
-                .environment(SettingsStore.sample)
+                .environment(store)
                 .environment(\.cloveTheme, theme)
                 .environment(\.usesSystemBrowsingToolbar, duo)
                 .environment(\.isDuoCover, duo))
@@ -1609,6 +1613,7 @@ struct DetailDisplayPresentationTests {
         guard #available(iOS 27.1, *) else { return }
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let store = SettingsStore.sample
+        store.markGestureGuideSeen()
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
         let target = try #require(browsing.photos.first { $0.id.stem == "mmq02678" })
@@ -3225,6 +3230,11 @@ private struct TestDuoDetailHost: View {
     let browsing: BrowsingModel
     let images: any DetailImageSource
     @Bindable var presentation: TestPresentationBox
+    @State private var settingsStore: SettingsStore = {
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        return store
+    }()
 
     var body: some View {
         NavigationStack {
@@ -3237,7 +3247,7 @@ private struct TestDuoDetailHost: View {
                     bottom: AnyView(EmptyView()),
                     showsGrid: true))
         }
-        .environment(SettingsStore.sample)
+        .environment(settingsStore)
         .environment(\.isDuoExpanded, true)
         .environment(\.usesSystemBrowsingToolbar, true)
     }
@@ -3249,6 +3259,11 @@ private struct TestDetailPresentationHost: View {
     @Bindable var presentation: TestPresentationBox
     let usesSystemToolbar: Bool
     var idiom: UIUserInterfaceIdiom = .pad
+    @State private var settingsStore: SettingsStore = {
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        return store
+    }()
 
     var body: some View {
         Group {
@@ -3263,7 +3278,7 @@ private struct TestDetailPresentationHost: View {
                     browsing: browsing, images: images, presentation: $presentation.value)
             }
         }
-        .environment(SettingsStore.sample)
+        .environment(settingsStore)
         .environment(\.cloveUserInterfaceIdiom, idiom)
     }
 }

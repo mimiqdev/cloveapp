@@ -127,6 +127,8 @@ struct CullingAndMarkingSettingsSections: View {
     @Environment(\.appLanguage) private var language
     let showsCategoryTitle: Bool
 
+    @State private var showsGestureGuide = false
+
     private static let ratingLevels = (1...5).compactMap { Rating(rawValue: $0) }
 
     var body: some View {
@@ -149,6 +151,27 @@ struct CullingAndMarkingSettingsSections: View {
             .accessibilityLabel(AppLocalization.string("While zoomed", language: language))
             .accessibilityValue(zoomedGesturesTitle)
             .accessibilityIdentifier("clove.settings.zoomedGestures")
+
+            Button {
+                showsGestureGuide = true
+            } label: {
+                HStack(spacing: 12) {
+                    Text(AppLocalization.string("Gesture guide", language: language))
+                        .foregroundStyle(Color.clove.text.primary)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.clove.text.secondary)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(AppLocalization.string("Gesture guide", language: language))
+            .accessibilityIdentifier("clove.settings.gestureGuide")
+            .sheet(isPresented: $showsGestureGuide) {
+                DetailGestureGuideSheet()
+            }
         } header: {
             if showsCategoryTitle {
                 VStack(alignment: .leading, spacing: 12) {
