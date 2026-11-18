@@ -1185,7 +1185,7 @@ struct DetailDisplayPresentationTests {
     }
 
     @Test func anchorSymmetricSwipeWorksConsistentlyAtFitAndZoomedTwoFinger() throws {
-        // Fit single-finger drag: immediate preview from first movement, unrated down 30pt -> Reject.
+        // Fit single-finger drag: immediate preview from first movement at H = 650 (rejectTravel = 52pt).
         do {
             let preview = DetailZoomContainerView(
                 frame: CGRect(x: 0, y: 0, width: 390, height: 650))
@@ -1204,8 +1204,8 @@ struct DetailDisplayPresentationTests {
             _ = preview.gestureRecognizer(
                 pan, shouldReceive: DetailMutableTouch(view: preview, location: start))
             let testPan = DetailTestPan()
-            testPan.locationPoint = CGPoint(x: 195, y: 430)
-            testPan.travel = CGPoint(x: 0, y: 30)
+            testPan.locationPoint = CGPoint(x: 195, y: 455)
+            testPan.travel = CGPoint(x: 0, y: 55)
             try #require(preview.gestureRecognizerShouldBegin(testPan))
             preview.handleMarkingPan(testPan)
             #expect(feedback.rating == .rejected)
@@ -1214,7 +1214,7 @@ struct DetailDisplayPresentationTests {
             #expect(commits == [.rejected])
         }
 
-        // Zoomed two-finger drag in `.pan` from 3★: down 30pt -> Clear, down 75pt -> Reject, up 30pt -> 4★, origin -> 3★.
+        // Zoomed two-finger drag in `.pan` from 3★ at H = 650 (clear = 29.25pt, reject = 81.25pt, upEntry = 19.5pt).
         do {
             let three = try #require(Rating(rawValue: 3))
             let preview = DetailZoomContainerView(
@@ -1238,15 +1238,15 @@ struct DetailDisplayPresentationTests {
             let event = UIEvent()
             twoFinger.touchesBegan([t1, t2], with: event)
 
-            t1.locationPoint = CGPoint(x: 150, y: 430)
-            t2.locationPoint = CGPoint(x: 230, y: 430)
+            t1.locationPoint = CGPoint(x: 150, y: 432)
+            t2.locationPoint = CGPoint(x: 230, y: 432)
             twoFinger.touchesMoved([t1, t2], with: event)
             #expect(twoFinger.state == .began)
             preview.handleTwoFingerMarkingSwipe(twoFinger)
             #expect(feedback.rating == .unrated)
 
-            t1.locationPoint = CGPoint(x: 150, y: 475)
-            t2.locationPoint = CGPoint(x: 230, y: 475)
+            t1.locationPoint = CGPoint(x: 150, y: 485)
+            t2.locationPoint = CGPoint(x: 230, y: 485)
             twoFinger.touchesMoved([t1, t2], with: event)
             preview.handleTwoFingerMarkingSwipe(twoFinger)
             #expect(feedback.rating == .rejected)
@@ -1379,7 +1379,8 @@ struct DetailDisplayPresentationTests {
         try await waitFor { preview.isZoomed && preview.twoFingerMarkingSwipeIsEnabled }
 
         // Zoomed two-finger rating swipe commits rating, auto-advances, and returns to fit.
-        let twoFinger = preview.twoFingerSwipeRecognizer
+        try #require(preview.gestureRecognizerShouldBegin(preview.twoFingerSwipeRecognizer))
+        let twoFinger = DetailTestTwoFingerSwipe()
         let t1 = DetailMutableTouch(view: preview, location: CGPoint(x: 140, y: 420))
         let t2 = DetailMutableTouch(view: preview, location: CGPoint(x: 240, y: 420))
         let event = UIEvent()
@@ -2329,7 +2330,8 @@ struct DetailDisplayPresentationTests {
             window.frame = scene.coordinateSpace.bounds
             window.layoutIfNeeded()
 
-            let twoFinger = preview.twoFingerSwipeRecognizer
+            try #require(preview.gestureRecognizerShouldBegin(preview.twoFingerSwipeRecognizer))
+            let twoFinger = DetailTestTwoFingerSwipe()
             let t1 = DetailMutableTouch(view: preview, location: CGPoint(x: 140, y: 420))
             let t2 = DetailMutableTouch(view: preview, location: CGPoint(x: 240, y: 420))
             let event = UIEvent()
@@ -2882,6 +2884,16 @@ private final class DetailTrackedTouchPan: UIPanGestureRecognizer {
         locationPoint ?? super.location(in: view)
     }
     override func velocity(in view: UIView?) -> CGPoint { velocityPoint }
+}
+
+@MainActor
+private final class DetailTestTwoFingerSwipe: TwoFingerMarkingSwipeGestureRecognizer {
+    var sampleState: UIGestureRecognizer.State = .possible
+
+    override var state: UIGestureRecognizer.State {
+        get { sampleState }
+        set { sampleState = newValue }
+    }
 }
 
 @MainActor

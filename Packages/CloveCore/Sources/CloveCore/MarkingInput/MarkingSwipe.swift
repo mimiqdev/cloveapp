@@ -1,11 +1,10 @@
 import Foundation
 
-/// Starting values for continuous marking, in points on every device.
-/// Tune these on an iPhone; release has no momentum and holding never changes the stage.
+/// Starting values for continuous marking, scaled proportionally to stage height and clamped to
+/// physical min/max bounds on every device. Release has no momentum and holding never changes the
+/// stage.
 public struct MarkingSwipeRules: Hashable, Sendable {
-    public static let deadZone: Double = 30
-    public static let stepDistance: Double = 45
-    public static let reversalHysteresis: Double = 8
+    public static let referenceContainerHeight: Double = 760
     public static let standard = MarkingSwipeRules()
 
     /// The initial axis split only; reversing vertically never changes the claimed axis.
@@ -13,6 +12,13 @@ public struct MarkingSwipeRules: Hashable, Sendable {
 
     public init(verticalToHorizontalRatio: Double = 1) {
         self.verticalToHorizontalRatio = verticalToHorizontalRatio
+    }
+
+    public static func geometry(
+        containerHeight: Double = referenceContainerHeight,
+        enabledRatings: EnabledRatings = .all
+    ) -> MarkingSwipeGeometry {
+        MarkingSwipeGeometry(containerHeight: containerHeight, enabledRatings: enabledRatings)
     }
 
     public func beginsSwipe(
@@ -25,6 +31,44 @@ public struct MarkingSwipeRules: Hashable, Sendable {
         }
         return abs(verticalTravel) > 0
             && abs(verticalTravel) >= abs(horizontalTravel) * verticalToHorizontalRatio
+    }
+}
+
+/// Proportional vertical-drag bucket geometry computed from the Detail stage height `H` and
+/// enabled rating count `K`.
+public struct MarkingSwipeGeometry: Hashable, Sendable {
+    public let containerHeight: Double
+    public let enabledCount: Int
+    public let upEntry: Double
+    public let upSpan: Double
+    public let upStep: Double
+    public let clearTravel: Double
+    public let rejectTravel: Double
+    public let reversalHysteresis: Double
+
+    public init(
+        containerHeight: Double = MarkingSwipeRules.referenceContainerHeight,
+        enabledRatings: EnabledRatings = .all
+    ) {
+        let resolvedHeight =
+            containerHeight.isFinite && containerHeight > 0
+            ? containerHeight : MarkingSwipeRules.referenceContainerHeight
+        let count = max(enabledRatings.levels.count, 1)
+        let upEntry = min(max(0.03 * resolvedHeight, 18), 26)
+        let upSpan = min(max(0.18 * resolvedHeight, 88), 148)
+        let upStep = count >= 2 ? (upSpan - upEntry) / Double(count - 1) : upEntry
+        let clearTravel = min(max(0.045 * resolvedHeight, 26), 40)
+        let rejectTravel = min(max(0.08 * resolvedHeight, 44), 68)
+        let reversalHysteresis = min(max(0.22 * upStep, 4), 8)
+
+        self.containerHeight = resolvedHeight
+        self.enabledCount = count
+        self.upEntry = upEntry
+        self.upSpan = upSpan
+        self.upStep = upStep
+        self.clearTravel = clearTravel
+        self.rejectTravel = rejectTravel
+        self.reversalHysteresis = reversalHysteresis
     }
 }
 
@@ -119,12 +163,13 @@ public struct MarkingStageCrossing: Hashable, Sendable {
 ///
 /// The session uses an anchor-symmetric ladder around `startingRating`:
 /// `sortedUnique([-1, 0, startingRating] ∪ { enabledStars > startingRating })`.
-/// Preview and semantic haptics respond purely to position from the first movement, with uniform
-/// buckets, reversal hysteresis, and endpoint overshoot clamping. The session only previews; its
-/// owner commits `rating` once at release or discards on cancel.
+/// Preview and semantic haptics respond purely to position from the first movement, with
+/// proportional stage-height buckets, reversal hysteresis, and endpoint overshoot clamping. The
+/// session only previews; its owner commits `rating` once at release or discards on cancel.
 public struct MarkingSwipeSession: Hashable, Sendable {
     public let startingRating: Rating
     public let enabledRatings: EnabledRatings
+    public let geometry: MarkingSwipeGeometry
     public private(set) var rating: Rating
 
     private let ladder: [Rating]
@@ -134,9 +179,16 @@ public struct MarkingSwipeSession: Hashable, Sendable {
     private var stage: Int
     private var originOffset: Double = 0
 
-    public init(startingRating: Rating, enabledRatings: EnabledRatings = .all) {
+    public init(
+        startingRating: Rating,
+        enabledRatings: EnabledRatings = .all,
+        containerHeight: Double = MarkingSwipeRules.referenceContainerHeight
+    ) {
+        let geometry = MarkingSwipeGeometry(
+            containerHeight: containerHeight, enabledRatings: enabledRatings)
         self.startingRating = startingRating
         self.enabledRatings = enabledRatings
+        self.geometry = geometry
         self.rating = startingRating
 
         let higherEnabled = enabledRatings.levels.filter { $0 > startingRating }
@@ -147,12 +199,21 @@ public struct MarkingSwipeSession: Hashable, Sendable {
         self.anchor = anchorIndex
         self.stage = anchorIndex
 
-        let minRelative = -anchorIndex
-        let maxRelative = (sortedLadder.count - 1) - anchorIndex
-        self.minTravel =
-            -(MarkingSwipeRules.deadZone + Double(-minRelative) * MarkingSwipeRules.stepDistance)
-        self.maxTravel =
-            MarkingSwipeRules.deadZone + Double(maxRelative) * MarkingSwipeRules.stepDistance
+        if anchorIndex < sortedLadder.count - 1 {
+            let highestUpBoundary =
+                geometry.upEntry + Double(sortedLadder.count - 2 - anchorIndex) * geometry.upStep
+            self.maxTravel = highestUpBoundary + geometry.upStep
+        } else {
+            self.maxTravel = geometry.upEntry
+        }
+
+        if anchorIndex > 0 {
+            let lowestDownBoundary = Self.downwardBoundary(
+                entering: 0, ladder: sortedLadder, anchor: anchorIndex, geometry: geometry)
+            self.minTravel = lowestDownBoundary - geometry.clearTravel
+        } else {
+            self.minTravel = -geometry.clearTravel
+        }
     }
 
     /// Updates the live preview rating for `travel` (up positive) and returns any crossed stages.
@@ -169,14 +230,14 @@ public struct MarkingSwipeSession: Hashable, Sendable {
 
         var crossings: [MarkingStageCrossing] = []
         while stage + 1 < ladder.count,
-            effectiveTravel >= Self.upThreshold(fromRelativeStage: stage - anchor)
+            effectiveTravel >= upThreshold(fromStage: stage)
         {
             stage += 1
             let value = ladder[stage]
             crossings.append(MarkingStageCrossing(rating: value, haptic: Self.haptic(for: value)))
         }
         while stage - 1 >= 0,
-            effectiveTravel <= Self.downThreshold(fromRelativeStage: stage - anchor)
+            effectiveTravel <= downThreshold(fromStage: stage)
         {
             stage -= 1
             let value = ladder[stage]
@@ -192,24 +253,34 @@ public struct MarkingSwipeSession: Hashable, Sendable {
         update(travel: travel)
     }
 
-    private static func upThreshold(fromRelativeStage relative: Int) -> Double {
-        if relative >= 0 {
-            return MarkingSwipeRules.deadZone + Double(relative) * MarkingSwipeRules.stepDistance
+    private func upThreshold(fromStage currentStage: Int) -> Double {
+        if currentStage >= anchor {
+            return geometry.upEntry + Double(currentStage - anchor) * geometry.upStep
         }
-        return
-            -(MarkingSwipeRules.deadZone
-            + Double(-relative - 1) * MarkingSwipeRules.stepDistance)
-            + MarkingSwipeRules.reversalHysteresis
+        return Self.downwardBoundary(
+            entering: currentStage, ladder: ladder, anchor: anchor, geometry: geometry)
+            + geometry.reversalHysteresis
     }
 
-    private static func downThreshold(fromRelativeStage relative: Int) -> Double {
-        if relative <= 0 {
-            return
-                -(MarkingSwipeRules.deadZone
-                + Double(-relative) * MarkingSwipeRules.stepDistance)
+    private func downThreshold(fromStage currentStage: Int) -> Double {
+        if currentStage <= anchor {
+            return Self.downwardBoundary(
+                entering: currentStage - 1, ladder: ladder, anchor: anchor, geometry: geometry)
         }
-        return MarkingSwipeRules.deadZone + Double(relative - 1) * MarkingSwipeRules.stepDistance
-            - MarkingSwipeRules.reversalHysteresis
+        let boundary =
+            geometry.upEntry + Double(currentStage - 1 - anchor) * geometry.upStep
+        return boundary - geometry.reversalHysteresis
+    }
+
+    private static func downwardBoundary(
+        entering index: Int, ladder: [Rating], anchor: Int, geometry: MarkingSwipeGeometry
+    ) -> Double {
+        var boundary: Double = 0
+        for i in stride(from: anchor - 1, through: index, by: -1) {
+            let step = ladder[i] == .rejected ? geometry.rejectTravel : geometry.clearTravel
+            boundary -= step
+        }
+        return boundary
     }
 
     private static func haptic(for rating: Rating) -> MarkingStageCrossing.Haptic {
