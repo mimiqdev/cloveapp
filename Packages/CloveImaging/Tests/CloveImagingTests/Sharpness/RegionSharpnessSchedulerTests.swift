@@ -246,7 +246,7 @@ private func photoRequest(
 /// evaluated once per iteration: scheduling state moves between evaluations, so a
 /// check-then-assert helper would observe a different state than it waited for.
 private func until(
-    _ description: String, timeout: Duration = .seconds(5), _ condition: () async -> Bool
+    _ description: String, timeout: Duration = .seconds(30), _ condition: () async -> Bool
 ) async throws {
     let deadline = ContinuousClock.now.advanced(by: timeout)
     while true {

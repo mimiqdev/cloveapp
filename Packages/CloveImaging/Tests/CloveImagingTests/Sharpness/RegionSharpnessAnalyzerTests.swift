@@ -36,6 +36,63 @@ private struct StubFaceDetector: FaceRegionDetecting {
     func detectFaces(on image: CGImage) async -> FaceDetectionOutcome { outcome }
 }
 
+private final class GatedDetector: FaceRegionDetecting, @unchecked Sendable {
+    private struct State {
+        var isParked = false
+        var parkedWaiters: [CheckedContinuation<Void, Never>] = []
+        var outcomeWaiters: [CheckedContinuation<FaceDetectionOutcome, Never>] = []
+    }
+
+    private let state = Mutex(State())
+
+    var isParked: Bool {
+        state.withLock { $0.isParked }
+    }
+
+    func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
+        await withCheckedContinuation { continuation in
+            let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+                state.isParked = true
+                state.outcomeWaiters.append(continuation)
+                let pending = state.parkedWaiters
+                state.parkedWaiters.removeAll()
+                return pending
+            }
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
+    }
+
+    func waitUntilParked() async {
+        await withCheckedContinuation { continuation in
+            let shouldResume = state.withLock { state -> Bool in
+                if state.isParked {
+                    return true
+                }
+                state.parkedWaiters.append(continuation)
+                return false
+            }
+            if shouldResume {
+                continuation.resume()
+            }
+        }
+    }
+
+    func release(_ outcome: FaceDetectionOutcome = .faces([])) {
+        let waiters = state.withLock {
+            state -> [CheckedContinuation<FaceDetectionOutcome, Never>] in
+            state.isParked = false
+            let pending = state.outcomeWaiters
+            state.outcomeWaiters.removeAll()
+            return pending
+        }
+        for waiter in waiters {
+            waiter.resume(returning: outcome)
+        }
+    }
+}
+
 private func afInfoProperties(_ values: [Any]) -> ImageProperties {
     ImageProperties(["{ExifAux}": ["AFInfo": values]])
 }
@@ -65,15 +122,6 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
     @Test func afResultIsDeliveredBeforeFaceDetectionCompletes() async throws {
         // A detector that parks until the test releases it. The early-AF callback must fire
         // straight after metadataRead while detection is still running.
-        final class GatedDetector: FaceRegionDetecting, @unchecked Sendable {
-            let gate = Mutex<[CheckedContinuation<FaceDetectionOutcome, Never>]>([])
-            func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
-                await withCheckedContinuation { continuation in
-                    gate.withLock { $0.append(continuation) }
-                }
-                return .faces([])
-            }
-        }
         let detector = GatedDetector()
         let reader = RecordingReader()
         reader.propertiesAnswer = afInfoProperties([0.2, 0.2, 0.1, 0.1, "f"])
@@ -88,16 +136,11 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
         }
 
         // The AF result arrives while the detector is still parked: no release has happened.
-        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-        var early: RegionSharpnessPathResult?
-        while ContinuousClock.now < deadline {
-            early = delivered.withLock { $0 }
-            if early != nil { break }
-            try await Task.sleep(for: .milliseconds(2))
-        }
-        let waiting = detector.gate.withLock { !$0.isEmpty }
+        await detector.waitUntilParked()
+        let early = delivered.withLock { $0 }
+        #expect(detector.isParked, "the detector must still be parked when the AF result arrives")
+        defer { detector.release() }
         try #require(early != nil, "AF result must arrive before detection completes")
-        #expect(waiting, "the detector must still be parked when the AF result arrives")
         guard case .regions(let afRegions) = early else {
             Issue.record("Expected the located AF region, got \(String(describing: early))")
             analysisTask.cancel()
@@ -110,9 +153,7 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
 
         // Releasing the detector lets the analysis finish; its combined result carries the
         // same AF answer plus the (empty) face path.
-        let waiters = detector.gate.withLock { $0 }
-        detector.gate.withLock { $0.removeAll() }
-        for waiter in waiters { waiter.resume(returning: .faces([])) }
+        detector.release()
         let analysis = try await analysisTask.value
         guard
             case .regions(let combinedAutofocus) = analysis.autofocus,
@@ -133,20 +174,11 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
     @Test func unavailableAFIsDeliveredEarlyToo() async throws {
         // Metadata unavailable needs no pixels, so the early callback fires straight after
         // the metadata read — even with a parked detector and no acquisition.
-        final class ParkedDetector: FaceRegionDetecting, @unchecked Sendable {
-            let parked = Mutex<[CheckedContinuation<FaceDetectionOutcome, Never>]>([])
-            func detectFaces(on image: CGImage) async -> FaceDetectionOutcome {
-                // Parked until the test's task is cancelled; the continuation is leaked by
-                // design for the lifetime of this short-lived test.
-                return await withCheckedContinuation { continuation in
-                    parked.withLock { $0.append(continuation) }
-                }
-            }
-        }
+        let detector = GatedDetector()
         let reader = RecordingReader()
         reader.propertiesAnswer = ImageProperties(["{TIFF}": ["Make": "SONY"]])
         reader.previewImage = previewImage
-        let analyzer = RegionSharpnessAnalyzer(reader: reader, faces: ParkedDetector())
+        let analyzer = RegionSharpnessAnalyzer(reader: reader, faces: detector)
 
         let delivered = Mutex<RegionSharpnessPathResult?>(nil)
         let analysisTask = Task {
@@ -154,20 +186,18 @@ private func afInfoProperties(_ values: [Any]) -> ImageProperties {
                 delivered.withLock { $0 = early }
             }
         }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-        var early: RegionSharpnessPathResult?
-        while ContinuousClock.now < deadline {
-            early = delivered.withLock { $0 }
-            if early != nil { break }
-            try await Task.sleep(for: .milliseconds(2))
-        }
-        analysisTask.cancel()
+        await detector.waitUntilParked()
+        let early = delivered.withLock { $0 }
+        #expect(detector.isParked, "the detector must still be parked when the AF result arrives")
+        defer { detector.release() }
         try #require(early != nil, "AF unavailability must arrive before detection completes")
         guard case .unavailable(.noAutofocusMetadata(let evidence)) = early else {
             Issue.record("Expected early AF unavailability with evidence")
             return
         }
         #expect(evidence.cameraMake == "SONY")
+        detector.release()
+        _ = try await analysisTask.value
     }
 
     @Test func missingAutofocusMetadataReportsEvidenceNotAnEmptyRegion() async throws {
