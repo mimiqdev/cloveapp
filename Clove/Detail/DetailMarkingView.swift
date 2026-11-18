@@ -105,6 +105,7 @@ struct DetailMarkingView: View {
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appLanguage) private var language
+    @Environment(SettingsStore.self) private var settingsStore: SettingsStore?
     @State private var hidesChrome = false
     @State private var widePresentation: DetailPresentation
     @State private var expandPillNudgeCount = 0
@@ -738,10 +739,10 @@ struct DetailMarkingView: View {
                         expandedGroup: expandedGroup,
                         current: photo.id,
                         thumbnails: browsing.thumbnails,
-                        openPhoto: actions.openPhoto,
-                        selectGroupPhoto: actions.selectGroupPhoto,
-                        expandGroup: actions.expandGroup,
-                        collapseGroup: actions.collapseGroup)
+                        openPhoto: openFilmstripPhoto,
+                        selectGroupPhoto: selectFilmstripGroupPhoto,
+                        expandGroup: expandFilmstripGroup,
+                        collapseGroup: collapseFilmstripGroup)
                     if isDuoExpanded {
                         duoMarkingToolbar
                     }
@@ -779,7 +780,7 @@ struct DetailMarkingView: View {
                 photoID: photo.id,
                 onRate: { rate($0) }, onReject: { toggleReject() },
                 onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
-                onBegin: actions.markingSwipeBegan
+                onBegin: beginToolbarMarking
             )
             .disabled(!allowsMarkingInput)
             .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
@@ -888,10 +889,10 @@ struct DetailMarkingView: View {
             browsing: browsing,
             thumbnails: browsing.thumbnails,
             similarGroupsEnabled: settings.similarGroupsEnabled,
-            openPhoto: actions.openPhoto,
-            selectGroupPhoto: actions.selectGroupPhoto,
-            openGroup: actions.expandGroup,
-            collapseGroup: actions.collapseGroup)
+            openPhoto: openFilmstripPhoto,
+            selectGroupPhoto: selectFilmstripGroupPhoto,
+            openGroup: expandFilmstripGroup,
+            collapseGroup: collapseFilmstripGroup)
     }
 
     private func togglePresentation() {
@@ -1016,10 +1017,10 @@ struct DetailMarkingView: View {
                         expandedGroup: expandedGroup,
                         current: photo.id,
                         thumbnails: browsing.thumbnails,
-                        openPhoto: actions.openPhoto,
-                        selectGroupPhoto: actions.selectGroupPhoto,
-                        expandGroup: actions.expandGroup,
-                        collapseGroup: actions.collapseGroup)
+                        openPhoto: openFilmstripPhoto,
+                        selectGroupPhoto: selectFilmstripGroupPhoto,
+                        expandGroup: expandFilmstripGroup,
+                        collapseGroup: collapseFilmstripGroup)
                     if chromeIsVisible && !usesRail {
                         MarkingToolbar(
                             rating: swipeFeedback.rating
@@ -1037,7 +1038,7 @@ struct DetailMarkingView: View {
                             onLabel: {
                                 choose($0.map { ColourLabel(colour: $0) } ?? .clear)
                             },
-                            onBegin: actions.markingSwipeBegan
+                            onBegin: beginToolbarMarking
                         )
                         .disabled(!allowsMarkingInput)
                         .accessibilityValue(
@@ -1083,10 +1084,10 @@ struct DetailMarkingView: View {
                 current: photo.id,
                 thumbnails: browsing.thumbnails,
                 metrics: .compact,
-                openPhoto: actions.openPhoto,
-                selectGroupPhoto: actions.selectGroupPhoto,
-                expandGroup: actions.expandGroup,
-                collapseGroup: actions.collapseGroup
+                openPhoto: openFilmstripPhoto,
+                selectGroupPhoto: selectFilmstripGroupPhoto,
+                expandGroup: expandFilmstripGroup,
+                collapseGroup: collapseFilmstripGroup
             )
             .frame(maxWidth: .infinity)
 
@@ -1103,7 +1104,7 @@ struct DetailMarkingView: View {
                 onRate: { rate($0) },
                 onReject: { toggleReject() },
                 onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
-                onBegin: actions.markingSwipeBegan
+                onBegin: beginToolbarMarking
             )
             .disabled(!allowsMarkingInput)
             .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
@@ -1137,7 +1138,10 @@ struct DetailMarkingView: View {
                 identifier: "clove.detail.rejectUnmarked",
                 tone: .destructive,
                 compact: compact
-            ) { actions.finishGroup(plan) }
+            ) {
+                dismissGestureGuide()
+                actions.finishGroup(plan)
+            }
         }
         if let group = currentTimelineGroup {
             return PillAction(
@@ -1147,7 +1151,7 @@ struct DetailMarkingView: View {
                 tone: .neutral,
                 nudgeTrigger: expandPillNudgeCount,
                 compact: compact
-            ) { actions.expandGroup(group.id) }
+            ) { expandFilmstripGroup(group.id) }
         }
         return nil
     }
@@ -1189,13 +1193,20 @@ struct DetailMarkingView: View {
             feedback: swipeFeedback,
             onZoomChange: { zoomChanged($0) },
             onChromeToggle: { toggleChrome() },
-            onStep: { actions.step($0) },
+            onStep: {
+                dismissGestureGuide()
+                actions.step($0)
+            },
             onDoubleTap: { doubleTap(at: $0) },
             onMarkingSwipe: { applyMarkingSwipe($0, touchCount: 1) },
             onTwoFingerMarkingSwipe: { applyMarkingSwipe($0, touchCount: 2) },
             onSwipeBegin: { beginMarkingGesture() },
             allowsMarking: allowsMarkingInput,
-            onReadOnlyMarkingDrag: isReadOnlyCollapsedGroup ? { expandPillNudgeCount += 1 } : nil,
+            onReadOnlyMarkingDrag: isReadOnlyCollapsedGroup
+                ? {
+                    dismissGestureGuide()
+                    expandPillNudgeCount += 1
+                } : nil,
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
@@ -1241,8 +1252,70 @@ struct DetailMarkingView: View {
         .overlay(alignment: .topTrailing) {
             DetailRejectGlyphOverlay(photoID: photo.id, isRejected: displayMarks.isRejected)
         }
+        .overlay { gestureGuideOverlay }
+        .animation(CloveMotion.chrome(reduceMotion: reduceMotion), value: showsGestureGuide)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clove.bg.stage)
+    }
+
+    private var showsGestureGuide: Bool {
+        settingsStore?.hasSeenGestureGuide == false
+    }
+
+    @ViewBuilder private var gestureGuideOverlay: some View {
+        if showsGestureGuide {
+            ZStack {
+                Color.black.opacity(0.28)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissGestureGuide()
+                    }
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 10)
+                            .onChanged { _ in
+                                dismissGestureGuide()
+                            }
+                    )
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(
+                        AppLocalization.string("Dismiss gesture guide", language: language))
+
+                DetailGestureGuideCard {
+                    dismissGestureGuide()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, max(12, swipeFeedbackReservation))
+            }
+            .transition(.opacity)
+        }
+    }
+
+    private func dismissGestureGuide() {
+        guard let settingsStore, !settingsStore.hasSeenGestureGuide else { return }
+        withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+            settingsStore.markGestureGuideSeen()
+        }
+    }
+
+    private func openFilmstripPhoto(_ photo: PhotoIdentity) {
+        dismissGestureGuide()
+        actions.openPhoto(photo)
+    }
+
+    private func selectFilmstripGroupPhoto(_ photo: PhotoIdentity) {
+        dismissGestureGuide()
+        actions.selectGroupPhoto(photo)
+    }
+
+    private func expandFilmstripGroup(_ groupID: GroupID) {
+        dismissGestureGuide()
+        actions.expandGroup(groupID)
+    }
+
+    private func collapseFilmstripGroup() {
+        dismissGestureGuide()
+        actions.collapseGroup()
     }
 
     private var placeholder: CGImage? {
@@ -1741,6 +1814,9 @@ struct DetailMarkingView: View {
     /// back and forth must not queue one native render per frame, and I2 will drop any queued
     /// stale render anyway (G1 "Scheduling and cache").
     private func zoomChanged(_ value: CGFloat) {
+        if value > DetailFitScale.tolerance {
+            dismissGestureGuide()
+        }
         scale = value
         if value <= DetailFitScale.tolerance {
             inspectedFocusRegionID = nil
@@ -1783,6 +1859,7 @@ struct DetailMarkingView: View {
     /// wait for, so the tap inspects the preview at ``DetailZoom/inspectionScale`` instead of
     /// doing nothing for good.
     private func doubleTap(at anchor: UnitPoint) {
+        dismissGestureGuide()
         guard settings.doubleTap != .off else { return }
         guard scale <= DetailFitScale.tolerance else {
             inspectedFocusRegionID = nil
@@ -1808,6 +1885,7 @@ struct DetailMarkingView: View {
     /// A valid analysis region always enters the existing 100% inspection, independently of the
     /// double-tap setting. It neither resolves a marking input nor calls a navigation action.
     private func focusRegionTapped(_ region: DetailFocusRegion) {
+        dismissGestureGuide()
         guard region.isActionable else { return }
         inspectedFocusRegionID = region.id
         inspectFullResolution(at: region.centre)
@@ -1916,6 +1994,7 @@ struct DetailMarkingView: View {
     /// Toggles chrome visibility when single-tapping anywhere on the preview, at both fit and
     /// zoomed scales (PRD P0-04, #252, #273).
     private func toggleChrome() {
+        dismissGestureGuide()
         hidesChrome.toggle()
     }
 
@@ -1933,7 +2012,13 @@ struct DetailMarkingView: View {
                 allowsMarking: allowsMarkingInput))
     }
 
+    private func beginToolbarMarking() {
+        dismissGestureGuide()
+        actions.markingSwipeBegan()
+    }
+
     private func beginMarkingGesture() {
+        dismissGestureGuide()
         tapPickerDismissToken += 1
         actions.markingSwipeBegan()
     }
@@ -1991,6 +2076,7 @@ struct DetailMarkingView: View {
     /// here, so the mark path is one function. A result that changes nothing writes nothing and
     /// advances nothing (PRD P0-06 acceptance).
     private func apply(_ result: MarkingResult) {
+        dismissGestureGuide()
         switch result {
         case .mark(let change, let kind):
             guard allowsMarkingInput else { return }
