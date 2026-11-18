@@ -54,7 +54,9 @@ struct BrowsingLayoutTests {
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let host = UIHostingController(
-            rootView: BrowseShell(browsing: model).environment(SettingsStore.sample))
+            rootView: BrowseShell(browsing: model)
+                .environment(SettingsStore.sample)
+                .environment(\.cloveUserInterfaceIdiom, .pad))
         host.traitOverrides.horizontalSizeClass = .regular
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
@@ -430,6 +432,144 @@ struct BrowsingLayoutTests {
         try await waitFor("grid filter popover dismissed on route/snapshot change") {
             self.topPresentedViewController(from: host) == nil
         }
+    }
+
+    @Test func ordinaryPhoneLandscapeGridAdaptsColumnsAndPreservesScrollAnchorAcrossRotation()
+        async throws
+    {
+        #expect(GridCollectionView.columns(width: 430, regular: false) == 3)
+        #expect(GridCollectionView.columns(width: 667, regular: false) >= 4)
+        #expect(GridCollectionView.columns(width: 844, regular: false) >= 5)
+        #expect(GridCollectionView.columns(width: 932, regular: false) >= 5)
+
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let model = BrowsingModel(library: TestLibrary.sample(), similarGroupsEnabled: false)
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                GridScreen(browsing: model, thumbnails: model.thumbnails)
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .phone))
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        var collectionView: UICollectionView?
+        try await waitFor("grid collection did not lay out") {
+            collectionView = self.findCollectionView(in: window)
+            return collectionView?.visibleCells.isEmpty == false
+                && (collectionView?.contentSize.height ?? 0) > 1000
+        }
+        let grid = try #require(collectionView)
+        // Scroll into the middle of the folder in portrait.
+        let targetItem = 15
+        grid.scrollToItem(at: IndexPath(item: targetItem, section: 0), at: .top, animated: false)
+        grid.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+
+        let topItemBefore = grid.indexPathsForVisibleItems.min()?.item
+        let anchoredItem = try #require(topItemBefore)
+        #expect(anchoredItem >= 9)
+
+        // Rotate to Pro Max landscape (where UIKit/traits can report horizontalSizeClass == .regular).
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .compact
+        window.frame = CGRect(x: 0, y: 0, width: 932, height: 430)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+
+        let visibleInLandscape = Set(grid.indexPathsForVisibleItems.map(\.item))
+        #expect(
+            visibleInLandscape.contains { abs($0 - anchoredItem) <= 8 },
+            "Expected anchored item \(anchoredItem) near visible items \(visibleInLandscape)")
+
+        // Rotate back to portrait and verify anchor remains near the middle, not reset to 0.
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+
+        let visibleBackInPortrait = grid.indexPathsForVisibleItems.map(\.item)
+        #expect((visibleBackInPortrait.min() ?? 0) >= 3)
+    }
+
+    @Test func gridFilterPopoverDismissesOnOrientationChange() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let model = BrowsingModel(library: TestLibrary.sample())
+        model.openFolder()
+        let box = TestDuoEnvironmentBox()
+        box.isDuoExpanded = false
+        box.usesVertical = false
+        box.hasFoldRegion = false
+
+        struct HostView: View {
+            let model: BrowsingModel
+            let box: TestDuoEnvironmentBox
+            var body: some View {
+                NavigationStack {
+                    GridScreen(
+                        browsing: model,
+                        thumbnails: model.thumbnails,
+                        filterPopoverTrigger: box.filterPopoverTrigger)
+                }
+                .environment(SettingsStore.sample)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.scenePhase, .active)
+            }
+        }
+
+        let host = UIHostingController(rootView: HostView(model: model, box: box))
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await Task.sleep(for: .milliseconds(80))
+        window.layoutIfNeeded()
+        box.filterPopoverTrigger += 1
+        try await waitFor("grid filter popover presented") {
+            self.topPresentedViewController(from: host) != nil
+        }
+
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .compact
+        window.frame = CGRect(x: 0, y: 0, width: 932, height: 430)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor("grid filter popover dismissed on orientation change") {
+            self.topPresentedViewController(from: host) == nil
+        }
+    }
+
+    private func findCollectionView(in view: UIView) -> UICollectionView? {
+        if let collection = view as? UICollectionView { return collection }
+        for child in view.subviews {
+            if let collection = findCollectionView(in: child) { return collection }
+        }
+        return nil
     }
 
     private func hasGridCollection(in view: UIView) -> Bool {

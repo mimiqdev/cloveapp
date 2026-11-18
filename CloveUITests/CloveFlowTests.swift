@@ -2971,6 +2971,100 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testPhoneLandscapeGridAndDetailWorkflow() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Dedicated iPhone landscape workflow")
+        }
+        let app = launchSample()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .portrait
+        openLibrary(app)
+
+        // Portrait -> landscapeLeft in Grid: full safe-area grid, no iPad rail or sidebar toggle.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let grid = element(app, "clove.grid")
+        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate { _, _ in grid.frame.width > grid.frame.height }, grid))
+        XCTAssertFalse(element(app, "clove.detail.gridToggle").exists)
+
+        // Tapping a group stack opens single-photo Group Focus (never Photo Preview) with the
+        // dedicated bottom review row and compact inline header pill.
+        let groupTile = element(app, "clove.grid.group.burst-2678")
+        XCTAssertTrue(groupTile.waitForExistence(timeout: 5))
+        groupTile.tap()
+
+        let bottomRow = element(app, "clove.detail.landscapeBottomRow")
+        let filmstrip = element(app, "clove.detail.filmstrip")
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.gridToggle").exists)
+        XCTAssertFalse(element(app, "clove.detail.photoGrid").exists)
+        XCTAssertFalse(element(app, "clove.detail.rail").exists)
+        XCTAssertLessThanOrEqual(filmstrip.frame.maxX, capsule.frame.minX + 1)
+
+        // Header controls & Group Focus pill coexist without overlapping inside the header.
+        let back = element(app, "clove.nav.back")
+        let focus = element(app, "clove.detail.focusToggle")
+        let fileName = element(app, "clove.detail.fileName")
+        let rejectPill = element(app, "clove.detail.rejectUnmarked")
+        let info = element(app, "clove.detail.info")
+        let undo = element(app, "clove.detail.undo")
+        XCTAssertTrue(back.exists)
+        XCTAssertTrue(focus.exists)
+        XCTAssertTrue(fileName.exists)
+        XCTAssertTrue(rejectPill.waitForExistence(timeout: 5))
+        XCTAssertTrue(info.exists)
+        XCTAssertTrue(undo.exists)
+        XCTAssertLessThanOrEqual(back.frame.maxX, focus.frame.minX + 1)
+        XCTAssertLessThanOrEqual(focus.frame.maxX, fileName.frame.minX + 1)
+        XCTAssertLessThanOrEqual(fileName.frame.maxX, rejectPill.frame.minX + 1)
+        XCTAssertLessThanOrEqual(rejectPill.frame.maxX, info.frame.minX + 1)
+        XCTAssertLessThanOrEqual(info.frame.maxX, undo.frame.minX + 1)
+
+        // Collapse Group Focus via trailing chevron.up -> returns to Timeline & Expand pill in header.
+        let foldButton = element(app, "clove.detail.filmstrip.group.fold")
+        XCTAssertTrue(foldButton.waitForExistence(timeout: 5))
+        foldButton.tap()
+        let expandPill = element(app, "clove.detail.expandGroup")
+        XCTAssertTrue(expandPill.waitForExistence(timeout: 5))
+        expandPill.tap()
+        XCTAssertTrue(rejectPill.waitForExistence(timeout: 5))
+
+        // Rotate to landscapeRight -> stays cleanly within safe bounds and horizontal pickers open above.
+        XCUIDevice.shared.orientation = .landscapeRight
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(capsule.frame.minX, 0)
+        XCTAssertLessThanOrEqual(capsule.frame.maxX, app.frame.maxX)
+
+        element(app, "clove.detail.capsule.rating").tap()
+        let stars = element(app, "clove.detail.capsule.stars")
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(stars.frame.width, stars.frame.height)
+        XCTAssertLessThanOrEqual(stars.frame.maxY, capsule.frame.minY + 1)
+        element(app, "clove.detail.capsule.stars.4").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), stars))
+
+        // Single tap on stage hides chrome including landscapeBottomRow, second tap restores it.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), bottomRow))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+
+        // Rotate back to portrait -> returns to stacked portrait layout and Back exits to Grid.
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), bottomRow))
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }

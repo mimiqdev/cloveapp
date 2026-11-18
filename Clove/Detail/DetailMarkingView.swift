@@ -93,6 +93,8 @@ struct DetailMarkingView: View {
     var presentation: Binding<DetailPresentation>? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.cloveUserInterfaceIdiom) private var overrideUserInterfaceIdiom
     @Environment(\.cloveTheme) private var theme
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
@@ -281,7 +283,7 @@ struct DetailMarkingView: View {
             pillVisible: chromeIsVisible && stagePill != nil,
             pillHeight: duoPillHeight,
             pillGap: showsFilmstrip ? 6 : 12,
-            measuredBand: controlsHeight)
+            measuredBand: isOrdinaryPhoneLandscape ? 0 : controlsHeight)
     }
 
     /// The stage-bottom band a marking swipe's star bar must stay clear of (#305).
@@ -313,7 +315,23 @@ struct DetailMarkingView: View {
         browsing.canMark && !isReadOnlyCollapsedGroup
     }
 
-    private var usesRail: Bool { horizontalSizeClass == .regular && duo == nil }
+    private var userInterfaceIdiom: UIUserInterfaceIdiom {
+        overrideUserInterfaceIdiom ?? UIDevice.current.userInterfaceIdiom
+    }
+
+    private var isOrdinaryPhone: Bool {
+        userInterfaceIdiom == .phone && !isDuoExpanded && !isDuoCover && !hasFoldRegion
+    }
+
+    private var isLandscapeContainer: Bool {
+        containerSize.width > containerSize.height && containerSize.width > 0
+    }
+
+    private var isOrdinaryPhoneLandscape: Bool {
+        isOrdinaryPhone && (verticalSizeClass == .compact || isLandscapeContainer)
+    }
+
+    private var usesRail: Bool { !isOrdinaryPhone && horizontalSizeClass == .regular && duo == nil }
 
     private var showsExpandedPhotoHeader: Bool {
         isDuoExpanded && (usesVerticalToolbar || !hasFoldRegion)
@@ -322,6 +340,7 @@ struct DetailMarkingView: View {
     private var presentationPolicy: DetailPresentationPolicy {
         DetailPresentationPolicy(
             isRegularWidth: horizontalSizeClass == .regular,
+            isPhone: userInterfaceIdiom == .phone,
             isDuoExpanded: isDuoExpanded,
             isDuoCover: isDuoCover,
             hasFoldRegion: hasFoldRegion,
@@ -395,6 +414,14 @@ struct DetailMarkingView: View {
                     focusRegionsToggle
                 } tools: {
                     if chromeIsVisible {
+                        if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
+                            Button(pill.title, action: pill.action)
+                                .tint(
+                                    pill.tone == .destructive
+                                        ? Color.clove.reject : Color.clove.text.primary
+                                )
+                                .accessibilityIdentifier(pill.identifier)
+                        }
                         Button(
                             AppLocalization.string("Info", language: language),
                             systemImage: "info.circle"
@@ -516,6 +543,7 @@ struct DetailMarkingView: View {
             ) {
                 browsing.showsFocusRegions.toggle()
             }
+            .reportHeaderControlFrame("clove.detail.focusToggle")
         }
     }
 
@@ -765,12 +793,15 @@ struct DetailMarkingView: View {
                 BrowsingHeader(
                     title: photo.fileName,
                     titleIdentifier: "clove.detail.fileName",
-                    backTitle: horizontalSizeClass == .regular
+                    backTitle: (!isOrdinaryPhone && horizontalSizeClass == .regular)
                         ? browsing.localizedFilterTitle(language: language) : nil,
+                    usesInlineFlow: isOrdinaryPhoneLandscape,
+                    height: isOrdinaryPhoneLandscape ? 54 : 64,
                     back: { browsing.back() }
                 ) {
                     HStack(spacing: 0) {
                         Text(detailSubtitle)
+                            .lineLimit(1)
                             .accessibilityIdentifier("clove.detail.zoom")
                         SaveStatusIndicator(
                             browsing: browsing, identifierPrefix: "clove.detail.saveState")
@@ -786,18 +817,26 @@ struct DetailMarkingView: View {
                     focusRegionsToggle
                 } tools: {
                     if chromeIsVisible {
+                        if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
+                            pill
+                                .fixedSize()
+                                .reportHeaderControlFrame(pill.identifier)
+                        }
                         GlassIconButton(
                             label: AppLocalization.string("Info", language: language),
                             symbol: "info.circle", size: usesRail ? .pad : .phone,
                             identifier: "clove.detail.info"
                         ) { showsInformation = true }
+                        .reportHeaderControlFrame("clove.detail.info")
                         GlassIconButton(
                             label: AppLocalization.string("Undo", language: language),
                             symbol: "arrow.uturn.backward",
                             size: usesRail ? .pad : .phone,
                             identifier: "clove.detail.undo",
                             action: undo
-                        ).disabled(!browsing.canUndoMark)
+                        )
+                        .disabled(!browsing.canUndoMark)
+                        .reportHeaderControlFrame("clove.detail.undo")
                     }
                 }
             }
@@ -874,125 +913,217 @@ struct DetailMarkingView: View {
     }
 
     private var photoStage: some View {
-        previewArea
-            .overlay(alignment: .bottom) {
+        VStack(spacing: 0) {
+            previewArea
+                .overlay(alignment: .bottom) {
+                    if isOrdinaryPhoneLandscape {
+                        landscapeStageFeedbackOverlay
+                    } else {
+                        standardStageOverlayChrome
+                    }
+                }
+            if isOrdinaryPhoneLandscape && showsFilmstrip && chromeIsVisible {
+                landscapeBottomReviewRow
+            }
+        }
+    }
+
+    private var landscapeStageFeedbackOverlay: some View {
+        VStack(spacing: 8) {
+            Group {
+                if let message = browsing.failureToastMessage {
+                    Toast(
+                        message: AppLocalization.string(message, language: language),
+                        identifier: "clove.save.toast"
+                    )
+                    .padding(.horizontal, 16)
+                    .transition(
+                        CloveMotion.slideTransition(
+                            edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                }
+            }
+            .animation(
+                CloveMotion.chrome(reduceMotion: reduceMotion),
+                value: browsing.failureToastMessage
+            )
+            if showsZoomChip && scale > DetailFitScale.tolerance {
+                Text(zoomName)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.clove.text.primary)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .cloveGlass(in: Capsule())
+                    .transition(.opacity)
+            }
+        }
+        .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 8 : 12)
+        .transition(.opacity)
+    }
+
+    private var standardStageOverlayChrome: some View {
+        VStack(spacing: 8) {
+            // The save/read failure toast sits above the filmstrip so it never
+            // covers the mark capsule (handoff screens.md §03, components.md Toast).
+            // It is transient feedback, not chrome, and remains visible at 100% zoom.
+            Group {
+                if let message = browsing.failureToastMessage {
+                    Toast(
+                        message: AppLocalization.string(message, language: language),
+                        identifier: "clove.save.toast"
+                    )
+                    .padding(.horizontal, 16)
+                    .transition(
+                        CloveMotion.slideTransition(
+                            edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                }
+            }
+            .animation(
+                CloveMotion.chrome(reduceMotion: reduceMotion),
+                value: browsing.failureToastMessage
+            )
+            if showsZoomChip && scale > DetailFitScale.tolerance {
+                Text(zoomName)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.clove.text.primary)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .cloveGlass(in: Capsule())
+                    .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 0 : 12)
+                    .transition(.opacity)
+            }
+            if showsFilmstrip && chromeIsVisible {
+                // The pill rides the floating chrome band above the strip. The band is an
+                // overlay, so its height never moves the stage (handoff components.md,
+                // Pill action; #305).
                 VStack(spacing: 8) {
-                    // The save/read failure toast sits above the filmstrip so it never
-                    // covers the mark capsule (handoff screens.md §03, components.md Toast).
-                    // It is transient feedback, not chrome, and remains visible at 100% zoom.
                     Group {
-                        if let message = browsing.failureToastMessage {
-                            Toast(
-                                message: AppLocalization.string(message, language: language),
-                                identifier: "clove.save.toast"
-                            )
-                            .padding(.horizontal, 16)
-                            .transition(
-                                CloveMotion.slideTransition(
-                                    edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                        if let stagePill {
+                            stagePill
+                                .transition(
+                                    .asymmetric(
+                                        insertion: CloveMotion.slideTransition(
+                                            edge: .bottom, offset: 8,
+                                            reduceMotion: reduceMotion
+                                        ),
+                                        removal: .identity))
                         }
                     }
                     .animation(
-                        CloveMotion.chrome(reduceMotion: reduceMotion),
-                        value: browsing.failureToastMessage
+                        stagePill != nil
+                            ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                        value: stagePill?.identifier
                     )
-                    if showsZoomChip && scale > DetailFitScale.tolerance {
-                        Text(zoomName)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Color.clove.text.primary)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .cloveGlass(in: Capsule())
-                            .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 0 : 12)
-                            .transition(.opacity)
-                    }
-                    if showsFilmstrip && chromeIsVisible {
-                        // The pill rides the floating chrome band above the strip. The band is an
-                        // overlay, so its height never moves the stage (handoff components.md,
-                        // Pill action; #305).
-                        VStack(spacing: 8) {
-                            Group {
-                                if let stagePill {
-                                    stagePill
-                                        .transition(
-                                            .asymmetric(
-                                                insertion: CloveMotion.slideTransition(
-                                                    edge: .bottom, offset: 8,
-                                                    reduceMotion: reduceMotion
-                                                ),
-                                                removal: .identity))
-                                }
-                            }
-                            .animation(
-                                stagePill != nil
-                                    ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                                value: stagePill?.identifier
-                            )
-                            DetailFilmstrip(
-                                timeline: timeline,
-                                expandedGroup: expandedGroup,
-                                current: photo.id,
-                                thumbnails: browsing.thumbnails,
-                                openPhoto: actions.openPhoto,
-                                selectGroupPhoto: actions.selectGroupPhoto,
-                                expandGroup: actions.expandGroup,
-                                collapseGroup: actions.collapseGroup)
-                            if chromeIsVisible && !usesRail {
-                                MarkingToolbar(
-                                    rating: swipeFeedback.rating
-                                        ?? (displayMarks.isRejected
-                                            ? .unrated : displayMarks.rating),
-                                    label: displayMarks.isRejected
-                                        ? nil : displayMarks.label.colour,
-                                    isRejected: displayMarks.isRejected,
-                                    enabledRatings: settings.enabledRatings,
-                                    labels: [nil] + settings.availableLabels.map { Optional($0) },
-                                    identifier: "clove.detail.capsule",
-                                    labelPickerIdentifier: "clove.detail.labels",
-                                    photoID: photo.id,
-                                    onRate: { rate($0) }, onReject: { toggleReject() },
-                                    onLabel: {
-                                        choose($0.map { ColourLabel(colour: $0) } ?? .clear)
-                                    },
-                                    onBegin: actions.markingSwipeBegan
-                                )
-                                .disabled(!allowsMarkingInput)
-                                .accessibilityValue(
-                                    MarkSummary.text(for: displayMarks, language: language)
-                                )
-                                .padding(.horizontal, 16)
-                            }
-                        }
-                        .padding(.bottom, 8)
-                    } else if !showsFilmstrip && chromeIsVisible {
-                        Group {
-                            if let stagePill {
-                                stagePill
-                                    .padding(.bottom, 12)
-                                    .transition(
-                                        .asymmetric(
-                                            insertion: CloveMotion.slideTransition(
-                                                edge: .bottom, offset: 8,
-                                                reduceMotion: reduceMotion),
-                                            removal: .identity))
-                            }
-                        }
-                        .animation(
-                            stagePill != nil
-                                ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                            value: stagePill?.identifier
+                    DetailFilmstrip(
+                        timeline: timeline,
+                        expandedGroup: expandedGroup,
+                        current: photo.id,
+                        thumbnails: browsing.thumbnails,
+                        openPhoto: actions.openPhoto,
+                        selectGroupPhoto: actions.selectGroupPhoto,
+                        expandGroup: actions.expandGroup,
+                        collapseGroup: actions.collapseGroup)
+                    if chromeIsVisible && !usesRail {
+                        MarkingToolbar(
+                            rating: swipeFeedback.rating
+                                ?? (displayMarks.isRejected
+                                    ? .unrated : displayMarks.rating),
+                            label: displayMarks.isRejected
+                                ? nil : displayMarks.label.colour,
+                            isRejected: displayMarks.isRejected,
+                            enabledRatings: settings.enabledRatings,
+                            labels: [nil] + settings.availableLabels.map { Optional($0) },
+                            identifier: "clove.detail.capsule",
+                            labelPickerIdentifier: "clove.detail.labels",
+                            photoID: photo.id,
+                            onRate: { rate($0) }, onReject: { toggleReject() },
+                            onLabel: {
+                                choose($0.map { ColourLabel(colour: $0) } ?? .clear)
+                            },
+                            onBegin: actions.markingSwipeBegan
                         )
+                        .disabled(!allowsMarkingInput)
+                        .accessibilityValue(
+                            MarkSummary.text(for: displayMarks, language: language)
+                        )
+                        .padding(.horizontal, 16)
                     }
                 }
-                .onGeometryChange(for: CGFloat.self) {
-                    $0.size.height
-                } action: {
-                    controlsHeight = $0
+                .padding(.bottom, 8)
+            } else if !showsFilmstrip && chromeIsVisible {
+                Group {
+                    if let stagePill {
+                        stagePill
+                            .padding(.bottom, 12)
+                            .transition(
+                                .asymmetric(
+                                    insertion: CloveMotion.slideTransition(
+                                        edge: .bottom, offset: 8,
+                                        reduceMotion: reduceMotion),
+                                    removal: .identity))
+                    }
                 }
-                .transition(.opacity)
+                .animation(
+                    stagePill != nil
+                        ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                    value: stagePill?.identifier
+                )
             }
+        }
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.height
+        } action: {
+            controlsHeight = $0
+        }
+        .transition(.opacity)
+    }
+
+    private var landscapeBottomReviewRow: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            DetailFilmstrip(
+                timeline: timeline,
+                expandedGroup: expandedGroup,
+                current: photo.id,
+                thumbnails: browsing.thumbnails,
+                metrics: .compact,
+                openPhoto: actions.openPhoto,
+                selectGroupPhoto: actions.selectGroupPhoto,
+                expandGroup: actions.expandGroup,
+                collapseGroup: actions.collapseGroup
+            )
+            .frame(maxWidth: .infinity)
+
+            MarkingToolbar(
+                rating: swipeFeedback.rating
+                    ?? (displayMarks.isRejected ? .unrated : displayMarks.rating),
+                label: displayMarks.isRejected ? nil : displayMarks.label.colour,
+                isRejected: displayMarks.isRejected,
+                enabledRatings: settings.enabledRatings,
+                labels: [nil] + settings.availableLabels.map { Optional($0) },
+                identifier: "clove.detail.capsule",
+                labelPickerIdentifier: "clove.detail.labels",
+                photoID: photo.id,
+                onRate: { rate($0) },
+                onReject: { toggleReject() },
+                onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
+                onBegin: actions.markingSwipeBegan
+            )
+            .disabled(!allowsMarkingInput)
+            .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
+            .padding(.bottom, 2)
+            .layoutPriority(1)
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 16)
+        .padding(.bottom, 4)
+        .background(Color.clove.bg.stage)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clove.detail.landscapeBottomRow")
+        .reportTapPickerFrame("clove.detail.landscapeBottomRow")
     }
 
     private var stagePill: PillAction? {
+        makeStagePill(compact: false)
+    }
+
+    private func makeStagePill(compact: Bool) -> PillAction? {
         if let expandedGroup {
             guard browsing.canMark else { return nil }
             let plan = GroupFinishingPlan(
@@ -1004,7 +1135,8 @@ struct DetailMarkingView: View {
                 title: AppLocalization.format(
                     "Reject %lld unmarked", language: language, Int64(plan.rejects.count)),
                 identifier: "clove.detail.rejectUnmarked",
-                tone: .destructive
+                tone: .destructive,
+                compact: compact
             ) { actions.finishGroup(plan) }
         }
         if let group = currentTimelineGroup {
@@ -1013,7 +1145,8 @@ struct DetailMarkingView: View {
                     "Expand %lld photos", language: language, Int64(group.visibleMembers.count)),
                 identifier: "clove.detail.expandGroup",
                 tone: .neutral,
-                nudgeTrigger: expandPillNudgeCount
+                nudgeTrigger: expandPillNudgeCount,
+                compact: compact
             ) { actions.expandGroup(group.id) }
         }
         return nil
@@ -1899,6 +2032,9 @@ struct DetailMarkingView: View {
             canMark: browsing.canMark,
             chromeIsVisible: chromeIsVisible,
             showsInformation: showsInformation,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isLandscapeContainer: isLandscapeContainer,
             dismissToken: tapPickerDismissToken)
     }
 
@@ -1910,6 +2046,8 @@ struct DetailMarkingView: View {
             usesVerticalToolbar: usesVerticalToolbar,
             hasFoldRegion: hasFoldRegion,
             horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isLandscapeContainer: isLandscapeContainer,
             allowsMarkingInput: allowsMarkingInput,
             hasDuo: duo != nil)
     }
@@ -1990,6 +2128,9 @@ private struct DetailTapPickerDismissTrigger: Equatable {
     let canMark: Bool
     let chromeIsVisible: Bool
     let showsInformation: Bool
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isLandscapeContainer: Bool
     let dismissToken: Int
 }
 
@@ -2000,6 +2141,8 @@ private struct DetailDuoPopoverDismissTrigger: Equatable {
     let usesVerticalToolbar: Bool
     let hasFoldRegion: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isLandscapeContainer: Bool
     let allowsMarkingInput: Bool
     let hasDuo: Bool
 }

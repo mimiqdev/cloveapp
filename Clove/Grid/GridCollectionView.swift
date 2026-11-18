@@ -93,11 +93,20 @@ struct GridCollectionView: UIViewRepresentable {
             placeholderCount: { [weak coordinator] in coordinator?.placeholderCount ?? 0 },
             columnCount: { [weak coordinator] in coordinator?.columnCount },
             sectionPlans: { [weak coordinator] in coordinator?.sectionPlans ?? [] })
-        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let collectionView = AnchoredGridCollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = context.coordinator
         collectionView.prefetchDataSource = context.coordinator
+        collectionView.onWidthWillChange = { [weak coordinator] newWidth in
+            coordinator?.captureResizeAnchor(forNewWidth: newWidth)
+        }
+        collectionView.onDidLayoutForWidthChange = { [weak coordinator] in
+            coordinator?.restoreResizeAnchorIfNeeded()
+        }
+        collectionView.onSettledLayout = { [weak coordinator] in
+            coordinator?.updateSettledAnchor()
+        }
         context.coordinator.attach(to: collectionView)
         return collectionView
     }
@@ -147,12 +156,21 @@ struct GridCollectionView: UIViewRepresentable {
         }
     }
 
-    /// About six square tiles beside the sidebar on an 11-inch iPad in landscape.
-    private static func columns(width: CGFloat, regular: Bool) -> Int {
-        regular ? max(1, Int((width + 1.5) / (140 + 1.5))) : 3
+    /// About six square tiles beside the sidebar on an 11-inch iPad in landscape;
+    /// compact landscape widths (>= 500 pt) adapt cleanly from 4 columns upward, while
+    /// narrower compact widths (portrait phone, Duo cover, narrow splits) keep 3 columns.
+    static func columns(width: CGFloat, regular: Bool) -> Int {
+        if regular {
+            return max(1, Int((width + 1.5) / (140 + 1.5)))
+        }
+        if width >= 500 {
+            return max(4, Int((width + 1.5) / (140 + 1.5)))
+        }
+        return 3
     }
 
-    /// Compact keeps three columns; regular width fits tiles at a minimum of 140 points.
+    /// Narrow compact widths keep three columns; landscape compact and regular widths fit tiles at
+    /// a minimum of 140 points.
     ///
     /// A group run adds its header and its surface; a run of the folder's own cells keeps the
     /// layout the grid always had (owner decision, #225).
@@ -216,6 +234,58 @@ struct GridCollectionView: UIViewRepresentable {
     }
 }
 
+@MainActor
+private final class AnchoredGridCollectionView: UICollectionView {
+    var onWidthWillChange: ((CGFloat) -> Void)?
+    var onDidLayoutForWidthChange: (() -> Void)?
+    var onSettledLayout: (() -> Void)?
+    private(set) var laidOutWidth: CGFloat = 0
+    private var pendingWidthChangeLayout = false
+
+    var isResizingWidth: Bool {
+        pendingWidthChangeLayout || (laidOutWidth > 0 && abs(bounds.width - laidOutWidth) > 0.5)
+    }
+
+    override var frame: CGRect {
+        willSet {
+            if super.frame.width > 0,
+                abs(newValue.width - super.frame.width) > 0.5
+            {
+                onWidthWillChange?(newValue.width)
+            }
+        }
+    }
+
+    override var bounds: CGRect {
+        willSet {
+            if super.bounds.width > 0,
+                abs(newValue.width - super.bounds.width) > 0.5
+            {
+                onWidthWillChange?(newValue.width)
+            }
+        }
+    }
+
+    override func layoutSubviews() {
+        let widthChanged = abs(bounds.width - laidOutWidth) > 0.5
+        if widthChanged {
+            if laidOutWidth > 0 {
+                pendingWidthChangeLayout = true
+            }
+            laidOutWidth = bounds.width
+            collectionViewLayout.invalidateLayout()
+        }
+        super.layoutSubviews()
+        if pendingWidthChangeLayout, bounds.width > 0, bounds.height > 0 {
+            onDidLayoutForWidthChange?()
+            pendingWidthChangeLayout = false
+            onSettledLayout?()
+        } else if bounds.width > 0, bounds.height > 0 {
+            onSettledLayout?()
+        }
+    }
+}
+
 extension GridCollectionView {
     /// Keeps the collection view's cells, tapping and thumbnail requests in step with SwiftUI.
     @MainActor
@@ -264,6 +334,16 @@ extension GridCollectionView {
         /// person to the stack they left on (issue #309).
         private var folderOffsetBeforeGroupFocus: CGFloat?
 
+        /// Scroll anchor held across width/column count changes on rotation, measured relative to
+        /// the visible safe top (`adjustedContentInset.top`).
+        private struct HeldResizeAnchor {
+            let id: GridCellItem.ID
+            let visibleTopOffset: CGFloat
+        }
+
+        private var pendingResizeAnchor: HeldResizeAnchor?
+        private var settledResizeAnchor: HeldResizeAnchor?
+
         init(
             thumbnails: any GridThumbnailSource,
             openPhoto: @escaping (PhotoIdentity) -> Void,
@@ -280,6 +360,84 @@ extension GridCollectionView {
             self.toggleSelection = toggleSelection
             self.selection = selection
             self.foldExpandedGroup = foldExpandedGroup
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            updateSettledAnchor()
+        }
+
+        func updateSettledAnchor() {
+            guard let collectionView = collectionView as? AnchoredGridCollectionView,
+                !collectionView.isResizingWidth,
+                pendingResizeAnchor == nil,
+                !items.isEmpty,
+                collectionView.bounds.width > 0,
+                collectionView.bounds.height > 0
+            else { return }
+            if let anchor = currentResizeAnchor(in: collectionView) {
+                settledResizeAnchor = anchor
+            }
+        }
+
+        func captureResizeAnchor(forNewWidth newWidth: CGFloat) {
+            guard pendingResizeAnchor == nil, let collectionView, !items.isEmpty,
+                collectionView.bounds.width > 0,
+                abs(newWidth - collectionView.bounds.width) > 0.5
+            else { return }
+            pendingResizeAnchor = currentResizeAnchor(in: collectionView) ?? settledResizeAnchor
+        }
+
+        func restoreResizeAnchorIfNeeded() {
+            let held = pendingResizeAnchor ?? settledResizeAnchor
+            pendingResizeAnchor = nil
+            guard let held, let collectionView else { return }
+            guard let indexPath = indexPath(of: held.id),
+                let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+            else { return }
+            let targetY =
+                attributes.frame.minY - held.visibleTopOffset
+                - collectionView.adjustedContentInset.top
+            scrollToClampedOffsetY(targetY)
+            settledResizeAnchor = currentResizeAnchor(in: collectionView) ?? held
+        }
+
+        private func currentResizeAnchor(in collectionView: UICollectionView) -> HeldResizeAnchor? {
+            let visibleTop =
+                collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+            if let currentPhoto,
+                let cell = GridCellItem.cell(
+                    for: currentPhoto, in: items, groups: groups, shown: shownPhotos),
+                let indexPath = indexPath(of: cell),
+                isItemVisible(at: indexPath, in: collectionView),
+                let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+            {
+                return HeldResizeAnchor(
+                    id: cell, visibleTopOffset: attributes.frame.minY - visibleTop)
+            }
+            if let first = firstVisibleCellIndexPath(in: collectionView),
+                let anchor = item(at: first)?.id,
+                let attributes = collectionView.layoutAttributesForItem(at: first)
+            {
+                return HeldResizeAnchor(
+                    id: anchor, visibleTopOffset: attributes.frame.minY - visibleTop)
+            }
+            return nil
+        }
+
+        private func firstVisibleCellIndexPath(in collectionView: UICollectionView) -> IndexPath? {
+            if let first = collectionView.indexPathsForVisibleItems.min() {
+                return first
+            }
+            let insets = collectionView.adjustedContentInset
+            let visibleRect = CGRect(
+                x: collectionView.contentOffset.x,
+                y: collectionView.contentOffset.y + insets.top,
+                width: collectionView.bounds.width,
+                height: max(0, collectionView.bounds.height - insets.top - insets.bottom))
+            return collectionView.collectionViewLayout.layoutAttributesForElements(in: visibleRect)?
+                .filter { $0.representedElementCategory == .cell }
+                .min { $0.indexPath < $1.indexPath }?
+                .indexPath
         }
 
         /// Registers the cell and builds the diffable data source (PRD P0-03, P0-11).
@@ -424,11 +582,16 @@ extension GridCollectionView {
                     snapshot.reconfigureItems(restyled)
                     dataSource.apply(snapshot, animatingDifferences: false)
                 }
-                if followsMoved { follow() }
+                if followsMoved {
+                    follow()
+                    updateSettledAnchor()
+                }
                 return
             }
 
             let previousIDs = items.map(\.id)
+            pendingResizeAnchor = nil
+            settledResizeAnchor = nil
             let previousByID = itemsByID
             let entersFocus = oldFocusGroup == nil && newFocusGroup != nil
             let leavesFocus = oldFocusGroup != nil && newFocusGroup == nil
@@ -500,6 +663,7 @@ extension GridCollectionView {
                 // Focus, or the stack a fold leaves (#225, #241, #290).
                 follow()
             }
+            updateSettledAnchor()
         }
 
         /// One cell tapped: multi-select toggles it, a collapsed cover opens its group, and any

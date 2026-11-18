@@ -181,6 +181,7 @@ struct MarkRatingAction: View {
     @Environment(\.tapPickerController) private var tapPicker
     @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.scenePhase) private var scenePhase
@@ -208,6 +209,7 @@ struct MarkRatingAction: View {
             photoID: photoID,
             hasTapPicker: tapPicker != nil,
             horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
             isDuoExpanded: isDuoExpanded,
             isDuoCover: isDuoCover,
             isEnabled: isEnabled)
@@ -359,6 +361,7 @@ struct MarkLabelAction: View {
     @Environment(\.tapPickerController) private var tapPicker
     @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.scenePhase) private var scenePhase
@@ -379,6 +382,7 @@ struct MarkLabelAction: View {
             photoID: photoID,
             hasTapPicker: tapPicker != nil,
             horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
             isDuoExpanded: isDuoExpanded,
             isDuoCover: isDuoCover,
             isEnabled: isEnabled)
@@ -494,6 +498,7 @@ private struct FallbackPopoverDismissTrigger: Equatable {
     let photoID: PhotoIdentity?
     let hasTapPicker: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
     let isDuoExpanded: Bool
     let isDuoCover: Bool
     let isEnabled: Bool
