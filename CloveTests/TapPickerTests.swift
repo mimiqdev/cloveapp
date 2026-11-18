@@ -2,6 +2,7 @@ import CloveCore
 import Foundation
 import SwiftUI
 import Testing
+import UIKit
 
 @testable import Clove
 
@@ -122,6 +123,422 @@ struct TapPickerTests {
         #expect(!controller.isPresented)
     }
 
+    // MARK: - Hosted placement regressions
+
+    @Test func duoExpandedFocusViewAndPhotoPreviewPlaceTapPickersWithinPhotoPane() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+
+        for (presentation, paneIdentifier) in [
+            (DetailPresentation.photoPreview, "clove.duo.photoPreview"),
+            (DetailPresentation.focus, "clove.duo.focus"),
+        ] {
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            let target = try #require(browsing.photos.first { $0.fileName == "MMQ02680.ARW" })
+            let box = TapPickerTestBox()
+
+            struct HostView: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let presentation: DetailPresentation
+                let box: TapPickerTestBox
+
+                var body: some View {
+                    NavigationStack {
+                        GridScreen(
+                            browsing: browsing,
+                            thumbnails: browsing.thumbnails,
+                            initialPresentation: presentation)
+                    }
+                    .environment(store)
+                    .environment(\.isDuoExpanded, true)
+                    .environment(\.usesSystemBrowsingToolbar, true)
+                    .environment(\.usesVerticalBrowsingToolbar, true)
+                    .environment(\.hasFoldRegion, true)
+                    .environment(\.scenePhase, .active)
+                    .environment(\.tapPickerTriggerRequest, box.trigger)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                        box.frames = frames
+                    }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+            let host = UIHostingController(
+                rootView: HostView(
+                    browsing: browsing, store: store, presentation: presentation, box: box))
+            host.traitOverrides.horizontalSizeClass = .regular
+            // Simulate the 89.5 pt vertical toolbar trailing safe area on physical unfolded Duo.
+            host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(100))
+            browsing.openPhoto(target.id)
+
+            try await waitFor("\(paneIdentifier) mounted") {
+                box.frames[paneIdentifier] != nil && box.frames["clove.duo.capsule"] != nil
+            }
+
+            try await verifyPickers(
+                box: box,
+                paneIdentifier: paneIdentifier,
+                capsuleIdentifier: "clove.duo.capsule",
+                ratingButtonIdentifier: "clove.duo.capsule.rating",
+                ratingPickerIdentifier: "clove.duo.capsule.stars",
+                labelButtonIdentifier: "clove.duo.capsule.label",
+                labelPickerIdentifier: "clove.duo.labels",
+                expectedDockLeftEdge: window.frame.width - 89.5)
+        }
+    }
+
+    @Test func nestedTapPickerContainersIsolateHorizontallyOffsetInnerHost() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let box = TapPickerTestBox()
+
+        struct NestedHost: View {
+            let box: TapPickerTestBox
+
+            var body: some View {
+                HStack(spacing: 0) {
+                    ZStack(alignment: .bottomTrailing) {
+                        Color.clear
+                        MarkingToolbar(
+                            rating: .unrated,
+                            label: nil,
+                            isRejected: false,
+                            identifier: "test.outer",
+                            onRate: { _ in },
+                            onReject: {},
+                            onLabel: { _ in }
+                        )
+                        .padding(16)
+                    }
+                    .frame(width: 460, height: 600)
+
+                    ZStack(alignment: .bottomTrailing) {
+                        Color.clear
+                        MarkingToolbar(
+                            rating: .unrated,
+                            label: nil,
+                            isRejected: false,
+                            identifier: "test.inner",
+                            onRate: { _ in },
+                            onReject: {},
+                            onLabel: { _ in }
+                        )
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                    }
+                    .frame(width: 450.5, height: 600)
+                    .horizontalContainerContentMarginsIfAvailable()
+                    .tapPickerContainer()
+                    .reportTapPickerFrame("test.inner.pane")
+                }
+                .frame(width: 910.5, height: 600)
+                .tapPickerContainer()
+                .reportTapPickerFrame("test.outer.pane")
+                .environment(\.scenePhase, .active)
+                .environment(\.tapPickerTriggerRequest, box.trigger)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    box.frames = frames
+                }
+            }
+        }
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 700)
+        let host = UIHostingController(rootView: NestedHost(box: box))
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("nested host mounted") {
+            box.frames["test.inner.pane"] != nil
+                && box.frames["test.inner"] != nil
+                && box.frames["test.outer.pane"] != nil
+                && box.frames["test.outer"] != nil
+        }
+
+        let innerPaneFrame = try #require(box.frames["test.inner.pane"])
+        let innerCapsuleFrame = try #require(box.frames["test.inner"])
+        let outerPaneFrame = try #require(box.frames["test.outer.pane"])
+        let outerCapsuleFrame = try #require(box.frames["test.outer"])
+        #expect(abs(innerPaneFrame.minX - (outerPaneFrame.minX + 460)) < 2)
+
+        for (buttonID, pickerID) in [
+            ("test.inner.rating", "test.inner.stars"),
+            ("test.inner.label", "test.inner.labels"),
+        ] {
+            box.sendTrigger(buttonID)
+            try await waitFor("inner picker \(pickerID) visible") {
+                box.frames[pickerID] != nil
+            }
+            let pickerFrame = try #require(box.frames[pickerID])
+            #expect(pickerFrame.width > pickerFrame.height)
+            #expect(pickerFrame.maxY <= innerCapsuleFrame.minY + 1)
+            #expect(pickerFrame.minX >= innerPaneFrame.minX + 12 - 1.5)
+            #expect(pickerFrame.maxX <= innerPaneFrame.maxX - 12 + 1.5)
+            // Must clamp to 12 pt inside inner pane, not shift left by 460 pt or 89.5 pt.
+            #expect(abs((innerPaneFrame.maxX - 12) - pickerFrame.maxX) < 2)
+            box.sendTrigger(buttonID)
+            try await waitFor("inner picker \(pickerID) dismissed") {
+                box.frames[pickerID] == nil
+            }
+        }
+
+        // Verify outer container still places its own picker within outer pane.
+        box.sendTrigger("test.outer.rating")
+        try await waitFor("outer picker visible") {
+            box.frames["test.outer.stars"] != nil
+        }
+        let outerPickerFrame = try #require(box.frames["test.outer.stars"])
+        #expect(outerPickerFrame.width > outerPickerFrame.height)
+        #expect(outerPickerFrame.maxY <= outerCapsuleFrame.minY + 1)
+        #expect(outerPickerFrame.minX >= outerPaneFrame.minX + 12 - 1.5)
+        #expect(outerPickerFrame.maxX <= outerPaneFrame.maxX - 12 + 1.5)
+        box.sendTrigger("test.outer.rating")
+        try await waitFor("outer picker dismissed") {
+            box.frames["test.outer.stars"] == nil
+        }
+    }
+
+    @Test func compactDetailAndGridBatchBarPlaceTapPickersInsideSafeBounds() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+
+        // 1. Standard compact Detail.
+        do {
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            let target = try #require(browsing.photos.first { $0.fileName == "MMQ02680.ARW" })
+            let box = TapPickerTestBox()
+
+            struct HostView: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let box: TapPickerTestBox
+
+                var body: some View {
+                    BrowseShell(browsing: browsing)
+                        .environment(store)
+                        .environment(\.scenePhase, .active)
+                        .environment(\.tapPickerTriggerRequest, box.trigger)
+                        .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                            box.frames = frames
+                        }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            let host = UIHostingController(
+                rootView: HostView(browsing: browsing, store: store, box: box))
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.additionalSafeAreaInsets = UIEdgeInsets(top: 12, left: 0, bottom: 20, right: 0)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(100))
+            browsing.openPhoto(target.id)
+
+            try await waitFor("compact detail capsule mounted") {
+                box.frames["clove.detail.capsule"] != nil
+            }
+
+            let capsuleFrame = try #require(box.frames["clove.detail.capsule"])
+            for (buttonID, pickerID) in [
+                ("clove.detail.capsule.rating", "clove.detail.capsule.stars"),
+                ("clove.detail.capsule.label", "clove.detail.labels"),
+            ] {
+                box.sendTrigger(buttonID)
+                try await waitFor("compact detail picker \(pickerID) visible") {
+                    box.frames[pickerID] != nil
+                }
+                let pickerFrame = try #require(box.frames[pickerID])
+                let detailSafeWidth = host.view.safeAreaLayoutGuide.layoutFrame.width - 24
+                if detailSafeWidth >= 288 {
+                    #expect(pickerFrame.width > pickerFrame.height)
+                } else {
+                    #expect(pickerFrame.height > pickerFrame.width)
+                }
+                #expect(pickerFrame.maxY <= capsuleFrame.minY + 1)
+                #expect(pickerFrame.minX >= 12 - 1.5)
+                #expect(pickerFrame.maxX <= window.frame.width - 12 + 1.5)
+                box.sendTrigger(buttonID)
+                try await waitFor("compact detail picker \(pickerID) dismissed") {
+                    box.frames[pickerID] == nil
+                }
+            }
+        }
+
+        // 2. GridBatchBar in compact GridScreen.
+        do {
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            let first = try #require(browsing.photos.first)
+            let second = try #require(browsing.photos.dropFirst().first)
+            let box = TapPickerTestBox()
+
+            struct HostView: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let box: TapPickerTestBox
+
+                var body: some View {
+                    NavigationStack {
+                        GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+                    }
+                    .environment(store)
+                    .environment(\.scenePhase, .active)
+                    .environment(\.tapPickerTriggerRequest, box.trigger)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                        box.frames = frames
+                    }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            let host = UIHostingController(
+                rootView: HostView(browsing: browsing, store: store, box: box))
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.additionalSafeAreaInsets = UIEdgeInsets(top: 12, left: 0, bottom: 20, right: 0)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(100))
+            browsing.toggleSelection(first.id)
+            browsing.toggleSelection(second.id)
+
+            try await waitFor("grid batch bar mounted") {
+                box.frames["clove.grid.batch"] != nil
+            }
+            // Allow the batch bar's 220 ms chrome slide-in transition to settle before measuring.
+            try await Task.sleep(for: .milliseconds(300))
+
+            let batchFrame = try #require(box.frames["clove.grid.batch"])
+            for (buttonID, pickerID) in [
+                ("clove.grid.batch.rating", "clove.grid.batch.stars"),
+                ("clove.grid.batch.label", "clove.grid.batch.labels"),
+            ] {
+                box.sendTrigger(buttonID)
+                try await waitFor("batch picker \(pickerID) visible") {
+                    box.frames[pickerID] != nil
+                }
+                let pickerFrame = try #require(box.frames[pickerID])
+                let batchSafeWidth = host.view.safeAreaLayoutGuide.layoutFrame.width - 24
+                if batchSafeWidth >= 288 {
+                    #expect(pickerFrame.width > pickerFrame.height)
+                } else {
+                    #expect(pickerFrame.height > pickerFrame.width)
+                }
+                #expect(pickerFrame.maxY <= batchFrame.minY + 1)
+                #expect(pickerFrame.minX >= 12 - 1.5)
+                #expect(pickerFrame.maxX <= window.frame.width - 12 + 1.5)
+                box.sendTrigger(buttonID)
+                try await waitFor("batch picker \(pickerID) dismissed") {
+                    box.frames[pickerID] == nil
+                }
+            }
+        }
+    }
+
+    @Test func outsideTapDismisserAndSafeAreasDoNotShiftPickerFrame() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let box = TapPickerTestBox()
+
+        struct SafeAreaHost: View {
+            let box: TapPickerTestBox
+
+            var body: some View {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    HStack {
+                        Spacer(minLength: 0)
+                        MarkingToolbar(
+                            rating: .unrated,
+                            label: nil,
+                            isRejected: false,
+                            identifier: "test.safe",
+                            onRate: { _ in },
+                            onReject: {},
+                            onLabel: { _ in }
+                        )
+                    }
+                    .padding(.vertical, 8)
+                }
+                .background(Color.clear.ignoresSafeArea())
+                .tapPickerContainer()
+                .reportTapPickerFrame("test.safe.pane")
+                .environment(\.scenePhase, .active)
+                .environment(\.tapPickerTriggerRequest, box.trigger)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    box.frames = frames
+                }
+            }
+        }
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+        let host = UIHostingController(rootView: SafeAreaHost(box: box))
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 59, left: 20, bottom: 34, right: 89.5)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("safe-area host mounted") {
+            box.frames["test.safe.pane"] != nil && box.frames["test.safe"] != nil
+        }
+
+        let paneFrame = try #require(box.frames["test.safe.pane"])
+        let capsuleFrame = try #require(box.frames["test.safe"])
+
+        for (buttonID, pickerID) in [
+            ("test.safe.rating", "test.safe.stars"),
+            ("test.safe.label", "test.safe.labels"),
+        ] {
+            box.sendTrigger(buttonID)
+            try await waitFor("safe-area picker \(pickerID) visible") {
+                box.frames[pickerID] != nil
+            }
+            let pickerFrame = try #require(box.frames[pickerID])
+            #expect(pickerFrame.width > pickerFrame.height)
+            #expect(abs((capsuleFrame.minY - 10) - pickerFrame.maxY) < 2)
+            #expect(abs((paneFrame.maxX - 12) - pickerFrame.maxX) < 2)
+            box.sendTrigger(buttonID)
+            try await waitFor("safe-area picker \(pickerID) dismissed") {
+                box.frames[pickerID] == nil
+            }
+        }
+    }
+
     // MARK: - Behavioral rules
 
     @Test func clearRatingKeepsLabelAndClearsRejectWhileClearLabelKeepsStars() {
@@ -217,5 +634,83 @@ struct TapPickerTests {
         // Clearing ratings on mixed [3, 5] writes .unrated to both while keeping labels untouched.
         let clearRatingPlan = BatchMarkPlan(action: .rating(.unrated), photos: [p1, p2])
         #expect(clearRatingPlan.photos == [p1.id, p2.id])
+    }
+
+    // MARK: - Helpers
+
+    private func verifyPickers(
+        box: TapPickerTestBox,
+        paneIdentifier: String,
+        capsuleIdentifier: String,
+        ratingButtonIdentifier: String,
+        ratingPickerIdentifier: String,
+        labelButtonIdentifier: String,
+        labelPickerIdentifier: String,
+        expectedDockLeftEdge: CGFloat
+    ) async throws {
+        let paneFrame = try #require(box.frames[paneIdentifier])
+        let capsuleFrame = try #require(box.frames[capsuleIdentifier])
+        #expect(paneFrame.maxX <= expectedDockLeftEdge + 1.5)
+
+        for (buttonID, pickerID) in [
+            (ratingButtonIdentifier, ratingPickerIdentifier),
+            (labelButtonIdentifier, labelPickerIdentifier),
+        ] {
+            box.sendTrigger(buttonID)
+            try await waitFor("picker \(pickerID) visible") {
+                box.frames[pickerID] != nil
+            }
+            let pickerFrame = try #require(box.frames[pickerID])
+            #expect(pickerFrame.width > pickerFrame.height)
+            #expect(pickerFrame.maxY <= capsuleFrame.minY + 1)
+            #expect(pickerFrame.minX >= paneFrame.minX + 12 - 1.5)
+            #expect(pickerFrame.maxX <= paneFrame.maxX - 12 + 1.5)
+            #expect(pickerFrame.maxX <= expectedDockLeftEdge - 12 + 1.5)
+            // Verify picker clamps to 12 pt inside pane's right edge rather than double-subtracting.
+            #expect(abs((paneFrame.maxX - 12) - pickerFrame.maxX) < 2)
+            box.sendTrigger(buttonID)
+            try await waitFor("picker \(pickerID) dismissed") {
+                box.frames[pickerID] == nil
+            }
+        }
+    }
+
+    private func waitFor(
+        _ message: String,
+        timeout: Duration = .seconds(3),
+        condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            if ContinuousClock.now >= deadline {
+                Issue.record(Comment(rawValue: message))
+                throw CancellationError()
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+    }
+}
+
+@MainActor
+@Observable
+private final class TapPickerTestBox {
+    var frames: [String: CGRect] = [:]
+    var trigger: TapPickerTriggerRequest?
+    private var nonce = 0
+
+    func sendTrigger(_ id: String) {
+        nonce += 1
+        trigger = TapPickerTriggerRequest(id: id, nonce: nonce)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func horizontalContainerContentMarginsIfAvailable() -> some View {
+        if #available(iOS 27.1, *) {
+            contentMargins(for: .container, edges: .horizontal)
+        } else {
+            self
+        }
     }
 }

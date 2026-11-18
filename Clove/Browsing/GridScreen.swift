@@ -45,11 +45,13 @@ struct GridScreen: View {
     init(
         browsing: BrowsingModel,
         thumbnails: (any GridThumbnailSource)? = nil,
-        filterPopoverTrigger: Int = 0
+        filterPopoverTrigger: Int = 0,
+        initialPresentation: DetailPresentation = .photoPreview
     ) {
         self.browsing = browsing
         self.thumbnails = thumbnails ?? browsing.thumbnails
         self.filterPopoverTrigger = filterPopoverTrigger
+        _presentation = State(initialValue: initialPresentation)
     }
 
     private var isSelecting: Bool { selectsEmpty || browsing.isSelecting }

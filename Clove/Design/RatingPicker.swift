@@ -80,6 +80,7 @@ struct RatingPicker: View {
         .accessibilityElement(children: .contain)
         .accessibilityValue(accessibilityValue)
         .accessibilityIdentifier(identifier)
+        .reportTapPickerFrame(identifier)
     }
 
     private enum PickerItem: Hashable {
