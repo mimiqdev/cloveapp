@@ -231,6 +231,8 @@ struct DetailMarkingView: View {
                 toolbarDragRating = nil
                 inspectedFocusRegionID = nil
                 pendingRestoredZoom = nil
+                focusAnalysisID = UUID()
+                focusRegionState = DetailFocusRegionState()
             }
             .onChange(of: duoPopoverDismissTrigger) { _, _ in
                 showsToolbarStars = false
@@ -1102,8 +1104,7 @@ struct DetailMarkingView: View {
             }
         }
         .overlay { previewState }
-        .overlay(alignment: .top) { focusRegionStatus }
-        .overlay(alignment: .topLeading) { limitationNote }
+        .overlay(alignment: .topLeading) { topLeadingStageOverlays }
         .overlay(alignment: .topTrailing) {
             DetailRejectGlyphOverlay(photoID: photo.id, isRejected: displayMarks.isRejected)
         }
@@ -1138,20 +1139,29 @@ struct DetailMarkingView: View {
         }
     }
 
-    /// Advisory progress and explicit unavailable answers live in the existing floating chrome.
-    @ViewBuilder private var focusRegionStatus: some View {
-        if chromeIsVisible, browsing.showsFocusRegions,
-            let status = focusRegionState.status(language: language)
-        {
-            Text(status)
-                .font(.caption)
-                .foregroundStyle(Color.clove.text.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .cloveGlass(in: Capsule())
-                .padding(.top, 12)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("clove.detail.focusStatus")
+    /// Compact passive face/AF result indicators and any preview-only limitation note stacked cleanly
+    /// in the viewport's upper-leading corner inside its safe area.
+    @ViewBuilder private var topLeadingStageOverlays: some View {
+        let indicators = focusRegionState.resultIndicators(
+            visible: shown != nil && chromeIsVisible && browsing.showsFocusRegions)
+        let showsLimitation = limitation != nil && shown != nil
+        if !indicators.isEmpty || showsLimitation {
+            VStack(alignment: .leading, spacing: 6) {
+                if !indicators.isEmpty {
+                    DetailFocusResultIndicatorsView(
+                        indicators: indicators,
+                        usesPhotoBacking: DetailFocusResultIndicators.coversPhotoPixels(
+                            indicators: indicators,
+                            scale: scale,
+                            imagePixels: shown.map { pixelSize($0) },
+                            viewSize: viewSize),
+                        language: language)
+                }
+                limitationNote
+            }
+            .padding(.top, 8)
+            .padding(.leading, 12)
+            .allowsHitTesting(false)
         }
     }
 
@@ -1163,7 +1173,6 @@ struct DetailMarkingView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(.thinMaterial, in: Capsule())
-                .padding(12)
                 .accessibilityIdentifier("clove.detail.limitation")
         }
     }

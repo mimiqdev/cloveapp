@@ -215,48 +215,37 @@ struct DetailFocusRegionState {
         return dx * dx + dy * dy
     }
 
-    var status: String? {
-        status(language: .english)
+    var resultIndicators: DetailFocusResultIndicators {
+        guard !analysisUnavailable else {
+            return DetailFocusResultIndicators(face: nil, missingAutofocusMetadata: false)
+        }
+        let face: DetailFocusFaceIndicator? =
+            switch faces {
+            case .regions(let items)
+            where items.contains(where: { $0.kind == .face || $0.kind == .eye }):
+                .detected
+            case .unavailable(.noFacesDetected):
+                .noFacesDetected
+            default:
+                nil
+            }
+        let missingAutofocusMetadata: Bool =
+            switch autofocus {
+            case .unavailable(.noAutofocusMetadata):
+                true
+            default:
+                false
+            }
+        return DetailFocusResultIndicators(
+            face: face,
+            missingAutofocusMetadata: missingAutofocusMetadata)
     }
 
-    func status(language: ResolvedAppLanguage) -> String? {
-        if analysisUnavailable {
-            return AppLocalization.string("Analysis unavailable", language: language)
+    func resultIndicators(visible: Bool) -> DetailFocusResultIndicators {
+        guard visible else {
+            return DetailFocusResultIndicators(face: nil, missingAutofocusMetadata: false)
         }
-        var messages: [String] = []
-        if let autofocus, case .unavailable(let reason) = autofocus {
-            if case .noAutofocusMetadata = reason {
-                messages.append(AppLocalization.string("No AF metadata", language: language))
-            }
-        }
-        if let faces, case .unavailable(let reason) = faces {
-            switch reason {
-            case .noFacesDetected:
-                messages.append(AppLocalization.string("No faces", language: language))
-            case .faceDetectionFailed, .previewFailed:
-                messages.append(
-                    AppLocalization.string("Face analysis unavailable", language: language))
-            case .noAutofocusMetadata:
-                break
-            }
-        }
-        if isAnalyzing {
-            messages.append(
-                AppLocalization.string(
-                    autofocus == nil ? "Analyzing focus regions…" : "Analyzing faces…",
-                    language: language))
-        }
-        let presented = regions
-        if presented.contains(where: { $0.unavailableReason != nil }) {
-            messages.append(
-                AppLocalization.string(
-                    presented.contains {
-                        $0.unavailableReason == RegionScoreUnavailable.regionTooSmall.rawValue
-                    }
-                        ? "Tiny focus region unavailable" : "Focus region unavailable",
-                    language: language))
-        }
-        return messages.isEmpty ? nil : messages.joined(separator: " · ")
+        return resultIndicators
     }
 
     mutating func begin(for photo: PhotoIdentity) {
@@ -351,5 +340,131 @@ struct DetailFocusRegionState {
                 ? autofocusRegions.filter(\.isActionable) : autofocusRegions
             return !blockingAF.contains { af in af.collidesLocally(with: marker) }
         }
+    }
+}
+
+enum DetailFocusFaceIndicator: Equatable, Sendable {
+    case detected
+    case noFacesDetected
+
+    var systemImageName: String {
+        switch self {
+        case .detected: "person.fill.viewfinder"
+        case .noFacesDetected: "person.slash"
+        }
+    }
+
+    func accessibilityLabel(language: ResolvedAppLanguage) -> String {
+        switch self {
+        case .detected:
+            AppLocalization.string("Face detected", language: language)
+        case .noFacesDetected:
+            AppLocalization.string("No faces detected", language: language)
+        }
+    }
+}
+
+struct DetailFocusResultIndicators: Equatable, Sendable {
+    let face: DetailFocusFaceIndicator?
+    let missingAutofocusMetadata: Bool
+
+    var isEmpty: Bool {
+        face == nil && !missingAutofocusMetadata
+    }
+
+    func missingAutofocusAccessibilityLabel(language: ResolvedAppLanguage) -> String {
+        AppLocalization.string("No autofocus metadata", language: language)
+    }
+
+    /// Returns whether the upper-leading indicator badge sits over photo pixels at the current
+    /// zoom and fit geometry, so a subtle scrim appears only where icons cover photo pixels.
+    static func coversPhotoPixels(
+        indicators: DetailFocusResultIndicators,
+        scale: CGFloat,
+        imagePixels: CGSize?,
+        viewSize: CGSize
+    ) -> Bool {
+        guard !indicators.isEmpty else { return false }
+        if scale > DetailFitScale.tolerance { return true }
+        guard let imagePixels, viewSize.width > 0, viewSize.height > 0 else { return false }
+        let fitted = DetailZoom.fittedSize(imagePixels: imagePixels, viewSize: viewSize)
+        let fittedRect = CGRect(
+            x: (viewSize.width - fitted.width) / 2,
+            y: (viewSize.height - fitted.height) / 2,
+            width: fitted.width,
+            height: fitted.height)
+        let badgeWidth: CGFloat =
+            (indicators.face != nil && indicators.missingAutofocusMetadata) ? 52 : 30
+        let badgeRect = CGRect(x: 12, y: 8, width: badgeWidth, height: 24)
+        return fittedRect.intersects(badgeRect)
+    }
+}
+
+struct SlashedViewfinderGlyph: View {
+    var body: some View {
+        Image(systemName: "viewfinder")
+            .font(.system(size: 16, weight: .medium))
+            .overlay {
+                Canvas { context, size in
+                    let inset = min(size.width, size.height) * 0.14
+                    var path = Path()
+                    path.move(to: CGPoint(x: inset, y: inset))
+                    path.addLine(to: CGPoint(x: size.width - inset, y: size.height - inset))
+                    context.blendMode = .destinationOut
+                    context.stroke(
+                        path,
+                        with: .color(.black),
+                        style: StrokeStyle(lineWidth: 3.4, lineCap: .round))
+                    context.blendMode = .normal
+                    context.stroke(
+                        path,
+                        with: .foreground,
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                }
+            }
+            .compositingGroup()
+    }
+}
+
+struct DetailFocusResultIndicatorsView: View {
+    let indicators: DetailFocusResultIndicators
+    let usesPhotoBacking: Bool
+    let language: ResolvedAppLanguage
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let face = indicators.face {
+                Image(systemName: face.systemImageName)
+                    .font(.system(size: 16, weight: .medium))
+                    .accessibilityAddTraits(.isImage)
+                    .accessibilityLabel(face.accessibilityLabel(language: language))
+                    .accessibilityIdentifier("clove.detail.focusIndicator.face")
+            }
+            if indicators.missingAutofocusMetadata {
+                SlashedViewfinderGlyph()
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isImage)
+                    .accessibilityLabel(
+                        indicators.missingAutofocusAccessibilityLabel(language: language)
+                    )
+                    .accessibilityIdentifier("clove.detail.focusIndicator.autofocus")
+            }
+        }
+        .foregroundStyle(
+            usesPhotoBacking
+                ? AnyShapeStyle(Color.clove.focus.outline)
+                : AnyShapeStyle(Color.clove.text.primary)
+        )
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background {
+            if usesPhotoBacking {
+                Capsule()
+                    .fill(Color.clove.focus.edge)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("clove.detail.focusIndicators")
     }
 }
