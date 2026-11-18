@@ -54,7 +54,8 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | a11y.focusToggle | Focus regions (value: On / Off) |
 | a11y.focusRegion.* | Autofocus region / Face region / Eye region |
 | a11y.collapseGroup | Collapse group (`chevron.down` in filmstrip, `chevron.up` in Photo Preview split grid) |
-| detail.focus.status | Analyzing focus regions… / Analyzing faces… / No AF metadata / No faces / Tiny focus region unavailable / Focus region unavailable / Analysis unavailable |
+| a11y.focusIndicator.face | Face detected / No faces detected (VoiceOver label on the compact face result glyph) |
+| a11y.focusIndicator.autofocus | No autofocus metadata (VoiceOver label on the compact missing-AF glyph) |
 
 ## Folder access accessibility
 

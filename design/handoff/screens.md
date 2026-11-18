@@ -88,7 +88,7 @@ Devices:
 **Default**
 - The photo sits on `bg/stage`.
 - The top bar has Back and the **Focus regions** (`viewfinder`) toggle on the leading side, the filename as the title, and the subtitle `"{i} / {n} · + JPG"` in Timeline or `"Group · {i} / {n} · + JPG"` in Group Focus (no loading or save label). On the right are **Info (ⓘ)** and **Undo**.
-- Focus overlays draw camera AF rectangles, four-corner face fallbacks, or one small square eye marker per person without fill; pending or unavailable status appears in a compact glass pill at the top edge of the stage when chrome and overlays are visible.
+- Focus overlays draw camera AF rectangles, four-corner face fallbacks, or one small square eye marker per person without fill; compact passive face and missing-AF result glyphs (`16 pt`) appear in the photo viewport's upper-leading corner (with a subtle dark scrim only over photo pixels) when chrome and Focus regions are visible.
 - Marks appear **once**, in the shared **marking toolbar** (168 × 48) above the home indicator: the `flag.slash` Reject action, the star+value rating action, and the label circle (owner decision, 2026-11-13, #227). Disabled on unexpanded group stacks in Timeline.
 - The **filmstrip** floats just above the marking toolbar. Both stay in place at fit and while zoomed, and a single tap on the photo toggles them with the rest of the chrome (#302).
 

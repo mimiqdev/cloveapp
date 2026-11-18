@@ -216,13 +216,27 @@ struct AppLocalizationTests {
             FolderPreparationAccessibility.summaryText(for: status, language: .traditionalChinese)
                 == "已就緒 3 / 10")
 
-        var focusState = DetailFocusRegionState()
-        let photo = PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "IMG_0001")
-        focusState.begin(for: photo)
-        #expect(focusState.status(language: .simplifiedChinese) == "正在分析对焦区域…")
-        #expect(focusState.status(language: .traditionalChinese) == "正在分析對焦區域…")
-        focusState.finish(nil, for: photo)
-        #expect(focusState.status(language: .simplifiedChinese) == "分析不可用")
-        #expect(focusState.status(language: .traditionalChinese) == "分析不可用")
+        let detected = DetailFocusFaceIndicator.detected
+        let none = DetailFocusFaceIndicator.noFacesDetected
+        let indicators = DetailFocusResultIndicators(
+            face: detected, missingAutofocusMetadata: true)
+
+        #expect(detected.accessibilityLabel(language: .english) == "Face detected")
+        #expect(detected.accessibilityLabel(language: .simplifiedChinese) == "检测到人脸")
+        #expect(detected.accessibilityLabel(language: .traditionalChinese) == "偵測到人臉")
+
+        #expect(none.accessibilityLabel(language: .english) == "No faces detected")
+        #expect(none.accessibilityLabel(language: .simplifiedChinese) == "未检测到人脸")
+        #expect(none.accessibilityLabel(language: .traditionalChinese) == "未偵測到人臉")
+
+        #expect(
+            indicators.missingAutofocusAccessibilityLabel(language: .english)
+                == "No autofocus metadata")
+        #expect(
+            indicators.missingAutofocusAccessibilityLabel(language: .simplifiedChinese)
+                == "无自动对焦元数据")
+        #expect(
+            indicators.missingAutofocusAccessibilityLabel(language: .traditionalChinese)
+                == "無自動對焦中繼資料")
     }
 }
