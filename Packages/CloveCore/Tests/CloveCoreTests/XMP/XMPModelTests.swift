@@ -27,24 +27,38 @@ func keepsOutOfRangeRatingsExternal(value: Int) {
 
 @Test func unmarkedIsTheReadingOfAnEmptyPacket() {
     #expect(XMPRating.unrated == .rated(.unrated))
-    #expect(XMPMarks.unmarked == XMPMarks(rating: .unrated, label: .clear))
+    #expect(XMPMarks.unmarked == XMPMarks(rating: .unrated, label: .clear, keywords: []))
     #expect(XMPMarks.unmarked.label.isClear)
+    #expect(XMPMarks.unmarked.keywords.isEmpty)
 }
 
 @Test func editKeepsEverythingItWasNotAskedToChange() throws {
     let rating = try #require(Rating(rawValue: 4))
     let label = ColourLabel(colour: .orange)
-    #expect(XMPEdit() == XMPEdit(rating: .keep, label: .keep))
-    #expect(XMPEdit.rating(rating) == XMPEdit(rating: .set(rating), label: .keep))
-    #expect(XMPEdit.label(label) == XMPEdit(rating: .keep, label: .set(label)))
+    #expect(XMPEdit() == XMPEdit(rating: .keep, label: .keep, keywords: .keep))
+    #expect(
+        XMPEdit.rating(rating)
+            == XMPEdit(rating: .set(rating), label: .keep, keywords: .keep))
+    #expect(
+        XMPEdit.label(label)
+            == XMPEdit(rating: .keep, label: .set(label), keywords: .keep))
     #expect(XMPEdit.label(.clear).label == .set(.clear))
+    #expect(
+        XMPEdit.keywords(["sky", "dawn"])
+            == XMPEdit(rating: .keep, label: .keep, keywords: .set(["sky", "dawn"])))
 }
 
 @Test func ownedPropertiesUseTheStandardNamespaceAndNames() {
     #expect(XMPProperty.namespaceURI == "http://ns.adobe.com/xap/1.0/")
+    #expect(XMPProperty.dublinCoreNamespaceURI == "http://purl.org/dc/elements/1.1/")
+    #expect(XMPProperty.lightroomNamespaceURI == "http://ns.adobe.com/lightroom/1.0/")
     #expect(XMPProperty.rating.localName == "Rating")
     #expect(XMPProperty.label.localName == "Label")
-    #expect(XMPProperty.allCases == [.rating, .label])
+    #expect(XMPProperty.keywords.localName == "subject")
+    #expect(XMPProperty.rating.propertyNamespaceURI == XMPProperty.namespaceURI)
+    #expect(XMPProperty.label.propertyNamespaceURI == XMPProperty.namespaceURI)
+    #expect(XMPProperty.keywords.propertyNamespaceURI == XMPProperty.dublinCoreNamespaceURI)
+    #expect(XMPProperty.allCases == [.rating, .label, .keywords])
 }
 
 @Test func publicValuesAreSendable() {
@@ -74,6 +88,7 @@ func keepsOutOfRangeRatingsExternal(value: Int) {
         .qualifiedMark(.rating),
         .invalidRating("five"),
         .unsupportedLabelText,
+        .unsupportedKeywordText,
         .writeVerificationFailed,
     ]
     for error in errors {

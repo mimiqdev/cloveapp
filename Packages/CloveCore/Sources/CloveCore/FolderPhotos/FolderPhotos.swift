@@ -114,8 +114,7 @@ public struct FolderPhotos: Sendable {
     /// rating change never clears a label and a label never changes the rating.
     public mutating func apply(_ change: MarkChange, to id: PhotoIdentity) {
         guard var photo = gridPhotos[id] else { return }
-        if let rating = change.rating { photo.marks.rating = rating }
-        if let label = change.label { photo.marks.label = label }
+        photo.marks = photo.marks.applying(change)
         gridPhotos[id] = photo
     }
 

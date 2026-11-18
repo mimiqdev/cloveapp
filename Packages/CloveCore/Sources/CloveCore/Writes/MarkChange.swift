@@ -1,21 +1,24 @@
 import Foundation
 
-/// One request to change marks on a photo set: the rating and/or the label.
+/// One request to change marks on a photo set: the rating, label, and/or keywords.
 ///
 /// PRD P0-07 and P0-09 describe single and batch writes of a rating (Reject included, as −1)
 /// and a colour label. A field left `nil` is not part of the request and keeps its stored
-/// value, so a rating change never rewrites the label (PRD How marks reach disk, rule 9).
+/// value, so a rating change never rewrites the label or keywords (PRD How marks reach disk, rule 9).
 public struct MarkChange: Hashable, Sendable {
     /// The requested rating, −1 for Reject, or `nil` to leave the stored rating alone
     /// (PRD P0-05).
     public var rating: Rating?
     /// The requested label, or `nil` to leave the stored label alone (PRD disk rules 9–10).
     public var label: ColourLabel?
+    /// The requested keywords, `[]` to clear all keywords, or `nil` to leave stored keywords alone.
+    public var keywords: [String]?
 
     /// Creates a request that touches only the fields the caller names (PRD P0-07).
-    public init(rating: Rating? = nil, label: ColourLabel? = nil) {
+    public init(rating: Rating? = nil, label: ColourLabel? = nil, keywords: [String]? = nil) {
         self.rating = rating
         self.label = label
+        self.keywords = keywords
     }
 
     /// A request that changes only the rating; `.rejected` writes Reject (PRD P0-05).
@@ -28,8 +31,13 @@ public struct MarkChange: Hashable, Sendable {
         MarkChange(label: label)
     }
 
+    /// A request that sets or clears (`[]`) only the keywords.
+    public static func keywords(_ keywords: [String]) -> MarkChange {
+        MarkChange(keywords: keywords)
+    }
+
     /// Whether the request names no field at all; an empty change writes nothing.
-    public var isEmpty: Bool { rating == nil && label == nil }
+    public var isEmpty: Bool { rating == nil && label == nil && keywords == nil }
 
 }
 
@@ -53,37 +61,43 @@ public struct CloveMarkChange: Hashable, Sendable {
     public var rating: Rating?
     /// The requested stored label, or `nil` to keep the stored value (G1 decision 6).
     public var label: ColourLabel?
+    /// The requested stored keywords, `[]` to clear, or `nil` to keep the stored value.
+    public var keywords: [String]?
 
     /// Creates a request against Clove storage (G1 decision 6).
-    public init(rating: Rating? = nil, label: ColourLabel? = nil) {
+    public init(rating: Rating? = nil, label: ColourLabel? = nil, keywords: [String]? = nil) {
         self.rating = rating
         self.label = label
+        self.keywords = keywords
     }
 
     /// Whether the request names no field at all.
-    public var isEmpty: Bool { rating == nil && label == nil }
+    public var isEmpty: Bool { rating == nil && label == nil && keywords == nil }
 }
 
 /// The marks Clove keeps for one photo in its own storage.
 ///
 /// G1 decision 6 stores new marks for a standalone JPEG/HIF here, Reject included as the
-/// rating −1. The rating and label are absent for a RAW set, whose marks belong to the sidecar
+/// rating −1. The marks are absent for a RAW set, whose marks belong to the sidecar
 /// (PRD How marks reach disk, rule 2).
 public struct CloveStoredMarks: Hashable, Sendable {
     /// A stored rating, or `nil` when Clove stores no rating for the photo (G1 decision 6).
     public var rating: Rating?
     /// A stored label, or `nil` when Clove stores no label for the photo (G1 decision 6).
     public var label: ColourLabel?
+    /// Stored keywords (`nil` = untouched in Clove, `[]` = explicitly cleared in Clove).
+    public var keywords: [String]?
 
     /// Creates the stored marks for one photo; the default is nothing stored.
-    public init(rating: Rating? = nil, label: ColourLabel? = nil) {
+    public init(rating: Rating? = nil, label: ColourLabel? = nil, keywords: [String]? = nil) {
         self.rating = rating
         self.label = label
+        self.keywords = keywords.map(PhotoKeywords.deduplicated)
     }
 
     /// Whether the photo is rejected, which is the stored rating −1 (PRD P0-05).
     public var isRejected: Bool { rating?.isRejected == true }
 
     /// Whether Clove stores nothing at all for the photo.
-    public var isEmpty: Bool { rating == nil && label == nil }
+    public var isEmpty: Bool { rating == nil && label == nil && keywords == nil }
 }

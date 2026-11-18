@@ -8,6 +8,8 @@ enum MarkFieldValue: Hashable, Sendable {
     case rating(Rating)
     /// A colour label, including external text Clove preserves (PRD P0-05).
     case label(ColourLabel)
+    /// The ordered, deduplicated keyword list.
+    case keywords([String])
 }
 
 /// Field-level helpers shared by recording and restoring (PRD P0-05; DEV-PLAN C5).
@@ -24,6 +26,7 @@ enum MarkUndoFields {
         switch field {
         case .rating: change.rating.map(MarkFieldValue.rating)
         case .label: change.label.map(MarkFieldValue.label)
+        case .keywords: change.keywords.map { .keywords(PhotoKeywords.deduplicated($0)) }
         }
     }
 
@@ -32,6 +35,7 @@ enum MarkUndoFields {
         switch field {
         case .rating: .rating(marks.rating)
         case .label: .label(marks.label)
+        case .keywords: .keywords(marks.keywords)
         }
     }
 
@@ -45,6 +49,7 @@ enum MarkUndoFields {
             switch values[field] {
             case .rating(let rating)?: change.rating = rating
             case .label(let label)?: change.label = label
+            case .keywords(let keywords)?: change.keywords = keywords
             case nil: continue
             }
         }

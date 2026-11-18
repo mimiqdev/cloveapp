@@ -397,3 +397,31 @@ private func makeQueue(_ folder: WriteTestFolder, _ double: WriteFileSystemDoubl
     #expect(later.state == .savedInSidecar)
     #expect(try marks(at: sidecar) == XMPMarks(label: green))
 }
+
+@Test func keywordsWriteToSidecarForRawSetsAndToCloveStorageForStandaloneJPEGs() async throws {
+    let folder = try WriteTestFolder()
+    defer { folder.remove() }
+    let double = WriteFileSystemDouble()
+    let queue = makeQueue(folder, double)
+    let folderID = makeFolderIdentity("keywords-queue")
+    let rawSet = try makeScannedSet(folder: folderID, root: folder.url, stem: "RAW_0001")
+    let jpegSet = try makeScannedSet(
+        folder: folderID, root: folder.url, stem: "JPG_0001", formats: [.jpeg])
+    let rawSidecar = folder.file("RAW_0001.xmp")
+
+    _ = await queue.apply(MarkChange(rating: three, label: green), to: rawSet)
+    let rawKeywordStatus = await queue.apply(.keywords(["Bergen", "winter", "Bergen"]), to: rawSet)
+    #expect(rawKeywordStatus.state == .savedInSidecar)
+    #expect(
+        try marks(at: rawSidecar)
+            == XMPMarks(rating: .rated(three), label: green, keywords: ["Bergen", "winter"]))
+
+    let jpegKeywordStatus = await queue.apply(.keywords(["fjord", ""]), to: jpegSet)
+    #expect(jpegKeywordStatus.state == .savedInCloveOnly)
+    #expect(try await queue.storedMarks(for: jpegSet.id)?.keywords == ["fjord"])
+
+    let jpegClearStatus = await queue.apply(.keywords([]), to: jpegSet)
+    #expect(jpegClearStatus.state == .savedInCloveOnly)
+    #expect(try await queue.storedMarks(for: jpegSet.id)?.keywords == [])
+    #expect(double.count(of: .replace, at: jpegSet.photoSet.primary.url) == 0)
+}

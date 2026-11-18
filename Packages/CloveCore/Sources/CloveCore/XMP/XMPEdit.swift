@@ -10,11 +10,18 @@ public struct XMPEdit: Hashable, Sendable {
     public var rating: XMPRatingChange
     /// What happens to `xmp:Label`; `.keep` leaves it untouched.
     public var label: XMPLabelChange
+    /// What happens to `dc:subject`; `.keep` leaves it untouched.
+    public var keywords: XMPKeywordsChange
 
     /// Creates an edit that touches only the fields named by the caller.
-    public init(rating: XMPRatingChange = .keep, label: XMPLabelChange = .keep) {
+    public init(
+        rating: XMPRatingChange = .keep,
+        label: XMPLabelChange = .keep,
+        keywords: XMPKeywordsChange = .keep
+    ) {
         self.rating = rating
         self.label = label
+        self.keywords = keywords
     }
 
     /// An edit that only sets a rating, −1 for Reject (PRD P0-05).
@@ -25,6 +32,11 @@ public struct XMPEdit: Hashable, Sendable {
     /// An edit that only sets or clears a label (PRD disk rules 9–10).
     public static func label(_ label: ColourLabel) -> XMPEdit {
         XMPEdit(label: .set(label))
+    }
+
+    /// An edit that only sets or clears keywords.
+    public static func keywords(_ keywords: [String]) -> XMPEdit {
+        XMPEdit(keywords: .set(keywords))
     }
 }
 
@@ -44,4 +56,12 @@ public enum XMPLabelChange: Hashable, Sendable {
     /// PRD Marking rules describe clear as the empty label; PRD disk rule 9 requires
     /// every other byte of the packet to stay as it is.
     case set(ColourLabel)
+}
+
+/// The requested change to `dc:subject`.
+public enum XMPKeywordsChange: Hashable, Sendable {
+    /// Leave the on-disk keywords unchanged.
+    case keep
+    /// Write these keywords, or remove `dc:subject` when empty after deduplication.
+    case set([String])
 }

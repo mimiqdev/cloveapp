@@ -26,14 +26,18 @@ func undoSidecarMarks(at url: URL) throws -> XMPMarks {
 /// sees exactly the marks a folder open would see (PRD How marks reach disk, rule 1).
 func undoSeedSidecar(_ marks: PhotoMarks, at url: URL) async {
     _ = await SidecarMarkWriter().write(
-        XMPEdit(rating: .set(marks.rating), label: .set(marks.label)), to: url)
+        XMPEdit(
+            rating: .set(marks.rating),
+            label: .set(marks.label),
+            keywords: .set(marks.keywords)),
+        to: url)
 }
 
 /// The marks a folder session would read now: XMP for a RAW set, Clove storage otherwise.
 ///
-/// PRD How marks reach disk, rule 1, reads a RAW set's rating (Reject included) and label from
-/// the sidecar and a standalone photo's from app storage (G1 decisions 2 and 6). Tests use this
-/// to check what the next read returns.
+/// PRD How marks reach disk, rule 1, reads a RAW set's rating (Reject included), label, and
+/// keywords from the sidecar and a standalone photo's from app storage (G1 decisions 2 and 6).
+/// Tests use this to check what the next read returns.
 func undoCurrentMarks(
     for set: ScannedPhotoSet,
     stored: [PhotoIdentity: CloveStoredMarks]
@@ -43,11 +47,13 @@ func undoCurrentMarks(
     case .cloveStorage:
         marks.rating = stored[set.id]?.rating ?? .unrated
         marks.label = stored[set.id]?.label ?? .clear
+        marks.keywords = stored[set.id]?.keywords ?? []
     case .xmpSidecar(let url):
         if FileManager.default.fileExists(atPath: url.path) {
             let packet = try XMPCodec().read(try Data(contentsOf: url))
             marks.rating = packet.rating.rating ?? .unrated
             marks.label = packet.label
+            marks.keywords = packet.keywords
         }
     }
     return marks

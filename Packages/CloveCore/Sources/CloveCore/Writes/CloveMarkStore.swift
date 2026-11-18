@@ -107,6 +107,9 @@ public actor CloveMarkStore {
         // PRD P0-05 reads zero as unrated, so clearing a stored rating removes the value.
         if let rating = change.rating { marks.rating = rating == .unrated ? nil : rating }
         if let label = change.label { marks.label = label.isClear ? nil : label }
+        if let keywords = change.keywords {
+            marks.keywords = PhotoKeywords.deduplicated(keywords)
+        }
         storage.set(marks, for: identity)
         try save(storage, folderID: identity.folderID)
     }
@@ -260,6 +263,8 @@ struct CloveStoredPhoto: Codable, Hashable, Sendable {
     var rating: Int?
     /// Stored label text, absent when no label is stored (G1 decision 6).
     var label: String?
+    /// Stored keywords; `nil` means untouched in Clove, `[]` means explicitly cleared.
+    var keywords: [String]?
 
     /// Builds the stored entry for one photo from confirmed marks.
     init(identity: PhotoIdentity, marks: CloveStoredMarks) {
@@ -267,6 +272,7 @@ struct CloveStoredPhoto: Codable, Hashable, Sendable {
         self.stem = identity.stem
         self.rating = marks.rating?.rawValue
         self.label = marks.label?.rawValue
+        self.keywords = marks.keywords.map(PhotoKeywords.deduplicated)
     }
 
     /// Whether this entry names `identity`, using C1's folded stem and relative folder.
@@ -279,6 +285,7 @@ struct CloveStoredPhoto: Codable, Hashable, Sendable {
     var marks: CloveStoredMarks {
         CloveStoredMarks(
             rating: rating.flatMap { Rating(rawValue: $0) },
-            label: label.map { ColourLabel(rawValue: $0) })
+            label: label.map { ColourLabel(rawValue: $0) },
+            keywords: keywords.map(PhotoKeywords.deduplicated))
     }
 }

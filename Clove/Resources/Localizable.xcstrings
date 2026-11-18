@@ -3431,6 +3431,28 @@
         }
       }
     },
+    "Keywords": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keywords"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关键词"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關鍵字"
+          }
+        }
+      }
+    },
     "Label": {
       "localizations": {
         "en": {

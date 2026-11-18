@@ -1,8 +1,8 @@
 import Foundation
 
-/// One XMP property Clove owns: the rating or the colour label.
+/// One XMP property Clove owns: the rating, colour label, or keywords.
 ///
-/// PRD P0-07 limits XMP interoperability to ratings and colour labels, so there is
+/// PRD P0-07 limits XMP interoperability to standard metadata properties, so there is
 /// deliberately no Clove namespace and no separate Reject field: Reject is the standard rating
 /// −1 (decision record `reject-as-rating.md`). A property is identified by its namespace URI and
 /// local name, never by a prefix, so `photo:Rating` and `xmp:Rating` are the same field when both
@@ -12,16 +12,41 @@ public enum XMPProperty: String, CaseIterable, Hashable, Sendable {
     case rating
     /// `xmp:Label`, the fixed English colour names from PRD Marking rules.
     case label
+    /// `dc:subject`, the unordered bag of keywords from Dublin Core.
+    case keywords
 
-    /// The `http://ns.adobe.com/xap/1.0/` namespace URI shared by both owned properties.
+    /// The `http://ns.adobe.com/xap/1.0/` namespace URI shared by `xmp:Rating` and `xmp:Label`.
     /// PRD P0-07 and How marks reach disk, rule 4.
     public static let namespaceURI = "http://ns.adobe.com/xap/1.0/"
+
+    /// The `http://purl.org/dc/elements/1.1/` namespace URI used by `dc:subject`.
+    public static let dublinCoreNamespaceURI = "http://purl.org/dc/elements/1.1/"
+
+    /// The `http://ns.adobe.com/lightroom/1.0/` namespace URI used by `lr:hierarchicalSubject`.
+    public static let lightroomNamespaceURI = "http://ns.adobe.com/lightroom/1.0/"
+
+    /// The namespace URI that owns this property.
+    public var propertyNamespaceURI: String {
+        switch self {
+        case .rating, .label: return Self.namespaceURI
+        case .keywords: return Self.dublinCoreNamespaceURI
+        }
+    }
 
     /// The standard local name this property is written with (PRD disk rule 4).
     public var localName: String {
         switch self {
         case .rating: return "Rating"
         case .label: return "Label"
+        case .keywords: return "subject"
+        }
+    }
+
+    /// The conventional prefix used when declaring this property's namespace.
+    public var preferredPrefix: String {
+        switch self {
+        case .rating, .label: return "xmp"
+        case .keywords: return "dc"
         }
     }
 }
@@ -63,7 +88,7 @@ public enum XMPRating: Hashable, Sendable {
     }
 }
 
-/// Ratings and colour labels read from one XMP packet.
+/// Ratings, colour labels, and keywords read from one XMP packet.
 ///
 /// Reject needs no field of its own: it is the rating −1 written by the same `xmp:Rating`
 /// property (decision record `reject-as-rating.md`). An unknown label keeps its exact external
@@ -73,13 +98,20 @@ public struct XMPMarks: Hashable, Sendable {
     public var rating: XMPRating
     /// The label's exact external text; empty means no label (PRD disk rules 9–10).
     public var label: ColourLabel
+    /// The ordered, deduplicated keywords read from `dc:subject`.
+    public var keywords: [String]
 
     /// Creates marks; the default is the reading of a packet with no owned properties.
-    public init(rating: XMPRating = .unrated, label: ColourLabel = .clear) {
+    public init(
+        rating: XMPRating = .unrated,
+        label: ColourLabel = .clear,
+        keywords: [String] = []
+    ) {
         self.rating = rating
         self.label = label
+        self.keywords = PhotoKeywords.deduplicated(keywords)
     }
 
-    /// The marks of a packet that holds neither owned property.
+    /// The marks of a packet that holds none of the owned properties.
     public static let unmarked = XMPMarks()
 }

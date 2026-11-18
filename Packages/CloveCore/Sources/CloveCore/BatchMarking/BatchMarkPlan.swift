@@ -98,6 +98,22 @@ public struct BatchMarkPlan: Hashable, Sendable {
             return marked(rules.result(forLabel: label, marks: marks))
         case .reject:
             return marked(rules.result(for: .reject, marks: marks))
+        case .addKeywords(let added):
+            let toAdd = PhotoKeywords.deduplicated(added)
+            guard !toAdd.isEmpty else { return nil }
+            let resolved = PhotoKeywords.deduplicated(marks.keywords + toAdd)
+            guard resolved != marks.keywords else { return nil }
+            return MarkChange.keywords(resolved)
+        case .removeKeywords(let removed):
+            let toRemove = Set(PhotoKeywords.deduplicated(removed))
+            guard !toRemove.isEmpty else { return nil }
+            let resolved = marks.keywords.filter { !toRemove.contains($0) }
+            guard resolved != marks.keywords else { return nil }
+            return MarkChange.keywords(resolved)
+        case .setKeywords(let keywords):
+            let resolved = PhotoKeywords.deduplicated(keywords)
+            guard resolved != marks.keywords else { return nil }
+            return MarkChange.keywords(resolved)
         }
     }
 

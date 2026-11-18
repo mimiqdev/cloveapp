@@ -25,4 +25,13 @@ public enum BatchMarkAction: Hashable, Sendable {
     /// The rating's own storage holds the value (G1 decisions 2 and 6), and the move to the
     /// rejects folder is Reject's durable result.
     case reject
+
+    /// Appends the supplied keywords (after deduplication) to each photo's existing keywords.
+    case addKeywords([String])
+
+    /// Removes the supplied keywords from each photo's existing keywords.
+    case removeKeywords([String])
+
+    /// Replaces each photo's keywords with the supplied list, or clears them when empty.
+    case setKeywords([String])
 }

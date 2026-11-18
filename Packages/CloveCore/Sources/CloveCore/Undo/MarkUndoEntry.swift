@@ -11,6 +11,8 @@ public enum MarkUndoField: String, CaseIterable, Hashable, Sendable {
     case rating
     /// The colour label (PRD P0-05); XMP for a RAW set (G1 decisions 2 and 6).
     case label
+    /// The keyword list (`dc:subject` for a RAW set, Clove storage for standalone photos).
+    case keywords
 }
 
 /// Why an undo or redo left one field alone instead of restoring it (PRD P0-05).
@@ -136,11 +138,12 @@ public struct MarkUndoEntry: Hashable, Sendable, Identifiable {
         return MarkUndoEntry.actionName(for: photos.first?.change ?? MarkChange())
     }
 
-    /// The name one mark change uses in the undo menu: Reject for −1, then rating, then label.
+    /// The name one mark change uses in the undo menu: Reject for −1, then rating, then label, then keywords.
     static func actionName(for change: MarkChange) -> String {
         if change.rating == .rejected { return "Reject" }
         if change.rating != nil { return "Rating" }
         if change.label != nil { return "Label" }
+        if change.keywords != nil { return "Keywords" }
         return "Mark"
     }
 
