@@ -158,7 +158,15 @@ public struct BatchRenamePlanner: Sendable {
             }
             dateText += template.dateSeparator
         }
-        let stem = template.prefix + dateText + String(repeating: "0", count: padding) + number
+        let joinedPrefix: String
+        if !template.prefix.isEmpty, !template.prefixSeparator.isEmpty,
+            !template.prefix.hasSuffix(template.prefixSeparator)
+        {
+            joinedPrefix = template.prefix + template.prefixSeparator
+        } else {
+            joinedPrefix = template.prefix
+        }
+        let stem = joinedPrefix + dateText + String(repeating: "0", count: padding) + number
         problems += Self.nameProblems(stem)
         let files = members.map { source in
             let name = stem + "." + source.pathExtension

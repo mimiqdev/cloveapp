@@ -6,10 +6,13 @@ import SwiftUI
 struct GridBatchBar: View {
     let browsing: BrowsingModel
     let cells: [GridCellItem]
+    var onDeselectAll: () -> Void = {}
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
 
     var body: some View {
+        let batchSelection = BatchSelection(
+            groups: browsing.groups, selection: browsing.state.selection)
         MarkingToolbar(
             rating: isRejected ? .unrated : commonRating,
             // Batch Reject is main's set-only action. Keep it unselected so it never
@@ -28,10 +31,19 @@ struct GridBatchBar: View {
                 apply(.rating(.unrated))
             }
             .accessibilityIdentifier("clove.grid.batch.clearRating")
-            Button(AppLocalization.string("Select all", language: language)) {
-                browsing.selectAllVisible(cells)
+            if !batchSelection.showsAllSelected(cells) {
+                Button(AppLocalization.string("Select all", language: language)) {
+                    browsing.selectAllVisible(cells)
+                }
+                .accessibilityIdentifier("clove.grid.batch.selectAll")
             }
-            .accessibilityIdentifier("clove.grid.batch.selectAll")
+            if !browsing.state.selection.isEmpty {
+                Button(AppLocalization.string("Deselect all", language: language)) {
+                    onDeselectAll()
+                    browsing.deselectAllVisible(cells)
+                }
+                .accessibilityIdentifier("clove.grid.batch.deselectAll")
+            }
         }
         .disabled(browsing.batchTargets.isEmpty || !browsing.canMark)
     }

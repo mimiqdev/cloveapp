@@ -1,5 +1,11 @@
 import Foundation
 
+public enum RenameSeparator: String, CaseIterable, Hashable, Sendable {
+    case underscore = "_"
+    case hyphen = "-"
+    case none = ""
+}
+
 /// The sequence follows the supplied order across every subfolder.
 public struct RenameTemplate: Hashable, Sendable {
     public let prefix: String
@@ -7,16 +13,19 @@ public struct RenameTemplate: Hashable, Sendable {
     public let digits: Int
     public let includesCaptureDate: Bool
     public let dateSeparator: String
+    public let prefixSeparator: String
 
     public init(
         prefix: String = "", sequenceStart: Int = 1, digits: Int = 3,
-        includesCaptureDate: Bool = false, dateSeparator: String = "_"
+        includesCaptureDate: Bool = false, dateSeparator: String = "_",
+        prefixSeparator: String = ""
     ) {
         self.prefix = prefix
         self.sequenceStart = sequenceStart
         self.digits = digits
         self.includesCaptureDate = includesCaptureDate
         self.dateSeparator = dateSeparator
+        self.prefixSeparator = prefixSeparator
     }
 }
 

@@ -188,4 +188,71 @@ struct BatchRenamePlannerTests {
         fixture.fileSystem.fail(.contentsOfDirectory, with: POSIXError(.EACCES))
         #expect(!fixture.plan([item]).canRename)
     }
+
+    @Test func prefixSeparatorJoinsWithoutDuplicatingTrailingSeparatorOrEmptyPrefix() throws {
+        let fixture = try RenameFixture()
+        defer { fixture.cleanup() }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        let wall = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 11, day: 18, hour: 12, minute: 0)))
+        let item = try fixture.item("source", captureWallTime: wall)
+
+        let underscoreNoDate = fixture.plan(
+            [item],
+            template: RenameTemplate(
+                prefix: "Wedding", includesCaptureDate: false,
+                dateSeparator: RenameSeparator.underscore.rawValue,
+                prefixSeparator: RenameSeparator.underscore.rawValue))
+        #expect(underscoreNoDate.rows[0].newStem == "Wedding_001")
+
+        let underscoreWithDate = fixture.plan(
+            [item],
+            template: RenameTemplate(
+                prefix: "Wedding", includesCaptureDate: true,
+                dateSeparator: RenameSeparator.underscore.rawValue,
+                prefixSeparator: RenameSeparator.underscore.rawValue))
+        #expect(underscoreWithDate.rows[0].newStem == "Wedding_20261118_001")
+
+        let deduplicatedTrailing = fixture.plan(
+            [item],
+            template: RenameTemplate(
+                prefix: "Test_", includesCaptureDate: false,
+                dateSeparator: RenameSeparator.underscore.rawValue,
+                prefixSeparator: RenameSeparator.underscore.rawValue))
+        #expect(deduplicatedTrailing.rows[0].newStem == "Test_001")
+
+        let hyphenWithDate = fixture.plan(
+            [item],
+            template: RenameTemplate(
+                prefix: "Trip", includesCaptureDate: true,
+                dateSeparator: RenameSeparator.hyphen.rawValue,
+                prefixSeparator: RenameSeparator.hyphen.rawValue))
+        #expect(hyphenWithDate.rows[0].newStem == "Trip-20261118-001")
+
+        let noneWithDate = fixture.plan(
+            [item],
+            template: RenameTemplate(
+                prefix: "Trip", includesCaptureDate: true,
+                dateSeparator: RenameSeparator.none.rawValue,
+                prefixSeparator: RenameSeparator.none.rawValue))
+        #expect(noneWithDate.rows[0].newStem == "Trip20261118001")
+
+        let emptyPrefixNoDate = fixture.plan(
+            [item],
+            template: RenameTemplate(
+                prefix: "", includesCaptureDate: false,
+                dateSeparator: RenameSeparator.underscore.rawValue,
+                prefixSeparator: RenameSeparator.underscore.rawValue))
+        #expect(emptyPrefixNoDate.rows[0].newStem == "001")
+
+        let emptyPrefixWithDate = fixture.plan(
+            [item],
+            template: RenameTemplate(
+                prefix: "", includesCaptureDate: true,
+                dateSeparator: RenameSeparator.underscore.rawValue,
+                prefixSeparator: RenameSeparator.underscore.rawValue))
+        #expect(emptyPrefixWithDate.rows[0].newStem == "20261118_001")
+    }
 }

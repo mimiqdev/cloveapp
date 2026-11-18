@@ -71,6 +71,90 @@ extension CloveFlowTests {
     }
 
     @MainActor
+    func testBatchRenamePolishSortRemoveStartInputAndDragSelection() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_KEEP_TOAST": "1"])
+        defer { app.terminate() }
+        openLibrary(app)
+        openSettings(in: app)
+        openSettingsCategory("clove.settings.category.browsing", in: app)
+        setSimilarGroups(in: app, on: false)
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+
+        // Drag-select across the first three photos from non-selecting state.
+        let firstGrid = element(app, "clove.grid.photo.mmq02678")
+        let thirdGrid = element(app, "clove.grid.photo.mmq02680")
+        XCTAssertTrue(firstGrid.waitForExistence(timeout: 5))
+        firstGrid.press(forDuration: 0.7, thenDragTo: thirdGrid)
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
+
+        // Deselect all keeps empty multi-select active.
+        element(app, "clove.grid.selectionOptions").tap()
+        app.buttons["Deselect all"].tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
+        XCTAssertTrue(element(app, "clove.grid.batch.done").exists)
+
+        // Select all then Deselect all, then drag-select 3 photos while already in select mode.
+        element(app, "clove.grid.selectionOptions").tap()
+        app.buttons["Select all"].tap()
+        XCTAssertNotEqual(element(app, "clove.grid.batch.count").label, "0 selected")
+        element(app, "clove.grid.selectionOptions").tap()
+        app.buttons["Deselect all"].tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
+
+        firstGrid.press(forDuration: 0.7, thenDragTo: thirdGrid)
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
+        XCTAssertTrue(element(app, "clove.grid.batch.rename").isEnabled)
+        element(app, "clove.grid.batch.rename").tap()
+        XCTAssertTrue(element(app, "clove.rename.order").waitForExistence(timeout: 5))
+
+        // Sort reverse then back to capture time.
+        let sortButton = element(app, "clove.rename.sort")
+        XCTAssertTrue(sortButton.waitForExistence(timeout: 5))
+        sortButton.tap()
+        app.buttons["Reverse order"].tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "value == %@", "Position 1 of 3"),
+                element(app, "clove.rename.tile.mmq02680"), timeout: 5))
+
+        sortButton.tap()
+        app.buttons["Capture time"].tap()
+        XCTAssertEqual(
+            element(app, "clove.rename.tile.mmq02678").value as? String, "Position 1 of 3")
+
+        // Remove the middle item directly on the Order screen.
+        let removeSecond = element(app, "clove.rename.remove.mmq02679")
+        XCTAssertTrue(removeSecond.waitForExistence(timeout: 5))
+        removeSecond.tap()
+        XCTAssertEqual(
+            element(app, "clove.rename.tile.mmq02680").value as? String, "Position 2 of 2")
+
+        // Configure prefix, hyphen separator, and direct numeric start input.
+        element(app, "clove.rename.next").tap()
+        let prefix = app.textFields["clove.rename.prefix"]
+        XCTAssertTrue(prefix.waitForExistence(timeout: 5))
+        prefix.tap()
+        prefix.typeText("Trip")
+
+        let separator = element(app, "clove.rename.separator")
+        XCTAssertTrue(separator.exists)
+        separator.buttons["-"].tap()
+
+        let startInput = app.textFields["clove.rename.startInput"]
+        XCTAssertTrue(startInput.exists)
+        startInput.doubleTap()
+        startInput.typeText("25")
+        app.staticTexts["Rename 2 photos"].tap()
+
+        let previewFirst = element(app, "clove.rename.preview.mmq02678")
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "label CONTAINS %@", "Trip-025"),
+                previewFirst, timeout: 5))
+    }
+
+    @MainActor
     private var renameDevice: String {
         UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
     }
