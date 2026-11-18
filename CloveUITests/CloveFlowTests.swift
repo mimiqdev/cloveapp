@@ -738,19 +738,27 @@ final class CloveFlowTests: XCTestCase {
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         let capsule = element(app, "clove.detail.capsule")
-        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35))
+        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45))
 
-        // Unrated -> slow down past 30pt rejects immediately (no 120pt dead band).
+        // Unrated -> slow down past rejectTravel rejects immediately (no 120pt dead band).
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 45)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 75)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
         element(app, "clove.detail.undo").tap()
         XCTAssertEqual(capsule.value as? String, "Unmarked")
 
-        // Unrated -> up raises stars symmetrically.
+        // Unrated -> up reaches 5 stars across full upSpan, then undo.
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -135)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -150)),
+            withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
+        XCTAssertTrue((capsule.value as? String)?.contains("5 stars") == true)
+        element(app, "clove.detail.undo").tap()
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+
+        // Unrated -> up raises stars symmetrically to 3 stars.
+        start.press(
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
 
@@ -770,9 +778,9 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.detail.undo").tap()
         XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
 
-        // From 3 stars, second downward step (>= 75pt) rejects regardless of speed.
+        // From 3 stars, second downward step (>= clearTravel + rejectTravel) rejects regardless of speed.
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 110)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 115)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
         XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)

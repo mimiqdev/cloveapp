@@ -43,8 +43,14 @@ public struct MarkingInputRules: Hashable, Sendable {
         }
     }
 
-    public func swipeSession(startingRating: Rating) -> MarkingSwipeSession {
-        MarkingSwipeSession(startingRating: startingRating, enabledRatings: settings.enabledRatings)
+    public func swipeSession(
+        startingRating: Rating,
+        containerHeight: Double = MarkingSwipeRules.referenceContainerHeight
+    ) -> MarkingSwipeSession {
+        MarkingSwipeSession(
+            startingRating: startingRating,
+            enabledRatings: settings.enabledRatings,
+            containerHeight: containerHeight)
     }
 
     /// Commits exactly the preview, once per release. No label change, no velocity at release.

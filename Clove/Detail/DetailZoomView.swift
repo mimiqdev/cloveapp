@@ -847,7 +847,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     private func beginMarkingSwipe(at startLocation: CGPoint) {
         onSwipeBegin?()
         haptics.prepare()
-        markingSession = rules.swipeSession(startingRating: currentRating)
+        markingSession = rules.swipeSession(
+            startingRating: currentRating, containerHeight: Double(bounds.height))
         feedback?.startLocation = startLocation
         feedback?.rating = currentRating
     }
@@ -1171,7 +1172,7 @@ final class DetailSingleFingerPanGestureRecognizer: UIPanGestureRecognizer {
 /// Recognizes a parallel two-finger vertical drag while zoomed in the `.pan` mode and immediately
 /// fails pinches, horizontal two-finger drags, and single-finger drags.
 @MainActor
-final class TwoFingerMarkingSwipeGestureRecognizer: UIGestureRecognizer {
+class TwoFingerMarkingSwipeGestureRecognizer: UIGestureRecognizer {
     private var orderedTouchIDs: [ObjectIdentifier] = []
     private var startPoints: [ObjectIdentifier: CGPoint] = [:]
     private var currentPoints: [ObjectIdentifier: CGPoint] = [:]
