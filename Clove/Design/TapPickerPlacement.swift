@@ -207,10 +207,6 @@ struct TapPickerPlacement: Equatable, Sendable {
     }
 }
 
-enum TapPickerSpace {
-    static let name = "clove.tapPicker.coordinateSpace"
-}
-
 /// Manages one active anchored tap picker inside a ``TapPickerContainer``.
 @MainActor
 @Observable
@@ -224,6 +220,7 @@ final class TapPickerController {
         let content: @MainActor (Axis, @escaping @MainActor () -> Void) -> AnyView
     }
 
+    let coordinateSpaceName = UUID().uuidString
     private(set) var active: Presentation?
 
     var isPresented: Bool { active != nil }
@@ -265,8 +262,22 @@ final class TapPickerController {
     }
 }
 
+struct TapPickerTriggerRequest: Equatable {
+    let id: String
+    let nonce: Int
+}
+
+struct TapPickerFramesPreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 extension EnvironmentValues {
     @Entry var tapPickerController: TapPickerController? = nil
+    @Entry var tapPickerTriggerRequest: TapPickerTriggerRequest? = nil
 }
 
 private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
@@ -278,7 +289,6 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.tapPickerController, controller)
-            .coordinateSpace(name: TapPickerSpace.name)
             .onChange(of: dismissTrigger) { _, _ in
                 controller.dismiss()
             }
@@ -294,23 +304,25 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
                 Group {
                     if let active = controller.active {
                         GeometryReader { proxy in
+                            let overlayFrame = proxy.frame(
+                                in: .named(controller.coordinateSpaceName))
+                            let localAnchor = active.anchor.offsetBy(
+                                dx: -overlayFrame.minX,
+                                dy: -overlayFrame.minY)
+                            // GeometryReader without ignoresSafeArea() already excludes safe areas
+                            // from proxy.size, while proxy.safeAreaInsets still reports iOS 27's
+                            // vertical-toolbar / container margin inset.
                             let placement = TapPickerPlacement.resolve(
-                                anchor: active.anchor,
+                                anchor: localAnchor,
                                 containerSize: proxy.size,
-                                safeAreaInsets: proxy.safeAreaInsets,
                                 horizontalSize: active.horizontalSize,
                                 verticalSize: active.verticalSize,
                                 preferredEdge: active.preferredEdge)
                             let bloomAnchor = TapPickerPlacement.bloomAnchor(
                                 for: placement.frame,
-                                anchor: active.anchor,
+                                anchor: localAnchor,
                                 preferredEdge: active.preferredEdge)
                             ZStack(alignment: .topLeading) {
-                                Color.clear
-                                    .contentShape(Rectangle())
-                                    .ignoresSafeArea()
-                                    .onTapGesture { controller.dismiss() }
-                                    .accessibilityHidden(true)
                                 active.content(placement.axis) {
                                     controller.dismiss()
                                 }
@@ -324,6 +336,18 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
                                 .id(active.id)
                                 .position(x: placement.frame.midX, y: placement.frame.midY)
                             }
+                            .frame(
+                                width: proxy.size.width,
+                                height: proxy.size.height,
+                                alignment: .topLeading
+                            )
+                            .background {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .ignoresSafeArea()
+                                    .onTapGesture { controller.dismiss() }
+                                    .accessibilityHidden(true)
+                            }
                         }
                     }
                 }
@@ -332,6 +356,7 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
                     value: controller.active?.id
                 )
             }
+            .coordinateSpace(name: controller.coordinateSpaceName)
     }
 }
 
@@ -347,5 +372,15 @@ extension View {
     /// Installs an adaptive floating tap-picker host and outside-tap dismisser over this view.
     func tapPickerContainer() -> some View {
         modifier(TapPickerContainerModifier(dismissTrigger: 0))
+    }
+
+    func reportTapPickerFrame(_ identifier: String) -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: TapPickerFramesPreferenceKey.self,
+                    value: [identifier: proxy.frame(in: .global)])
+            }
+        }
     }
 }

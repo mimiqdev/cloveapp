@@ -84,6 +84,7 @@ struct MarkingToolbar: View {
         .cloveGlass(in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
+        .reportTapPickerFrame(identifier)
     }
 
     /// The control's frame: 168 × 48 (components.md, Marking toolbar).
@@ -175,6 +176,7 @@ struct MarkRatingAction: View {
     var fallbackPopoverTrigger: Int = 0
 
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
@@ -209,6 +211,7 @@ struct MarkRatingAction: View {
 
     var body: some View {
         let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
+        let coordinateSpaceName = tapPicker?.coordinateSpaceName
         Button {
             onBegin()
             openPicker()
@@ -235,7 +238,7 @@ struct MarkRatingAction: View {
             .contentShape(Rectangle())
             .animation(markAnimation, value: stars)
             .onGeometryChange(for: CGRect.self) { proxy in
-                proxy.frame(in: .named(TapPickerSpace.name))
+                coordinateSpaceName.map { proxy.frame(in: .named($0)) } ?? .zero
             } action: { rect in
                 anchor = rect
                 tapPicker?.updateAnchor(id: pickerIdentifier, anchor: rect)
@@ -248,6 +251,12 @@ struct MarkRatingAction: View {
         .onChange(of: fallbackPopoverTrigger) { _, _ in
             if isAnchorReady, scenePhase == .active, isEnabled {
                 fallbackOpen = true
+            }
+        }
+        .onChange(of: tapPickerTriggerRequest) { _, request in
+            if request?.id == identifier, isAnchorReady, scenePhase == .active, isEnabled {
+                onBegin()
+                openPicker()
             }
         }
         .onChange(of: fallbackDismissTrigger) { _, _ in
@@ -344,6 +353,7 @@ struct MarkLabelAction: View {
     var fallbackPopoverTrigger: Int = 0
 
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
@@ -371,6 +381,7 @@ struct MarkLabelAction: View {
 
     var body: some View {
         let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
+        let coordinateSpaceName = tapPicker?.coordinateSpaceName
         Button {
             onBegin()
             openPicker()
@@ -388,7 +399,7 @@ struct MarkLabelAction: View {
             .contentShape(Rectangle())
             .animation(markAnimation, value: label)
             .onGeometryChange(for: CGRect.self) { proxy in
-                proxy.frame(in: .named(TapPickerSpace.name))
+                coordinateSpaceName.map { proxy.frame(in: .named($0)) } ?? .zero
             } action: { rect in
                 anchor = rect
                 tapPicker?.updateAnchor(id: pickerIdentifier, anchor: rect)
@@ -401,6 +412,12 @@ struct MarkLabelAction: View {
         .onChange(of: fallbackPopoverTrigger) { _, _ in
             if isAnchorReady, scenePhase == .active, isEnabled {
                 fallbackOpen = true
+            }
+        }
+        .onChange(of: tapPickerTriggerRequest) { _, request in
+            if request?.id == identifier, isAnchorReady, scenePhase == .active, isEnabled {
+                onBegin()
+                openPicker()
             }
         }
         .onChange(of: fallbackDismissTrigger) { _, _ in

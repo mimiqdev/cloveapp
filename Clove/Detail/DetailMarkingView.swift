@@ -716,6 +716,7 @@ struct DetailMarkingView: View {
         .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
+        .reportTapPickerFrame(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
     }
 
     /// The shared marking family in the reserved bottom-right marking area beside the filmstrip

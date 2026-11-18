@@ -81,6 +81,7 @@ struct LabelPicker: View {
         .onChange(of: photoID, initial: true) { _, newID in
             settledPhotoID = newID
         }
+        .reportTapPickerFrame(identifier)
     }
 
     private func dots(spacing: CGFloat, targetSize: CGFloat) -> some View {
