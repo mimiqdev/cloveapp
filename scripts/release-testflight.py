@@ -63,6 +63,14 @@ class ReleaseError(Exception):
     pass
 
 
+class AscHttpError(ReleaseError):
+    def __init__(self, url, status_code, details):
+        self.url = url
+        self.status_code = status_code
+        self.details = details
+        super().__init__(f"App Store Connect {url}: HTTP {status_code}, {details}")
+
+
 _SECRETS = []
 
 
@@ -172,29 +180,47 @@ def jwt(key_id, issuer_id, key_path):
     return match.group(0)
 
 
-def asc_json(url, token):
-    """GET one App Store Connect JSON resource, refusing non-HTTPS URLs."""
+def asc_json(url, token, *, method="GET", payload=None):
+    """Call one App Store Connect JSON endpoint, refusing non-HTTPS URLs."""
     if urllib.parse.urlsplit(url).scheme != "https":
         raise ReleaseError("Refusing non-HTTPS App Store Connect URL: " + url)
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(  # noqa: S310 -- scheme checked above
-        url, headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
+        url, data=data, headers=headers, method=method)
     try:
         # The scheme is checked above, so urlopen only sees the documented API
         # host or a pagination link Apple returned over HTTPS.
         with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
-            return json.load(response)
+            raw = response.read()
+            return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as error:
         try:
-            details = [(item.get("code"), item.get("title")) for item in json.load(error).get("errors", [])]
+            details = [
+                tuple(item.get(field) for field in ("code", "title", "detail") if item.get(field))
+                for item in json.load(error).get("errors", [])
+            ]
         except (ValueError, OSError):
             details = []
-        raise ReleaseError(f"App Store Connect {url}: HTTP {error.code}, {details}") from error
+        raise AscHttpError(url, error.code, details) from error
     except (ValueError, OSError) as error:
         raise ReleaseError(f"App Store Connect {url}: unreadable response ({error})") from error
 
 
 def asc_get(path, params, token):
-    return asc_json(ASC_HOST + path + "?" + urllib.parse.urlencode(params, doseq=True), token)
+    query = ("?" + urllib.parse.urlencode(params, doseq=True)) if params else ""
+    return asc_json(ASC_HOST + path + query, token)
+
+
+def asc_post(path, payload, token):
+    return asc_json(ASC_HOST + path, token, method="POST", payload=payload)
+
+
+def asc_patch(path, payload, token):
+    return asc_json(ASC_HOST + path, token, method="PATCH", payload=payload)
 
 
 def asc_pages(path, params, token):
