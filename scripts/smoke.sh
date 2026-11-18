@@ -100,7 +100,10 @@ ios = [
     for runtime in runtimes
     if runtime.get("isAvailable")
     and runtime.get("platform") == "iOS"
-    and any(device["name"] == device_type for device in runtime.get("supportedDeviceTypes", []))
+    and any(
+        device_type in (device.get("name"), device.get("identifier"))
+        for device in runtime.get("supportedDeviceTypes", [])
+    )
 ]
 if not ios:
     raise SystemExit("no available iOS simulator runtime runs " + device_type)
@@ -110,7 +113,7 @@ print(newest["identifier"])
     )
 fi
 
-if [ -n "$duo_test" ] && [ "$device_type" != "iPhone Duo" ]; then
+if [ -n "$duo_test" ] && [ "$device_type" != "iPhone Duo" ] && [ "$device_type" != "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo" ]; then
     echo "error: the selected runtime/device cannot run the real Duo flow; select a compatible Duo runtime (27.2 build 24B91016s)" >&2
     exit 1
 fi

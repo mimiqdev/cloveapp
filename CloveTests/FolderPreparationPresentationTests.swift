@@ -293,6 +293,146 @@ struct FolderPreparationPresentationTests {
         #expect(prep.midX >= fileName.maxX - 4)
     }
 
+    @Test func preparationDetailsDismissOnModeRoutePostureAndInactiveSceneTransitions()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = TestLibrary.forLaunch(
+            environment: [
+                TestLibrary.launchVariable: "1",
+                TestLibrary.preparationVariable: "preparing",
+            ])
+
+        // 1. Compact sheet -> regular popover transition dismisses cleanly without colliding.
+        do {
+            let browsing = BrowsingModel(library: library)
+            browsing.openFolder()
+            let envBox = PreparationEnvironmentBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+            let host = makePreparationHost(browsing: browsing, envBox: envBox)
+            host.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(80))
+            window.layoutIfNeeded()
+            envBox.presentTrigger += 1
+            try await waitFor("compact preparation sheet presented") {
+                self.topPresentedViewController(from: host) != nil
+            }
+            host.traitOverrides.horizontalSizeClass = .regular
+            UIView.performWithoutAnimation {
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                _ = window.snapshotView(afterScreenUpdates: true)
+            }
+            try await waitFor("preparation sheet dismissed on size-class flip") {
+                self.topPresentedViewController(from: host) == nil
+            }
+        }
+
+        // 2. Regular popover -> route change dismisses cleanly.
+        do {
+            let browsing = BrowsingModel(library: library)
+            browsing.openFolder()
+            let firstPhoto = try #require(browsing.photos.first?.id)
+            let envBox = PreparationEnvironmentBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+            let host = makePreparationHost(browsing: browsing, envBox: envBox)
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(80))
+            window.layoutIfNeeded()
+            envBox.presentTrigger += 1
+            try await waitFor("regular preparation popover presented") {
+                self.topPresentedViewController(from: host) != nil
+            }
+            browsing.openPhoto(firstPhoto)
+            try await waitFor("preparation popover dismissed on route change") {
+                self.topPresentedViewController(from: host) == nil
+            }
+        }
+
+        // 3. Regular popover -> inactive scene + snapshot dismisses cleanly.
+        do {
+            let browsing = BrowsingModel(library: library)
+            browsing.openFolder()
+            let envBox = PreparationEnvironmentBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+            let host = makePreparationHost(browsing: browsing, envBox: envBox)
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(80))
+            window.layoutIfNeeded()
+            envBox.presentTrigger += 1
+            try await waitFor("preparation popover re-presented") {
+                self.topPresentedViewController(from: host) != nil
+            }
+            envBox.scenePhase = .inactive
+            UIView.performWithoutAnimation {
+                _ = window.snapshotView(afterScreenUpdates: true)
+            }
+            try await waitFor("preparation popover dismissed on inactive scene") {
+                self.topPresentedViewController(from: host) == nil
+            }
+        }
+    }
+
+    private func makePreparationHost(
+        browsing: BrowsingModel,
+        envBox: PreparationEnvironmentBox
+    ) -> UIHostingController<AnyView> {
+        struct HostView: View {
+            let browsing: BrowsingModel
+            let envBox: PreparationEnvironmentBox
+            var body: some View {
+                NavigationStack {
+                    Text("Grid")
+                        .toolbar {
+                            ToolbarItem(placement: .principal) {
+                                FolderPreparationIndicator(
+                                    browsing: browsing,
+                                    identifierPrefix: "clove.grid.preparation",
+                                    presentTrigger: envBox.presentTrigger)
+                            }
+                        }
+                }
+                .environment(\.isDuoExpanded, envBox.isDuoExpanded)
+                .environment(\.isDuoCover, envBox.isDuoCover)
+                .environment(\.scenePhase, envBox.scenePhase)
+            }
+        }
+        return UIHostingController(rootView: AnyView(HostView(browsing: browsing, envBox: envBox)))
+    }
+
+    private func topPresentedViewController(from controller: UIViewController) -> UIViewController?
+    {
+        if let presented = controller.presentedViewController { return presented }
+        for child in controller.children {
+            if let presented = topPresentedViewController(from: child) { return presented }
+        }
+        return nil
+    }
+
     private func waitFor(
         _ message: String,
         timeout: Duration = .seconds(3),
@@ -318,6 +458,15 @@ struct FolderPreparationPresentationTests {
         guard didDraw else { return nil }
         return image.pngData()
     }
+}
+
+@MainActor
+@Observable
+private final class PreparationEnvironmentBox {
+    var isDuoExpanded = false
+    var isDuoCover = false
+    var scenePhase: ScenePhase = .active
+    var presentTrigger = 0
 }
 
 @MainActor

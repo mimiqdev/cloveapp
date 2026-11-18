@@ -271,6 +271,7 @@ extension EnvironmentValues {
 
 private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var controller = TapPickerController()
     let dismissTrigger: Trigger
 
@@ -279,6 +280,14 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
             .environment(\.tapPickerController, controller)
             .coordinateSpace(name: TapPickerSpace.name)
             .onChange(of: dismissTrigger) { _, _ in
+                controller.dismiss()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active {
+                    controller.dismiss()
+                }
+            }
+            .onDisappear {
                 controller.dismiss()
             }
             .overlay {

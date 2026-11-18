@@ -152,20 +152,43 @@ struct FolderPreparationIndicator: View {
     let browsing: BrowsingModel
     let identifierPrefix: String
     var inListRow = false
+    var presentTrigger: Int = 0
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.folderPreparationPresentationMode) private var presentationModeOverride
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
+    @Environment(\.hasFoldRegion) private var hasFoldRegion
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.cloveTheme) private var theme
-    @State private var isShowingDetails = false
+    @State private var presentedMode: FolderPreparationPresentationMode?
+    @State private var isAnchorReady = false
 
     private var status: FolderPreparationStatus {
         browsing.preparationStatus
     }
 
+    private var isShowingDetails: Bool {
+        presentedMode != nil
+    }
+
     private var presentationMode: FolderPreparationPresentationMode {
         presentationModeOverride
             ?? FolderPreparationPresentationMode.resolved(horizontalSizeClass: horizontalSizeClass)
+    }
+
+    private var dismissTrigger: PreparationDismissTrigger {
+        PreparationDismissTrigger(
+            presentationMode: presentationMode,
+            horizontalSizeClass: horizontalSizeClass,
+            route: browsing.state.route,
+            folder: browsing.state.folder,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            usesVerticalToolbar: usesVerticalToolbar,
+            hasFoldRegion: hasFoldRegion)
     }
 
     var body: some View {
@@ -194,7 +217,7 @@ struct FolderPreparationIndicator: View {
     @ViewBuilder
     private var indicatorButton: some View {
         let baseButton = Button {
-            isShowingDetails = true
+            presentedMode = presentationMode
         } label: {
             glyph
                 .frame(width: 14, height: 14)
@@ -220,21 +243,43 @@ struct FolderPreparationIndicator: View {
             }
         }
 
-        if presentationMode == .popover {
-            styledButton
-                .popover(
-                    isPresented: $isShowingDetails,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .top
-                ) {
-                    FolderPreparationDetails(browsing: browsing, showsDoneButton: false)
+        styledButton
+            .popover(
+                isPresented: Binding(
+                    get: { presentedMode == .popover && isAnchorReady && scenePhase == .active },
+                    set: { if !$0, presentedMode == .popover { presentedMode = nil } }),
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .top
+            ) {
+                FolderPreparationDetails(browsing: browsing, showsDoneButton: false)
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { presentedMode == .sheet && isAnchorReady && scenePhase == .active },
+                    set: { if !$0, presentedMode == .sheet { presentedMode = nil } })
+            ) {
+                FolderPreparationDetails(browsing: browsing, showsDoneButton: true)
+            }
+            .onChange(of: presentTrigger) { _, _ in
+                if isAnchorReady, scenePhase == .active {
+                    presentedMode = presentationMode
                 }
-        } else {
-            styledButton
-                .sheet(isPresented: $isShowingDetails) {
-                    FolderPreparationDetails(browsing: browsing, showsDoneButton: true)
+            }
+            .onChange(of: dismissTrigger) { _, _ in
+                presentedMode = nil
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active {
+                    presentedMode = nil
                 }
-        }
+            }
+            .onAppear {
+                isAnchorReady = true
+            }
+            .onDisappear {
+                isAnchorReady = false
+                presentedMode = nil
+            }
     }
 
     @ViewBuilder
@@ -531,4 +576,15 @@ struct FolderPreparationDetails: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.preparation.issues")
     }
+}
+
+private struct PreparationDismissTrigger: Equatable {
+    let presentationMode: FolderPreparationPresentationMode
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let route: BrowserRoute
+    let folder: FolderIdentity?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let usesVerticalToolbar: Bool
+    let hasFoldRegion: Bool
 }

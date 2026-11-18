@@ -172,11 +172,18 @@ struct MarkRatingAction: View {
 
     /// Input began: drop whatever the last mark was about to do (PRD Auto-advance).
     var onBegin: () -> Void = {}
+    var fallbackPopoverTrigger: Int = 0
 
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var anchor: CGRect = .zero
     @State private var fallbackOpen = false
+    @State private var isAnchorReady = false
     @State private var settledPhotoID: PhotoIdentity?
 
     /// The value the photo carries, 1–5 stars or unrated (`copy.md` `a11y.rating`).
@@ -188,6 +195,16 @@ struct MarkRatingAction: View {
 
     private var shouldAnimateMarks: Bool {
         CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
+
+    private var fallbackDismissTrigger: FallbackPopoverDismissTrigger {
+        FallbackPopoverDismissTrigger(
+            photoID: photoID,
+            hasTapPicker: tapPicker != nil,
+            horizontalSizeClass: horizontalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            isEnabled: isEnabled)
     }
 
     var body: some View {
@@ -228,11 +245,37 @@ struct MarkRatingAction: View {
         .onChange(of: photoID, initial: true) { _, newID in
             settledPhotoID = newID
         }
+        .onChange(of: fallbackPopoverTrigger) { _, _ in
+            if isAnchorReady, scenePhase == .active, isEnabled {
+                fallbackOpen = true
+            }
+        }
+        .onChange(of: fallbackDismissTrigger) { _, _ in
+            fallbackOpen = false
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                fallbackOpen = false
+            }
+        }
+        .onAppear {
+            isAnchorReady = true
+        }
+        .onDisappear {
+            isAnchorReady = false
+            fallbackOpen = false
+        }
         .accessibilityLabel("Rating")
         .accessibilityValue(accessibilityRating)
         .accessibilityIdentifier(identifier)
         .help(accessibilityRating)
-        .popover(isPresented: $fallbackOpen, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+        .popover(
+            isPresented: Binding(
+                get: { fallbackOpen && isAnchorReady && scenePhase == .active && isEnabled },
+                set: { fallbackOpen = $0 }),
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .top
+        ) {
             ratingPicker(axis: .horizontal) { fallbackOpen = false }
                 .presentationCompactAdaptation(.popover)
         }
@@ -298,15 +341,32 @@ struct MarkLabelAction: View {
 
     /// Input began: drop whatever the last mark was about to do (PRD Auto-advance).
     var onBegin: () -> Void = {}
+    var fallbackPopoverTrigger: Int = 0
 
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var anchor: CGRect = .zero
     @State private var fallbackOpen = false
+    @State private var isAnchorReady = false
     @State private var settledPhotoID: PhotoIdentity?
 
     private var shouldAnimateMarks: Bool {
         CloveMotion.shouldAnimateMarkChange(settledPhotoID: settledPhotoID, currentPhotoID: photoID)
+    }
+
+    private var fallbackDismissTrigger: FallbackPopoverDismissTrigger {
+        FallbackPopoverDismissTrigger(
+            photoID: photoID,
+            hasTapPicker: tapPicker != nil,
+            horizontalSizeClass: horizontalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            isEnabled: isEnabled)
     }
 
     var body: some View {
@@ -338,11 +398,37 @@ struct MarkLabelAction: View {
         .onChange(of: photoID, initial: true) { _, newID in
             settledPhotoID = newID
         }
+        .onChange(of: fallbackPopoverTrigger) { _, _ in
+            if isAnchorReady, scenePhase == .active, isEnabled {
+                fallbackOpen = true
+            }
+        }
+        .onChange(of: fallbackDismissTrigger) { _, _ in
+            fallbackOpen = false
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                fallbackOpen = false
+            }
+        }
+        .onAppear {
+            isAnchorReady = true
+        }
+        .onDisappear {
+            isAnchorReady = false
+            fallbackOpen = false
+        }
         .accessibilityLabel(label.map { "Label, \($0.rawValue)" } ?? "Label")
         .accessibilityAddTraits(label != nil ? .isSelected : [])
         .accessibilityIdentifier(identifier)
         .help(label.map { "Label, \($0.rawValue)" } ?? "Label")
-        .popover(isPresented: $fallbackOpen, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+        .popover(
+            isPresented: Binding(
+                get: { fallbackOpen && isAnchorReady && scenePhase == .active && isEnabled },
+                set: { fallbackOpen = $0 }),
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .top
+        ) {
             labelPicker(axis: .horizontal) { fallbackOpen = false }
                 .presentationCompactAdaptation(.popover)
         }
@@ -374,6 +460,15 @@ struct MarkLabelAction: View {
                 dismiss()
             }, axis: axis, photoID: photoID)
     }
+}
+
+private struct FallbackPopoverDismissTrigger: Equatable {
+    let photoID: PhotoIdentity?
+    let hasTapPicker: Bool
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let isEnabled: Bool
 }
 
 #Preview("Marking toolbar") {
