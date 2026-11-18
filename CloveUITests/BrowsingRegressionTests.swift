@@ -227,19 +227,19 @@ extension CloveFlowTests {
         }
     }
 
-    /// The browsing path through the real controls, from Entry to the grid, detail, the
-    /// filmstrip and the settings that change the grid.
+    /// The browsing path through the real controls, from Entry to the grid, detail, and
+    /// the settings that change the grid.
     ///
-    /// Steps other tests cover are not repeated here:
-    /// - the group's finishing actions: `testStackOpensDetailAndFinishingUndoRestoresUnmarkedTogether`,
-    ///   `undecidedCountsLabelOnlyRatedRejectedAndUnmarkedPhotos`,
-    ///   `rejectingUnmarkedFinishesAGroupWithOnlyALabelledKeep`;
-    /// - a batch rating with a failed write: `testSaveFailureShowsToastAndTheFilesMarks`,
-    ///   `aBatchFailureShowsOneToastAndRestoresOnlyItsFailedPhoto`,
-    ///   `aRatingSetsEveryPhotoAndReplacesRejectOnRejectedPhotos`;
-    /// - the Rejected filter: `rejectedShowsRejectedPhotosOnly`;
-    /// - Move rejects with a keep and a failure:
-    ///   `testMoveRejectsConfirmsAndReportsFilesLeftInPlace`,
+    /// Steps other tests or TLA+/unit suites cover are not repeated here:
+    /// - double-tap zoom, culling swipes, and filmstrip navigation/group focus: dedicated gesture and
+    ///   filmstrip tests (`testDetailInfoLabelsZoomAndMarking`,
+    ///   `testFilmstripAnchorsVisibleGroupAndCentersOffscreenNavigation`,
+    ///   `testZoomedRatingSwipeModesAndPinchSafety`);
+    /// - the group's finishing actions and Undo: `testFinishingPillNeverResizesTheStage`,
+    ///   `PhotoActionsTests`;
+    /// - a batch rating with a failed write: `testFinishingPillAndSaveFailureToastStayUsable`,
+    ///   `PhotoActionsTests`;
+    /// - Move rejects with a keep and a failure: `testMoveRejectsConfirmsAndReportsFilesLeftInPlace`,
     ///   `RejectMoveCopyTests`.
     @MainActor @objc
     func testBrowsingFlowFromEntryToSettings() {
@@ -258,12 +258,6 @@ extension CloveFlowTests {
         checkGridOverlays(in: app)
         rerunGrouping(in: app)
         openFirstPhoto(in: app)
-        checkDoubleTapZoom(in: app)
-        markThePhoto(in: app)
-        rateBySwiping(in: app)
-        rejectBySwiping(in: app)
-        expandGroupFromFilmstrip(in: app)
-        advanceBySwipe(in: app)
         returnToGrid(in: app)
         openSettings(in: app)
         checkSimplifiedGroupingSettings(in: app)
@@ -330,6 +324,7 @@ extension CloveFlowTests {
 
     @MainActor
     private func checkGridOverlays(in app: XCUIApplication) {
+        XCTAssertFalse(element(in: app, "clove.grid.saveState").exists)
         let group = element(in: app, "clove.grid.group.burst-2678")
         XCTAssertTrue(group.waitForExistence(timeout: 10), "The grid did not show burst-2678 stack")
         let groupLabel = group.label
@@ -392,180 +387,20 @@ extension CloveFlowTests {
         XCTAssertTrue(
             element(in: app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
             "Opening a grid stack did not enter Group Focus")
+        if !element(in: app, "clove.detail.rail").exists {
+            let capsule = element(in: app, "clove.detail.capsule")
+            XCTAssertTrue(capsule.exists)
+            XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
+            XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
+        }
+        XCTAssertTrue(element(in: app, "clove.detail.info").exists)
+        XCTAssertTrue(element(in: app, "clove.detail.undo").exists)
 
         let marks = detailMarksControl(in: app).value as? String
         XCTAssertTrue(
             marks?.contains("5 stars") == true,
             "The detail view did not show the saved rating: \(String(describing: marks))"
         )
-    }
-
-    @MainActor
-    private func checkDoubleTapZoom(in app: XCUIApplication) {
-        let preview = element(in: app, "clove.detail.preview")
-        let zoom = element(in: app, "clove.detail.zoom")
-        let strip = element(in: app, "clove.detail.filmstrip")
-        let fitLabel = zoom.label
-        XCTAssertFalse(fitLabel.isEmpty, "The detail view had no zoom state")
-        XCTAssertFalse(fitLabel.contains("%"), "The detail view did not open at fit")
-
-        preview.doubleTap()
-        XCTAssertTrue(zoom.label.hasSuffix("100%"))
-        // Chrome is one visibility across fit and zoom (#302).
-        XCTAssertTrue(strip.exists, "The filmstrip should stay visible while zoomed")
-        XCTAssertTrue(
-            detailMarksControl(in: app).exists,
-            "The marking controls should stay visible while zoomed")
-
-        preview.doubleTap()
-        XCTAssertEqual(zoom.label, fitLabel)
-
-        // A pinch still zooms, and the default zoomed mode keeps the one-finger culling gestures, so
-        // a one-finger drag neither pans the image nor switches photos (#302).
-        let marks = detailMarksControl(in: app)
-        let marksAtFit = marks.value as? String
-        preview.pinch(withScale: 2, velocity: 1)
-        XCTAssertNotEqual(zoom.label, fitLabel)
-        XCTAssertTrue(strip.exists, "The filmstrip should stay visible after pinching to zoom")
-        let centredBeforeDrag = preview.value as? String
-        drag(preview, byPointsX: 0, y: -150)
-        XCTAssertEqual(
-            preview.value as? String, centredBeforeDrag,
-            "The zoomed one-finger drag panned the image instead of keeping the culling gestures")
-
-        preview.doubleTap()
-        XCTAssertEqual(zoom.label, fitLabel)
-
-        // The photo already has its highest rating, so a drag that rated it could only write a
-        // change and move the detail on; the marks and the photo both stay where they were.
-        XCTAssertEqual(
-            marks.value as? String, marksAtFit, "The zoomed drag rated the photo")
-        XCTAssertEqual(
-            element(in: app, "clove.detail.fileName").label, "MMQ02678.ARW",
-            "The zoomed drag switched photos")
-    }
-
-    @MainActor
-    private func markThePhoto(in app: XCUIApplication) {
-        if element(in: app, "clove.detail.rail").exists {
-            element(in: app, "clove.detail.rail.stars.4").tap()
-        } else {
-            // The compact toolbar's rating action opens the ladder the stars live in (#227).
-            element(in: app, "clove.detail.capsule.rating").tap()
-            let fourStars = element(in: app, "clove.detail.capsule.stars.4")
-            XCTAssertTrue(
-                fourStars.waitForExistence(timeout: 5), "the rating ladder did not open")
-            fourStars.tap()
-        }
-
-        // Group auto-advance skips the already rejected member. Select it explicitly for the
-        // swipe checks below, which replace its existing Reject with stars.
-        waitForFileName("MMQ02681.ARW", in: app)
-        element(in: app, "clove.detail.filmstrip.mmq02679").tap()
-        XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02679.ARW")
-    }
-
-    @MainActor
-    private func rateBySwiping(in app: XCUIApplication) {
-        let preview = element(in: app, "clove.detail.preview")
-        let fileName = element(in: app, "clove.detail.fileName")
-        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
-
-        // From Reject, three steps (30 pt dead zone + two 45 pt steps) reach two stars at 120–164 pt.
-        drag(preview, byPointsX: 0, y: -135)
-
-        // The mark advances to the group's remaining unmarked member.
-        waitForFileName("MMQ02681.ARW", in: app)
-
-        // Return to the rated member through the expanded group.
-        element(in: app, "clove.detail.filmstrip.mmq02679").tap()
-        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
-        let marks = detailMarksControl(in: app)
-        XCTAssertTrue((marks.value as? String)?.contains("2 stars") == true)
-
-    }
-
-    @MainActor
-    private func rejectBySwiping(in app: XCUIApplication) {
-        let preview = element(in: app, "clove.detail.preview")
-        let fileName = element(in: app, "clove.detail.fileName")
-        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
-
-        // From two stars, two downward steps (30 pt Clear, 75 pt Reject) reach Rejected and advance
-        // to the remaining unmarked member inside Group Focus.
-        drag(preview, byPointsX: 0, y: 210)
-        waitForFileName("MMQ02681.ARW", in: app)
-        // Swiping right stays inside Group Focus rather than leaving the burst.
-        preview.swipeRight()
-        XCTAssertEqual(fileName.label, "MMQ02679.ARW")
-        // Collapsing returns to Timeline on the Representative Photo, then swiping left moves
-        // to the standalone photo after the burst.
-        element(in: app, "clove.detail.filmstrip.group.fold").tap()
-        waitForFileName("MMQ02678.ARW", in: app)
-        preview.swipeLeft()
-        waitForFileName("MMQ02680.ARW", in: app)
-    }
-
-    @MainActor
-    private func drag(_ element: XCUIElement, byPointsX dx: CGFloat, y dy: CGFloat) {
-        let middle = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: dx, dy: dy)))
-    }
-
-    @MainActor
-    private func waitForFileName(_ name: String, in app: XCUIApplication) {
-        let fileName = element(in: app, "clove.detail.fileName")
-        XCTAssertTrue(wait(NSPredicate(format: "label == %@", name), fileName, timeout: 10))
-    }
-
-    @MainActor
-    private func expandGroupFromFilmstrip(in app: XCUIApplication) {
-        // MMQ02680 is outside the group, so the Timeline filmstrip shows the group as one stack.
-        XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02680.ARW")
-        let stack = element(in: app, "clove.detail.filmstrip.group.burst-2678")
-        // Tapping an unselected stack opens its representative photo in Timeline (read-only).
-        stack.tap()
-        XCTAssertEqual(element(in: app, "clove.detail.fileName").label, "MMQ02678.ARW")
-        XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
-        let expandPill = element(in: app, "clove.detail.expandGroup")
-        XCTAssertTrue(expandPill.waitForExistence(timeout: 5))
-        XCTAssertEqual(expandPill.label, "Expand 3 photos")
-        // Expanding enters Group Focus cleanly; collapsing returns to Timeline.
-        expandPill.tap()
-        XCTAssertTrue(
-            element(in: app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
-            "The group did not enter Group Focus")
-        XCTAssertTrue(
-            element(in: app, "clove.detail.filmstrip.mmq02679").exists,
-            "The group did not show its members in Group Focus")
-        XCTAssertFalse(
-            element(in: app, "clove.detail.filmstrip.mmq02680").exists,
-            "Group Focus strip should isolate the group's visible members")
-        element(in: app, "clove.detail.filmstrip.group.fold").tap()
-        XCTAssertFalse(element(in: app, "clove.detail.filmstrip.expandedGroup").exists)
-        let back = element(in: app, "clove.detail.filmstrip.mmq02680")
-        XCTAssertTrue(back.waitForExistence(timeout: 5), "The Timeline strip lost the next photo")
-        back.tap()
-    }
-
-    @MainActor
-    private func advanceBySwipe(in app: XCUIApplication) {
-        let preview = element(in: app, "clove.detail.preview")
-        let fileName = element(in: app, "clove.detail.fileName")
-        let chromeTarget = element(
-            in: app,
-            element(in: app, "clove.detail.rail").exists
-                ? "clove.detail.filmstrip" : "clove.detail.capsule")
-        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        // Single taps anywhere (including the outer 18% edges) toggle chrome and never navigate.
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), chromeTarget))
-        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), chromeTarget))
-        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
-        preview.swipeLeft()
-        XCTAssertEqual(fileName.label, "MMQ02682.ARW")
     }
 
     @MainActor
@@ -639,16 +474,16 @@ extension CloveFlowTests {
             groupingActionIsVisible(in: app), "Turning similar groups off left Run again")
         let ratedLabel = element(in: app, "clove.grid.photo.mmq02678").label
         XCTAssertTrue(
-            ratedLabel.contains("4 stars"),
-            "The flat grid did not show the rating the bar wrote: \(ratedLabel)")
-        let swipedLabel = element(in: app, "clove.grid.photo.mmq02679").label
+            ratedLabel.contains("5 stars"),
+            "The flat grid did not show the member's saved rating: \(ratedLabel)")
+        let rejectedLabel = element(in: app, "clove.grid.photo.mmq02679").label
         XCTAssertTrue(
-            swipedLabel.contains("Rejected"),
-            "The flat grid did not show the Reject the swipe wrote: \(swipedLabel)")
+            rejectedLabel.contains("Rejected"),
+            "The flat grid did not show the member's Reject: \(rejectedLabel)")
         XCTAssertFalse(
-            swipedLabel.contains("2 stars"), "A rejected photo kept its stars: \(swipedLabel)")
+            rejectedLabel.contains("2 stars"), "A rejected photo kept its stars: \(rejectedLabel)")
         XCTAssertFalse(
-            swipedLabel.contains("-1"), "A rejected photo read its rating: \(swipedLabel)")
+            rejectedLabel.contains("-1"), "A rejected photo read its rating: \(rejectedLabel)")
 
         openSettingsFromGrid(in: app)
         openSettingsCategory("clove.settings.category.browsing", in: app)
@@ -682,7 +517,7 @@ extension CloveFlowTests {
     }
 
     @MainActor
-    private func setSimilarGroups(in app: XCUIApplication, on: Bool) {
+    func setSimilarGroups(in app: XCUIApplication, on: Bool) {
         let toggle = element(in: app, "clove.settings.similarGroupsEnabled")
         let window = app.windows.firstMatch.frame
         for _ in 0..<8 {

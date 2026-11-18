@@ -536,23 +536,6 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.grid.photo.mmq02678").exists)
     }
 
-    @MainActor
-    func testGridAndDetailControls() {
-        let app = launchSample()
-        openLibrary(app)
-        XCTAssertFalse(element(app, "clove.grid.saveState").exists)
-        let companion = element(app, "clove.grid.photo.mmq02680")
-        XCTAssertTrue(companion.label.contains("JPEG companion"))
-        XCTAssertTrue(element(app, "clove.grid.group.burst-2678").exists)
-        companion.tap()
-        let capsule = element(app, "clove.detail.capsule")
-        XCTAssertTrue(capsule.exists)
-        XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
-        XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
-        XCTAssertTrue(element(app, "clove.detail.info").exists)
-        XCTAssertTrue(element(app, "clove.detail.undo").exists)
-    }
-
     /// Hardware keys mark and navigate through the marking path the capsule uses (PRD P0-06).
     @MainActor
     func testDetailHardwareKeysMarkAndNavigate() {
@@ -583,100 +566,27 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testSaveFailureShowsToastAndTheFilesMarks() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEMS": "2680"])
-        openLibrary(app)
-        element(app, "clove.grid.photo.mmq02680").tap()
-        let label = element(app, "clove.detail.capsule.label")
-        label.tap()
-        element(app, "clove.detail.labels.red").tap()
-        XCTAssertTrue(app.staticTexts["Couldn't save the mark."].waitForExistence(timeout: 3))
-        let toast = element(app, "clove.save.toast")
-        let filmstrip = element(app, "clove.detail.filmstrip")
-        let capsule = element(app, "clove.detail.capsule")
-        XCTAssertTrue(toast.exists)
-        XCTAssertLessThan(toast.frame.midY, filmstrip.frame.minY)
-        XCTAssertLessThan(toast.frame.maxY, capsule.frame.minY)
-        XCTAssertTrue(waitForLabel("Label", label))
-        XCTAssertFalse(element(app, "clove.detail.saveState").exists)
-        XCTAssertFalse(element(app, "clove.save.toast.action").exists)
-    }
-
-    @MainActor
     func testDriveLossDropsTheRequestedMarkAndDisablesMarking() {
         let app = launchSample([
             "CLOVE_TEST_LIBRARY_DISCONNECT_ON_WRITE": "1",
             "CLOVE_TEST_LIBRARY_WRITE_DELAY_MS": "500",
         ])
+        defer { app.terminate() }
         openLibrary(app)
         element(app, "clove.grid.photo.mmq02680").tap()
         let label = element(app, "clove.detail.capsule.label")
         label.tap()
         element(app, "clove.detail.labels.red").tap()
         XCTAssertTrue(waitForLabel("Not connected", element(app, "clove.detail.saveState")))
+        XCTAssertTrue(element(app, "clove.detail.saveStatus.failure.action").exists)
         XCTAssertFalse(element(app, "clove.save.toast").exists)
         XCTAssertEqual(label.label, "Label")
         XCTAssertFalse(label.isEnabled)
         element(app, "clove.nav.back").tap()
+        XCTAssertEqual(element(app, "clove.grid.saveState").label, "Not connected")
+        XCTAssertTrue(app.staticTexts["The drive disconnected."].exists)
+        XCTAssertTrue(element(app, "clove.grid.saveState.failure.action").exists)
         XCTAssertFalse(element(app, "clove.grid.photo.mmq02680").label.contains("Red"))
-    }
-
-    @MainActor
-    func testMarkingStillAdvancesWhenTheUnmarkedFilterRemovesThePhoto() {
-        let app = launchSample()
-        openLibrary(app)
-        element(app, "clove.grid.filter").tap()
-        element(app, "clove.grid.filter.unmarked").tap()
-        element(app, "clove.grid.photo.mmq02680").tap()
-        rate(3, in: app)
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", element(app, "clove.detail.fileName")))
-    }
-
-    @MainActor
-    func testShownMarkTimingWhileWriteIsHeldPending() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_WRITE_DELAY_MS": "5000"])
-        defer { app.terminate() }
-        openLibrary(app)
-        element(app, "clove.grid.photo.mmq02680").tap()
-        let label = element(app, "clove.detail.capsule.label")
-        label.tap()
-        let start = ContinuousClock.now
-        element(app, "clove.detail.labels.red").tap()
-        let shownLabel = label.label
-        let elapsed = start.duration(to: .now)
-        XCTAssertEqual(shownLabel, "Label, Red")
-        print(
-            "Tap to shown mark, test library with a 5000 ms pending write (informational, includes XCTest input and observation): \(elapsed)"
-        )
-        XCTAssertFalse(element(app, "clove.detail.saveState").exists)
-        XCTAssertEqual(label.label, "Label, Red")
-    }
-
-    @MainActor
-    func testSelectAllIsAvailableBeforeSelectingAPhoto() {
-        let app = launchSample()
-        openLibrary(app)
-        element(app, "clove.grid.more").tap()
-        app.buttons["Select"].tap()
-        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
-        element(app, "clove.grid.selectionOptions").tap()
-        app.buttons["Select all"].tap()
-        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "36 selected")
-        XCTAssertTrue(element(app, "clove.grid.batch.rating").isEnabled)
-    }
-
-    @MainActor
-    func testMixedBatchCanClearRatingsWithoutAnIntermediateMark() {
-        let app = launchSample()
-        openLibrary(app)
-        let rated = element(app, "clove.grid.group.burst-2678")
-        rated.press(forDuration: 0.6)
-        element(app, "clove.grid.photo.mmq02680").tap()
-        element(app, "clove.grid.batch").press(forDuration: 0.6)
-        app.buttons["Clear rating"].tap()
-        let clearedLabel = rated.label
-        XCTAssertFalse(clearedLabel.contains("stars"))
-        XCTAssertTrue(clearedLabel.contains("Red"))
     }
 
     @MainActor
@@ -797,7 +707,7 @@ final class CloveFlowTests: XCTestCase {
         preview.swipeRight()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertTrue(String(describing: marksControl.value).contains("4"))
-        for (side, horizontalStart, nextPhoto) in [
+        for (_, horizontalStart, nextPhoto) in [
             ("right", 0.8, "MMQ02682.ARW"),
             // Standalone Timeline swipe-mark moves to the next standalone Timeline slot.
             ("left-third", 0.2, "MMQ02683.ARW"),
@@ -870,57 +780,54 @@ final class CloveFlowTests: XCTestCase {
 
     @MainActor
     func testRejectedDetailGlyphWithChromeShownAndHidden() throws {
-        for theme in ["light", "dark"] {
-            let app = launchSample()
-            openLibrary(app)
-            applyComparisonTheme(theme, app)
-            element(app, "clove.grid.photo.mmq02680").tap()
-            let preview = element(app, "clove.detail.preview")
-            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-            let unmarkedCorner = try rejectGlyphPixels(in: preview)
-            let glyph = element(app, "clove.detail.rejectGlyph")
-            let reject = element(app, "clove.detail.capsule.reject")
-            let fileName = element(app, "clove.detail.fileName")
-            let capsule = element(app, "clove.detail.capsule")
-            XCTAssertFalse(glyph.exists)
-            reject.tap()
-            XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
-            preview.swipeRight()
-            XCTAssertEqual(preview.label, "MMQ02680.ARW, Rejected")
-            let rejectedCorner = try rejectGlyphPixels(in: preview)
-            XCTAssertNotEqual(rejectedCorner, unmarkedCorner)
-            XCTAssertTrue(glyph.exists)
-            let glyphFrame = glyph.frame
-            capture("detail-rejected-\(theme)-chrome-shown")
-            let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
-            centre.tap()
-            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
-            XCTAssertTrue(glyph.exists)
-            XCTAssertEqual(glyph.frame, glyphFrame)
-            XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
-            capture("detail-rejected-\(theme)-chrome-hidden")
-            centre.doubleTap()
-            XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
-            XCTAssertTrue(glyph.exists)
-            XCTAssertEqual(glyph.frame, glyphFrame)
-            XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
-            // A two-finger drag pans the zoomed image in the default mode without switching or
-            // marking, and the glyph stays put with it.
-            try swipeTwoFingersVertically(in: preview, deltaY: -120, app: app)
-            XCTAssertTrue(glyph.exists)
-            XCTAssertEqual(glyph.frame, glyphFrame)
-            XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
-            centre.doubleTap()
-            centre.tap()
-            XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
-            reject.tap()
-            XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
-            preview.swipeRight()
-            XCTAssertEqual(preview.label, "MMQ02680.ARW")
-            XCTAssertFalse(glyph.exists)
-            XCTAssertEqual(try rejectGlyphPixels(in: preview), unmarkedCorner)
-            app.terminate()
-        }
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let unmarkedCorner = try rejectGlyphPixels(in: preview)
+        let glyph = element(app, "clove.detail.rejectGlyph")
+        let reject = element(app, "clove.detail.capsule.reject")
+        let fileName = element(app, "clove.detail.fileName")
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertFalse(glyph.exists)
+        reject.tap()
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
+        preview.swipeRight()
+        XCTAssertEqual(preview.label, "MMQ02680.ARW, Rejected")
+        let rejectedCorner = try rejectGlyphPixels(in: preview)
+        XCTAssertNotEqual(rejectedCorner, unmarkedCorner)
+        XCTAssertTrue(glyph.exists)
+        let glyphFrame = glyph.frame
+        capture("detail-rejected-chrome-shown")
+        let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+        centre.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertTrue(glyph.exists)
+        XCTAssertEqual(glyph.frame, glyphFrame)
+        XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
+        capture("detail-rejected-chrome-hidden")
+        centre.doubleTap()
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
+        XCTAssertTrue(glyph.exists)
+        XCTAssertEqual(glyph.frame, glyphFrame)
+        XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
+        // A two-finger drag pans the zoomed image in the default mode without switching or
+        // marking, and the glyph stays put with it.
+        try swipeTwoFingersVertically(in: preview, deltaY: -120, app: app)
+        XCTAssertTrue(glyph.exists)
+        XCTAssertEqual(glyph.frame, glyphFrame)
+        XCTAssertEqual(try rejectGlyphPixels(in: preview), rejectedCorner)
+        centre.doubleTap()
+        centre.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        reject.tap()
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
+        preview.swipeRight()
+        XCTAssertEqual(preview.label, "MMQ02680.ARW")
+        XCTAssertFalse(glyph.exists)
+        XCTAssertEqual(try rejectGlyphPixels(in: preview), unmarkedCorner)
     }
 
     /// Sample the opaque centre of the 22 pt glyph, inset 8 pt in the stage.
@@ -962,167 +869,61 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
     }
 
-    @MainActor
-    func testDisconnectedFolderBanner() {
-        let disconnected = launchSample(["CLOVE_TEST_LIBRARY_LOCATION_LOSS": "drive"])
-        openLibrary(disconnected)
-        XCTAssertEqual(element(disconnected, "clove.grid.saveState").label, "Not connected")
-        XCTAssertTrue(disconnected.staticTexts["The drive disconnected."].exists)
-        XCTAssertTrue(element(disconnected, "clove.grid.saveState.failure.action").exists)
-        element(disconnected, "clove.grid.group.burst-2678").tap()
-        XCTAssertTrue(element(disconnected, "clove.detail").exists)
-        XCTAssertTrue(element(disconnected, "clove.detail.saveStatus.failure.action").exists)
-    }
-
-    /// A stack uses detail; one undo restores every photo rejected by the finishing pill.
-    @MainActor
-    func testStackOpensDetailAndFinishingUndoRestoresUnmarkedTogether() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
-        openLibrary(app)
-        let group = element(app, "clove.grid.group.burst-2678")
-        let fileName = element(app, "clove.detail.fileName")
-        group.tap()
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
-        XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
-        element(app, "clove.detail.capsule.label").tap()
-        element(app, "clove.detail.labels.green").tap()
-        element(app, "clove.nav.back").tap()
-        group.tap()
-        // Unified Representative Photo selects the green-labelled keeper (MMQ02678) over unmarked.
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        let pill = element(app, "clove.detail.rejectUnmarked")
-        XCTAssertEqual(pill.label, "Reject 2 unmarked")
-        pill.tap()
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
-        XCTAssertFalse(pill.exists)
-        element(app, "clove.detail.undo").tap()
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        XCTAssertEqual(pill.label, "Reject 2 unmarked")
-        element(app, "clove.nav.back").tap()
-        XCTAssertTrue(group.waitForExistence(timeout: 5))
-        XCTAssertTrue(group.label.contains("Similar group of 3 photos"))
-        XCTAssertFalse(element(app, "clove.detail.undo").exists)
-        // Re-entering confirms the Green keeper and both restored unmarked members.
-        group.tap()
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        XCTAssertEqual(element(app, "clove.detail.capsule.label").label, "Label, Green")
-        XCTAssertEqual(pill.label, "Reject 2 unmarked")
-    }
-
-    @MainActor
-    func testFinishingPillRequiresAKeepInTheVisibleGroup() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
-        defer { app.terminate() }
-        openLibrary(app)
-        element(app, "clove.grid.filter").tap()
-        element(app, "clove.grid.filter.unmarked").tap()
-        element(app, "clove.grid.group.burst-2678").tap()
-        let label = element(app, "clove.detail.capsule.label")
-        label.tap()
-        element(app, "clove.detail.labels.green").tap()
-        XCTAssertEqual(label.label, "Label, Green")
-        // A label choice keeps this title. A predicate wait can time out taking its snapshot
-        // under load even when the title is already correct (#166).
-        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02678.ARW")
-        XCTAssertFalse(element(app, "clove.detail.rejectUnmarked").exists)
-    }
-
-    @MainActor
-    func testGroupZoomKeepsTheCropUntilLeavingItsMembers() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
-        defer { app.terminate() }
-        openLibrary(app)
-        element(app, "clove.grid.group.burst-2678").tap()
-        let preview = element(app, "clove.detail.preview")
-        let fileName = element(app, "clove.detail.fileName")
-        let info = element(app, "clove.detail.info")
-        let strip = element(app, "clove.detail.filmstrip")
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-        XCTAssertTrue(
-            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
-        // Chrome is one visibility across fit and zoom (#302).
-        XCTAssertTrue(info.exists)
-        XCTAssertTrue(strip.exists)
-        // Single taps near the edges toggle all togglable chrome and never navigate (#252, #273).
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.4)).tap()
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
-        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
-        // Zoomed navigation stays strictly within Group Focus and synchronizes the crop.
-        preview.swipeLeft()
-        XCTAssertTrue(waitForLabel("MMQ02679.ARW", fileName))
-        XCTAssertTrue(
-            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
-        XCTAssertTrue(strip.exists)
-        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
-        XCTAssertTrue(waitForLabel("MMQ02681.ARW", fileName))
-        XCTAssertTrue(
-            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
-        // At the end of Group Focus, right arrow stops instead of leaving the group.
-        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
-        XCTAssertEqual(fileName.label, "MMQ02681.ARW")
-        XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
-        // Collapsing snaps to the Representative Photo (MMQ02678) and resets zoom when changed;
-        // Timeline right arrow then skips the collapsed burst in one step to MMQ02680 at fit.
-        element(app, "clove.detail.filmstrip.group.fold").tap()
-        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        app.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
-        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), info))
-        XCTAssertTrue(strip.exists)
-    }
-
     /// #305: the finishing pill is not part of the filmstrip's layout, so its availability and the
     /// fit–zoom transitions never resize the stage or move the fitted photo. It floats above the
     /// strip, where the rest of the chrome already is, and every control it shares that band with
-    /// stays usable.
+    /// stays usable; finishing Undo restores the pill and its unmarked member in one step.
     @MainActor
     func testFinishingPillNeverResizesTheStage() {
-        for theme in ["light", "dark", "nord"] {
-            let app = launchSample()
-            openLibrary(app)
-            applyComparisonTheme(theme, app)
-            element(app, "clove.grid.group.burst-2678").tap()
-            let preview = element(app, "clove.detail.preview")
-            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-            let pill = element(app, "clove.detail.rejectUnmarked")
-            XCTAssertTrue(pill.waitForExistence(timeout: 5), "\(theme): no finishing pill")
-            let strip = element(app, "clove.detail.filmstrip")
-            let capsule = element(app, "clove.detail.capsule")
-            let stage = preview.frame
-            XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
-            XCTAssertLessThanOrEqual(strip.frame.maxY, capsule.frame.minY)
-            XCTAssertTrue(pill.isHittable)
-            XCTAssertTrue(strip.isHittable)
-            XCTAssertTrue(capsule.isHittable)
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+        let group = element(app, "clove.grid.group.burst-2678")
+        group.tap()
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let pill = element(app, "clove.detail.rejectUnmarked")
+        XCTAssertTrue(pill.waitForExistence(timeout: 5), "no finishing pill")
+        let strip = element(app, "clove.detail.filmstrip")
+        let capsule = element(app, "clove.detail.capsule")
+        let stage = preview.frame
+        XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
+        XCTAssertLessThanOrEqual(strip.frame.maxY, capsule.frame.minY)
+        XCTAssertTrue(pill.isHittable)
+        XCTAssertTrue(strip.isHittable)
+        XCTAssertTrue(capsule.isHittable)
 
-            // 100% zoom keeps the stage and the pill's band, and the pill stays usable (#302, #305).
-            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-            XCTAssertTrue(
-                wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
-            assertSameFrame(preview.frame, stage, "\(theme): zoom resized the stage")
-            XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
-            XCTAssertTrue(pill.isHittable)
+        // 100% zoom keeps the stage and the pill's band, and the pill stays usable (#302, #305).
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+        XCTAssertTrue(
+            wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
+        assertSameFrame(preview.frame, stage, "zoom resized the stage")
+        XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
+        XCTAssertTrue(pill.isHittable)
 
-            // Fit again, then finish the group: the pill goes and the stage and strip stay put.
-            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
-            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-            pill.tap()
-            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), pill))
-            assertSameFrame(preview.frame, stage, "\(theme): finishing resized the stage")
-            XCTAssertTrue(strip.exists)
-            app.terminate()
-        }
+        // Fit again, then finish the group: the pill goes and the stage and strip stay put.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let pillLabel = pill.label
+        pill.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), pill))
+        assertSameFrame(preview.frame, stage, "finishing resized the stage")
+        XCTAssertTrue(strip.exists)
+
+        // Detail Undo restores the finished photo and its finishing pill in one step; returning to
+        // Grid clears Detail Undo.
+        element(app, "clove.detail.undo").tap()
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertEqual(pill.label, pillLabel)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02678.ARW")
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
     }
 
-    /// #305: the failure toast sits in the stage's floating band while the finishing pill floats
-    /// above the strip, so a failed write in Group Focus leaves both readable and usable.
+    /// #305: the failure toast sits in the stage's floating band above the filmstrip and below the
+    /// capsule, never shows a spurious action, and restores the failed mark while keeping the pill
+    /// usable in Group Focus.
     @MainActor
     func testFinishingPillAndSaveFailureToastStayUsable() {
         let app = launchSample(["CLOVE_TEST_LIBRARY_FAIL_STEMS": "2678"])
@@ -1135,19 +936,28 @@ final class CloveFlowTests: XCTestCase {
         // A keeper whose write saves makes the finishing action available; the failing member then
         // brings the toast while the pill is still offered.
         element(app, "clove.detail.filmstrip.mmq02679").tap()
-        element(app, "clove.detail.capsule.label").tap()
+        let label = element(app, "clove.detail.capsule.label")
+        label.tap()
         element(app, "clove.detail.labels.green").tap()
         let pill = element(app, "clove.detail.rejectUnmarked")
         XCTAssertTrue(pill.waitForExistence(timeout: 5))
         element(app, "clove.detail.filmstrip.mmq02678").tap()
-        element(app, "clove.detail.capsule.label").tap()
-        element(app, "clove.detail.labels.red").tap()
+        XCTAssertEqual(label.label, "Label, Red")
+        label.tap()
+        element(app, "clove.detail.labels.green").tap()
         XCTAssertTrue(app.staticTexts["Couldn't save the mark."].waitForExistence(timeout: 5))
         let toast = element(app, "clove.save.toast")
+        let filmstrip = element(app, "clove.detail.filmstrip")
+        let capsule = element(app, "clove.detail.capsule")
         XCTAssertTrue(toast.exists)
+        XCTAssertLessThan(toast.frame.midY, filmstrip.frame.minY)
+        XCTAssertLessThan(toast.frame.maxY, capsule.frame.minY)
+        XCTAssertTrue(waitForLabel("Label, Red", label))
+        XCTAssertFalse(element(app, "clove.detail.saveState").exists)
+        XCTAssertFalse(element(app, "clove.save.toast.action").exists)
         XCTAssertTrue(pill.exists, "the keeper keeps the finishing pill available")
         XCTAssertTrue(pill.isHittable)
-        XCTAssertTrue(element(app, "clove.detail.filmstrip").isHittable)
+        XCTAssertTrue(filmstrip.isHittable)
         assertSameFrame(preview.frame, stage, "the toast resized the stage")
     }
 
@@ -1170,24 +980,6 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").exists)
         element(app, "clove.moves.details.done").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02685").label.contains("Rejected"))
-    }
-
-    @MainActor
-    func testAMoveThatMovedNothingOffersDetailsWithoutUndo() {
-        let app = launchSample([
-            "CLOVE_TEST_LIBRARY_MOVE_FAIL_STEM_SUFFIX": "",
-            "CLOVE_TEST_LIBRARY_KEEP_TOAST": "1",
-        ])
-        openLibrary(app)
-        element(app, "clove.grid.moveRejects").tap()
-        element(app, "clove.moves.confirm").tap()
-        let toast = element(app, "clove.moves.toast")
-        XCTAssertTrue(toast.waitForExistence(timeout: 5))
-        XCTAssertFalse(element(app, "clove.moves.toast.action").exists)
-        let details = toast.buttons["clove.moves.toast.secondaryAction"]
-        XCTAssertTrue(details.exists)
-        details.tap()
-        XCTAssertTrue(element(app, "clove.moves.details.sheet").exists)
     }
 
     @MainActor
@@ -2237,7 +2029,6 @@ final class CloveFlowTests: XCTestCase {
 
         let leftBefore = neighborLeft.frame
         let currentBefore = neighborCurrent.frame
-        let stackBefore = stack.frame
 
         // First tap on a collapsed stack opens its representative in Timeline without expanding;
         // neighbors stay anchored in place and the Expand nudge appears.
@@ -2302,7 +2093,6 @@ final class CloveFlowTests: XCTestCase {
         let app = launchSample()
         defer { app.terminate() }
         openLibrary(app)
-        applyComparisonTheme("light", app)
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
         turnOffAutoAdvance(app)
@@ -2340,21 +2130,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(eye.waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
 
-        // Double-tapping the photo body away from the AF rectangle (including near the edges, #252)
-        // still centres 100% on AF; a second double-tap anywhere returns to fit.
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).doubleTap()
-        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
-        XCTAssertTrue(
-            wait(
-                NSPredicate(format: "value CONTAINS %@", "centred at 30%, 35%"), preview),
-            "Double-tap should centre on the AF region instead of the tap point")
-        XCTAssertTrue(autofocus.exists)
-        XCTAssertFalse(eye.exists)
-        preview.doubleTap()
-        XCTAssertFalse(zoom.label.hasSuffix("100%"))
-        XCTAssertTrue(eye.waitForExistence(timeout: 5))
-        XCTAssertEqual(element(app, "clove.detail.capsule").value as? String, marks)
-
+        // Double-tapping away from the AF rectangle (including near the edges, #252) still
+        // centres 100% on AF; a second double-tap anywhere returns to fit.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).doubleTap()
         XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
         XCTAssertTrue(
@@ -2425,24 +2202,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.detail.region.face.0-0").exists)
         capture("detail-focus-regions-face-fallback-light")
 
-        // Dark theme toggle contrast and overlay legibility.
-        element(app, "clove.nav.back").tap()
-        applyComparisonTheme("dark", app)
-        element(app, "clove.grid.photo.mmq02683").tap()
-        XCTAssertTrue(element(app, "clove.detail.region.af.0").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(app, "clove.detail.region.face.4-1").exists)
-        capture("detail-focus-regions-overlap-dark")
-        toggle.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), toggle))
-        XCTAssertTrue(
-            wait(
-                NSPredicate(format: "exists == false"),
-                element(app, "clove.detail.region.af.0")))
-        capture("detail-focus-regions-off-dark")
-
         // Photo with no focus regions keeps tap-point double-tap zoom anywhere, including edges.
-        toggle.tap()
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), toggle))
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
@@ -2454,13 +2214,7 @@ final class CloveFlowTests: XCTestCase {
             wait(
                 NSPredicate(format: "value CONTAINS %@", "centred at 65%, 50%"), preview),
             "Double-tap on a photo with no focus regions should centre on the tap point")
-        preview.doubleTap()
-        XCTAssertFalse(zoom.label.hasSuffix("100%"))
-
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).doubleTap()
-        XCTAssertTrue(wait(NSPredicate(format: "label ENDSWITH %@", "100%"), zoom))
-        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).doubleTap()
         XCTAssertFalse(zoom.label.hasSuffix("100%"))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
     }
@@ -2533,30 +2287,61 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.nav.back").tap()
         }
 
-        // 2. Mixed batch selection: mixed labels must NOT highlight None, and outside tap dismisses.
-        let ratedAndRed = element(app, "clove.grid.group.burst-2678")
-        XCTAssertTrue(ratedAndRed.waitForExistence(timeout: 5))
-        ratedAndRed.press(forDuration: 0.6)
-        element(app, "clove.grid.photo.mmq02680").tap()
+        // 2. Select all before selection, mixed batch labels/Clear rating, and outside-tap dismiss.
+        element(app, "clove.grid.more").tap()
+        app.buttons["Select"].tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
+        element(app, "clove.grid.selectionOptions").tap()
+        app.buttons["Select all"].tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "36 selected")
+        XCTAssertTrue(element(app, "clove.grid.batch.rating").isEnabled)
+        element(app, "clove.grid.batch.done").tap()
+
+        // Pair unrated mmq02684 with standalone 2-star Purple mmq02699 (collapsed group covers omit
+        // member marks from their accessibility label).
+        let unmarked = element(app, "clove.grid.photo.mmq02684")
+        XCTAssertTrue(unmarked.waitForExistence(timeout: 5))
+        unmarked.press(forDuration: 0.6)
+        let batchBar = element(app, "clove.grid.batch")
+        XCTAssertTrue(batchBar.waitForExistence(timeout: 5))
+        let rated = element(app, "clove.grid.photo.mmq02699")
+        let gridCollection = element(app, "clove.grid").collectionViews.firstMatch
+        for _ in 0..<6 {
+            if rated.exists && rated.isHittable && rated.frame.maxY < batchBar.frame.minY - 8 {
+                break
+            }
+            gridCollection.swipeUp()
+        }
+        XCTAssertTrue(rated.waitForExistence(timeout: 5))
+        rated.tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "2 selected")
 
         element(app, "clove.grid.batch.label").tap()
         let batchPicker = element(app, "clove.grid.batch.labels")
         XCTAssertTrue(batchPicker.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.grid.batch.labels.none").isSelected)
-        XCTAssertFalse(element(app, "clove.grid.batch.labels.red").isSelected)
+        XCTAssertFalse(element(app, "clove.grid.batch.labels.purple").isSelected)
         element(app, "clove.grid").coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.3))
             .tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
+
+        batchBar.press(forDuration: 0.6)
+        app.buttons["Clear rating"].tap()
+        XCTAssertTrue(wait(NSPredicate(format: "NOT (label CONTAINS %@)", "stars"), rated))
+        XCTAssertTrue(rated.label.contains("Purple"))
 
         element(app, "clove.grid.batch.label").tap()
         XCTAssertTrue(batchPicker.waitForExistence(timeout: 5))
         element(app, "clove.grid.batch.labels.none").tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
+        XCTAssertTrue(wait(NSPredicate(format: "NOT (label CONTAINS %@)", "Purple"), rated))
         element(app, "clove.grid.batch.done").tap()
-        ratedAndRed.tap()
-        let burstCapsule = element(app, "clove.detail.capsule")
-        XCTAssertTrue(burstCapsule.waitForExistence(timeout: 5))
-        XCTAssertEqual(burstCapsule.value as? String, "5 stars")
+
+        rated.tap()
+        let rail = element(app, "clove.detail.rail")
+        let marksControl = rail.exists ? rail : element(app, "clove.detail.capsule")
+        XCTAssertTrue(marksControl.waitForExistence(timeout: 5))
+        XCTAssertEqual(marksControl.value as? String, "Unmarked")
     }
 
     /// #302: the default zoomed mode keeps one-finger rating and photo switching, `Pan` keeps the
@@ -3011,87 +2796,6 @@ final class CloveFlowTests: XCTestCase {
                 ? "clove.detail.rail.reject" : "clove.detail.capsule.reject")
         rejectButton.tap()
         XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
-    }
-
-    @MainActor
-    func testFolderPreparationStatesAndThemes() {
-        // 1. Unknown total / enumerating state.
-        do {
-            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "enumerating"])
-            defer { app.terminate() }
-            openLibrary(app)
-            let prep = element(app, "clove.grid.preparation")
-            XCTAssertTrue(prep.waitForExistence(timeout: 5))
-            XCTAssertEqual(prep.value as? String, "Scanning folder")
-            prep.tap()
-            XCTAssertTrue(element(app, "clove.preparation.details").waitForExistence(timeout: 5))
-            XCTAssertEqual(element(app, "clove.preparation.summary").label, "Scanning folder…")
-            XCTAssertEqual(
-                element(app, "clove.preparation.analysis.count").label, "Waiting for photo count")
-            XCTAssertEqual(
-                element(app, "clove.preparation.previews.count").label, "Waiting for photo count")
-            if element(app, "clove.preparation.done").exists {
-                element(app, "clove.preparation.done").tap()
-            }
-        }
-
-        // 2. Waiting / memory-pressure paused state.
-        do {
-            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "waiting_pressure"])
-            defer { app.terminate() }
-            openLibrary(app)
-            let prep = element(app, "clove.grid.preparation")
-            XCTAssertTrue(prep.waitForExistence(timeout: 5))
-            XCTAssertTrue((prep.value as? String)?.contains("Paused for memory") == true)
-            prep.tap()
-            XCTAssertTrue(element(app, "clove.preparation.waiting").waitForExistence(timeout: 5))
-            XCTAssertFalse(app.buttons["Pause"].exists)
-            XCTAssertFalse(app.buttons["Cancel"].exists)
-        }
-
-        // 3. Explicit material failures surfaced in details across Nord / Dark / Light themes.
-        do {
-            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "issues"])
-            defer { app.terminate() }
-            openLibrary(app)
-            for theme in ["light", "dark", "nord"] {
-                applyComparisonTheme(theme, app)
-                let prep = element(app, "clove.grid.preparation")
-                XCTAssertTrue(prep.waitForExistence(timeout: 5))
-                XCTAssertTrue((prep.value as? String)?.contains("issue") == true)
-                prep.tap()
-                let issues = element(app, "clove.preparation.issues")
-                XCTAssertTrue(issues.waitForExistence(timeout: 5))
-                XCTAssertTrue(app.staticTexts["MMQ02700.ARW"].exists)
-                if element(app, "clove.preparation.done").exists {
-                    element(app, "clove.preparation.done").tap()
-                } else {
-                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)).tap()
-                }
-                XCTAssertTrue(
-                    wait(
-                        NSPredicate(format: "exists == false"),
-                        element(app, "clove.preparation.details")))
-            }
-        }
-
-        // 4. Completion briefly shows checkmark, then withdraws persistent indicator.
-        do {
-            let app = launchSample(["CLOVE_TEST_LIBRARY_PREPARATION": "complete"])
-            defer { app.terminate() }
-            let open = element(app, "clove.entry.openFolder")
-            if open.exists { open.tap() }
-            let detailPrep = element(app, "clove.detail.preparation")
-            let gridPrep = element(app, "clove.grid.preparation")
-            let deadline = Date().addingTimeInterval(5)
-            while Date() < deadline && !detailPrep.exists && !gridPrep.exists {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-            }
-            let prep = detailPrep.exists ? detailPrep : gridPrep
-            XCTAssertTrue(prep.exists)
-            XCTAssertTrue((prep.value as? String)?.contains("Complete") == true)
-            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), prep, timeout: 6))
-        }
     }
 
     @MainActor

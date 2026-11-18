@@ -77,11 +77,16 @@ extension CloveFlowTests {
 
     @MainActor
     private func selectRenamePhotos(_ app: XCUIApplication) {
+        openSettings(in: app)
+        openSettingsCategory("clove.settings.category.browsing", in: app)
+        setSimilarGroups(in: app, on: false)
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
         element(app, "clove.grid.more").tap()
         app.buttons["Select"].tap()
         for stem in ["mmq02678", "mmq02679", "mmq02680"] {
             let photo = element(app, "clove.grid.photo.\(stem)")
-            XCTAssertTrue(photo.exists)
+            XCTAssertTrue(photo.waitForExistence(timeout: 5))
             photo.tap()
         }
         element(app, "clove.grid.batch.rename").tap()

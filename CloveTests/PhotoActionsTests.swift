@@ -480,6 +480,21 @@ struct PhotoActionsTests {
         #expect(model.photos.map(\.id) == ["c", "d"].map { library.identity($0) })
         #expect(model.expandedGroup == nil)
     }
+
+    @Test func aMoveThatMovedNothingCannotUndoAndShowsDetails() async throws {
+        let model = BrowsingModel(library: TestLibrary.sample(failingMoveStemSuffix: ""))
+        model.openFolder()
+        let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
+        model.runRejectMove(plan, kept: []) { _ in }
+        await model.drainActions()
+        let completed = try #require(model.lastRejectMove)
+        #expect(!completed.canUndo)
+        #expect(!model.canUndoRejectMove(completed))
+        #expect(model.isRejectMoveToastVisible)
+        let copy = RejectMoveToast(
+            result: completed.result, rejectsFolderName: completed.rejectsFolderName)
+        #expect(copy.showsDetails)
+    }
 }
 
 private struct PhotoActionWaitFailure: Error {}
