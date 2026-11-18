@@ -634,6 +634,16 @@ final class BrowsingModel {
         state.selection = batchSelection.selectingAll(cells)
     }
 
+    /// Removes every photo the shown cells stand for from the current selection.
+    func deselectAllVisible(_ cells: [GridCellItem]) {
+        state.selection = batchSelection.deselectingAll(cells)
+    }
+
+    /// Replaces the current multi-selection set (used by drag-range selection).
+    func setSelection(_ selection: Set<PhotoIdentity>) {
+        state.selection = selection
+    }
+
     /// Leaves multi-select and clears the selection (PRD P0-09).
     func clearSelection() {
         state.selection = []

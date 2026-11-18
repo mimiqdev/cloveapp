@@ -218,6 +218,134 @@ struct BatchRenameFlowTests {
         #expect(!fixture.browsing.canUndoMark)
         await fixture.library.closeFolder()
     }
+
+    @Test func removeDropsPhotoFromBatchAndClearsPreviewWithoutChangingGridSelection() async throws
+    {
+        let library = TestLibrary.sample
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        browsing.setOrder(.fileName)
+        let selected = Array(browsing.photos.prefix(3))
+        for photo in selected { browsing.toggleSelection(photo.id) }
+        let flow = BatchRenameFlow(
+            browsing: browsing, defaults: BatchRenameDefaults(storage: SampleSettingsStorage()))
+        await flow.prepare(rejectsFolderName: .defaultFolderName)
+        #expect(flow.preview?.rows.count == 3)
+        flow.remove(selected[1].id)
+        #expect(flow.order.map(\.id) == [selected[0].id, selected[2].id])
+        #expect(flow.preview == nil)
+        #expect(!flow.canRename)
+        #expect(browsing.batchTargets.count == 3)
+        flow.remove(selected[0].id)
+        flow.remove(selected[2].id)
+        #expect(flow.order.isEmpty)
+        await library.closeFolder()
+    }
+
+    @Test func sortOrdersByCaptureTimeFileNameAndReverseAndClearsPreview() async throws {
+        let library = TestLibrary.sample
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        browsing.setOrder(.captureTime)
+        let selected = Array(browsing.photos.prefix(3))
+        for photo in selected { browsing.toggleSelection(photo.id) }
+        let flow = BatchRenameFlow(
+            browsing: browsing, defaults: BatchRenameDefaults(storage: SampleSettingsStorage()))
+        let initialIDs = flow.order.map(\.id)
+        await flow.prepare(rejectsFolderName: .defaultFolderName)
+        #expect(flow.preview != nil)
+
+        flow.sort(by: .reverse)
+        #expect(flow.order.map(\.id) == initialIDs.reversed())
+        #expect(flow.preview == nil)
+
+        flow.sort(by: .fileName)
+        let expectedByFileName = selected.sorted {
+            $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
+        }
+        #expect(flow.order.map(\.id) == expectedByFileName.map(\.id))
+
+        flow.sort(by: .captureTime)
+        let expectedByCaptureTime = selected.sorted {
+            let lhs = $0.time.time?.instant ?? .distantFuture
+            let rhs = $1.time.time?.instant ?? .distantFuture
+            if lhs != rhs { return lhs < rhs }
+            return $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
+        }
+        #expect(flow.order.map(\.id) == expectedByCaptureTime.map(\.id))
+        await library.closeFolder()
+    }
+
+    @Test func defaultsPersistPrefixDigitsAndSeparatorAcrossFlowsAndIsolateTests() async throws {
+        let storage = SampleSettingsStorage()
+        let defaults = BatchRenameDefaults(storage: storage)
+        #expect(defaults.prefix == "")
+        #expect(defaults.digits == 3)
+        #expect(defaults.separator == .underscore)
+
+        let fixture = try await RenameFixture(existing: false)
+        defer { fixture.removeFiles() }
+        let firstFlow = BatchRenameFlow(browsing: fixture.browsing, defaults: defaults)
+        firstFlow.options.prefix = "Wedding"
+        firstFlow.options.digits = 4
+        firstFlow.options.separator = .hyphen
+        firstFlow.options.start = 12
+        await firstFlow.prepare(rejectsFolderName: fixture.rejects)
+        var completed = false
+        await firstFlow.rename { completed = true }
+        #expect(completed)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: fixture.photos.appendingPathComponent("Wedding-0012.jpg").path))
+
+        let nextFlow = BatchRenameFlow(browsing: fixture.browsing, defaults: defaults)
+        #expect(nextFlow.options.prefix == "Wedding")
+        #expect(nextFlow.options.digits == 4)
+        #expect(nextFlow.options.separator == .hyphen)
+        #expect(nextFlow.options.start == 1)
+
+        let testLaunchDefaults = BatchRenameDefaults.launch(
+            environment: [TestLibrary.launchVariable: "1"])
+        #expect(testLaunchDefaults.prefix == "")
+        #expect(testLaunchDefaults.digits == 3)
+        #expect(testLaunchDefaults.separator == .underscore)
+        await fixture.library.closeFolder()
+    }
+
+    @Test func separatorOptionsDriveTemplateWithoutDuplicatingTrailingSeparator() async throws {
+        let fixture = try await RenameFixture(existing: false)
+        defer { fixture.removeFiles() }
+        let defaults = BatchRenameDefaults(storage: SampleSettingsStorage())
+        let flow = BatchRenameFlow(browsing: fixture.browsing, defaults: defaults)
+
+        flow.options.prefix = "Trip"
+        flow.options.separator = .hyphen
+        await flow.prepare(rejectsFolderName: fixture.rejects)
+        #expect(flow.preview?.rows.first?.newStem == "Trip-001")
+
+        flow.options.separator = .none
+        await flow.prepare(rejectsFolderName: fixture.rejects)
+        #expect(flow.preview?.rows.first?.newStem == "Trip001")
+
+        flow.options.prefix = "Test_"
+        flow.options.separator = .underscore
+        await flow.prepare(rejectsFolderName: fixture.rejects)
+        #expect(flow.preview?.rows.first?.newStem == "Test_001")
+        await fixture.library.closeFolder()
+    }
+
+    @Test func browsingSetSelectionAndDeselectAllVisibleKeepGridModelConsistent() async {
+        let library = TestLibrary.sample
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        let cells = GridDisplay(photos: browsing.photos, groups: [], groupsEnabled: false).cells
+        let subset = Set(cells.prefix(2).map(\.photo.id))
+        browsing.setSelection(subset)
+        #expect(browsing.state.selection == subset)
+        browsing.deselectAllVisible(cells)
+        #expect(browsing.state.selection.isEmpty)
+        await library.closeFolder()
+    }
 }
 
 @MainActor

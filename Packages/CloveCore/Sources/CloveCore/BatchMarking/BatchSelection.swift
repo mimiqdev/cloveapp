@@ -65,6 +65,36 @@ public struct BatchSelection: Hashable, Sendable {
         cells.reduce(selection) { current, cell in current.union(identities(for: cell)) }
     }
 
+    /// The selection with every shown cell removed, for Deselect all visible (PRD P0-09).
+    public func deselectingAll(_ cells: [GridCellItem]) -> Set<PhotoIdentity> {
+        cells.reduce(selection) { current, cell in current.subtracting(identities(for: cell)) }
+    }
+
+    /// Whether every shown cell currently draws as selected (PRD P0-09).
+    public func showsAllSelected(_ cells: [GridCellItem]) -> Bool {
+        !cells.isEmpty && cells.allSatisfy(showsSelected)
+    }
+
+    /// Recomputes a drag-range selection from `selection` (the baseline captured at drag start)
+    /// across the contiguous span between `anchorIndex` and `currentIndex` in `cells`.
+    public func rangeSelection(
+        in cells: [GridCellItem],
+        anchorIndex: Int,
+        currentIndex: Int,
+        selecting: Bool
+    ) -> Set<PhotoIdentity> {
+        guard !cells.isEmpty,
+            cells.indices.contains(anchorIndex),
+            cells.indices.contains(currentIndex)
+        else { return selection }
+        let lower = min(anchorIndex, currentIndex)
+        let upper = max(anchorIndex, currentIndex)
+        return cells[lower...upper].reduce(selection) { current, cell in
+            let cellIdentities = identities(for: cell)
+            return selecting ? current.union(cellIdentities) : current.subtracting(cellIdentities)
+        }
+    }
+
     /// Whether a cell draws as selected: every photo it stands for is selected (PRD P0-09).
     public func showsSelected(_ cell: GridCellItem) -> Bool {
         identities(for: cell).isSubset(of: selection)

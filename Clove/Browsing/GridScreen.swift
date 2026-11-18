@@ -20,6 +20,7 @@ struct GridScreen: View {
     @State private var isFilterAnchorReady = false
     @State private var selectsEmpty = false
     @State private var isLandscapeContainer = false
+    @State private var containerWidth: CGFloat = 0
     @State private var presentation = DetailPresentation.photoPreview
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
     /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
@@ -74,6 +75,9 @@ struct GridScreen: View {
             && !hasFoldRegion
             && (verticalSizeClass == .compact || isLandscapeContainer)
     }
+    private var usesHorizontalBatchBar: Bool {
+        isOrdinaryPhoneLandscape || isRegular || containerWidth >= 500
+    }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
     private var showsMoveRejects: Bool {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
@@ -118,10 +122,11 @@ struct GridScreen: View {
     var body: some View {
         surface
             .background(Color.clove.bg.canvas)
-            .onGeometryChange(for: Bool.self) {
-                $0.size.width > $0.size.height && $0.size.width > 0
-            } action: {
-                isLandscapeContainer = $0
+            .onGeometryChange(for: CGSize.self) {
+                $0.size
+            } action: { size in
+                isLandscapeContainer = size.width > size.height && size.width > 0
+                containerWidth = size.width
             }
             .onChange(of: browsing.state.route) { _, route in
                 if route == .detail { hasOpenedPhoto = true }
@@ -162,14 +167,27 @@ struct GridScreen: View {
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting {
-                    VStack(spacing: 8) {
-                        GridBatchRenameButton(
-                            disabled: browsing.batchTargets.isEmpty || !browsing.canMark
-                        ) {
-                            renameFlow = BatchRenameFlow(browsing: browsing)
+                    let renameButton = GridBatchRenameButton(
+                        disabled: browsing.batchTargets.isEmpty || !browsing.canMark
+                    ) {
+                        renameFlow = BatchRenameFlow(browsing: browsing)
+                    }
+                    let batchBar = GridBatchBar(browsing: browsing, cells: cells) {
+                        selectsEmpty = true
+                    }
+                    .disabled(!browsing.canMark)
+                    Group {
+                        if usesHorizontalBatchBar {
+                            HStack(spacing: 8) {
+                                batchBar
+                                renameButton
+                            }
+                        } else {
+                            VStack(spacing: 8) {
+                                renameButton
+                                batchBar
+                            }
                         }
-                        GridBatchBar(browsing: browsing, cells: cells)
-                            .disabled(!browsing.canMark)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -354,7 +372,9 @@ struct GridScreen: View {
                     foldExpandedGroup: { _ in },
                     openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },
-                    toggleSelection: { browsing.toggleSelection(of: $0) }
+                    toggleSelection: { browsing.toggleSelection(of: $0) },
+                    setSelection: { browsing.setSelection($0) },
+                    keepSelectingWhenEmpty: { selectsEmpty = true }
                 )
                 .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
                 .animation(
@@ -441,13 +461,28 @@ struct GridScreen: View {
         }
     }
 
+    @ViewBuilder private var selectionOptionsMenuItems: some View {
+        let batchSelection = BatchSelection(
+            groups: browsing.groups, selection: browsing.state.selection)
+        if !batchSelection.showsAllSelected(cells) {
+            Button(AppLocalization.string("Select all", language: language)) {
+                browsing.selectAllVisible(cells)
+            }
+            .accessibilityIdentifier("clove.grid.batch.selectAll")
+        }
+        if !browsing.state.selection.isEmpty {
+            Button(AppLocalization.string("Deselect all", language: language)) {
+                selectsEmpty = true
+                browsing.deselectAllVisible(cells)
+            }
+            .accessibilityIdentifier("clove.grid.batch.deselectAll")
+        }
+    }
+
     @ViewBuilder private var headerTools: some View {
         if isSelecting && usesSystemToolbar {
             Menu {
-                Button(AppLocalization.string("Select all", language: language)) {
-                    browsing.selectAllVisible(cells)
-                }
-                .accessibilityIdentifier("clove.grid.batch.selectAll")
+                selectionOptionsMenuItems
             } label: {
                 Label(
                     AppLocalization.string("Selection options", language: language),
@@ -464,10 +499,7 @@ struct GridScreen: View {
             .accessibilityIdentifier("clove.grid.batch.done")
         } else if isSelecting {
             Menu {
-                Button(AppLocalization.string("Select all", language: language)) {
-                    browsing.selectAllVisible(cells)
-                }
-                .accessibilityIdentifier("clove.grid.batch.selectAll")
+                selectionOptionsMenuItems
             } label: {
                 Image(systemName: "ellipsis")
                     .foregroundStyle(Color.clove.text.primary)

@@ -91,4 +91,88 @@ struct BatchSelectionTests {
         #expect(both.map(\.id) == shown.map(\.id))
         #expect(both.map(\.id) == ["b", "a"].map(BatchMarkFixtures.photo))
     }
+
+    @Test func deselectingAllRemovesShownCellsWhileKeepingHiddenSelection() {
+        let cells = GridDisplay(
+            photos: ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) },
+            groups: BatchMarkFixtures.groups
+        ).cells
+        let hidden = BatchMarkFixtures.photo("hidden")
+        let all = BatchSelection(groups: BatchMarkFixtures.groups, selection: [hidden])
+            .selectingAll(cells)
+        let batch = BatchSelection(groups: BatchMarkFixtures.groups, selection: all)
+
+        #expect(batch.showsAllSelected(cells))
+        #expect(
+            !BatchSelection(groups: BatchMarkFixtures.groups, selection: []).showsAllSelected([]))
+
+        let deselected = batch.deselectingAll(cells)
+        #expect(deselected == [hidden])
+        #expect(
+            !BatchSelection(groups: BatchMarkFixtures.groups, selection: deselected)
+                .showsAllSelected(cells))
+    }
+
+    @Test func rangeSelectionSelectsForwardBackwardAndRestoresBaselineOnPullBack() {
+        let cells = ["a", "b", "c", "d", "e"].map { name in
+            let photo = BatchMarkFixtures.gridPhoto(name)
+            return GridCellItem(id: .photo(photo.id), photo: photo, isDimmed: false)
+        }
+        let baseline: Set<PhotoIdentity> = [BatchMarkFixtures.photo("a")]
+        let base = BatchSelection(selection: baseline)
+
+        // Forward drag from index 1 (b) to 3 (d): adds b, c, d on top of baseline {a}.
+        let forward = base.rangeSelection(
+            in: cells, anchorIndex: 1, currentIndex: 3, selecting: true)
+        #expect(forward == Set(["a", "b", "c", "d"].map(BatchMarkFixtures.photo)))
+
+        // Pulling back to index 2 (c) from the same baseline cleanly drops d.
+        let pulledBack = base.rangeSelection(
+            in: cells, anchorIndex: 1, currentIndex: 2, selecting: true)
+        #expect(pulledBack == Set(["a", "b", "c"].map(BatchMarkFixtures.photo)))
+
+        // Backward drag from index 3 (d) to 1 (b).
+        let backward = base.rangeSelection(
+            in: cells, anchorIndex: 3, currentIndex: 1, selecting: true)
+        #expect(backward == Set(["a", "b", "c", "d"].map(BatchMarkFixtures.photo)))
+
+        // Deselect drag from index 3 to 1 on full selection leaves e (and baseline restoration).
+        let full = Set(["a", "b", "c", "d", "e"].map(BatchMarkFixtures.photo))
+        let deselectBase = BatchSelection(selection: full)
+        let deselected = deselectBase.rangeSelection(
+            in: cells, anchorIndex: 3, currentIndex: 1, selecting: false)
+        #expect(deselected == Set(["a", "e"].map(BatchMarkFixtures.photo)))
+
+        // Pulling back deselect drag to index 2 restores b.
+        let deselectPulledBack = deselectBase.rangeSelection(
+            in: cells, anchorIndex: 3, currentIndex: 2, selecting: false)
+        #expect(deselectPulledBack == Set(["a", "b", "e"].map(BatchMarkFixtures.photo)))
+
+        // Out-of-bounds indices return baseline untouched.
+        #expect(
+            base.rangeSelection(in: cells, anchorIndex: -1, currentIndex: 2, selecting: true)
+                == baseline)
+        #expect(
+            base.rangeSelection(in: cells, anchorIndex: 1, currentIndex: 99, selecting: true)
+                == baseline)
+        #expect(
+            base.rangeSelection(in: [], anchorIndex: 0, currentIndex: 0, selecting: true)
+                == baseline)
+    }
+
+    @Test func rangeSelectionExpandsCollapsedGroupCoversInSpan() throws {
+        let cells = GridDisplay(
+            photos: ["a", "b", "c", "d", "e"].map { BatchMarkFixtures.gridPhoto($0) },
+            groups: BatchMarkFixtures.groups
+        ).cells
+        // cells[0] is collapsed cover for {a, b, c}, cells[1] is d, cells[2] is e.
+        #expect(cells.count == 3)
+        let base = BatchSelection(groups: BatchMarkFixtures.groups, selection: [])
+        let span = base.rangeSelection(in: cells, anchorIndex: 0, currentIndex: 1, selecting: true)
+        #expect(span == Set(["a", "b", "c", "d"].map(BatchMarkFixtures.photo)))
+
+        let deselect = BatchSelection(groups: BatchMarkFixtures.groups, selection: span)
+            .rangeSelection(in: cells, anchorIndex: 0, currentIndex: 0, selecting: false)
+        #expect(deselect == [BatchMarkFixtures.photo("d")])
+    }
 }

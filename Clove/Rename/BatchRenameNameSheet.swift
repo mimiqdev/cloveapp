@@ -7,6 +7,13 @@ struct BatchRenameNameSheet: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
     @FocusState private var editing: Bool
+    @State private var startText: String
+
+    init(flow: BatchRenameFlow, completion: @escaping () -> Void) {
+        self.flow = flow
+        self.completion = completion
+        _startText = State(initialValue: String(flow.options.start))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -40,6 +47,16 @@ struct BatchRenameNameSheet: View {
         .interactiveDismissDisabled(flow.isRunning)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.rename.nameSheet")
+        .onChange(of: flow.options.start) { _, newValue in
+            if Int(startText) != newValue {
+                startText = String(newValue)
+            }
+        }
+        .onChange(of: editing) { _, isEditing in
+            if !isEditing {
+                startText = String(flow.options.start)
+            }
+        }
         .task(id: flow.options) {
             await flow.prepare(rejectsFolderName: store.settings.rejectsFolderName)
         }
@@ -60,6 +77,25 @@ struct BatchRenameNameSheet: View {
             }
             .frame(minHeight: 44)
             Divider()
+            HStack {
+                Text(AppLocalization.string("Separator", language: language))
+                Spacer()
+                Picker(
+                    AppLocalization.string("Separator", language: language),
+                    selection: $flow.options.separator
+                ) {
+                    Text("_").tag(RenameSeparator.underscore)
+                    Text("-").tag(RenameSeparator.hyphen)
+                    Text(AppLocalization.string("None", language: language))
+                        .tag(RenameSeparator.none)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .accessibilityIdentifier("clove.rename.separator")
+            }
+            .frame(minHeight: 44)
+            Divider()
             Toggle(
                 AppLocalization.string("Add capture date", language: language),
                 isOn: $flow.options.addsCaptureDate
@@ -67,15 +103,47 @@ struct BatchRenameNameSheet: View {
             .frame(minHeight: 44)
             .accessibilityIdentifier("clove.rename.captureDate")
             Divider()
-            Stepper(value: $flow.options.start, in: 0...Int.max) {
-                HStack {
-                    Text(AppLocalization.string("Start number", language: language))
-                    Spacer()
-                    Text("\(flow.options.start)")
-                }
+            HStack(spacing: 8) {
+                Text(AppLocalization.string("Start number", language: language))
+                Spacer()
+                TextField("1", text: $startText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .frame(minWidth: 56, maxWidth: 96)
+                    .focused($editing)
+                    .onChange(of: startText) { _, newValue in
+                        let digitsOnly = newValue.filter { $0.isASCII && $0.isNumber }
+                        if digitsOnly != newValue {
+                            startText = digitsOnly
+                            return
+                        }
+                        guard !digitsOnly.isEmpty else { return }
+                        if let parsed = Int(digitsOnly) {
+                            let clamped = min(max(parsed, 0), 999_999_999)
+                            if clamped != parsed {
+                                startText = String(clamped)
+                            }
+                            if flow.options.start != clamped {
+                                flow.options.start = clamped
+                            }
+                        } else {
+                            let clamped = 999_999_999
+                            startText = String(clamped)
+                            flow.options.start = clamped
+                        }
+                    }
+                    .accessibilityLabel(AppLocalization.string("Start number", language: language))
+                    .accessibilityIdentifier("clove.rename.startInput")
+                Stepper(
+                    AppLocalization.string("Start number", language: language),
+                    value: $flow.options.start,
+                    in: 0...999_999_999
+                )
+                .labelsHidden()
+                .accessibilityIdentifier("clove.rename.start")
             }
             .frame(minHeight: 44)
-            .accessibilityIdentifier("clove.rename.start")
             Divider()
             Stepper(value: $flow.options.digits, in: 1...255) {
                 HStack {

@@ -6,6 +6,7 @@ import UIKit
 /// movement gives the lifted tile, insertion slot and edge scrolling their system behavior.
 struct RenameOrderGrid: UIViewRepresentable {
     let flow: BatchRenameFlow
+    let order: [GridPhoto]
     let open: (GridPhoto) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(flow: flow, open: open) }
@@ -34,7 +35,7 @@ struct RenameOrderGrid: UIViewRepresentable {
         let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
         view.backgroundColor = .clear
         view.alwaysBounceVertical = true
-        view.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "photo")
+        view.register(RenameOrderTileCell.self, forCellWithReuseIdentifier: "photo")
         view.dataSource = context.coordinator
         view.delegate = context.coordinator
         let press = UILongPressGestureRecognizer(
@@ -96,14 +97,16 @@ struct RenameOrderGrid: UIViewRepresentable {
                     .environment(\.locale, appLanguage.locale)
                     .id(photo.id)
             }.margins(.all, 0)
-            cell.isAccessibilityElement = true
-            cell.accessibilityLabel = photo.fileName
-            cell.accessibilityValue = AppLocalization.format(
+
+            let tileAccessibility = cell.contentView
+            tileAccessibility.isAccessibilityElement = true
+            tileAccessibility.accessibilityLabel = photo.fileName
+            tileAccessibility.accessibilityValue = AppLocalization.format(
                 "Position %lld of %lld", language: appLanguage,
                 Int64(position + 1), Int64(flow.order.count))
-            cell.accessibilityIdentifier = "clove.rename.tile.\(photo.id.stem)"
-            cell.accessibilityTraits = .button
-            cell.accessibilityCustomActions = [
+            tileAccessibility.accessibilityIdentifier = "clove.rename.tile.\(photo.id.stem)"
+            tileAccessibility.accessibilityTraits = .button
+            tileAccessibility.accessibilityCustomActions = [
                 action(
                     AppLocalization.string("Move earlier", language: appLanguage),
                     photo: photo.id, position: position - 1),
@@ -116,7 +119,30 @@ struct RenameOrderGrid: UIViewRepresentable {
                 action(
                     AppLocalization.string("Move to end", language: appLanguage),
                     photo: photo.id, position: flow.order.count - 1),
+                UIAccessibilityCustomAction(
+                    name: AppLocalization.string("Remove from batch", language: appLanguage)
+                ) { [weak self] _ in
+                    guard let self else { return false }
+                    self.flow.remove(photo.id)
+                    self.collection?.reloadData()
+                    return true
+                },
             ]
+
+            if let tileCell = cell as? RenameOrderTileCell {
+                tileCell.isAccessibilityElement = false
+                tileCell.removeButton.accessibilityLabel = AppLocalization.string(
+                    "Remove from batch", language: appLanguage)
+                tileCell.removeButton.accessibilityValue = photo.fileName
+                tileCell.removeButton.accessibilityIdentifier =
+                    "clove.rename.remove.\(photo.id.stem)"
+                tileCell.onRemove = { [weak self] in
+                    guard let self else { return }
+                    self.flow.remove(photo.id)
+                    self.collection?.reloadData()
+                }
+                tileCell.accessibilityElements = [tileCell.contentView, tileCell.removeButton]
+            }
         }
 
         private func action(_ name: String, photo: PhotoIdentity, position: Int)
@@ -199,5 +225,58 @@ struct RenameOrderGrid: UIViewRepresentable {
             targetPosition = nil
             collection?.reloadData()
         }
+    }
+}
+
+@MainActor
+private final class RenameOrderTileCell: UICollectionViewCell {
+    let removeButton = UIButton(type: .custom)
+    var onRemove: (() -> Void)?
+
+    private let badgeView = UIView()
+    private let badgeIcon = UIImageView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        removeButton.frame = CGRect(x: bounds.width - 44, y: 0, width: 44, height: 44)
+        removeButton.autoresizingMask = [.flexibleLeftMargin, .flexibleBottomMargin]
+        removeButton.addTarget(self, action: #selector(handleRemove), for: .touchUpInside)
+
+        badgeView.frame = CGRect(x: 14, y: 6, width: 24, height: 24)
+        badgeView.backgroundColor = UIColor.black.withAlphaComponent(0.62)
+        badgeView.layer.cornerRadius = 12
+        badgeView.layer.cornerCurve = .continuous
+        badgeView.isUserInteractionEnabled = false
+
+        let config = UIImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+        badgeIcon.image = UIImage(systemName: "xmark", withConfiguration: config)
+        badgeIcon.tintColor = .white
+        badgeIcon.contentMode = .center
+        badgeIcon.frame = badgeView.bounds
+        badgeIcon.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        badgeView.addSubview(badgeIcon)
+
+        removeButton.addSubview(badgeView)
+        addSubview(removeButton)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        removeButton.frame = CGRect(x: bounds.width - 44, y: 0, width: 44, height: 44)
+        bringSubviewToFront(removeButton)
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onRemove = nil
+    }
+
+    @objc private func handleRemove() {
+        onRemove?()
     }
 }

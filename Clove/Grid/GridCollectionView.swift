@@ -74,11 +74,22 @@ struct GridCollectionView: UIViewRepresentable {
     /// Adds one cell's photos to the selection or removes them (PRD P0-09).
     let toggleSelection: (GridCellItem) -> Void
 
+    /// Replaces the current selection during drag-range selection.
+    var setSelection: ((Set<PhotoIdentity>) -> Void)? = nil
+
+    /// Keeps multi-select mode active if a drag-deselect clears the last selected item.
+    var keepSelectingWhenEmpty: () -> Void = {}
+
     func makeCoordinator() -> Coordinator {
         Coordinator(
             thumbnails: thumbnails, openPhoto: openPhoto, openGroup: openGroup,
             beginSelection: beginSelection, toggleSelection: toggleSelection,
+            setSelection: setSelection, keepSelectingWhenEmpty: keepSelectingWhenEmpty,
             selection: selection, foldExpandedGroup: foldExpandedGroup)
+    }
+
+    static func dismantleUIView(_ uiView: UICollectionView, coordinator: Coordinator) {
+        coordinator.stopDragSelection()
     }
 
     /// What the layout needs from one run: whether it draws a group header and surface
@@ -127,6 +138,8 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.openGroup = openGroup
         context.coordinator.beginSelection = beginSelection
         context.coordinator.toggleSelection = toggleSelection
+        context.coordinator.setSelection = setSelection
+        context.coordinator.keepSelectingWhenEmpty = keepSelectingWhenEmpty
         context.coordinator.apply(
             sections: sections, groups: groups, shownPhotos: shownPhotos,
             currentPhoto: currentPhoto, selection: selection,
@@ -290,13 +303,15 @@ extension GridCollectionView {
     /// Keeps the collection view's cells, tapping and thumbnail requests in step with SwiftUI.
     @MainActor
     final class Coordinator: NSObject, UICollectionViewDelegate,
-        UICollectionViewDataSourcePrefetching
+        UICollectionViewDataSourcePrefetching, UIGestureRecognizerDelegate
     {
         var thumbnails: any GridThumbnailSource
         var openPhoto: (PhotoIdentity) -> Void
         var openGroup: (GroupID) -> Void
         var beginSelection: (GridCellItem) -> Void
         var toggleSelection: (GridCellItem) -> Void
+        var setSelection: ((Set<PhotoIdentity>) -> Void)?
+        var keepSelectingWhenEmpty: () -> Void
         var foldExpandedGroup: (GroupID) -> Void
         var followsCurrentPhoto = false
 
@@ -309,6 +324,14 @@ extension GridCollectionView {
         private struct PrefetchRequest {
             let token: UUID
             let task: Task<Void, Never>
+        }
+
+        private struct DragSelectionState {
+            let anchorIndex: Int
+            let baseline: Set<PhotoIdentity>
+            let selecting: Bool
+            var lastCurrentIndex: Int
+            var fingerViewportPoint: CGPoint
         }
 
         private var dataSource: UICollectionViewDiffableDataSource<GridSection.ID, GridCellItem.ID>?
@@ -344,12 +367,21 @@ extension GridCollectionView {
         private var pendingResizeAnchor: HeldResizeAnchor?
         private var settledResizeAnchor: HeldResizeAnchor?
 
+        private var dragSelection: DragSelectionState?
+        private var autoScrollLink: CADisplayLink?
+        private var autoScrollTarget: DisplayLinkProxy?
+        private var lastAutoScrollTimestamp: CFTimeInterval?
+        private weak var longPressRecognizer: UILongPressGestureRecognizer?
+        private weak var selectionPanRecognizer: UIPanGestureRecognizer?
+
         init(
             thumbnails: any GridThumbnailSource,
             openPhoto: @escaping (PhotoIdentity) -> Void,
             openGroup: @escaping (GroupID) -> Void,
             beginSelection: @escaping (GridCellItem) -> Void,
             toggleSelection: @escaping (GridCellItem) -> Void,
+            setSelection: ((Set<PhotoIdentity>) -> Void)?,
+            keepSelectingWhenEmpty: @escaping () -> Void,
             selection: Set<PhotoIdentity>,
             foldExpandedGroup: @escaping (GroupID) -> Void
         ) {
@@ -358,6 +390,8 @@ extension GridCollectionView {
             self.openGroup = openGroup
             self.beginSelection = beginSelection
             self.toggleSelection = toggleSelection
+            self.setSelection = setSelection
+            self.keepSelectingWhenEmpty = keepSelectingWhenEmpty
             self.selection = selection
             self.foldExpandedGroup = foldExpandedGroup
         }
@@ -501,11 +535,20 @@ extension GridCollectionView {
                 }
                 return footer
             }
-            // A long press starts multi-select (PRD P0-09). It lives on the collection view, so
-            // a cell needs no recognizer of its own and a reused cell keeps nothing.
-            collectionView.addGestureRecognizer(
-                UILongPressGestureRecognizer(
-                    target: self, action: #selector(handleLongPress(_:))))
+            // A long press starts multi-select (PRD P0-09) and sweeps across cells while dragged.
+            let longPress = UILongPressGestureRecognizer(
+                target: self, action: #selector(handleLongPress(_:)))
+            collectionView.addGestureRecognizer(longPress)
+            longPressRecognizer = longPress
+
+            let selectionPan = UIPanGestureRecognizer(
+                target: self, action: #selector(handleSelectionPan(_:)))
+            selectionPan.delegate = self
+            selectionPan.maximumNumberOfTouches = 1
+            selectionPan.isEnabled = setSelection != nil && isSelecting
+            collectionView.addGestureRecognizer(selectionPan)
+            selectionPanRecognizer = selectionPan
+            collectionView.panGestureRecognizer.require(toFail: selectionPan)
         }
 
         /// Applies the runs SwiftUI handed over, holding the anchor cell's place (PRD P0-11).
@@ -570,6 +613,7 @@ extension GridCollectionView {
                 groups = newGroups
                 shownPhotos = newShownPhotos
                 selection = newSelection
+                selectionPanRecognizer?.isEnabled = setSelection != nil && isSelecting
                 let restyled = items.compactMap { item in
                     if highlightChanged && highlightCells.contains(item.id) { return item.id }
                     return !styleChanged && before.showsSelected(item) == after.showsSelected(item)
@@ -621,6 +665,7 @@ extension GridCollectionView {
             groups = newGroups
             shownPhotos = newShownPhotos
             selection = newSelection
+            selectionPanRecognizer?.isEnabled = setSelection != nil && isSelecting
             itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
 
             var snapshot = NSDiffableDataSourceSnapshot<GridSection.ID, GridCellItem.ID>()
@@ -682,18 +727,276 @@ extension GridCollectionView {
             }
         }
 
-        /// A long press starts multi-select on the pressed cell's photos (PRD P0-09).
-        ///
-        /// The selection changes on `.began`, so the cell is selected while the finger is still
-        /// down and the bar appears at once. A cell the collection view cannot resolve under the
-        /// finger, such as the space between rows, starts nothing.
+        /// Allows the 1-finger selection pan only when already in multi-select and moving
+        /// predominantly horizontally, so vertical scrolling stays untouched.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === selectionPanRecognizer else { return true }
+            guard setSelection != nil, isSelecting, dragSelection == nil,
+                let pan = gestureRecognizer as? UIPanGestureRecognizer,
+                let collectionView
+            else { return false }
+            let velocity = pan.velocity(in: collectionView)
+            return abs(velocity.x) > 0 && abs(velocity.x) > abs(velocity.y) * 1.2
+        }
+
+        /// A long press starts multi-select on the pressed cell's photos (PRD P0-09) and sweeps
+        /// selection across the spanned range while dragged.
         @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
-            guard recognizer.state == .began, let collectionView,
-                let indexPath = collectionView.indexPathForItem(
-                    at: recognizer.location(in: collectionView)),
-                let item = item(at: indexPath)
+            guard let collectionView else { return }
+            let point = recognizer.location(in: collectionView)
+            switch recognizer.state {
+            case .began:
+                guard dragSelection == nil,
+                    let indexPath = collectionView.indexPathForItem(at: point),
+                    let item = item(at: indexPath)
+                else { return }
+                if setSelection == nil {
+                    beginSelection(item)
+                    return
+                }
+                beginDragSelection(
+                    at: indexPath, item: item, fingerPointInCollectionView: point,
+                    collectionView: collectionView)
+            case .changed:
+                guard dragSelection != nil else { return }
+                dragSelection?.fingerViewportPoint = CGPoint(
+                    x: point.x - collectionView.bounds.origin.x,
+                    y: point.y - collectionView.bounds.origin.y)
+                updateDragSelection(atCollectionPoint: point, in: collectionView)
+                updateAutoScrollState()
+            case .ended, .cancelled, .failed:
+                stopDragSelection()
+            default:
+                break
+            }
+        }
+
+        /// Horizontal 1-finger pan sweeps selection while already in multi-select mode.
+        @objc private func handleSelectionPan(_ recognizer: UIPanGestureRecognizer) {
+            guard let collectionView else { return }
+            let point = recognizer.location(in: collectionView)
+            switch recognizer.state {
+            case .began:
+                guard dragSelection == nil else { return }
+                let translation = recognizer.translation(in: collectionView)
+                let startPoint = CGPoint(x: point.x - translation.x, y: point.y - translation.y)
+                guard
+                    let startIndexPath = collectionView.indexPathForItem(at: startPoint)
+                        ?? nearestIndexPath(to: startPoint, in: collectionView),
+                    let item = item(at: startIndexPath)
+                else { return }
+                beginDragSelection(
+                    at: startIndexPath, item: item, fingerPointInCollectionView: point,
+                    collectionView: collectionView)
+                updateDragSelection(atCollectionPoint: point, in: collectionView)
+                updateAutoScrollState()
+            case .changed:
+                guard dragSelection != nil else { return }
+                dragSelection?.fingerViewportPoint = CGPoint(
+                    x: point.x - collectionView.bounds.origin.x,
+                    y: point.y - collectionView.bounds.origin.y)
+                updateDragSelection(atCollectionPoint: point, in: collectionView)
+                updateAutoScrollState()
+            case .ended, .cancelled, .failed:
+                stopDragSelection()
+            default:
+                break
+            }
+        }
+
+        private func beginDragSelection(
+            at indexPath: IndexPath,
+            item: GridCellItem,
+            fingerPointInCollectionView point: CGPoint,
+            collectionView: UICollectionView
+        ) {
+            guard let anchorIndex = flatIndex(for: indexPath) else { return }
+            let baseline = selection
+            let selecting = isSelecting ? !showsSelected(item) : true
+            let fingerViewportPoint = CGPoint(
+                x: point.x - collectionView.bounds.origin.x,
+                y: point.y - collectionView.bounds.origin.y)
+            dragSelection = DragSelectionState(
+                anchorIndex: anchorIndex,
+                baseline: baseline,
+                selecting: selecting,
+                lastCurrentIndex: anchorIndex,
+                fingerViewportPoint: fingerViewportPoint)
+            let updated = BatchSelection(groups: groups, selection: baseline).rangeSelection(
+                in: items, anchorIndex: anchorIndex, currentIndex: anchorIndex,
+                selecting: selecting)
+            if isSelecting && updated.isEmpty {
+                keepSelectingWhenEmpty()
+            }
+            setSelection?(updated)
+            updateAutoScrollState()
+        }
+
+        private func updateDragSelection(
+            atCollectionPoint point: CGPoint,
+            in collectionView: UICollectionView
+        ) {
+            guard var drag = dragSelection else { return }
+            guard
+                let indexPath = collectionView.indexPathForItem(at: point)
+                    ?? nearestIndexPath(to: point, in: collectionView),
+                let currentIndex = flatIndex(for: indexPath)
             else { return }
-            beginSelection(item)
+            guard currentIndex != drag.lastCurrentIndex else { return }
+            drag.lastCurrentIndex = currentIndex
+            dragSelection = drag
+            let updated = BatchSelection(groups: groups, selection: drag.baseline).rangeSelection(
+                in: items, anchorIndex: drag.anchorIndex, currentIndex: currentIndex,
+                selecting: drag.selecting)
+            if isSelecting && updated.isEmpty {
+                keepSelectingWhenEmpty()
+            }
+            setSelection?(updated)
+        }
+
+        func stopDragSelection() {
+            dragSelection = nil
+            stopAutoScroll()
+        }
+
+        private func updateAutoScrollState() {
+            guard let drag = dragSelection, let collectionView,
+                autoScrollVelocity(
+                    in: collectionView, fingerViewportPoint: drag.fingerViewportPoint)
+                    != 0
+            else {
+                stopAutoScroll()
+                return
+            }
+            guard autoScrollLink == nil else { return }
+            let proxy = DisplayLinkProxy(target: self)
+            let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+            link.add(to: .main, forMode: .common)
+            autoScrollTarget = proxy
+            autoScrollLink = link
+            lastAutoScrollTimestamp = nil
+        }
+
+        private func stopAutoScroll() {
+            autoScrollLink?.invalidate()
+            autoScrollLink = nil
+            autoScrollTarget = nil
+            lastAutoScrollTimestamp = nil
+        }
+
+        fileprivate func autoScrollTick(_ link: CADisplayLink) {
+            guard let drag = dragSelection, let collectionView else {
+                stopAutoScroll()
+                return
+            }
+            let dt =
+                lastAutoScrollTimestamp.map { min(max(link.timestamp - $0, 0), 0.05) }
+                ?? (1.0 / 60.0)
+            lastAutoScrollTimestamp = link.timestamp
+            let velocity = autoScrollVelocity(
+                in: collectionView, fingerViewportPoint: drag.fingerViewportPoint)
+            guard velocity != 0 else {
+                stopAutoScroll()
+                return
+            }
+            let insets = collectionView.adjustedContentInset
+            let minY = -insets.top
+            let maxY = max(
+                collectionView.contentSize.height + insets.bottom - collectionView.bounds.height,
+                minY)
+            let nextY = min(max(collectionView.contentOffset.y + velocity * dt, minY), maxY)
+            guard abs(nextY - collectionView.contentOffset.y) > 0.25 else {
+                stopAutoScroll()
+                return
+            }
+            collectionView.setContentOffset(
+                CGPoint(x: collectionView.contentOffset.x, y: nextY), animated: false)
+            let point = CGPoint(
+                x: drag.fingerViewportPoint.x + collectionView.bounds.origin.x,
+                y: drag.fingerViewportPoint.y + collectionView.bounds.origin.y)
+            updateDragSelection(atCollectionPoint: point, in: collectionView)
+        }
+
+        private func autoScrollVelocity(
+            in collectionView: UICollectionView,
+            fingerViewportPoint: CGPoint
+        ) -> CGFloat {
+            let edgeMargin: CGFloat = 44
+            let maxSpeed: CGFloat = 420
+            let insets = collectionView.adjustedContentInset
+            let visibleTop = insets.top
+            let visibleBottom = collectionView.bounds.height - insets.bottom
+            guard visibleBottom - visibleTop > edgeMargin * 2 else { return 0 }
+            let topThreshold = visibleTop + edgeMargin
+            let bottomThreshold = visibleBottom - edgeMargin
+            if fingerViewportPoint.y < topThreshold {
+                let fraction = min(max((topThreshold - fingerViewportPoint.y) / edgeMargin, 0), 1)
+                return -fraction * maxSpeed
+            }
+            if fingerViewportPoint.y > bottomThreshold {
+                let fraction = min(
+                    max((fingerViewportPoint.y - bottomThreshold) / edgeMargin, 0), 1)
+                return fraction * maxSpeed
+            }
+            return 0
+        }
+
+        private func flatIndex(for indexPath: IndexPath) -> Int? {
+            guard sections.indices.contains(indexPath.section),
+                sections[indexPath.section].cells.indices.contains(indexPath.item)
+            else { return nil }
+            var offset = 0
+            for sectionIndex in 0..<indexPath.section {
+                offset += sections[sectionIndex].cells.count
+            }
+            return offset + indexPath.item
+        }
+
+        private func nearestIndexPath(
+            to point: CGPoint,
+            in collectionView: UICollectionView
+        ) -> IndexPath? {
+            let visible = collectionView.indexPathsForVisibleItems
+            guard !visible.isEmpty else { return nil }
+            let candidates: [(indexPath: IndexPath, frame: CGRect)] = visible.compactMap {
+                indexPath in
+                guard let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+                else { return nil }
+                return (indexPath, attributes.frame)
+            }
+            guard !candidates.isEmpty else { return nil }
+            let sameRow = candidates.filter {
+                point.y >= $0.frame.minY - 2 && point.y <= $0.frame.maxY + 2
+            }
+            if let bestSameRow = sameRow.min(by: {
+                horizontalDistance(from: point.x, to: $0.frame)
+                    < horizontalDistance(from: point.x, to: $1.frame)
+            }) {
+                return bestSameRow.indexPath
+            }
+            return candidates.min(by: {
+                squaredDistance(from: point, to: $0.frame)
+                    < squaredDistance(from: point, to: $1.frame)
+            })?.indexPath
+        }
+
+        private func horizontalDistance(from x: CGFloat, to frame: CGRect) -> CGFloat {
+            if x < frame.minX { return frame.minX - x }
+            if x > frame.maxX { return x - frame.maxX }
+            return 0
+        }
+
+        private func squaredDistance(from point: CGPoint, to frame: CGRect) -> CGFloat {
+            let dx = horizontalDistance(from: point.x, to: frame)
+            let dy: CGFloat =
+                if point.y < frame.minY {
+                    frame.minY - point.y
+                } else if point.y > frame.maxY {
+                    point.y - frame.maxY
+                } else {
+                    0
+                }
+            return dx * dx + dy * dy
         }
 
         /// Requests the next screenful before the cells appear (PRD P0-03, G1 scheduling row).
@@ -916,5 +1219,18 @@ extension GridCollectionView {
             collectionView.setContentOffset(
                 CGPoint(x: collectionView.contentOffset.x, y: y), animated: false)
         }
+    }
+}
+
+@MainActor
+private final class DisplayLinkProxy: NSObject {
+    weak var target: GridCollectionView.Coordinator?
+
+    init(target: GridCollectionView.Coordinator) {
+        self.target = target
+    }
+
+    @objc func tick(_ link: CADisplayLink) {
+        target?.autoScrollTick(link)
     }
 }

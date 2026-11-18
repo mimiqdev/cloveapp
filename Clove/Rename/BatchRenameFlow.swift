@@ -2,10 +2,17 @@ import CloveCore
 import Foundation
 import Observation
 
+enum BatchRenameSortOrder {
+    case captureTime
+    case fileName
+    case reverse
+}
+
 struct RenameOptions: Hashable {
     var prefix = ""
     var start = 1
     var digits = 3
+    var separator: RenameSeparator = .underscore
     var addsCaptureDate = false
     var movesToFolder = false
     var folderName = ""
@@ -13,7 +20,8 @@ struct RenameOptions: Hashable {
     var template: RenameTemplate {
         RenameTemplate(
             prefix: prefix, sequenceStart: start, digits: digits,
-            includesCaptureDate: addsCaptureDate)
+            includesCaptureDate: addsCaptureDate, dateSeparator: separator.rawValue,
+            prefixSeparator: separator.rawValue)
     }
     var destination: RenameDestination { movesToFolder ? .folder(folderName) : .inPlace }
 }
@@ -24,21 +32,24 @@ struct RenameOptions: Hashable {
 final class BatchRenameFlow: Identifiable {
     let id = UUID()
     let browsing: BrowsingModel
+    private let defaults: BatchRenameDefaults
     private let folder: FolderIdentity?
     private let generation: Int
     private(set) var order: [GridPhoto]
-    var options = RenameOptions()
+    var options: RenameOptions
     private(set) var preview: BatchRenamePlan?
     private(set) var message: String?
     private(set) var isRunning = false
     private(set) var finishedCount = 0
     private var previewOptions: RenameOptions?
 
-    init(browsing: BrowsingModel) {
+    init(browsing: BrowsingModel, defaults: BatchRenameDefaults = .launch()) {
         self.browsing = browsing
+        self.defaults = defaults
         folder = browsing.state.folder
         generation = browsing.openGeneration
         order = browsing.batchTargets
+        options = defaults.loadOptions()
     }
 
     func move(_ photo: PhotoIdentity, to position: Int) {
@@ -47,6 +58,46 @@ final class BatchRenameFlow: Identifiable {
         else { return }
         order.insert(order.remove(at: index), at: position)
         preview = nil
+        previewOptions = nil
+    }
+
+    func remove(_ photo: PhotoIdentity) {
+        guard !isRunning, let index = order.firstIndex(where: { $0.id == photo }) else { return }
+        order.remove(at: index)
+        preview = nil
+        previewOptions = nil
+    }
+
+    func sort(by sortOrder: BatchRenameSortOrder) {
+        guard !isRunning else { return }
+        switch sortOrder {
+        case .captureTime:
+            order.sort { lhs, rhs in
+                let leftDate = lhs.time.time?.instant ?? .distantFuture
+                let rightDate = rhs.time.time?.instant ?? .distantFuture
+                if leftDate != rightDate { return leftDate < rightDate }
+                let names = lhs.fileName.localizedStandardCompare(rhs.fileName)
+                if names != .orderedSame { return names == .orderedAscending }
+                if lhs.id.relativeFolderPath != rhs.id.relativeFolderPath {
+                    return lhs.id.relativeFolderPath < rhs.id.relativeFolderPath
+                }
+                return lhs.id.stem < rhs.id.stem
+            }
+        case .fileName:
+            order.sort { lhs, rhs in
+                if lhs.id.relativeFolderPath != rhs.id.relativeFolderPath {
+                    return lhs.id.relativeFolderPath.localizedStandardCompare(
+                        rhs.id.relativeFolderPath) == .orderedAscending
+                }
+                let names = lhs.fileName.localizedStandardCompare(rhs.fileName)
+                if names != .orderedSame { return names == .orderedAscending }
+                return lhs.id.stem < rhs.id.stem
+            }
+        case .reverse:
+            order.reverse()
+        }
+        preview = nil
+        previewOptions = nil
     }
 
     func prepare(rejectsFolderName: RejectsFolderName) async {
@@ -90,6 +141,8 @@ final class BatchRenameFlow: Identifiable {
                     self?.finishedCount += 1
                 }
             }
+            defaults.save(
+                prefix: options.prefix, digits: options.digits, separator: options.separator)
             completion()
         } catch let BatchRenameRefusal.problems(plan) {
             preview = plan
