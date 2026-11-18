@@ -15,7 +15,7 @@ mise run release -- --config ~/.config/apple/clove-testflight.json --app clove
 
 | App | Scheme | Bundle ID | TestFlight |
 | --- | --- | --- | --- |
-| `clove` | `Clove` | `com.mimiqdev.clove` | internal now, external after G3 |
+| `clove` | `Clove` | `com.mimiqdev.clove` | internal & external Public Beta |
 | `lab` | `CloveLab` | `com.mimiqdev.clove.lab` | internal only |
 
 The configuration is read from `--config`, then `$CLOVE_TESTFLIGHT_CONFIG`, then
@@ -80,18 +80,55 @@ Archive, IPA, and logs stay in `.build/testflight/<app>/` (`archive.log`,
   [DEV-PLAN.md](DEV-PLAN.md#real-device-verification); internal builds need no
   review.
 
+## Public Beta (External TestFlight)
+
+`scripts/public-beta-testflight.py` configures `com.mimiqdev.clove`'s external
+TestFlight metadata, `"Clove Public Beta"` group, localized release notes, and
+Beta App Review submission using the materials in
+[`docs/testflight-external.md`](testflight-external.md) and the same config
+resolution order as `scripts/release-testflight.py`:
+
+```sh
+python3 scripts/public-beta-testflight.py --config ~/.config/apple/clove-testflight.json --inspect
+python3 scripts/public-beta-testflight.py --config ~/.config/apple/clove-testflight.json --prepare --feedback-email mrtoniliu@gmail.com
+python3 scripts/public-beta-testflight.py --config ~/.config/apple/clove-testflight.json --submit --feedback-email mrtoniliu@gmail.com
+```
+
+- `--inspect`: read-only check of app ID, recent iOS builds (`processingState`),
+  `betaGroups` (`isInternalGroup`, `publicLinkEnabled`, `publicLink`),
+  `betaAppLocalizations` locales, and whether `betaAppReviewDetails` contact
+  fields are complete (`contactComplete: True/False`, never printing contact
+  phone numbers or emails).
+- `--prepare`: idempotently updates/creates `betaAppLocalizations` (`en-US`,
+  `zh-Hans`, `zh-Hant`) with beta description and `--feedback-email`, verifies
+  `betaAppReviewDetails` contact fields are non-empty and sets
+  `demoAccountRequired = false` + reviewer notes while preserving contact info,
+  and finds or creates the external `--group-name` group (default
+  `"Clove Public Beta"`, `isInternalGroup = false`, `feedbackEnabled = true`),
+  enabling `publicLinkEnabled = true` if App Store Connect permits it before a
+  build is approved.
+- `--submit`: runs `--prepare`, selects `--build` (or the highest `VALID` build
+  for `--marketing-version`, default from `project.yml`), upserts
+  `betaBuildLocalizations` (`whatsNew` in `en-US`, `zh-Hans`, `zh-Hant`),
+  attaches the build to the external group, submits `betaAppReviewSubmissions`
+  when not already submitted/approved, and enables `publicLinkEnabled = true`
+  (with `--public-link-limit` optional; omitted sets
+  `publicLinkLimitEnabled = false`).
+
 ## Tests
 
-`mise run test-release` runs `scripts/test_release_testflight.py`: build-number
-arithmetic, config parsing and validation, app selection, the dirty-tree check,
-IPA verification on a synthetic IPA, and beta-group and build lookups on canned
-App Store Connect JSON. No network, no signing, no `xcodebuild`. It is part of
-`mise run verify`.
+`mise run test-release` runs both `scripts/test_release_testflight.py` and
+`scripts/test_public_beta_testflight.py`: build-number arithmetic, config
+parsing and validation, secret redaction, app selection, the dirty-tree check,
+IPA verification on a synthetic IPA, and external Public Beta inspect/prepare/submit
+workflows on canned App Store Connect JSON. No network, no signing, no
+`xcodebuild`. It is part of `mise run verify`.
 
-## Placeholder release assets
+## Release assets
 
-The app icon is a plain 1024×1024 colored square in each app's
-`Assets.xcassets`, and `project.yml` declares
-`ITSAppUsesNonExemptEncryption = NO` plus all four iPad orientations, which App
-Store validation requires. Replace the icons when the visual design lands; keep
-the catalog and the build settings.
+`Clove/Assets.xcassets` contains Clove's production app icons (Default, Dark,
+and Tinted), while `CloveLab/Assets.xcassets` keeps a plain 1024×1024 colored
+square icon. `project.yml` declares `ITSAppUsesNonExemptEncryption = NO` plus all
+four iPad orientations, which App Store validation requires. Keep the catalog
+and those build settings intact.
+
