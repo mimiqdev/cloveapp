@@ -41,8 +41,12 @@ description = "Run the fixture tooling tests (logic only, no network)"
 run = "/usr/bin/python3 scripts/test_fixtures.py"
 
 [tasks.test-release]
-description = "Run the TestFlight release tests (logic only, no network, no signing)"
-run = "/usr/bin/python3 scripts/test_release_testflight.py"
+description = "Run the TestFlight release and public beta tests (logic only, no network, no signing)"
+run = """
+set -eu
+/usr/bin/python3 scripts/test_release_testflight.py
+/usr/bin/python3 scripts/test_public_beta_testflight.py
+"""
 
 [tasks.release]
 description = "Archive, sign, validate, and optionally upload Clove or Clove Lab to TestFlight"
