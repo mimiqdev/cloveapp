@@ -155,16 +155,27 @@ struct DetailFocusRegionTests {
         ])
         var state = DetailFocusRegionState()
         state.begin(for: first)
-        #expect(state.status == "Analyzing focus regions…")
+        #expect(state.resultIndicators.isEmpty)
         state.receiveAutofocus(autofocus, for: first)
         #expect(state.regions.count == 1)
         #expect(state.regions[0].kind == .autofocus)
-        #expect(state.status == "Analyzing faces…")
+        #expect(state.resultIndicators.isEmpty)
         state.finish(makeAnalysis(autofocus: autofocus, faces: faces), for: first)
         #expect(state.retainedRegions.count == 3)
         #expect(state.regions.count == 2)
         #expect(state.regions.map(\.kind) == [.autofocus, .eye])
-        #expect(state.status == nil)
+        #expect(
+            state.resultIndicators
+                == DetailFocusResultIndicators(face: .detected, missingAutofocusMetadata: false))
+
+        let noAF = RegionSharpnessPathResult.unavailable(
+            .noAutofocusMetadata(
+                AutofocusMetadataEvidence(inspected: [], cameraMake: "Test", exifOrientation: 1)))
+        state.begin(for: first)
+        state.receiveAutofocus(noAF, for: first)
+        #expect(
+            state.resultIndicators
+                == DetailFocusResultIndicators(face: nil, missingAutofocusMetadata: true))
     }
 
     @Test func perPersonSelectionChoosesOneDeterministicEyeOrFallsBackToFace() {
@@ -421,7 +432,10 @@ struct DetailFocusRegionTests {
             makeAnalysis(autofocus: noMetadata, faces: .unavailable(.noFacesDetected)),
             for: identity)
         #expect(state.regions.isEmpty)
-        #expect(state.status == "No AF metadata · No faces")
+        #expect(
+            state.resultIndicators
+                == DetailFocusResultIndicators(
+                    face: .noFacesDetected, missingAutofocusMetadata: true))
 
         let tiny = RegionSharpnessEvidence(
             kind: .cameraAutofocus, groupIndex: nil,
@@ -435,23 +449,176 @@ struct DetailFocusRegionTests {
         #expect(state.regions.count == 1)
         #expect(!state.regions[0].isActionable)
         #expect(state.regions[0].unavailableAccessibilityDescription?.contains("too small") == true)
-        #expect(state.status?.contains("Tiny focus region unavailable") == true)
+        #expect(
+            state.resultIndicators
+                == DetailFocusResultIndicators(
+                    face: .noFacesDetected, missingAutofocusMetadata: false))
     }
 
     @Test func navigationRejectsEarlyAndFinalResultsForTheOldPhoto() {
         let first = photo("first")
         let second = photo("second")
         let autofocus = RegionSharpnessPathResult.regions([makeEvidence(.cameraAutofocus)])
+        let noMetadata = RegionSharpnessPathResult.unavailable(
+            .noAutofocusMetadata(
+                AutofocusMetadataEvidence(inspected: [], cameraMake: "Test", exifOrientation: 1)))
         var state = DetailFocusRegionState()
         state.begin(for: first)
+        state.finish(
+            makeAnalysis(autofocus: noMetadata, faces: .unavailable(.noFacesDetected)),
+            for: first)
+        #expect(!state.resultIndicators.isEmpty)
+
+        // Switching photos clears indicators immediately and rejects stale callbacks.
         state.begin(for: second)
-        state.receiveAutofocus(autofocus, for: first)
+        #expect(state.resultIndicators.isEmpty)
+        state.receiveAutofocus(noMetadata, for: first)
         state.finish(makeAnalysis(autofocus: autofocus, faces: .regions([])), for: first)
         #expect(state.photo == second)
         #expect(state.regions.isEmpty)
-        #expect(state.status == "Analyzing focus regions…")
+        #expect(state.resultIndicators.isEmpty)
         state.finish(nil, for: second)
-        #expect(state.status == "Analysis unavailable")
+        #expect(state.resultIndicators.isEmpty)
+    }
+
+    @Test func resultIndicatorsHandleSuppressedFacesFailuresCancellationsAndCoexistence() {
+        let photoID = photo("indicator-rules")
+        let noAF = RegionSharpnessPathResult.unavailable(
+            .noAutofocusMetadata(
+                AutofocusMetadataEvidence(inspected: [], cameraMake: "Test", exifOrientation: 1)))
+
+        // 1. Face/eye evidence completely suppressed on-photo by overlapping AF still shows
+        // the positive face indicator.
+        let af = makeEvidence(
+            .cameraAutofocus,
+            normalized: NormalizedRegion(x: 0.20, y: 0.20, width: 0.20, height: 0.20))
+        let suppressedFace = makeEvidence(
+            .face, group: 0,
+            normalized: NormalizedRegion(x: 0.22, y: 0.22, width: 0.16, height: 0.16))
+        let suppressedEye = makeEvidence(
+            .eye, group: 0,
+            normalized: NormalizedRegion(x: 0.25, y: 0.26, width: 0.04, height: 0.04))
+
+        var state = DetailFocusRegionState()
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(
+                autofocus: .regions([af]), faces: .regions([suppressedFace, suppressedEye])),
+            for: photoID)
+        #expect(state.regions.map(\.kind) == [.autofocus])
+        #expect(
+            state.resultIndicators
+                == DetailFocusResultIndicators(face: .detected, missingAutofocusMetadata: false))
+        #expect(state.resultIndicators(visible: false).isEmpty)
+
+        // 2. Eye-only result counts as face/eye detection; missing AF coexists with positive face.
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(autofocus: noAF, faces: .regions([suppressedEye])),
+            for: photoID)
+        #expect(
+            state.resultIndicators
+                == DetailFocusResultIndicators(face: .detected, missingAutofocusMetadata: true))
+
+        // 3. Empty regions, faceDetectionFailed, previewFailed stay quiet for their paths.
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(
+                autofocus: .unavailable(.previewFailed(.cannotOpen)),
+                faces: .regions([])),
+            for: photoID)
+        #expect(state.resultIndicators.isEmpty)
+
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(
+                autofocus: noAF,
+                faces: .unavailable(.faceDetectionFailed("vision-error"))),
+            for: photoID)
+        #expect(
+            state.resultIndicators
+                == DetailFocusResultIndicators(face: nil, missingAutofocusMetadata: true))
+
+        state.begin(for: photoID)
+        state.finish(
+            makeAnalysis(
+                autofocus: .unavailable(.previewFailed(.noUsablePreview)),
+                faces: .unavailable(.previewFailed(.noUsablePreview))),
+            for: photoID)
+        #expect(state.resultIndicators.isEmpty)
+
+        // 4. Cancellation after early noAF result suppresses everything cleanly.
+        state.begin(for: photoID)
+        state.receiveAutofocus(noAF, for: photoID)
+        #expect(state.resultIndicators.missingAutofocusMetadata)
+        state.finish(nil, for: photoID)
+        #expect(state.resultIndicators.isEmpty)
+    }
+
+    @Test func resultIndicatorSymbolsExistOnIOSAndRenderNonEmptyPixels() throws {
+        #expect(UIImage(systemName: DetailFocusFaceIndicator.detected.systemImageName) != nil)
+        #expect(
+            UIImage(systemName: DetailFocusFaceIndicator.noFacesDetected.systemImageName) != nil)
+        #expect(UIImage(systemName: "viewfinder") != nil)
+
+        let glyphRenderer = ImageRenderer(
+            content: SlashedViewfinderGlyph().foregroundStyle(Color.white).padding(4))
+        glyphRenderer.scale = 2
+        let glyphImage = try #require(glyphRenderer.cgImage)
+        #expect(hasVisiblePixels(in: glyphImage))
+
+        let indicators = DetailFocusResultIndicators(
+            face: .detected, missingAutofocusMetadata: true)
+        let viewRenderer = ImageRenderer(
+            content: DetailFocusResultIndicatorsView(
+                indicators: indicators, usesPhotoBacking: true, language: .english))
+        viewRenderer.scale = 2
+        let badgeImage = try #require(viewRenderer.cgImage)
+        #expect(hasVisiblePixels(in: badgeImage))
+    }
+
+    @Test func resultIndicatorsBackingGeometryFitsCompactlyAndPassesThroughHits() {
+        let oneIcon = DetailFocusResultIndicators(face: .detected, missingAutofocusMetadata: false)
+        let twoIcons = DetailFocusResultIndicators(
+            face: .noFacesDetected, missingAutofocusMetadata: true)
+        let empty = DetailFocusResultIndicators(face: nil, missingAutofocusMetadata: false)
+
+        #expect(
+            !DetailFocusResultIndicators.coversPhotoPixels(
+                indicators: empty, scale: 1, imagePixels: CGSize(width: 3000, height: 2000),
+                viewSize: CGSize(width: 400, height: 600)))
+
+        // Portrait photo fills iPhone stage -> badge covers photo pixels.
+        #expect(
+            DetailFocusResultIndicators.coversPhotoPixels(
+                indicators: oneIcon, scale: 1, imagePixels: CGSize(width: 2000, height: 3000),
+                viewSize: CGSize(width: 400, height: 600)))
+
+        // Landscape photo centered inside tall portrait stage -> top-leading corner is matte.
+        #expect(
+            !DetailFocusResultIndicators.coversPhotoPixels(
+                indicators: twoIcons, scale: 1, imagePixels: CGSize(width: 3000, height: 2000),
+                viewSize: CGSize(width: 400, height: 600)))
+
+        // Portrait photo centered inside wide landscape iPad/Duo viewport -> leading corner is matte.
+        #expect(
+            !DetailFocusResultIndicators.coversPhotoPixels(
+                indicators: twoIcons, scale: 1, imagePixels: CGSize(width: 2000, height: 3000),
+                viewSize: CGSize(width: 700, height: 600)))
+
+        // Zooming past fit scale assumes photo pixels occupy the corner.
+        #expect(
+            DetailFocusResultIndicators.coversPhotoPixels(
+                indicators: twoIcons, scale: 1.5, imagePixels: CGSize(width: 3000, height: 2000),
+                viewSize: CGSize(width: 400, height: 600)))
+
+        let overlay = DetailFocusResultIndicatorsView(
+            indicators: twoIcons, usesPhotoBacking: true, language: .english)
+        let host = UIHostingController(rootView: overlay)
+        host.view.backgroundColor = .clear
+        let measured = host.sizeThatFits(in: CGSize(width: 400, height: 400))
+        #expect(measured.width > 0 && measured.width < 64)
+        #expect(measured.height > 0 && measured.height < 36)
     }
 
     @Test func doubleTapPolicyPrefersInspectedThenAutofocusThenNearestPresentedRegion() {
@@ -684,6 +851,28 @@ struct DetailFocusRegionTests {
                 bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         return try #require(context.makeImage())
+    }
+
+    private func hasVisiblePixels(in image: CGImage) -> Bool {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return false }
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        guard
+            let context = CGContext(
+                data: &bytes,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        for offset in stride(from: 3, to: bytes.count, by: 4) {
+            if bytes[offset] > 0 { return true }
+        }
+        return false
     }
 
     private func findRegionControl(in view: UIView) -> DetailFocusRegionControl? {
