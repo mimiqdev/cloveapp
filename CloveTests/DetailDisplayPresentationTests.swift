@@ -1185,7 +1185,7 @@ struct DetailDisplayPresentationTests {
     }
 
     @Test func anchorSymmetricSwipeWorksConsistentlyAtFitAndZoomedTwoFinger() throws {
-        // Fit single-finger drag: immediate preview from first movement at H = 650 (rejectTravel = 52pt).
+        // Fit single-finger drag: immediate preview from first movement at H = 650 (rejectTravel = 65pt).
         do {
             let preview = DetailZoomContainerView(
                 frame: CGRect(x: 0, y: 0, width: 390, height: 650))
@@ -1204,8 +1204,8 @@ struct DetailDisplayPresentationTests {
             _ = preview.gestureRecognizer(
                 pan, shouldReceive: DetailMutableTouch(view: preview, location: start))
             let testPan = DetailTestPan()
-            testPan.locationPoint = CGPoint(x: 195, y: 455)
-            testPan.travel = CGPoint(x: 0, y: 55)
+            testPan.locationPoint = CGPoint(x: 195, y: 470)
+            testPan.travel = CGPoint(x: 0, y: 70)
             try #require(preview.gestureRecognizerShouldBegin(testPan))
             preview.handleMarkingPan(testPan)
             #expect(feedback.rating == .rejected)
@@ -1214,7 +1214,7 @@ struct DetailDisplayPresentationTests {
             #expect(commits == [.rejected])
         }
 
-        // Zoomed two-finger drag in `.pan` from 3★ at H = 650 (clear = 29.25pt, reject = 81.25pt, upEntry = 19.5pt).
+        // Zoomed two-finger drag in `.pan` from 3★ at H = 650 (clear = 32.5pt, reject = 65pt, two-step = 97.5pt, upEntry = 19.5pt).
         do {
             let three = try #require(Rating(rawValue: 3))
             let preview = DetailZoomContainerView(
@@ -1238,15 +1238,15 @@ struct DetailDisplayPresentationTests {
             let event = UIEvent()
             twoFinger.touchesBegan([t1, t2], with: event)
 
-            t1.locationPoint = CGPoint(x: 150, y: 432)
-            t2.locationPoint = CGPoint(x: 230, y: 432)
+            t1.locationPoint = CGPoint(x: 150, y: 436)
+            t2.locationPoint = CGPoint(x: 230, y: 436)
             twoFinger.touchesMoved([t1, t2], with: event)
             #expect(twoFinger.state == .began)
             preview.handleTwoFingerMarkingSwipe(twoFinger)
             #expect(feedback.rating == .unrated)
 
-            t1.locationPoint = CGPoint(x: 150, y: 485)
-            t2.locationPoint = CGPoint(x: 230, y: 485)
+            t1.locationPoint = CGPoint(x: 150, y: 525)
+            t2.locationPoint = CGPoint(x: 230, y: 525)
             twoFinger.touchesMoved([t1, t2], with: event)
             preview.handleTwoFingerMarkingSwipe(twoFinger)
             #expect(feedback.rating == .rejected)

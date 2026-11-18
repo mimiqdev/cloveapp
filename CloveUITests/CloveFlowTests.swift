@@ -753,7 +753,7 @@ final class CloveFlowTests: XCTestCase {
 
         // Unrated -> slow down past rejectTravel rejects immediately (no 120pt dead band).
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 75)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 95)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
         element(app, "clove.detail.undo").tap()
@@ -775,7 +775,7 @@ final class CloveFlowTests: XCTestCase {
 
         // From 3 stars, slow first downward step clears to Unmarked (independent of speed).
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 45)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 52)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertEqual(capsule.value as? String, "Unmarked")
         element(app, "clove.detail.undo").tap()
@@ -783,7 +783,7 @@ final class CloveFlowTests: XCTestCase {
 
         // From 3 stars, fast first downward step also clears to Unmarked.
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 45)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 52)),
             withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
         XCTAssertEqual(capsule.value as? String, "Unmarked")
         element(app, "clove.detail.undo").tap()
@@ -791,7 +791,7 @@ final class CloveFlowTests: XCTestCase {
 
         // From 3 stars, second downward step (>= clearTravel + rejectTravel) rejects regardless of speed.
         start.press(
-            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 115)),
+            forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 135)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
         XCTAssertFalse(element(app, "clove.detail.swipeFeedback").exists)

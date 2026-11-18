@@ -15,8 +15,8 @@ import Testing
         #expect(compact.upEntry == 18)
         #expect(compact.upSpan == 88)
         #expect(abs(compact.upStep - 17.5) < 0.0001)
-        #expect(compact.clearTravel == 26)
-        #expect(compact.rejectTravel == 44)
+        #expect(compact.clearTravel == 32)
+        #expect(compact.rejectTravel == 64)
         #expect(compact.reversalHysteresis == 4)
 
         let compactThree = MarkingSwipeGeometry(
@@ -25,14 +25,24 @@ import Testing
         #expect(compactThree.upStep == 35)
         #expect(abs(compactThree.reversalHysteresis - 7.7) < 0.0001)
 
+        // Duo Expanded (H = 535)
+        let duoExpanded = MarkingSwipeGeometry(containerHeight: 535, enabledRatings: .all)
+        #expect(duoExpanded.containerHeight == 535)
+        #expect(duoExpanded.upEntry == 18)
+        #expect(abs(duoExpanded.upSpan - 96.3) < 0.0001)
+        #expect(abs(duoExpanded.upStep - 19.575) < 0.0001)
+        #expect(duoExpanded.clearTravel == 32)
+        #expect(duoExpanded.rejectTravel == 64)
+        #expect(abs(duoExpanded.reversalHysteresis - (0.22 * 19.575)) < 0.0001)
+
         // iPhone 17 Pro reference (H = 760)
         let reference = MarkingSwipeGeometry(containerHeight: 760, enabledRatings: .all)
         #expect(reference.containerHeight == 760)
         #expect(abs(reference.upEntry - 22.8) < 0.0001)
         #expect(abs(reference.upSpan - 136.8) < 0.0001)
         #expect(abs(reference.upStep - 28.5) < 0.0001)
-        #expect(abs(reference.clearTravel - 34.2) < 0.0001)
-        #expect(abs(reference.rejectTravel - 60.8) < 0.0001)
+        #expect(abs(reference.clearTravel - 38.0) < 0.0001)
+        #expect(abs(reference.rejectTravel - 76.0) < 0.0001)
         #expect(abs(reference.reversalHysteresis - 6.27) < 0.0001)
 
         let referenceThree = MarkingSwipeGeometry(
@@ -52,8 +62,8 @@ import Testing
         #expect(tablet.upEntry == 26)
         #expect(tablet.upSpan == 148)
         #expect(abs(tablet.upStep - 30.5) < 0.0001)
-        #expect(tablet.clearTravel == 40)
-        #expect(tablet.rejectTravel == 68)
+        #expect(tablet.clearTravel == 42)
+        #expect(tablet.rejectTravel == 80)
         #expect(abs(tablet.reversalHysteresis - 6.71) < 0.0001)
 
         // Fallback for non-positive or non-finite container heights
@@ -80,7 +90,7 @@ import Testing
         let initial = try #require(Rating(rawValue: start))
         let ladder = Self.expectedLadder(start: start, enabled: enabled)
         let anchor = try #require(ladder.firstIndex(of: start))
-        for height in [390.0, 760.0, 1200.0] {
+        for height in [390.0, 535.0, 760.0, 1200.0] {
             var session = MarkingSwipeSession(
                 startingRating: initial, enabledRatings: enabled, containerHeight: height)
             let g = session.geometry
@@ -127,7 +137,7 @@ import Testing
 
     @Test func unratedDownRejectsAtRejectTravelWithoutOriginDeadBand() {
         var session = MarkingSwipeSession(startingRating: .unrated)
-        #expect(session.update(travel: -60.0).isEmpty)
+        #expect(session.update(travel: -75.9).isEmpty)
         #expect(session.rating == .unrated)
 
         let crossing = session.update(travel: -session.geometry.rejectTravel)
@@ -151,13 +161,13 @@ import Testing
         let backToUnrated = session.update(travel: 16.5)
         #expect(backToUnrated == [MarkingStageCrossing(rating: .unrated, haptic: .clear)])
 
-        #expect(session.update(travel: -60.0).isEmpty)
+        #expect(session.update(travel: -75.9).isEmpty)
         let toReject = session.update(travel: -g.rejectTravel)
         #expect(toReject == [MarkingStageCrossing(rating: .rejected, haptic: .reject)])
 
-        // Reversing up from Reject crosses back to Unrated at -rejectTravel + reversalHysteresis (-54.53).
-        #expect(session.update(travel: -55.0).isEmpty)
-        let rejectToUnrated = session.update(travel: -54.5)
+        // Reversing up from Reject crosses back to Unrated at -rejectTravel + reversalHysteresis (-69.73).
+        #expect(session.update(travel: -70.0).isEmpty)
+        let rejectToUnrated = session.update(travel: -69.7)
         #expect(rejectToUnrated == [MarkingStageCrossing(rating: .unrated, haptic: .clear)])
     }
 
@@ -170,7 +180,8 @@ import Testing
         #expect(full.update(travel: 73).map(\.rating.rawValue) == [2])
         #expect(full.update(travel: 44).map(\.rating.rawValue) == [1])
         #expect(full.update(travel: 16).map(\.rating.rawValue) == [0])
-        #expect(full.update(travel: -61).map(\.rating.rawValue) == [-1])
+        #expect(full.update(travel: -75).isEmpty)
+        #expect(full.update(travel: -76).map(\.rating.rawValue) == [-1])
         #expect(full.release(travel: 52).map(\.rating.rawValue) == [0, 1, 2])
         #expect(full.rating == (try #require(Rating(rawValue: 2))))
 
@@ -198,28 +209,28 @@ import Testing
         let initial = try #require(Rating(rawValue: start))
         var session = MarkingSwipeSession(startingRating: initial)
 
-        // At H = 760: clearTravel = 34.2, rejectTravel = 60.8, total Reject = -95.0.
-        #expect(session.update(travel: -34.0).isEmpty)
+        // At H = 760: clearTravel = 38.0, rejectTravel = 76.0, total Reject = -114.0.
+        #expect(session.update(travel: -37.9).isEmpty)
         #expect(session.rating == initial)
 
-        let clear = session.update(travel: -34.2)
+        let clear = session.update(travel: -38.0)
         #expect(clear == [MarkingStageCrossing(rating: .unrated, haptic: .clear)])
         #expect(session.rating == .unrated)
 
-        #expect(session.update(travel: -94.5).isEmpty)
-        let reject = session.update(travel: -95.0)
+        #expect(session.update(travel: -113.9).isEmpty)
+        let reject = session.update(travel: -114.0)
         #expect(reject == [MarkingStageCrossing(rating: .rejected, haptic: .reject)])
         #expect(session.rating == .rejected)
 
-        // Returning crosses Clear at -95.0 + 6.27 = -88.73, then restores initial at -34.2 + 6.27 = -27.93.
-        #expect(session.update(travel: -89.0).isEmpty)
+        // Returning crosses Clear at -114.0 + 6.27 = -107.73, then restores initial at -38.0 + 6.27 = -31.73.
+        #expect(session.update(travel: -108.0).isEmpty)
         #expect(
-            session.update(travel: -88.7) == [
+            session.update(travel: -107.7) == [
                 MarkingStageCrossing(rating: .unrated, haptic: .clear)
             ])
-        #expect(session.update(travel: -28.5).isEmpty)
+        #expect(session.update(travel: -32.0).isEmpty)
         #expect(
-            session.update(travel: -27.9) == [MarkingStageCrossing(rating: initial, haptic: .step)])
+            session.update(travel: -31.7) == [MarkingStageCrossing(rating: initial, haptic: .step)])
     }
 
     @Test func threeStarsUpStepsWithoutStretchingAcrossFullSpan() throws {
@@ -250,59 +261,69 @@ import Testing
         #expect(session.rating == three)
     }
 
-    @Test func overshootTopFiveAndRejectThenReturnHasNoExtraDeadTravel() throws {
-        // From unrated at H = 760: maxTravel = 136.8 + 28.5 = 165.3. Dragging to +600 clamps at 165.3.
-        var topOvershoot = MarkingSwipeSession(startingRating: .unrated)
-        #expect(topOvershoot.update(travel: 600).map(\.rating.rawValue) == [1, 2, 3, 4, 5])
-        // Returning one upStep + reversalHysteresis (28.5 + 6.27 = 34.77) steps to 4★ immediately.
-        #expect(topOvershoot.update(travel: 565.5).isEmpty)
-        #expect(
-            topOvershoot.update(travel: 565.0) == [
-                MarkingStageCrossing(rating: Rating(rawValue: 4)!, haptic: .step)
-            ])
-        // One upStep more (28.5) steps to 3★.
-        #expect(
-            topOvershoot.update(travel: 536.5) == [
-                MarkingStageCrossing(rating: Rating(rawValue: 3)!, haptic: .step)
-            ])
+    @Test func rapidOvershootScrubbingNeverShiftsTouchOriginOrThresholds() throws {
+        // From unrated at H = 760: up thresholds stay anchored at 22.8..136.8 and Reject at -76.0.
+        var fromUnrated = MarkingSwipeSession(startingRating: .unrated)
+        #expect(fromUnrated.update(travel: 600).map(\.rating.rawValue) == [1, 2, 3, 4, 5])
+        #expect(fromUnrated.update(travel: 0).map(\.rating.rawValue) == [4, 3, 2, 1, 0])
+        #expect(fromUnrated.rating == .unrated)
 
-        // From 3★ at H = 760: minTravel = -(2 * 34.2 + 60.8) = -129.2. Dragging to -500 clamps at -129.2.
+        #expect(fromUnrated.update(travel: -600).map(\.rating.rawValue) == [-1])
+        #expect(fromUnrated.update(travel: 0).map(\.rating.rawValue) == [0])
+        #expect(fromUnrated.rating == .unrated)
+
+        #expect(fromUnrated.update(travel: 400).map(\.rating.rawValue) == [1, 2, 3, 4, 5])
+        // 5★ -> 4★ reverses at 136.8 - 6.27 = 130.53 (unchanged by prior +600 / -600 / +400 scrubs).
+        #expect(fromUnrated.update(travel: 130.6).isEmpty)
+        #expect(fromUnrated.update(travel: 130.5).map(\.rating.rawValue) == [4])
+        #expect(fromUnrated.update(travel: 102.0).map(\.rating.rawValue) == [3])
+        #expect(fromUnrated.update(travel: 73.5).map(\.rating.rawValue) == [2])
+        #expect(fromUnrated.update(travel: 45.0).map(\.rating.rawValue) == [1])
+        #expect(fromUnrated.update(travel: 16.5).map(\.rating.rawValue) == [0])
+        #expect(fromUnrated.update(travel: -75.9).isEmpty)
+        #expect(fromUnrated.update(travel: -76.0).map(\.rating.rawValue) == [-1])
+        #expect(fromUnrated.update(travel: 0).map(\.rating.rawValue) == [0])
+        #expect(fromUnrated.rating == .unrated)
+
+        // From 3★ at H = 760: clearTravel = 38.0, two-step Reject = -(38.0 + 76.0) = -114.0.
         let three = try #require(Rating(rawValue: 3))
-        var bottomOvershoot = MarkingSwipeSession(startingRating: three)
-        #expect(bottomOvershoot.update(travel: -500).map(\.rating.rawValue) == [0, -1])
-        // Moving back up clearTravel + reversalHysteresis (34.2 + 6.27 = 40.47) reaches Clear (0).
-        #expect(bottomOvershoot.update(travel: -460.0).isEmpty)
-        #expect(
-            bottomOvershoot.update(travel: -459.5) == [
-                MarkingStageCrossing(rating: .unrated, haptic: .clear)
-            ])
-        // Moving up rejectTravel more (60.8) restores 3★.
-        #expect(
-            bottomOvershoot.update(travel: -398.5) == [
-                MarkingStageCrossing(rating: three, haptic: .step)
-            ])
+        var fromThree = MarkingSwipeSession(startingRating: three)
+        #expect(fromThree.update(travel: 600).map(\.rating.rawValue) == [4, 5])
+        #expect(fromThree.update(travel: 0).map(\.rating.rawValue) == [4, 3])
+        #expect(fromThree.rating == three)
 
-        // Starting at 5★ (top endpoint) clamps at +upEntry (22.8); dragging down upEntry + clearTravel (57.0) clears.
+        #expect(fromThree.update(travel: -600).map(\.rating.rawValue) == [0, -1])
+        #expect(fromThree.update(travel: 0).map(\.rating.rawValue) == [0, 3])
+        #expect(fromThree.rating == three)
+
+        #expect(fromThree.update(travel: 400).map(\.rating.rawValue) == [4, 5])
+        #expect(fromThree.update(travel: -37.9).map(\.rating.rawValue) == [4, 3])
+        #expect(fromThree.rating == three)
+        #expect(fromThree.update(travel: -38.0).map(\.rating.rawValue) == [0])
+        #expect(fromThree.update(travel: -113.9).isEmpty)
+        #expect(fromThree.update(travel: -114.0).map(\.rating.rawValue) == [-1])
+        #expect(fromThree.update(travel: 0).map(\.rating.rawValue) == [0, 3])
+        #expect(fromThree.rating == three)
+
+        // Endpoints (5★ and Reject): overshooting past endpoints never shifts return thresholds.
         let five = try #require(Rating(rawValue: 5))
         var fromFive = MarkingSwipeSession(startingRating: five)
-        #expect(fromFive.update(travel: 200).isEmpty)
+        #expect(fromFive.update(travel: 600).isEmpty)
+        #expect(fromFive.update(travel: 0).isEmpty)
         #expect(fromFive.rating == five)
-        #expect(fromFive.update(travel: 143.5).isEmpty)
-        #expect(
-            fromFive.update(travel: 142.9) == [
-                MarkingStageCrossing(rating: .unrated, haptic: .clear)
-            ]
-        )
+        #expect(fromFive.update(travel: -37.9).isEmpty)
+        #expect(fromFive.update(travel: -38.0).map(\.rating.rawValue) == [0])
+        #expect(fromFive.update(travel: -600).map(\.rating.rawValue) == [-1])
+        #expect(fromFive.update(travel: 0).map(\.rating.rawValue) == [0, 5])
+        #expect(fromFive.rating == five)
 
-        // Starting at Reject (bottom endpoint) clamps at -clearTravel (-34.2); dragging up clearTravel + upEntry (57.0) clears.
         var fromReject = MarkingSwipeSession(startingRating: .rejected)
-        #expect(fromReject.update(travel: -200).isEmpty)
+        #expect(fromReject.update(travel: -600).isEmpty)
+        #expect(fromReject.update(travel: 0).isEmpty)
         #expect(fromReject.rating == .rejected)
-        #expect(fromReject.update(travel: -143.5).isEmpty)
-        #expect(
-            fromReject.update(travel: -142.9) == [
-                MarkingStageCrossing(rating: .unrated, haptic: .clear)
-            ])
+        #expect(fromReject.update(travel: 400).map(\.rating.rawValue) == [0, 1, 2, 3, 4, 5])
+        #expect(fromReject.update(travel: 0).map(\.rating.rawValue) == [4, 3, 2, 1, 0, -1])
+        #expect(fromReject.rating == .rejected)
     }
 
     @Test func disabledCurrentValueIsAnchorAndOnlyHigherDisabledStarsAreSkipped() throws {
@@ -315,7 +336,7 @@ import Testing
         #expect(session.update(travel: 23).map(\.rating.rawValue) == [3])
         #expect(session.update(travel: 80).map(\.rating.rawValue) == [5])
         #expect(session.update(travel: 0).map(\.rating.rawValue) == [3, 2])
-        #expect(session.update(travel: -95).map(\.rating.rawValue) == [0, -1])
+        #expect(session.update(travel: -114).map(\.rating.rawValue) == [0, -1])
         #expect(session.update(travel: 0).map(\.rating.rawValue) == [0, 2])
         #expect(session.rating == two)
     }
@@ -329,7 +350,8 @@ import Testing
         #expect(session.geometry.enabledCount == 3)
         #expect(session.geometry.upEntry == 18)
         #expect(session.geometry.upStep == 35)
-        #expect(session.geometry.rejectTravel == 44)
+        #expect(session.geometry.clearTravel == 32)
+        #expect(session.geometry.rejectTravel == 64)
     }
 
     @Test func releaseAddsNoMomentumAfterCrossings() throws {

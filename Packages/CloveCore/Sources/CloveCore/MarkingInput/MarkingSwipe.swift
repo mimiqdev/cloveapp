@@ -57,8 +57,8 @@ public struct MarkingSwipeGeometry: Hashable, Sendable {
         let upEntry = min(max(0.03 * resolvedHeight, 18), 26)
         let upSpan = min(max(0.18 * resolvedHeight, 88), 148)
         let upStep = count >= 2 ? (upSpan - upEntry) / Double(count - 1) : upEntry
-        let clearTravel = min(max(0.045 * resolvedHeight, 26), 40)
-        let rejectTravel = min(max(0.08 * resolvedHeight, 44), 68)
+        let clearTravel = min(max(0.05 * resolvedHeight, 32), 42)
+        let rejectTravel = min(max(0.10 * resolvedHeight, 64), 80)
         let reversalHysteresis = min(max(0.22 * upStep, 4), 8)
 
         self.containerHeight = resolvedHeight
@@ -164,8 +164,9 @@ public struct MarkingStageCrossing: Hashable, Sendable {
 /// The session uses an anchor-symmetric ladder around `startingRating`:
 /// `sortedUnique([-1, 0, startingRating] ∪ { enabledStars > startingRating })`.
 /// Preview and semantic haptics respond purely to position from the first movement, with
-/// proportional stage-height buckets, reversal hysteresis, and endpoint overshoot clamping. The
-/// session only previews; its owner commits `rating` once at release or discards on cancel.
+/// proportional stage-height buckets, reversal hysteresis, and fixed touch-down origin anchoring
+/// (clamping `stage` within `0 ..< ladder.count` without shifting any threshold). The session only
+/// previews; its owner commits `rating` once at release or discards on cancel.
 public struct MarkingSwipeSession: Hashable, Sendable {
     public let startingRating: Rating
     public let enabledRatings: EnabledRatings
@@ -174,10 +175,7 @@ public struct MarkingSwipeSession: Hashable, Sendable {
 
     private let ladder: [Rating]
     private let anchor: Int
-    private let minTravel: Double
-    private let maxTravel: Double
     private var stage: Int
-    private var originOffset: Double = 0
 
     public init(
         startingRating: Rating,
@@ -198,46 +196,21 @@ public struct MarkingSwipeSession: Hashable, Sendable {
         self.ladder = sortedLadder
         self.anchor = anchorIndex
         self.stage = anchorIndex
-
-        if anchorIndex < sortedLadder.count - 1 {
-            let highestUpBoundary =
-                geometry.upEntry + Double(sortedLadder.count - 2 - anchorIndex) * geometry.upStep
-            self.maxTravel = highestUpBoundary + geometry.upStep
-        } else {
-            self.maxTravel = geometry.upEntry
-        }
-
-        if anchorIndex > 0 {
-            let lowestDownBoundary = Self.downwardBoundary(
-                entering: 0, ladder: sortedLadder, anchor: anchorIndex, geometry: geometry)
-            self.minTravel = lowestDownBoundary - geometry.clearTravel
-        } else {
-            self.minTravel = -geometry.clearTravel
-        }
     }
 
     /// Updates the live preview rating for `travel` (up positive) and returns any crossed stages.
     @discardableResult
     public mutating func update(travel: Double) -> [MarkingStageCrossing] {
-        var effectiveTravel = travel - originOffset
-        if effectiveTravel > maxTravel {
-            originOffset = travel - maxTravel
-            effectiveTravel = maxTravel
-        } else if effectiveTravel < minTravel {
-            originOffset = travel - minTravel
-            effectiveTravel = minTravel
-        }
-
         var crossings: [MarkingStageCrossing] = []
         while stage + 1 < ladder.count,
-            effectiveTravel >= upThreshold(fromStage: stage)
+            travel >= upThreshold(fromStage: stage)
         {
             stage += 1
             let value = ladder[stage]
             crossings.append(MarkingStageCrossing(rating: value, haptic: Self.haptic(for: value)))
         }
         while stage - 1 >= 0,
-            effectiveTravel <= downThreshold(fromStage: stage)
+            travel <= downThreshold(fromStage: stage)
         {
             stage -= 1
             let value = ladder[stage]
