@@ -170,4 +170,48 @@ struct SettingsAdaptiveTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(model.state.route == .settings)
     }
+
+    @Test func systemAppearanceReaderTracksWindowSceneChangesAcrossWindowOverride() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousSceneStyle: UIUserInterfaceStyle? =
+            scene.traitOverrides.contains(UITraitUserInterfaceStyle.self)
+            ? scene.traitOverrides.userInterfaceStyle
+            : nil
+        scene.traitOverrides.userInterfaceStyle = .light
+        defer {
+            if let previousSceneStyle {
+                scene.traitOverrides.userInterfaceStyle = previousSceneStyle
+            } else {
+                scene.traitOverrides.remove(UITraitUserInterfaceStyle.self)
+            }
+        }
+
+        var reported: [ThemeAppearance] = []
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 480)
+        // Simulate forced Light mode on the window while the scene changes underneath.
+        window.overrideUserInterfaceStyle = .light
+        let host = UIHostingController(
+            rootView: SystemAppearanceReader { appearance in
+                if reported.last != appearance { reported.append(appearance) }
+            })
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(reported.last == .light)
+
+        scene.traitOverrides.userInterfaceStyle = .dark
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(reported.last == .dark)
+
+        scene.traitOverrides.userInterfaceStyle = .light
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(reported.last == .light)
+    }
 }

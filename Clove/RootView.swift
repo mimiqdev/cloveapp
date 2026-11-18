@@ -18,7 +18,7 @@ import UIKit
 /// `System`) and paired theme family, resolved centrally against the actual system appearance.
 /// Explicit Light and Dark modes apply their color scheme; System follows the device's appearance
 /// within the selected family without fallback to Default (`tokens.md`). The system appearance is
-/// read from the window scene's screen through ``SystemAppearanceReader``, never from this tree's
+/// read from the window scene through ``SystemAppearanceReader``, never from this tree's
 /// `\.colorScheme`, which the window override would otherwise report back.
 struct RootView: View {
     /// This scene's stored browsing state; the key is per scene, so scenes never share it.
@@ -127,7 +127,7 @@ struct RootView: View {
     private static var windowSceneAppearance: ThemeAppearance {
         let style = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .first?.screen.traitCollection.userInterfaceStyle
+            .first?.traitCollection.userInterfaceStyle
         return style == .dark ? .dark : .light
     }
 }
