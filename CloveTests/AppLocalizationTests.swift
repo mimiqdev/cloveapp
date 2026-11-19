@@ -40,6 +40,9 @@ struct AppLocalizationTests {
         #expect(AppLocalization.string("Keywords", language: .english) == "Keywords")
         #expect(AppLocalization.string("Keywords", language: .simplifiedChinese) == "关键词")
         #expect(AppLocalization.string("Keywords", language: .traditionalChinese) == "關鍵字")
+        #expect(AppLocalization.string("Actions", language: .english) == "Actions")
+        #expect(AppLocalization.string("Actions", language: .simplifiedChinese) == "操作")
+        #expect(AppLocalization.string("Actions", language: .traditionalChinese) == "動作")
     }
 
     @Test func pluralStringsFormatSingularAndPluralInAllSupportedLanguages() {
@@ -51,6 +54,39 @@ struct AppLocalizationTests {
         #expect(
             AppLocalization.format("%lld photos", language: .traditionalChinese, Int64(1))
                 == "1 張相片")
+
+        #expect(
+            AppLocalization.format("%lld hidden by filter", language: .english, Int64(1))
+                == "1 hidden by filter")
+        #expect(
+            AppLocalization.format("%lld hidden by filter", language: .english, Int64(3))
+                == "3 hidden by filter")
+        #expect(
+            AppLocalization.format("%lld hidden by filter", language: .simplifiedChinese, Int64(3))
+                == "3 张因筛选隐藏")
+        #expect(
+            AppLocalization.format("%lld hidden by filter", language: .traditionalChinese, Int64(3))
+                == "3 張因篩選隱藏")
+
+        #expect(
+            AppLocalization.format("Order %lld photos", language: .english, Int64(1))
+                == "Order 1 photo")
+        #expect(
+            AppLocalization.format("Order %lld photos", language: .english, Int64(4))
+                == "Order 4 photos")
+        #expect(
+            AppLocalization.format("Order %lld photos", language: .simplifiedChinese, Int64(1))
+                == "排序 1 张照片")
+        #expect(
+            AppLocalization.format("Order %lld photos", language: .traditionalChinese, Int64(1))
+                == "排序 1 張相片")
+
+        #expect(
+            AppLocalization.format("Renaming %lld photos…", language: .english, Int64(1))
+                == "Renaming 1 photo…")
+        #expect(
+            AppLocalization.format("Renaming %lld photos…", language: .english, Int64(4))
+                == "Renaming 4 photos…")
 
         #expect(
             AppLocalization.format("Renamed %lld photos", language: .english, Int64(1))

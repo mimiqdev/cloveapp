@@ -17,10 +17,10 @@ struct GridScreen: View {
     @State private var showsRenameDetails = false
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
-    @State private var isFilterAnchorReady = false
+    @State private var filterAnchorAttachments = 0
     @State private var selectsEmpty = false
+    private var isFilterAnchorReady: Bool { filterAnchorAttachments > 0 }
     @State private var isLandscapeContainer = false
-    @State private var containerWidth: CGFloat = 0
     @State private var presentation = DetailPresentation.photoPreview
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
     /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
@@ -75,9 +75,6 @@ struct GridScreen: View {
             && !hasFoldRegion
             && (verticalSizeClass == .compact || isLandscapeContainer)
     }
-    private var usesHorizontalBatchBar: Bool {
-        isOrdinaryPhoneLandscape || isRegular || containerWidth >= 500
-    }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
     private var showsMoveRejects: Bool {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
@@ -126,7 +123,9 @@ struct GridScreen: View {
                 $0.size
             } action: { size in
                 isLandscapeContainer = size.width > size.height && size.width > 0
-                containerWidth = size.width
+            }
+            .onChange(of: browsing.state.folder) { _, _ in
+                selectsEmpty = false
             }
             .onChange(of: browsing.state.route) { _, route in
                 if route == .detail { hasOpenedPhoto = true }
@@ -166,29 +165,13 @@ struct GridScreen: View {
                 value: showsMoveRejects
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isSelecting {
-                    let renameButton = GridBatchRenameButton(
-                        disabled: browsing.batchTargets.isEmpty || !browsing.canMark
-                    ) {
-                        renameFlow = BatchRenameFlow(browsing: browsing)
-                    }
-                    let batchBar = GridBatchBar(browsing: browsing, cells: cells) {
-                        selectsEmpty = true
-                    }
-                    .disabled(!browsing.canMark)
-                    Group {
-                        if usesHorizontalBatchBar {
-                            HStack(spacing: 8) {
-                                batchBar
-                                renameButton
-                            }
-                        } else {
-                            VStack(spacing: 8) {
-                                renameButton
-                                batchBar
-                            }
-                        }
-                    }
+                if isSelecting && !(usesDock && browsing.state.route == .detail) {
+                    GridBatchBar(
+                        browsing: browsing,
+                        cells: cells,
+                        onDeselectAll: { selectsEmpty = true },
+                        onRename: { renameFlow = BatchRenameFlow(browsing: browsing) }
+                    )
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .transition(
@@ -296,7 +279,8 @@ struct GridScreen: View {
                     .toolbar {
                         BrowsingToolbar(
                             back: { browsing.back() }, undo: { browsing.undoLastMark() },
-                            canUndo: browsing.canUndoMark, showsBack: !isRegular,
+                            canUndo: browsing.canUndoMark,
+                            showsBack: !isRegular && (usesDock || !isSelecting),
                             showsUndo: usesDock
                         ) {
                             headerTools
@@ -312,7 +296,7 @@ struct GridScreen: View {
                                         isSelecting
                                             ? AppLocalization.format(
                                                 "%lld selected", language: language,
-                                                Int64(browsing.state.selection.count))
+                                                Int64(browsing.batchTargets.count))
                                             : (isRegular
                                                 ? browsing.localizedFilterTitle(language: language)
                                                 : browsing.localizedFolderTitle(language: language))
@@ -330,7 +314,17 @@ struct GridScreen: View {
                                     }
                                 }
                                 HStack(spacing: 0) {
-                                    Text(subtitle)
+                                    if let hiddenSelectedSubtitle {
+                                        Text(hiddenSelectedSubtitle)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.85)
+                                            .accessibilityIdentifier("clove.grid.batch.hiddenCount")
+                                            .reportHeaderControlFrame(
+                                                "clove.grid.batch.hiddenCount")
+                                    } else {
+                                        Text(subtitle)
+                                            .lineLimit(1)
+                                    }
                                     SaveStatusIndicator(
                                         browsing: browsing, identifierPrefix: "clove.grid.saveState"
                                     )
@@ -408,15 +402,26 @@ struct GridScreen: View {
                         isSelecting
                             ? AppLocalization.format(
                                 "%lld selected", language: language,
-                                Int64(browsing.state.selection.count))
+                                Int64(browsing.batchTargets.count))
                             : browsing.localizedFilterTitle(language: language)
                     )
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .accessibilityIdentifier(
+                        isSelecting ? "clove.grid.batch.count" : "clove.grid.title"
+                    )
+                    .reportHeaderControlFrame(
                         isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
                     HStack(spacing: 0) {
-                        Text(subtitle).lineLimit(1)
+                        if let hiddenSelectedSubtitle {
+                            Text(hiddenSelectedSubtitle)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                                .accessibilityIdentifier("clove.grid.batch.hiddenCount")
+                                .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
+                        } else {
+                            Text(subtitle).lineLimit(1)
+                        }
                         SaveStatusIndicator(
                             browsing: browsing, identifierPrefix: "clove.grid.saveState")
                     }
@@ -438,15 +443,24 @@ struct GridScreen: View {
         BrowsingHeader(
             title: isSelecting
                 ? AppLocalization.format(
-                    "%lld selected", language: language, Int64(browsing.state.selection.count))
+                    "%lld selected", language: language, Int64(browsing.batchTargets.count))
                 : browsing.localizedFolderTitle(language: language),
             titleIdentifier: isSelecting ? "clove.grid.batch.count" : "clove.grid.title",
-            usesInlineFlow: isOrdinaryPhoneLandscape,
+            showsBack: !isSelecting,
+            usesInlineFlow: isOrdinaryPhoneLandscape || isSelecting,
             height: isOrdinaryPhoneLandscape ? 54 : 64,
             back: { browsing.back() }
         ) {
             HStack(spacing: 0) {
-                Text(subtitle).lineLimit(1)
+                if let hiddenSelectedSubtitle {
+                    Text(hiddenSelectedSubtitle)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("clove.grid.batch.hiddenCount")
+                        .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
+                } else {
+                    Text(subtitle).lineLimit(1)
+                }
                 SaveStatusIndicator(
                     browsing: browsing, identifierPrefix: "clove.grid.saveState")
             }
@@ -470,7 +484,7 @@ struct GridScreen: View {
             }
             .accessibilityIdentifier("clove.grid.batch.selectAll")
         }
-        if !browsing.state.selection.isEmpty {
+        if !browsing.batchTargets.isEmpty {
             Button(AppLocalization.string("Deselect all", language: language)) {
                 selectsEmpty = true
                 browsing.deselectAllVisible(cells)
@@ -480,6 +494,14 @@ struct GridScreen: View {
     }
 
     @ViewBuilder private var headerTools: some View {
+        if !isRegular {
+            if usesSystemToolbar {
+                filterButton
+            } else {
+                filterButton
+                    .reportHeaderControlFrame("clove.grid.filter")
+            }
+        }
         if isSelecting && usesSystemToolbar {
             Menu {
                 selectionOptionsMenuItems
@@ -508,35 +530,37 @@ struct GridScreen: View {
             }
             .accessibilityLabel(AppLocalization.string("Selection options", language: language))
             .accessibilityIdentifier("clove.grid.selectionOptions")
+            .reportHeaderControlFrame("clove.grid.selectionOptions")
             Button {
                 browsing.clearSelection()
                 selectsEmpty = false
             } label: {
                 Text(AppLocalization.string("Done", language: language))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(Color.clove.accent)
+                    .padding(.horizontal, isRegular ? 16 : 14)
+                    .frame(height: isRegular ? 40 : 44)
+                    .cloveGlass(in: Capsule())
             }
+            .buttonStyle(.cloveGlassPress)
             .accessibilityLabel(AppLocalization.string("Done", language: language))
-            .foregroundStyle(Color.clove.accent)
-            .padding(.horizontal, 16)
-            .frame(height: 44)
-            .cloveGlass(in: Capsule())
             .accessibilityIdentifier("clove.grid.batch.done")
+            .reportHeaderControlFrame("clove.grid.batch.done")
         } else {
-            if isRegular {
-                if showsMoveRejects {
-                    if usesSystemToolbar {
-                        dockBottom
-                    } else {
-                        GlassIconButton(
-                            label: AppLocalization.string("Move rejects", language: language),
-                            symbol: "tray.and.arrow.down", size: .pad,
-                            identifier: "clove.grid.moveRejects"
-                        ) {
-                            moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
-                        }
+            if isRegular, showsMoveRejects {
+                if usesSystemToolbar {
+                    dockBottom
+                } else {
+                    GlassIconButton(
+                        label: AppLocalization.string("Move rejects", language: language),
+                        symbol: "tray.and.arrow.down", size: .pad,
+                        identifier: "clove.grid.moveRejects"
+                    ) {
+                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
                     }
                 }
-            } else {
-                filterButton
             }
             moreMenu
         }
@@ -569,11 +593,13 @@ struct GridScreen: View {
             filterMenu.presentationCompactAdaptation(.popover)
         }
         .onAppear {
-            isFilterAnchorReady = true
+            filterAnchorAttachments += 1
         }
         .onDisappear {
-            isFilterAnchorReady = false
-            showsFilters = false
+            filterAnchorAttachments = max(0, filterAnchorAttachments - 1)
+            if filterAnchorAttachments == 0 {
+                showsFilters = false
+            }
         }
     }
 
@@ -714,6 +740,12 @@ struct GridScreen: View {
 
     private var hasFilter: Bool { browsing.state.filter != .all || browsing.labelFilter != nil }
 
+    private var hiddenSelectedSubtitle: String? {
+        guard isSelecting, browsing.hiddenSelectedCount > 0 else { return nil }
+        return AppLocalization.format(
+            "%lld hidden by filter", language: language, Int64(browsing.hiddenSelectedCount))
+    }
+
     private var subtitle: String {
         if isSelecting { return browsing.localizedFolderTitle(language: language) }
         if let progress = browsing.readingProgress {
@@ -812,32 +844,6 @@ struct GridScreen: View {
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isLandscapeContainer: isLandscapeContainer)
-    }
-}
-
-private struct GridBatchRenameButton: View {
-    let disabled: Bool
-    let action: () -> Void
-    @Environment(\.tapPickerController) private var tapPicker
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.appLanguage) private var language
-
-    var body: some View {
-        let obscured = tapPicker?.isPresented == true
-        Button(action: action) {
-            Text(AppLocalization.string("Rename…", language: language))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.clove.accent)
-                .padding(.horizontal, 20).padding(.vertical, 10)
-                .cloveGlass(in: Capsule())
-        }
-        .buttonStyle(.cloveGlassPress)
-        .disabled(disabled)
-        .opacity(obscured ? 0 : 1)
-        .animation(CloveMotion.micro(reduceMotion: reduceMotion), value: obscured)
-        .allowsHitTesting(!obscured)
-        .accessibilityHidden(obscured)
-        .accessibilityIdentifier("clove.grid.batch.rename")
     }
 }
 

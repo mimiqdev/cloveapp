@@ -601,6 +601,15 @@ final class BrowsingModel {
         BatchSelection.targets(selection: state.selection, shown: photos)
     }
 
+    /// Selected photos in the open folder currently hidden by the active filter.
+    var hiddenSelectedCount: Int {
+        guard !state.selection.isEmpty else { return 0 }
+        let visibleSelectedIDs = Set(batchTargets.map(\.id))
+        return state.selection.count {
+            placedPhotoIndices[$0] != nil && !visibleSelectedIDs.contains($0)
+        }
+    }
+
     /// Whether the grid is in multi-select (PRD P0-09).
     ///
     /// The mode is not stored separately: a non-empty selection is multi-select, and
