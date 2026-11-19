@@ -606,6 +606,7 @@ struct DetailFilmstrip: View {
             FilmstripItemFrameTracker(
                 id: cellID, coordinateSpace: coordinateSpace, layoutState: layoutState)
         )
+        .accessibilityAddTraits(photo.id == current ? [.isSelected] : [])
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
     }
 
@@ -727,13 +728,15 @@ private struct FilmstripGroupStack: View {
                 showsMarks: true, appliesRejectedOpacity: false)
         }
         .opacity(isDimmed ? theme.tokens.rejectedOpacity : 1)
+        .overlay(alignment: .bottom) {
+            if isCurrent {
+                CurrentPhotoIndicator(cornerRadius: 5)
+                    .frame(width: thumbnailWidth, height: thumbnailHeight)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             GroupCountBadge(count: visibleCount, presentation: .filmstrip)
                 .padding(2)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.clove.text.primary, lineWidth: isCurrent ? 2 : 0)
         }
         .onChange(of: peekingIDs, initial: true) { _, needed in
             let keep = Set(needed)

@@ -309,7 +309,7 @@ private struct GridTile: View {
     let companions: GridCompanions
     let isUnavailable: Bool
     let isSelected: Bool
-    /// The expanded Duo's split grid rings the member on screen (owner decision, #225).
+    /// Indicates the photo or collapsed stack currently open in detail in Split Photo Preview.
     var isCurrent = false
     let isSelecting: Bool
     let openGroup: (GroupID) -> Void
@@ -317,6 +317,11 @@ private struct GridTile: View {
     @Environment(\.appLanguage) private var language
 
     private var isCover: Bool { item.group?.isCover == true }
+    private var isExpandedGroupMember: Bool { item.group != nil && !isCover }
+    private var tileCornerRadius: CGFloat {
+        if isCover { return 5 }
+        return isExpandedGroupMember ? 6 : 0
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -324,20 +329,31 @@ private struct GridTile: View {
                 if isCover {
                     GroupStack(peekingImages: peekingThumbnails) { image }
                 } else {
-                    image.frame(width: proxy.size.width, height: proxy.size.height).clipped()
+                    image
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: tileCornerRadius))
                 }
             }
             .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
             .overlay(alignment: .bottomLeading) { rating }
             .overlay(alignment: .bottomTrailing) { label }
             .overlay(alignment: .bottomTrailing) { bottomMarkers }
+            .overlay(alignment: .bottom) {
+                if isCurrent {
+                    CurrentPhotoIndicator(cornerRadius: tileCornerRadius)
+                        .frame(
+                            width: proxy.size.width,
+                            height: isCover ? max(0, proxy.size.height - 8) : proxy.size.height
+                        )
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if let group = item.group, isCover {
                     GroupCountBadge(count: group.count, presentation: .grid).padding(4)
                 }
             }
             .background {
-                if item.group != nil && !isCover {
+                if isExpandedGroupMember {
                     // An expanded group's members sit on the same neutral surface as the
                     // filmstrip's group extent: `text/primary` at 12% on the background shape
                     // alone, never on the photo (owner decision, 2026-11-13, #226 filmstrip,
@@ -346,12 +362,6 @@ private struct GridTile: View {
                 } else if !isCover {
                     Rectangle().fill(Color.clove.surface.card)
                 }
-            }
-        }
-        .overlay {
-            if isCurrent {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.clove.text.primary, lineWidth: 2)
             }
         }
         .accessibilityElement(children: .ignore)

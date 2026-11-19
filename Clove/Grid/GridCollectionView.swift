@@ -51,8 +51,8 @@ struct GridCollectionView: UIViewRepresentable {
     var placeholderCount = 0
     /// Duo uses six columns in the grid and two beside a focused photo.
     var columnCount: Int?
-    /// Whether the cell drawing the current photo carries its ring. The expanded Duo's split
-    /// turns this on so the person can see which member is open (#225).
+    /// Whether the cell drawing the current photo carries the current-photo indicator. The split
+    /// Photo Preview turns this on so the person can see which photo or collapsed stack is open.
     var highlightsCurrentPhoto = false
 
     /// Whether the grid keeps the photo on screen in view: the Duo's split pane follows the open
