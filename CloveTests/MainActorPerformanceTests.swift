@@ -223,11 +223,11 @@ struct MainActorPerformanceTests {
         let sidecarURL = directory.appendingPathComponent("shot.xmp")
         try XMPCodec().write(.rating(three), into: nil).write(to: sidecarURL)
 
-        let trusted = try FolderLibrarySession.readMarks(
+        let trusted = FolderLibrarySession.readMarks(
             for: [scanned], storedMarks: [:], codec: XMPCodec(), trustAbsentSidecar: true)
         #expect(trusted[scanned.id] == PhotoMarks())
 
-        let retried = try FolderLibrarySession.readMarks(
+        let retried = FolderLibrarySession.readMarks(
             for: [scanned], storedMarks: [:], codec: XMPCodec(), trustAbsentSidecar: false)
         #expect(retried[scanned.id] == PhotoMarks(rating: three))
     }
@@ -249,7 +249,7 @@ struct MainActorPerformanceTests {
             jpegURL: jpegURL)
         let scanned = ScannedPhotoSet(photoSet: set, sidecar: .absent, imageFiles: [])
 
-        let fromEmbedded = try await worker.readMarks(
+        let fromEmbedded = await worker.readMarks(
             for: [scanned], storedMarks: [:], codec: XMPCodec())
         #expect(
             fromEmbedded[scanned.id]
@@ -258,7 +258,7 @@ struct MainActorPerformanceTests {
                     label: ColourLabel(colour: .green),
                     keywords: ["harbour", "dawn"]))
 
-        let clearedInClove = try await worker.readMarks(
+        let clearedInClove = await worker.readMarks(
             for: [scanned],
             storedMarks: [scanned.id: CloveStoredMarks(keywords: [])],
             codec: XMPCodec())
@@ -268,6 +268,79 @@ struct MainActorPerformanceTests {
                     rating: try #require(Rating(rawValue: 4)),
                     label: ColourLabel(colour: .green),
                     keywords: []))
+    }
+
+    @Test func readMarksIsolatesSidecarReadErrorsPerPhotoInBatch() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let folder = FolderIdentity(rawValue: "isolate-sidecar-read-errors-test")
+        let codec = XMPCodec()
+
+        let beforeRaw = directory.appendingPathComponent("a_before.ARW")
+        let unreadableRaw = directory.appendingPathComponent("b_unreadable.ARW")
+        let afterRaw = directory.appendingPathComponent("c_after.ARW")
+        try Data("raw".utf8).write(to: beforeRaw)
+        try Data("raw".utf8).write(to: unreadableRaw)
+        try Data("raw".utf8).write(to: afterRaw)
+
+        let beforeSidecar = directory.appendingPathComponent("a_before.xmp")
+        let unreadableSidecar = directory.appendingPathComponent("b_unreadable.xmp")
+        let afterSidecar = directory.appendingPathComponent("c_after.xmp")
+
+        let four = try #require(Rating(rawValue: 4))
+        let two = try #require(Rating(rawValue: 2))
+        try codec.write(
+            XMPEdit(
+                rating: .set(four),
+                label: .set(ColourLabel(colour: .green)),
+                keywords: .set(["harbour", "dawn"])),
+            into: nil
+        ).write(to: beforeSidecar)
+        try FileManager.default.createDirectory(
+            at: unreadableSidecar, withIntermediateDirectories: false)
+        try codec.write(
+            XMPEdit(
+                rating: .set(two),
+                label: .set(ColourLabel(colour: .blue)),
+                keywords: .set(["cliff", "mist"])),
+            into: nil
+        ).write(to: afterSidecar)
+
+        let beforeSet = ScannedPhotoSet(
+            photoSet: try PhotoSet(folderID: folder, relativeFolderPath: "", rawURL: beforeRaw),
+            sidecar: .resolved(beforeSidecar),
+            imageFiles: [])
+        let unreadableSet = ScannedPhotoSet(
+            photoSet: try PhotoSet(folderID: folder, relativeFolderPath: "", rawURL: unreadableRaw),
+            sidecar: .resolved(unreadableSidecar),
+            imageFiles: [])
+        let afterSet = ScannedPhotoSet(
+            photoSet: try PhotoSet(folderID: folder, relativeFolderPath: "", rawURL: afterRaw),
+            sidecar: .resolved(afterSidecar),
+            imageFiles: [])
+
+        let sets = [beforeSet, unreadableSet, afterSet]
+        let marks = FolderLibrarySession.readMarks(
+            for: sets, storedMarks: [:], codec: codec, trustAbsentSidecar: true)
+
+        #expect(marks.count < sets.count)
+        #expect(marks.count == 2)
+        #expect(marks[unreadableSet.id] == nil)
+        #expect(
+            marks[beforeSet.id]
+                == PhotoMarks(
+                    rating: four,
+                    label: ColourLabel(colour: .green),
+                    keywords: ["harbour", "dawn"]))
+        #expect(
+            marks[afterSet.id]
+                == PhotoMarks(
+                    rating: two,
+                    label: ColourLabel(colour: .blue),
+                    keywords: ["cliff", "mist"]))
     }
 
     @Test func folderSessionScanCoalescesBatchUpdatesWithoutIntermediatePendingPhotos() async throws
@@ -600,8 +673,8 @@ private actor DispatchQueueMarkHelper {
         for sets: [ScannedPhotoSet],
         storedMarks: [PhotoIdentity: CloveStoredMarks],
         codec: XMPCodec
-    ) throws -> [PhotoIdentity: PhotoMarks] {
-        try FolderLibrarySession.readMarks(
+    ) -> [PhotoIdentity: PhotoMarks] {
+        FolderLibrarySession.readMarks(
             for: sets, storedMarks: storedMarks, codec: codec, trustAbsentSidecar: false)
     }
 }

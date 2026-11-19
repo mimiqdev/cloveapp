@@ -371,7 +371,7 @@ final class FolderLibrarySession: FolderLibrary {
         let codec = codec
         let marks = try await session.withAdmittedWork {
             let stored = try await stores.writes.storedMarks(for: session.folder.id)
-            return try await Self.readMarksOffPool(for: sets, storedMarks: stored, codec: codec)
+            return await Self.readMarksOffPool(for: sets, storedMarks: stored, codec: codec)
         }
         for (photo, marks) in marks { store.setMarks(marks, for: photo) }
         publish(.reads(times: [:], marks: marks))
@@ -903,10 +903,9 @@ final class FolderLibrarySession: FolderLibrary {
                         // I4 reads the primary file of each set off the main actor; a RAW set's
                         // capture time comes from the RAW (G1 decision 1, I4).
                         let reads = await metadata.read(urls: sets.map { $0.photoSet.primary.url })
-                        let marks =
-                            (try? await Self.readMarksOffPool(
-                                for: sets, storedMarks: storedMarks, codec: codec,
-                                trustAbsentSidecar: true)) ?? [:]
+                        let marks = await Self.readMarksOffPool(
+                            for: sets, storedMarks: storedMarks, codec: codec,
+                            trustAbsentSidecar: true)
                         await self.applyReads(
                             reads, marks: marks, sets: sets, generation: generation)
                     }
@@ -1060,17 +1059,13 @@ final class FolderLibrarySession: FolderLibrary {
         storedMarks: [PhotoIdentity: CloveStoredMarks],
         codec: XMPCodec,
         trustAbsentSidecar: Bool = false
-    ) async throws -> [PhotoIdentity: PhotoMarks] {
-        try await withCheckedThrowingContinuation { continuation in
+    ) async -> [PhotoIdentity: PhotoMarks] {
+        await withCheckedContinuation { continuation in
             markReadQueue.async {
-                do {
-                    continuation.resume(
-                        returning: try readMarks(
-                            for: sets, storedMarks: storedMarks, codec: codec,
-                            trustAbsentSidecar: trustAbsentSidecar))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
+                continuation.resume(
+                    returning: readMarks(
+                        for: sets, storedMarks: storedMarks, codec: codec,
+                        trustAbsentSidecar: trustAbsentSidecar))
             }
         }
     }
@@ -1088,7 +1083,7 @@ final class FolderLibrarySession: FolderLibrary {
         storedMarks: [PhotoIdentity: CloveStoredMarks],
         codec: XMPCodec,
         trustAbsentSidecar: Bool = false
-    ) throws -> [PhotoIdentity: PhotoMarks] {
+    ) -> [PhotoIdentity: PhotoMarks] {
         var marks: [PhotoIdentity: PhotoMarks] = [:]
         for set in sets {
             var packet: XMPMarks?
@@ -1113,7 +1108,11 @@ final class FolderLibrarySession: FolderLibrary {
                         let data = try Data(contentsOf: sidecar)
                         packet = try? codec.read(data)
                     } catch CocoaError.fileReadNoSuchFile {
-                        // A missing sidecar has no marks; other read failures must not erase them.
+                        // A missing sidecar means unmarked (packet = nil).
+                    } catch {
+                        // Isolate sidecar I/O errors per photo so healthy siblings keep their
+                        // marks and callers can detect failure via marks.count < sets.count.
+                        continue
                     }
                 }
             } else {
