@@ -24,56 +24,79 @@ struct BatchSelectionTests {
         #expect(selected.toggling(cell).isEmpty)
     }
 
-    /// A collapsed group's cover stands for every photo in its group, and a second tap clears
-    /// all of them.
-    @Test func aCollapsedCoverSelectsItsWholeGroup() throws {
+    /// Even when a cell is a collapsed cover, interacting with it operates strictly on its visible
+    /// cover photo (`cell.photo.id`) and never pulls in hidden or other group members.
+    @Test func aCollapsedCoverSelectsAndTogglesOnlyItsVisibleCoverPhoto() throws {
         let photos = ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) }
         let cells = GridDisplay(
             photos: photos, groups: BatchMarkFixtures.groups
         ).cells
         let cover = try #require(cells.first)
         #expect(cover.id == .group(BatchMarkFixtures.burst))
-        let group = Set(["a", "b", "c"].map(BatchMarkFixtures.photo))
+        let coverPhoto = BatchMarkFixtures.photo("a")
 
         let empty = BatchSelection(groups: BatchMarkFixtures.groups)
-        #expect(empty.identities(for: cover) == group)
+        #expect(empty.identities(for: cover) == [coverPhoto])
         #expect(!empty.showsSelected(cover))
-        #expect(empty.toggling(cover) == group)
+        #expect(empty.selecting(cover) == [coverPhoto])
+        #expect(empty.toggling(cover) == [coverPhoto])
 
-        let selected = BatchSelection(groups: BatchMarkFixtures.groups, selection: group)
+        let selected = BatchSelection(groups: BatchMarkFixtures.groups, selection: [coverPhoto])
         #expect(selected.showsSelected(cover))
         #expect(selected.toggling(cover).isEmpty)
     }
 
-    /// A partly selected cover completes its group instead of clearing the part already chosen,
-    /// and Select all adds every photo the shown cells stand for.
-    @Test func aPartlySelectedCoverCompletesItsGroup() throws {
-        let photos = ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) }
-        let cells = GridDisplay(
-            photos: photos, groups: BatchMarkFixtures.groups
+    /// Selecting a collapsed cover when another hidden or sibling member happens to be in the
+    /// selection only affects the cover's visible photo; Select all on visible `photos` adds all
+    /// visible photos without pulling in hidden group members.
+    @Test func selectingCoverAndSelectAllVisibleNeverPullInHiddenMembers() throws {
+        let visiblePhotos = ["a", "b", "d"].map { BatchMarkFixtures.gridPhoto($0) }
+        let collapsedCells = GridDisplay(
+            photos: visiblePhotos, groups: BatchMarkFixtures.groups
         ).cells
-        let cover = try #require(cells.first)
-        let group: Set<PhotoIdentity> = ["a", "b", "c"].reduce(into: Set()) {
-            $0.insert(BatchMarkFixtures.photo($1))
-        }
-        let partly = BatchSelection(
+        let unfoldedCells = GridDisplay(
+            photos: visiblePhotos, groups: BatchMarkFixtures.groups,
+            expandGroupsInline: true
+        ).cells
+        let cover = try #require(collapsedCells.first)
+        let batch = BatchSelection(
             groups: BatchMarkFixtures.groups, selection: [BatchMarkFixtures.photo("a")])
-        #expect(!partly.showsSelected(cover))
-        #expect(partly.toggling(cover) == group)
+        #expect(batch.showsSelected(cover))
+        #expect(!batch.showsAllSelected(visiblePhotos))
+        #expect(!batch.showsAllSelected(unfoldedCells))
 
-        let everything = partly.selectingAll(cells)
-        #expect(everything == group.union([BatchMarkFixtures.photo("d")]))
+        let selectedVisible = batch.selectingAll(visiblePhotos)
+        #expect(
+            selectedVisible
+                == Set(["a", "b", "d"].map(BatchMarkFixtures.photo)))
+        #expect(!selectedVisible.contains(BatchMarkFixtures.photo("c")))
+
+        let selectedFromUnfolded = batch.selectingAll(unfoldedCells)
+        #expect(selectedFromUnfolded == selectedVisible)
+        #expect(
+            BatchSelection(groups: BatchMarkFixtures.groups, selection: selectedVisible)
+                .showsAllSelected(visiblePhotos))
     }
 
-    /// A cover whose group is no longer published falls back to its own photo, so a stale cell
-    /// never selects a group nobody can open.
-    @Test func aCoverWithoutItsGroupSelectsItsOwnPhoto() throws {
-        let display = GridDisplay(
-            photos: ["a", "b"].map { BatchMarkFixtures.gridPhoto($0) },
-            groups: BatchMarkFixtures.groups)
-        let cover = try #require(display.cells.first)
-        let stale = BatchSelection()
-        #expect(stale.identities(for: cover) == [BatchMarkFixtures.photo("a")])
+    /// Unfolded group cells each select and toggle independently on their own photo identity.
+    @Test func unfoldedGroupCellsSelectAndToggleIndividually() throws {
+        let photos = ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) }
+        let cells = GridDisplay(
+            photos: photos, groups: BatchMarkFixtures.groups, expandGroupsInline: true
+        ).cells
+        #expect(cells.count == 4)
+
+        let batch = BatchSelection(groups: BatchMarkFixtures.groups)
+        let afterFirst = batch.toggling(cells[0])
+        #expect(afterFirst == [BatchMarkFixtures.photo("a")])
+
+        let afterSecond = BatchSelection(groups: BatchMarkFixtures.groups, selection: afterFirst)
+            .toggling(cells[1])
+        #expect(afterSecond == Set([BatchMarkFixtures.photo("a"), BatchMarkFixtures.photo("b")]))
+
+        let afterUntoggle = BatchSelection(groups: BatchMarkFixtures.groups, selection: afterSecond)
+            .toggling(cells[0])
+        #expect(afterUntoggle == [BatchMarkFixtures.photo("b")])
     }
 
     /// A batch marks the selected photos the grid shows, in grid order; a photo the filter
@@ -92,25 +115,31 @@ struct BatchSelectionTests {
         #expect(both.map(\.id) == ["b", "a"].map(BatchMarkFixtures.photo))
     }
 
-    @Test func deselectingAllRemovesShownCellsWhileKeepingHiddenSelection() {
+    @Test func deselectingAllRemovesVisiblePhotosWhileKeepingHiddenSelection() {
+        let photos = ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) }
         let cells = GridDisplay(
-            photos: ["a", "b", "c", "d"].map { BatchMarkFixtures.gridPhoto($0) },
-            groups: BatchMarkFixtures.groups
+            photos: photos, groups: BatchMarkFixtures.groups, expandGroupsInline: true
         ).cells
         let hidden = BatchMarkFixtures.photo("hidden")
         let all = BatchSelection(groups: BatchMarkFixtures.groups, selection: [hidden])
-            .selectingAll(cells)
+            .selectingAll(photos)
         let batch = BatchSelection(groups: BatchMarkFixtures.groups, selection: all)
 
+        #expect(batch.showsAllSelected(photos))
         #expect(batch.showsAllSelected(cells))
         #expect(
-            !BatchSelection(groups: BatchMarkFixtures.groups, selection: []).showsAllSelected([]))
+            !BatchSelection(groups: BatchMarkFixtures.groups, selection: []).showsAllSelected(
+                [GridPhoto]()))
+        #expect(
+            !BatchSelection(groups: BatchMarkFixtures.groups, selection: []).showsAllSelected(
+                [GridCellItem]()))
 
-        let deselected = batch.deselectingAll(cells)
+        let deselected = batch.deselectingAll(photos)
         #expect(deselected == [hidden])
         #expect(
             !BatchSelection(groups: BatchMarkFixtures.groups, selection: deselected)
-                .showsAllSelected(cells))
+                .showsAllSelected(photos))
+        #expect(batch.deselectingAll(cells) == [hidden])
     }
 
     @Test func rangeSelectionSelectsForwardBackwardAndRestoresBaselineOnPullBack() {
@@ -160,19 +189,20 @@ struct BatchSelectionTests {
                 == baseline)
     }
 
-    @Test func rangeSelectionExpandsCollapsedGroupCoversInSpan() throws {
+    @Test func rangeSelectionOperatesOnIndividualUnfoldedGroupCells() throws {
         let cells = GridDisplay(
             photos: ["a", "b", "c", "d", "e"].map { BatchMarkFixtures.gridPhoto($0) },
-            groups: BatchMarkFixtures.groups
+            groups: BatchMarkFixtures.groups,
+            expandGroupsInline: true
         ).cells
-        // cells[0] is collapsed cover for {a, b, c}, cells[1] is d, cells[2] is e.
-        #expect(cells.count == 3)
+        // Unfolded: cells[0]=a, cells[1]=b, cells[2]=c, cells[3]=d, cells[4]=e.
+        #expect(cells.count == 5)
         let base = BatchSelection(groups: BatchMarkFixtures.groups, selection: [])
         let span = base.rangeSelection(in: cells, anchorIndex: 0, currentIndex: 1, selecting: true)
-        #expect(span == Set(["a", "b", "c", "d"].map(BatchMarkFixtures.photo)))
+        #expect(span == Set(["a", "b"].map(BatchMarkFixtures.photo)))
 
         let deselect = BatchSelection(groups: BatchMarkFixtures.groups, selection: span)
             .rangeSelection(in: cells, anchorIndex: 0, currentIndex: 0, selecting: false)
-        #expect(deselect == [BatchMarkFixtures.photo("d")])
+        #expect(deselect == [BatchMarkFixtures.photo("b")])
     }
 }

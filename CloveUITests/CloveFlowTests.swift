@@ -2463,6 +2463,62 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(marksControl.value as? String, "Unmarked")
     }
 
+    @MainActor
+    func testSelectModeUnfoldsGroupsIntoInlineTraysAndPreservesSinglePhotoSelection() throws {
+        for theme in ["light", "dark"] {
+            let app = launchSample()
+            defer { app.terminate() }
+            openLibrary(app)
+            applyComparisonTheme(theme, app)
+
+            let collapsedGroup = element(app, "clove.grid.group.burst-2678")
+            let member1 = element(app, "clove.grid.photo.mmq02678")
+            let member2 = element(app, "clove.grid.photo.mmq02679")
+            let member3 = element(app, "clove.grid.photo.mmq02681")
+            let standalone = element(app, "clove.grid.photo.mmq02680")
+            XCTAssertTrue(collapsedGroup.waitForExistence(timeout: 5))
+            XCTAssertFalse(member2.exists)
+
+            element(app, "clove.grid.more").tap()
+            app.buttons["Select"].tap()
+            let countLabel = element(app, "clove.grid.batch.count")
+            XCTAssertTrue(countLabel.waitForExistence(timeout: 5))
+            XCTAssertEqual(countLabel.label, "0 selected")
+
+            XCTAssertTrue(member1.waitForExistence(timeout: 5))
+            XCTAssertTrue(member2.waitForExistence(timeout: 5))
+            XCTAssertTrue(member3.waitForExistence(timeout: 5))
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), collapsedGroup))
+            XCTAssertTrue(member1.label.contains("Group 1 of 3"))
+            XCTAssertTrue(member2.label.contains("Group 2 of 3"))
+            XCTAssertTrue(member3.label.contains("Group 3 of 3"))
+
+            member2.tap()
+            XCTAssertTrue(waitForLabel("1 selected", countLabel))
+            standalone.tap()
+            XCTAssertTrue(waitForLabel("2 selected", countLabel))
+            capture("select-mode-unfolded-trays-\(theme)")
+
+            member3.tap()
+            XCTAssertTrue(waitForLabel("3 selected", countLabel))
+            element(app, "clove.grid.batch.done").tap()
+
+            XCTAssertTrue(collapsedGroup.waitForExistence(timeout: 5))
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), member2))
+
+            if theme == "light" {
+                collapsedGroup.press(forDuration: 0.6)
+                XCTAssertTrue(element(app, "clove.grid.batch").waitForExistence(timeout: 5))
+                XCTAssertTrue(waitForLabel("1 selected", countLabel))
+                XCTAssertTrue(member2.waitForExistence(timeout: 5))
+                standalone.tap()
+                XCTAssertTrue(waitForLabel("2 selected", countLabel))
+                element(app, "clove.grid.batch.done").tap()
+                XCTAssertTrue(collapsedGroup.waitForExistence(timeout: 5))
+            }
+        }
+    }
+
     /// #302: the default zoomed mode keeps one-finger rating and photo switching, `Pan` keeps the
     /// one-finger pan with a two-finger rating swipe, and the chrome stays steady at both scales.
     @MainActor

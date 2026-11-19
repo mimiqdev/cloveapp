@@ -3,6 +3,14 @@ import SwiftUI
 import UIKit
 import os
 
+/// Describes how an unfolded group member tile sits inside its horizontal inline tray.
+struct GridGroupTrayPosition: Equatable, Sendable {
+    let memberIndex: Int
+    let memberCount: Int
+    let connectsLeading: Bool
+    let connectsTrailing: Bool
+}
+
 /// A reusable collection cell with token-based tile presentation and bounded thumbnail retries.
 final class GridPhotoCell: UICollectionViewCell {
     private var thumbnailTask: Task<Void, Never>?
@@ -20,6 +28,7 @@ final class GridPhotoCell: UICollectionViewCell {
     private var theme = CloveTheme.light
     private var language = ResolvedAppLanguage.english
     private var isSelecting = false
+    private(set) var trayPosition: GridGroupTrayPosition?
     private var onOpenGroup: (GroupID) -> Void = { _ in }
     private var pixelLoadSignpost: (token: UUID, state: OSSignpostIntervalState)?
     private(set) var hostingConfigurationCount = 0
@@ -27,11 +36,22 @@ final class GridPhotoCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
-        contentView.clipsToBounds = true
+        applyClipping()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyClipping()
+    }
+
+    private func applyClipping() {
+        let shouldClip = (trayPosition == nil)
+        clipsToBounds = shouldClip
+        contentView.clipsToBounds = shouldClip
+    }
 
     private var currentPeekingIDs: [PhotoIdentity] {
         guard let group = currentItem?.group, group.isCover else { return [] }
@@ -40,6 +60,7 @@ final class GridPhotoCell: UICollectionViewCell {
 
     func configure(
         with item: GridCellItem, isSelected: Bool, isCurrent: Bool = false, isSelecting: Bool,
+        trayPosition: GridGroupTrayPosition? = nil,
         thumbnails: any GridThumbnailSource, theme: CloveTheme,
         language: ResolvedAppLanguage = .english,
         onOpenGroup: @escaping (GroupID) -> Void
@@ -56,6 +77,8 @@ final class GridPhotoCell: UICollectionViewCell {
         self.theme = theme
         self.language = language
         self.isSelecting = isSelecting
+        self.trayPosition = trayPosition
+        applyClipping()
         self.onOpenGroup = onOpenGroup
         if changesPhoto {
             thumbnailTask?.cancel()
@@ -116,6 +139,8 @@ final class GridPhotoCell: UICollectionViewCell {
         retriesUnavailable = false
         peekingUnavailable.removeAll()
         peekingRetriesUnavailable.removeAll()
+        trayPosition = nil
+        applyClipping()
         contentConfiguration = nil
     }
 
@@ -143,7 +168,7 @@ final class GridPhotoCell: UICollectionViewCell {
             item: item, thumbnail: thumbnail, peekingThumbnails: peeking,
             companions: currentCompanions,
             isUnavailable: isUnavailable, isSelected: showsSelection, isCurrent: showsCurrent,
-            isSelecting: isSelecting, openGroup: onOpenGroup)
+            isSelecting: isSelecting, trayPosition: trayPosition, openGroup: onOpenGroup)
         let theme = theme
         let language = language
         contentConfiguration = UIHostingConfiguration {
@@ -153,6 +178,7 @@ final class GridPhotoCell: UICollectionViewCell {
                 .environment(\.locale, language.locale)
         }
         .margins(.all, 0)
+        applyClipping()
     }
 
     @discardableResult
@@ -312,6 +338,7 @@ private struct GridTile: View {
     /// Indicates the photo or collapsed stack currently open in detail in Split Photo Preview.
     var isCurrent = false
     let isSelecting: Bool
+    var trayPosition: GridGroupTrayPosition? = nil
     let openGroup: (GroupID) -> Void
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
@@ -325,42 +352,66 @@ private struct GridTile: View {
 
     var body: some View {
         GeometryReader { proxy in
-            Group {
-                if isCover {
-                    GroupStack(peekingImages: peekingThumbnails) { image }
-                } else {
-                    image
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .clipShape(RoundedRectangle(cornerRadius: tileCornerRadius))
+            if let tray = trayPosition {
+                let leadingInset: CGFloat = tray.connectsLeading ? 2 : 4
+                let trailingInset: CGFloat = tray.connectsTrailing ? 2 : 4
+                let verticalInset: CGFloat = 4
+                let photoWidth = max(0, proxy.size.width - leadingInset - trailingInset)
+                let photoHeight = max(0, proxy.size.height - verticalInset * 2)
+                ZStack(alignment: .topLeading) {
+                    InlineGroupTraySurface(
+                        connectsLeading: tray.connectsLeading,
+                        connectsTrailing: tray.connectsTrailing
+                    )
+                    .frame(
+                        width: proxy.size.width + (tray.connectsTrailing ? 1.5 : 0),
+                        height: proxy.size.height)
+                    photoContent(width: photoWidth, height: photoHeight)
+                        .padding(.top, verticalInset)
+                        .padding(.leading, leadingInset)
+                    if tray.memberIndex == 0 {
+                        trayGroupPill(count: tray.memberCount)
+                            .padding(7)
+                    }
                 }
-            }
-            .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
-            .overlay(alignment: .bottomLeading) { rating }
-            .overlay(alignment: .bottomTrailing) { label }
-            .overlay(alignment: .bottomTrailing) { bottomMarkers }
-            .overlay(alignment: .bottom) {
-                if isCurrent {
-                    CurrentPhotoIndicator(cornerRadius: tileCornerRadius)
-                        .frame(
-                            width: proxy.size.width,
-                            height: isCover ? max(0, proxy.size.height - 8) : proxy.size.height
-                        )
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            } else {
+                Group {
+                    if isCover {
+                        GroupStack(peekingImages: peekingThumbnails) { image }
+                            .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
+                            .overlay(alignment: .bottomLeading) { rating }
+                            .overlay(alignment: .bottomTrailing) { label }
+                            .overlay(alignment: .bottomTrailing) { bottomMarkers }
+                    } else {
+                        photoContent(width: proxy.size.width, height: proxy.size.height)
+                    }
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                if let group = item.group, isCover {
-                    GroupCountBadge(count: group.count, presentation: .grid).padding(4)
+                .overlay(alignment: .bottom) {
+                    if isCurrent {
+                        CurrentPhotoIndicator(cornerRadius: tileCornerRadius)
+                            .frame(
+                                width: proxy.size.width,
+                                height: isCover
+                                    ? max(0, proxy.size.height - 8) : proxy.size.height
+                            )
+                    }
                 }
-            }
-            .background {
-                if isExpandedGroupMember {
-                    // An expanded group's members sit on the same neutral surface as the
-                    // filmstrip's group extent: `text/primary` at 12% on the background shape
-                    // alone, never on the photo (owner decision, 2026-11-13, #226 filmstrip,
-                    // #227 grid).
-                    ExpandedGroupSurface(cornerRadius: 6)
-                } else if !isCover {
-                    Rectangle().fill(Color.clove.surface.card)
+                .overlay(alignment: .topTrailing) {
+                    if let group = item.group, isCover {
+                        GroupCountBadge(count: group.count, presentation: .grid).padding(4)
+                    }
+                }
+                .background {
+                    if isExpandedGroupMember {
+                        // An expanded group's members sit on the same neutral surface as the
+                        // filmstrip's group extent: `text/primary` at 12% on the background shape
+                        // alone, never on the photo (owner decision, 2026-11-13, #226 filmstrip,
+                        // #227 grid).
+                        ExpandedGroupSurface(cornerRadius: 6)
+                    } else if !isCover {
+                        Rectangle().fill(Color.clove.surface.card)
+                    }
                 }
             }
         }
@@ -390,6 +441,32 @@ private struct GridTile: View {
                 .accessibilityIdentifier("clove.grid.group.\(group.id.rawValue)")
             }
         }
+    }
+
+    private func photoContent(width: CGFloat, height: CGFloat) -> some View {
+        image
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: tileCornerRadius, style: .continuous))
+            .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
+            .overlay(alignment: .bottomLeading) { rating }
+            .overlay(alignment: .bottomTrailing) { label }
+            .overlay(alignment: .bottomTrailing) { bottomMarkers }
+    }
+
+    private func trayGroupPill(count: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "square.stack")
+                .font(.system(size: 9, weight: .semibold))
+            Text(count.formatted(.number.locale(language.locale)))
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+        }
+        .foregroundStyle(Color.white.opacity(0.95))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(Color.black.opacity(0.58), in: Capsule())
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder private var image: some View {
@@ -452,6 +529,12 @@ private struct GridTile: View {
                 Int64(item.group?.count ?? 0))
         }
         var parts = [item.photo.fileName]
+        if let group = item.group, !group.isCover, let memberIndex = group.memberIndex {
+            parts.append(
+                AppLocalization.format(
+                    "Group %lld of %lld", language: language,
+                    Int64(memberIndex + 1), Int64(group.count)))
+        }
         if let stars = item.photo.marks.rating.starCount {
             parts.append(AppLocalization.starCount(stars, language: language))
         }
@@ -476,5 +559,84 @@ private struct GridTile: View {
             parts.append(AppLocalization.string("Selected", language: language))
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// Neutral tray band behind unfolded inline group members in select mode, connecting
+/// horizontally across same-row group neighbors with rounded outer caps and no internal dividers.
+private struct InlineGroupTraySurface: View {
+    let connectsLeading: Bool
+    let connectsTrailing: Bool
+
+    private var trayShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: connectsLeading ? 0 : 8,
+            bottomLeadingRadius: connectsLeading ? 0 : 8,
+            bottomTrailingRadius: connectsTrailing ? 0 : 8,
+            topTrailingRadius: connectsTrailing ? 0 : 8,
+            style: .continuous)
+    }
+
+    var body: some View {
+        trayShape
+            .fill(Color.clove.text.primary.opacity(0.12))
+            .overlay {
+                InlineGroupTrayBorder(
+                    connectsLeading: connectsLeading,
+                    connectsTrailing: connectsTrailing,
+                    cornerRadius: 8
+                )
+                .stroke(Color.clove.text.primary.opacity(0.20), lineWidth: 1)
+            }
+    }
+}
+
+private struct InlineGroupTrayBorder: Shape {
+    let connectsLeading: Bool
+    let connectsTrailing: Bool
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        if !connectsLeading && !connectsTrailing {
+            return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .path(in: rect.insetBy(dx: 0.5, dy: 0.5))
+        }
+        let radius = min(cornerRadius, min(rect.width, rect.height) / 2)
+        let halfStroke: CGFloat = 0.5
+        let topY = rect.minY + halfStroke
+        let bottomY = rect.maxY - halfStroke
+        let leftX = connectsLeading ? rect.minX : rect.minX + halfStroke
+        let rightX = connectsTrailing ? rect.maxX : rect.maxX - halfStroke
+
+        var path = Path()
+        if !connectsLeading && connectsTrailing {
+            path.move(to: CGPoint(x: rightX, y: topY))
+            path.addArc(
+                tangent1End: CGPoint(x: leftX, y: topY),
+                tangent2End: CGPoint(x: leftX, y: bottomY),
+                radius: radius)
+            path.addArc(
+                tangent1End: CGPoint(x: leftX, y: bottomY),
+                tangent2End: CGPoint(x: rightX, y: bottomY),
+                radius: radius)
+            path.addLine(to: CGPoint(x: rightX, y: bottomY))
+        } else if connectsLeading && !connectsTrailing {
+            path.move(to: CGPoint(x: leftX, y: topY))
+            path.addArc(
+                tangent1End: CGPoint(x: rightX, y: topY),
+                tangent2End: CGPoint(x: rightX, y: bottomY),
+                radius: radius)
+            path.addArc(
+                tangent1End: CGPoint(x: rightX, y: bottomY),
+                tangent2End: CGPoint(x: leftX, y: bottomY),
+                radius: radius)
+            path.addLine(to: CGPoint(x: leftX, y: bottomY))
+        } else {
+            path.move(to: CGPoint(x: leftX, y: topY))
+            path.addLine(to: CGPoint(x: rightX, y: topY))
+            path.move(to: CGPoint(x: leftX, y: bottomY))
+            path.addLine(to: CGPoint(x: rightX, y: bottomY))
+        }
+        return path
     }
 }

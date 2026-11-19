@@ -627,28 +627,43 @@ final class BrowsingModel {
         BatchSelection(groups: groups, selection: state.selection)
     }
 
-    /// Enters multi-select on one cell's photos (PRD P0-09).
+    /// Enters multi-select on one cell's visible photo (PRD P0-09).
     ///
-    /// A photo's cell adds that photo; a collapsed group's cover adds every photo in its group,
-    /// because the cover stands for the group (PRD Grid, collapsed).
+    /// Select mode strictly operates on 1 cell = 1 visible photo: even on a collapsed cover,
+    /// long-pressing selects only that cover's visible Representative Photo and never pulls in
+    /// hidden or other group members.
     func beginSelection(of cell: GridCellItem) {
         state.selection = batchSelection.selecting(cell)
     }
 
-    /// Adds one cell's photos to the multi-selection or removes them (PRD P0-09).
-    ///
-    /// In multi-select a tap toggles instead of opening detail, and a partly selected cover
-    /// completes its group rather than clearing the part already chosen.
+    /// Adds one cell's visible photo to the multi-selection or removes it (PRD P0-09).
     func toggleSelection(of cell: GridCellItem) {
         state.selection = batchSelection.toggling(cell)
     }
 
-    /// Selects every photo the shown cells stand for (PRD P0-09's Select all visible).
+    /// Whether every currently visible photo in the grid is selected.
+    var showsAllVisibleSelected: Bool {
+        batchSelection.showsAllSelected(photos)
+    }
+
+    /// Selects every currently visible photo in `photos` (PRD P0-09's Select all visible),
+    /// regardless of whether groups are still collapsed or unfolded inline.
+    func selectAllVisible() {
+        state.selection = batchSelection.selectingAll(photos)
+    }
+
+    /// Selects every photo represented by `cells` (PRD P0-09's Select all visible).
     func selectAllVisible(_ cells: [GridCellItem]) {
         state.selection = batchSelection.selectingAll(cells)
     }
 
-    /// Removes every photo the shown cells stand for from the current selection.
+    /// Removes every currently visible photo in `photos` from the selection while keeping any
+    /// hidden selected photos.
+    func deselectAllVisible() {
+        state.selection = batchSelection.deselectingAll(photos)
+    }
+
+    /// Removes every photo represented by `cells` from the current selection.
     func deselectAllVisible(_ cells: [GridCellItem]) {
         state.selection = batchSelection.deselectingAll(cells)
     }

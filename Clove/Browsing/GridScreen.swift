@@ -22,6 +22,7 @@ struct GridScreen: View {
     @State private var showsFilters = false
     @State private var filterAnchorAttachments = 0
     @State private var selectsEmpty = false
+    @State private var areGroupsUnfolded: Bool
     private var isFilterAnchorReady: Bool { filterAnchorAttachments > 0 }
     @State private var isLandscapeContainer = false
     @State private var presentation = DetailPresentation.photoPreview
@@ -60,6 +61,7 @@ struct GridScreen: View {
         self.thumbnails = thumbnails ?? browsing.thumbnails
         self.filterPopoverTrigger = filterPopoverTrigger
         _presentation = State(initialValue: initialPresentation)
+        _areGroupsUnfolded = State(initialValue: browsing.isSelecting)
     }
 
     private var userInterfaceIdiom: UIUserInterfaceIdiom {
@@ -122,7 +124,8 @@ struct GridScreen: View {
     private var gridDisplay: GridDisplay {
         GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
-            groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil)
+            groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
+            expandGroupsInline: isSelecting && areGroupsUnfolded)
     }
 
     var body: some View {
@@ -135,6 +138,7 @@ struct GridScreen: View {
             }
             .onChange(of: browsing.state.folder) { _, _ in
                 selectsEmpty = false
+                areGroupsUnfolded = browsing.isSelecting
                 pendingPhotosConfirmationPlan = nil
                 showsNoEligiblePhotosAlert = false
             }
@@ -186,6 +190,7 @@ struct GridScreen: View {
                     GridBatchBar(
                         browsing: browsing,
                         cells: cells,
+                        onSelectAll: completeGroupUnfoldImmediately,
                         onDeselectAll: { selectsEmpty = true },
                         onRename: { renameFlow = BatchRenameFlow(browsing: browsing) },
                         onKeywords: { showsKeywordsSheet = true },
@@ -204,6 +209,22 @@ struct GridScreen: View {
                 isSelecting ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
                 value: isSelecting
             )
+            .task(id: isSelecting) {
+                guard isSelecting else {
+                    areGroupsUnfolded = false
+                    return
+                }
+                guard !areGroupsUnfolded else { return }
+                if reduceMotion || !store.settings.similarGroupsEnabled
+                    || browsing.readingProgress != nil
+                {
+                    areGroupsUnfolded = true
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled, isSelecting else { return }
+                areGroupsUnfolded = true
+            }
             .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
             .overlay(alignment: .bottom) {
                 if !(usesDock && browsing.state.route == .detail),
@@ -459,7 +480,9 @@ struct GridScreen: View {
                     beginSelection: { browsing.beginSelection(of: $0) },
                     toggleSelection: { browsing.toggleSelection(of: $0) },
                     setSelection: { browsing.setSelection($0) },
-                    keepSelectingWhenEmpty: { selectsEmpty = true }
+                    keepSelectingWhenEmpty: { selectsEmpty = true },
+                    areGroupsUnfolded: areGroupsUnfolded,
+                    completeGroupUnfold: completeGroupUnfoldImmediately
                 )
                 .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
                 .animation(
@@ -567,18 +590,17 @@ struct GridScreen: View {
     }
 
     @ViewBuilder private var selectionOptionsMenuItems: some View {
-        let batchSelection = BatchSelection(
-            groups: browsing.groups, selection: browsing.state.selection)
-        if !batchSelection.showsAllSelected(cells) {
+        if !browsing.showsAllVisibleSelected {
             Button(AppLocalization.string("Select all", language: language)) {
-                browsing.selectAllVisible(cells)
+                completeGroupUnfoldImmediately()
+                browsing.selectAllVisible()
             }
             .accessibilityIdentifier("clove.grid.batch.selectAll")
         }
         if !browsing.batchTargets.isEmpty {
             Button(AppLocalization.string("Deselect all", language: language)) {
                 selectsEmpty = true
-                browsing.deselectAllVisible(cells)
+                browsing.deselectAllVisible()
             }
             .accessibilityIdentifier("clove.grid.batch.deselectAll")
         }
@@ -898,6 +920,11 @@ struct GridScreen: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("clove.grid.empty")
         }
+    }
+
+    private func completeGroupUnfoldImmediately() {
+        guard isSelecting, !areGroupsUnfolded else { return }
+        areGroupsUnfolded = true
     }
 
     /// Opens one collapsed group in Group Focus on its Representative Photo.

@@ -80,12 +80,20 @@ struct GridCollectionView: UIViewRepresentable {
     /// Keeps multi-select mode active if a drag-deselect clears the last selected item.
     var keepSelectingWhenEmpty: () -> Void = {}
 
+    /// Whether similar groups are unfolded inline in select mode.
+    var areGroupsUnfolded = false
+
+    /// Completes the inline group unfold immediately when interaction begins before beat 2.
+    var completeGroupUnfold: () -> Void = {}
+
     func makeCoordinator() -> Coordinator {
         Coordinator(
             thumbnails: thumbnails, openPhoto: openPhoto, openGroup: openGroup,
             beginSelection: beginSelection, toggleSelection: toggleSelection,
             setSelection: setSelection, keepSelectingWhenEmpty: keepSelectingWhenEmpty,
-            selection: selection, foldExpandedGroup: foldExpandedGroup)
+            selection: selection, foldExpandedGroup: foldExpandedGroup,
+            areGroupsUnfolded: areGroupsUnfolded,
+            completeGroupUnfold: completeGroupUnfold)
     }
 
     static func dismantleUIView(_ uiView: UICollectionView, coordinator: Coordinator) {
@@ -140,13 +148,16 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.toggleSelection = toggleSelection
         context.coordinator.setSelection = setSelection
         context.coordinator.keepSelectingWhenEmpty = keepSelectingWhenEmpty
+        context.coordinator.completeGroupUnfold = completeGroupUnfold
         context.coordinator.apply(
             sections: sections, groups: groups, shownPhotos: shownPhotos,
             currentPhoto: currentPhoto, selection: selection,
             sizeClass: context.environment.horizontalSizeClass,
             theme: context.environment.cloveTheme,
             language: context.environment.appLanguage,
-            isSelectingEmpty: isSelectingEmpty)
+            isSelectingEmpty: isSelectingEmpty,
+            areGroupsUnfolded: areGroupsUnfolded,
+            reduceMotion: context.environment.accessibilityReduceMotion)
         for case let header as GridGroupHeader in collectionView.visibleSupplementaryViews(
             ofKind: GridGroupHeader.kind)
         where header.theme != context.environment.cloveTheme
@@ -313,6 +324,7 @@ extension GridCollectionView {
         var setSelection: ((Set<PhotoIdentity>) -> Void)?
         var keepSelectingWhenEmpty: () -> Void
         var foldExpandedGroup: (GroupID) -> Void
+        var completeGroupUnfold: () -> Void
         var followsCurrentPhoto = false
 
         private var sections: [GridSection] = []
@@ -321,13 +333,17 @@ extension GridCollectionView {
         private var shownPhotos: Set<PhotoIdentity> = []
         private var selection: Set<PhotoIdentity>
         private var itemsByID: [GridCellItem.ID: GridCellItem] = [:]
+        private var trayPositionsByID: [GridCellItem.ID: GridGroupTrayPosition] = [:]
+        private var areGroupsUnfolded: Bool
+        private var pendingLongPressAnchorPhoto: PhotoIdentity?
         private struct PrefetchRequest {
             let token: UUID
             let task: Task<Void, Never>
         }
 
         private struct DragSelectionState {
-            let anchorIndex: Int
+            let anchorPhotoID: PhotoIdentity
+            var anchorIndex: Int
             let baseline: Set<PhotoIdentity>
             let selecting: Bool
             var lastCurrentIndex: Int
@@ -383,7 +399,9 @@ extension GridCollectionView {
             setSelection: ((Set<PhotoIdentity>) -> Void)?,
             keepSelectingWhenEmpty: @escaping () -> Void,
             selection: Set<PhotoIdentity>,
-            foldExpandedGroup: @escaping (GroupID) -> Void
+            foldExpandedGroup: @escaping (GroupID) -> Void,
+            areGroupsUnfolded: Bool,
+            completeGroupUnfold: @escaping () -> Void
         ) {
             self.thumbnails = thumbnails
             self.openPhoto = openPhoto
@@ -394,6 +412,8 @@ extension GridCollectionView {
             self.keepSelectingWhenEmpty = keepSelectingWhenEmpty
             self.selection = selection
             self.foldExpandedGroup = foldExpandedGroup
+            self.areGroupsUnfolded = areGroupsUnfolded
+            self.completeGroupUnfold = completeGroupUnfold
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -408,6 +428,7 @@ extension GridCollectionView {
                 collectionView.bounds.width > 0,
                 collectionView.bounds.height > 0
             else { return }
+            reconfigureTrayPositionsIfNeeded(in: collectionView)
             if let anchor = currentResizeAnchor(in: collectionView) {
                 settledResizeAnchor = anchor
             }
@@ -425,6 +446,7 @@ extension GridCollectionView {
             let held = pendingResizeAnchor ?? settledResizeAnchor
             pendingResizeAnchor = nil
             guard let held, let collectionView else { return }
+            reconfigureTrayPositionsIfNeeded(in: collectionView)
             guard let indexPath = indexPath(of: held.id),
                 let attributes = collectionView.layoutAttributesForItem(at: indexPath)
             else { return }
@@ -433,6 +455,72 @@ extension GridCollectionView {
                 - collectionView.adjustedContentInset.top
             scrollToClampedOffsetY(targetY)
             settledResizeAnchor = currentResizeAnchor(in: collectionView) ?? held
+        }
+
+        private func activeColumns(in collectionView: UICollectionView) -> Int {
+            let safeWidth = collectionView.safeAreaLayoutGuide.layoutFrame.width
+            let width = safeWidth > 0 ? safeWidth : collectionView.bounds.width
+            let isRegular =
+                lastSizeClass == .regular
+                || collectionView.traitCollection.horizontalSizeClass == .regular
+            guard width > 0 else {
+                return columnCount ?? (isRegular ? 6 : 3)
+            }
+            return columnCount
+                ?? GridCollectionView.columns(width: width, regular: isRegular)
+        }
+
+        private func computeTrayPositions(
+            in sections: [GridSection], columns: Int
+        ) -> [GridCellItem.ID: GridGroupTrayPosition] {
+            guard columns > 0 else { return [:] }
+            var positions: [GridCellItem.ID: GridGroupTrayPosition] = [:]
+            for section in sections where section.id == .photos {
+                let cells = section.cells
+                for index in cells.indices {
+                    let item = cells[index]
+                    guard let group = item.group, !group.isCover else { continue }
+                    let col = index % columns
+                    let connectsLeading =
+                        index > 0
+                        && col > 0
+                        && cells[index - 1].group?.isCover == false
+                        && cells[index - 1].group?.id == group.id
+                    let connectsTrailing =
+                        index + 1 < cells.count
+                        && col + 1 < columns
+                        && cells[index + 1].group?.isCover == false
+                        && cells[index + 1].group?.id == group.id
+                    positions[item.id] = GridGroupTrayPosition(
+                        memberIndex: group.memberIndex ?? 0,
+                        memberCount: group.count,
+                        connectsLeading: connectsLeading,
+                        connectsTrailing: connectsTrailing)
+                }
+            }
+            return positions
+        }
+
+        private func reconfigureTrayPositionsIfNeeded(in collectionView: UICollectionView) {
+            guard let dataSource else { return }
+            let newTrayPositions = computeTrayPositions(
+                in: sections, columns: activeColumns(in: collectionView))
+            guard newTrayPositions != trayPositionsByID else { return }
+            let previous = trayPositionsByID
+            trayPositionsByID = newTrayPositions
+            let changed = Set(previous.keys).union(newTrayPositions.keys).filter {
+                previous[$0] != newTrayPositions[$0]
+            }
+            guard !changed.isEmpty else { return }
+            DispatchQueue.main.async { [weak dataSource] in
+                guard let dataSource else { return }
+                let existing = Set(dataSource.snapshot().itemIdentifiers)
+                let toReconfigure = changed.filter { existing.contains($0) }
+                guard !toReconfigure.isEmpty else { return }
+                var snapshot = dataSource.snapshot()
+                snapshot.reconfigureItems(Array(toReconfigure))
+                dataSource.apply(snapshot, animatingDifferences: false)
+            }
         }
 
         private func currentResizeAnchor(in collectionView: UICollectionView) -> HeldResizeAnchor? {
@@ -483,7 +571,9 @@ extension GridCollectionView {
                 cell.configure(
                     with: item, isSelected: self.showsSelected(item),
                     isCurrent: self.highlightsCurrentPhoto && self.highlightedCellID == item.id,
-                    isSelecting: self.isSelecting, thumbnails: self.thumbnails,
+                    isSelecting: self.isSelecting,
+                    trayPosition: self.trayPositionsByID[id],
+                    thumbnails: self.thumbnails,
                     theme: self.theme,
                     language: self.language
                 ) { [weak self] group in
@@ -570,11 +660,19 @@ extension GridCollectionView {
             selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?,
             theme newTheme: CloveTheme,
             language newLanguage: ResolvedAppLanguage,
-            isSelectingEmpty newSelectingEmpty: Bool
+            isSelectingEmpty newSelectingEmpty: Bool,
+            areGroupsUnfolded newAreGroupsUnfolded: Bool,
+            reduceMotion: Bool
         ) {
             guard let collectionView, let dataSource else { return }
             let newItems = newSections.flatMap(\.cells)
             let wasEmpty = items.isEmpty
+            let oldAreGroupsUnfolded = areGroupsUnfolded
+            areGroupsUnfolded = newAreGroupsUnfolded
+            let willBeSelecting = newSelectingEmpty || !newSelection.isEmpty
+            if !willBeSelecting {
+                pendingLongPressAnchorPhoto = nil
+            }
             let styleChanged =
                 theme != newTheme || language != newLanguage
                 || isSelectingEmpty != newSelectingEmpty
@@ -609,6 +707,11 @@ extension GridCollectionView {
             let newFocusGroup = newSections.compactMap(\.expandedGroup).first
             let before = BatchSelection(groups: groups, selection: selection)
             let after = BatchSelection(groups: newGroups, selection: newSelection)
+            let previousTrayPositions = trayPositionsByID
+            let newTrayPositions = computeTrayPositions(
+                in: newSections, columns: activeColumns(in: collectionView))
+            trayPositionsByID = newTrayPositions
+
             guard newSections != sections else {
                 groups = newGroups
                 shownPhotos = newShownPhotos
@@ -616,6 +719,9 @@ extension GridCollectionView {
                 selectionPanRecognizer?.isEnabled = setSelection != nil && isSelecting
                 let restyled = items.compactMap { item in
                     if highlightChanged && highlightCells.contains(item.id) { return item.id }
+                    if previousTrayPositions[item.id] != newTrayPositions[item.id] {
+                        return item.id
+                    }
                     return !styleChanged && before.showsSelected(item) == after.showsSelected(item)
                         ? nil : item.id
                 }
@@ -639,6 +745,13 @@ extension GridCollectionView {
             let previousByID = itemsByID
             let entersFocus = oldFocusGroup == nil && newFocusGroup != nil
             let leavesFocus = oldFocusGroup != nil && newFocusGroup == nil
+            let previousPhotoIDs = Set(items.map(\.photo.id))
+            let newPhotoIDs = Set(newItems.map(\.photo.id))
+            let isGroupFoldTransition =
+                oldAreGroupsUnfolded != newAreGroupsUnfolded
+                && !entersFocus && !leavesFocus
+                && !wasEmpty && !newItems.isEmpty
+                && !previousPhotoIDs.isDisjoint(with: newPhotoIDs)
             // Group Focus replaces the folder's run with the group's own run, so the folder's
             // place is kept beside it and given back when the person folds (#309).
             let folderOffsetBeforeFocus: CGFloat? =
@@ -652,8 +765,11 @@ extension GridCollectionView {
                 if entersFocus || leavesFocus {
                     nil
                 } else {
-                    hold(currentPhoto: currentPhoto, groups: groups, shownPhotos: shownPhotos)
+                    hold(
+                        currentPhoto: currentPhoto, groups: groups, shownPhotos: shownPhotos,
+                        preferLongPressOrVisibleAnchor: isGroupFoldTransition)
                 }
+            pendingLongPressAnchorPhoto = nil
             let plans = newSections.map { SectionPlan(isGroup: $0.expandedGroup != nil) }
             if plans != sectionPlans {
                 sectionPlans = plans
@@ -667,6 +783,13 @@ extension GridCollectionView {
             selection = newSelection
             selectionPanRecognizer?.isEnabled = setSelection != nil && isSelecting
             itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
+            if var drag = dragSelection {
+                if let remapped = newItems.firstIndex(where: { $0.photo.id == drag.anchorPhotoID })
+                {
+                    drag.anchorIndex = remapped
+                }
+                dragSelection = drag
+            }
 
             var snapshot = NSDiffableDataSourceSnapshot<GridSection.ID, GridCellItem.ID>()
             snapshot.appendSections(newSections.map(\.id))
@@ -676,21 +799,47 @@ extension GridCollectionView {
             let changed: [GridCellItem.ID] = newItems.compactMap { item in
                 if highlightChanged && highlightCells.contains(item.id) { return item.id }
                 guard let old = previousByID[item.id] else { return nil }
-                if old != item || styleChanged { return item.id }
+                if old != item || styleChanged
+                    || previousTrayPositions[item.id] != newTrayPositions[item.id]
+                {
+                    return item.id
+                }
                 return before.showsSelected(old) != after.showsSelected(item) ? item.id : nil
             }
             if !changed.isEmpty { snapshot.reconfigureItems(changed) }
-            dataSource.apply(snapshot, animatingDifferences: false)
 
-            if let foldedOffsetY {
-                if collectionView.bounds.height > 0 {
-                    collectionView.layoutIfNeeded()
+            if isGroupFoldTransition && !reduceMotion {
+                UIView.animate(
+                    withDuration: 0.28,
+                    delay: 0,
+                    usingSpringWithDamping: 0.86,
+                    initialSpringVelocity: 0,
+                    options: [.allowUserInteraction, .beginFromCurrentState]
+                ) {
+                    dataSource.apply(snapshot, animatingDifferences: true)
+                    if let held {
+                        self.restore(
+                            held: held, previousIDs: previousIDs, newItems: newItems,
+                            newGroups: newGroups, newShownPhotos: newShownPhotos,
+                            currentPhoto: currentPhoto,
+                            mapGroupFoldAnchors: true)
+                    }
                 }
-                scrollToClampedOffsetY(foldedOffsetY)
-            } else if let held {
-                restore(
-                    held: held, previousIDs: previousIDs, newItems: newItems, newGroups: newGroups,
-                    newShownPhotos: newShownPhotos, currentPhoto: currentPhoto)
+            } else {
+                dataSource.apply(snapshot, animatingDifferences: false)
+
+                if let foldedOffsetY {
+                    if collectionView.bounds.height > 0 {
+                        collectionView.layoutIfNeeded()
+                    }
+                    scrollToClampedOffsetY(foldedOffsetY)
+                } else if let held {
+                    restore(
+                        held: held, previousIDs: previousIDs, newItems: newItems,
+                        newGroups: newGroups, newShownPhotos: newShownPhotos,
+                        currentPhoto: currentPhoto,
+                        mapGroupFoldAnchors: isGroupFoldTransition)
+                }
             }
 
             if entersFocus {
@@ -719,6 +868,10 @@ extension GridCollectionView {
             collectionView.deselectItem(at: indexPath, animated: false)
             guard let item = item(at: indexPath) else { return }
             if isSelecting {
+                if !areGroupsUnfolded {
+                    pendingLongPressAnchorPhoto = item.photo.id
+                    completeGroupUnfold()
+                }
                 toggleSelection(item)
             } else if let group = item.group, group.isCover {
                 openGroup(group.id)
@@ -750,6 +903,9 @@ extension GridCollectionView {
                     let indexPath = collectionView.indexPathForItem(at: point),
                     let item = item(at: indexPath)
                 else { return }
+                if !isSelecting {
+                    pendingLongPressAnchorPhoto = item.photo.id
+                }
                 if setSelection == nil {
                     beginSelection(item)
                     return
@@ -785,6 +941,10 @@ extension GridCollectionView {
                         ?? nearestIndexPath(to: startPoint, in: collectionView),
                     let item = item(at: startIndexPath)
                 else { return }
+                if isSelecting && !areGroupsUnfolded {
+                    pendingLongPressAnchorPhoto = item.photo.id
+                    completeGroupUnfold()
+                }
                 beginDragSelection(
                     at: startIndexPath, item: item, fingerPointInCollectionView: point,
                     collectionView: collectionView)
@@ -817,6 +977,7 @@ extension GridCollectionView {
                 x: point.x - collectionView.bounds.origin.x,
                 y: point.y - collectionView.bounds.origin.y)
             dragSelection = DragSelectionState(
+                anchorPhotoID: item.photo.id,
                 anchorIndex: anchorIndex,
                 baseline: baseline,
                 selecting: selecting,
@@ -1135,31 +1296,64 @@ extension GridCollectionView {
         /// One anchor cell's old place on screen, and whether the current photo chose it (PRD P0-11).
         private struct HeldPlace {
             let id: GridCellItem.ID
+            let photoID: PhotoIdentity?
             let offset: CGFloat?
             let isCurrentPhoto: Bool
         }
 
         /// The anchor cell and its distance from the top of the visible area, before an update.
         ///
-        /// The current photo wins when the old cells drew it, so a refinement holds the photo.
-        /// Otherwise the top visible cell is the anchor, because no photo has a place to keep.
+        /// During inline fold/unfold transitions, a pressed tile (long press, tap, or pan start)
+        /// wins first, then a visible current photo, else the top-most visible cell.
+        /// For ordinary updates, the current photo wins when drawn, else the top visible cell.
         private func hold(
             currentPhoto: PhotoIdentity?, groups: [BrowsingGroup],
-            shownPhotos: Set<PhotoIdentity>
+            shownPhotos: Set<PhotoIdentity>,
+            preferLongPressOrVisibleAnchor: Bool = false
         ) -> HeldPlace? {
             guard let collectionView, !items.isEmpty else { return nil }
+            if preferLongPressOrVisibleAnchor {
+                if let anchorPhoto = pendingLongPressAnchorPhoto,
+                    let cell = items.first(where: { $0.photo.id == anchorPhoto })?.id
+                        ?? GridCellItem.cell(
+                            for: anchorPhoto, in: items, groups: groups, shown: shownPhotos),
+                    let offset = viewportOffset(of: cell)
+                {
+                    return HeldPlace(
+                        id: cell, photoID: anchorPhoto, offset: offset, isCurrentPhoto: false)
+                }
+                if let currentPhoto,
+                    let cell = GridCellItem.cell(
+                        for: currentPhoto, in: items, groups: groups, shown: shownPhotos),
+                    let indexPath = indexPath(of: cell),
+                    isItemVisible(at: indexPath, in: collectionView),
+                    let offset = viewportOffset(of: cell)
+                {
+                    return HeldPlace(
+                        id: cell, photoID: currentPhoto, offset: offset, isCurrentPhoto: true)
+                }
+                guard let first = firstVisibleCellIndexPath(in: collectionView),
+                    let anchorItem = item(at: first)
+                else { return nil }
+                let anchorPhoto: PhotoIdentity? =
+                    (anchorItem.group?.isCover == true) ? nil : anchorItem.photo.id
+                return HeldPlace(
+                    id: anchorItem.id, photoID: anchorPhoto,
+                    offset: viewportOffset(of: anchorItem.id), isCurrentPhoto: false)
+            }
             if let currentPhoto,
                 let cell = GridCellItem.cell(
                     for: currentPhoto, in: items, groups: groups, shown: shownPhotos),
                 let offset = viewportOffset(of: cell)
             {
-                return HeldPlace(id: cell, offset: offset, isCurrentPhoto: true)
+                return HeldPlace(
+                    id: cell, photoID: currentPhoto, offset: offset, isCurrentPhoto: true)
             }
             guard let first = collectionView.indexPathsForVisibleItems.min(),
                 let anchor = item(at: first)?.id
             else { return nil }
             return HeldPlace(
-                id: anchor, offset: viewportOffset(of: anchor), isCurrentPhoto: false)
+                id: anchor, photoID: nil, offset: viewportOffset(of: anchor), isCurrentPhoto: false)
         }
 
         /// How far one cell sits below the visible area's top edge, negative when above it.
@@ -1173,7 +1367,8 @@ extension GridCollectionView {
         private func restore(
             held: HeldPlace, previousIDs: [GridCellItem.ID], newItems: [GridCellItem],
             newGroups: [BrowsingGroup], newShownPhotos: Set<PhotoIdentity>,
-            currentPhoto: PhotoIdentity?
+            currentPhoto: PhotoIdentity?,
+            mapGroupFoldAnchors: Bool = false
         ) {
             // The current photo may now be drawn by a different cell, such as a cover keyed by
             // a refined group; hold that cell where the photo's old cell was.
@@ -1184,6 +1379,31 @@ extension GridCollectionView {
             {
                 restore(cell, offset: held.offset)
                 return
+            }
+            if mapGroupFoldAnchors {
+                if let photoID = held.photoID,
+                    let cell = newItems.first(where: { $0.photo.id == photoID })?.id
+                        ?? GridCellItem.cell(
+                            for: photoID, in: newItems, groups: newGroups,
+                            shown: newShownPhotos)
+                {
+                    restore(cell, offset: held.offset)
+                    return
+                }
+                if case .group(let groupID) = held.id,
+                    let firstMemberCell = newItems.first(where: { $0.group?.id == groupID })?.id
+                {
+                    restore(firstMemberCell, offset: held.offset)
+                    return
+                }
+                if case .photo(let photoID) = held.id,
+                    let coverOrSelf = GridCellItem.cell(
+                        for: photoID, in: newItems, groups: newGroups,
+                        shown: newShownPhotos)
+                {
+                    restore(coverOrSelf, offset: held.offset)
+                    return
+                }
             }
             if newItems.contains(where: { $0.id == held.id }) {
                 restore(held.id, offset: held.offset)

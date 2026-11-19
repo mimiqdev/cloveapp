@@ -5,7 +5,8 @@ import SwiftUI
 /// Write failures are reported once by the shared toast.
 struct GridBatchBar: View {
     let browsing: BrowsingModel
-    let cells: [GridCellItem]
+    var cells: [GridCellItem] = []
+    var onSelectAll: () -> Void = {}
     var onDeselectAll: () -> Void = {}
     var onRename: () -> Void = {}
     var onKeywords: () -> Void = {}
@@ -27,8 +28,6 @@ struct GridBatchBar: View {
     }
 
     var body: some View {
-        let batchSelection = BatchSelection(
-            groups: browsing.groups, selection: browsing.state.selection)
         HStack(spacing: 0) {
             markingGroup
                 .disabled(!canOperate)
@@ -39,16 +38,17 @@ struct GridBatchBar: View {
                     }
                     .disabled(!canOperate)
                     .accessibilityIdentifier("clove.grid.batch.clearRating")
-                    if !batchSelection.showsAllSelected(cells) {
+                    if !browsing.showsAllVisibleSelected {
                         Button(AppLocalization.string("Select all", language: language)) {
-                            browsing.selectAllVisible(cells)
+                            onSelectAll()
+                            browsing.selectAllVisible()
                         }
                         .accessibilityIdentifier("clove.grid.batch.selectAll")
                     }
                     if !browsing.batchTargets.isEmpty {
                         Button(AppLocalization.string("Deselect all", language: language)) {
                             onDeselectAll()
-                            browsing.deselectAllVisible(cells)
+                            browsing.deselectAllVisible()
                         }
                         .accessibilityIdentifier("clove.grid.batch.deselectAll")
                     }

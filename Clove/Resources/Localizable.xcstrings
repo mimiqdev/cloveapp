@@ -3571,6 +3571,28 @@
         }
       }
     },
+    "Group %lld of %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group %lld of %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld / %lld 张（相似组）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld / %lld 張（相似組）"
+          }
+        }
+      }
+    },
     "Group · %@": {
       "localizations": {
         "en": {
