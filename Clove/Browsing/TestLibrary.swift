@@ -80,6 +80,19 @@ final class TestLibrary: FolderLibrary {
     /// The launch environment value that holds a synthetic folder-preparation status for UI tests.
     static let preparationVariable = "CLOVE_TEST_LIBRARY_PREPARATION"
 
+    /// The launch environment value controlling simulated Photos authorization state in UI tests.
+    static let photosAuthorizationVariable = "CLOVE_TEST_LIBRARY_PHOTOS_AUTHORIZATION"
+
+    /// The launch environment value forcing a Save to Photos error (`permission`, `write`, or
+    /// `folderUnavailable`) in UI tests.
+    static let photosSaveErrorVariable = "CLOVE_TEST_LIBRARY_PHOTOS_SAVE_ERROR"
+
+    /// The launch environment value slowing Save to Photos in milliseconds in UI tests.
+    static let photosDelayVariable = "CLOVE_TEST_LIBRARY_PHOTOS_DELAY_MS"
+
+    /// The launch environment value appending standalone JPEG/HEIF and RAW+HEIF sample sets.
+    static let rasterSamplesVariable = "CLOVE_TEST_LIBRARY_RASTER_SAMPLES"
+
     /// The library this launch browses: the sample when the launch value asks for it (PRD P0-13).
     static func forLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -96,7 +109,14 @@ final class TestLibrary: FolderLibrary {
             failureReason: forcedFailureReason(named: environment[forcedFailureReasonVariable]),
             locationLoss: locationLoss(named: environment[locationLossVariable]),
             drainDelay: Duration.milliseconds(
-                Int(environment[drainDelayVariable] ?? "") ?? 0))
+                Int(environment[drainDelayVariable] ?? "") ?? 0),
+            includeRasterSamples: environment[rasterSamplesVariable] == "1",
+            simulatedPhotosAuthorization: photosAuthorization(
+                named: environment[photosAuthorizationVariable]),
+            simulatedPhotosSaveError: photosSaveError(
+                named: environment[photosSaveErrorVariable]),
+            simulatedPhotosSaveDelay: Duration.milliseconds(
+                min(10_000, max(0, Int(environment[photosDelayVariable] ?? "") ?? 0))))
         library.writeDelay = .milliseconds(
             min(10_000, max(0, Int(environment["CLOVE_TEST_LIBRARY_WRITE_DELAY_MS"] ?? "") ?? 0)))
         library.disconnectsOnWrite = environment["CLOVE_TEST_LIBRARY_DISCONNECT_ON_WRITE"] == "1"
@@ -230,6 +250,12 @@ final class TestLibrary: FolderLibrary {
     private var writeDelay: Duration = .zero
     private var disconnectsOnWrite = false
     private let sampleLocationLoss: FolderLocationLoss.Reason?
+    private let companions: [PhotoIdentity: GridCompanions]
+    private var photosSaver: (any PhotosLibrarySaving)?
+    private(set) var savedPhotoURLs: [[URL]] = []
+    private var simulatedPhotosAuthorization: PhotosAuthorizationState
+    private var simulatedPhotosSaveError: PhotosSaveError?
+    private var simulatedPhotosSaveDelay: Duration
 
     /// The open folder's simulated preparation progress across analysis and grid previews.
     private(set) var preparationStatus: FolderPreparationStatus = .idle
@@ -246,12 +272,17 @@ final class TestLibrary: FolderLibrary {
         stored = []
         groups = []
         allGroups = []
+        companions = [:]
         failingMoveStemSuffix = nil
         readOnly = false
         failingStems = []
         failureReason = .notConfirmed
         drainDelay = .zero
         sampleLocationLoss = nil
+        photosSaver = nil
+        simulatedPhotosAuthorization = .authorized
+        simulatedPhotosSaveError = nil
+        simulatedPhotosSaveDelay = .zero
         thumbnails = SampleGridThumbnails()
         detailImages = EmptyDetailImages()
         preparationStatus = .idle
@@ -262,25 +293,36 @@ final class TestLibrary: FolderLibrary {
     init(
         photos: [GridPhoto],
         groups: [BrowsingGroup],
+        companions: [PhotoIdentity: GridCompanions] = TestLibrary.sampleCompanions,
         failingMoveStemSuffix: String? = nil,
         readOnly: Bool = false,
         detailImages: (any DetailImageSource)? = nil,
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
         locationLoss: FolderLocationLoss.Reason? = nil,
-        drainDelay: Duration = .zero
+        drainDelay: Duration = .zero,
+        photosSaver: (any PhotosLibrarySaving)? = nil,
+        simulatedPhotosAuthorization: PhotosAuthorizationState = .authorized,
+        simulatedPhotosSaveError: PhotosSaveError? = nil,
+        simulatedPhotosSaveDelay: Duration = .zero
     ) {
         folder = TestLibrary.sampleFolderKey
         stored = photos
         self.groups = groups
         allGroups = groups
+        self.companions = companions
         self.failingMoveStemSuffix = failingMoveStemSuffix
         self.readOnly = readOnly
         self.failingStems = failingStems.map { $0.lowercased() }
         self.failureReason = failureReason
         self.drainDelay = drainDelay
         self.sampleLocationLoss = locationLoss
-        thumbnails = TestLibrary.sampleThumbnails
+        self.photosSaver = photosSaver
+        self.simulatedPhotosAuthorization = simulatedPhotosAuthorization
+        self.simulatedPhotosSaveError = simulatedPhotosSaveError
+        self.simulatedPhotosSaveDelay = simulatedPhotosSaveDelay
+        thumbnails = SampleGridThumbnails(
+            companions: companions, unavailable: [TestLibrary.unreadablePhoto])
         self.detailImages = detailImages ?? SampleDetailImages()
         let count = photos.count
         let initialPreparation = FolderPreparationStatus(
@@ -442,9 +484,10 @@ final class TestLibrary: FolderLibrary {
             let stem =
                 result.temporarySets.first { $0.identity == photo.id }?.stem
                 ?? plan.rows.first { $0.id == photo.id }?.newStem ?? identity.stem
+            let ext = (photo.fileName as NSString).pathExtension
+            let updatedName = ext.isEmpty ? stem : "\(stem).\(ext)"
             return GridPhoto(
-                id: identity, fileName: stem + ".ARW", time: photo.time, marks: photo.marks)
-
+                id: identity, fileName: updatedName, time: photo.time, marks: photo.marks)
         }
         groups = []
         allGroups = []
@@ -457,6 +500,28 @@ final class TestLibrary: FolderLibrary {
         syncCompletedPreparationCount()
         updateContinuation.yield(
             .scanFinished(FolderScanSummary(photoCount: stored.count, status: .complete)))
+    }
+
+    func saveToPhotos(fileURLs: [URL]) async throws {
+        guard !fileURLs.isEmpty else { return }
+        guard folder != Self.emptyFolderKey, preparationStatus.waitingReason == nil else {
+            throw PhotosSaveError.folderUnavailable
+        }
+        if simulatedPhotosSaveDelay > .zero {
+            try? await Task.sleep(for: simulatedPhotosSaveDelay)
+        }
+        if let photosSaver {
+            try await photosSaver.savePhotos(fileURLs: fileURLs)
+            savedPhotoURLs.append(fileURLs)
+            return
+        }
+        guard simulatedPhotosAuthorization == .authorized else {
+            throw PhotosSaveError.permissionDenied
+        }
+        if let simulatedPhotosSaveError {
+            throw simulatedPhotosSaveError
+        }
+        savedPhotoURLs.append(fileURLs)
     }
 
     // MARK: - Move rejects
@@ -619,25 +684,42 @@ final class TestLibrary: FolderLibrary {
             ? root
             : root.appendingPathComponent(photo.id.relativeFolderPath, isDirectory: true)
         let stem = (photo.fileName as NSString).deletingPathExtension
-        let companions = TestLibrary.sampleCompanions[photo.id]
+        let ext = (photo.fileName as NSString).pathExtension
+        let format = PhotoFormat(pathExtension: ext) ?? .raw
+        let companionState = companions[photo.id]
         let sidecar = folder.appendingPathComponent("\(stem).xmp")
-        guard
-            let set = try? PhotoSet(
+        let primaryURL = folder.appendingPathComponent(photo.fileName)
+        let photoSet: PhotoSet?
+        let association: SidecarState
+        switch format {
+        case .raw:
+            photoSet = try? PhotoSet(
                 folderID: photo.id.folderID, relativeFolderPath: photo.id.relativeFolderPath,
-                rawURL: folder.appendingPathComponent("\(stem).ARW"),
-                jpegURL: companions?.hasJPEG == true
+                rawURL: primaryURL,
+                jpegURL: companionState?.hasJPEG == true
                     ? folder.appendingPathComponent("\(stem).JPG") : nil,
-                heifURL: companions?.hasHEIF == true
+                heifURL: companionState?.hasHEIF == true
                     ? folder.appendingPathComponent("\(stem).HIF") : nil,
                 sidecarURL: sidecar)
-        else { return nil }
+            association =
+                showsRenameProblem && photo.id.stem == "mmq02680"
+                ? .ambiguous([sidecar, folder.appendingPathComponent("\(stem).XMP")])
+                : .resolved(sidecar)
+        case .jpeg:
+            photoSet = try? PhotoSet(
+                folderID: photo.id.folderID, relativeFolderPath: photo.id.relativeFolderPath,
+                rawURL: nil, jpegURL: primaryURL, heifURL: nil, sidecarURL: nil)
+            association = .absent
+        case .heif:
+            photoSet = try? PhotoSet(
+                folderID: photo.id.folderID, relativeFolderPath: photo.id.relativeFolderPath,
+                rawURL: nil, jpegURL: nil, heifURL: primaryURL, sidecarURL: nil)
+            association = .absent
+        }
+        guard let set = photoSet else { return nil }
         let images = set.imageFiles.map { file in
             ScannedImageFile(file: file, size: nil, modificationDate: nil)
         }
-        let association: SidecarState =
-            showsRenameProblem && photo.id.stem == "mmq02680"
-            ? .ambiguous([sidecar, folder.appendingPathComponent("\(stem).XMP")])
-            : .resolved(sidecar)
         return ScannedPhotoSet(photoSet: set, sidecar: association, imageFiles: images)
     }
 
@@ -992,6 +1074,23 @@ final class TestLibrary: FolderLibrary {
         }
     }
 
+    private static func photosAuthorization(named name: String?) -> PhotosAuthorizationState {
+        switch name {
+        case "denied", "restricted": .denied
+        case "notDetermined": .notDetermined
+        default: .authorized
+        }
+    }
+
+    private static func photosSaveError(named name: String?) -> PhotosSaveError? {
+        switch name {
+        case "permission": .permissionDenied
+        case "folderUnavailable": .folderUnavailable
+        case "write": .writeFailed
+        default: nil
+        }
+    }
+
     /// The sample: 36 photos across two capture folders, a few marks, two bursts, two sets with
     /// reference companions and one unreadable file (PRD P0-03, PRD Grid, PRD Scan scope).
     static var sample: TestLibrary { sample() }
@@ -1006,10 +1105,15 @@ final class TestLibrary: FolderLibrary {
         failingStems: [String] = [],
         failureReason: MarkWriteFailureReason = .notConfirmed,
         locationLoss: FolderLocationLoss.Reason? = nil,
-        drainDelay: Duration = .zero
+        drainDelay: Duration = .zero,
+        includeRasterSamples: Bool = false,
+        photosSaver: (any PhotosLibrarySaving)? = nil,
+        simulatedPhotosAuthorization: PhotosAuthorizationState = .authorized,
+        simulatedPhotosSaveError: PhotosSaveError? = nil,
+        simulatedPhotosSaveDelay: Duration = .zero
     ) -> TestLibrary {
         let captureBase = Date(timeIntervalSince1970: 1_760_000_000)
-        let photos = (0..<36).map { index -> GridPhoto in
+        var photos = (0..<36).map { index -> GridPhoto in
             let number = 2678 + index
             let stem = String(format: "MMQ%05d", number)
             return GridPhoto(
@@ -1021,12 +1125,36 @@ final class TestLibrary: FolderLibrary {
                         hasUTCOffset: true)),
                 marks: sampleMarks[index])
         }
+        var companions = sampleCompanions
+        if includeRasterSamples {
+            let extra: [(number: Int, ext: String, offset: TimeInterval)] = [
+                (2714, "JPG", 36 * 4),
+                (2715, "HEIF", 37 * 4),
+                (2716, "ARW", 38 * 4),
+            ]
+            for item in extra {
+                let stem = String(format: "MMQ%05d", item.number)
+                photos.append(
+                    GridPhoto(
+                        id: samplePhoto(item.number),
+                        fileName: "\(stem).\(item.ext)",
+                        time: .known(
+                            PhotoTime(
+                                captureTime: captureBase.addingTimeInterval(item.offset),
+                                hasUTCOffset: true)),
+                        marks: PhotoMarks()))
+            }
+            companions[samplePhoto(2716)] = GridCompanions(hasHEIF: true)
+        }
         return TestLibrary(
-            photos: photos, groups: sampleGroups,
+            photos: photos, groups: sampleGroups, companions: companions,
             failingMoveStemSuffix: failingMoveStemSuffix, readOnly: readOnly,
             detailImages: sampleDetailImages, failingStems: failingStems,
             failureReason: failureReason, locationLoss: locationLoss,
-            drainDelay: drainDelay)
+            drainDelay: drainDelay, photosSaver: photosSaver,
+            simulatedPhotosAuthorization: simulatedPhotosAuthorization,
+            simulatedPhotosSaveError: simulatedPhotosSaveError,
+            simulatedPhotosSaveDelay: simulatedPhotosSaveDelay)
     }
 
     /// Two bursts from the sample, so the grid offers stacks (PRD P0-11).

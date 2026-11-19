@@ -1,0 +1,29 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSPhotoLibraryAddUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clove saves selected JPEG and HEIF photos to your Photos library when you choose Save to Photos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当您选择“保存到照片”时，Clove 会将所选的 JPEG 和 HEIF 照片保存到您的照片图库。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "當您選擇「儲存至相片」時，Clove 會將所選的 JPEG 與 HEIF 相片儲存至您的相片圖庫。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

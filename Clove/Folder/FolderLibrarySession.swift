@@ -65,6 +65,7 @@ final class FolderLibrarySession: FolderLibrary {
     private let caches: Task<Caches?, Never>
     private let metadata: MetadataReader
     private let codec = XMPCodec()
+    private let photosSaver: any PhotosLibrarySaving
 
     /// The rejects folder name the scan skips, read each time a folder opens (PRD Move rejects).
     ///
@@ -179,6 +180,7 @@ final class FolderLibrarySession: FolderLibrary {
         stores: Task<Stores, any Error>,
         caches: Task<Caches?, Never>? = nil,
         metadata: MetadataReader = MetadataReader(),
+        photosSaver: any PhotosLibrarySaving = SystemPhotosLibrarySaver(),
         rejectsFolderName: @escaping @MainActor () -> RejectsFolderName = {
             .defaultFolderName
         },
@@ -187,6 +189,7 @@ final class FolderLibrarySession: FolderLibrary {
         self.stores = stores
         self.caches = caches ?? Task.detached(priority: .userInitiated) { await Self.makeCaches() }
         self.metadata = metadata
+        self.photosSaver = photosSaver
         self.rejectsFolderName = rejectsFolderName
         self.similarGroupsEnabled = similarGroupsEnabled
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
@@ -529,6 +532,45 @@ final class FolderLibrarySession: FolderLibrary {
         else { throw RenameFlowError.rescanFailed }
         await scanTask?.value
         guard completedScanStatus == .complete else { throw RenameFlowError.rescanFailed }
+    }
+
+    // MARK: - Save to Photos
+
+    func saveToPhotos(fileURLs: [URL]) async throws {
+        guard !fileURLs.isEmpty else { return }
+        guard let session = openSession else {
+            throw PhotosSaveError.folderUnavailable
+        }
+        let generation = scanGeneration
+        let status = photosSaver.authorizationStatus()
+        let resolvedStatus: PhotosAuthorizationState =
+            status == .notDetermined
+            ? await photosSaver.requestAddOnlyAuthorization()
+            : status
+        guard resolvedStatus == .authorized else {
+            throw PhotosSaveError.permissionDenied
+        }
+        guard generation == scanGeneration, let activeSession = openSession,
+            activeSession === session
+        else {
+            throw PhotosSaveError.folderUnavailable
+        }
+        let saver = photosSaver
+        do {
+            try await activeSession.withAdmittedWork {
+                guard fileURLs.allSatisfy({ FileManager.default.isReadableFile(atPath: $0.path) })
+                else {
+                    throw PhotosSaveError.writeFailed
+                }
+                try await saver.savePhotos(fileURLs: fileURLs)
+            }
+        } catch let error as PhotosSaveError {
+            throw error
+        } catch is FolderSessionError {
+            throw PhotosSaveError.folderUnavailable
+        } catch {
+            throw PhotosSaveError.writeFailed
+        }
     }
 
     // MARK: - Entry

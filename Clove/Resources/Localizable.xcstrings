@@ -155,6 +155,98 @@
         }
       }
     },
+    "%lld RAW skipped": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld RAW skipped"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld RAW skipped"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已跳过 %lld 张 RAW"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已略過 %lld 張 RAW"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld RAW-only photos have no JPEG or HEIF and will be skipped.": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "1 RAW-only photo has no JPEG or HEIF and will be skipped."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld RAW-only photos have no JPEG or HEIF and will be skipped."
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "其中 %lld 张仅包含 RAW，没有 JPEG 或 HEIF，将被跳过。"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "其中 %lld 張僅包含 RAW，沒有 JPEG 或 HEIF，將會略過。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld couldn't be moved": {
       "localizations": {
         "en": {
@@ -1165,6 +1257,28 @@
         }
       }
     },
+    "Allow Photos access in Settings to save photos.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Photos access in Settings to save photos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在“设置”中允许访问“照片”以存储照片。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在「設定」中允許取用「相片」以儲存相片。"
+          }
+        }
+      }
+    },
     "Analysis paused for active viewing.": {
       "localizations": {
         "en": {
@@ -2041,6 +2155,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法儲存標記。"
+          }
+        }
+      }
+    },
+    "Couldn't save to Photos.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't save to Photos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能存储到照片。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能儲存到相片。"
           }
         }
       }
@@ -4381,6 +4517,28 @@
         }
       }
     },
+    "No JPEG or HEIF to save": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No JPEG or HEIF to save"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可存储的 JPEG 或 HEIF"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有可儲存的 JPEG 或 HEIF"
+          }
+        }
+      }
+    },
     "No autofocus metadata": {
       "localizations": {
         "en": {
@@ -4729,6 +4887,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "未連接"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "好"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "好"
           }
         }
       }
@@ -6791,6 +6971,166 @@
         }
       }
     },
+    "Save %lld": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Save %lld"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Save %lld"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "存储 %lld 张"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "儲存 %lld 張"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Save %lld photos to Photos?": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Save 1 photo to Photos?"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Save %lld photos to Photos?"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "要将这 %lld 张照片存储到照片吗？"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "要將這 %lld 張相片儲存到相片嗎？"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Save to Photos": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save to Photos"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储到照片"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存到相片"
+          }
+        }
+      }
+    },
+    "Saved %lld photos to Photos": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Saved 1 photo to Photos"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Saved %lld photos to Photos"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已将 %lld 张照片存储到照片"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已將 %lld 張相片儲存到相片"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Scanning folder": {
       "localizations": {
         "en": {
@@ -6897,6 +7237,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "已選擇"
+          }
+        }
+      }
+    },
+    "Selected photos are RAW-only. Clove saves existing JPEG and HEIF files without re-encoding RAW.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected photos are RAW-only. Clove saves existing JPEG and HEIF files without re-encoding RAW."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选照片仅包含 RAW。Clove 仅存储现有的 JPEG 和 HEIF 文件，不会重新编码 RAW。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所選相片僅包含 RAW。Clove 僅儲存現有的 JPEG 與 HEIF 檔案，不會重新編碼 RAW。"
           }
         }
       }
