@@ -359,6 +359,52 @@
         }
       }
     },
+    "%lld keywords": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "1 keyword"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld keywords"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个关键词"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 個關鍵字"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld left": {
       "localizations": {
         "en": {
@@ -1077,6 +1123,72 @@
         }
       }
     },
+    "Add": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入"
+          }
+        }
+      }
+    },
+    "Add %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加 %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入 %@"
+          }
+        }
+      }
+    },
+    "Add Keywords…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Keywords…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加关键词…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入關鍵字…"
+          }
+        }
+      }
+    },
     "Add capture date": {
       "localizations": {
         "en": {
@@ -1095,6 +1207,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "加入拍攝日期"
+          }
+        }
+      }
+    },
+    "Add keywords, separated by commas": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add keywords, separated by commas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入关键词，用逗号分隔"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "輸入關鍵字，以逗號分隔"
+          }
+        }
+      }
+    },
+    "Adds this keyword to all selected photos.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adds this keyword to all selected photos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将此关键词添加到所有已选照片。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將此關鍵字加入所有已選相片。"
           }
         }
       }
@@ -1161,6 +1317,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "全部 5 個星級"
+          }
+        }
+      }
+    },
+    "Also on some selected: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also on some selected: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分已选照片还包含：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分已選相片另包含：%@"
           }
         }
       }
@@ -4821,6 +4999,28 @@
         }
       }
     },
+    "On all selected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On all selected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部已选均有"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部已選皆有"
+          }
+        }
+      }
+    },
     "Open": {
       "localizations": {
         "en": {
@@ -6279,6 +6479,28 @@
         }
       }
     },
+    "Remove %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除 %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除 %@"
+          }
+        }
+      }
+    },
     "Remove from batch": {
       "localizations": {
         "en": {
@@ -6297,6 +6519,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "從本批移除"
+          }
+        }
+      }
+    },
+    "Removes this keyword from all selected photos.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removes this keyword from all selected photos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从所有已选照片中移除此关键词。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從所有已選相片中移除此關鍵字。"
           }
         }
       }
@@ -6923,6 +7167,28 @@
         }
       }
     },
+    "Separate multiple keywords with commas.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Separate multiple keywords with commas."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多个关键词请用逗号分隔。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多個關鍵字請以逗號分隔。"
+          }
+        }
+      }
+    },
     "Separator": {
       "localizations": {
         "en": {
@@ -7383,6 +7649,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "仍在統計此檔案夾中的相片。"
+          }
+        }
+      }
+    },
+    "Suggestions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suggestions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "建议"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "建議"
           }
         }
       }
