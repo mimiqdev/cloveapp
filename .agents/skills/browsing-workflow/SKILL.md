@@ -54,7 +54,7 @@ results. A passing variant is a failed check because the defect did not break it
 
 ## Compare the model with the code
 
-Source sync commit: `a05bf2a660a0f87a07a472ecc73254fe2cef7a13`. The machine-readable copy and
+Source sync commit: `88c7a7373eefe26cf99659277a88c1c221404807`. The machine-readable copy and
 covered-path list used by the drift gate live in `model/source-sync.json`.
 
 The model was manually compared with these functions at that commit:
@@ -77,7 +77,7 @@ The model was manually compared with these functions at that commit:
 Before trusting a run after a source change, compare the covered files with the sync commit:
 
 ```sh
-git diff a05bf2a660a0f87a07a472ecc73254fe2cef7a13 -- \
+git diff 88c7a7373eefe26cf99659277a88c1c221404807 -- \
   Clove/Browsing/BrowsingModel.swift \
   Clove/Browsing/FolderLibrary.swift \
   Clove/Folder/FolderLibrarySession.swift \
@@ -240,7 +240,8 @@ The current model uses these limits and assumptions:
   and 100%, with centre and eye anchors. Pinch values, native-scale conversion,
   pan geometry, RAW rendering, Vision, focus analysis, and UIKit layout are outside the model.
 - Filters, one-visible-member groups, several bursts per folder, selection, batch marks, Move
-  Rejects, rename, Settings navigation, and device posture changes are outside the model.
+  Rejects, rename, Save to Photos, Settings navigation, and device posture changes are outside the
+  model.
 
 The model does not execute Swift. Existing CloveCore, app, and UI tests remain necessary.
 
