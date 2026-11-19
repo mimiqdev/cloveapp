@@ -682,8 +682,10 @@ struct DetailMarkingView: View {
         }
     }
 
+    @ViewBuilder
     @available(iOS 27.1, *)
     private func duoPhotoPane(showsFilmstrip: Bool) -> some View {
+        let activeStagePill = chromeIsVisible ? stagePill : nil
         VStack(spacing: 0) {
             if showsExpandedPhotoHeader {
                 duoPhotoHeader
@@ -695,25 +697,35 @@ struct DetailMarkingView: View {
                     // The finishing pill floats over the stage's bottom edge, above the dock. It
                     // is not part of the dock's height, so showing or hiding it never resizes
                     // the photo stage (#305).
-                    if chromeIsVisible, let stagePill {
-                        stagePill
-                            .onGeometryChange(for: CGFloat.self) {
-                                $0.size.height
-                            } action: {
-                                duoPillHeight = $0
-                            }
-                            .padding(.bottom, showsFilmstrip ? 6 : 12)
-                            .transition(
-                                .asymmetric(
-                                    insertion: CloveMotion.slideTransition(
-                                        edge: .bottom, offset: 8, reduceMotion: reduceMotion),
-                                    removal: .identity))
+                    if showsFilmstrip {
+                        if let activeStagePill {
+                            activeStagePill
+                                .onGeometryChange(for: CGFloat.self) {
+                                    $0.size.height
+                                } action: {
+                                    duoPillHeight = $0
+                                }
+                                .padding(.bottom, 6)
+                                .transition(
+                                    .asymmetric(
+                                        insertion: CloveMotion.slideTransition(
+                                            edge: .bottom, offset: 8, reduceMotion: reduceMotion),
+                                        removal: .identity))
+                        }
+                    } else {
+                        photoPreviewStagePillOverlay(activeStagePill)
                     }
                 }
                 .animation(
-                    chromeIsVisible && stagePill != nil
+                    showsFilmstrip && activeStagePill != nil
                         ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                    value: stagePill?.identifier)
+                    value: showsFilmstrip ? activeStagePill?.identifier : nil
+                )
+                .onChange(of: activeStagePill != nil) { _, isVisible in
+                    if !isVisible {
+                        duoPillHeight = 0
+                    }
+                }
             // The failure toast sits above the filmstrip, clear of the capsule row
             // (handoff screens.md §03, components.md Toast).
             if let message = browsing.failureToastMessage {
@@ -763,6 +775,27 @@ struct DetailMarkingView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
         .reportTapPickerFrame(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
+    }
+
+    @ViewBuilder
+    private func photoPreviewStagePillOverlay(_ pill: PillAction?) -> some View {
+        Group {
+            if let pill {
+                pill
+                    .id(pill.identity)
+                    .onGeometryChange(for: CGFloat.self) {
+                        $0.size.height
+                    } action: {
+                        duoPillHeight = $0
+                    }
+                    .padding(.bottom, 12)
+                    .transition(.identity)
+            }
+        }
+        .transaction { transaction in
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
     }
 
     /// The shared marking family in the reserved bottom-right marking area beside the filmstrip

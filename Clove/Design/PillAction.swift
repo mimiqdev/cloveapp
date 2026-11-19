@@ -7,7 +7,7 @@ import SwiftUI
 /// (`copy.md` `group.rejectRest`) or `"Expand N photos"` in `text.primary`. The detail view decides
 /// when each pill appears (issue #304).
 struct PillAction: View {
-    enum Tone {
+    enum Tone: Hashable {
         case destructive
         case neutral
 
@@ -19,6 +19,12 @@ struct PillAction: View {
         }
     }
 
+    struct Identity: Hashable {
+        let identifier: String
+        let title: String
+        let tone: Tone
+    }
+
     /// What the button says (`design/handoff/copy.md`).
     let title: String
 
@@ -27,6 +33,10 @@ struct PillAction: View {
 
     /// Visual tone for the pill's text.
     var tone: Tone = .destructive
+
+    var identity: Identity {
+        Identity(identifier: identifier, title: title, tone: tone)
+    }
 
     /// Incrementing this counter pulses a subtle scale bounce (used for read-only nudges).
     var nudgeTrigger: Int = 0

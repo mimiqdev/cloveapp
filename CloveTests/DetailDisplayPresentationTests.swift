@@ -2914,6 +2914,445 @@ struct DetailDisplayPresentationTests {
         #expect(preview.isZoomed)
     }
 
+    @Test
+    func duoExpandedPhotoPreviewSingleStagePillMatchesStateAndClearsPriorLayerAcrossTransitions()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+
+        struct HostedDuoPane: View {
+            let browsing: BrowsingModel
+            let store: SettingsStore
+            let theme: CloveTheme
+            let framesBox: DetailFrameBox
+
+            var body: some View {
+                NavigationStack {
+                    GridScreen(
+                        browsing: browsing,
+                        thumbnails: browsing.thumbnails,
+                        initialPresentation: .photoPreview)
+                }
+                .environment(store)
+                .environment(\.cloveTheme, theme)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, true)
+                .environment(\.scenePhase, .active)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                }
+            }
+        }
+
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            let store = SettingsStore.sample
+            store.markGestureGuideSeen()
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            try await waitFor("folder open") { !browsing.isFolderOpening }
+
+            let group = try #require(browsing.groups.first)
+            let rep = try #require(
+                BrowsingGroup.representative(
+                    of: browsing.photos.filter { group.members.contains($0.id) })?.id)
+            let groupedIDs = Set(browsing.groups.flatMap(\.members))
+            let standalone = try #require(browsing.photos.first { !groupedIDs.contains($0.id) }).id
+
+            // Rate the representative so entering Group Focus offers an immediate finishing plan.
+            browsing.apply(.rating(try #require(Rating(rawValue: 4))), to: rep)
+
+            let framesBox = DetailFrameBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+            window.overrideUserInterfaceStyle = theme == .light ? .light : .dark
+            let host = UIHostingController(
+                rootView: HostedDuoPane(
+                    browsing: browsing, store: store, theme: theme, framesBox: framesBox))
+            host.traitOverrides.horizontalSizeClass = .regular
+            host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(100))
+            browsing.openPhoto(rep)
+            try await waitFor("Duo Photo Preview did not settle") {
+                framesBox.frames["clove.duo.photoPreview"] != nil
+                    && framesBox.frames["clove.duo.capsule"] != nil
+                    && self.findPreview(in: window) != nil
+            }
+            let preview = try #require(findPreview(in: window))
+            let baselinePreviewSize = preview.bounds.size
+
+            func visibleStagePillGlasses() -> [UIView] {
+                let previewFrame = preview.convert(preview.bounds, to: window)
+                let topY = previewFrame.minY + previewFrame.height * 0.6
+                let bottomY = framesBox.frames["clove.duo.capsule"]?.minY ?? previewFrame.maxY
+                let band = CGRect(
+                    x: previewFrame.minX,
+                    y: topY,
+                    width: previewFrame.width,
+                    height: max(0, bottomY - topY))
+                var matches: [UIView] = []
+                func walk(_ view: UIView) {
+                    let frame = view.convert(view.bounds, to: window)
+                    let name = String(describing: type(of: view))
+                    if name.contains("GlassInteractionView"),
+                        !view.isHidden, view.alpha > 0.01, view.layer.opacity > 0.01,
+                        frame.width > 40, frame.height > 20,
+                        band.intersects(frame)
+                    {
+                        matches.append(view)
+                    }
+                    for subview in view.subviews { walk(subview) }
+                }
+                walk(window)
+                return matches
+            }
+
+            func expectSingleCenteredPill(
+                expectedWidth: CGFloat? = nil,
+                label: String
+            ) throws -> CGRect {
+                let glasses = visibleStagePillGlasses()
+                #expect(glasses.count == 1, Comment(rawValue: "\(label): expected 1 capsule"))
+                let glass = try #require(glasses.first)
+                let frame = glass.convert(glass.bounds, to: window)
+                let previewFrame = preview.convert(preview.bounds, to: window)
+                let capsuleFrame = try #require(framesBox.frames["clove.duo.capsule"])
+
+                #expect(
+                    (glass.layer.animationKeys() ?? []).isEmpty,
+                    Comment(rawValue: "\(label): capsule layer should not hold stale animations"))
+                #expect(
+                    abs(frame.midX - previewFrame.midX) <= 1.0,
+                    Comment(rawValue: "\(label): capsule should be centered in right photo pane"))
+                #expect(
+                    abs(previewFrame.maxY - frame.maxY - 12.0) <= 1.5,
+                    Comment(rawValue: "\(label): capsule should sit 12 pt above stage bottom"))
+                #expect(
+                    frame.maxY <= capsuleFrame.minY,
+                    Comment(rawValue: "\(label): capsule must stay clear of marking dock"))
+                if let expectedWidth {
+                    #expect(
+                        abs(frame.width - expectedWidth) <= 0.5,
+                        Comment(rawValue: "\(label): unexpected capsule width \(frame.width)"))
+                }
+                #expect(
+                    preview.bounds.size == baselinePreviewSize,
+                    Comment(rawValue: "\(label): pill must not resize photo stage"))
+                return frame
+            }
+
+            func waitForSinglePillTransition(
+                expectedWidth: CGFloat? = nil,
+                excludingWidth: CGFloat? = nil,
+                label: String
+            ) async throws -> CGRect {
+                for _ in 0..<15 {
+                    let glasses = visibleStagePillGlasses()
+                    #expect(
+                        glasses.count <= 1,
+                        Comment(rawValue: "\(label): duplicate capsules during transition"))
+                    if let glass = glasses.first {
+                        let frame = glass.convert(glass.bounds, to: window)
+                        let matchesExpected =
+                            expectedWidth.map { abs(frame.width - $0) <= 0.5 } ?? true
+                        let differsFromPrevious =
+                            excludingWidth.map { abs(frame.width - $0) > 0.5 } ?? true
+                        if matchesExpected && differsFromPrevious {
+                            return try expectSingleCenteredPill(
+                                expectedWidth: expectedWidth, label: label)
+                        }
+                    }
+                    try await Task.sleep(for: .milliseconds(15))
+                }
+                return try expectSingleCenteredPill(expectedWidth: expectedWidth, label: label)
+            }
+
+            func waitForPillRemoval(label: String) async throws {
+                for _ in 0..<15 {
+                    let glasses = visibleStagePillGlasses()
+                    #expect(
+                        glasses.count <= 1,
+                        Comment(rawValue: "\(label): duplicate capsules during removal"))
+                    if glasses.isEmpty { return }
+                    try await Task.sleep(for: .milliseconds(15))
+                }
+                #expect(
+                    visibleStagePillGlasses().isEmpty,
+                    Comment(rawValue: "\(label): expected pill removal"))
+            }
+
+            // 1. Timeline on collapsed group's representative shows "Expand N photos".
+            try await waitFor("Expand pill did not appear") {
+                visibleStagePillGlasses().count == 1
+            }
+            let expandFrame = try expectSingleCenteredPill(label: "Timeline expand pill")
+
+            // 2. Animated transition Expand -> Reject leaves only the single Reject capsule.
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                browsing.openGroup(group.id, on: rep)
+            }
+            let midRejectFrame = try await waitForSinglePillTransition(
+                excludingWidth: expandFrame.width, label: "Mid Expand->Reject")
+            #expect(midRejectFrame.width != expandFrame.width)
+
+            try await Task.sleep(for: .milliseconds(350))
+            let rejectFrame = try expectSingleCenteredPill(
+                expectedWidth: midRejectFrame.width, label: "Settled Group Focus reject pill")
+
+            // 3. Animated transition Reject -> Expand snaps back to single Expand capsule.
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                browsing.collapseGroup()
+            }
+            _ = try await waitForSinglePillTransition(
+                expectedWidth: expandFrame.width, label: "Mid Reject->Expand")
+
+            try await Task.sleep(for: .milliseconds(350))
+            _ = try expectSingleCenteredPill(
+                expectedWidth: expandFrame.width, label: "Settled collapsed Expand pill")
+
+            // 4. Enter Group Focus and finish the group -> Reject disappears with no ghost layer.
+            browsing.openGroup(group.id, on: rep)
+            try await waitFor("Reject pill did not return") {
+                guard let frame = visibleStagePillGlasses().first?.frame else { return false }
+                return abs(frame.width - rejectFrame.width) <= 0.5
+            }
+            let plan = try #require(finishingPlan(for: group, currentPhoto: rep, in: browsing))
+            #expect(!plan.isEmpty)
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                browsing.runGroupFinishing(plan)
+            }
+            try await waitForPillRemoval(label: "Mid finishing Reject->nil")
+            #expect(preview.bounds.size == baselinePreviewSize)
+            try await Task.sleep(for: .milliseconds(350))
+            #expect(visibleStagePillGlasses().isEmpty)
+
+            // 5. Undo restores the Reject pill cleanly without stale artifacts.
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                browsing.undoLastMark()
+            }
+            _ = try await waitForSinglePillTransition(
+                expectedWidth: rejectFrame.width, label: "Mid Undo->Reject")
+
+            // 6. Chrome hide/show removes and restores the single pill; stage restores baseline size.
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                preview.onChromeToggle?()
+            }
+            try await waitForPillRemoval(label: "Mid chrome hide")
+
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                preview.onChromeToggle?()
+            }
+            try await waitFor("Reject pill did not restore with chrome") {
+                visibleStagePillGlasses().count == 1
+                    && framesBox.frames["clove.duo.capsule"] != nil
+            }
+            try await Task.sleep(for: .milliseconds(350))
+            _ = try expectSingleCenteredPill(
+                expectedWidth: rejectFrame.width, label: "Restored chrome Reject pill")
+
+            // 7. Switching to a standalone photo shows no group action pill.
+            browsing.collapseGroup()
+            withAnimation(CloveMotion.chrome(reduceMotion: false)) {
+                browsing.openPhoto(standalone)
+            }
+            try await waitForPillRemoval(label: "Mid collapse to standalone")
+            #expect(preview.bounds.size == baselinePreviewSize)
+
+            // 8. Resizing the Duo pane re-centers the pill horizontally with the right pane.
+            browsing.openPhoto(rep)
+            try await waitFor("Expand pill did not return on rep") {
+                visibleStagePillGlasses().count == 1
+            }
+            for width in [CGFloat(880), CGFloat(1180)] {
+                window.frame = CGRect(x: 0, y: 0, width: width, height: 703.5)
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(100))
+                let resizedGlass = try #require(visibleStagePillGlasses().first)
+                let resizedPill = resizedGlass.convert(resizedGlass.bounds, to: window)
+                let resizedPreview = preview.convert(preview.bounds, to: window)
+                let resizedCapsule = try #require(framesBox.frames["clove.duo.capsule"])
+                #expect(abs(resizedPill.midX - resizedPreview.midX) <= 1.0)
+                #expect(resizedPill.maxY <= resizedCapsule.minY)
+            }
+        }
+    }
+
+    @Test func duoExpandedPhotoPreviewStagePillAvailabilityToastClearanceAndFocusViewPreservation()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = ControlledPhotoLibrary(
+            rejected: [], stems: ["rep", "m1", "m2", "standalone"])
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "g1"),
+            members: ["rep", "m1", "m2"].map { library.identity($0) })
+        library.groups = [group]
+
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        library.reportScanFinished()
+        try await waitFor("folder open did not finish") {
+            !browsing.isFolderOpening && !browsing.groups.isEmpty
+        }
+        let rep = library.identity("rep")
+        let m1 = library.identity("m1")
+        browsing.apply(.rating(try #require(Rating(rawValue: 4))), to: rep)
+
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let framesBox = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+
+        struct HostView: View {
+            let browsing: BrowsingModel
+            let store: SettingsStore
+            @Bindable var presentation: TestPresentationBox
+            let framesBox: DetailFrameBox
+
+            var body: some View {
+                NavigationStack {
+                    DetailScreen(
+                        browsing: browsing,
+                        images: SampleDetailImages(),
+                        duo: DuoDetailLayout(
+                            presentation: $presentation.value,
+                            filter: AnyView(EmptyView()),
+                            more: AnyView(EmptyView()),
+                            bottom: AnyView(EmptyView()),
+                            showsGrid: true))
+                }
+                .environment(store)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, true)
+                .environment(\.scenePhase, .active)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                }
+            }
+        }
+
+        let host = UIHostingController(
+            rootView: HostView(
+                browsing: browsing, store: store, presentation: presentationBox,
+                framesBox: framesBox))
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        browsing.openPhoto(rep)
+        try await waitFor("Photo Preview did not settle") {
+            framesBox.frames["clove.duo.photoPreview"] != nil
+                && framesBox.frames["clove.duo.capsule"] != nil
+                && self.findPreview(in: window) != nil
+        }
+        func visibleGlassViews(inVerticalBand range: (CGRect) -> ClosedRange<CGFloat>?) -> [UIView]
+        {
+            guard let currentPreview = findPreview(in: window) else { return [] }
+            let previewFrame = currentPreview.convert(currentPreview.bounds, to: window)
+            guard let verticalRange = range(previewFrame) else { return [] }
+            var matches: [UIView] = []
+            func walk(_ view: UIView) {
+                let frame = view.convert(view.bounds, to: window)
+                if String(describing: type(of: view)).contains("GlassInteractionView"),
+                    !view.isHidden, view.alpha > 0.01, view.layer.opacity > 0.01,
+                    frame.width > 40, frame.height > 20,
+                    frame.midX >= previewFrame.minX, frame.midX <= previewFrame.maxX,
+                    frame.midY >= verticalRange.lowerBound, frame.midY <= verticalRange.upperBound
+                {
+                    matches.append(view)
+                }
+                for subview in view.subviews { walk(subview) }
+            }
+            walk(window)
+            return matches
+        }
+
+        func visiblePillGlasses() -> [UIView] {
+            visibleGlassViews { previewFrame in
+                let topY = previewFrame.minY + previewFrame.height * 0.55
+                return topY...previewFrame.maxY
+            }
+        }
+
+        func visibleToastGlasses() -> [UIView] {
+            visibleGlassViews { previewFrame in
+                let capsuleMinY =
+                    framesBox.frames["clove.duo.capsule"]?.minY ?? previewFrame.maxY + 200
+                guard capsuleMinY > previewFrame.maxY else { return nil }
+                return previewFrame.maxY...capsuleMinY
+            }
+        }
+
+        // Entering Group Focus and triggering a save failure toast keeps the stage pill clear of
+        // the toast and marking capsule.
+        browsing.openGroup(group.id, on: rep)
+        try await waitFor("Group Focus pill did not appear") {
+            visiblePillGlasses().count == 1
+        }
+        library.failNext.insert(m1)
+        browsing.apply(.rating(try #require(Rating(rawValue: 3))), to: m1)
+        await browsing.drainActions()
+        try await waitFor("Save failure toast did not appear") {
+            browsing.failureToastMessage != nil && visibleToastGlasses().count == 1
+        }
+        let pillFrame = try #require(visiblePillGlasses().first).convert(
+            try #require(visiblePillGlasses().first).bounds, to: window)
+        let toastView = try #require(visibleToastGlasses().first)
+        let toastFrame = toastView.convert(toastView.bounds, to: window)
+        let capsuleFrame = try #require(framesBox.frames["clove.duo.capsule"])
+        #expect(pillFrame.maxY <= toastFrame.minY)
+        #expect(toastFrame.maxY <= capsuleFrame.minY)
+
+        // Focus View preserves its filmstrip and group action pill when toggled from Photo Preview.
+        presentationBox.value = .focus
+        try await waitFor("Focus View did not mount filmstrip") {
+            guard let currentPreview = self.findPreview(in: window) else { return false }
+            return framesBox.frames["clove.duo.focus"] != nil
+                && self.findFilmstripScrollView(in: window, excluding: currentPreview) != nil
+                && visiblePillGlasses().count == 1
+        }
+
+        // Losing folder location disables marking: Reject hides in Group Focus, while Expand stays
+        // available on a collapsed group representative in Timeline.
+        presentationBox.value = .photoPreview
+        try await waitFor("Photo Preview did not return") {
+            guard let currentPreview = self.findPreview(in: window) else { return false }
+            return framesBox.frames["clove.duo.photoPreview"] != nil
+                && self.findFilmstripScrollView(in: window, excluding: currentPreview) == nil
+                && visiblePillGlasses().count == 1
+        }
+        library.reportDriveLoss()
+        try await waitFor("Location loss did not disable marking") { !browsing.canMark }
+        try await waitFor("Reject pill did not hide after location loss") {
+            visiblePillGlasses().isEmpty
+        }
+
+        browsing.collapseGroup()
+        try await waitFor("Timeline Expand pill did not appear while location lost") {
+            visiblePillGlasses().count == 1
+        }
+    }
+
     private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
         let start = CGPoint(x: 195, y: 300)
         let pan = DetailTestPan()
