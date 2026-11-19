@@ -6,7 +6,7 @@ import SwiftUI
 /// The opacity never touches the container or the photo thumbnails; photos are never tinted.
 /// The filmstrip draws it behind the current group's members, and the grid's expanded group
 /// presentation draws it behind its members' tiles. It is deliberately distinct from the
-/// current-photo selection ring, which stays the solid `text/primary` stroke.
+/// current-photo indicator, which stays the full-opacity `accent` outline and bottom locator.
 struct ExpandedGroupSurface: View {
     /// The corner radius the surrounding layout draws: 9 in the filmstrip, 6 per grid tile.
     var cornerRadius: CGFloat = 9

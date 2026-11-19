@@ -12,7 +12,8 @@ import SwiftUI
 /// A frame that fails to draw is a state, not a blank picture presented as loaded (PRD Scan
 /// scope): the placeholder keeps the empty frame rather than claiming an image.
 ///
-/// Rejected thumbnails dim without a reject badge; the current frame keeps its thin ring.
+/// Rejected thumbnails dim without a reject badge; the current frame keeps its quiet accent
+/// indicator.
 struct DetailPhotoFrame: View {
     /// The photo the frame draws (PRD P0-05).
     let photo: GridPhoto
@@ -46,7 +47,11 @@ struct DetailPhotoFrame: View {
                 appliesRejectedOpacity && photo.marks.isRejected
                     ? theme.tokens.rejectedOpacity : 1
             )
-            .overlay { border }
+            .overlay {
+                if isCurrent {
+                    CurrentPhotoIndicator(cornerRadius: 6)
+                }
+            }
             .task(id: photo.id) {
                 guard thumbnail == nil else { return }
                 if case .image(let pixels) = await thumbnails.thumbnail(
@@ -85,11 +90,5 @@ struct DetailPhotoFrame: View {
             }
         }
         .padding(3)
-    }
-
-    /// The border that says which photo is on screen (PRD P0-04).
-    private var border: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(Color.clove.text.primary, lineWidth: isCurrent ? 2 : 0)
     }
 }
