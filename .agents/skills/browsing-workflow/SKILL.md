@@ -54,7 +54,7 @@ results. A passing variant is a failed check because the defect did not break it
 
 ## Compare the model with the code
 
-Source sync commit: `88c7a7373eefe26cf99659277a88c1c221404807`. The machine-readable copy and
+Source sync commit: `d473832f97cbf7b76c29b17c93ff54da6ef94c04`. The machine-readable copy and
 covered-path list used by the drift gate live in `model/source-sync.json`.
 
 The model was manually compared with these functions at that commit:
@@ -77,7 +77,7 @@ The model was manually compared with these functions at that commit:
 Before trusting a run after a source change, compare the covered files with the sync commit:
 
 ```sh
-git diff 88c7a7373eefe26cf99659277a88c1c221404807 -- \
+git diff d473832f97cbf7b76c29b17c93ff54da6ef94c04 -- \
   Clove/Browsing/BrowsingModel.swift \
   Clove/Browsing/FolderLibrary.swift \
   Clove/Folder/FolderLibrarySession.swift \
