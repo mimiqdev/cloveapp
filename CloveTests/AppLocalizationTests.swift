@@ -43,6 +43,12 @@ struct AppLocalizationTests {
         #expect(AppLocalization.string("Actions", language: .english) == "Actions")
         #expect(AppLocalization.string("Actions", language: .simplifiedChinese) == "操作")
         #expect(AppLocalization.string("Actions", language: .traditionalChinese) == "動作")
+        #expect(AppLocalization.string("Add Keywords…", language: .english) == "Add Keywords…")
+        #expect(AppLocalization.string("Add Keywords…", language: .simplifiedChinese) == "添加关键词…")
+        #expect(AppLocalization.string("Add Keywords…", language: .traditionalChinese) == "加入關鍵字…")
+        #expect(AppLocalization.string("Suggestions", language: .english) == "Suggestions")
+        #expect(AppLocalization.string("Suggestions", language: .simplifiedChinese) == "建议")
+        #expect(AppLocalization.string("Suggestions", language: .traditionalChinese) == "建議")
     }
 
     @Test func pluralStringsFormatSingularAndPluralInAllSupportedLanguages() {
@@ -54,6 +60,19 @@ struct AppLocalizationTests {
         #expect(
             AppLocalization.format("%lld photos", language: .traditionalChinese, Int64(1))
                 == "1 張相片")
+
+        #expect(
+            AppLocalization.format("%lld keywords", language: .english, Int64(1))
+                == "1 keyword")
+        #expect(
+            AppLocalization.format("%lld keywords", language: .english, Int64(3))
+                == "3 keywords")
+        #expect(
+            AppLocalization.format("%lld keywords", language: .simplifiedChinese, Int64(3))
+                == "3 个关键词")
+        #expect(
+            AppLocalization.format("%lld keywords", language: .traditionalChinese, Int64(3))
+                == "3 個關鍵字")
 
         #expect(
             AppLocalization.format("%lld hidden by filter", language: .english, Int64(1))

@@ -8,6 +8,7 @@ struct GridBatchBar: View {
     let cells: [GridCellItem]
     var onDeselectAll: () -> Void = {}
     var onRename: () -> Void = {}
+    var onKeywords: () -> Void = {}
     var onSaveToPhotos: () -> Void = {}
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
@@ -114,6 +115,16 @@ struct GridBatchBar: View {
             .disabled(!canSaveToPhotos)
             .accessibilityIdentifier("clove.grid.batch.saveToPhotos")
 
+            Button {
+                tapPicker?.dismiss()
+                onKeywords()
+            } label: {
+                Label(
+                    AppLocalization.string("Add Keywords…", language: language),
+                    systemImage: "tag")
+            }
+            .disabled(!canOperate)
+            .accessibilityIdentifier("clove.grid.batch.keywords")
             Button {
                 tapPicker?.dismiss()
                 onRename()
