@@ -68,16 +68,22 @@ extension GridCellItem {
         /// Up to two member identities peeking behind a collapsed cover in grid order.
         public let peekingPhotos: [PhotoIdentity]
 
+        /// Zero-based position inside the group's visible members when unfolded inline in Grid
+        /// select mode, or nil for collapsed covers and Group Focus.
+        public let memberIndex: Int?
+
         /// Describes one cell's part in a group.
         public init(
             id: GroupID, count: Int, showsCount: Bool, isCover: Bool,
-            peekingPhotos: [PhotoIdentity] = []
+            peekingPhotos: [PhotoIdentity] = [],
+            memberIndex: Int? = nil
         ) {
             self.id = id
             self.count = count
             self.showsCount = showsCount
             self.isCover = isCover
             self.peekingPhotos = peekingPhotos
+            self.memberIndex = memberIndex
         }
     }
 }

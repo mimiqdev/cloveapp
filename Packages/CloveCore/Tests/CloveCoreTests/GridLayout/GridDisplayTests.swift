@@ -156,6 +156,55 @@ struct GridDisplayTests {
         #expect(cells[0].group?.count == 2)
         #expect(cells[0].group?.peekingPhotos == [members[2].id])
     }
+
+    @Test func inlineUnfoldEmitsSinglePhotoCellsWithSequentialMemberIndices() throws {
+        let all = photos(0...5)
+        let burst = group("burst", [all[1], all[2], all[3]])
+        let singleton = group("single", [all[5]])
+        let display = GridDisplay(
+            photos: all, groups: [burst, singleton], groupsEnabled: true, expandGroupsInline: true)
+
+        #expect(display.sections.map(\.id) == [.photos])
+        #expect(display.cells.map(\.id) == all.map { .photo($0.id) })
+        #expect(display.cells[0].group == nil)
+        #expect(display.cells[4].group == nil)
+        #expect(display.cells[5].group == nil)
+
+        for offset in 0..<3 {
+            let mark = try #require(display.cells[1 + offset].group)
+            #expect(mark.id == burst.id)
+            #expect(mark.count == 3)
+            #expect(mark.showsCount == false)
+            #expect(mark.isCover == false)
+            #expect(mark.memberIndex == offset)
+        }
+    }
+
+    @Test func inlineUnfoldRespectsFilterAndPerPhotoDimmingAndGroupingOff() throws {
+        let p0 = photo("p0", time: capture(seconds(0)), marks: marks(stars: 4))
+        let p1 = photo("p1", time: capture(seconds(1)), marks: marks(rejected: true))
+        let p2 = photo("p2", time: capture(seconds(2)))
+        let hidden = photo("p3", time: capture(seconds(3)), marks: marks(stars: 5))
+        let burst = group("burst", [p0, p1, p2, hidden])
+
+        let unfolded = GridDisplay(
+            photos: [p0, p1, p2], groups: [burst], groupsEnabled: true, expandGroupsInline: true)
+        #expect(unfolded.cells.map(\.id) == [.photo(p0.id), .photo(p1.id), .photo(p2.id)])
+        #expect(unfolded.cells.map(\.isDimmed) == [false, true, false])
+        #expect(unfolded.cells.compactMap { $0.group?.count } == [3, 3, 3])
+        #expect(unfolded.cells.compactMap { $0.group?.memberIndex } == [0, 1, 2])
+
+        // Narrowed below two visible members stays standalone even when expandGroupsInline is true.
+        let narrowed = GridDisplay(
+            photos: [p0], groups: [burst], groupsEnabled: true, expandGroupsInline: true)
+        #expect(narrowed.cells.count == 1)
+        #expect(narrowed.cells[0].group == nil)
+
+        // Grouping disabled keeps flat standalone cells even when expandGroupsInline is true.
+        let flat = GridDisplay(
+            photos: [p0, p1, p2], groups: [burst], groupsEnabled: false, expandGroupsInline: true)
+        #expect(flat.cells.allSatisfy { $0.group == nil })
+    }
 }
 
 /// PRD Grid and P0-11: the grid holds the current photo's cell in place, including a collapsed

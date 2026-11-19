@@ -24,25 +24,18 @@ public struct BatchSelection: Hashable, Sendable {
         self.selection = selection
     }
 
-    /// The photos one cell adds or removes (PRD P0-09, PRD Grid).
+    /// The photo one grid cell selects or toggles (PRD P0-09).
     ///
-    /// A photo's own cell means that photo. A collapsed group's cover means every photo in its
-    /// group, including members the current filter hides, because the cover stands for the
-    /// group the user sees it for. A cover whose group is no longer published falls back to its
-    /// own photo, so a stale cell never selects a group nobody can open.
+    /// Select mode strictly maintains 1 cell = 1 visible photo: even if a cell is momentarily a
+    /// collapsed cover during entry, interacting with it operates only on its visible cover photo
+    /// (`cell.photo.id`) and never pulls in hidden or unshown group members.
     public func identities(for cell: GridCellItem) -> Set<PhotoIdentity> {
-        guard let mark = cell.group, mark.isCover,
-            let group = groups.first(where: { $0.id == mark.id })
-        else { return [cell.photo.id] }
-        let members = Set(group.members)
-        return members.isEmpty ? [cell.photo.id] : members
+        [cell.photo.id]
     }
 
     /// The selection after tapping one cell (PRD P0-09).
     ///
-    /// A tap adds the cell's photos, or removes all of them when every one is already selected.
-    /// A collapsed cover that is only partly selected therefore completes its group rather than
-    /// clearing the part the user already chose.
+    /// A tap adds the cell's photo, or removes it when already selected.
     public func toggling(_ cell: GridCellItem) -> Set<PhotoIdentity> {
         let identities = identities(for: cell)
         if identities.isSubset(of: selection) {
@@ -51,28 +44,41 @@ public struct BatchSelection: Hashable, Sendable {
         return selection.union(identities)
     }
 
-    /// The selection with one cell's photos added, for the long press that starts multi-select
-    /// (PRD P0-09).
+    /// The selection with one cell's visible photo added, for the long press that starts
+    /// multi-select (PRD P0-09).
     public func selecting(_ cell: GridCellItem) -> Set<PhotoIdentity> {
         selection.union(identities(for: cell))
     }
 
-    /// The selection with every shown cell added, for Select all visible (PRD P0-09).
-    ///
-    /// A collapsed cover adds its whole group, so Select all covers every photo the user sees
-    /// a cell for instead of only the covers' own photos.
+    /// The selection with every visible cell's photo added, for Select all visible (PRD P0-09).
     public func selectingAll(_ cells: [GridCellItem]) -> Set<PhotoIdentity> {
         cells.reduce(selection) { current, cell in current.union(identities(for: cell)) }
     }
 
-    /// The selection with every shown cell removed, for Deselect all visible (PRD P0-09).
+    /// The selection with every visible photo added, ensuring Select all works identically even
+    /// before inline group unfolding finishes.
+    public func selectingAll(_ photos: [GridPhoto]) -> Set<PhotoIdentity> {
+        selection.union(photos.map(\.id))
+    }
+
+    /// The selection with every visible cell's photo removed, for Deselect all visible (PRD P0-09).
     public func deselectingAll(_ cells: [GridCellItem]) -> Set<PhotoIdentity> {
         cells.reduce(selection) { current, cell in current.subtracting(identities(for: cell)) }
+    }
+
+    /// The selection with every visible photo removed while preserving any hidden selected photos.
+    public func deselectingAll(_ photos: [GridPhoto]) -> Set<PhotoIdentity> {
+        selection.subtracting(photos.map(\.id))
     }
 
     /// Whether every shown cell currently draws as selected (PRD P0-09).
     public func showsAllSelected(_ cells: [GridCellItem]) -> Bool {
         !cells.isEmpty && cells.allSatisfy(showsSelected)
+    }
+
+    /// Whether every visible photo is currently selected.
+    public func showsAllSelected(_ photos: [GridPhoto]) -> Bool {
+        !photos.isEmpty && photos.allSatisfy { selection.contains($0.id) }
     }
 
     /// Recomputes a drag-range selection from `selection` (the baseline captured at drag start)
@@ -95,9 +101,9 @@ public struct BatchSelection: Hashable, Sendable {
         }
     }
 
-    /// Whether a cell draws as selected: every photo it stands for is selected (PRD P0-09).
+    /// Whether a cell draws as selected: its visible photo is selected (PRD P0-09).
     public func showsSelected(_ cell: GridCellItem) -> Bool {
-        identities(for: cell).isSubset(of: selection)
+        selection.contains(cell.photo.id)
     }
 
     /// The photos one batch marks: the selection the grid shows, in grid order (PRD P0-09).

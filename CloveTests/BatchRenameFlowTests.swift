@@ -385,7 +385,7 @@ struct BatchRenameFlowTests {
         await library.closeFolder()
     }
 
-    @Test func groupedCoverSelectionUnderFilterReportsVisibleTargetsAndHiddenSelectedCount()
+    @Test func groupedCoverSelectionUnderFilterSelectsOnlyVisibleCoverAndTracksHiddenSelection()
         async throws
     {
         let library = TestLibrary.sample()
@@ -404,11 +404,15 @@ struct BatchRenameFlowTests {
             cells.first { $0.group?.id == group.id && $0.group?.isCover == true })
         browsing.beginSelection(of: coverCell)
 
-        #expect(browsing.state.selection.contains(hiddenMember))
-        #expect(
-            browsing.batchTargets.count
-                == browsing.photos.filter { group.members.contains($0.id) }.count)
+        #expect(browsing.state.selection == [coverCell.photo.id])
+        #expect(!browsing.state.selection.contains(hiddenMember))
+        #expect(browsing.batchTargets.map(\.id) == [coverCell.photo.id])
+        #expect(browsing.hiddenSelectedCount == 0)
+
+        // Selecting a hidden photo explicitly before filtering keeps hiddenSelectedCount accurate.
+        browsing.toggleSelection(hiddenMember)
         #expect(browsing.hiddenSelectedCount == 1)
+        #expect(browsing.batchTargets.map(\.id) == [coverCell.photo.id])
         await library.closeFolder()
     }
 }

@@ -16,11 +16,13 @@ public struct GridDisplay: Sendable {
     public var cells: [GridCellItem] { sections.flatMap(\.cells) }
 
     /// Builds the full folder's cells for the photos a filter and an order produced (PRD P0-03,
-    /// P0-11): standalone photos and one collapsed cover per active group.
+    /// P0-11): standalone photos and one collapsed cover per active group, or inline unfolded
+    /// single-photo cells when `expandGroupsInline` is true.
     public init(
         photos: [GridPhoto],
         groups: [BrowsingGroup],
-        groupsEnabled: Bool = true
+        groupsEnabled: Bool = true,
+        expandGroupsInline: Bool = false
     ) {
         guard groupsEnabled else {
             self.sections = [
@@ -29,8 +31,12 @@ public struct GridDisplay: Sendable {
             return
         }
         let resolved = BrowsingGroup.resolveVisibleGroups(in: photos, groups: groups)
+        let cells =
+            expandGroupsInline
+            ? Self.unfoldedCells(photos: photos, resolved: resolved)
+            : Self.collapsedCells(photos: photos, resolved: resolved)
         self.sections = [
-            GridSection(id: .photos, cells: Self.collapsedCells(photos: photos, resolved: resolved))
+            GridSection(id: .photos, cells: cells)
         ]
     }
 
@@ -82,6 +88,37 @@ extension GridDisplay {
                         peekingPhotos: peekingPhotos(
                             cover: cover.id, visibleMembers: active.visibleMembers)),
                     isDimmed: active.visibleMembers.allSatisfy { $0.marks.isRejected }))
+        }
+        return cells
+    }
+
+    /// Unfolds every active group inline in `photos` order so each visible member gets its own
+    /// selectable single-photo cell while carrying its `memberIndex` for inline tray grouping.
+    private static func unfoldedCells(
+        photos: [GridPhoto],
+        resolved: (byGroupID: [GroupID: ActiveBrowsingGroup], byPhotoID: [PhotoIdentity: GroupID])
+    ) -> [GridCellItem] {
+        var memberOffsets: [GroupID: Int] = [:]
+        var cells: [GridCellItem] = []
+        cells.reserveCapacity(photos.count)
+        for photo in photos {
+            guard let groupID = resolved.byPhotoID[photo.id],
+                let active = resolved.byGroupID[groupID]
+            else {
+                cells.append(standaloneCell(photo))
+                continue
+            }
+            let memberIndex = memberOffsets[groupID, default: 0]
+            memberOffsets[groupID] = memberIndex + 1
+            cells.append(
+                GridCellItem(
+                    id: .photo(photo.id),
+                    photo: photo,
+                    group: GridCellItem.GroupMark(
+                        id: groupID, count: active.visibleMembers.count,
+                        showsCount: false, isCover: false,
+                        memberIndex: memberIndex),
+                    isDimmed: photo.marks.isRejected))
         }
         return cells
     }

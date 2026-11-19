@@ -162,6 +162,19 @@ struct AppLocalizationTests {
         #expect(AppLocalization.starCount(1, language: .english) == "1 star")
         #expect(AppLocalization.starCount(5, language: .english) == "5 stars")
         #expect(AppLocalization.starCount(5, language: .simplifiedChinese) == "5 星")
+
+        #expect(
+            AppLocalization.format(
+                "Group %lld of %lld", language: .english, Int64(1), Int64(3))
+                == "Group 1 of 3")
+        #expect(
+            AppLocalization.format(
+                "Group %lld of %lld", language: .simplifiedChinese, Int64(1), Int64(3))
+                == "第 1 / 3 张（相似组）")
+        #expect(
+            AppLocalization.format(
+                "Group %lld of %lld", language: .traditionalChinese, Int64(2), Int64(4))
+                == "第 2 / 4 張（相似組）")
     }
 
     @Test func xmpColourRawValuesAndRejectsFolderNameStayUnlocalized() {
