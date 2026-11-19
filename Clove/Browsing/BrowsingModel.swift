@@ -740,9 +740,92 @@ final class BrowsingModel {
         state.route = .grid
         completedRename = completed
         dismissFailureToast()
+        dismissPhotosSaveToast()
         renameToastAttempt += 1
         isRenameToastVisible = true
         UIAccessibility.post(notification: .announcement, argument: completed.message)
+    }
+
+    // MARK: - Save to Photos
+
+    private(set) var isSavingToPhotos = false
+    private(set) var photosSaveToastMessage: PhotosSaveToastMessage?
+    private(set) var photosSaveToastAttempt = 0
+    private(set) var isPhotosSaveToastVisible = false
+
+    var canSaveToPhotos: Bool {
+        !batchTargets.isEmpty && folderLocationLoss == nil && !isSavingToPhotos
+            && !isChangingFolder && !hasLeftFolder
+    }
+
+    func dismissPhotosSaveToast() {
+        isPhotosSaveToastVisible = false
+    }
+
+    func planSaveToPhotos() -> PhotosSavePlan {
+        PhotosSavePlan.resolve(targets: batchTargets) { identity in
+            library.scannedSet(for: identity)
+        }
+    }
+
+    @discardableResult
+    func saveToPhotos(
+        _ plan: PhotosSavePlan,
+        language: ResolvedAppLanguage = .english
+    ) async -> PhotosSaveResult {
+        guard canSaveToPhotos, !plan.fileURLs.isEmpty else {
+            let error: PhotosSaveError =
+                folderLocationLoss != nil || isChangingFolder || hasLeftFolder
+                ? .folderUnavailable
+                : .writeFailed
+            return .failed(error)
+        }
+        isSavingToPhotos = true
+        defer { isSavingToPhotos = false }
+
+        let folder = state.folder
+        let generation = openGeneration
+
+        do {
+            try await library.saveToPhotos(fileURLs: plan.fileURLs)
+            guard folder == state.folder, generation == openGeneration, !hasLeftFolder else {
+                return .failed(.folderUnavailable)
+            }
+            let message = PhotosSaveToastMessage.saved(
+                savedCount: plan.eligibleCount, skippedRawCount: plan.skippedRawCount)
+            showPhotosSaveToast(message, language: language)
+            return .saved(eligibleCount: plan.eligibleCount, skippedRawCount: plan.skippedRawCount)
+        } catch let error as PhotosSaveError {
+            guard folder == state.folder, generation == openGeneration, !hasLeftFolder else {
+                return .failed(.folderUnavailable)
+            }
+            switch error {
+            case .permissionDenied:
+                showPhotosSaveToast(.permissionDenied, language: language)
+            case .folderUnavailable, .writeFailed:
+                showPhotosSaveToast(.failed, language: language)
+            }
+            return .failed(error)
+        } catch {
+            guard folder == state.folder, generation == openGeneration, !hasLeftFolder else {
+                return .failed(.folderUnavailable)
+            }
+            showPhotosSaveToast(.failed, language: language)
+            return .failed(.writeFailed)
+        }
+    }
+
+    private func showPhotosSaveToast(
+        _ message: PhotosSaveToastMessage, language: ResolvedAppLanguage
+    ) {
+        dismissFailureToast()
+        dismissRenameToast()
+        dismissRejectMoveToast()
+        photosSaveToastMessage = message
+        photosSaveToastAttempt += 1
+        isPhotosSaveToastVisible = true
+        UIAccessibility.post(
+            notification: .announcement, argument: message.localizedText(language: language))
     }
 
     // MARK: - Move rejects
@@ -807,6 +890,7 @@ final class BrowsingModel {
             result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
             folder: folder, openGeneration: openGeneration)
         dismissFailureToast()
+        dismissPhotosSaveToast()
         isRejectMoveToastVisible = true
         rejectMoveToastAttempt += 1
     }
@@ -1101,6 +1185,7 @@ final class BrowsingModel {
         failureToastBurst += 1
         failureToastMessage = message
         isRejectMoveToastVisible = false
+        isPhotosSaveToastVisible = false
         UIAccessibility.post(notification: .announcement, argument: message)
     }
 
@@ -1127,6 +1212,7 @@ final class BrowsingModel {
         }
         refilterPhotos()
         dismissFailureToast()
+        dismissPhotosSaveToast()
         for entry in dropped {
             moveCompletions.removeValue(forKey: entry.id)?(.failure(RejectMoveRefusal.disabled))
         }
@@ -1197,6 +1283,8 @@ final class BrowsingModel {
     private func showEntryAfterLeaving() {
         completedRename = nil
         isRenameToastVisible = false
+        photosSaveToastMessage = nil
+        isPhotosSaveToastVisible = false
         state.folder = nil
         state.currentPhoto = nil
         state.selection = []
@@ -1402,6 +1490,8 @@ final class BrowsingModel {
         hasLeftFolder = false
         completedRename = nil
         isRenameToastVisible = false
+        photosSaveToastMessage = nil
+        isPhotosSaveToastVisible = false
         state.folder = library.folder
         clearRecentFailureForOpenFolder()
         state.currentPhoto = nil
@@ -1473,6 +1563,8 @@ final class BrowsingModel {
             desiredMarks.removeAll()
             recordUndo(for: nil)
             dismissFailureToast()
+            photosSaveToastMessage = nil
+            isPhotosSaveToastVisible = false
             dismissedPreparationCompletion = nil
             preparationStatus = library.preparationStatus
             generationChanged = true

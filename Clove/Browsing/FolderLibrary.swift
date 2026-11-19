@@ -161,6 +161,9 @@ protocol FolderLibrary: AnyObject {
     /// Reads the files again after any completed rename, including a partial failure.
     func rescanAfterRename() async throws
 
+    /// Saves existing JPEG or HEIF files to the system Photos library under the folder's session.
+    func saveToPhotos(fileURLs: [URL]) async throws
+
     /// The progress steps of the next or running Move rejects (PRD P0-10).
     ///
     /// The stream yields each set as it starts and finishes, then the run's result. A library that
@@ -371,6 +374,10 @@ extension FolderLibrary {
     }
 
     func rescanAfterRename() async throws { throw RenameFlowError.unavailable }
+
+    func saveToPhotos(fileURLs: [URL]) async throws {
+        throw PhotosSaveError.folderUnavailable
+    }
 
     func undoRejectMove(
         _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],

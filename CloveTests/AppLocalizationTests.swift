@@ -297,4 +297,61 @@ struct AppLocalizationTests {
             indicators.missingAutofocusAccessibilityLabel(language: .traditionalChinese)
                 == "無自動對焦中繼資料")
     }
+
+    @Test func saveToPhotosLocalizesAcrossLanguagesAndPlurals() {
+        #expect(AppLocalization.string("Save to Photos", language: .english) == "Save to Photos")
+        #expect(
+            AppLocalization.string("Save to Photos", language: .simplifiedChinese) == "存储到照片")
+        #expect(
+            AppLocalization.string("Save to Photos", language: .traditionalChinese) == "儲存到相片")
+
+        #expect(
+            PhotosSaveToastMessage.saved(savedCount: 1, skippedRawCount: 0)
+                .localizedText(language: .english) == "Saved 1 photo to Photos")
+        #expect(
+            PhotosSaveToastMessage.saved(savedCount: 3, skippedRawCount: 0)
+                .localizedText(language: .english) == "Saved 3 photos to Photos")
+        #expect(
+            PhotosSaveToastMessage.saved(savedCount: 2, skippedRawCount: 1)
+                .localizedText(language: .english) == "Saved 2 photos to Photos · 1 RAW skipped")
+        #expect(
+            PhotosSaveToastMessage.saved(savedCount: 2, skippedRawCount: 1)
+                .localizedText(language: .simplifiedChinese) == "已将 2 张照片存储到照片 · 已跳过 1 张 RAW")
+        #expect(
+            PhotosSaveToastMessage.saved(savedCount: 2, skippedRawCount: 1)
+                .localizedText(language: .traditionalChinese) == "已將 2 張相片儲存到相片 · 已略過 1 張 RAW")
+
+        #expect(
+            AppLocalization.format("Save %lld photos to Photos?", language: .english, Int64(1))
+                == "Save 1 photo to Photos?")
+        #expect(
+            AppLocalization.format("Save %lld photos to Photos?", language: .english, Int64(4))
+                == "Save 4 photos to Photos?")
+        #expect(
+            AppLocalization.format(
+                "%lld RAW-only photos have no JPEG or HEIF and will be skipped.",
+                language: .english, Int64(1))
+                == "1 RAW-only photo has no JPEG or HEIF and will be skipped.")
+        #expect(
+            AppLocalization.format(
+                "%lld RAW-only photos have no JPEG or HEIF and will be skipped.",
+                language: .english, Int64(2))
+                == "2 RAW-only photos have no JPEG or HEIF and will be skipped.")
+
+        #expect(
+            PhotosSaveToastMessage.permissionDenied.localizedText(language: .english)
+                == "Allow Photos access in Settings to save photos.")
+        #expect(
+            PhotosSaveToastMessage.failed.localizedText(language: .english)
+                == "Couldn't save to Photos.")
+
+        for language in [
+            ResolvedAppLanguage.english, .simplifiedChinese, .traditionalChinese,
+        ] {
+            let bundle = AppLocalization.bundle(for: language)
+            let usage = bundle.localizedString(
+                forKey: "NSPhotoLibraryAddUsageDescription", value: nil, table: "InfoPlist")
+            #expect(!usage.isEmpty && usage != "NSPhotoLibraryAddUsageDescription")
+        }
+    }
 }

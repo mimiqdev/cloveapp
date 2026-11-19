@@ -16,6 +16,8 @@ struct GridScreen: View {
     @State private var renameFlow: BatchRenameFlow?
     @State private var showsKeywordsSheet = false
     @State private var showsRenameDetails = false
+    @State private var pendingPhotosConfirmationPlan: PhotosSavePlan?
+    @State private var showsNoEligiblePhotosAlert = false
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
     @State private var filterAnchorAttachments = 0
@@ -88,6 +90,12 @@ struct GridScreen: View {
         {
             return "failure-\(browsing.failureToastBurst)"
         }
+        if !(usesDock && browsing.state.route == .detail),
+            let message = browsing.photosSaveToastMessage,
+            browsing.isPhotosSaveToastVisible
+        {
+            return "photosSave-\(browsing.photosSaveToastAttempt)-\(message)"
+        }
         if browsing.completedRename != nil, browsing.isRenameToastVisible {
             return "rename-\(browsing.renameToastAttempt)"
         }
@@ -127,6 +135,14 @@ struct GridScreen: View {
             }
             .onChange(of: browsing.state.folder) { _, _ in
                 selectsEmpty = false
+                pendingPhotosConfirmationPlan = nil
+                showsNoEligiblePhotosAlert = false
+            }
+            .onChange(of: browsing.folderLocationLoss != nil) { _, isLost in
+                if isLost {
+                    pendingPhotosConfirmationPlan = nil
+                    showsNoEligiblePhotosAlert = false
+                }
             }
             .onChange(of: browsing.state.route) { _, route in
                 if route == .detail { hasOpenedPhoto = true }
@@ -172,7 +188,8 @@ struct GridScreen: View {
                         cells: cells,
                         onDeselectAll: { selectsEmpty = true },
                         onRename: { renameFlow = BatchRenameFlow(browsing: browsing) },
-                        onKeywords: { showsKeywordsSheet = true }
+                        onKeywords: { showsKeywordsSheet = true },
+                        onSaveToPhotos: startSaveToPhotos
                     )
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -201,6 +218,22 @@ struct GridScreen: View {
                     .transition(
                         CloveMotion.slideTransition(
                             edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                } else if !(usesDock && browsing.state.route == .detail),
+                    let photosToast = browsing.photosSaveToastMessage,
+                    browsing.isPhotosSaveToastVisible
+                {
+                    Toast(
+                        message: photosToast.localizedText(language: language),
+                        identifier: "clove.photos.toast"
+                    )
+                    .padding(.horizontal)
+                    .padding(
+                        .bottom,
+                        (isSelecting && !(usesDock && browsing.state.route == .detail)) ? 76 : 12
+                    )
+                    .transition(
+                        CloveMotion.slideTransition(
+                            edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                 } else if let completed = browsing.completedRename, browsing.isRenameToastVisible {
                     BatchRenameToast(completed: completed) { showsRenameDetails = true }
                         .padding(.horizontal).padding(.bottom, 12)
@@ -223,6 +256,16 @@ struct GridScreen: View {
                 CloveMotion.chrome(reduceMotion: reduceMotion),
                 value: activeToastKey
             )
+            .task(id: browsing.photosSaveToastAttempt) {
+                guard browsing.isPhotosSaveToastVisible, !TestLibrary.keepsMoveToast else {
+                    return
+                }
+                try? await Task.sleep(for: .seconds(6))
+                guard !Task.isCancelled else { return }
+                withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                    browsing.dismissPhotosSaveToast()
+                }
+            }
             .task(id: browsing.rejectMoveToastAttempt) {
                 guard browsing.isRejectMoveToastVisible, !TestLibrary.keepsMoveToast else { return }
                 try? await Task.sleep(for: .seconds(6))
@@ -261,6 +304,49 @@ struct GridScreen: View {
                 case .details(let completed):
                     MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
                 }
+            }
+            .alert(
+                AppLocalization.format(
+                    "Save %lld photos to Photos?", language: language,
+                    Int64(pendingPhotosConfirmationPlan?.eligibleCount ?? 0)),
+                isPresented: Binding(
+                    get: { pendingPhotosConfirmationPlan != nil },
+                    set: { isPresented in
+                        if !isPresented { pendingPhotosConfirmationPlan = nil }
+                    }),
+                presenting: pendingPhotosConfirmationPlan
+            ) { plan in
+                Button(
+                    AppLocalization.format(
+                        "Save %lld", language: language, Int64(plan.eligibleCount))
+                ) {
+                    pendingPhotosConfirmationPlan = nil
+                    Task {
+                        await browsing.saveToPhotos(plan, language: language)
+                    }
+                }
+                .accessibilityIdentifier("clove.photos.confirm.save")
+                Button(AppLocalization.string("Cancel", language: language), role: .cancel) {
+                    pendingPhotosConfirmationPlan = nil
+                }
+                .accessibilityIdentifier("clove.photos.confirm.cancel")
+            } message: { plan in
+                Text(
+                    AppLocalization.format(
+                        "%lld RAW-only photos have no JPEG or HEIF and will be skipped.",
+                        language: language, Int64(plan.skippedRawCount)))
+            }
+            .alert(
+                AppLocalization.string("No JPEG or HEIF to save", language: language),
+                isPresented: $showsNoEligiblePhotosAlert
+            ) {
+                Button(AppLocalization.string("OK", language: language), role: .cancel) {}
+                    .accessibilityIdentifier("clove.photos.noEligible.ok")
+            } message: {
+                Text(
+                    verbatim: AppLocalization.string(
+                        "Selected photos are RAW-only. Clove saves existing JPEG and HEIF files without re-encoding RAW.",
+                        language: language))
             }
             .folderPicker(isPresented: $isPickingEmptyFolder) { url in
                 await browsing.openPickedFolder(url)
@@ -819,6 +905,21 @@ struct GridScreen: View {
         browsing.openGroup(id)
     }
 
+    private func startSaveToPhotos() {
+        guard browsing.canSaveToPhotos else { return }
+        let plan = browsing.planSaveToPhotos()
+        guard !plan.isEmpty else { return }
+        if plan.eligibleCount == 0 && plan.skippedRawCount > 0 {
+            showsNoEligiblePhotosAlert = true
+        } else if plan.skippedRawCount > 0 {
+            pendingPhotosConfirmationPlan = plan
+        } else if plan.eligibleCount > 0 {
+            Task {
+                await browsing.saveToPhotos(plan, language: language)
+            }
+        }
+    }
+
     private var filterDismissTrigger: GridFilterDismissTrigger {
         GridFilterDismissTrigger(
             route: browsing.state.route,
@@ -846,6 +947,8 @@ struct GridScreen: View {
             hasMoveSheet: moveSheet != nil,
             hasRenameFlow: renameFlow != nil,
             hasKeywordsSheet: showsKeywordsSheet,
+            hasPendingPhotosAlert: pendingPhotosConfirmationPlan != nil
+                || showsNoEligiblePhotosAlert,
             showsFilters: showsFilters,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
@@ -878,6 +981,7 @@ private struct GridTapPickerDismissTrigger: Equatable {
     let hasMoveSheet: Bool
     let hasRenameFlow: Bool
     let hasKeywordsSheet: Bool
+    let hasPendingPhotosAlert: Bool
     let showsFilters: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
     let verticalSizeClass: UserInterfaceSizeClass?

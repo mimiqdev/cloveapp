@@ -9,12 +9,21 @@ struct GridBatchBar: View {
     var onDeselectAll: () -> Void = {}
     var onRename: () -> Void = {}
     var onKeywords: () -> Void = {}
+    var onSaveToPhotos: () -> Void = {}
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
     @Environment(\.tapPickerController) private var tapPicker
 
     private var canOperate: Bool {
         !browsing.batchTargets.isEmpty && browsing.canMark
+    }
+
+    private var canSaveToPhotos: Bool {
+        browsing.canSaveToPhotos
+    }
+
+    private var hasAnyMenuAction: Bool {
+        canOperate || canSaveToPhotos
     }
 
     var body: some View {
@@ -97,12 +106,24 @@ struct GridBatchBar: View {
         Menu {
             Button {
                 tapPicker?.dismiss()
+                onSaveToPhotos()
+            } label: {
+                Label(
+                    AppLocalization.string("Save to Photos", language: language),
+                    systemImage: "square.and.arrow.down")
+            }
+            .disabled(!canSaveToPhotos)
+            .accessibilityIdentifier("clove.grid.batch.saveToPhotos")
+
+            Button {
+                tapPicker?.dismiss()
                 onKeywords()
             } label: {
                 Label(
                     AppLocalization.string("Add Keywords…", language: language),
                     systemImage: "tag")
             }
+            .disabled(!canOperate)
             .accessibilityIdentifier("clove.grid.batch.keywords")
             Button {
                 tapPicker?.dismiss()
@@ -112,6 +133,7 @@ struct GridBatchBar: View {
                     AppLocalization.string("Rename…", language: language),
                     systemImage: "pencil")
             }
+            .disabled(!canOperate)
             .accessibilityIdentifier("clove.grid.batch.rename")
         } label: {
             HStack(spacing: 4) {
@@ -121,13 +143,13 @@ struct GridBatchBar: View {
                     .imageScale(.small)
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(canOperate ? Color.clove.accent : Color.clove.text.secondary)
-            .opacity(canOperate ? 1 : 0.45)
+            .foregroundStyle(hasAnyMenuAction ? Color.clove.accent : Color.clove.text.secondary)
+            .opacity(hasAnyMenuAction ? 1 : 0.45)
             .padding(.horizontal, 14)
             .frame(minWidth: 44, minHeight: 48, maxHeight: 48)
             .contentShape(Rectangle())
         }
-        .disabled(!canOperate)
+        .disabled(!hasAnyMenuAction)
         .accessibilityLabel(AppLocalization.string("Actions", language: language))
         .accessibilityIdentifier("clove.grid.batch.actions")
         .reportTapPickerFrame("clove.grid.batch.actions")
