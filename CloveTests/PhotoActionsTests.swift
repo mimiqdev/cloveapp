@@ -82,7 +82,7 @@ struct PhotoActionsTests {
         await model.drainActions()
     }
 
-    @Test func detailUndoRecordsTheActionAndABatchClearsTheWholeStep() async {
+    @Test func detailUndoRecordsTheActionAndABatchReplacesItWithItsOwnUndoStep() async {
         let library = ControlledPhotoLibrary()
         let model = BrowsingModel(library: library)
         model.openFolder()
@@ -99,6 +99,9 @@ struct PhotoActionsTests {
         #expect(model.canUndoMark)
         model.toggleSelection(photo)
         model.applyBatch(.rating(.unrated), settings: AppSettings())
+        #expect(model.canUndoMark)
+        model.undoLastMark()
+        #expect(model.shownMarks(for: photo).isRejected)
         #expect(!model.canUndoMark)
         await model.drainActions()
     }
@@ -528,7 +531,7 @@ private struct PhotoActionWaitFailure: Error {}
 private struct PhotoActionMoveFailure: Error {}
 
 @MainActor
-private final class ControlledPhotoLibrary: FolderLibrary {
+final class ControlledPhotoLibrary: FolderLibrary {
     let folder: FolderIdentity
     private let recentID = UUID()
     var photos: [GridPhoto] = []

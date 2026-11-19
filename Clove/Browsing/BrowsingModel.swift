@@ -170,8 +170,13 @@ final class BrowsingModel {
     private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
     private var keptEditsByMove: [RejectMoveBatchID: [DesiredMarkEdit]] = [:]
 
-    /// The latest detail action's return photo and before/after snapshots form one undo step.
-    private var markUndo: (photo: PhotoIdentity, edits: [DesiredMarkEdit])?
+    private struct MarkUndoStep {
+        let photo: PhotoIdentity?
+        let edits: [DesiredMarkEdit]
+    }
+
+    /// The latest marking action's optional detail return photo and before/after snapshots form one undo step.
+    private var markUndo: MarkUndoStep?
     private(set) var lastMoveUndo: Result<RejectMoveUndoResult, any Error>?
 
     /// The copy for a mark whose write failed, and for marks a sidecar would not give up
@@ -665,6 +670,9 @@ final class BrowsingModel {
         guard !plan.items.isEmpty else { return }
         let edits = plan.items.map { request($0.change, for: $0.photo) }
         submit(.batch(edits))
+        markUndo = MarkUndoStep(
+            photo: state.route == .detail ? state.currentPhoto : nil,
+            edits: edits)
     }
 
     // MARK: - Batch rename
@@ -868,7 +876,7 @@ final class BrowsingModel {
 
     var canUndoMark: Bool { canMark && markUndo != nil }
 
-    /// Restore the latest detail action together, including a whole Reject unmarked action.
+    /// Restore the latest marking or finishing action together.
     func undoLastMark() {
         guard canUndoMark, let undo = markUndo else { return }
         let edits = undo.edits.compactMap { edit -> DesiredMarkEdit? in
@@ -880,13 +888,15 @@ final class BrowsingModel {
             return request(change, for: edit.photo)
         }
         submit(.batch(edits))
-        let timeline = DetailTimeline(
-            photos: photos, groups: groups,
-            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
-        if let active = timeline.activeGroup(containing: undo.photo) {
-            openGroup(active.id, on: undo.photo)
-        } else {
-            openPhoto(undo.photo)
+        if let returnPhoto = undo.photo {
+            let timeline = DetailTimeline(
+                photos: photos, groups: groups,
+                groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+            if let active = timeline.activeGroup(containing: returnPhoto) {
+                openGroup(active.id, on: returnPhoto)
+            } else {
+                openPhoto(returnPhoto)
+            }
         }
     }
 
@@ -910,14 +920,14 @@ final class BrowsingModel {
         refilterPhotos()
     }
 
-    /// Only detail marks and finishing actions create a marking undo step. Other actions and
-    /// ending the folder's session clear the whole value, so no separate navigation record lingers.
+    /// Detail marks and finishing actions create a detail undo step; `applyBatch` installs a
+    /// batch undo step after `submit`, while undo-submitted batches and session resets clear it.
     private func recordUndo(for action: PhotoAction?) {
         switch action {
         case .mark(let edit)? where state.route == .detail:
-            markUndo = (edit.photo, [edit])
+            markUndo = MarkUndoStep(photo: edit.photo, edits: [edit])
         case .finishing(let plan, let edits)? where state.route == .detail && !edits.isEmpty:
-            markUndo = (plan.currentPhoto, edits)
+            markUndo = MarkUndoStep(photo: plan.currentPhoto, edits: edits)
         default:
             markUndo = nil
         }

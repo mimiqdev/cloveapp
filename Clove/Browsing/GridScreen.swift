@@ -14,6 +14,7 @@ struct GridScreen: View {
     @Environment(\.appLanguage) private var language
     @State private var moveSheet: MoveSheetRoute?
     @State private var renameFlow: BatchRenameFlow?
+    @State private var showsKeywordsSheet = false
     @State private var showsRenameDetails = false
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
@@ -170,7 +171,8 @@ struct GridScreen: View {
                         browsing: browsing,
                         cells: cells,
                         onDeselectAll: { selectsEmpty = true },
-                        onRename: { renameFlow = BatchRenameFlow(browsing: browsing) }
+                        onRename: { renameFlow = BatchRenameFlow(browsing: browsing) },
+                        onKeywords: { showsKeywordsSheet = true }
                     )
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -249,6 +251,9 @@ struct GridScreen: View {
                 if let completed = browsing.completedRename {
                     BatchRenameDetailsSheet(completed: completed)
                 }
+            }
+            .sheet(isPresented: $showsKeywordsSheet) {
+                BatchKeywordsSheet(browsing: browsing)
             }
             .sheet(item: $moveSheet) { route in
                 switch route {
@@ -840,6 +845,7 @@ struct GridScreen: View {
             hasBatchTargets: !browsing.batchTargets.isEmpty,
             hasMoveSheet: moveSheet != nil,
             hasRenameFlow: renameFlow != nil,
+            hasKeywordsSheet: showsKeywordsSheet,
             showsFilters: showsFilters,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
@@ -871,6 +877,7 @@ private struct GridTapPickerDismissTrigger: Equatable {
     let hasBatchTargets: Bool
     let hasMoveSheet: Bool
     let hasRenameFlow: Bool
+    let hasKeywordsSheet: Bool
     let showsFilters: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
     let verticalSizeClass: UserInterfaceSizeClass?

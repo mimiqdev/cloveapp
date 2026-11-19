@@ -31,7 +31,15 @@ struct PhotoInformationSheet: View {
                         }
                         row(
                             AppLocalization.string("Marks", language: language), "",
-                            trailing: marksTrailing(information))
+                            trailing: marksTrailing()
+                        )
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("clove.detail.info.marks")
+                        if let keywords = Self.keywordsText(for: currentMarks) {
+                            row(AppLocalization.string("Keywords", language: language), keywords)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityIdentifier("clove.detail.info.keywords")
+                        }
                     }
                     .listRowBackground(theme.tokens.card.color)
                 }
@@ -72,6 +80,10 @@ struct PhotoInformationSheet: View {
             isLoading = false
         }
         .accessibilityIdentifier("clove.detail.info.sheet")
+    }
+
+    private var currentMarks: PhotoMarks {
+        browsing.state.folder != nil ? browsing.shownMarks(for: photo.id) : photo.marks
     }
 
     @ViewBuilder private func capture(_ image: ImageInformation?) -> some View {
@@ -131,25 +143,44 @@ struct PhotoInformationSheet: View {
 
     /// The frame's marks column: filled stars in `rating/on`, the label as its colour name, and
     /// Reject as ✕ glyphs (handoff screens.md §03 Info sheet, screens/03-detail-info-sheet.png).
-    private func marksTrailing(_ information: PhotoInformation) -> (spacing: CGFloat, content: Text)
-    {
+    /// When a photo carries only keywords, shows the keyword count in neutral secondary text
+    /// instead of "Unmarked".
+    private func marksTrailing() -> (spacing: CGFloat, content: Text) {
+        let summary = Self.marksSummary(for: currentMarks, language: language)
+        let colour = summary.isNeutral ? Color.clove.text.secondary : Color.clove.rating.on
+        return (6, Text(summary.text).foregroundStyle(colour))
+    }
+
+    static func keywordsText(for marks: PhotoMarks) -> String? {
+        marks.keywords.isEmpty ? nil : marks.keywords.joined(separator: ", ")
+    }
+
+    static func marksSummary(for marks: PhotoMarks, language: ResolvedAppLanguage) -> (
+        text: String, isNeutral: Bool
+    ) {
         var parts: [String] = []
-        if let stars = photo.marks.rating.starCount {
+        if let stars = marks.rating.starCount {
             parts.append(String(repeating: "★", count: stars))
         }
-        if let colour = photo.marks.label.colour {
+        if let colour = marks.label.colour {
             parts.append(AppLocalization.colourName(colour, language: language))
-        } else if !photo.marks.label.isClear {
-            parts.append(photo.marks.label.rawValue)
+        } else if !marks.label.isClear {
+            parts.append(marks.label.rawValue)
         }
-        if photo.marks.isRejected {
+        if marks.isRejected {
             parts.append("✕")
         }
-        let text =
-            parts.isEmpty
-            ? Text(AppLocalization.string("Unmarked", language: language))
-            : Text(parts.joined(separator: " · "))
-        return (6, text.foregroundStyle(Color.clove.rating.on))
+        if !parts.isEmpty {
+            return (parts.joined(separator: " · "), false)
+        }
+        if !marks.keywords.isEmpty {
+            return (
+                AppLocalization.format(
+                    "%lld keywords", language: language, Int64(marks.keywords.count)),
+                true
+            )
+        }
+        return (AppLocalization.string("Unmarked", language: language), false)
     }
 
     private func takenText(_ image: ImageInformation) -> String? {
