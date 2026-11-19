@@ -466,6 +466,234 @@ struct TapPickerTests {
         }
     }
 
+    @Test func gridBatchBarFitsNarrowWidthsAcrossLanguagesAndRespectsDisabledEligibility()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+
+        for language in [
+            ResolvedAppLanguage.english, .simplifiedChinese, .traditionalChinese,
+        ] {
+            let library = TestLibrary.sample()
+            let browsing = BrowsingModel(library: library)
+            browsing.openFolder()
+            let box = TapPickerTestBox()
+
+            struct HostView: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let language: ResolvedAppLanguage
+                let box: TapPickerTestBox
+
+                var body: some View {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        GridBatchBar(
+                            browsing: browsing,
+                            cells: GridDisplay(
+                                photos: browsing.photos, groups: browsing.groups,
+                                groupsEnabled: true
+                            ).cells
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .tapPickerContainer()
+                    .environment(store)
+                    .environment(\.appLanguage, language)
+                    .environment(\.scenePhase, .active)
+                    .environment(\.tapPickerTriggerRequest, box.trigger)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                        box.frames = frames
+                    }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 320, height: 640)
+            let host = UIHostingController(
+                rootView: HostView(
+                    browsing: browsing, store: store, language: language, box: box))
+            host.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("narrow grid batch bar mounted (\(language.rawValue))") {
+                box.frames["clove.grid.batch"] != nil
+                    && box.frames["clove.grid.batch.actions"] != nil
+            }
+
+            let bar = try #require(box.frames["clove.grid.batch"])
+            let reject = try #require(box.frames["clove.grid.batch.reject"])
+            let rating = try #require(box.frames["clove.grid.batch.rating"])
+            let label = try #require(box.frames["clove.grid.batch.label"])
+            let actions = try #require(box.frames["clove.grid.batch.actions"])
+
+            #expect(abs(bar.height - 48) < 1)
+            #expect(bar.minX >= 16 - 1.5)
+            #expect(bar.maxX <= 320 - 16 + 1.5)
+            #expect((52...56).contains(reject.width))
+            #expect((52...56).contains(rating.width))
+            #expect((52...56).contains(label.width))
+            #expect(actions.width >= 44)
+            #expect(abs(actions.height - 48) < 1)
+            #expect(actions.minX >= label.maxX - 0.5)
+
+            // With zero targets selected, the bar remains visible and rating trigger does not open.
+            #expect(browsing.batchTargets.isEmpty)
+            box.sendTrigger("clove.grid.batch.rating")
+            try await Task.sleep(for: .milliseconds(120))
+            #expect(box.frames["clove.grid.batch.stars"] == nil)
+
+            // Selecting a photo enables triggers and opens picker cleanly above the bar.
+            let first = try #require(browsing.photos.first)
+            browsing.toggleSelection(first.id)
+            try await Task.sleep(for: .milliseconds(60))
+            box.sendTrigger("clove.grid.batch.rating")
+            try await waitFor("stars picker opens when batch targets exist") {
+                box.frames["clove.grid.batch.stars"] != nil
+            }
+            box.sendTrigger("clove.grid.batch.rating")
+            try await waitFor("stars picker closes") {
+                box.frames["clove.grid.batch.stars"] == nil
+            }
+
+            // Losing mark permission disables picker triggers while keeping the bar visible.
+            library.reportLocationLoss(.externalVolumeDisconnected)
+            try await waitFor("location loss disables marking") {
+                !browsing.canMark
+            }
+            box.sendTrigger("clove.grid.batch.rating")
+            try await Task.sleep(for: .milliseconds(120))
+            #expect(box.frames["clove.grid.batch.stars"] == nil)
+            #expect(box.frames["clove.grid.batch"] != nil)
+        }
+    }
+
+    @Test func gridBatchBarStaysHiddenOnDuoDetailAndContainmentHoldsInPadSplit() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+
+        // 1. Duo expanded Detail hides the grid selection toolbar while keeping selection intact.
+        if #available(iOS 27.1, *) {
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            let first = try #require(browsing.photos.first)
+            browsing.toggleSelection(first.id)
+            let box = TapPickerTestBox()
+
+            struct DuoHost: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let box: TapPickerTestBox
+
+                var body: some View {
+                    NavigationStack {
+                        GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+                    }
+                    .environment(store)
+                    .environment(\.isDuoExpanded, true)
+                    .environment(\.usesSystemBrowsingToolbar, true)
+                    .environment(\.usesVerticalBrowsingToolbar, true)
+                    .environment(\.hasFoldRegion, true)
+                    .environment(\.scenePhase, .active)
+                    .environment(\.tapPickerTriggerRequest, box.trigger)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                        box.frames = frames
+                    }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+            let host = UIHostingController(
+                rootView: DuoHost(browsing: browsing, store: store, box: box))
+            host.traitOverrides.horizontalSizeClass = .regular
+            host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("duo grid batch bar mounted") {
+                box.frames["clove.grid.batch"] != nil
+            }
+            browsing.openPhoto(first.id)
+            try await waitFor("duo detail capsule mounted and grid batch hidden") {
+                box.frames["clove.duo.capsule"] != nil && box.frames["clove.grid.batch"] == nil
+            }
+            browsing.back()
+            try await waitFor("duo grid batch bar returns after Back") {
+                box.frames["clove.grid.batch"] != nil
+            }
+        }
+
+        // 2. iPad split detail column contains GridBatchBar and its pickers without sidebar overlap.
+        do {
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            let first = try #require(browsing.photos.first)
+            browsing.toggleSelection(first.id)
+            let box = TapPickerTestBox()
+
+            struct PadHost: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let box: TapPickerTestBox
+
+                var body: some View {
+                    BrowseShell(browsing: browsing)
+                        .environment(store)
+                        .environment(\.cloveUserInterfaceIdiom, .pad)
+                        .environment(\.scenePhase, .active)
+                        .environment(\.tapPickerTriggerRequest, box.trigger)
+                        .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                            box.frames = frames
+                        }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+            let host = UIHostingController(
+                rootView: PadHost(browsing: browsing, store: store, box: box))
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("ipad split batch bar mounted") {
+                box.frames["clove.grid.batch"] != nil
+            }
+            try await Task.sleep(for: .milliseconds(300))
+            let batchFrame = try #require(box.frames["clove.grid.batch"])
+            #expect(batchFrame.minX >= 220)
+            #expect(batchFrame.maxX <= 1024 - 16 + 1.5)
+
+            box.sendTrigger("clove.grid.batch.rating")
+            try await waitFor("ipad split batch picker visible") {
+                box.frames["clove.grid.batch.stars"] != nil
+            }
+            let pickerFrame = try #require(box.frames["clove.grid.batch.stars"])
+            #expect(pickerFrame.maxY <= batchFrame.minY + 1)
+            #expect(pickerFrame.minX >= 220)
+            #expect(pickerFrame.maxX <= 1024 - 12 + 1.5)
+        }
+    }
+
     @Test func outsideTapDismisserAndSafeAreasDoNotShiftPickerFrame() async throws {
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)

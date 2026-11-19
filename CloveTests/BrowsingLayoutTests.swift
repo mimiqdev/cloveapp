@@ -564,6 +564,150 @@ struct BrowsingLayoutTests {
         }
     }
 
+    @Test func compactGridSelectionHeaderFitsNarrowWidthsWithoutOverlap() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        for width in [CGFloat(320), CGFloat(375), CGFloat(393)] {
+            for language in [
+                ResolvedAppLanguage.english, .simplifiedChinese, .traditionalChinese,
+            ] {
+                let model = BrowsingModel(
+                    library: TestLibrary.sample(), similarGroupsEnabled: false)
+                model.openFolder()
+                let selected = Array(model.photos.prefix(3))
+                for photo in selected { model.toggleSelection(photo.id) }
+                let fiveStars = try #require(Rating(rawValue: 5))
+                model.apply(.rating(fiveStars), to: selected[0].id)
+                model.setFilter(.ratedAtLeast(fiveStars))
+                let box = TestHeaderFramesBox()
+
+                struct HostView: View {
+                    let model: BrowsingModel
+                    let language: ResolvedAppLanguage
+                    let box: TestHeaderFramesBox
+                    var body: some View {
+                        GridScreen(browsing: model, thumbnails: model.thumbnails)
+                            .environment(SettingsStore.sample)
+                            .environment(\.cloveUserInterfaceIdiom, .phone)
+                            .environment(\.appLanguage, language)
+                            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                                box.frames = frames
+                            }
+                    }
+                }
+
+                let host = UIHostingController(
+                    rootView: HostView(model: model, language: language, box: box))
+                host.traitOverrides.horizontalSizeClass = .compact
+                host.traitOverrides.verticalSizeClass = .regular
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(x: 0, y: 0, width: width, height: 844)
+                window.rootViewController = host
+                window.makeKeyAndVisible()
+                defer {
+                    window.isHidden = true
+                    window.rootViewController = nil
+                }
+
+                try await waitFor(
+                    "grid selection header mounted (\(width), \(language.rawValue))"
+                ) {
+                    box.frames["clove.grid.batch.count"] != nil
+                        && box.frames["clove.grid.batch.hiddenCount"] != nil
+                        && box.frames["clove.grid.filter"] != nil
+                        && box.frames["clove.grid.selectionOptions"] != nil
+                        && box.frames["clove.grid.batch.done"] != nil
+                }
+
+                let countFrame = try #require(box.frames["clove.grid.batch.count"])
+                let hiddenFrame = try #require(box.frames["clove.grid.batch.hiddenCount"])
+                let filterFrame = try #require(box.frames["clove.grid.filter"])
+                let optionsFrame = try #require(box.frames["clove.grid.selectionOptions"])
+                let doneFrame = try #require(box.frames["clove.grid.batch.done"])
+
+                for frame in [countFrame, hiddenFrame, filterFrame, optionsFrame, doneFrame] {
+                    #expect(frame.width > 0 && frame.height > 0)
+                    #expect(frame.minX >= 16 - 1.5)
+                    #expect(frame.maxX <= width - 16 + 1.5)
+                }
+
+                let titleMaxX = max(countFrame.maxX, hiddenFrame.maxX)
+                #expect(titleMaxX <= filterFrame.minX + 1.5)
+                #expect(filterFrame.maxX <= optionsFrame.minX + 1.5)
+                #expect(optionsFrame.maxX <= doneFrame.minX + 1.5)
+            }
+        }
+    }
+
+    @Test func batchRenameOrderCompactHeaderFitsNarrowWidthsWithoutOverlap() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        for width in [CGFloat(320), CGFloat(375), CGFloat(393)] {
+            for language in [
+                ResolvedAppLanguage.english, .simplifiedChinese, .traditionalChinese,
+            ] {
+                let model = BrowsingModel(
+                    library: TestLibrary.sample(), similarGroupsEnabled: false)
+                model.openFolder()
+                for photo in model.photos.prefix(3) { model.toggleSelection(photo.id) }
+                let flow = BatchRenameFlow(browsing: model)
+                let box = TestHeaderFramesBox()
+
+                struct HostView: View {
+                    let flow: BatchRenameFlow
+                    let language: ResolvedAppLanguage
+                    let box: TestHeaderFramesBox
+                    var body: some View {
+                        BatchRenameOrderScreen(flow: flow)
+                            .environment(SettingsStore.sample)
+                            .environment(\.appLanguage, language)
+                            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                                box.frames = frames
+                            }
+                    }
+                }
+
+                let host = UIHostingController(
+                    rootView: HostView(flow: flow, language: language, box: box))
+                host.traitOverrides.horizontalSizeClass = .compact
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(x: 0, y: 0, width: width, height: 844)
+                window.rootViewController = host
+                window.makeKeyAndVisible()
+                defer {
+                    window.isHidden = true
+                    window.rootViewController = nil
+                }
+
+                try await waitFor(
+                    "rename order header mounted (\(width), \(language.rawValue))"
+                ) {
+                    box.frames["clove.rename.cancel"] != nil
+                        && box.frames["clove.rename.order.title"] != nil
+                        && box.frames["clove.rename.sort"] != nil
+                        && box.frames["clove.rename.next"] != nil
+                }
+
+                let cancelFrame = try #require(box.frames["clove.rename.cancel"])
+                let titleFrame = try #require(box.frames["clove.rename.order.title"])
+                let sortFrame = try #require(box.frames["clove.rename.sort"])
+                let nextFrame = try #require(box.frames["clove.rename.next"])
+
+                for frame in [cancelFrame, titleFrame, sortFrame, nextFrame] {
+                    #expect(frame.width > 0 && frame.height > 0)
+                    #expect(frame.minX >= 16 - 1.5)
+                    #expect(frame.maxX <= width - 16 + 1.5)
+                }
+
+                #expect(cancelFrame.maxX <= titleFrame.minX + 1.5)
+                #expect(titleFrame.maxX <= sortFrame.minX + 1.5)
+                #expect(sortFrame.maxX <= nextFrame.minX + 1.5)
+            }
+        }
+    }
+
     private func findCollectionView(in view: UIView) -> UICollectionView? {
         if let collection = view as? UICollectionView { return collection }
         for child in view.subviews {
@@ -636,4 +780,10 @@ private final class TestDuoEnvironmentBox {
     var isDuoCover = false
     var scenePhase: ScenePhase = .active
     var filterPopoverTrigger = 0
+}
+
+@MainActor
+@Observable
+private final class TestHeaderFramesBox {
+    var frames: [String: CGRect] = [:]
 }

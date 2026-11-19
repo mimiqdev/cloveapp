@@ -346,6 +346,71 @@ struct BatchRenameFlowTests {
         #expect(browsing.state.selection.isEmpty)
         await library.closeFolder()
     }
+
+    @Test func hiddenSelectedCountTracksFilterAndBatchActionsOperateOnlyOnVisibleTargets()
+        async throws
+    {
+        let library = TestLibrary.sample()
+        let browsing = BrowsingModel(library: library, similarGroupsEnabled: false)
+        browsing.openFolder()
+        let selected = Array(browsing.photos.dropFirst(2).prefix(3))
+        for photo in selected { browsing.toggleSelection(photo.id) }
+        #expect(browsing.batchTargets.count == 3)
+        #expect(browsing.hiddenSelectedCount == 0)
+
+        let fourStars = try #require(Rating(rawValue: 4))
+        browsing.apply(.rating(fourStars), to: selected[0].id)
+        browsing.setFilter(.ratedAtLeast(fourStars))
+        #expect(browsing.isSelecting)
+        #expect(browsing.batchTargets.map(\.id) == [selected[0].id])
+        #expect(browsing.hiddenSelectedCount == 2)
+        #expect(BatchRenameFlow(browsing: browsing).order.map(\.id) == [selected[0].id])
+
+        browsing.applyBatch(.label(ColourLabel(colour: .blue)), settings: AppSettings())
+        let firstMarks = browsing.shownMarks(for: selected[0].id)
+        let secondMarks = browsing.shownMarks(for: selected[1].id)
+        #expect(firstMarks.label.colour == .blue)
+        #expect(secondMarks.label == .clear)
+
+        // All selected photos hidden keeps selection mode active with 0 visible targets.
+        browsing.setFilter(.rejected)
+        #expect(browsing.isSelecting)
+        #expect(browsing.batchTargets.isEmpty)
+        #expect(browsing.hiddenSelectedCount == 3)
+
+        // Clearing filter restores full visible selection cleanly.
+        browsing.setFilter(.all)
+        #expect(browsing.batchTargets.count == 3)
+        #expect(browsing.hiddenSelectedCount == 0)
+        await library.closeFolder()
+    }
+
+    @Test func groupedCoverSelectionUnderFilterReportsVisibleTargetsAndHiddenSelectedCount()
+        async throws
+    {
+        let library = TestLibrary.sample()
+        let browsing = BrowsingModel(library: library, similarGroupsEnabled: true)
+        browsing.openFolder()
+        let group = try #require(browsing.groups.last { $0.members.count >= 3 })
+        let hiddenMember = try #require(group.members.last)
+        browsing.apply(MarkChange(rating: .rejected), to: hiddenMember)
+        browsing.setFilter(.unmarked)
+
+        let cells = GridDisplay(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: true
+        )
+        .cells
+        let coverCell = try #require(
+            cells.first { $0.group?.id == group.id && $0.group?.isCover == true })
+        browsing.beginSelection(of: coverCell)
+
+        #expect(browsing.state.selection.contains(hiddenMember))
+        #expect(
+            browsing.batchTargets.count
+                == browsing.photos.filter { group.members.contains($0.id) }.count)
+        #expect(browsing.hiddenSelectedCount == 1)
+        await library.closeFolder()
+    }
 }
 
 @MainActor

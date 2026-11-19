@@ -88,11 +88,16 @@ extension CloveFlowTests {
         firstGrid.press(forDuration: 0.7, thenDragTo: thirdGrid)
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
 
-        // Deselect all keeps empty multi-select active.
+        // Deselect all keeps empty multi-select active with disabled batch controls.
         element(app, "clove.grid.selectionOptions").tap()
         app.buttons["Deselect all"].tap()
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
         XCTAssertTrue(element(app, "clove.grid.batch.done").exists)
+        XCTAssertTrue(element(app, "clove.grid.batch").exists)
+        XCTAssertFalse(element(app, "clove.grid.batch.reject").isEnabled)
+        XCTAssertFalse(element(app, "clove.grid.batch.rating").isEnabled)
+        XCTAssertFalse(element(app, "clove.grid.batch.label").isEnabled)
+        XCTAssertFalse(element(app, "clove.grid.batch.actions").isEnabled)
 
         // Select all then Deselect all, then drag-select 3 photos while already in select mode.
         element(app, "clove.grid.selectionOptions").tap()
@@ -104,8 +109,12 @@ extension CloveFlowTests {
 
         firstGrid.press(forDuration: 0.7, thenDragTo: thirdGrid)
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
-        XCTAssertTrue(element(app, "clove.grid.batch.rename").isEnabled)
-        element(app, "clove.grid.batch.rename").tap()
+        let actionsButton = element(app, "clove.grid.batch.actions")
+        XCTAssertTrue(actionsButton.isEnabled)
+        actionsButton.tap()
+        let renameItem = element(app, "clove.grid.batch.rename")
+        XCTAssertTrue(renameItem.waitForExistence(timeout: 5))
+        renameItem.tap()
         XCTAssertTrue(element(app, "clove.rename.order").waitForExistence(timeout: 5))
 
         // Sort reverse then back to capture time.
@@ -155,6 +164,75 @@ extension CloveFlowTests {
     }
 
     @MainActor
+    func testSelectionToolbarFilterHiddenCountAndRenameCancelPreservesState() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_KEEP_TOAST": "1"])
+        defer { app.terminate() }
+        openLibrary(app)
+        openSettings(in: app)
+        openSettingsCategory("clove.settings.category.browsing", in: app)
+        setSimilarGroups(in: app, on: false)
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+
+        element(app, "clove.grid.more").tap()
+        app.buttons["Select"].tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
+        XCTAssertFalse(element(app, "clove.grid.batch.actions").isEnabled)
+
+        for stem in ["mmq02678", "mmq02679", "mmq02680"] {
+            let photo = element(app, "clove.grid.photo.\(stem)")
+            XCTAssertTrue(photo.waitForExistence(timeout: 5))
+            photo.tap()
+        }
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
+
+        // Normalize all three to 4 stars, then reject only the first while keeping all three selected.
+        element(app, "clove.grid.batch.rating").tap()
+        XCTAssertTrue(element(app, "clove.grid.batch.stars").waitForExistence(timeout: 5))
+        element(app, "clove.grid.batch.stars.4").tap()
+        element(app, "clove.grid.photo.mmq02679").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "1 selected")
+        element(app, "clove.grid.batch.reject").tap()
+        element(app, "clove.grid.photo.mmq02679").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
+
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let filterButton = element(app, "clove.grid.filter")
+            XCTAssertTrue(filterButton.waitForExistence(timeout: 5))
+            filterButton.tap()
+            element(app, "clove.grid.filter.rejected").tap()
+
+            XCTAssertEqual(element(app, "clove.grid.batch.count").label, "1 selected")
+            let hiddenCount = element(app, "clove.grid.batch.hiddenCount")
+            XCTAssertTrue(hiddenCount.waitForExistence(timeout: 5))
+            XCTAssertEqual(hiddenCount.label, "2 hidden by filter")
+
+            // Actions -> Rename… scopes strictly to visible targets and Cancel preserves filter & selection.
+            element(app, "clove.grid.batch.actions").tap()
+            let renameItem = element(app, "clove.grid.batch.rename")
+            XCTAssertTrue(renameItem.waitForExistence(timeout: 5))
+            renameItem.tap()
+            XCTAssertTrue(element(app, "clove.rename.order").waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Order 1 photo"].exists)
+            XCTAssertTrue(element(app, "clove.rename.tile.mmq02678").exists)
+            XCTAssertFalse(element(app, "clove.rename.tile.mmq02679").exists)
+
+            element(app, "clove.rename.cancel").tap()
+            XCTAssertTrue(element(app, "clove.grid.batch").waitForExistence(timeout: 5))
+            XCTAssertEqual(element(app, "clove.grid.batch.count").label, "1 selected")
+            XCTAssertEqual(element(app, "clove.grid.batch.hiddenCount").label, "2 hidden by filter")
+
+            // Switching filter back to All restores all 3 selected photos.
+            filterButton.tap()
+            element(app, "clove.grid.filter.all").tap()
+            XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
+            XCTAssertFalse(element(app, "clove.grid.batch.hiddenCount").exists)
+        }
+    }
+
+    @MainActor
     private var renameDevice: String {
         UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
     }
@@ -173,7 +251,13 @@ extension CloveFlowTests {
             XCTAssertTrue(photo.waitForExistence(timeout: 5))
             photo.tap()
         }
-        element(app, "clove.grid.batch.rename").tap()
-        XCTAssertTrue(element(app, "clove.rename.order").exists)
+        let actions = element(app, "clove.grid.batch.actions")
+        XCTAssertTrue(actions.waitForExistence(timeout: 5))
+        XCTAssertTrue(actions.isEnabled)
+        actions.tap()
+        let renameItem = element(app, "clove.grid.batch.rename")
+        XCTAssertTrue(renameItem.waitForExistence(timeout: 5))
+        renameItem.tap()
+        XCTAssertTrue(element(app, "clove.rename.order").waitForExistence(timeout: 5))
     }
 }

@@ -7,6 +7,7 @@ struct BrowsingHeader<
     let title: String
     var titleIdentifier = "clove.browsing.title"
     var backTitle: String? = nil
+    var showsBack = true
     var usesInlineFlow = false
     var height: CGFloat = 64
     let back: () -> Void
@@ -21,6 +22,7 @@ struct BrowsingHeader<
         title: String,
         titleIdentifier: String = "clove.browsing.title",
         backTitle: String? = nil,
+        showsBack: Bool = true,
         usesInlineFlow: Bool = false,
         height: CGFloat = 64,
         back: @escaping () -> Void,
@@ -32,6 +34,7 @@ struct BrowsingHeader<
         self.title = title
         self.titleIdentifier = titleIdentifier
         self.backTitle = backTitle
+        self.showsBack = showsBack
         self.usesInlineFlow = usesInlineFlow
         self.height = height
         self.back = back
@@ -46,12 +49,14 @@ struct BrowsingHeader<
         Group {
             if usesInlineFlow {
                 HStack(spacing: 8) {
-                    backButton(label: backLabel)
-                        .layoutPriority(1)
+                    if showsBack {
+                        backButton(label: backLabel)
+                            .layoutPriority(1)
+                    }
                     leadingTools()
                         .layoutPriority(1)
                     titleBlock
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: showsBack ? .center : .leading)
                         .layoutPriority(0)
                     tools()
                         .layoutPriority(1)
@@ -65,7 +70,9 @@ struct BrowsingHeader<
                                 maxWidth: max(
                                     proxy.size.width - (backTitle != nil ? 520 : 240), 100))
                         HStack(spacing: 8) {
-                            backButton(label: backLabel)
+                            if showsBack {
+                                backButton(label: backLabel)
+                            }
                             leadingTools()
                             Spacer(minLength: 0)
                             tools()
@@ -82,7 +89,7 @@ struct BrowsingHeader<
     }
 
     private var titleBlock: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: (usesInlineFlow && !showsBack) ? .leading : .center, spacing: 0) {
             HStack(spacing: 0) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
