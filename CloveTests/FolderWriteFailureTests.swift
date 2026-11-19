@@ -138,6 +138,135 @@ struct FolderWriteFailureTests {
         await library.closeFolder()
     }
 
+    @Test func scanIsolatesUnreadableSidecarFromHealthySiblingsBeforeAndAfter() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let photos = root.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: photos, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let codec = XMPCodec()
+        let four = try #require(Rating(rawValue: 4))
+        let two = try #require(Rating(rawValue: 2))
+
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("a_before.ARW"))
+        try codec.write(
+            XMPEdit(
+                rating: .set(four),
+                label: .set(ColourLabel(colour: .green)),
+                keywords: .set(["harbour", "dawn"])),
+            into: nil
+        ).write(to: photos.appendingPathComponent("a_before.xmp"))
+
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("b_unreadable.ARW"))
+        try FileManager.default.createDirectory(
+            at: photos.appendingPathComponent("b_unreadable.xmp"),
+            withIntermediateDirectories: false)
+
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("c_after.ARW"))
+        try codec.write(
+            XMPEdit(
+                rating: .set(two),
+                label: .set(ColourLabel(colour: .blue)),
+                keywords: .set(["cliff", "mist"])),
+            into: nil
+        ).write(to: photos.appendingPathComponent("c_after.xmp"))
+
+        let stores = FolderLibrarySession.Stores(
+            access: FolderAccess(
+                store: RecentFolderStore(fileURL: root.appendingPathComponent("recents.json"))),
+            writes: MarkWriteQueue(storeDirectory: root.appendingPathComponent("marks")),
+            groups: SimilarGroupsCache(directory: root.appendingPathComponent("groups")))
+        let library = FolderLibrarySession(stores: Task { stores }, similarGroupsEnabled: { false })
+        let model = BrowsingModel(library: library)
+        await model.openPickedFolder(photos)
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 3 }
+
+        let before = try #require(model.photos.first { $0.id.stem == "a_before" }?.id)
+        let unreadable = try #require(model.photos.first { $0.id.stem == "b_unreadable" }?.id)
+        let after = try #require(model.photos.first { $0.id.stem == "c_after" }?.id)
+
+        #expect(
+            model.shownMarks(for: before)
+                == PhotoMarks(
+                    rating: four,
+                    label: ColourLabel(colour: .green),
+                    keywords: ["harbour", "dawn"]))
+        #expect(model.shownMarks(for: unreadable) == PhotoMarks())
+        #expect(
+            model.shownMarks(for: after)
+                == PhotoMarks(
+                    rating: two,
+                    label: ColourLabel(colour: .blue),
+                    keywords: ["cliff", "mist"]))
+        #expect(model.failureToastMessage == BrowsingModel.readFailureToastMessage)
+        await library.closeFolder()
+    }
+
+    @Test func rereadMarksPreservesUnreadablePhotoAndUpdatesHealthySibling() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let photos = root.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: photos, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let codec = XMPCodec()
+        let one = try #require(Rating(rawValue: 1))
+        let three = try #require(Rating(rawValue: 3))
+        let five = try #require(Rating(rawValue: 5))
+
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("a_unreadable.ARW"))
+        let unreadableSidecar = photos.appendingPathComponent("a_unreadable.xmp")
+        try codec.write(
+            XMPEdit(
+                rating: .set(three),
+                label: .set(ColourLabel(colour: .red)),
+                keywords: .set(["meadow"])),
+            into: nil
+        ).write(to: unreadableSidecar)
+
+        try Data("photo".utf8).write(to: photos.appendingPathComponent("b_healthy.ARW"))
+        let healthySidecar = photos.appendingPathComponent("b_healthy.xmp")
+        try codec.write(.rating(one), into: nil).write(to: healthySidecar)
+
+        let stores = FolderLibrarySession.Stores(
+            access: FolderAccess(
+                store: RecentFolderStore(fileURL: root.appendingPathComponent("recents.json"))),
+            writes: MarkWriteQueue(storeDirectory: root.appendingPathComponent("marks")),
+            groups: SimilarGroupsCache(directory: root.appendingPathComponent("groups")))
+        let library = FolderLibrarySession(stores: Task { stores }, similarGroupsEnabled: { false })
+        let model = BrowsingModel(library: library)
+        await model.openPickedFolder(photos)
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 2 }
+
+        let unreadable = try #require(model.photos.first { $0.id.stem == "a_unreadable" }?.id)
+        let healthy = try #require(model.photos.first { $0.id.stem == "b_healthy" }?.id)
+        let expectedUnreadableMarks = PhotoMarks(
+            rating: three,
+            label: ColourLabel(colour: .red),
+            keywords: ["meadow"])
+        #expect(model.shownMarks(for: unreadable) == expectedUnreadableMarks)
+        #expect(model.shownMarks(for: healthy) == PhotoMarks(rating: one))
+
+        try FileManager.default.removeItem(at: unreadableSidecar)
+        try FileManager.default.createDirectory(
+            at: unreadableSidecar, withIntermediateDirectories: false)
+        try codec.write(
+            XMPEdit(
+                rating: .set(five),
+                label: .set(ColourLabel(colour: .purple)),
+                keywords: .set(["summit", "ridge"])),
+            into: nil
+        ).write(to: healthySidecar)
+
+        try await library.rereadMarks(for: [unreadable, healthy])
+        let expectedHealthyMarks = PhotoMarks(
+            rating: five,
+            label: ColourLabel(colour: .purple),
+            keywords: ["summit", "ridge"])
+        try await waitUntil { model.shownMarks(for: healthy) == expectedHealthyMarks }
+        #expect(model.shownMarks(for: unreadable) == expectedUnreadableMarks)
+        await library.closeFolder()
+    }
+
     private func waitUntil(_ condition: () -> Bool) async throws {
         for _ in 0..<1000 {
             if condition() { return }
