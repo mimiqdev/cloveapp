@@ -28,12 +28,18 @@ enum MetadataParser {
                     "{MakerOlympus}.SerialNumber", "{MakerPanasonic}.SerialNumber",
                     "{MakerSony}.SerialNumber", "{MakerPentax}.SerialNumber",
                 ]),
+            lens: text(
+                properties, paths: ["{Exif}.LensModel", "{ExifAux}.LensModel"], allowNumbers: false),
+            focalLengthMillimetres: positiveNumber(properties, paths: ["{Exif}.FocalLength"]),
+            focalLength35mmEquivalent: positiveNumber(
+                properties, paths: ["{Exif}.FocalLenIn35mmFilm"]),
             fileCreationTime: fileDate(creationDate, source: .fileCreation),
             fileModificationTime: fileDate(modificationDate, source: .fileModification))
     }
 
     private static func text(
-        _ properties: [String: Any], paths: [String], unknownPlaceholderIsMissing: Bool = false
+        _ properties: [String: Any], paths: [String], unknownPlaceholderIsMissing: Bool = false,
+        allowNumbers: Bool = true
     ) -> MetadataField<String> {
         var firstInvalid: MetadataField<String>?
         for path in paths {
@@ -45,7 +51,9 @@ enum MetadataParser {
             let string: String
             if let value = raw as? String {
                 string = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            } else if allowNumbers, let number = raw as? NSNumber,
+                CFGetTypeID(number) != CFBooleanGetTypeID()
+            {
                 string = number.stringValue
             } else {
                 firstInvalid =
@@ -61,6 +69,32 @@ enum MetadataParser {
                 continue
             }
             return .value(string, source: source)
+        }
+        return firstInvalid ?? .missing
+    }
+
+    private static func positiveNumber(
+        _ properties: [String: Any], paths: [String]
+    ) -> MetadataField<Double> {
+        var firstInvalid: MetadataField<Double>?
+        for path in paths {
+            let parts = path.split(separator: ".", maxSplits: 1).map(String.init)
+            guard let dictionary = properties[parts[0]] as? [String: Any],
+                let raw = dictionary[parts[1]]
+            else { continue }
+            let source = MetadataLocation.imageProperty(path)
+            guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
+                firstInvalid =
+                    firstInvalid ?? .invalid(rawValue: String(describing: raw), source: source)
+                continue
+            }
+            let value = number.doubleValue
+            guard value.isFinite, value > 0 else {
+                firstInvalid =
+                    firstInvalid ?? .invalid(rawValue: String(describing: raw), source: source)
+                continue
+            }
+            return .value(value, source: source)
         }
         return firstInvalid ?? .missing
     }

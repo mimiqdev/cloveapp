@@ -61,8 +61,16 @@ public struct ImageMetadata: Sendable, Equatable {
     public let utcOffset: MetadataField<Int>
     public let model: MetadataField<String>
     public let bodySerial: MetadataField<String>
+    public let lens: MetadataField<String>
+    public let focalLengthMillimetres: MetadataField<Double>
+    public let focalLength35mmEquivalent: MetadataField<Double>
     public let fileCreationTime: MetadataField<Date>
     public let fileModificationTime: MetadataField<Date>
+
+    /// Prefers 35mm-equivalent focal length when present and valid, falling back to actual focal length.
+    public var effectiveFocalLengthMillimetres: Double? {
+        focalLength35mmEquivalent.value ?? focalLengthMillimetres.value
+    }
 
     public var time: MetadataTime {
         if let capture = captureTime.value { return .captureMetadata(capture) }
