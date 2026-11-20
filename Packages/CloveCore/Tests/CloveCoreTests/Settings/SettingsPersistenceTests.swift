@@ -67,6 +67,14 @@ import CloveCore
             { $0.similarGroupsEnabled = defaults.similarGroupsEnabled }
         ),
         (
+            "groups.sensitivity", invalid,
+            { $0.groupingSensitivity = defaults.groupingSensitivity }
+        ),
+        (
+            "groups.timeWindow", invalid,
+            { $0.groupingTimeWindow = defaults.groupingTimeWindow }
+        ),
+        (
             "appearance.mode", invalid,
             { $0.appearance.mode = defaults.appearance.mode }
         ),

@@ -1039,6 +1039,28 @@
         }
       }
     },
+    "%llds": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%llds"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 秒"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 秒"
+          }
+        }
+      }
+    },
     "A different folder is at this location now. Choose the folder again.": {
       "localizations": {
         "en": {
@@ -3637,6 +3659,50 @@
         }
       }
     },
+    "Groups consecutive photos from the same camera within the time window, then splits shots that look different.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Groups consecutive photos from the same camera within the time window, then splits shots that look different."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先将同一台相机在时间窗口内连续拍摄的照片归为一组，再按画面相似度拆分不同场景。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先將同一部相機在時間窗口內連續拍攝的相片歸為一組，再依畫面相似度拆分不同場景。"
+          }
+        }
+      }
+    },
+    "Groups consecutive photos from the same camera within the time window, without checking visual similarity.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Groups consecutive photos from the same camera within the time window, without checking visual similarity."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将同一台相机在时间窗口内连续拍摄的照片归为一组，不比较画面相似度。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將同一部相機在時間窗口內連續拍攝的相片歸為一組，不比較畫面相似度。"
+          }
+        }
+      }
+    },
     "Gruvbox": {
       "localizations": {
         "en": {
@@ -4117,6 +4183,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "位置"
+          }
+        }
+      }
+    },
+    "Loose": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loose"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "宽松"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "寬鬆"
           }
         }
       }
@@ -7839,6 +7927,28 @@
         }
       }
     },
+    "Similar groups are off. Your time window and sensitivity preferences are kept.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Similar groups are off. Your time window and sensitivity preferences are kept."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似照片组已关闭，时间窗口与相似度灵敏度设置会保留。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似相片組已關閉，時間窗口與相似度靈敏度設定會保留。"
+          }
+        }
+      }
+    },
     "Similar groups keep zoom and position between members. Leaving a group or switching standalone photos returns to fit.": {
       "localizations": {
         "en": {
@@ -7857,6 +7967,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "相似相片組內切換相片時會保持縮放比例與位置；離開群組或切換獨立相片時會恢復符合螢幕。"
+          }
+        }
+      }
+    },
+    "Similarity sensitivity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Similarity sensitivity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似度灵敏度"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似度靈敏度"
           }
         }
       }
@@ -7923,6 +8055,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "排序方式"
+          }
+        }
+      }
+    },
+    "Standard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标准"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標準"
           }
         }
       }
@@ -9045,6 +9199,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "該相片在列表中重複出現。"
+          }
+        }
+      }
+    },
+    "Tight": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tight"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "严格"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "嚴格"
+          }
+        }
+      }
+    },
+    "Time only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅按时间"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅依時間"
+          }
+        }
+      }
+    },
+    "Time window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time window"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "时间窗口"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "時間窗口"
           }
         }
       }

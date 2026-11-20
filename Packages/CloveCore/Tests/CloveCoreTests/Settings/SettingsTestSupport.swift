@@ -45,7 +45,9 @@ let launchSettingKeys = [
     "detail.doubleTap",
     "detail.zoomedGestures",
     "gestures.enabled",
+    "groups.sensitivity",
     "groups.similarEnabled",
+    "groups.timeWindow",
     "labels.extended",
     "ratings.enabled",
     "rejects.folderName",
@@ -72,6 +74,8 @@ func nonDefaultSettings() throws -> AppSettings {
         rejectsFolderName: folderName,
         moveRejectsEnabled: false,
         similarGroupsEnabled: false,
+        groupingSensitivity: .timeOnly,
+        groupingTimeWindow: .tenSeconds,
         appearance: AppearanceChoice(mode: .dark, family: .nord),
         photoDisplayMode: .cameraPreviewFirst,
         language: .simplifiedChinese

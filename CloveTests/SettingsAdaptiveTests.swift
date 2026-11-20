@@ -103,13 +103,46 @@ struct SettingsAdaptiveTests {
             $0.zoomedGestures = .pan
             $0.doubleTap = .zoomToTapPoint
             $0.appearance = AppearanceChoice(mode: .dark, family: .nord)
+            $0.similarGroupsEnabled = false
+            $0.groupingSensitivity = .timeOnly
+            $0.groupingTimeWindow = .tenSeconds
         }
         #expect(store.photoDisplayMode == .rawFirst)
+        #expect(store.settings.groupingSensitivity == .timeOnly)
+        #expect(store.settings.groupingTimeWindow == .tenSeconds)
 
         store.resetToDefaults()
         #expect(store.settings == AppSettings())
         #expect(store.settings.appearance == AppearanceChoice(mode: .system, family: .default))
+        #expect(store.settings.similarGroupsEnabled)
+        #expect(store.settings.groupingSensitivity == .standard)
+        #expect(store.settings.groupingTimeWindow == .twoSeconds)
         #expect(store.photoDisplayMode == .cameraPreviewFirst)
+    }
+
+    @Test func disablingSimilarGroupsPreservesTimeWindowAndSensitivity() {
+        let storage = SampleSettingsStorage()
+        let persistence = SettingsPersistence(storage: storage)
+        let store = SettingsStore(
+            persistence: persistence,
+            rememberedAdvanceStorage: storage,
+            physicalMemory: 8 * 1024 * 1024 * 1024)
+
+        store.update {
+            $0.groupingTimeWindow = .fiveSeconds
+            $0.groupingSensitivity = .loose
+        }
+        store.update { $0.similarGroupsEnabled = false }
+
+        #expect(!store.settings.similarGroupsEnabled)
+        #expect(store.settings.groupingTimeWindow == .fiveSeconds)
+        #expect(store.settings.groupingSensitivity == .loose)
+        #expect(persistence.load().groupingTimeWindow == .fiveSeconds)
+        #expect(persistence.load().groupingSensitivity == .loose)
+
+        store.update { $0.similarGroupsEnabled = true }
+        #expect(store.settings.groupingTimeWindow == .fiveSeconds)
+        #expect(store.settings.groupingSensitivity == .loose)
     }
 
     @Test func independentAppearanceModeAndFamilyUpdatesPersistAndReset() {

@@ -81,6 +81,9 @@ final class FolderLibrarySession: FolderLibrary {
     /// what the store says then, not by what this library was created with.
     private let similarGroupsEnabled: @MainActor () -> Bool
 
+    /// Active grouping thresholds (time window and sensitivity), read each time grouping runs.
+    private let groupingThresholds: @MainActor () -> GroupingThresholds
+
     /// The one stream this library publishes, consumed by ``BrowsingModel``.
     let updates: AsyncStream<FolderLibraryUpdate>
     private let updatesContinuation: AsyncStream<FolderLibraryUpdate>.Continuation
@@ -184,7 +187,8 @@ final class FolderLibrarySession: FolderLibrary {
         rejectsFolderName: @escaping @MainActor () -> RejectsFolderName = {
             .defaultFolderName
         },
-        similarGroupsEnabled: @escaping @MainActor () -> Bool = { true }
+        similarGroupsEnabled: @escaping @MainActor () -> Bool = { true },
+        groupingThresholds: @escaping @MainActor () -> GroupingThresholds = { .standard }
     ) {
         self.stores = stores
         self.caches = caches ?? Task.detached(priority: .userInitiated) { await Self.makeCaches() }
@@ -192,6 +196,7 @@ final class FolderLibrarySession: FolderLibrary {
         self.photosSaver = photosSaver
         self.rejectsFolderName = rejectsFolderName
         self.similarGroupsEnabled = similarGroupsEnabled
+        self.groupingThresholds = groupingThresholds
         let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
         updates = stream
         updatesContinuation = continuation
@@ -1209,6 +1214,7 @@ final class FolderLibrarySession: FolderLibrary {
             cache: stores.groups,
             featureCache: caches.features,
             previewCache: caches.thumbnails,
+            thresholds: groupingThresholds(),
             sets: { [weak self] photo in self?.store.scannedSet(for: photo)?.photoSet },
             publish: { [weak self] groups in
                 // A replaced folder publishes nothing: the open that owns this grouping is gone.
@@ -1229,7 +1235,7 @@ final class FolderLibrarySession: FolderLibrary {
         guard let grouping else { return }
         await grouping.begin(
             photos: store.groupingPhotos, revision: groupingRevision(),
-            enabled: similarGroupsEnabled())
+            enabled: similarGroupsEnabled(), thresholds: groupingThresholds())
     }
 
     /// The group cache's token for the folder as the scan found it (PRD Similar groups rules).
@@ -1486,10 +1492,19 @@ final class FolderLibrarySession: FolderLibrary {
     /// again when the next folder opens. A change during the scan changes nothing: grouping
     /// reads the store when it starts after the scan finishes.
     func setSimilarGroupsEnabled(_ enabled: Bool) async {
-        if enabled {
+        let thresholds = groupingThresholds()
+        if enabled && thresholds.useVisualSimilarity {
             await resumeAfterMemoryPressure()
         }
-        await grouping?.setEnabled(enabled, photos: store.groupingPhotos)
+        await grouping?.setEnabled(enabled, photos: store.groupingPhotos, thresholds: thresholds)
+    }
+
+    /// Applies updated grouping thresholds to the open folder without rescanning files on disk.
+    func setGroupingThresholds(_ thresholds: GroupingThresholds) async {
+        if similarGroupsEnabled() && thresholds.useVisualSimilarity {
+            await resumeAfterMemoryPressure()
+        }
+        await grouping?.setThresholds(thresholds, photos: store.groupingPhotos)
     }
 
     // MARK: - Memory pressure

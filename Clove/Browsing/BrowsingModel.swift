@@ -529,6 +529,11 @@ final class BrowsingModel {
         await library.setSimilarGroupsEnabled(enabled)
     }
 
+    /// Applies updated grouping thresholds to the open folder without rescanning files on disk.
+    func setGroupingThresholds(_ thresholds: GroupingThresholds) async {
+        await library.setGroupingThresholds(thresholds)
+    }
+
     // MARK: - In-group culling
 
     /// Snapshots the allowed changes from shown marks and submits one finishing action.

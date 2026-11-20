@@ -315,6 +315,44 @@ struct BrowsingAndGroupsSettingsSections: View {
                 isOn: settingsBinding(store, \.similarGroupsEnabled)
             )
             .accessibilityIdentifier("clove.settings.similarGroupsEnabled")
+
+            Picker(
+                AppLocalization.string("Time window", language: language),
+                selection: settingsBinding(store, \.groupingTimeWindow)
+            ) {
+                ForEach(GroupingTimeWindow.allCases) { window in
+                    Text(AppLocalization.groupingTimeWindowTitle(window, language: language))
+                        .tag(window)
+                }
+            }
+            .disabled(!store.settings.similarGroupsEnabled)
+            .accessibilityLabel(AppLocalization.string("Time window", language: language))
+            .accessibilityValue(
+                AppLocalization.groupingTimeWindowTitle(
+                    store.settings.groupingTimeWindow, language: language)
+            )
+            .accessibilityIdentifier("clove.settings.groupingTimeWindow")
+
+            Picker(
+                AppLocalization.string("Similarity sensitivity", language: language),
+                selection: settingsBinding(store, \.groupingSensitivity)
+            ) {
+                ForEach(GroupingSensitivity.allCases) { sensitivity in
+                    Text(
+                        AppLocalization.groupingSensitivityTitle(sensitivity, language: language)
+                    )
+                    .tag(sensitivity)
+                }
+            }
+            .disabled(!store.settings.similarGroupsEnabled)
+            .accessibilityLabel(
+                AppLocalization.string("Similarity sensitivity", language: language)
+            )
+            .accessibilityValue(
+                AppLocalization.groupingSensitivityTitle(
+                    store.settings.groupingSensitivity, language: language)
+            )
+            .accessibilityIdentifier("clove.settings.groupingSensitivity")
         } header: {
             if showsCategoryTitle {
                 VStack(alignment: .leading, spacing: 12) {
@@ -327,6 +365,9 @@ struct BrowsingAndGroupsSettingsSections: View {
                 SettingsSectionHeader(
                     AppLocalization.string("Groups", language: language), identifier: "groups")
             }
+        } footer: {
+            Text(groupsFooterText)
+                .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
 
@@ -359,6 +400,22 @@ struct BrowsingAndGroupsSettingsSections: View {
         .listRowBackground(theme.tokens.card.color)
 
         SettingsSaveFailureSection()
+    }
+
+    private var groupsFooterText: String {
+        if !store.settings.similarGroupsEnabled {
+            return AppLocalization.string(
+                "Similar groups are off. Your time window and sensitivity preferences are kept.",
+                language: language)
+        }
+        if store.settings.groupingSensitivity == .timeOnly {
+            return AppLocalization.string(
+                "Groups consecutive photos from the same camera within the time window, without checking visual similarity.",
+                language: language)
+        }
+        return AppLocalization.string(
+            "Groups consecutive photos from the same camera within the time window, then splits shots that look different.",
+            language: language)
     }
 
     private var doubleTapTitle: String {

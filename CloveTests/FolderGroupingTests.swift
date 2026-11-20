@@ -221,6 +221,148 @@ struct FolderGroupingTests {
         await session.end()
     }
 
+    @Test func timeOnlyModeGroupsImmediatelyWithoutFeatureExtraction() async throws {
+        let fixture = try await GroupingTestWorkspace()
+        defer { fixture.remove() }
+
+        var activity: [Bool] = []
+        var setsLookups = 0
+        var published: [[BrowsingGroup]] = []
+        let timeOnly = GroupingThresholds(timeWindow: .twoSeconds, sensitivity: .timeOnly)
+        let grouping = FolderGrouping(
+            folder: fixture.folderID,
+            session: fixture.session,
+            cache: fixture.groupCache,
+            featureCache: fixture.warmFeatures,
+            previewCache: fixture.warmThumbnails,
+            thresholds: timeOnly,
+            sets: { id in
+                setsLookups += 1
+                return fixture.sets[id]
+            },
+            publish: { published.append($0) },
+            analysisChanged: { activity.append($0) })
+
+        await grouping.begin(
+            photos: fixture.groupingPhotos, revision: fixture.revision, enabled: true)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(published.last?.map(\.members) == [fixture.groupingPhotos.map(\.id)])
+        #expect(!activity.contains(true))
+        #expect(setsLookups == 0)
+        let featureFiles = try FileManager.default.contentsOfDirectory(
+            at: fixture.warmFeatureDirectory, includingPropertiesForKeys: nil)
+        #expect(featureFiles.filter { $0.pathExtension == "feature" }.isEmpty)
+
+        await grouping.close()
+        await fixture.session.end()
+    }
+
+    @Test func updatingThresholdsRecomputesImmediatelyAndReusesCachedFeatures() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let photosDir = root.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: photosDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let access = FolderAccess(
+            store: RecentFolderStore(fileURL: root.appendingPathComponent("recents.json")))
+        guard case .opened(let opened) = await access.pick(photosDir) else {
+            Issue.record("Expected test folder to open")
+            return
+        }
+        let session = opened.session
+        let folderID = session.folder.id
+
+        // a (gray 0.0) and b (gray 0.21) are 0.2s apart:
+        // DeterministicFeaturePrintReader produces Euclidean distance ~0.42 between 0.0 and 0.21,
+        // which joins at standard (0.5) and splits at tight (0.35).
+        // c (gray 1.0) is 3.5s after b (so outside 2s, inside 5s) and visually far from b.
+        let names = ["a.jpg", "b.jpg", "c.jpg"]
+        let grays: [CGFloat] = [0.0, 0.21, 1.0]
+        let timestamps: [TimeInterval] = [0.0, 0.2, 3.7]
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        var sets: [PhotoIdentity: PhotoSet] = [:]
+        var groupingPhotos: [GroupingPhoto] = []
+        var imagesByName: [String: CGImage] = [:]
+        for index in names.indices {
+            let fileURL = photosDir.appendingPathComponent(names[index])
+            let image = GroupingTestWorkspace.makeGrayImage(gray: grays[index])
+            try GroupingTestWorkspace.writeJPEG(image, to: fileURL)
+            imagesByName[names[index]] = image
+            let set = try PhotoSet(
+                folderID: folderID, relativeFolderPath: "", jpegURL: fileURL)
+            sets[set.id] = set
+            groupingPhotos.append(
+                GroupingPhoto(
+                    id: set.id,
+                    fileName: names[index],
+                    time: .known(
+                        PhotoTime(
+                            captureTime: base.addingTimeInterval(timestamps[index]),
+                            hasUTCOffset: true)),
+                    cameraModel: "TestCam"))
+        }
+
+        let previewReader = GatedPreviewReader(images: imagesByName, heldNames: [])
+        let featureCache = try ImageFeatureCache(
+            directory: root.appendingPathComponent("features"))
+        let previewCache = try ThumbnailCache(
+            directory: root.appendingPathComponent("thumbs"))
+        let groupCache = SimilarGroupsCache(directory: root.appendingPathComponent("groups"))
+        let pipeline = ImageFeaturePipeline(
+            cache: featureCache, previews: previewReader, prints: DeterministicFeaturePrintReader(),
+            workers: 2)
+
+        var published: [[BrowsingGroup]] = []
+        var activity: [Bool] = []
+        let grouping = FolderGrouping(
+            folder: folderID,
+            session: session,
+            cache: groupCache,
+            featureCache: featureCache,
+            previewCache: previewCache,
+            thresholds: .standard,
+            featurePipeline: pipeline,
+            sets: { sets[$0] },
+            publish: { published.append($0) },
+            analysisChanged: { activity.append($0) })
+
+        // Standard (2s, 0.5): a & b join; c is outside 2s.
+        await grouping.begin(
+            photos: groupingPhotos,
+            revision: GroupingInputRevision(rawValue: "dynamic-thresholds"),
+            enabled: true)
+        try await waitUntil { activity.contains(true) && activity.last == false }
+        #expect(published.last?.map(\.members) == [[groupingPhotos[0].id, groupingPhotos[1].id]])
+        let previewsAfterStandard = await previewReader.startedNames.count
+        #expect(previewsAfterStandard == 2)
+
+        // Tight (2s, 0.35): splits a & b without decoding previews again (reuses cached features).
+        activity.removeAll()
+        await grouping.setThresholds(
+            GroupingThresholds(timeWindow: .twoSeconds, sensitivity: .tight),
+            photos: groupingPhotos)
+        try await waitUntil { activity.contains(true) && activity.last == false }
+        #expect(published.last?.isEmpty == true)
+        #expect(await previewReader.startedNames.count == previewsAfterStandard)
+
+        // Time-only (5s): joins a, b, and c immediately with zero visual analysis or preview reads.
+        activity.removeAll()
+        await grouping.setThresholds(
+            GroupingThresholds(timeWindow: .fiveSeconds, sensitivity: .timeOnly),
+            photos: groupingPhotos)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(
+            published.last?.map(\.members) == [
+                [groupingPhotos[0].id, groupingPhotos[1].id, groupingPhotos[2].id]
+            ])
+        #expect(!activity.contains(true))
+        #expect(await previewReader.startedNames.count == previewsAfterStandard)
+
+        await grouping.close()
+        await session.end()
+    }
+
     private func waitUntil(
         timeout: Duration = .seconds(60),
         _ condition: @escaping @MainActor () -> Bool

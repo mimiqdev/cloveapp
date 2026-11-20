@@ -30,6 +30,7 @@ enum FolderLibraryLaunch {
                 try FolderLibrarySession.Stores.applicationSupport()
             },
             rejectsFolderName: { settings.settings.rejectsFolderName },
-            similarGroupsEnabled: { settings.settings.similarGroupsEnabled })
+            similarGroupsEnabled: { settings.settings.similarGroupsEnabled },
+            groupingThresholds: { settings.settings.groupingThresholds })
     }
 }

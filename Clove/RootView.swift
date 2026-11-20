@@ -91,6 +91,9 @@ struct RootView: View {
                     // shows Settings instead of the grid while the toggle changes.
                     Task { await browsing.setSimilarGroupsEnabled(enabled) }
                 }
+                .onChange(of: settings.settings.groupingThresholds) { _, thresholds in
+                    Task { await browsing.setGroupingThresholds(thresholds) }
+                }
                 .onChange(of: scenePhase) { _, phase in
                     // G1 folder access watches with presenters plus a 500 ms foreground poll, so
                     // a scene that comes back asks at once instead of waiting one interval to

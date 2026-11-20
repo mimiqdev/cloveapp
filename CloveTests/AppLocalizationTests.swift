@@ -367,4 +367,59 @@ struct AppLocalizationTests {
             #expect(!usage.isEmpty && usage != "NSPhotoLibraryAddUsageDescription")
         }
     }
+
+    @Test func groupingSettingsLocalizeAcrossLanguages() {
+        #expect(AppLocalization.string("Time window", language: .english) == "Time window")
+        #expect(AppLocalization.string("Time window", language: .simplifiedChinese) == "时间窗口")
+        #expect(AppLocalization.string("Time window", language: .traditionalChinese) == "時間窗口")
+
+        #expect(
+            AppLocalization.string("Similarity sensitivity", language: .english)
+                == "Similarity sensitivity")
+        #expect(
+            AppLocalization.string("Similarity sensitivity", language: .simplifiedChinese)
+                == "相似度灵敏度")
+        #expect(
+            AppLocalization.string("Similarity sensitivity", language: .traditionalChinese)
+                == "相似度靈敏度")
+
+        #expect(AppLocalization.groupingSensitivityTitle(.tight, language: .english) == "Tight")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.tight, language: .simplifiedChinese) == "严格")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.tight, language: .traditionalChinese) == "嚴格")
+
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.standard, language: .english) == "Standard")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.standard, language: .simplifiedChinese)
+                == "标准")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.standard, language: .traditionalChinese)
+                == "標準")
+
+        #expect(AppLocalization.groupingSensitivityTitle(.loose, language: .english) == "Loose")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.loose, language: .simplifiedChinese) == "宽松")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.loose, language: .traditionalChinese) == "寬鬆")
+
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.timeOnly, language: .english) == "Time only")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.timeOnly, language: .simplifiedChinese)
+                == "仅按时间")
+        #expect(
+            AppLocalization.groupingSensitivityTitle(.timeOnly, language: .traditionalChinese)
+                == "僅依時間")
+
+        #expect(
+            AppLocalization.groupingTimeWindowTitle(.twoSeconds, language: .english) == "2s")
+        #expect(
+            AppLocalization.groupingTimeWindowTitle(.twoSeconds, language: .simplifiedChinese)
+                == "2 秒")
+        #expect(
+            AppLocalization.groupingTimeWindowTitle(.thirtySeconds, language: .traditionalChinese)
+                == "30 秒")
+    }
 }
