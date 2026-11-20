@@ -104,6 +104,7 @@ struct DetailMarkingView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.appLanguage) private var language
     @Environment(SettingsStore.self) private var settingsStore: SettingsStore?
     @State private var hidesChrome = false
@@ -578,19 +579,60 @@ struct DetailMarkingView: View {
 
     @available(iOS 27.1, *)
     private var duoPhotoHeader: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             focusRegionsButton(inStageHeader: true)
+                .layoutPriority(2)
+            duoHeaderContent
             Spacer(minLength: 0)
-            detailToolbarTitle
-                .multilineTextAlignment(.center)
-            Spacer(minLength: 0)
-            Color.clear
-                .frame(width: 44, height: 44)
-                .accessibilityHidden(true)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.vertical, 2)
+        .frame(minHeight: 48)
         .background(Color.clove.bg.stage)
+        .reportHeaderControlFrame("clove.detail.photoHeader")
+    }
+
+    @ViewBuilder
+    private var duoHeaderContent: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 2) {
+                duoHeaderTitleRow
+                duoHeaderMetadataRow(maxLines: 2)
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                duoHeaderTitleRow
+                duoHeaderMetadataRow(maxLines: 1)
+            }
+        }
+    }
+
+    private var duoHeaderTitleRow: some View {
+        HStack(alignment: .center, spacing: 0) {
+            DetailHeaderFileNameView(fileName: photo.fileName)
+            FolderPreparationIndicator(
+                browsing: browsing,
+                identifierPrefix: "clove.detail.preparation"
+            )
+            .layoutPriority(2)
+        }
+    }
+
+    private func duoHeaderMetadataRow(maxLines: Int) -> some View {
+        HStack(alignment: .center, spacing: 0) {
+            Text(detailSubtitle)
+                .lineLimit(maxLines)
+                .truncationMode(.tail)
+                .accessibilityIdentifier("clove.detail.zoom")
+                .reportHeaderControlFrame("clove.detail.zoom")
+            SaveStatusIndicator(
+                browsing: browsing, identifierPrefix: "clove.detail.saveState"
+            )
+            .layoutPriority(2)
+        }
+        .font(.caption)
+        .foregroundStyle(Color.clove.text.secondary)
+        .layoutPriority(1)
     }
 
     @ViewBuilder private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
@@ -2336,5 +2378,54 @@ private struct DetailRejectGlyphOverlay: View {
         .onChange(of: photoID) { _, newValue in
             settledPhotoID = newValue
         }
+    }
+}
+
+struct DetailHeaderFileNameParts: Equatable, Sendable {
+    let stem: String
+    let extensionSuffix: String
+
+    init(_ fileName: String) {
+        if let dotIndex = fileName.lastIndex(of: "."),
+            dotIndex > fileName.startIndex
+        {
+            let suffix = String(fileName[dotIndex...])
+            let extensionLength = suffix.count - 1
+            if extensionLength >= 1 && extensionLength <= 8 {
+                self.stem = String(fileName[..<dotIndex])
+                self.extensionSuffix = suffix
+                return
+            }
+        }
+        self.stem = fileName
+        self.extensionSuffix = ""
+    }
+}
+
+private struct DetailHeaderFileNameView: View {
+    let fileName: String
+
+    var body: some View {
+        let parts = DetailHeaderFileNameParts(fileName)
+        HStack(spacing: 0) {
+            Text(parts.stem)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(0)
+            if !parts.extensionSuffix.isEmpty {
+                Text(parts.extensionSuffix)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+                    .reportHeaderControlFrame("clove.detail.fileName.extension")
+            }
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Color.clove.text.primary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityLabel(fileName)
+        .accessibilityIdentifier("clove.detail.fileName")
+        .reportHeaderControlFrame("clove.detail.fileName")
     }
 }
