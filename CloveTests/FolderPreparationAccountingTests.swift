@@ -410,6 +410,117 @@ struct FolderPreparationAccountingTests {
         #expect(enumerating.preparationStatus.phase == .enumeratingUnknown)
     }
 
+    @Test func retryIssuesResetsOnlyFailedAndDeferredTasksWhilePreservingCompletedAndUnsupported()
+        throws
+    {
+        let folder = FolderIdentity(rawValue: "folder-retry")
+        let completedPhoto = try makeScannedSet(folder: folder, stem: "OK_0001")
+        let analysisFailedPhoto = try makeScannedSet(folder: folder, stem: "AN_0002")
+        let previewDeferredPhoto = try makeScannedSet(folder: folder, stem: "PR_0003")
+        let unsupportedPhoto = try makeScannedSet(folder: folder, stem: "UN_0004")
+
+        var accountant = FolderPreparationAccountant(
+            folder: folder, folderName: "Retry", generation: 2, parametersVersion: 2,
+            maxTransientRetries: 1)
+        accountant.registerDiscovered([
+            completedPhoto, analysisFailedPhoto, previewDeferredPhoto, unsupportedPhoto,
+        ])
+        accountant.finishScan(isPartial: false)
+
+        // 1. Fully completed photo.
+        let okA = accountant.recordAnalysisClassification(.completed, for: completedPhoto.id)
+        let okP = accountant.recordPreviewClassification(.completed, for: completedPhoto.id)
+        #expect(okA && okP)
+
+        // 2. Preview succeeded, analysis failed.
+        let anP = accountant.recordPreviewClassification(.completed, for: analysisFailedPhoto.id)
+        let anA = accountant.recordAnalysisClassification(
+            .failed("Couldn't open photo for face analysis."), for: analysisFailedPhoto.id)
+        #expect(anP && anA)
+
+        // 3. Analysis succeeded, preview deferred after exceeding maxTransientRetries (1).
+        let prA = accountant.recordAnalysisClassification(.completed, for: previewDeferredPhoto.id)
+        let prDefer1 = accountant.recordPreviewClassification(
+            .retryableDeferral("Preview queue is busy."), for: previewDeferredPhoto.id)
+        let prDefer2 = accountant.recordPreviewClassification(
+            .retryableDeferral("Preview queue is busy."), for: previewDeferredPhoto.id)
+        #expect(prA && !prDefer1 && prDefer2)
+
+        // 4. Unsupported preview + completed analysis (non-retryable).
+        let unP = accountant.recordPreviewClassification(
+            .unsupported("Unsupported format."), for: unsupportedPhoto.id)
+        let unA = accountant.recordAnalysisClassification(.completed, for: unsupportedPhoto.id)
+        #expect(unP && unA)
+
+        let beforeRetry = accountant.status
+        #expect(beforeRetry.phase == .completeWithIssues)
+        #expect(beforeRetry.readyForBothCount == 1)
+        #expect(beforeRetry.bothSettledCount == 4)
+        #expect(beforeRetry.totalIssueCount == 3)
+        #expect(beforeRetry.retryableIssueCount == 2)
+        #expect(beforeRetry.hasRetryableIssues)
+        #expect(beforeRetry.canRetryIssues)
+
+        // Waiting reason disables canRetryIssues even while retryable issues exist.
+        let pausedSet = accountant.setWaitingReason(.memoryPressure)
+        #expect(pausedSet)
+        #expect(accountant.status.hasRetryableIssues)
+        #expect(!accountant.status.canRetryIssues)
+        let pausedCleared = accountant.setWaitingReason(nil)
+        #expect(pausedCleared)
+        #expect(accountant.status.canRetryIssues)
+
+        let targets = accountant.retryableTargets()
+        #expect(targets.hasWork)
+        #expect(
+            targets.previewURLs == [previewDeferredPhoto.photoSet.primary.url.standardizedFileURL])
+        #expect(targets.analysisRequests.count == 1)
+        #expect(
+            targets.analysisRequests.first?.primaryURL.standardizedFileURL
+                == analysisFailedPhoto.photoSet.primary.url.standardizedFileURL)
+
+        let retriedIDs = accountant.retryIssues()
+        #expect(retriedIDs == [analysisFailedPhoto.id, previewDeferredPhoto.id])
+
+        let afterRetry = accountant.status
+        #expect(afterRetry.phase == .preparing)
+        #expect(afterRetry.readyForBothCount == 1)
+        #expect(afterRetry.bothSettledCount == 2)
+        // Completed tasks remain intact!
+        #expect(afterRetry.analysis.completed == 3)
+        #expect(afterRetry.analysis.failed == 0)
+        #expect(afterRetry.previews.completed == 2)
+        #expect(afterRetry.previews.deferred == 0)
+        #expect(afterRetry.previews.unsupported == 1)
+        #expect(!afterRetry.hasRetryableIssues)
+        #expect(!afterRetry.canRetryIssues)
+
+        // Only the failed analysis and deferred preview are pending.
+        let pendingAnalysis = accountant.nextPendingAnalysisItems(limit: 10, excluding: [])
+        let pendingPreviews = accountant.nextPendingPreviewItems(limit: 10, excluding: [])
+        #expect(pendingAnalysis.map(\.photo) == [analysisFailedPhoto.id])
+        #expect(pendingPreviews.map(\.photo) == [previewDeferredPhoto.id])
+
+        // Retry counter was reset: one transient deferral stays pending instead of deferring immediately.
+        let postRetryDefer = accountant.recordPreviewClassification(
+            .retryableDeferral("Preview queue is busy."), for: previewDeferredPhoto.id)
+        #expect(!postRetryDefer)
+        #expect(accountant.status.previews.deferred == 0)
+
+        // Succeeding both retried tasks resolves their issues cleanly while keeping unsupported intact.
+        let recoveredAnalysis = accountant.recordAnalysisClassification(
+            .completed, for: analysisFailedPhoto.id)
+        let recoveredPreview = accountant.recordPreviewClassification(
+            .completed, for: previewDeferredPhoto.id)
+        #expect(recoveredAnalysis && recoveredPreview)
+        let settled = accountant.status
+        #expect(settled.readyForBothCount == 3)
+        #expect(settled.bothSettledCount == 4)
+        #expect(settled.totalIssueCount == 1)
+        #expect(!settled.hasRetryableIssues)
+        #expect(settled.phase == .completeWithIssues)
+    }
+
     private var emptyAFEvidence: AutofocusMetadataEvidence {
         AutofocusMetadataEvidence(inspected: [], cameraMake: nil, exifOrientation: 1)
     }

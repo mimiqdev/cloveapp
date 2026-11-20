@@ -229,6 +229,10 @@ final class FolderLibrarySession: FolderLibrary {
         preparationCoordinator?.currentStatus ?? .idle
     }
 
+    func retryPreparationIssues() async {
+        await preparationCoordinator?.retryIssues()
+    }
+
     /// Grouping's groups for the folder, in grid order and by grouping's stable keys
     /// (PRD P0-11). They arrive through ``FolderLibraryUpdate/groups(_:)``; before grouping's
     /// first publication this is empty.

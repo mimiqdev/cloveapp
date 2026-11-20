@@ -124,6 +124,35 @@ final class FolderPreparationCoordinator {
         emitStatus(immediate: true)
     }
 
+    func retryIssues() async {
+        guard !isClosed,
+            locationLossReason == nil,
+            !isPausedForMemoryPressure
+        else { return }
+        let targets = accountant.retryableTargets()
+        guard targets.hasWork else { return }
+        if !targets.previewURLs.isEmpty {
+            thumbnailCache?.invalidateMemory(sources: targets.previewURLs)
+        }
+        if !targets.analysisRequests.isEmpty, let regionScheduler {
+            for request in targets.analysisRequests {
+                inFlightAnalysisKeys.remove(regionScheduler.resultKey(for: request))
+            }
+            await regionScheduler.discardResults(for: targets.analysisRequests)
+        }
+        guard !isClosed,
+            locationLossReason == nil,
+            !isPausedForMemoryPressure
+        else { return }
+        let retried = accountant.retryIssues()
+        guard !retried.isEmpty else { return }
+        emitStatus(immediate: true)
+        resumeAnalysisSettlementWaiters()
+        if hasFinishedScan {
+            restartPreparationIfNeeded()
+        }
+    }
+
     func close() async {
         guard !isClosed else { return }
         isClosed = true

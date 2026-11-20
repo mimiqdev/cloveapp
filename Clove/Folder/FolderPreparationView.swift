@@ -109,6 +109,29 @@ enum FolderPreparationAccessibility {
         }
     }
 
+    static func retryButtonTitle(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Retry", language: language)
+    }
+
+    static func retryButtonAccessibilityLabel(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Retry preparation issues", language: language)
+    }
+
+    static func retryButtonAccessibilityHint(
+        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+    ) -> String {
+        if status.waitingReason != nil {
+            return AppLocalization.string(
+                "Unavailable while folder preparation is paused.", language: language)
+        }
+        return AppLocalization.string(
+            "Retries failed or deferred analysis and preview tasks.", language: language)
+    }
+
+    static func canRetryIssues(for status: FolderPreparationStatus) -> Bool {
+        status.canRetryIssues
+    }
+
     static func indicatorAccessibilityValue(
         for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
     ) -> String {
@@ -604,13 +627,37 @@ struct FolderPreparationDetails: View {
 
     private var issuesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
                 Text(AppLocalization.string("Issues", language: language))
                     .font(.subheadline.weight(.semibold))
-                Spacer()
                 Text(status.totalIssueCount.formatted(.number.locale(language.locale)))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Color.clove.text.secondary)
+                Spacer(minLength: 8)
+                if status.hasRetryableIssues {
+                    Button {
+                        Task { await browsing.retryPreparationIssues() }
+                    } label: {
+                        Label(
+                            FolderPreparationAccessibility.retryButtonTitle(language: language),
+                            systemImage: "arrow.clockwise"
+                        )
+                        .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(theme.tokens.accent.color)
+                    .disabled(!status.canRetryIssues)
+                    .accessibilityLabel(
+                        FolderPreparationAccessibility.retryButtonAccessibilityLabel(
+                            language: language)
+                    )
+                    .accessibilityHint(
+                        FolderPreparationAccessibility.retryButtonAccessibilityHint(
+                            for: status, language: language)
+                    )
+                    .accessibilityIdentifier("clove.preparation.retry")
+                }
             }
             ForEach(status.issues) { issue in
                 VStack(alignment: .leading, spacing: 2) {

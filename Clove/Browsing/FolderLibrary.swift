@@ -69,6 +69,9 @@ protocol FolderLibrary: AnyObject {
     /// The open folder's current preparation progress across analysis and grid previews.
     var preparationStatus: FolderPreparationStatus { get }
 
+    /// Re-queues failed or deferred folder preparation tasks without rescanning the folder.
+    func retryPreparationIssues() async
+
     /// The folder's photos with their marks, in any order: the browsing state orders and filters
     /// them through its C8 order and C1 marks (PRD P0-03).
     var photos: [GridPhoto] { get }
@@ -275,6 +278,8 @@ extension FolderLibrary {
     }
 
     var preparationStatus: FolderPreparationStatus { .idle }
+
+    func retryPreparationIssues() async {}
 
     /// A library with no folder access cannot open a picked or remembered folder; the reason
     /// asks for the folder again (PRD P0-02). The real library and the test library override
