@@ -20,7 +20,8 @@ import Testing
 
     private func record(
         _ key: SharpnessResultKey, name: String = "a",
-        acquisitionFailure: RegionImageFailure? = nil
+        acquisitionFailure: RegionImageFailure? = nil,
+        faces: RegionSharpnessPathResult = .unavailable(.noFacesDetected)
     ) -> RegionSharpnessRecord {
         RegionSharpnessRecord(
             key: key,
@@ -36,7 +37,7 @@ import Testing
                     .noAutofocusMetadata(
                         AutofocusMetadataEvidence(
                             inspected: [], cameraMake: nil, exifOrientation: 1))),
-                faces: .unavailable(.noFacesDetected),
+                faces: faces,
                 acquisitionFailure: acquisitionFailure,
                 timings: RegionSharpnessTimings()))
     }
@@ -103,17 +104,26 @@ import Testing
         #expect(store.result(for: key("kept")) != nil)
     }
 
-    @Test func neverStoresContentionOrIdentityFailures() {
-        let store = RegionSharpnessResultStore(capacity: 4)
+    @Test func neverStoresTransientOpenContentionOrIdentityFailures() {
+        let store = RegionSharpnessResultStore(capacity: 8)
         // A stale source: the answer belongs to no revision the caller can ask for again.
         store.store(record(key("stale"), acquisitionFailure: .staleSource))
         // Contention: the photo was never analysed; a later request must run real work.
         store.store(record(key("full"), acquisitionFailure: .queueFull))
         store.store(record(key("closed"), acquisitionFailure: .closed))
-        #expect(store.count == 0)
-        // Every other explicit answer is a fact about the photo and is kept.
+        // Transient open failure: external/File Provider access may succeed on retry or reopen.
         store.store(record(key("unreadable"), acquisitionFailure: .cannotOpen))
+        store.store(
+            record(
+                key("unreadable-faces"),
+                faces: .unavailable(.previewFailed(.cannotOpen))))
+        #expect(store.count == 0)
+        // Durable photo facts remain stored.
         store.store(record(key("nopreview"), acquisitionFailure: .noUsablePreview))
+        store.store(
+            record(
+                key("nopreview-faces"),
+                faces: .unavailable(.previewFailed(.noUsablePreview))))
         store.store(record(key("analysed")))
         #expect(store.count == 3)
     }

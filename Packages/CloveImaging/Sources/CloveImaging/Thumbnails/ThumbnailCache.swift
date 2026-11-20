@@ -142,6 +142,19 @@ public final class ThumbnailCache: Sendable {
         }
     }
 
+    /// Drops in-memory cached entries (including unavailable outcomes) for the supplied source
+    /// URLs without touching disk files.
+    public func invalidateMemory(sources: [URL]) {
+        let paths = Set(sources.map { $0.standardizedFileURL.path })
+        guard !paths.isEmpty else { return }
+        state.withLock { state in
+            for (key, entry) in state.memory where paths.contains(key.path) {
+                state.memory.removeValue(forKey: key)
+                state.memoryCost -= entry.cost
+            }
+        }
+    }
+
     var memoryByteCount: Int { state.withLock { $0.memoryCost } }
     public var memoryCapacityBytes: Int { configuration.memoryBytes }
 
@@ -281,8 +294,17 @@ public final class ThumbnailCache: Sendable {
             case .unavailable(let reason): .unavailable(reason)
             }
         let memKey = MemoryKey(request: request, route: route)
+        let shouldRemember: Bool =
+            switch result {
+            case .available, .unavailable(.noUsablePreview):
+                true
+            case .unavailable(.cannotOpen), .unavailable(.sourceChanged):
+                false
+            }
         let observers = state.withLock { state -> [StoreObserver] in
-            remember(result, key: memKey, state: &state)
+            if shouldRemember {
+                remember(result, key: memKey, state: &state)
+            }
             return Array(state.observers.values)
         }
         defer {

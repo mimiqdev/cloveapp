@@ -311,7 +311,7 @@ struct RegionSharpnessCacheTests {
         #expect(reopened.analysis(for: makeKey("noaf.ARW", session: "s2")) == analysis)
     }
 
-    @Test func staleSourceAndContentionNeverPersisted() throws {
+    @Test func staleSourceContentionAndCannotOpenNeverPersisted() throws {
         let dir = try TempCacheDirectory()
         defer { dir.remove() }
 
@@ -320,20 +320,42 @@ struct RegionSharpnessCacheTests {
         try cache.store(sampleAnalysis(acquisitionFailure: .queueFull), for: makeKey("full.ARW"))
         try cache.store(sampleAnalysis(acquisitionFailure: .closed), for: makeKey("closed.ARW"))
         try cache.store(
+            sampleAnalysis(acquisitionFailure: .cannotOpen), for: makeKey("cannot-open.ARW"))
+        try cache.store(
             sampleAnalysis(previewFailure: .staleSource), for: makeKey("stale-preview.ARW"))
+        try cache.store(
+            sampleAnalysis(previewFailure: .cannotOpen), for: makeKey("cannot-open-faces.ARW"))
+        let cannotOpenAF = RegionSharpnessAnalysis(
+            autofocus: .unavailable(.previewFailed(.cannotOpen)),
+            faces: .unavailable(.noFacesDetected),
+            acquisitionFailure: nil,
+            timings: RegionSharpnessTimings())
+        try cache.store(cannotOpenAF, for: makeKey("cannot-open-af.ARW"))
 
         #expect(cache.diskEntryCount == 0)
         #expect(cache.diskByteCount == 0)
         #expect(cache.analysis(for: makeKey("stale.ARW")) == nil)
         #expect(cache.analysis(for: makeKey("full.ARW")) == nil)
         #expect(cache.analysis(for: makeKey("closed.ARW")) == nil)
+        #expect(cache.analysis(for: makeKey("cannot-open.ARW")) == nil)
         #expect(cache.analysis(for: makeKey("stale-preview.ARW")) == nil)
+        #expect(cache.analysis(for: makeKey("cannot-open-faces.ARW")) == nil)
+        #expect(cache.analysis(for: makeKey("cannot-open-af.ARW")) == nil)
 
-        // Real photo facts (e.g. unreadable / no usable preview) are persisted.
+        // Durable photo facts (e.g. no usable preview) remain persisted.
         try cache.store(
-            sampleAnalysis(acquisitionFailure: .cannotOpen), for: makeKey("unreadable.ARW"))
+            sampleAnalysis(acquisitionFailure: .noUsablePreview), for: makeKey("nopreview.ARW"))
+        try cache.store(
+            sampleAnalysis(previewFailure: .noUsablePreview), for: makeKey("nopreview-faces.ARW"))
+        #expect(cache.diskEntryCount == 2)
+        #expect(cache.analysis(for: makeKey("nopreview.ARW")) != nil)
+        #expect(cache.analysis(for: makeKey("nopreview-faces.ARW")) != nil)
+
+        // Explicit removal drops only the targeted entry.
+        cache.remove(for: makeKey("nopreview.ARW"))
         #expect(cache.diskEntryCount == 1)
-        #expect(cache.analysis(for: makeKey("unreadable.ARW")) != nil)
+        #expect(cache.analysis(for: makeKey("nopreview.ARW")) == nil)
+        #expect(cache.analysis(for: makeKey("nopreview-faces.ARW")) != nil)
     }
 
     @Test func corruptFileIsRemovedAndStagingFilesCleanedOnInit() throws {
@@ -459,6 +481,96 @@ struct RegionSharpnessCacheTests {
         #expect(healthyReader.totalCalls > 0)
         #expect(cache2.diskEntryCount == 1)
         await scheduler2.close()
+    }
+
+    @Test func schedulerDoesNotPersistCannotOpenAndRerunsOnReopen() async throws {
+        let dir = try TempCacheDirectory()
+        defer { dir.remove() }
+
+        let failingReader = CountingReader()
+        failingReader.previewResult = .failure(.cannotOpen)
+        let detector1 = CountingFaceDetector()
+        let cache1 = try dir.makeCache()
+        let store1 = RegionSharpnessResultStore(capacity: 64, disk: cache1)
+        let scheduler1 = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: failingReader, faces: detector1),
+            results: store1,
+            parametersVersion: 1)
+
+        let request1 = makeRequest("external.ARW", session: "open-1")
+        let failedResult = await scheduler1.analyzeCurrent(request1)
+        #expect(failedResult?.faces == .unavailable(.previewFailed(.cannotOpen)))
+        #expect(store1.count == 0)
+        #expect(cache1.diskEntryCount == 0)
+        await scheduler1.close()
+
+        // Reopen with a healthy reader at the exact same revision: must not replay cannotOpen.
+        let healthyReader = CountingReader()
+        let detector2 = CountingFaceDetector()
+        let cache2 = try dir.makeCache()
+        let scheduler2 = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: healthyReader, faces: detector2),
+            results: RegionSharpnessResultStore(capacity: 64, disk: cache2),
+            parametersVersion: 1)
+
+        let freshResult = await scheduler2.analyzeCurrent(
+            makeRequest("external.ARW", session: "open-2"))
+        #expect(freshResult?.acquisitionFailure == nil)
+        if case .regions = freshResult?.faces {
+        } else {
+            Issue.record("Expected located face regions after healthy reopen")
+        }
+        #expect(healthyReader.totalCalls > 0)
+        #expect(cache2.diskEntryCount == 1)
+        await scheduler2.close()
+    }
+
+    @Test func schedulerDiscardResultsClearsMemoryAndDiskWithoutEmittingSourceInvalidation()
+        async throws
+    {
+        let dir = try TempCacheDirectory()
+        defer { dir.remove() }
+
+        let reader = CountingReader()
+        reader.previewResult = .failure(.noUsablePreview)
+        let detector = CountingFaceDetector()
+        let cache = try dir.makeCache()
+        let store = RegionSharpnessResultStore(capacity: 64, disk: cache)
+        let scheduler = RegionSharpnessScheduler(
+            analyzer: RegionSharpnessAnalyzer(reader: reader, faces: detector),
+            results: store,
+            parametersVersion: 1)
+
+        let req = makeRequest("retry.ARW", session: "open-1")
+        let first = await scheduler.analyzeCurrent(req)
+        #expect(first?.faces == .unavailable(.previewFailed(.noUsablePreview)))
+        #expect(store.count == 1)
+        #expect(cache.diskEntryCount == 1)
+
+        let sawInvalidation = Mutex(false)
+        let stream = await scheduler.events()
+        let observer = Task {
+            for await event in stream {
+                if case .invalidated = event {
+                    sawInvalidation.withLock { $0 = true }
+                }
+            }
+        }
+
+        await scheduler.discardResults(for: [req])
+        #expect(store.count == 0)
+        #expect(cache.diskEntryCount == 0)
+
+        reader.previewResult = .success(SharpnessScene.flat(width: 64, height: 48))
+        let retried = await scheduler.analyzeCurrent(req)
+        if case .regions = retried?.faces {
+        } else {
+            Issue.record("Expected fresh face analysis after discarding cached result")
+        }
+
+        await scheduler.close()
+        await observer.value
+        #expect(!sawInvalidation.withLock { $0 })
     }
 
     @Test func schedulerRevisionChangeAndParametersBumpInvalidateDiskHits() async throws {

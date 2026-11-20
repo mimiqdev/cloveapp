@@ -175,7 +175,7 @@ public final class RegionSharpnessCache: Sendable {
     }
 
     /// Persists one finished sharpness record on disk under its session-free key, unless its
-    /// acquisition or preview reported `staleSource`, `queueFull`, or `closed`.
+    /// acquisition or preview reported `cannotOpen`, `staleSource`, `queueFull`, or `closed`.
     public func store(_ record: RegionSharpnessRecord) throws {
         try store(record.analysis, for: record.key)
     }
@@ -216,6 +216,16 @@ public final class RegionSharpnessCache: Sendable {
         evict(evictions)
     }
 
+    /// Removes the cached sharpness file for one exact `(photo, revision, parametersVersion)`
+    /// identity, if present on disk.
+    public func remove(for key: SharpnessResultKey) {
+        let diskKey = diskKey(
+            photo: key.photo, revision: key.revision, parametersVersion: key.parametersVersion)
+        let digest = diskKey.digest
+        guard let entry = state.withLock({ $0.disk[digest] }), !entry.evicting else { return }
+        removeFile(digest, entry)
+    }
+
     /// Removes every cached sharpness file on disk. Call with no work in flight so a concurrent
     /// store is not left half-published.
     public func clear() throws {
@@ -228,24 +238,34 @@ public final class RegionSharpnessCache: Sendable {
         for file in files { try? FileManager.default.removeItem(at: file) }
     }
 
-    /// Whether an analysis represents a durable answer rather than a `staleSource` race or
-    /// scheduler contention.
+    /// Whether an analysis represents a durable answer rather than a transient open failure,
+    /// `staleSource` race, or scheduler contention.
     static func isPersistable(_ analysis: RegionSharpnessAnalysis) -> Bool {
-        switch analysis.acquisitionFailure {
-        case .staleSource, .queueFull, .closed:
+        if let acquisitionFailure = analysis.acquisitionFailure,
+            !isPersistable(acquisitionFailure)
+        {
             return false
-        case nil, .cannotOpen, .noUsablePreview:
-            break
         }
-        if case .unavailable(.previewFailed(let failure)) = analysis.faces {
-            switch failure {
-            case .staleSource, .queueFull, .closed:
-                return false
-            case .cannotOpen, .noUsablePreview:
-                break
-            }
+        if case .unavailable(.previewFailed(let failure)) = analysis.faces,
+            !isPersistable(failure)
+        {
+            return false
+        }
+        if case .unavailable(.previewFailed(let failure)) = analysis.autofocus,
+            !isPersistable(failure)
+        {
+            return false
         }
         return true
+    }
+
+    private static func isPersistable(_ failure: RegionImageFailure) -> Bool {
+        switch failure {
+        case .cannotOpen, .staleSource, .queueFull, .closed:
+            return false
+        case .noUsablePreview:
+            return true
+        }
     }
 
     /// Bytes and entry counts currently tracked on disk, for diagnostics and budget tests.
