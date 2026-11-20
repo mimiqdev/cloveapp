@@ -168,3 +168,68 @@ func bodySerialFallbackPaths(_ path: String) {
     #expect(metadata.bodySerial.value == nil)
     #expect(metadata.time == .fileModification(Date(timeIntervalSince1970: 100)))
 }
+
+@Test func lensExtractionTrimsAndFallsBackToExifAux() {
+    let exifLens = MetadataParser.parse(
+        properties: [
+            "{Exif}": ["LensModel": "  FE 35mm F1.4 GM  "],
+            "{ExifAux}": ["LensModel": "Auxiliary Lens"],
+        ], creationDate: nil, modificationDate: nil)
+    #expect(exifLens.lens == .value("FE 35mm F1.4 GM", source: .imageProperty("{Exif}.LensModel")))
+
+    let auxFallback = MetadataParser.parse(
+        properties: [
+            "{Exif}": ["LensModel": "   "],
+            "{ExifAux}": ["LensModel": " RF 50mm F1.2L USM "],
+        ], creationDate: nil, modificationDate: nil)
+    #expect(
+        auxFallback.lens
+            == .value("RF 50mm F1.2L USM", source: .imageProperty("{ExifAux}.LensModel")))
+
+    let invalidLens = MetadataParser.parse(
+        properties: ["{Exif}": ["LensModel": 35]], creationDate: nil, modificationDate: nil)
+    #expect(invalidLens.lens.value == nil)
+    #expect(invalidLens.lens.source == .imageProperty("{Exif}.LensModel"))
+
+    let missingLens = MetadataParser.parse(
+        properties: [:], creationDate: nil, modificationDate: nil)
+    #expect(missingLens.lens == .missing)
+}
+
+@Test func focalLengthPrefers35mmEquivalentAndFallsBackToActual() {
+    let both = MetadataParser.parse(
+        properties: ["{Exif}": ["FocalLength": 23.0, "FocalLenIn35mmFilm": 35]],
+        creationDate: nil, modificationDate: nil)
+    #expect(
+        both.focalLengthMillimetres
+            == .value(23.0, source: .imageProperty("{Exif}.FocalLength")))
+    #expect(
+        both.focalLength35mmEquivalent
+            == .value(35.0, source: .imageProperty("{Exif}.FocalLenIn35mmFilm")))
+    #expect(both.effectiveFocalLengthMillimetres == 35.0)
+
+    // Many cameras write 0 for unknown 35mm equivalent; effective focal length must fall back.
+    let zeroEquivalent = MetadataParser.parse(
+        properties: ["{Exif}": ["FocalLength": 85.0, "FocalLenIn35mmFilm": 0]],
+        creationDate: nil, modificationDate: nil)
+    #expect(zeroEquivalent.focalLength35mmEquivalent.value == nil)
+    #expect(zeroEquivalent.focalLengthMillimetres.value == 85.0)
+    #expect(zeroEquivalent.effectiveFocalLengthMillimetres == 85.0)
+
+    let actualOnly = MetadataParser.parse(
+        properties: ["{Exif}": ["FocalLength": 200.5]],
+        creationDate: nil, modificationDate: nil)
+    #expect(actualOnly.focalLength35mmEquivalent == .missing)
+    #expect(actualOnly.effectiveFocalLengthMillimetres == 200.5)
+
+    let invalidValues = MetadataParser.parse(
+        properties: [
+            "{Exif}": [
+                "FocalLength": Double.infinity,
+                "FocalLenIn35mmFilm": true,
+            ]
+        ], creationDate: nil, modificationDate: nil)
+    #expect(invalidValues.focalLengthMillimetres.value == nil)
+    #expect(invalidValues.focalLength35mmEquivalent.value == nil)
+    #expect(invalidValues.effectiveFocalLengthMillimetres == nil)
+}

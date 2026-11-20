@@ -24,6 +24,27 @@ struct FolderSidebar: View {
 
     var body: some View {
         let counts = browsing.sidebarCounts
+        let metadataOptions = browsing.metadataFilterOptions
+        let cameras = resolvedSidebarOptions(
+            metadataOptions.cameras, active: browsing.metadataFilter.camera
+        ) { value in
+            browsing.allPlacedPhotos.count { $0.metadata.camera == value }
+        }
+        let lenses = resolvedSidebarOptions(
+            metadataOptions.lenses, active: browsing.metadataFilter.lens
+        ) { value in
+            browsing.allPlacedPhotos.count { $0.metadata.lens == value }
+        }
+        let focalLengths = resolvedSidebarOptions(
+            metadataOptions.focalLengths, active: browsing.metadataFilter.focalLength
+        ) { bucket in
+            browsing.allPlacedPhotos.count { $0.metadata.focalLengthBucket == bucket }
+        }
+        let keywords = resolvedSidebarOptions(
+            metadataOptions.keywords, active: browsing.metadataFilter.keyword
+        ) { keyword in
+            browsing.allPlacedPhotos.count { $0.marks.keywords.contains(keyword) }
+        }
         List {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
@@ -101,6 +122,63 @@ struct FolderSidebar: View {
                     }
                 }
             }
+            if !cameras.isEmpty {
+                Section(AppLocalization.string("Camera", language: language)) {
+                    ForEach(cameras, id: \.value) { option in
+                        row(
+                            option.value,
+                            count: option.count,
+                            selected: browsing.metadataFilter.camera == option.value,
+                            identifier: "camera.\(option.value)"
+                        ) {
+                            browsing.toggleCameraFilter(option.value)
+                        }
+                    }
+                }
+            }
+            if !lenses.isEmpty {
+                Section(AppLocalization.string("Lens", language: language)) {
+                    ForEach(lenses, id: \.value) { option in
+                        row(
+                            option.value,
+                            count: option.count,
+                            selected: browsing.metadataFilter.lens == option.value,
+                            identifier: "lens.\(option.value)"
+                        ) {
+                            browsing.toggleLensFilter(option.value)
+                        }
+                    }
+                }
+            }
+            if !focalLengths.isEmpty {
+                Section(AppLocalization.string("Focal length", language: language)) {
+                    ForEach(focalLengths, id: \.value) { option in
+                        row(
+                            AppLocalization.focalLengthBucketLabel(
+                                option.value, language: language),
+                            count: option.count,
+                            selected: browsing.metadataFilter.focalLength == option.value,
+                            identifier: "focalLength.\(option.value.rawValue)"
+                        ) {
+                            browsing.toggleFocalLengthFilter(option.value)
+                        }
+                    }
+                }
+            }
+            if !keywords.isEmpty {
+                Section(AppLocalization.string("Keywords", language: language)) {
+                    ForEach(keywords, id: \.value) { option in
+                        row(
+                            option.value,
+                            count: option.count,
+                            selected: browsing.metadataFilter.keyword == option.value,
+                            identifier: "keyword.\(option.value)"
+                        ) {
+                            browsing.toggleKeywordFilter(option.value)
+                        }
+                    }
+                }
+            }
             if store.settings.similarGroupsEnabled {
                 Section(AppLocalization.string("Similar groups", language: language)) {
                     HStack {
@@ -171,5 +249,17 @@ struct FolderSidebar: View {
         .listRowBackground(selected ? theme.tokens.accent.color : Color.clear)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("clove.sidebar.\(identifier)")
+    }
+
+    private func resolvedSidebarOptions<Value: Hashable>(
+        _ available: [PhotoFilterOption<Value>],
+        active: Value?,
+        count: (Value) -> Int
+    ) -> [PhotoFilterOption<Value>] {
+        guard let active else { return available }
+        if available.contains(where: { $0.value == active }) {
+            return available
+        }
+        return [PhotoFilterOption(value: active, count: count(active))] + available
     }
 }

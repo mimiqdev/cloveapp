@@ -12,6 +12,8 @@ public struct GridPhoto: Identifiable, Hashable, Sendable {
     public var time: PhotoTimeState
     /// Rating, label and Reject, which filters read without changing the order (PRD P0-03).
     public var marks: PhotoMarks
+    /// Lightweight camera, lens, and focal-length metadata captured during the scan pass.
+    public var metadata: PhotoFilterMetadata
 
     /// Collects one photo with its current ordering time and marks.
     /// Ties fall through to `id`, so a stale `fileName` can never make the order ambiguous.
@@ -19,17 +21,25 @@ public struct GridPhoto: Identifiable, Hashable, Sendable {
         id: PhotoIdentity,
         fileName: String,
         time: PhotoTimeState,
-        marks: PhotoMarks = PhotoMarks()
+        marks: PhotoMarks = PhotoMarks(),
+        metadata: PhotoFilterMetadata = .empty
     ) {
         self.id = id
         self.fileName = fileName
         self.time = time
         self.marks = marks
+        self.metadata = metadata
     }
 
     /// Collects a scanned set, using its primary file's name (G1 decision 1).
-    public init(set: PhotoSet, time: PhotoTimeState, marks: PhotoMarks = PhotoMarks()) {
+    public init(
+        set: PhotoSet,
+        time: PhotoTimeState,
+        marks: PhotoMarks = PhotoMarks(),
+        metadata: PhotoFilterMetadata = .empty
+    ) {
         self.init(
-            id: set.id, fileName: set.primary.url.lastPathComponent, time: time, marks: marks)
+            id: set.id, fileName: set.primary.url.lastPathComponent, time: time, marks: marks,
+            metadata: metadata)
     }
 }

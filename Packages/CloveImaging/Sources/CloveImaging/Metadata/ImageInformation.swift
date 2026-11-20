@@ -64,26 +64,19 @@ enum ImageInformationParser {
         let metadata = MetadataParser.parse(
             properties: properties, creationDate: nil, modificationDate: nil)
         let exif = properties["{Exif}"] as? [String: Any] ?? [:]
-        let auxiliary = properties["{ExifAux}"] as? [String: Any] ?? [:]
         let sensitivity = (exif["ISOSpeedRatings"] as? [Any])?.first
         return ImageInformation(
             captureWallTime: metadata.captureTime.value?.wallTime,
             subseconds: metadata.subseconds.value,
             camera: metadata.model.value, bodySerial: metadata.bodySerial.value,
-            lens: text(exif["LensModel"]) ?? text(auxiliary["LensModel"]),
+            lens: metadata.lens.value,
             exposureSeconds: positiveNumber(exif["ExposureTime"]),
             aperture: positiveNumber(exif["FNumber"]),
             iso: positiveInteger(sensitivity),
-            focalLengthMillimetres: positiveNumber(exif["FocalLength"]),
+            focalLengthMillimetres: metadata.focalLengthMillimetres.value,
             fileSizeBytes: fileSize.flatMap { $0 >= 0 ? Int64($0) : nil },
             pixelWidth: positiveInteger(properties["PixelWidth"]),
             pixelHeight: positiveInteger(properties["PixelHeight"]))
-    }
-
-    private static func text(_ raw: Any?) -> String? {
-        guard let string = raw as? String else { return nil }
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func positiveNumber(_ raw: Any?) -> Double? {

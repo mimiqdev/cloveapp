@@ -96,6 +96,26 @@ enum AppLocalization {
         }
     }
 
+    static func focalLengthBucketTitle(
+        _ bucket: FocalLengthBucket, language: ResolvedAppLanguage
+    ) -> String {
+        switch bucket {
+        case .ultraWide: string("Ultra-wide", language: language)
+        case .wide: string("Wide", language: language)
+        case .standard: string("Standard", language: language)
+        case .shortTelephoto: string("Short telephoto", language: language)
+        case .telephoto: string("Telephoto", language: language)
+        }
+    }
+
+    static func focalLengthBucketLabel(
+        _ bucket: FocalLengthBucket, language: ResolvedAppLanguage
+    ) -> String {
+        format(
+            "%@ · %@", language: language, focalLengthBucketTitle(bucket, language: language),
+            bucket.rangeLabel)
+    }
+
     static func appearanceTitle(_ mode: AppearanceMode, language: ResolvedAppLanguage) -> String {
         string(mode.title, language: language)
     }

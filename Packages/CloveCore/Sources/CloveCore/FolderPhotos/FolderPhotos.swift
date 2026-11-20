@@ -99,6 +99,11 @@ public struct FolderPhotos: Sendable {
         gridPhotos[id]?.marks = marks
     }
 
+    /// Records lightweight filter metadata read during the scan pass.
+    public mutating func setFilterMetadata(_ metadata: PhotoFilterMetadata, for id: PhotoIdentity) {
+        gridPhotos[id]?.metadata = metadata
+    }
+
     /// Records the camera body I4 read for one photo, which grouping separates photos by
     /// (PRD P0-11, G1's Grouping row).
     ///

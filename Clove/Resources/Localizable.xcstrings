@@ -313,6 +313,52 @@
         }
       }
     },
+    "%lld filters": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld filter"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld filters"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 项筛选"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 項篩選"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld group": {
       "localizations": {
         "en": {
@@ -1985,6 +2031,50 @@
         }
       }
     },
+    "Clear": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除"
+          }
+        }
+      }
+    },
+    "Clear filters": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear filters"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除筛选"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除篩選"
+          }
+        }
+      }
+    },
     "Clear rating": {
       "localizations": {
         "en": {
@@ -3307,6 +3397,28 @@
         }
       }
     },
+    "Focal length": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Focal length"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "焦距"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "焦距"
+          }
+        }
+      }
+    },
     "Focus View": {
       "localizations": {
         "en": {
@@ -4319,6 +4431,28 @@
         }
       }
     },
+    "More filters": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More filters"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多筛选"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多篩選"
+          }
+        }
+      }
+    },
     "More than one sidecar matches this photo.": {
       "localizations": {
         "en": {
@@ -4845,6 +4979,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "無自動對焦中繼資料"
+          }
+        }
+      }
+    },
+    "No camera, lens, focal length, or keyword filters available in this folder.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No camera, lens, focal length, or keyword filters available in this folder."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前文件夹没有可用的相机、镜头、焦距或关键词筛选条件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前檔案夾沒有可用的相機、鏡頭、焦距或關鍵字篩選條件。"
           }
         }
       }
@@ -6791,6 +6947,28 @@
         }
       }
     },
+    "Remove %@ filter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %@ filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除“%@”筛选"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除「%@」篩選"
+          }
+        }
+      }
+    },
     "Remove from batch": {
       "localizations": {
         "en": {
@@ -7705,6 +7883,28 @@
         }
       }
     },
+    "Short telephoto": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Short telephoto"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中长焦"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中長焦"
+          }
+        }
+      }
+    },
     "Show or hide controls": {
       "localizations": {
         "en": {
@@ -7767,6 +7967,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "顯示方式"
+          }
+        }
+      }
+    },
+    "Showing %lld of %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Showing %lld of %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示 %1$lld / %2$lld"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示 %1$lld / %2$lld"
           }
         }
       }
@@ -8385,6 +8607,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "輕點相片可將其保留。"
+          }
+        }
+      }
+    },
+    "Telephoto": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Telephoto"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长焦"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "長焦"
           }
         }
       }
@@ -9335,6 +9579,28 @@
         }
       }
     },
+    "Ultra-wide": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ultra-wide"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "超广角"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "超廣角"
+          }
+        }
+      }
+    },
     "Unavailable": {
       "localizations": {
         "en": {
@@ -9683,6 +9949,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "放大時"
+          }
+        }
+      }
+    },
+    "Wide": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wide"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "广角"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "廣角"
           }
         }
       }

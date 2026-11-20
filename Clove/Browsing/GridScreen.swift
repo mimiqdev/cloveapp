@@ -20,6 +20,7 @@ struct GridScreen: View {
     @State private var showsNoEligiblePhotosAlert = false
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
+    @State private var showsMetadataFilters = false
     @State private var filterAnchorAttachments = 0
     @State private var selectsEmpty = false
     @State private var areGroupsUnfolded: Bool
@@ -141,6 +142,7 @@ struct GridScreen: View {
                 areGroupsUnfolded = browsing.isSelecting
                 pendingPhotosConfirmationPlan = nil
                 showsNoEligiblePhotosAlert = false
+                showsMetadataFilters = false
             }
             .onChange(of: browsing.folderLocationLoss != nil) { _, isLost in
                 if isLost {
@@ -319,6 +321,9 @@ struct GridScreen: View {
             .sheet(isPresented: $showsKeywordsSheet) {
                 BatchKeywordsSheet(browsing: browsing)
             }
+            .sheet(isPresented: $showsMetadataFilters) {
+                MetadataFilterSheet(browsing: browsing)
+            }
             .sheet(item: $moveSheet) { route in
                 switch route {
                 case .flow(let flow): MoveRejectsSheet(flow: flow)
@@ -460,6 +465,11 @@ struct GridScreen: View {
             if !usesSystemToolbar { header }
             ProgressLine(progress: gridProgressLine.progress, tone: gridProgressLine.tone)
             FolderSaveBanner(browsing: browsing, identifierPrefix: "clove.grid.saveState.failure")
+            if !browsing.metadataFilter.isEmpty {
+                ActiveMetadataFilterBar(
+                    browsing: browsing,
+                    onEdit: isRegular ? nil : { showsMetadataFilters = true })
+            }
             if cells.isEmpty && !browsing.isFolderOpening {
                 emptyState
             } else {
@@ -813,6 +823,43 @@ struct GridScreen: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+            if browsing.metadataFilterOptions.hasAnyDimension || !browsing.metadataFilter.isEmpty {
+                Divider().overlay(Color.clove.separator)
+                Button {
+                    showsFilters = false
+                    showsMetadataFilters = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "slider.horizontal.3")
+                            .frame(width: 16)
+                            .foregroundStyle(
+                                browsing.metadataFilter.isEmpty
+                                    ? Color.clove.text.secondary : Color.clove.accent)
+                        Text(AppLocalization.string("More filters", language: language))
+                        Spacer()
+                        if !browsing.metadataFilter.isEmpty {
+                            Text(
+                                browsing.metadataFilter.activeCount.formatted(
+                                    .number.locale(language.locale))
+                            )
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.clove.accent, in: Capsule())
+                            .accessibilityIdentifier("clove.grid.filter.more.badge")
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.clove.text.secondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 42)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("clove.grid.filter.more")
+            }
         }
         .font(.subheadline)
         .foregroundStyle(Color.clove.text.primary)
@@ -851,7 +898,22 @@ struct GridScreen: View {
         return .unrated
     }
 
-    private var hasFilter: Bool { browsing.state.filter != .all || browsing.labelFilter != nil }
+    private var hasFilter: Bool { browsing.hasActiveFilter }
+
+    private var metadataFilterSubtitlePart: String? {
+        let filter = browsing.metadataFilter
+        guard !filter.isEmpty else { return nil }
+        if filter.activeCount == 1 {
+            if let camera = filter.camera { return camera }
+            if let lens = filter.lens { return lens }
+            if let bucket = filter.focalLength {
+                return AppLocalization.focalLengthBucketTitle(bucket, language: language)
+            }
+            if let keyword = filter.keyword { return keyword }
+        }
+        return AppLocalization.format(
+            "%lld filters", language: language, Int64(filter.activeCount))
+    }
 
     private var hiddenSelectedSubtitle: String? {
         guard isSelecting, browsing.hiddenSelectedCount > 0 else { return nil }
@@ -883,6 +945,10 @@ struct GridScreen: View {
         }
         switch browsing.state.filter {
         case .all:
+            if let metadataPart = metadataFilterSubtitlePart {
+                return AppLocalization.format(
+                    "%@ · %@", language: language, metadataPart, countText)
+            }
             return AppLocalization.format("%lld photos", language: language, Int64(count))
         case .unmarked:
             return AppLocalization.format(
@@ -916,6 +982,15 @@ struct GridScreen: View {
                         browsing.isFolderOpening
                             ? "Reading photos…" : "No photos match this filter.",
                         language: language))
+            } actions: {
+                if !browsing.isFolderOpening && hasFilter {
+                    Button(AppLocalization.string("Clear filters", language: language)) {
+                        browsing.clearAllFilters()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.clove.accent)
+                    .accessibilityIdentifier("clove.grid.empty.clearFilters")
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("clove.grid.empty")
@@ -970,10 +1045,12 @@ struct GridScreen: View {
             selection: browsing.state.selection,
             filter: browsing.state.filter,
             labelFilter: browsing.labelFilter,
+            metadataFilter: browsing.metadataFilter,
             hasBatchTargets: !browsing.batchTargets.isEmpty,
             hasMoveSheet: moveSheet != nil,
             hasRenameFlow: renameFlow != nil,
             hasKeywordsSheet: showsKeywordsSheet,
+            hasMetadataFiltersSheet: showsMetadataFilters,
             hasPendingPhotosAlert: pendingPhotosConfirmationPlan != nil
                 || showsNoEligiblePhotosAlert,
             showsFilters: showsFilters,
@@ -1004,10 +1081,12 @@ private struct GridTapPickerDismissTrigger: Equatable {
     let selection: Set<PhotoIdentity>
     let filter: PhotoFilter
     let labelFilter: LabelColour?
+    let metadataFilter: PhotoMetadataFilter
     let hasBatchTargets: Bool
     let hasMoveSheet: Bool
     let hasRenameFlow: Bool
     let hasKeywordsSheet: Bool
+    let hasMetadataFiltersSheet: Bool
     let hasPendingPhotosAlert: Bool
     let showsFilters: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
