@@ -1943,7 +1943,7 @@ struct DetailMarkingView: View {
     /// picture still until the pixels land. Once the render has failed there is nothing left to
     /// wait for, so the tap inspects the preview at ``DetailZoom/inspectionScale`` instead of
     /// doing nothing for good.
-    private func doubleTap(at anchor: UnitPoint) {
+    private func doubleTap(at tap: DetailDoubleTapLocation) {
         dismissGestureGuide()
         guard settings.doubleTap != .off else { return }
         guard scale <= DetailFitScale.tolerance else {
@@ -1955,7 +1955,7 @@ struct DetailMarkingView: View {
         guard shown != nil else { return }
         if settings.doubleTap == .zoomToFocus,
             let targetRegion = focusRegionState.preferredDoubleTapRegion(
-                at: anchor,
+                at: tap.proximityAnchor,
                 visible: browsing.showsFocusRegions,
                 inspectedRegionID: inspectedFocusRegionID)
         {
@@ -1963,7 +1963,7 @@ struct DetailMarkingView: View {
             inspectFullResolution(at: targetRegion.centre)
         } else {
             inspectedFocusRegionID = nil
-            inspectFullResolution(at: anchor)
+            inspectFullResolution(at: tap.zoomAnchor)
         }
     }
 

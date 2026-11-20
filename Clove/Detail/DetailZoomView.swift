@@ -13,6 +13,33 @@ enum DetailFitScale {
     static let tolerance: CGFloat = 1.005
 }
 
+/// Where a double tap landed on the detail preview stage (PRD P0-04).
+struct DetailDoubleTapLocation: Equatable, Sendable {
+    /// Tapped point inside the fitted photograph in unit coordinates, or `nil` when the tap
+    /// landed in surrounding blank space outside the fitted photograph.
+    let imagePoint: UnitPoint?
+
+    /// Clamped unit coordinate in image space used to break ties among multiple focus regions.
+    let proximityAnchor: UnitPoint
+
+    static let center = DetailDoubleTapLocation(imagePoint: .center, proximityAnchor: .center)
+
+    init(imagePoint: UnitPoint?, proximityAnchor: UnitPoint) {
+        self.imagePoint = imagePoint
+        self.proximityAnchor = proximityAnchor
+    }
+
+    init(_ imagePoint: UnitPoint) {
+        self.imagePoint = imagePoint
+        self.proximityAnchor = imagePoint
+    }
+
+    /// The zoom anchor to use when no focus region is selected.
+    var zoomAnchor: UnitPoint {
+        imagePoint ?? .center
+    }
+}
+
 /// One zoom the screen asks the preview to show (PRD P0-04).
 ///
 /// The screen computes the scale and the image point from ``DetailZoom``'s geometry; the view
@@ -121,9 +148,9 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports a completed horizontal navigation swipe (`-1` previous, `1` next).
     let onStep: (Int) -> Void
 
-    /// Reports a double tap anywhere on the preview, with the tapped point in unit image
-    /// coordinates.
-    let onDoubleTap: (UnitPoint) -> Void
+    /// Reports a double tap anywhere on the preview, distinguishing taps on the fitted photograph
+    /// from taps in surrounding blank space.
+    let onDoubleTap: (DetailDoubleTapLocation) -> Void
 
     /// Reports the preview value once per release; cancellation reports nothing.
     let onMarkingSwipe: (Rating) -> Void
@@ -294,7 +321,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         selected: .systemBrown, unavailable: UIColor.white.withAlphaComponent(0.58))
     var onChromeToggle: (() -> Void)?
     var onStep: ((Int) -> Void)?
-    var onDoubleTap: ((UnitPoint) -> Void)?
+    var onDoubleTap: ((DetailDoubleTapLocation) -> Void)?
     var onMarkingSwipe: ((Rating) -> Void)?
     var onTwoFingerMarkingSwipe: ((Rating) -> Void)?
     var onSwipeBegin: (() -> Void)?
@@ -958,17 +985,30 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         }
     }
 
-    /// The point a view location names, in unit image coordinates.
-    private func imageAnchor(of location: CGPoint) -> UnitPoint {
+    /// Resolves a stage-space point into the tapped image coordinate (when inside the fitted
+    /// photograph) and clamped proximity anchor for focus-region tie-breaking.
+    func doubleTapLocation(at location: CGPoint) -> DetailDoubleTapLocation {
         let rect = imageRectAtFit()
-        guard rect.width > 0, rect.height > 0 else { return .center }
-        return UnitPoint(
+        guard rect.width > 0, rect.height > 0 else {
+            return DetailDoubleTapLocation(imagePoint: nil, proximityAnchor: .center)
+        }
+        let clamped = UnitPoint(
             x: min(max((location.x - rect.minX) / rect.width, 0), 1),
             y: min(max((location.y - rect.minY) / rect.height, 0), 1))
+        guard rect.contains(location) else {
+            return DetailDoubleTapLocation(imagePoint: nil, proximityAnchor: clamped)
+        }
+        return DetailDoubleTapLocation(imagePoint: clamped, proximityAnchor: clamped)
+    }
+
+    /// Resolves and delivers a double tap at `location` in this container's coordinate space.
+    func doubleTap(at location: CGPoint) {
+        guard doubleTap.isEnabled else { return }
+        onDoubleTap?(doubleTapLocation(at: location))
     }
 
     /// Where the aspect-fit image is drawn in the scroll view's own bounds at the fit scale.
-    private func imageRectAtFit() -> CGRect {
+    func imageRectAtFit() -> CGRect {
         let fitted = DetailZoom.fittedSize(imagePixels: shownPixels, viewSize: bounds.size)
         return CGRect(
             x: (bounds.width - fitted.width) / 2, y: (bounds.height - fitted.height) / 2,
@@ -1013,8 +1053,7 @@ extension DetailZoomContainerView {
     }
 
     @objc private func handleDoubleTap() {
-        let location = doubleTap.location(in: self)
-        onDoubleTap?(imageAnchor(of: location))
+        doubleTap(at: doubleTap.location(in: self))
     }
 
     func setLanguage(_ newLanguage: ResolvedAppLanguage) {
