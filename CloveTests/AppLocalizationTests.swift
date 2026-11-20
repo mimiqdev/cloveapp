@@ -266,6 +266,35 @@ struct AppLocalizationTests {
             AppLocalization.filterTitle(
                 for: .all, labelFilter: .blue, language: .traditionalChinese) == "藍色")
 
+        #expect(AppLocalization.string("Focal length", language: .english) == "Focal length")
+        #expect(AppLocalization.string("Focal length", language: .simplifiedChinese) == "焦距")
+        #expect(AppLocalization.string("Focal length", language: .traditionalChinese) == "焦距")
+        #expect(AppLocalization.string("More filters", language: .simplifiedChinese) == "更多筛选")
+        #expect(AppLocalization.string("More filters", language: .traditionalChinese) == "更多篩選")
+        #expect(AppLocalization.string("Clear", language: .simplifiedChinese) == "清除")
+        #expect(AppLocalization.string("Clear", language: .traditionalChinese) == "清除")
+        #expect(AppLocalization.string("Clear filters", language: .simplifiedChinese) == "清除筛选")
+        #expect(AppLocalization.string("Clear filters", language: .traditionalChinese) == "清除篩選")
+        #expect(
+            AppLocalization.focalLengthBucketLabel(.ultraWide, language: .english)
+                == "Ultra-wide · < 24 mm")
+        #expect(
+            AppLocalization.focalLengthBucketLabel(.wide, language: .simplifiedChinese)
+                == "广角 · 24–35 mm")
+        #expect(
+            AppLocalization.focalLengthBucketLabel(.shortTelephoto, language: .traditionalChinese)
+                == "中長焦 · 71–135 mm")
+        #expect(
+            AppLocalization.format("%lld filters", language: .english, Int64(1)) == "1 filter")
+        #expect(
+            AppLocalization.format("%lld filters", language: .english, Int64(3)) == "3 filters")
+        #expect(
+            AppLocalization.format("%lld filters", language: .simplifiedChinese, Int64(2))
+                == "2 项筛选")
+        #expect(
+            AppLocalization.format("%lld filters", language: .traditionalChinese, Int64(2))
+                == "2 項篩選")
+
         let folder = FolderIdentity(rawValue: "loc-prep")
         let status = FolderPreparationStatus(
             folder: folder,

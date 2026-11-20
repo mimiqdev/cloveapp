@@ -105,6 +105,19 @@ final class BrowsingModel {
     /// Label filtering is a presentation filter over the same ordered photos.
     var labelFilter: LabelColour?
 
+    /// Secondary camera, lens, focal-length bucket, and keyword filters combined with AND.
+    private(set) var metadataFilter: PhotoMetadataFilter = .none
+
+    /// Available secondary filter dimensions derived from the folder's placed photos.
+    var metadataFilterOptions: PhotoMetadataFilterOptions {
+        PhotoMetadataFilterOptions(photos: allPlacedPhotos)
+    }
+
+    /// Whether any primary, label, or metadata/keyword filter is active.
+    var hasActiveFilter: Bool {
+        state.filter != .all || labelFilter != nil || !metadataFilter.isEmpty
+    }
+
     /// Session-scoped visibility for detail focus region overlays; intentionally unpersisted.
     var showsFocusRegions = true
 
@@ -586,6 +599,55 @@ final class BrowsingModel {
         guard state.filter != .all || labelFilter != label else { return }
         state.filter = .all
         labelFilter = label
+        refilterPhotos()
+    }
+
+    /// Replaces the secondary metadata and keyword filter without changing order or primary filter.
+    func setMetadataFilter(_ filter: PhotoMetadataFilter) {
+        guard metadataFilter != filter else { return }
+        metadataFilter = filter
+        refilterPhotos()
+    }
+
+    /// Toggles a single-select camera filter value.
+    func toggleCameraFilter(_ camera: String) {
+        var next = metadataFilter
+        next.camera = next.camera == camera ? nil : camera
+        setMetadataFilter(next)
+    }
+
+    /// Toggles a single-select lens filter value.
+    func toggleLensFilter(_ lens: String) {
+        var next = metadataFilter
+        next.lens = next.lens == lens ? nil : lens
+        setMetadataFilter(next)
+    }
+
+    /// Toggles a single-select focal-length bucket filter value.
+    func toggleFocalLengthFilter(_ bucket: FocalLengthBucket) {
+        var next = metadataFilter
+        next.focalLength = next.focalLength == bucket ? nil : bucket
+        setMetadataFilter(next)
+    }
+
+    /// Toggles a single-select keyword filter value.
+    func toggleKeywordFilter(_ keyword: String) {
+        var next = metadataFilter
+        next.keyword = next.keyword == keyword ? nil : keyword
+        setMetadataFilter(next)
+    }
+
+    /// Clears all active metadata and keyword filters while keeping the primary filter.
+    func clearMetadataFilter() {
+        setMetadataFilter(.none)
+    }
+
+    /// Clears primary, label, and metadata/keyword filters in one step.
+    func clearAllFilters() {
+        guard hasActiveFilter else { return }
+        state.filter = .all
+        labelFilter = nil
+        metadataFilter = .none
         refilterPhotos()
     }
 
@@ -1316,6 +1378,7 @@ final class BrowsingModel {
         isFindingSimilarShots = false
         preparationStatus = .idle
         labelFilter = nil
+        metadataFilter = .none
         pendingRestore = nil
         hasLeftFolder = true
         // The closed folder's completed move cannot be undone through its ended session.
@@ -1512,7 +1575,11 @@ final class BrowsingModel {
         isRenameToastVisible = false
         photosSaveToastMessage = nil
         isPhotosSaveToastVisible = false
+        let previousFolder = state.folder
         state.folder = library.folder
+        if previousFolder != library.folder {
+            metadataFilter = .none
+        }
         clearRecentFailureForOpenFolder()
         state.currentPhoto = nil
         state.selection = []
@@ -1604,6 +1671,13 @@ final class BrowsingModel {
                         allPlacedPhotos[placedIndex].marks = shown
                     }
                 }
+                if storedPhotos[index].metadata != updated.metadata {
+                    storedPhotos[index].metadata = updated.metadata
+                    ordering.setMetadata(updated.metadata, for: updated.id)
+                    if let placedIndex = placedPhotoIndices[updated.id] {
+                        allPlacedPhotos[placedIndex].metadata = updated.metadata
+                    }
+                }
             }
             refilterPhotos()
             groups = library.groups
@@ -1621,6 +1695,10 @@ final class BrowsingModel {
                 if storedPhotos[index].marks != shown {
                     storedPhotos[index].marks = shown
                     ordering.setMarks(shown, for: updated.id)
+                }
+                if storedPhotos[index].metadata != updated.metadata {
+                    storedPhotos[index].metadata = updated.metadata
+                    ordering.setMetadata(updated.metadata, for: updated.id)
                 }
             }
             var inserted: [GridPhoto] = []
@@ -1667,12 +1745,13 @@ final class BrowsingModel {
     }
 
     private func refilterPhotos() {
-        if case .all = state.filter, labelFilter == nil {
+        if case .all = state.filter, labelFilter == nil, metadataFilter.isEmpty {
             photos = allPlacedPhotos
         } else {
             photos = allPlacedPhotos.filter { photo in
                 state.filter.matches(photo.marks, relativeFolderPath: photo.id.relativeFolderPath)
                     && (labelFilter == nil || photo.marks.label.colour == labelFilter)
+                    && metadataFilter.matches(photo)
             }
         }
         reconcileExpandedGroup()

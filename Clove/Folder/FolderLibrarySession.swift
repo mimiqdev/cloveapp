@@ -450,6 +450,7 @@ final class FolderLibrarySession: FolderLibrary {
             if let photo = movedPhotoRecords.removeValue(forKey: restored.identity) {
                 store.setTime(photo.time, for: restored.identity)
                 store.setMarks(photo.marks, for: restored.identity)
+                store.setFilterMetadata(photo.metadata, for: restored.identity)
             }
             movedRejectIdentities.remove(restored.identity)
         }
@@ -1021,6 +1022,12 @@ final class FolderLibrarySession: FolderLibrary {
                 store.setCameraBody(
                     CameraBody(
                         model: metadata.model.value, serial: metadata.bodySerial.value),
+                    for: set.id)
+                store.setFilterMetadata(
+                    PhotoFilterMetadata(
+                        camera: metadata.model.value,
+                        lens: metadata.lens.value,
+                        focalLengthMillimetres: metadata.effectiveFocalLengthMillimetres),
                     for: set.id)
             }
         }
