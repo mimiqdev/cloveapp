@@ -104,6 +104,23 @@ enum AppLocalization {
         string(family.name, language: language)
     }
 
+    static func groupingSensitivityTitle(
+        _ sensitivity: GroupingSensitivity, language: ResolvedAppLanguage
+    ) -> String {
+        switch sensitivity {
+        case .tight: string("Tight", language: language)
+        case .standard: string("Standard", language: language)
+        case .loose: string("Loose", language: language)
+        case .timeOnly: string("Time only", language: language)
+        }
+    }
+
+    static func groupingTimeWindowTitle(
+        _ window: GroupingTimeWindow, language: ResolvedAppLanguage
+    ) -> String {
+        format("%llds", language: language, Int64(window.wholeSeconds))
+    }
+
     static func saveSituationMessage(_ situation: SaveSituation, language: ResolvedAppLanguage)
         -> String
     {

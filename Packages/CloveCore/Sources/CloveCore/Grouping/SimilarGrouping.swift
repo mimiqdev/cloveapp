@@ -24,8 +24,8 @@ import Foundation
 public actor SimilarGrouping {
     /// The feature source for step 3; the app wires I3 behind it (PRD Similar groups step 3).
     private let similarity: any PhotoSimilarityProviding
-    /// G1's starting thresholds (G1 Grouping row).
-    private let thresholds: GroupingThresholds
+    /// Active thresholds for time runs and visual similarity boundaries.
+    private var thresholds: GroupingThresholds
     /// Clove's own group cache, or nil when the caller keeps no cache (PRD Similar groups rules).
     private let cache: SimilarGroupsCache?
 
@@ -103,9 +103,11 @@ public actor SimilarGrouping {
         photos: [GroupingPhoto],
         revision: GroupingInputRevision,
         similarGroupsEnabled: Bool = true,
-        reuseCache: Bool = true
+        reuseCache: Bool = true,
+        thresholds: GroupingThresholds? = nil
     ) async {
         generation += 1
+        if let thresholds { self.thresholds = thresholds }
         isEnabled = similarGroupsEnabled
         self.revision = revision
         inputs = GroupingRuns.distinct(photos)
@@ -126,7 +128,7 @@ public actor SimilarGrouping {
                 folderID: folder,
                 revision: revision,
                 fingerprint: inputFingerprint,
-                thresholds: thresholds,
+                thresholds: self.thresholds,
                 photos: inputs)
         {
             cacheIsAuthoritative = true
@@ -137,8 +139,25 @@ public actor SimilarGrouping {
             return
         }
 
-        timeRuns = GroupingRuns.runs(for: inputs, timeGap: thresholds.timeGap)
+        timeRuns = GroupingRuns.runs(for: inputs, timeGap: self.thresholds.timeGap)
         publish()
+    }
+
+    /// Updates the active grouping thresholds and recomputes the current folder's groups if a run
+    /// has already started.
+    public func setThresholds(
+        _ thresholds: GroupingThresholds,
+        reuseCache: Bool = true
+    ) async {
+        guard thresholds != self.thresholds else { return }
+        self.thresholds = thresholds
+        guard generation > 0 else { return }
+        await run(
+            photos: inputs,
+            revision: revision,
+            similarGroupsEnabled: isEnabled,
+            reuseCache: reuseCache,
+            thresholds: thresholds)
     }
 
     /// One refinement pass over every boundary without a final answer (PRD Similar groups
@@ -148,8 +167,8 @@ public actor SimilarGrouping {
     /// publishes a new result when anything changed. A pair the provider reports as not ready
     /// stays provisional, so call again as features arrive; the final result does not depend
     /// on the order answers arrive in. Nothing happens while similar groups are off, while the
-    /// cache's finished result is showing, or for a run a later ``run(photos:revision:
-    /// similarGroupsEnabled:reuseCache:)`` superseded.
+    /// cache's finished result is showing, while visual similarity is disabled, or for a run a
+    /// later ``run(photos:revision:similarGroupsEnabled:reuseCache:thresholds:)`` superseded.
     public func refine() async {
         await refineBoundaries(settledPhotos: nil)
     }
@@ -164,7 +183,7 @@ public actor SimilarGrouping {
     }
 
     private func refineBoundaries(settledPhotos: Set<PhotoIdentity>?) async {
-        guard isEnabled, !cacheIsAuthoritative else { return }
+        guard isEnabled, !cacheIsAuthoritative, thresholds.useVisualSimilarity else { return }
         let generation = self.generation
         var changed = false
         for run in timeRuns {
@@ -221,6 +240,7 @@ public actor SimilarGrouping {
     /// The folder's progress: every boundary inside a time run counts, split or not
     /// (PRD Similar groups rules: "Show analysis progress or Analyzed").
     private func analysisState() -> GroupAnalysis {
+        guard thresholds.useVisualSimilarity else { return .analyzed }
         var total = 0
         var decided = 0
         for run in timeRuns {

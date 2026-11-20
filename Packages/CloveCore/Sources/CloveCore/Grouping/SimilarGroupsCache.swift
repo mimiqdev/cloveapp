@@ -104,7 +104,7 @@ public struct SimilarGroupsCache: Sendable {
                 SimilarGroup(
                     id: id,
                     members: members,
-                    refinement: .refined,
+                    refinement: thresholds.useVisualSimilarity ? .refined : .timeOnly,
                     usedFallbackSimilarity: cachedGroup.usedFallback))
         }
         return groups

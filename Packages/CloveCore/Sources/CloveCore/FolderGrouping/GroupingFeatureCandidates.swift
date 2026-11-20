@@ -17,7 +17,8 @@ public enum GroupingFeatureCandidates {
         in photos: [GroupingPhoto],
         thresholds: GroupingThresholds = .standard
     ) -> [GroupingPhoto] {
-        GroupingRuns.runs(for: photos, timeGap: thresholds.timeGap).flatMap { $0 }
+        guard thresholds.useVisualSimilarity else { return [] }
+        return GroupingRuns.runs(for: photos, timeGap: thresholds.timeGap).flatMap { $0 }
     }
 
     /// The candidate time-runs of `photos` that have at least one neighbour, ordered by each
@@ -26,7 +27,8 @@ public enum GroupingFeatureCandidates {
         in photos: [GroupingPhoto],
         thresholds: GroupingThresholds = .standard
     ) -> [[GroupingPhoto]] {
-        GroupingRuns.runs(for: photos, timeGap: thresholds.timeGap).sorted { left, right in
+        guard thresholds.useVisualSimilarity else { return [] }
+        return GroupingRuns.runs(for: photos, timeGap: thresholds.timeGap).sorted { left, right in
             guard let firstLeft = left.first, let firstRight = right.first else {
                 return !left.isEmpty && right.isEmpty
             }

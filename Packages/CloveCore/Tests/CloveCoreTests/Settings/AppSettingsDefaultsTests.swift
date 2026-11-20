@@ -17,6 +17,9 @@ import CloveCore
     #expect(settings.rejectsFolderName.rawValue == "_Rejected")
     #expect(settings.moveRejectsEnabled)
     #expect(settings.similarGroupsEnabled)
+    #expect(settings.groupingSensitivity == .standard)
+    #expect(settings.groupingTimeWindow == .twoSeconds)
+    #expect(settings.groupingThresholds == .standard)
     #expect(settings.appearance == AppearanceChoice())
     #expect(settings.appearance.mode == .system)
     #expect(settings.appearance.family == .default)
@@ -39,6 +42,11 @@ import CloveCore
         AppLanguage.allCases == [.system, .english, .simplifiedChinese, .traditionalChinese])
     #expect(
         ResolvedAppLanguage.allCases == [.english, .simplifiedChinese, .traditionalChinese])
+    #expect(GroupingSensitivity.allCases == [.tight, .standard, .loose, .timeOnly])
+    #expect(
+        GroupingTimeWindow.allCases == [
+            .oneSecond, .twoSeconds, .fiveSeconds, .tenSeconds, .thirtySeconds,
+        ])
 }
 
 @Test func labelsOfferedFollowExtendedColours() {
@@ -60,6 +68,9 @@ import CloveCore
     requireSendable(AppearanceChoice.self)
     requireSendable(AppLanguage.self)
     requireSendable(ResolvedAppLanguage.self)
+    requireSendable(GroupingSensitivity.self)
+    requireSendable(GroupingTimeWindow.self)
+    requireSendable(GroupingThresholds.self)
     requireSendable(SettingsPersistence.self)
     requireSendable(UserDefaultsSettingsStorage.self)
 }

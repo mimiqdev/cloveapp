@@ -15,6 +15,8 @@ import CloveCore
             "rejectsFolderName",
             "moveRejectsEnabled",
             "similarGroupsEnabled",
+            "groupingSensitivity",
+            "groupingTimeWindow",
             "appearance",
             "photoDisplayMode",
             "language",

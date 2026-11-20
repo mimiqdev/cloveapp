@@ -28,8 +28,8 @@ final class FolderGrouping {
     private let folder: FolderIdentity
     /// The session that holds the folder's C11 scope while features read its files.
     private let session: FolderAccessSession
-    /// C9's thresholds for both time runs and similarity boundaries.
-    private let thresholds: GroupingThresholds
+    /// Active thresholds for both time runs and similarity boundaries.
+    private var thresholds: GroupingThresholds
     /// Minimum interval between incremental refinement updates after the initial burst settles.
     private let refinementInterval: Duration
     /// C9's grouper: the time stage, the boundary decisions and the group cache.
@@ -126,11 +126,15 @@ final class FolderGrouping {
     /// the library can report the scan finished knowing the folder's groups exist. The
     /// refinement that needs features keeps running afterwards.
     func begin(
-        photos: [GroupingPhoto], revision: GroupingInputRevision, enabled: Bool
+        photos: [GroupingPhoto], revision: GroupingInputRevision, enabled: Bool,
+        thresholds: GroupingThresholds? = nil
     ) async {
         inputs = photos
         self.revision = revision
         self.enabled = enabled
+        if let thresholds {
+            self.thresholds = thresholds
+        }
         hasBegun = true
         await run(reusingCache: true)
     }
@@ -138,7 +142,8 @@ final class FolderGrouping {
     /// Runs grouping again from the folder's current photos with the cache bypassed (P0-11).
     ///
     /// A folder whose first pass has not started yet ignores this: its input arrives with
-    /// ``begin(photos:revision:enabled:)``, which the library calls once the scan finishes.
+    /// ``begin(photos:revision:enabled:thresholds:)``, which the library calls once the scan
+    /// finishes.
     func runAgain(photos: [GroupingPhoto]) async {
         guard hasBegun else { return }
         inputs = photos
@@ -151,10 +156,35 @@ final class FolderGrouping {
     /// turning it back on shows the finished result at once. A folder whose first pass has not
     /// started yet ignores the change: its time stage reads the setting when it begins. The
     /// settings screen reaches this through the folder library's one call.
-    func setEnabled(_ enabled: Bool, photos: [GroupingPhoto]) async {
-        guard hasBegun, !isClosed, enabled != self.enabled else { return }
+    func setEnabled(
+        _ enabled: Bool, photos: [GroupingPhoto], thresholds: GroupingThresholds? = nil
+    ) async {
+        guard !isClosed else { return }
+        let thresholdsChanged: Bool
+        if let thresholds, thresholds != self.thresholds {
+            self.thresholds = thresholds
+            thresholdsChanged = true
+        } else {
+            thresholdsChanged = false
+        }
+        guard hasBegun else { return }
+        guard enabled != self.enabled || (enabled && thresholdsChanged) else { return }
         inputs = photos
         self.enabled = enabled
+        await run(reusingCache: true)
+    }
+
+    /// Applies updated grouping thresholds to the open folder.
+    ///
+    /// When grouping is active, this cancels any in-flight feature pass and immediately recomputes
+    /// groups under the new thresholds while reusing both the group cache and cached image
+    /// features. When grouping is disabled or has not started yet, the thresholds are stored for
+    /// the next run.
+    func setThresholds(_ thresholds: GroupingThresholds, photos: [GroupingPhoto]) async {
+        guard !isClosed, thresholds != self.thresholds else { return }
+        self.thresholds = thresholds
+        guard hasBegun, enabled else { return }
+        inputs = photos
         await run(reusingCache: true)
     }
 
@@ -224,7 +254,7 @@ final class FolderGrouping {
         guard !isClosed else { return }
         await grouping.run(
             photos: inputs, revision: revision, similarGroupsEnabled: enabled,
-            reuseCache: reusingCache)
+            reuseCache: reusingCache, thresholds: thresholds)
         guard !isClosed else { return }
         // The grouper's own result, read here rather than waited for, so the caller's next step
         // runs after the first publication instead of racing it.

@@ -91,6 +91,12 @@ protocol FolderLibrary: AnyObject {
     /// settings store. A library that cannot group ignores it.
     func setSimilarGroupsEnabled(_ enabled: Bool) async
 
+    /// Applies updated grouping thresholds to the open folder without rescanning files on disk.
+    ///
+    /// The settings screen calls this when the user changes grouping sensitivity or time window;
+    /// persistence stays with the settings store. A library that cannot group ignores it.
+    func setGroupingThresholds(_ thresholds: GroupingThresholds) async
+
     /// The grid's window on the folder's files: preview pixels and companion badges by identity
     /// (PRD P0-03, G1 preview row).
     ///
@@ -389,6 +395,8 @@ extension FolderLibrary {
     func runGroupingAgain() async {}
 
     func setSimilarGroupsEnabled(_ enabled: Bool) async {}
+
+    func setGroupingThresholds(_ thresholds: GroupingThresholds) async {}
 
     /// The reason a library with no folder access gives, which asks for the folder again
     /// (PRD P0-02).

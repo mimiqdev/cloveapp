@@ -17,6 +17,8 @@ enum SettingsKey: String, CaseIterable {
     case rejectsFolderName = "rejects.folderName"
     case moveRejects = "rejects.moveEnabled"
     case similarGroups = "groups.similarEnabled"
+    case groupingSensitivity = "groups.sensitivity"
+    case groupingTimeWindow = "groups.timeWindow"
     case appearanceMode = "appearance.mode"
     case appearanceFamily = "appearance.family"
     case language = "app.language"
@@ -66,6 +68,8 @@ public struct SettingsPersistence: Sendable {
             rejectsFolderName: rejectsFolderName() ?? defaults.rejectsFolderName,
             moveRejectsEnabled: boolean(.moveRejects) ?? defaults.moveRejectsEnabled,
             similarGroupsEnabled: boolean(.similarGroups) ?? defaults.similarGroupsEnabled,
+            groupingSensitivity: rawValue(.groupingSensitivity) ?? defaults.groupingSensitivity,
+            groupingTimeWindow: rawValue(.groupingTimeWindow) ?? defaults.groupingTimeWindow,
             appearance: loadAppearance(defaults: defaults.appearance),
             photoDisplayMode: rawValue(.photoDisplayMode),
             language: rawValue(.language) ?? defaults.language
@@ -86,6 +90,8 @@ public struct SettingsPersistence: Sendable {
         setText(settings.rejectsFolderName.rawValue, .rejectsFolderName)
         setBoolean(settings.moveRejectsEnabled, .moveRejects)
         setBoolean(settings.similarGroupsEnabled, .similarGroups)
+        setText(settings.groupingSensitivity.rawValue, .groupingSensitivity)
+        setText(settings.groupingTimeWindow.rawValue, .groupingTimeWindow)
         setText(settings.appearance.mode.rawValue, .appearanceMode)
         setText(settings.appearance.family.rawValue, .appearanceFamily)
         setText(settings.language.rawValue, .language)

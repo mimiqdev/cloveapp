@@ -28,9 +28,8 @@ public enum ZoomedGestures: String, CaseIterable, Hashable, Sendable {
 /// UI never re-derives them.
 ///
 /// Settings that G1 and the PRD removed are deliberately absent: Reject is never exported to
-/// XMP, there is no "Also write Rating −1" option, embedded metadata writes are not a launch
-/// setting, and there is no grouping-sensitivity setting (G1 decision 5, PRD Move rejects and
-/// PRD Explicitly out of launch scope).
+/// XMP, there is no "Also write Rating −1" option, and embedded metadata writes are not a launch
+/// setting (G1 decision 5, PRD Move rejects and PRD Explicitly out of launch scope).
 public struct AppSettings: Hashable, Sendable {
     /// Whether marking gestures are active (PRD Gesture-related settings); on by default.
     public var gesturesEnabled: Bool
@@ -61,9 +60,15 @@ public struct AppSettings: Hashable, Sendable {
     /// itself still works for filtering when this is off.
     public var moveRejectsEnabled: Bool
 
-    /// Whether similar groups are offered (PRD Similar groups and P0-11); on by default. There
-    /// is no grouping-sensitivity setting (PRD Explicitly out of launch scope).
+    /// Whether similar groups are offered (PRD Similar groups and P0-11); on by default.
     public var similarGroupsEnabled: Bool
+
+    /// How aggressively visual similarity splits time-adjacent photos into separate groups;
+    /// `.standard` by default.
+    public var groupingSensitivity: GroupingSensitivity
+
+    /// Maximum capture-time gap between consecutive photos in a similar group; `2s` by default.
+    public var groupingTimeWindow: GroupingTimeWindow
 
     /// The three-way appearance mode (Light, Dark, System) and paired theme family
     /// (`design/handoff/tokens/tokens.md`); System + Default by default.
@@ -72,10 +77,10 @@ public struct AppSettings: Hashable, Sendable {
     /// An explicit display choice. Absent means use the measured device default.
     public var photoDisplayMode: PhotoDisplayMode?
 
-    /// User-selected app language preference (issue #325); Follow System by default.
+    /// User-selected app language preference; Follow System by default.
     public var language: AppLanguage
 
-    /// Creates every launch setting, defaulting each one to its PRD launch value.
+    /// Creates every setting, defaulting each one to its launch value.
     public init(
         gesturesEnabled: Bool = true,
         enabledRatings: EnabledRatings = .all,
@@ -86,6 +91,8 @@ public struct AppSettings: Hashable, Sendable {
         rejectsFolderName: RejectsFolderName = .defaultFolderName,
         moveRejectsEnabled: Bool = true,
         similarGroupsEnabled: Bool = true,
+        groupingSensitivity: GroupingSensitivity = .standard,
+        groupingTimeWindow: GroupingTimeWindow = .twoSeconds,
         appearance: AppearanceChoice = AppearanceChoice(),
         photoDisplayMode: PhotoDisplayMode? = nil,
         language: AppLanguage = .system
@@ -99,9 +106,16 @@ public struct AppSettings: Hashable, Sendable {
         self.rejectsFolderName = rejectsFolderName
         self.moveRejectsEnabled = moveRejectsEnabled
         self.similarGroupsEnabled = similarGroupsEnabled
+        self.groupingSensitivity = groupingSensitivity
+        self.groupingTimeWindow = groupingTimeWindow
         self.appearance = appearance
         self.photoDisplayMode = photoDisplayMode
         self.language = language
+    }
+
+    /// The resolved thresholds derived from `groupingTimeWindow` and `groupingSensitivity`.
+    public var groupingThresholds: GroupingThresholds {
+        GroupingThresholds(timeWindow: groupingTimeWindow, sensitivity: groupingSensitivity)
     }
 
     /// The colour labels the marking HUD, menu, and keyboard offer (PRD Marking rules).
