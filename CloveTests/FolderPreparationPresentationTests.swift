@@ -289,6 +289,7 @@ struct FolderPreparationPresentationTests {
             frameBox.frames["clove.detail.preparation"] != nil
                 && frameBox.frames["clove.detail.focusToggle"] != nil
                 && frameBox.frames["clove.detail.fileName"] != nil
+                && frameBox.frames["clove.detail.zoom"] != nil
         }
 
         let prep = try #require(frameBox.frames["clove.detail.preparation"])
@@ -301,15 +302,16 @@ struct FolderPreparationPresentationTests {
         #expect(prep.width >= 43)
         #expect(prep.height >= 43)
         #expect(!prep.intersects(focus))
-        #expect(focus.maxX < fileName.minX)
         #expect(focus.maxX < prep.minX)
-        #expect(prep.midX >= fileName.maxX - 4)
-        #expect(fileName.maxX < zoom.minX)
-        #expect(abs(zoom.midY - fileName.midY) <= 4)
         #expect(prep.minY >= header.minY - 1)
         #expect(prep.maxY <= header.maxY + 1)
+        #expect(fileName.minY >= header.maxY + 9)
+        #expect(fileName.maxY <= zoom.minY + 1)
+        #expect(abs(fileName.minX - zoom.minX) <= 2)
+        #expect(frameBox.frames["clove.detail.saveState"] == nil)
 
-        // Switching to Focus View preserves the single-row leading preparation ring without collision.
+        // Switching to Focus View preserves the icon-only leading preparation ring without collision
+        // and keeps the filename/position corner overlay inside the photo stage.
         presentationBox.value = .focus
         let photoPreviewHeaderMinX = header.minX
         try await waitFor("Focus View preparation header did not lay out") {
@@ -328,9 +330,9 @@ struct FolderPreparationPresentationTests {
         #expect(prepInFocus.width >= 43)
         #expect(prepInFocus.height >= 43)
         #expect(!prepInFocus.intersects(focusInFocus))
-        #expect(focusInFocus.maxX < fileInFocus.minX)
         #expect(focusInFocus.maxX < prepInFocus.minX)
-        #expect(fileInFocus.maxX < zoomInFocus.minX)
+        #expect(fileInFocus.minY >= headerInFocus.maxY + 9)
+        #expect(fileInFocus.maxY <= zoomInFocus.minY + 1)
     }
 
     @Test func preparationDetailsDismissOnModeRoutePostureAndInactiveSceneTransitions()

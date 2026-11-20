@@ -181,6 +181,7 @@ struct DetailZoomView: UIViewRepresentable {
         selected: .systemBrown, unavailable: UIColor.white.withAlphaComponent(0.58))
     var onFocusRegionTap: (DetailFocusRegion) -> Void = { _ in }
     var previewAccessibilityLabel = "Detail preview"
+    var onVisiblePhotoRectChange: ((CGRect?) -> Void)? = nil
 
     func makeUIView(context: Context) -> DetailZoomContainerView {
         let view = DetailZoomContainerView()
@@ -191,6 +192,7 @@ struct DetailZoomView: UIViewRepresentable {
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(resolvedPreviewAccessibilityLabel(language: language))
         view.onZoomChange = onZoomChange
+        view.onVisiblePhotoRectChange = onVisiblePhotoRectChange
         view.onChromeToggle = onChromeToggle
         view.onStep = onStep
         view.onDoubleTap = onDoubleTap
@@ -208,12 +210,15 @@ struct DetailZoomView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: DetailZoomContainerView, context: Context) {
+        view.beginSwiftUIUpdate()
+        defer { view.endSwiftUIUpdate() }
         let language = context.environment.appLanguage
         view.setLanguage(language)
         view.focusRegionColours = focusRegionColours
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(resolvedPreviewAccessibilityLabel(language: language))
         view.onZoomChange = onZoomChange
+        view.onVisiblePhotoRectChange = onVisiblePhotoRectChange
         view.onChromeToggle = onChromeToggle
         view.onStep = onStep
         view.onDoubleTap = onDoubleTap
@@ -304,6 +309,15 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// Whether a `DispatchQueue.main.async` flush for `pendingZoom` is already queued.
     private var isFlushScheduled = false
 
+    /// Whether SwiftUI is currently running `updateUIView(_:context:)`.
+    private var isUpdatingFromSwiftUI = false
+
+    /// Whether a `DispatchQueue.main.async` report for `visiblePhotoRect` is queued.
+    private var isVisiblePhotoRectReportScheduled = false
+
+    /// Last reported visible photo crop rect, used to filter sub-pixel noise.
+    private var lastReportedVisiblePhotoRect: CGRect?
+
     /// Whether bounds changed while zoomed so the next programmatic zoom must reset the scroll
     /// view's fit geometry before applying the target scale.
     private var needsResetBeforeZoom = false
@@ -315,6 +329,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     }
 
     var onZoomChange: ((CGFloat) -> Void)?
+    var onVisiblePhotoRectChange: ((CGRect?) -> Void)?
     var onFocusRegionTap: ((DetailFocusRegion) -> Void)?
     var focusRegionColours = DetailFocusRegionColours(
         normal: .white, contrastEdge: UIColor.black.withAlphaComponent(0.45),
@@ -478,6 +493,15 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                 updatePreviewAccessibility()
             }
         }
+        reportVisiblePhotoRectIfNeeded()
+    }
+
+    func beginSwiftUIUpdate() {
+        isUpdatingFromSwiftUI = true
+    }
+
+    func endSwiftUIUpdate() {
+        isUpdatingFromSwiftUI = false
     }
 
     /// Whether two bitmaps have a materially different aspect ratio.
@@ -639,6 +663,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         // A programmatic zoom is the same handoff as a pinch, whether or not the delegate fires.
         updateGestureAvailability()
         updatePreviewAccessibility()
+        reportVisiblePhotoRectIfNeeded()
     }
 
     override func layoutSubviews() {
@@ -683,6 +708,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         layoutFocusRegions()
         updateGestureAvailability()
         updatePreviewAccessibility()
+        reportVisiblePhotoRectIfNeeded()
     }
 
     // MARK: - UIScrollViewDelegate
@@ -698,6 +724,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         updateGestureAvailability()
         updatePreviewAccessibility()
         if !isApplyingZoom {
+            reportVisiblePhotoRectIfNeeded()
             onZoomChange?(scrollView.zoomScale)
         }
         schedulePendingZoomFlushIfNeeded()
@@ -706,14 +733,17 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         isInScrollCallback = true
         defer { isInScrollCallback = false }
-        if !isApplyingZoom, isZoomed {
-            updatePreviewAccessibility()
-            if !isLayingOut,
-                scrollView.isDragging || scrollView.isDecelerating,
-                case .layoutRetarget(let scale, _) = pendingZoom,
-                let currentAnchor = zoomSnapshot?.anchor
-            {
-                pendingZoom = .layoutRetarget(scale: scale, anchor: currentAnchor)
+        if !isApplyingZoom {
+            reportVisiblePhotoRectIfNeeded()
+            if isZoomed {
+                updatePreviewAccessibility()
+                if !isLayingOut,
+                    scrollView.isDragging || scrollView.isDecelerating,
+                    case .layoutRetarget(let scale, _) = pendingZoom,
+                    let currentAnchor = zoomSnapshot?.anchor
+                {
+                    pendingZoom = .layoutRetarget(scale: scale, anchor: currentAnchor)
+                }
             }
         }
         schedulePendingZoomFlushIfNeeded()
@@ -1013,6 +1043,60 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         return CGRect(
             x: (bounds.width - fitted.width) / 2, y: (bounds.height - fitted.height) / 2,
             width: fitted.width, height: fitted.height)
+    }
+
+    /// Live visible portion of the drawn photo inside this container's bounds, accounting for
+    /// aspect-fit letterboxing/pillarboxing, zoom scale, pan offset, and rubber-band overscroll.
+    func currentVisiblePhotoRect() -> CGRect? {
+        guard bounds.width > 0, bounds.height > 0,
+            shownPixels.width > 0, shownPixels.height > 0,
+            imageView.bounds.width > 0, imageView.bounds.height > 0
+        else { return nil }
+        let fitted = DetailZoom.fittedSize(
+            imagePixels: shownPixels, viewSize: imageView.bounds.size)
+        guard fitted.width > 0, fitted.height > 0 else { return nil }
+        let fittedRect = CGRect(
+            x: (imageView.bounds.width - fitted.width) / 2,
+            y: (imageView.bounds.height - fitted.height) / 2,
+            width: fitted.width,
+            height: fitted.height)
+        let photoInContainer = imageView.convert(fittedRect, to: self)
+        let visible = photoInContainer.intersection(bounds)
+        guard !visible.isNull, visible.width > 0, visible.height > 0 else { return nil }
+        return visible
+    }
+
+    private func reportVisiblePhotoRectIfNeeded() {
+        if isLayingOut || isUpdatingFromSwiftUI {
+            guard !isVisiblePhotoRectReportScheduled else { return }
+            isVisiblePhotoRectReportScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.isVisiblePhotoRectReportScheduled = false
+                    self.reportVisiblePhotoRectIfNeeded()
+                }
+            }
+            return
+        }
+        let current = currentVisiblePhotoRect()
+        guard !Self.rectsApproximatelyEqual(current, lastReportedVisiblePhotoRect) else { return }
+        lastReportedVisiblePhotoRect = current
+        onVisiblePhotoRectChange?(current)
+    }
+
+    private static func rectsApproximatelyEqual(_ lhs: CGRect?, _ rhs: CGRect?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case (let first?, let second?):
+            return abs(first.minX - second.minX) < 0.2
+                && abs(first.minY - second.minY) < 0.2
+                && abs(first.width - second.width) < 0.2
+                && abs(first.height - second.height) < 0.2
+        default:
+            return false
+        }
     }
 
     /// The largest zoom: enough to reach native 100%, and at least the inspection scale.

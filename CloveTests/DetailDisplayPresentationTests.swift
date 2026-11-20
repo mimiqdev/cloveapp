@@ -3600,7 +3600,7 @@ struct DetailDisplayPresentationTests {
 
     @Test
     func
-        expandedDuoCompactLeadingHeaderReclaimsHeightPreservesExtensionsAndAdaptsAcrossModesAndSizes()
+        expandedDuoIconHeaderAndCornerOverlayPreserveExtensionsAndAdaptAcrossModesAndSizes()
         async throws
     {
         guard #available(iOS 27.1, *) else { return }
@@ -3610,13 +3610,14 @@ struct DetailDisplayPresentationTests {
             "2026-11-20_Kyoto_Autumn_Morning_Session_Ultra_Wide_Long_Filename_Example_DSC04821"
         let shortStem = "MMQ02680"
 
-        struct HostedCompactHeader: View {
+        struct HostedCornerDetail: View {
             let browsing: BrowsingModel
             let store: SettingsStore
             let theme: CloveTheme
             let dynamicTypeSize: DynamicTypeSize
             @Bindable var presentation: TestPresentationBox
             let headerFrames: DetailFrameBox
+            let headerCounts: DetailCountBox
 
             var body: some View {
                 NavigationStack {
@@ -3641,14 +3642,17 @@ struct DetailDisplayPresentationTests {
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                     headerFrames.frames = $0
                 }
+                .onPreferenceChange(HeaderControlCountsPreferenceKey.self) {
+                    headerCounts.counts = $0
+                }
             }
         }
 
         let fullLongWidth = ("\(longStem).ARW" as NSString).size(withAttributes: [
-            .font: UIFont.preferredFont(forTextStyle: .subheadline)
+            .font: UIFont.systemFont(ofSize: 12, weight: .semibold)
         ]).width
         let fullExtensionWidth = (".ARW" as NSString).size(withAttributes: [
-            .font: UIFont.preferredFont(forTextStyle: .subheadline)
+            .font: UIFont.systemFont(ofSize: 12, weight: .semibold)
         ]).width
 
         for theme in [CloveTheme.light, CloveTheme.dark] {
@@ -3688,18 +3692,19 @@ struct DetailDisplayPresentationTests {
 
             let presentationBox = TestPresentationBox(value: .photoPreview)
             let headerFrames = DetailFrameBox()
+            let headerCounts = DetailCountBox()
             let window = UIWindow(windowScene: scene)
             window.frame = CGRect(x: 0, y: 0, width: 920, height: 680)
             window.overrideUserInterfaceStyle = theme == .light ? .light : .dark
 
             func mountHost(dynamicTypeSize: DynamicTypeSize) -> UIHostingController<
-                HostedCompactHeader
+                HostedCornerDetail
             > {
                 let host = UIHostingController(
-                    rootView: HostedCompactHeader(
+                    rootView: HostedCornerDetail(
                         browsing: browsing, store: store, theme: theme,
                         dynamicTypeSize: dynamicTypeSize, presentation: presentationBox,
-                        headerFrames: headerFrames))
+                        headerFrames: headerFrames, headerCounts: headerCounts))
                 host.traitOverrides.horizontalSizeClass = .regular
                 host.additionalSafeAreaInsets = UIEdgeInsets(
                     top: 0, left: 0, bottom: 0, right: 89.5)
@@ -3715,13 +3720,14 @@ struct DetailDisplayPresentationTests {
             }
 
             // 1. Photo Preview on long filename in Timeline:
-            // - 48 pt compact header height, reclaimed 8 pt vs old 56 pt header
-            // - Single leading row: focusToggle -> fileName -> zoom, trailing clearance preserved
+            // - Icon-only 48 pt top header (focusToggle only during normal access)
+            // - Single two-line corner overlay inside the visible photo, inset 10 pt
             // - Long filename middle-truncates while preserving full .ARW extension width
             browsing.openPhoto(library.identity(longStem))
-            try await waitFor("Photo Preview compact header did not lay out") {
+            try await waitFor("Photo Preview corner overlay did not lay out") {
                 headerFrames.frames["clove.detail.photoHeader"] != nil
                     && headerFrames.frames["clove.detail.focusToggle"] != nil
+                    && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
                     && headerFrames.frames["clove.detail.fileName"] != nil
                     && headerFrames.frames["clove.detail.fileName.extension"] != nil
                     && headerFrames.frames["clove.detail.zoom"] != nil
@@ -3733,101 +3739,698 @@ struct DetailDisplayPresentationTests {
             let splitGrid = try #require(findCollectionView(in: window))
             let headerPP = try #require(headerFrames.frames["clove.detail.photoHeader"])
             let focusPP = try #require(headerFrames.frames["clove.detail.focusToggle"])
+            let overlayPP = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let filePP = try #require(headerFrames.frames["clove.detail.fileName"])
             let extPP = try #require(headerFrames.frames["clove.detail.fileName.extension"])
             let zoomPP = try #require(headerFrames.frames["clove.detail.zoom"])
             let stagePreviewRect = previewPhotoPreview.convert(
                 previewPhotoPreview.bounds, to: window)
             let splitGridRect = splitGrid.convert(splitGrid.bounds, to: window)
+            let photoRectPP = try #require(fittedPhotoRect(in: previewPhotoPreview, window: window))
 
             #expect(abs(headerPP.height - 48) <= 1.0)
             #expect(abs(stagePreviewRect.minY - headerPP.maxY) <= 1.0)
             #expect(headerPP.minX >= splitGridRect.maxX - 1)
             #expect(focusPP.width >= 44 && focusPP.height >= 44)
-            #expect(focusPP.maxX < filePP.minX)
-            #expect(filePP.maxX < zoomPP.minX)
-            #expect(abs(filePP.midY - focusPP.midY) <= 4)
-            #expect(abs(zoomPP.midY - focusPP.midY) <= 4)
-            #expect(zoomPP.maxX <= headerPP.maxX - 15)
+            #expect(headerFrames.frames["clove.detail.saveState"] == nil)
+            #expect(overlayPP.minY >= headerPP.maxY + 9)
+            #expect(abs(overlayPP.minX - (photoRectPP.minX + 10)) <= 1.5)
+            #expect(abs(overlayPP.minY - (photoRectPP.minY + 10)) <= 1.5)
+            #expect(filePP.maxY <= zoomPP.minY + 1)
+            #expect(overlayPP.maxX <= photoRectPP.maxX - 9)
             #expect(filePP.width < fullLongWidth)
             #expect(extPP.width >= fullExtensionWidth - 2)
             #expect(extPP.maxX <= filePP.maxX + 1)
-            #expect(headerFrames.frames["clove.detail.saveState"] == nil)
+            #expect(headerCounts.counts["clove.detail.fileName"] == 1)
+            #expect(headerCounts.counts["clove.detail.zoom"] == 1)
             if let fileAccessibility = findAccessibilityElement(
                 withIdentifier: "clove.detail.fileName", in: window)
             {
                 #expect(fileAccessibility.accessibilityLabel == "\(longStem).ARW")
             }
 
-            // 2. Narrower Photo Preview width + drive loss (SaveStatusIndicator visible):
-            // - Row stays unclipped and preserves trailing clearance & SaveStatusIndicator order
+            // 2. Narrower Photo Preview width + drive loss:
+            // - SaveStatusIndicator appears in icon-only header beside focusToggle
+            // - FolderSaveBanner appears below header while corner overlay shifts cleanly inside photo
             window.frame = CGRect(x: 0, y: 0, width: 760, height: 680)
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
             library.reportDriveLoss()
-            try await waitFor("SaveStatusIndicator did not appear in narrow compact header") {
-                headerFrames.frames["clove.detail.saveState"] != nil
+            try await waitFor("SaveStatusIndicator did not appear in icon-only header") {
+                guard let preview = self.findPreview(in: window),
+                    let photoRect = self.fittedPhotoRect(in: preview, window: window),
+                    let overlay = headerFrames.frames["clove.detail.photoCornerOverlay"]
+                else { return false }
+                return headerFrames.frames["clove.detail.saveState"] != nil
+                    && headerFrames.frames["clove.detail.saveStatus.failure"] != nil
+                    && abs(overlay.minX - (photoRect.minX + 10)) <= 1.5
+                    && abs(overlay.minY - (photoRect.minY + 10)) <= 1.5
             }
             let narrowHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
-            let narrowFile = try #require(headerFrames.frames["clove.detail.fileName"])
-            let narrowExt = try #require(headerFrames.frames["clove.detail.fileName.extension"])
-            let narrowZoom = try #require(headerFrames.frames["clove.detail.zoom"])
+            let narrowFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
             let narrowSave = try #require(headerFrames.frames["clove.detail.saveState"])
+            let narrowBanner = try #require(
+                headerFrames.frames["clove.detail.saveStatus.failure"])
+            let narrowOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
+            let narrowExt = try #require(headerFrames.frames["clove.detail.fileName.extension"])
+            let narrowPreview = try #require(findPreview(in: window))
+            let narrowPhotoRect = try #require(fittedPhotoRect(in: narrowPreview, window: window))
             #expect(abs(narrowHeader.height - 48) <= 1.0)
-            #expect(narrowFile.maxX < narrowZoom.minX)
-            #expect(narrowZoom.maxX <= narrowSave.minX + 1)
+            #expect(narrowFocus.maxX < narrowSave.minX)
+            #expect(narrowSave.minY >= narrowHeader.minY - 1)
+            #expect(narrowSave.maxY <= narrowHeader.maxY + 1)
             #expect(narrowSave.maxX <= narrowHeader.maxX - 15)
+            #expect(narrowBanner.minY >= narrowHeader.maxY - 1)
+            #expect(abs(narrowOverlay.minX - (narrowPhotoRect.minX + 10)) <= 1.5)
+            #expect(abs(narrowOverlay.minY - (narrowPhotoRect.minY + 10)) <= 1.5)
             #expect(narrowExt.width >= fullExtensionWidth - 2)
 
             // 3. Switch to Focus View + Group Focus on shorter filename:
-            // - Starts at leading edge of full photo stage (minX < Photo Preview header minX)
-            // - Retains 48 pt height, Group Focus metadata, and trailing space
+            // - Icon-only header starts at leading edge of full photo stage
+            // - Corner overlay keeps single Group Focus identity inside visible photo
             window.frame = CGRect(x: 0, y: 0, width: 920, height: 680)
             browsing.openGroup(group.id, on: library.identity(shortStem))
             presentationBox.value = .focus
-            try await waitFor("Focus View compact header did not settle") {
+            try await waitFor("Focus View header and corner overlay did not settle") {
                 guard let preview = self.findPreview(in: window),
-                    let header = headerFrames.frames["clove.detail.photoHeader"]
+                    let header = headerFrames.frames["clove.detail.photoHeader"],
+                    let overlay = headerFrames.frames["clove.detail.photoCornerOverlay"],
+                    let photoRect = self.fittedPhotoRect(in: preview, window: window)
                 else { return false }
                 return self.findCollectionView(in: window) == nil
                     && self.findFilmstripScrollView(in: window, excluding: preview) != nil
                     && header.minX < headerPP.minX - 40
+                    && abs(overlay.minX - (photoRect.minX + 10)) <= 1.5
+                    && abs(overlay.minY - (photoRect.minY + 10)) <= 1.5
             }
             let focusHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
             let focusToggleInFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
-            let focusFile = try #require(headerFrames.frames["clove.detail.fileName"])
-            let focusZoom = try #require(headerFrames.frames["clove.detail.zoom"])
             let focusSave = try #require(headerFrames.frames["clove.detail.saveState"])
+            let focusOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
+            let focusPreview = try #require(findPreview(in: window))
+            let focusPhotoRect = try #require(fittedPhotoRect(in: focusPreview, window: window))
             #expect(abs(focusHeader.height - 48) <= 1.0)
             #expect(focusHeader.minX < headerPP.minX - 40)
-            #expect(focusToggleInFocus.maxX < focusFile.minX)
-            #expect(focusFile.maxX < focusZoom.minX)
-            #expect(focusZoom.maxX <= focusSave.minX + 1)
+            #expect(focusToggleInFocus.maxX < focusSave.minX)
             #expect(focusSave.maxX < focusHeader.maxX - 120)
+            #expect(abs(focusOverlay.minX - (focusPhotoRect.minX + 10)) <= 1.5)
+            #expect(abs(focusOverlay.minY - (focusPhotoRect.minY + 10)) <= 1.5)
+            #expect(headerCounts.counts["clove.detail.fileName"] == 1)
+            #expect(headerCounts.counts["clove.detail.zoom"] == 1)
 
-            // 4. Accessibility Dynamic Type size: grows cleanly past 48 pt without clipping controls.
+            // 4. Accessibility Dynamic Type size: corner overlay scales cleanly without clipping,
+            // while icon-only header stays 48 pt with >= 44×44 focus toggle.
+            let standardOverlayHeight = focusOverlay.height
             _ = mountHost(dynamicTypeSize: .accessibility2)
             presentationBox.value = .photoPreview
-            try await waitFor("Accessibility Dynamic Type header did not adapt") {
-                guard let header = headerFrames.frames["clove.detail.photoHeader"] else {
+            try await waitFor("Accessibility Dynamic Type corner overlay did not scale") {
+                guard let overlay = headerFrames.frames["clove.detail.photoCornerOverlay"] else {
                     return false
                 }
-                return header.height > 52 && self.findCollectionView(in: window) != nil
+                return overlay.height > standardOverlayHeight + 6
+                    && self.findCollectionView(in: window) != nil
             }
             let a11yHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
             let a11yFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
+            let a11yOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let a11yFile = try #require(headerFrames.frames["clove.detail.fileName"])
             let a11yZoom = try #require(headerFrames.frames["clove.detail.zoom"])
+            let a11yPreview = try #require(findPreview(in: window))
+            let a11yPhotoRect = try #require(fittedPhotoRect(in: a11yPreview, window: window))
+            #expect(abs(a11yHeader.height - 48) <= 1.0)
             #expect(a11yFocus.width >= 44 && a11yFocus.height >= 44)
-            #expect(a11yFocus.maxX < a11yFile.minX)
-            #expect(a11yFocus.maxX < a11yZoom.minX)
+            #expect(a11yOverlay.maxX <= a11yPhotoRect.maxX - 9)
             #expect(a11yFile.maxY <= a11yZoom.minY + 1)
-            #expect(a11yZoom.maxY <= a11yHeader.maxY)
+            #expect(a11yZoom.maxY <= a11yOverlay.maxY)
         }
     }
 
-    private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
-        let start = CGPoint(x: 195, y: 300)
+    @Test
+    func expandedDuoCornerOverlayCountGroupGlyphNoCompanionsAndThemes() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            let store = SettingsStore.sample
+            store.markGestureGuideSeen()
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            try await waitFor("sample folder open") { !browsing.isFolderOpening }
+
+            // MMQ02680 has + JPG and MMQ02695 has + JPG · + HIF in TestLibrary.sample();
+            // the expanded Duo corner overlay must omit companion suffixes in both Timeline and
+            // Group Focus.
+            let companionPhoto = try #require(
+                browsing.photos.first { $0.id.stem == "mmq02695" })
+            let group = try #require(browsing.groups.first)
+            browsing.openPhoto(companionPhoto.id)
+
+            let timeline = DetailTimeline(
+                photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+            let timelineDescriptor = DetailMarkingView.cornerPositionDescriptor(
+                photo: companionPhoto, timeline: timeline, expandedGroup: nil, language: .english)
+            let timelineStrings = DetailPhotoCornerOverlay.metadataStrings(
+                positionText: timelineDescriptor.positionText,
+                isGroupFocus: timelineDescriptor.isGroupFocus,
+                zoomText: nil,
+                language: .english)
+            #expect(!timelineDescriptor.isGroupFocus)
+            let timelineVisible = try #require(timelineStrings.visible)
+            #expect(!timelineVisible.contains("+ JPG"))
+            #expect(!timelineVisible.contains("+ HIF"))
+            #expect(!timelineStrings.accessible.contains("Group"))
+
+            let presentationBox = TestPresentationBox(value: .photoPreview)
+            let framesBox = DetailFrameBox()
+            let countsBox = DetailCountBox()
+            let source = ObservedDetailImages()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1000, height: 700)
+            window.overrideUserInterfaceStyle = theme == .light ? .light : .dark
+
+            let host = UIHostingController(
+                rootView: TestDuoPoseDetailHost(
+                    browsing: browsing,
+                    images: source,
+                    presentation: presentationBox,
+                    isDuoExpanded: true,
+                    isDuoCover: false,
+                    usesVerticalToolbar: true,
+                    hasFoldRegion: true,
+                    showsGrid: true,
+                    theme: theme,
+                    settingsStore: store
+                )
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                }
+                .onPreferenceChange(HeaderControlCountsPreferenceKey.self) {
+                    countsBox.counts = $0
+                })
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("Timeline corner overlay settled") {
+                framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+                    && self.findPreview(in: window) != nil
+                    && source.deliveries.contains { $0.0 == companionPhoto.id }
+            }
+
+            #expect(countsBox.counts["clove.detail.fileName"] == 1)
+            #expect(countsBox.counts["clove.detail.zoom"] == 1)
+            let timelineZoomWidth = try #require(framesBox.frames["clove.detail.zoom"]).width
+
+            // Enter Group Focus in Focus View -> square.stack glyph renders, VoiceOver label uses
+            // "Group · ...", + JPG/+ HIF stays omitted, and 100% zoom appends magnification.
+            let groupMemberID = group.members[0]
+            let groupMember = try #require(browsing.photos.first { $0.id == groupMemberID })
+            browsing.openGroup(group.id, on: groupMemberID)
+            presentationBox.value = .focus
+            let expandedGroup = try #require(timeline.activeGroup(with: group.id))
+            let groupDescriptor = DetailMarkingView.cornerPositionDescriptor(
+                photo: groupMember, timeline: timeline, expandedGroup: expandedGroup,
+                language: .english)
+            let groupFitStrings = DetailPhotoCornerOverlay.metadataStrings(
+                positionText: groupDescriptor.positionText,
+                isGroupFocus: groupDescriptor.isGroupFocus,
+                zoomText: nil,
+                language: .english)
+            let groupZoomedStrings = DetailPhotoCornerOverlay.metadataStrings(
+                positionText: groupDescriptor.positionText,
+                isGroupFocus: groupDescriptor.isGroupFocus,
+                zoomText: "100%",
+                language: .english)
+            #expect(groupDescriptor.isGroupFocus)
+            #expect(groupFitStrings.visible == "1 / \(expandedGroup.visibleMembers.count)")
+            #expect(
+                groupFitStrings.accessible == "Group · 1 / \(expandedGroup.visibleMembers.count)")
+            #expect(
+                groupZoomedStrings.accessible
+                    == "Group · 1 / \(expandedGroup.visibleMembers.count) · 100%")
+
+            try await waitFor("Group Focus corner overlay settled") {
+                guard let preview = self.findPreview(in: window),
+                    self.findFilmstripScrollView(in: window, excluding: preview) != nil,
+                    let zoomFrame = framesBox.frames["clove.detail.zoom"]
+                else { return false }
+                return source.deliveries.contains { $0.0 == groupMemberID }
+                    && zoomFrame.width > 0
+            }
+
+            #expect(countsBox.counts["clove.detail.fileName"] == 1)
+            #expect(countsBox.counts["clove.detail.zoom"] == 1)
+            let groupZoomWidth = try #require(framesBox.frames["clove.detail.zoom"]).width
+
+            // Verify zoomed magnification appends cleanly in Group Focus, growing the zoom row width.
+            let preview = try #require(findPreview(in: window))
+            preview.onDoubleTap?(.center)
+            try await waitFor("Group Focus zoom magnification appeared in corner overlay") {
+                guard let zoomFrame = framesBox.frames["clove.detail.zoom"] else { return false }
+                return preview.isZoomed && zoomFrame.width > groupZoomWidth + 12
+            }
+
+            #expect(UIImage(systemName: "square.stack") != nil)
+            let timelineRender = ImageRenderer(
+                content: DetailPhotoCornerOverlay(
+                    fileName: "a",
+                    positionText: "100 / 999",
+                    isGroupFocus: false,
+                    zoomText: nil,
+                    language: .english
+                )
+                .environment(\.cloveTheme, theme))
+            timelineRender.scale = 2
+            let groupRender = ImageRenderer(
+                content: DetailPhotoCornerOverlay(
+                    fileName: "a",
+                    positionText: "100 / 999",
+                    isGroupFocus: true,
+                    zoomText: nil,
+                    language: .english
+                )
+                .environment(\.cloveTheme, theme))
+            groupRender.scale = 2
+            let timelineImage = try #require(timelineRender.cgImage)
+            let groupImage = try #require(groupRender.cgImage)
+            #expect(groupImage.width > timelineImage.width)
+            #expect(
+                UIImage(cgImage: groupImage).pngData() != UIImage(cgImage: timelineImage).pngData())
+            #expect(timelineZoomWidth > 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func expandedDuoCornerOverlayFollowsPortraitAndLandscapeGeometryZoomPanAndChromeToggle(
+        portrait: Bool
+    ) async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = AspectTestDetailImages(portrait: portrait)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder open") { !browsing.isFolderOpening }
+        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02680" }?.id)
+        browsing.openPhoto(target)
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let framesBox = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 920, height: 700)
+        let host = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: source,
+                presentation: presentationBox,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: true,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .light,
+                settingsStore: store
+            )
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                framesBox.frames = $0
+            })
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("Aspect photo and corner overlay settled") {
+            guard source.delivered,
+                let preview = self.findPreview(in: window),
+                let overlay = framesBox.frames["clove.detail.photoCornerOverlay"]
+            else { return false }
+            let fit = preview.imageRectAtFit()
+            let fitMatches = portrait ? fit.height > fit.width : fit.width > fit.height
+            let fitInWindow = preview.convert(fit, to: window)
+            return fitMatches
+                && abs(overlay.minX - (fitInWindow.minX + 10)) <= 1.5
+                && abs(overlay.minY - (fitInWindow.minY + 10)) <= 1.5
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let headerFrame = try #require(framesBox.frames["clove.detail.photoHeader"])
+        let previewFrameAtFit = preview.convert(preview.bounds, to: window)
+        let fitRect = preview.imageRectAtFit()
+        let fitInWindow = preview.convert(fitRect, to: window)
+        let overlayAtFit = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+
+        if portrait {
+            // Portrait photo has pillarbox margins: overlay starts 10 pt inside imageRectAtFit, not preview.minX.
+            #expect(fitRect.minX > 30)
+            #expect(overlayAtFit.minX > previewFrameAtFit.minX + 30)
+        } else {
+            // Wide landscape photo has letterbox margins: overlay starts 10 pt inside imageRectAtFit, not preview.minY.
+            #expect(fitRect.minY > 30)
+            #expect(overlayAtFit.minY > previewFrameAtFit.minY + 30)
+        }
+        #expect(abs(overlayAtFit.minX - (fitInWindow.minX + 10)) <= 1.5)
+        #expect(abs(overlayAtFit.minY - (fitInWindow.minY + 10)) <= 1.5)
+
+        let zoomWidthAtFit = try #require(framesBox.frames["clove.detail.zoom"]).width
+
+        // Zoom to 100%, pan, and simulate rubber-band overscroll: corner overlay follows live visible crop.
+        preview.onDoubleTap?(.center)
+        try await waitFor("zoom to 100% settled") {
+            guard let zoomFrame = framesBox.frames["clove.detail.zoom"] else { return false }
+            return preview.isZoomed && zoomFrame.width > zoomWidthAtFit + 12
+        }
+        try await Task.sleep(for: .milliseconds(250))
+
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        scroll.setContentOffset(CGPoint(x: -28, y: -36), animated: false)
+        try await waitFor("corner overlay tracked rubber-band visible crop") {
+            guard let visible = preview.currentVisiblePhotoRect(),
+                let overlay = framesBox.frames["clove.detail.photoCornerOverlay"]
+            else { return false }
+            let visibleInWindow = preview.convert(visible, to: window)
+            return visible.minY >= 20
+                && abs(overlay.minX - (visibleInWindow.minX + 10)) <= 1.5
+                && abs(overlay.minY - (visibleInWindow.minY + 10)) <= 1.5
+        }
+
+        // Return to fit and toggle chrome off -> overlay disappears without resizing header or shifting photo top.
+        preview.onDoubleTap?(.center)
+        try await waitFor("returned to fit") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+
+        // Switch to Focus View with chrome toggle to verify overlay hides and restores cleanly.
+        presentationBox.value = .focus
+        try await waitFor("Focus View settled") {
+            guard let currentPreview = self.findPreview(in: window) else { return false }
+            return self.findFilmstripScrollView(in: window, excluding: currentPreview) != nil
+                && framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+        }
+        let fitBeforeHide = preview.imageRectAtFit()
+        let previewMinYBeforeHide = preview.convert(preview.bounds, to: window).minY
+        let headerHeightBeforeHide = try #require(framesBox.frames["clove.detail.photoHeader"])
+            .height
+
+        preview.onChromeToggle?()
+        try await waitFor("corner overlay hid with chrome") {
+            framesBox.frames["clove.detail.photoCornerOverlay"] == nil
+                && framesBox.frames["clove.detail.fileName"] == nil
+                && framesBox.frames["clove.detail.zoom"] == nil
+        }
+        let headerAfterHide = try #require(framesBox.frames["clove.detail.photoHeader"])
+        #expect(abs(headerAfterHide.height - headerHeightBeforeHide) <= 0.5)
+        #expect(
+            abs(preview.convert(preview.bounds, to: window).minY - previewMinYBeforeHide) <= 0.5)
+        #expect(abs(headerFrame.height - 48) <= 1.0)
+
+        preview.onChromeToggle?()
+        try await waitFor("corner overlay restored with chrome") {
+            framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+                && framesBox.frames["clove.detail.fileName"] != nil
+                && framesBox.frames["clove.detail.zoom"] != nil
+        }
+        let fitAfterRestore = preview.imageRectAtFit()
+        #expect(abs(fitAfterRestore.minX - fitBeforeHide.minX) <= 1.0)
+        #expect(abs(fitAfterRestore.minY - fitBeforeHide.minY) <= 1.0)
+        #expect(abs(fitAfterRestore.width - fitBeforeHide.width) <= 1.0)
+        #expect(abs(fitAfterRestore.height - fitBeforeHide.height) <= 1.0)
+    }
+
+    @Test
+    func expandedDuoCornerOverlayStacksAboveIndicatorsAndPassesThroughGesturesAndFocusRegions()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = CornerRegionAndLimitationImages()
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        store.update { $0.autoAdvance.destination = .stay }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder open") { !browsing.isFolderOpening }
+        let first = browsing.photos[4]
+        let next = browsing.photos[5]
+        browsing.openPhoto(first.id)
+
+        let presentationBox = TestPresentationBox(value: .focus)
+        let framesBox = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 920, height: 700)
+        let host = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: source,
+                presentation: presentationBox,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: true,
+                hasFoldRegion: true,
+                showsGrid: false,
+                theme: .dark,
+                settingsStore: store
+            )
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                framesBox.frames = $0
+            })
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("corner overlay, focus region, indicators, and limitation settled") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+                && self.findFocusControl(in: preview) != nil
+                && framesBox.frames["clove.detail.focusIndicators"] != nil
+                && framesBox.frames["clove.detail.limitation"] != nil
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let cornerOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let indicatorsFrame = try #require(framesBox.frames["clove.detail.focusIndicators"])
+        let limitationFrame = try #require(framesBox.frames["clove.detail.limitation"])
+
+        // Passive indicators and limitation note stack cleanly below the corner overlay without overlap.
+        #expect(!cornerOverlay.intersects(indicatorsFrame))
+        #expect(indicatorsFrame.minY >= cornerOverlay.maxY + 4)
+        #expect(!indicatorsFrame.intersects(limitationFrame))
+        #expect(limitationFrame.minY >= indicatorsFrame.maxY + 4)
+
+        // Focus region placed under the upper-leading corner (x=0.08, y=0.08) still receives hits
+        // right through the passive corner overlay.
+        let cornerRegion = try #require(findFocusControl(in: preview))
+        let regionCenterInWindow = cornerRegion.convert(
+            CGPoint(x: cornerRegion.bounds.midX, y: cornerRegion.bounds.midY), to: window)
+        let hitView = window.hitTest(regionCenterInWindow, with: nil)
+        #expect(hitView === cornerRegion)
+
+        // Double-tap through the corner overlay area zooms to 100% and returns to fit.
+        let overlayCenterInPreview = window.convert(
+            CGPoint(x: cornerOverlay.midX, y: cornerOverlay.midY), to: preview)
+        preview.doubleTap(at: overlayCenterInPreview)
+        try await waitFor("double tap through corner overlay zoomed") { preview.isZoomed }
+        preview.doubleTap(at: overlayCenterInPreview)
+        try await waitFor("double tap through corner overlay returned to fit") { !preview.isZoomed }
+
+        // Tapping the corner focus region through the corner area enters 100% inspection on it.
+        cornerRegion.sendActions(for: .touchUpInside)
+        try await waitFor("corner focus region tap zoomed") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let regionSnapshot = try #require(preview.zoomSnapshot)
+        #expect(regionSnapshot.anchor.x < 0.25)
+        #expect(regionSnapshot.anchor.y < 0.25)
+        preview.doubleTap(at: overlayCenterInPreview)
+        try await waitFor("returned to fit after region tap") { !preview.isZoomed }
+
+        // Vertical marking swipe and horizontal navigation swipe starting inside the corner overlay
+        // work normally through the passive overlay.
+        try sendSwipe(
+            to: preview,
+            start: overlayCenterInPreview,
+            travel: CGPoint(x: 0, y: -130))
+        #expect(browsing.shownMarks(for: first.id).rating != .unrated)
+
+        let stepTravel = -max(180, preview.bounds.width * 0.3)
+        try sendSwipe(
+            to: preview,
+            start: overlayCenterInPreview,
+            travel: CGPoint(x: stepTravel, y: 0))
+        #expect(browsing.state.currentPhoto == next.id)
+        #expect(preview.chromeTapIsEnabled)
+    }
+
+    @Test
+    func nonExpandedDuoCoverHalfFoldIPhoneAndIPadKeepToolbarHeadersWithCompanions() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder open") { !browsing.isFolderOpening }
+        let photoWithJPEG = try #require(
+            browsing.photos.first { $0.id.stem == "mmq02680" }?.id)
+        browsing.openPhoto(photoWithJPEG)
+
+        struct StandardPoseCase {
+            let name: String
+            let size: CGSize
+            let horizontal: UIUserInterfaceSizeClass
+            let vertical: UIUserInterfaceSizeClass
+            let idiom: UIUserInterfaceIdiom
+            let usesSystemToolbar: Bool
+            let isDuoCover: Bool
+            let isDuoExpanded: Bool
+            let usesVerticalToolbar: Bool
+            let hasFoldRegion: Bool
+        }
+
+        let cases: [StandardPoseCase] = [
+            StandardPoseCase(
+                name: "Duo Cover",
+                size: CGSize(width: 466, height: 678),
+                horizontal: .compact, vertical: .regular, idiom: .phone,
+                usesSystemToolbar: true, isDuoCover: true, isDuoExpanded: false,
+                usesVerticalToolbar: true, hasFoldRegion: false),
+            StandardPoseCase(
+                name: "iPhone Portrait",
+                size: CGSize(width: 393, height: 852),
+                horizontal: .compact, vertical: .regular, idiom: .phone,
+                usesSystemToolbar: false, isDuoCover: false, isDuoExpanded: false,
+                usesVerticalToolbar: false, hasFoldRegion: false),
+            StandardPoseCase(
+                name: "iPhone Landscape",
+                size: CGSize(width: 852, height: 393),
+                horizontal: .compact, vertical: .compact, idiom: .phone,
+                usesSystemToolbar: false, isDuoCover: false, isDuoExpanded: false,
+                usesVerticalToolbar: false, hasFoldRegion: false),
+            StandardPoseCase(
+                name: "iPad Regular",
+                size: CGSize(width: 1024, height: 768),
+                horizontal: .regular, vertical: .regular, idiom: .pad,
+                usesSystemToolbar: false, isDuoCover: false, isDuoExpanded: false,
+                usesVerticalToolbar: false, hasFoldRegion: false),
+        ]
+
+        for pose in cases {
+            let presentationBox = TestPresentationBox(value: .focus)
+            let framesBox = DetailFrameBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: pose.size)
+
+            let rootView = Group {
+                if pose.usesSystemToolbar {
+                    NavigationStack {
+                        DetailScreen(
+                            browsing: browsing,
+                            images: SampleDetailImages(),
+                            duo: DuoDetailLayout(
+                                presentation: Binding(
+                                    get: { presentationBox.value },
+                                    set: { presentationBox.value = $0 }),
+                                filter: AnyView(EmptyView()),
+                                more: AnyView(EmptyView()),
+                                bottom: AnyView(EmptyView()),
+                                showsGrid: false))
+                    }
+                } else {
+                    DetailScreen(
+                        browsing: browsing,
+                        images: SampleDetailImages(),
+                        presentation: Binding(
+                            get: { presentationBox.value },
+                            set: { presentationBox.value = $0 }))
+                }
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, pose.idiom)
+            .environment(\.usesSystemBrowsingToolbar, pose.usesSystemToolbar)
+            .environment(\.isDuoCover, pose.isDuoCover)
+            .environment(\.isDuoExpanded, pose.isDuoExpanded)
+            .environment(\.usesVerticalBrowsingToolbar, pose.usesVerticalToolbar)
+            .environment(\.hasFoldRegion, pose.hasFoldRegion)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                framesBox.frames = $0
+            }
+
+            let host = UIHostingController(rootView: rootView)
+            host.traitOverrides.horizontalSizeClass = pose.horizontal
+            host.traitOverrides.verticalSizeClass = pose.vertical
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("\(pose.name) header did not settle") {
+                self.findPreview(in: window) != nil
+                    && framesBox.frames["clove.detail.fileName"] != nil
+                    && framesBox.frames["clove.detail.zoom"] != nil
+            }
+
+            #expect(
+                framesBox.frames["clove.detail.photoCornerOverlay"] == nil,
+                Comment(rawValue: "\(pose.name) must not render expanded Duo corner overlay"))
+            if let zoomLabel = findAccessibilityElement(
+                withIdentifier: "clove.detail.zoom", in: window)?.accessibilityLabel
+            {
+                #expect(
+                    zoomLabel.contains("+ JPG"),
+                    Comment(rawValue: "\(pose.name) must preserve + JPG in header subtitle"))
+            }
+        }
+
+        // Half Fold: neither expanded Duo header nor corner overlay renders.
+        let halfFoldPresentation = TestPresentationBox(value: .photoPreview)
+        let halfFoldFrames = DetailFrameBox()
+        let halfFoldWindow = UIWindow(windowScene: scene)
+        halfFoldWindow.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        let halfFoldHost = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: SampleDetailImages(),
+                presentation: halfFoldPresentation,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: false,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .light
+            )
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                halfFoldFrames.frames = $0
+            })
+        halfFoldHost.traitOverrides.horizontalSizeClass = .regular
+        halfFoldWindow.rootViewController = halfFoldHost
+        halfFoldWindow.makeKeyAndVisible()
+        defer {
+            halfFoldWindow.isHidden = true
+            halfFoldWindow.rootViewController = nil
+        }
+
+        try await waitFor("Half Fold settled") {
+            self.findPreview(in: halfFoldWindow) != nil
+                && self.findCollectionView(in: halfFoldWindow) != nil
+        }
+        #expect(halfFoldFrames.frames["clove.detail.photoHeader"] == nil)
+        #expect(halfFoldFrames.frames["clove.detail.photoCornerOverlay"] == nil)
+    }
+
+    private func sendSwipe(
+        to preview: DetailZoomContainerView,
+        start: CGPoint = CGPoint(x: 195, y: 300),
+        travel: CGPoint
+    ) throws {
         let pan = DetailTestPan()
         _ = preview.gestureRecognizer(
             pan, shouldReceive: DetailMutableTouch(view: preview, location: start))
@@ -3876,20 +4479,36 @@ struct DetailDisplayPresentationTests {
     private func findAccessibilityElement(
         withIdentifier identifier: String, in view: UIView
     ) -> NSObject? {
-        if view.accessibilityIdentifier == identifier { return view }
-        if let elements = view.accessibilityElements as? [NSObject] {
-            for element in elements {
-                if element.value(forKey: "accessibilityIdentifier") as? String == identifier {
-                    return element
+        allAccessibilityElements(withIdentifier: identifier, in: view).first
+    }
+
+    private func allAccessibilityElements(
+        withIdentifier identifier: String, in view: UIView
+    ) -> [NSObject] {
+        var matches: [NSObject] = []
+        func visitAccessibilityObject(_ object: NSObject) {
+            if (object.value(forKey: "accessibilityIdentifier") as? String) == identifier {
+                matches.append(object)
+            }
+            if let nested = object.value(forKey: "accessibilityElements") as? [NSObject] {
+                for element in nested where element !== object {
+                    visitAccessibilityObject(element)
                 }
             }
         }
-        for child in view.subviews {
-            if let found = findAccessibilityElement(withIdentifier: identifier, in: child) {
-                return found
+        if view.accessibilityIdentifier == identifier {
+            matches.append(view)
+        }
+        if let elements = view.accessibilityElements as? [NSObject] {
+            for element in elements {
+                visitAccessibilityObject(element)
             }
         }
-        return nil
+        for child in view.subviews {
+            matches.append(
+                contentsOf: allAccessibilityElements(withIdentifier: identifier, in: child))
+        }
+        return matches
     }
 
     private func findCollectionView(in view: UIView) -> UICollectionView? {
@@ -4292,6 +4911,12 @@ private struct TestDuoPoseDetailHost: View {
     let hasFoldRegion: Bool
     let showsGrid: Bool
     let theme: CloveTheme
+    var settingsStore: SettingsStore? = nil
+    @State private var fallbackStore: SettingsStore = {
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        return store
+    }()
 
     var body: some View {
         NavigationStack {
@@ -4304,7 +4929,7 @@ private struct TestDuoPoseDetailHost: View {
                     bottom: AnyView(EmptyView()),
                     showsGrid: showsGrid))
         }
-        .environment(SettingsStore.sample)
+        .environment(settingsStore ?? fallbackStore)
         .environment(\.cloveTheme, theme)
         .environment(\.isDuoExpanded, isDuoExpanded)
         .environment(\.isDuoCover, isDuoCover)
@@ -4397,8 +5022,130 @@ private final class GatedLateFocusDetailImages: DetailImageSource, DetailRegionS
 }
 
 @MainActor
+private final class AspectTestDetailImages: DetailImageSource {
+    private let sample = SampleDetailImages()
+    private let portrait: Bool
+    private(set) var delivered = false
+
+    init(portrait: Bool) {
+        self.portrait = portrait
+    }
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        nil
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async { await sample.prepare(window) }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        let outcome = await sample.image(for: photo, request: request)
+        guard case .image(let image) = outcome else { return outcome }
+        delivered = true
+        let pixels = portrait ? Self.portraitPixels : Self.wideLandscapePixels
+        guard let pixels else { return outcome }
+        return .image(
+            DetailImage(
+                image: pixels, source: image.source, quality: image.quality,
+                hasRAW: image.hasRAW,
+                fullResolutionSize: portrait
+                    ? CGSize(width: 2_000, height: 3_000)
+                    : CGSize(width: 3_600, height: 1_500)))
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async { await sample.leave(window: window) }
+
+    private static let portraitPixels: CGImage? = makeSolidPixels(width: 800, height: 1_200)
+    private static let wideLandscapePixels: CGImage? = makeSolidPixels(width: 1_200, height: 500)
+
+    private static func makeSolidPixels(width: Int, height: Int) -> CGImage? {
+        guard
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.setFillColor(gray: 0.48, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+}
+
+@MainActor
+private final class CornerRegionAndLimitationImages: DetailImageSource,
+    DetailRegionSharpnessSource
+{
+    private let sample = SampleDetailImages()
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        await sample.placeholder(for: photo, gridThumbnails: gridThumbnails)
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async { await sample.prepare(window) }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        let outcome = await sample.image(for: photo, request: request)
+        guard case .image(let image) = outcome else { return outcome }
+        return .image(
+            DetailImage(
+                image: image.image,
+                source: image.source,
+                quality: image.quality,
+                hasRAW: image.hasRAW,
+                limitation: .noHigherResolution,
+                fullResolutionSize: CGSize(width: 9_000, height: 6_000)))
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async { await sample.leave(window: window) }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        let cornerAF = RegionSharpnessEvidence(
+            kind: .cameraAutofocus,
+            groupIndex: nil,
+            region: NormalizedRegion(x: 0.04, y: 0.04, width: 0.08, height: 0.08),
+            score: nil,
+            unavailableBecause: nil)
+        onAutofocus(.regions([cornerAF]))
+        return RegionSharpnessAnalysis(
+            autofocus: .regions([cornerAF]),
+            faces: .unavailable(.noFacesDetected),
+            acquisitionFailure: nil,
+            timings: RegionSharpnessTimings())
+    }
+}
+
+@MainActor
 private final class DetailFrameBox {
     var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+private final class DetailCountBox {
+    var counts: [String: Int] = [:]
 }
 
 @MainActor

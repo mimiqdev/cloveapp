@@ -1512,7 +1512,13 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(focusToggle.frame.height, 43)
         XCTAssertGreaterThanOrEqual(focusToggle.frame.minX, grid.frame.maxX - 1)
         XCTAssertLessThanOrEqual(focusToggle.frame.maxY, preview.frame.minY + 1)
-        XCTAssertLessThan(focusToggle.frame.maxX, element(app, "clove.detail.fileName").frame.minX)
+        let cornerFileName = element(app, "clove.detail.fileName")
+        let cornerZoom = element(app, "clove.detail.zoom")
+        XCTAssertTrue(cornerFileName.exists)
+        XCTAssertTrue(cornerZoom.exists)
+        XCTAssertGreaterThanOrEqual(cornerFileName.frame.minY, preview.frame.minY + 9)
+        XCTAssertGreaterThanOrEqual(cornerFileName.frame.minX, preview.frame.minX + 9)
+        XCTAssertGreaterThanOrEqual(cornerZoom.frame.minY, cornerFileName.frame.maxY - 1)
         // #200: the marking capsule reserves its own row beneath the fitted photo, and
         // the side toolbar carries no duplicate marking items.
         let capsule = element(app, "clove.duo.capsule")
@@ -1559,7 +1565,9 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(focusToggles.count, 1)
         XCTAssertEqual(focusToggle.value as? String, "Off")
         XCTAssertLessThanOrEqual(focusToggle.frame.maxY, preview.frame.minY + 1)
-        XCTAssertLessThan(focusToggle.frame.maxX, element(app, "clove.detail.fileName").frame.minX)
+        XCTAssertGreaterThanOrEqual(
+            element(app, "clove.detail.fileName").frame.minY, preview.frame.minY + 9)
+        XCTAssertTrue(element(app, "clove.detail.zoom").exists)
         focusToggle.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), focusToggle))
         gridToggle.tap()
@@ -1573,6 +1581,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
         XCTAssertTrue(element(app, "clove.detail.fileName").exists)
+        XCTAssertGreaterThanOrEqual(
+            element(app, "clove.detail.fileName").frame.minY, preview.frame.minY + 9)
         XCTAssertEqual(focusToggles.count, 1)
         XCTAssertLessThanOrEqual(focusToggle.frame.maxY, preview.frame.minY + 1)
         // In Focus View, the capsule stays beneath the photo and beside the narrowed filmstrip.
