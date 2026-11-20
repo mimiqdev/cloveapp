@@ -356,3 +356,11 @@ Supersedes expanded Duo's right-dock placement for the **Focus regions** (`viewf
 - **Pose and device preservation:** iPhone/iPad top-bar placement, Duo half-fold's top-header placement (where no vertical side dock is active), and Duo cover's right-dock placement are unchanged, with no duplicates or loss across pose transitions.
 - **Unchanged toggle and overlay semantics:** reuses `clove.detail.focusToggle`, `viewfinder`, Clove `accent` (On) / `text/primary` (Off), `"Focus regions"` (`"On"` / `"Off"`), and session-scoped `BrowsingModel.showsFocusRegions` (default On, unpersisted) without changing overlay rendering, hit resolution, analysis scheduling, or `Off` resilience across navigation, presentation switches, or late analysis callbacks.
 
+## Expanded Duo compact leading photo header (#370)
+
+Supersedes the centered 56 pt two-line header inside `duoPhotoHeader` (#292) for expanded Duo **Photo Preview** and **Focus View**.
+
+- **Single leading row, 48 pt height:** `focusRegionsToggle` (`clove.detail.focusToggle`), filename (`clove.detail.fileName`) with inline `FolderPreparationIndicator` (`clove.detail.preparation`), and metadata (`detailSubtitle`, `clove.detail.zoom`) plus `SaveStatusIndicator` (`clove.detail.saveState`) sit in one leading row followed by `Spacer(minLength: 0)`, reclaiming 8 pt of vertical stage height (48 pt at standard text sizes) and leaving the trailing system status / Live Activities area clear.
+- **Extension-preserving middle truncation & accessibility:** long filenames middle-truncate the stem while keeping the file extension visible and retaining the full `photo.fileName` for VoiceOver and `PhotoInformationSheet`. At accessibility Dynamic Type sizes (`isAccessibilitySize`) the title and metadata stack into two leading lines without fixed height clipping (`minHeight: 48`), while keeping >= 44×44 pt non-overlapping hit targets.
+- **Other layouts unchanged:** Duo cover, Half Fold, ordinary iPhone, and iPad retain their existing headers (`detailToolbarTitle` / `BrowsingHeader`).
+

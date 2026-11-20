@@ -245,28 +245,38 @@ struct FolderPreparationPresentationTests {
         let frameBox = FrameStoreBox()
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
-        let host = UIHostingController(
-            rootView: NavigationStack {
-                DetailScreen(
-                    browsing: browsing,
-                    images: SampleDetailImages(),
-                    duo: DuoDetailLayout(
-                        presentation: .init(
-                            get: { presentationBox.value },
-                            set: { presentationBox.value = $0 }),
-                        filter: AnyView(EmptyView()),
-                        more: AnyView(EmptyView()),
-                        bottom: AnyView(EmptyView()),
-                        showsGrid: true))
+
+        struct HostedDuoDetail: View {
+            let browsing: BrowsingModel
+            @Bindable var presentation: PresentationBox
+            let frameBox: FrameStoreBox
+
+            var body: some View {
+                NavigationStack {
+                    DetailScreen(
+                        browsing: browsing,
+                        images: SampleDetailImages(),
+                        duo: DuoDetailLayout(
+                            presentation: $presentation.value,
+                            filter: AnyView(EmptyView()),
+                            more: AnyView(EmptyView()),
+                            bottom: AnyView(EmptyView()),
+                            showsGrid: true))
+                }
+                .environment(SettingsStore.sample)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, true)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    frameBox.frames = frames
+                }
             }
-            .environment(SettingsStore.sample)
-            .environment(\.isDuoExpanded, true)
-            .environment(\.usesSystemBrowsingToolbar, true)
-            .environment(\.usesVerticalBrowsingToolbar, true)
-            .environment(\.hasFoldRegion, true)
-            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                frameBox.frames = frames
-            })
+        }
+
+        let host = UIHostingController(
+            rootView: HostedDuoDetail(
+                browsing: browsing, presentation: presentationBox, frameBox: frameBox))
         host.traitOverrides.horizontalSizeClass = .regular
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -284,13 +294,43 @@ struct FolderPreparationPresentationTests {
         let prep = try #require(frameBox.frames["clove.detail.preparation"])
         let focus = try #require(frameBox.frames["clove.detail.focusToggle"])
         let fileName = try #require(frameBox.frames["clove.detail.fileName"])
+        let zoom = try #require(frameBox.frames["clove.detail.zoom"])
+        let header = try #require(frameBox.frames["clove.detail.photoHeader"])
 
+        #expect(abs(header.height - 48) <= 1.0)
         #expect(prep.width >= 43)
         #expect(prep.height >= 43)
         #expect(!prep.intersects(focus))
         #expect(focus.maxX < fileName.minX)
         #expect(focus.maxX < prep.minX)
         #expect(prep.midX >= fileName.maxX - 4)
+        #expect(fileName.maxX < zoom.minX)
+        #expect(abs(zoom.midY - fileName.midY) <= 4)
+        #expect(prep.minY >= header.minY - 1)
+        #expect(prep.maxY <= header.maxY + 1)
+
+        // Switching to Focus View preserves the single-row leading preparation ring without collision.
+        presentationBox.value = .focus
+        let photoPreviewHeaderMinX = header.minX
+        try await waitFor("Focus View preparation header did not lay out") {
+            guard let focusHeader = frameBox.frames["clove.detail.photoHeader"] else {
+                return false
+            }
+            return focusHeader.minX < photoPreviewHeaderMinX - 40
+        }
+        let prepInFocus = try #require(frameBox.frames["clove.detail.preparation"])
+        let focusInFocus = try #require(frameBox.frames["clove.detail.focusToggle"])
+        let fileInFocus = try #require(frameBox.frames["clove.detail.fileName"])
+        let zoomInFocus = try #require(frameBox.frames["clove.detail.zoom"])
+        let headerInFocus = try #require(frameBox.frames["clove.detail.photoHeader"])
+
+        #expect(abs(headerInFocus.height - 48) <= 1.0)
+        #expect(prepInFocus.width >= 43)
+        #expect(prepInFocus.height >= 43)
+        #expect(!prepInFocus.intersects(focusInFocus))
+        #expect(focusInFocus.maxX < fileInFocus.minX)
+        #expect(focusInFocus.maxX < prepInFocus.minX)
+        #expect(fileInFocus.maxX < zoomInFocus.minX)
     }
 
     @Test func preparationDetailsDismissOnModeRoutePostureAndInactiveSceneTransitions()

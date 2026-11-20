@@ -1993,6 +1993,7 @@ struct DetailDisplayPresentationTests {
         browsing.openPhoto(photo)
 
         let presentationBox = TestPresentationBox(value: .photoPreview)
+        let headerFrames = DetailFrameBox()
 
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
@@ -2006,7 +2007,11 @@ struct DetailDisplayPresentationTests {
                 usesVerticalToolbar: true,
                 hasFoldRegion: true,
                 showsGrid: true,
-                theme: .light))
+                theme: .light
+            )
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                headerFrames.frames = $0
+            })
         host.traitOverrides.horizontalSizeClass = .regular
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -2015,21 +2020,25 @@ struct DetailDisplayPresentationTests {
             window.rootViewController = nil
         }
 
-        // Photo Preview: expanded Duo reserves the photo-stage header (44pt control + vertical
-        // padding = ~56pt) above preview and beside the 30% grid, and presents focus overlays.
+        // Photo Preview: expanded Duo reserves the compact 48pt photo-stage header (44pt control +
+        // 2pt vertical padding each side) above preview and beside the 30% grid, reclaiming 8pt vs
+        // the prior 56pt header while presenting focus overlays.
         try await waitFor("Expanded Duo Photo Preview header did not settle") {
             let preview = self.findPreview(in: window)
             return preview != nil
                 && self.findCollectionView(in: window) != nil
                 && source.delivered.contains(.screenRAW)
                 && self.findFocusControl(in: preview!) != nil
+                && headerFrames.frames["clove.detail.photoHeader"] != nil
         }
         let splitGrid = try #require(findCollectionView(in: window))
         let previewInSplit = try #require(findPreview(in: window))
         let splitGridFrame = splitGrid.convert(splitGrid.bounds, to: window)
         let splitPreviewFrame = previewInSplit.convert(previewInSplit.bounds, to: window)
+        let splitHeaderFrame = try #require(headerFrames.frames["clove.detail.photoHeader"])
         #expect(splitPreviewFrame.minX >= splitGridFrame.maxX - 1)
-        #expect(splitPreviewFrame.minY >= 56)
+        #expect(abs(splitHeaderFrame.height - 48) <= 1.0)
+        #expect(abs(splitPreviewFrame.minY - splitHeaderFrame.maxY) <= 1.5)
 
         browsing.showsFocusRegions = false
         try await waitFor("Focus controls hid when toggled Off in Photo Preview") {
@@ -2042,7 +2051,7 @@ struct DetailDisplayPresentationTests {
             return self.findFocusControl(in: preview) != nil
         }
 
-        // Focus View: same photo-stage header sits above preview without restarting analysis.
+        // Focus View: same 48pt compact header sits above preview without restarting analysis.
         let analyzesBeforeFocus = source.analyzeCalls.count
         presentationBox.value = .focus
         try await waitFor("Expanded Duo Focus View header did not settle") {
@@ -2051,11 +2060,16 @@ struct DetailDisplayPresentationTests {
                 && self.findCollectionView(in: window) == nil
                 && self.findFilmstripScrollView(in: window, excluding: preview!) != nil
                 && self.findFocusControl(in: preview!) != nil
+                && (headerFrames.frames["clove.detail.photoHeader"]?.minX
+                    ?? .greatestFiniteMagnitude)
+                    < splitHeaderFrame.minX - 40
         }
         #expect(source.analyzeCalls.count == analyzesBeforeFocus)
         let previewInFocus = try #require(findPreview(in: window))
         let focusPreviewFrame = previewInFocus.convert(previewInFocus.bounds, to: window)
-        #expect(focusPreviewFrame.minY >= 56)
+        let focusHeaderFrame = try #require(headerFrames.frames["clove.detail.photoHeader"])
+        #expect(abs(focusHeaderFrame.height - 48) <= 1.0)
+        #expect(abs(focusPreviewFrame.minY - focusHeaderFrame.maxY) <= 1.5)
         #expect(focusPreviewFrame.minX < splitPreviewFrame.minX)
 
         // Pose transitions: Half-fold (no vertical toolbar) & Duo Cover remove the inline photo
@@ -2070,7 +2084,11 @@ struct DetailDisplayPresentationTests {
             usesVerticalToolbar: false,
             hasFoldRegion: true,
             showsGrid: true,
-            theme: .light)
+            theme: .light
+        )
+        .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+            headerFrames.frames = $0
+        }
         try await waitFor("Half-fold removed inline expanded photo header") {
             guard let preview = self.findPreview(in: window),
                 self.findCollectionView(in: window) != nil
@@ -2087,7 +2105,11 @@ struct DetailDisplayPresentationTests {
             usesVerticalToolbar: true,
             hasFoldRegion: false,
             showsGrid: false,
-            theme: .light)
+            theme: .light
+        )
+        .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+            headerFrames.frames = $0
+        }
         host.traitOverrides.horizontalSizeClass = .compact
         try await waitFor("Duo Cover settled cleanly") {
             guard let preview = self.findPreview(in: window) else { return false }
@@ -2105,12 +2127,17 @@ struct DetailDisplayPresentationTests {
             usesVerticalToolbar: true,
             hasFoldRegion: true,
             showsGrid: true,
-            theme: .light)
+            theme: .light
+        )
+        .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+            headerFrames.frames = $0
+        }
         try await waitFor("Expanded Duo Open pose restored inline photo header and overlays") {
             guard let preview = self.findPreview(in: window),
                 self.findCollectionView(in: window) != nil
             else { return false }
-            return preview.convert(preview.bounds, to: window).minY >= 56
+            return abs(preview.convert(preview.bounds, to: window).minY - splitPreviewFrame.minY)
+                <= 1.5
                 && self.findFocusControl(in: preview) != nil
         }
         #expect(browsing.showsFocusRegions)
@@ -3353,6 +3380,260 @@ struct DetailDisplayPresentationTests {
         }
     }
 
+    @Test func detailHeaderFileNamePartsSplitsExtensionWithoutBreakingEdgeCases() {
+        let standard = DetailHeaderFileNameParts("MMQ02680.ARW")
+        #expect(standard.stem == "MMQ02680")
+        #expect(standard.extensionSuffix == ".ARW")
+
+        let dottedStem = DetailHeaderFileNameParts("2026-11-20.Kyoto.Autumn.Session_042.CR3")
+        #expect(dottedStem.stem == "2026-11-20.Kyoto.Autumn.Session_042")
+        #expect(dottedStem.extensionSuffix == ".CR3")
+
+        let heif = DetailHeaderFileNameParts("DSC00123.HIF")
+        #expect(heif.stem == "DSC00123")
+        #expect(heif.extensionSuffix == ".HIF")
+
+        let noExtension = DetailHeaderFileNameParts("UntitledShot")
+        #expect(noExtension.stem == "UntitledShot")
+        #expect(noExtension.extensionSuffix == "")
+
+        let hiddenFile = DetailHeaderFileNameParts(".hidden")
+        #expect(hiddenFile.stem == ".hidden")
+        #expect(hiddenFile.extensionSuffix == "")
+
+        let trailingDot = DetailHeaderFileNameParts("photo.")
+        #expect(trailingDot.stem == "photo.")
+        #expect(trailingDot.extensionSuffix == "")
+    }
+
+    @Test
+    func
+        expandedDuoCompactLeadingHeaderReclaimsHeightPreservesExtensionsAndAdaptsAcrossModesAndSizes()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+
+        let longStem =
+            "2026-11-20_Kyoto_Autumn_Morning_Session_Ultra_Wide_Long_Filename_Example_DSC04821"
+        let shortStem = "MMQ02680"
+
+        struct HostedCompactHeader: View {
+            let browsing: BrowsingModel
+            let store: SettingsStore
+            let theme: CloveTheme
+            let dynamicTypeSize: DynamicTypeSize
+            @Bindable var presentation: TestPresentationBox
+            let headerFrames: DetailFrameBox
+
+            var body: some View {
+                NavigationStack {
+                    DetailScreen(
+                        browsing: browsing,
+                        images: SampleDetailImages(),
+                        duo: DuoDetailLayout(
+                            presentation: $presentation.value,
+                            filter: AnyView(EmptyView()),
+                            more: AnyView(EmptyView()),
+                            bottom: AnyView(EmptyView()),
+                            showsGrid: true))
+                }
+                .environment(store)
+                .environment(\.cloveTheme, theme)
+                .environment(\.dynamicTypeSize, dynamicTypeSize)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, true)
+                .environment(\.scenePhase, .active)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    headerFrames.frames = $0
+                }
+            }
+        }
+
+        let fullLongWidth = ("\(longStem).ARW" as NSString).size(withAttributes: [
+            .font: UIFont.preferredFont(forTextStyle: .subheadline)
+        ]).width
+        let fullExtensionWidth = (".ARW" as NSString).size(withAttributes: [
+            .font: UIFont.preferredFont(forTextStyle: .subheadline)
+        ]).width
+
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            let library = ControlledPhotoLibrary(
+                rejected: [],
+                stems: [longStem, shortStem, "group_b"])
+            library.photos = [
+                GridPhoto(
+                    id: library.identity(longStem),
+                    fileName: "\(longStem).ARW",
+                    time: .unavailable,
+                    marks: PhotoMarks()),
+                GridPhoto(
+                    id: library.identity(shortStem),
+                    fileName: "\(shortStem).CR3",
+                    time: .unavailable,
+                    marks: PhotoMarks()),
+                GridPhoto(
+                    id: library.identity("group_b"),
+                    fileName: "group_b.HIF",
+                    time: .unavailable,
+                    marks: PhotoMarks()),
+            ]
+            let group = BrowsingGroup(
+                id: GroupID(rawValue: "burst-1"),
+                members: [library.identity(shortStem), library.identity("group_b")])
+            library.groups = [group]
+
+            let store = SettingsStore.sample
+            store.markGestureGuideSeen()
+            let browsing = BrowsingModel(library: library)
+            browsing.openFolder()
+            library.reportScanFinished()
+            try await waitFor("controlled folder did not finish opening") {
+                !browsing.isFolderOpening && browsing.photos.count == 3
+            }
+
+            let presentationBox = TestPresentationBox(value: .photoPreview)
+            let headerFrames = DetailFrameBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 920, height: 680)
+            window.overrideUserInterfaceStyle = theme == .light ? .light : .dark
+
+            func mountHost(dynamicTypeSize: DynamicTypeSize) -> UIHostingController<
+                HostedCompactHeader
+            > {
+                let host = UIHostingController(
+                    rootView: HostedCompactHeader(
+                        browsing: browsing, store: store, theme: theme,
+                        dynamicTypeSize: dynamicTypeSize, presentation: presentationBox,
+                        headerFrames: headerFrames))
+                host.traitOverrides.horizontalSizeClass = .regular
+                host.additionalSafeAreaInsets = UIEdgeInsets(
+                    top: 0, left: 0, bottom: 0, right: 89.5)
+                window.rootViewController = host
+                window.makeKeyAndVisible()
+                return host
+            }
+
+            let host = mountHost(dynamicTypeSize: .large)
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            // 1. Photo Preview on long filename in Timeline:
+            // - 48 pt compact header height, reclaimed 8 pt vs old 56 pt header
+            // - Single leading row: focusToggle -> fileName -> zoom, trailing clearance preserved
+            // - Long filename middle-truncates while preserving full .ARW extension width
+            browsing.openPhoto(library.identity(longStem))
+            try await waitFor("Photo Preview compact header did not lay out") {
+                headerFrames.frames["clove.detail.photoHeader"] != nil
+                    && headerFrames.frames["clove.detail.focusToggle"] != nil
+                    && headerFrames.frames["clove.detail.fileName"] != nil
+                    && headerFrames.frames["clove.detail.fileName.extension"] != nil
+                    && headerFrames.frames["clove.detail.zoom"] != nil
+                    && self.findPreview(in: window) != nil
+                    && self.findCollectionView(in: window) != nil
+            }
+
+            let previewPhotoPreview = try #require(findPreview(in: window))
+            let splitGrid = try #require(findCollectionView(in: window))
+            let headerPP = try #require(headerFrames.frames["clove.detail.photoHeader"])
+            let focusPP = try #require(headerFrames.frames["clove.detail.focusToggle"])
+            let filePP = try #require(headerFrames.frames["clove.detail.fileName"])
+            let extPP = try #require(headerFrames.frames["clove.detail.fileName.extension"])
+            let zoomPP = try #require(headerFrames.frames["clove.detail.zoom"])
+            let stagePreviewRect = previewPhotoPreview.convert(
+                previewPhotoPreview.bounds, to: window)
+            let splitGridRect = splitGrid.convert(splitGrid.bounds, to: window)
+
+            #expect(abs(headerPP.height - 48) <= 1.0)
+            #expect(abs(stagePreviewRect.minY - headerPP.maxY) <= 1.0)
+            #expect(headerPP.minX >= splitGridRect.maxX - 1)
+            #expect(focusPP.width >= 44 && focusPP.height >= 44)
+            #expect(focusPP.maxX < filePP.minX)
+            #expect(filePP.maxX < zoomPP.minX)
+            #expect(abs(filePP.midY - focusPP.midY) <= 4)
+            #expect(abs(zoomPP.midY - focusPP.midY) <= 4)
+            #expect(zoomPP.maxX <= headerPP.maxX - 15)
+            #expect(filePP.width < fullLongWidth)
+            #expect(extPP.width >= fullExtensionWidth - 2)
+            #expect(extPP.maxX <= filePP.maxX + 1)
+            #expect(headerFrames.frames["clove.detail.saveState"] == nil)
+            if let fileAccessibility = findAccessibilityElement(
+                withIdentifier: "clove.detail.fileName", in: window)
+            {
+                #expect(fileAccessibility.accessibilityLabel == "\(longStem).ARW")
+            }
+
+            // 2. Narrower Photo Preview width + drive loss (SaveStatusIndicator visible):
+            // - Row stays unclipped and preserves trailing clearance & SaveStatusIndicator order
+            window.frame = CGRect(x: 0, y: 0, width: 760, height: 680)
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            library.reportDriveLoss()
+            try await waitFor("SaveStatusIndicator did not appear in narrow compact header") {
+                headerFrames.frames["clove.detail.saveState"] != nil
+            }
+            let narrowHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
+            let narrowFile = try #require(headerFrames.frames["clove.detail.fileName"])
+            let narrowExt = try #require(headerFrames.frames["clove.detail.fileName.extension"])
+            let narrowZoom = try #require(headerFrames.frames["clove.detail.zoom"])
+            let narrowSave = try #require(headerFrames.frames["clove.detail.saveState"])
+            #expect(abs(narrowHeader.height - 48) <= 1.0)
+            #expect(narrowFile.maxX < narrowZoom.minX)
+            #expect(narrowZoom.maxX <= narrowSave.minX + 1)
+            #expect(narrowSave.maxX <= narrowHeader.maxX - 15)
+            #expect(narrowExt.width >= fullExtensionWidth - 2)
+
+            // 3. Switch to Focus View + Group Focus on shorter filename:
+            // - Starts at leading edge of full photo stage (minX < Photo Preview header minX)
+            // - Retains 48 pt height, Group Focus metadata, and trailing space
+            window.frame = CGRect(x: 0, y: 0, width: 920, height: 680)
+            browsing.openGroup(group.id, on: library.identity(shortStem))
+            presentationBox.value = .focus
+            try await waitFor("Focus View compact header did not settle") {
+                guard let preview = self.findPreview(in: window),
+                    let header = headerFrames.frames["clove.detail.photoHeader"]
+                else { return false }
+                return self.findCollectionView(in: window) == nil
+                    && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+                    && header.minX < headerPP.minX - 40
+            }
+            let focusHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
+            let focusToggleInFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
+            let focusFile = try #require(headerFrames.frames["clove.detail.fileName"])
+            let focusZoom = try #require(headerFrames.frames["clove.detail.zoom"])
+            let focusSave = try #require(headerFrames.frames["clove.detail.saveState"])
+            #expect(abs(focusHeader.height - 48) <= 1.0)
+            #expect(focusHeader.minX < headerPP.minX - 40)
+            #expect(focusToggleInFocus.maxX < focusFile.minX)
+            #expect(focusFile.maxX < focusZoom.minX)
+            #expect(focusZoom.maxX <= focusSave.minX + 1)
+            #expect(focusSave.maxX < focusHeader.maxX - 120)
+
+            // 4. Accessibility Dynamic Type size: grows cleanly past 48 pt without clipping controls.
+            _ = mountHost(dynamicTypeSize: .accessibility2)
+            presentationBox.value = .photoPreview
+            try await waitFor("Accessibility Dynamic Type header did not adapt") {
+                guard let header = headerFrames.frames["clove.detail.photoHeader"] else {
+                    return false
+                }
+                return header.height > 52 && self.findCollectionView(in: window) != nil
+            }
+            let a11yHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
+            let a11yFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
+            let a11yFile = try #require(headerFrames.frames["clove.detail.fileName"])
+            let a11yZoom = try #require(headerFrames.frames["clove.detail.zoom"])
+            #expect(a11yFocus.width >= 44 && a11yFocus.height >= 44)
+            #expect(a11yFocus.maxX < a11yFile.minX)
+            #expect(a11yFocus.maxX < a11yZoom.minX)
+            #expect(a11yFile.maxY <= a11yZoom.minY + 1)
+            #expect(a11yZoom.maxY <= a11yHeader.maxY)
+        }
+    }
+
     private func sendSwipe(to preview: DetailZoomContainerView, travel: CGPoint) throws {
         let start = CGPoint(x: 195, y: 300)
         let pan = DetailTestPan()
@@ -3396,6 +3677,25 @@ struct DetailDisplayPresentationTests {
         if let control = view as? DetailFocusRegionControl { return control }
         for child in view.subviews {
             if let control = findFocusControl(in: child) { return control }
+        }
+        return nil
+    }
+
+    private func findAccessibilityElement(
+        withIdentifier identifier: String, in view: UIView
+    ) -> NSObject? {
+        if view.accessibilityIdentifier == identifier { return view }
+        if let elements = view.accessibilityElements as? [NSObject] {
+            for element in elements {
+                if element.value(forKey: "accessibilityIdentifier") as? String == identifier {
+                    return element
+                }
+            }
+        }
+        for child in view.subviews {
+            if let found = findAccessibilityElement(withIdentifier: identifier, in: child) {
+                return found
+            }
         }
         return nil
     }

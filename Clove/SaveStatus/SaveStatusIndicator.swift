@@ -21,6 +21,7 @@ struct SaveStatusIndicator: View {
                     language: language)
             )
             .accessibilityIdentifier(identifierPrefix)
+            .reportHeaderControlFrame(identifierPrefix)
         }
     }
 }
