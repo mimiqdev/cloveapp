@@ -453,6 +453,25 @@ public actor RegionSharpnessScheduler {
         pump()
     }
 
+    /// Discards cached memory and disk results (and cancels any matching queued/running jobs)
+    /// for the supplied requests without emitting a source-change invalidation event.
+    public func discardResults(for requests: [RegionSharpnessRequest]) async {
+        guard !requests.isEmpty else { return }
+        let keys = Array(Set(requests.map { resultKey(for: $0) }))
+        let files = Set(requests.flatMap(\.fileURLs))
+        invalidationEpoch &+= 1
+        for file in files { latestInvalidationEpoch[file] = invalidationEpoch }
+        results.removeMemory(for: keys)
+        for key in keys { drop(key: key) }
+        let resultsStore = results
+        if resultsStore.hasDiskCache {
+            await withTaskExecutorPreference(ImageWorkExecutor.current) {
+                resultsStore.removeDisk(for: keys)
+            }
+        }
+        pump()
+    }
+
     /// Stops accepting work, cancels everything queued and running, and waits for running
     /// stage entries to drain.
     public func close() async {

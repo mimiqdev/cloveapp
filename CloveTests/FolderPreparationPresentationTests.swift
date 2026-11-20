@@ -140,6 +140,78 @@ struct FolderPreparationPresentationTests {
         #expect(
             FolderPreparationAccessibility.indicatorAccessibilityValue(for: withIssues).contains(
                 "34 of 36 ready"))
+        #expect(FolderPreparationAccessibility.canRetryIssues(for: withIssues))
+        #expect(
+            FolderPreparationAccessibility.retryButtonAccessibilityHint(for: withIssues)
+                == "Retries failed or deferred analysis and preview tasks.")
+
+        var pausedWithIssues = withIssues
+        pausedWithIssues.waitingReason = .memoryPressure
+        #expect(pausedWithIssues.hasRetryableIssues)
+        #expect(!FolderPreparationAccessibility.canRetryIssues(for: pausedWithIssues))
+        #expect(
+            FolderPreparationAccessibility.retryButtonAccessibilityHint(for: pausedWithIssues)
+                == "Unavailable while folder preparation is paused.")
+
+        var disconnectedWithIssues = withIssues
+        disconnectedWithIssues.waitingReason = .folderUnavailable(.externalVolumeDisconnected)
+        #expect(!FolderPreparationAccessibility.canRetryIssues(for: disconnectedWithIssues))
+
+        let unsupportedOnly = FolderPreparationStatus(
+            folder: folder,
+            folderName: "Coastal light",
+            generation: 1,
+            isEnumerating: false,
+            isPartialScan: false,
+            waitingReason: nil,
+            totalPhotos: 36,
+            analysis: FolderPreparationTaskCounts(completed: 36),
+            previews: FolderPreparationTaskCounts(completed: 35, unsupported: 1),
+            readyForBothCount: 35,
+            bothSettledCount: 36,
+            issues: [])
+        #expect(!unsupportedOnly.hasRetryableIssues)
+        #expect(!FolderPreparationAccessibility.canRetryIssues(for: unsupportedOnly))
+    }
+
+    @Test func browsingModelRetryPreparationIssuesResolvesSampleIssuesAndBlocksWhenDisconnected()
+        async throws
+    {
+        let library = try #require(
+            TestLibrary.forLaunch(
+                environment: [
+                    TestLibrary.launchVariable: "1",
+                    TestLibrary.preparationVariable: "issues",
+                ]) as? TestLibrary)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        #expect(browsing.preparationStatus.phase == .completeWithIssues)
+        #expect(browsing.preparationStatus.canRetryIssues)
+        #expect(library.preparationRetryCount == 0)
+
+        await browsing.retryPreparationIssues()
+        try await waitFor("preparation issues resolved after retry") {
+            browsing.preparationStatus.phase == .complete
+                && browsing.preparationStatus.issues.isEmpty
+        }
+        #expect(library.preparationRetryCount == 1)
+        #expect(!browsing.preparationStatus.canRetryIssues)
+
+        // Disconnected library blocks retry even if issues exist.
+        let disconnectedLibrary = try #require(
+            TestLibrary.forLaunch(
+                environment: [
+                    TestLibrary.launchVariable: "1",
+                    TestLibrary.preparationVariable: "issues",
+                ]) as? TestLibrary)
+        let disconnectedModel = BrowsingModel(library: disconnectedLibrary)
+        disconnectedModel.openFolder()
+        disconnectedLibrary.reportLocationLoss(.externalVolumeDisconnected)
+        try await waitFor("location loss applied to browsing model") {
+            disconnectedModel.folderLocationLoss != nil
+        }
+        await disconnectedModel.retryPreparationIssues()
+        #expect(disconnectedLibrary.preparationRetryCount == 0)
     }
 
     @Test func completionDismissalSharedOnBrowsingModelAndResetsWhenNoLongerComplete() {

@@ -143,6 +143,13 @@ enum FolderPreparationOutcome: Hashable, Sendable {
         return false
     }
 
+    var isRetryable: Bool {
+        switch self {
+        case .failed, .deferred: true
+        case .pending, .completed, .unsupported: false
+        }
+    }
+
     var issueDescription: String? {
         switch self {
         case .pending, .completed: nil
@@ -157,6 +164,7 @@ struct FolderPreparationTaskCounts: Hashable, Sendable {
     var unsupported: Int = 0
     var deferred: Int = 0
 
+    var retryableIssueCount: Int { failed + deferred }
     var issueCount: Int { failed + unsupported + deferred }
     var settledCount: Int { completed + issueCount }
 }
@@ -210,6 +218,18 @@ struct FolderPreparationStatus: Hashable, Sendable {
         analysis.issueCount + previews.issueCount
     }
 
+    var retryableIssueCount: Int {
+        analysis.retryableIssueCount + previews.retryableIssueCount
+    }
+
+    var hasRetryableIssues: Bool {
+        retryableIssueCount > 0
+    }
+
+    var canRetryIssues: Bool {
+        hasRetryableIssues && waitingReason == nil
+    }
+
     var phase: FolderPreparationPhase {
         if totalPhotos == 0 {
             if let waitingReason {
@@ -256,6 +276,12 @@ struct FolderPreparationAccountant: Sendable {
         let set: ScannedPhotoSet
         let thumbnailRequest: ThumbnailRequest?
         let regionRequest: RegionSharpnessRequest?
+    }
+
+    struct RetryTargets: Sendable {
+        let previewURLs: [URL]
+        let analysisRequests: [RegionSharpnessRequest]
+        let hasWork: Bool
     }
 
     private struct TrackedPhoto: Sendable {
@@ -352,6 +378,72 @@ struct FolderPreparationAccountant: Sendable {
             guard let tracked = photos[id] else { return false }
             return !tracked.isBothSettled
         }
+    }
+
+    var hasRetryableIssues: Bool {
+        analysisCounts.retryableIssueCount > 0 || previewCounts.retryableIssueCount > 0
+    }
+
+    func retryableTargets() -> RetryTargets {
+        var previewURLs: [URL] = []
+        var analysisRequests: [RegionSharpnessRequest] = []
+        var hasWork = false
+        for id in orderedIDs {
+            guard let tracked = photos[id] else { continue }
+            if tracked.preview.isRetryable {
+                hasWork = true
+                previewURLs.append(tracked.primaryURL)
+            }
+            if tracked.analysis.isRetryable {
+                hasWork = true
+                if let request = tracked.regionRequest {
+                    analysisRequests.append(request)
+                }
+            }
+        }
+        return RetryTargets(
+            previewURLs: previewURLs,
+            analysisRequests: analysisRequests,
+            hasWork: hasWork)
+    }
+
+    /// Resets only failed or deferred task outcomes back to `.pending`, preserving completed and
+    /// unsupported outcomes intact and resetting retry counters for the retried task(s).
+    @discardableResult
+    mutating func retryIssues() -> [PhotoIdentity] {
+        guard hasRetryableIssues else { return [] }
+        var retried: [PhotoIdentity] = []
+        for id in orderedIDs {
+            guard var tracked = photos[id] else { continue }
+            let retryPreview = tracked.preview.isRetryable
+            let retryAnalysis = tracked.analysis.isRetryable
+            guard retryPreview || retryAnalysis else { continue }
+
+            let wasReady = tracked.isReadyForBoth
+            let wasSettled = tracked.isBothSettled
+
+            if retryPreview {
+                if let oldKey = tracked.thumbnailRequest, thumbnailKeyIndex[oldKey] == id {
+                    thumbnailKeyIndex.removeValue(forKey: oldKey)
+                }
+                tracked.thumbnailRequest = nil
+                adjustTaskCount(&previewCounts, outcome: tracked.preview, delta: -1)
+                tracked.preview = .pending
+                tracked.previewRetryCount = 0
+            }
+            if retryAnalysis {
+                tracked.regionRequest = nil
+                adjustTaskCount(&analysisCounts, outcome: tracked.analysis, delta: -1)
+                tracked.analysis = .pending
+                tracked.analysisRetryCount = 0
+            }
+
+            if wasReady && !tracked.isReadyForBoth { readyForBothCount -= 1 }
+            if wasSettled && !tracked.isBothSettled { bothSettledCount -= 1 }
+            photos[id] = tracked
+            retried.append(id)
+        }
+        return retried
     }
 
     mutating func registerDiscovered(_ sets: [ScannedPhotoSet]) {

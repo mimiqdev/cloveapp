@@ -260,6 +260,9 @@ final class TestLibrary: FolderLibrary {
     /// The open folder's simulated preparation progress across analysis and grid previews.
     private(set) var preparationStatus: FolderPreparationStatus = .idle
 
+    /// How many times ``retryPreparationIssues()`` ran on this sample library.
+    private(set) var preparationRetryCount = 0
+
     /// The open this sample library installed last, which ``closeFolder()`` changes (PRD P0-02).
     private(set) var openGeneration = 0
 
@@ -796,6 +799,28 @@ final class TestLibrary: FolderLibrary {
         guard next != groups else { return }
         groups = next
         updateContinuation.yield(.groups(next))
+    }
+
+    func retryPreparationIssues() async {
+        guard preparationStatus.canRetryIssues else { return }
+        preparationRetryCount += 1
+        let analysisResolved = preparationStatus.analysis.retryableIssueCount
+        let previewsResolved = preparationStatus.previews.retryableIssueCount
+        var next = preparationStatus
+        next.analysis.completed += analysisResolved
+        next.analysis.failed = 0
+        next.analysis.deferred = 0
+        next.previews.completed += previewsResolved
+        next.previews.failed = 0
+        next.previews.deferred = 0
+        let remainingIssues = next.analysis.unsupported + next.previews.unsupported
+        if remainingIssues == 0 {
+            next.readyForBothCount = next.totalPhotos
+            next.bothSettledCount = next.totalPhotos
+            next.issues = []
+        }
+        preparationStatus = next
+        updateContinuation.yield(.preparation(next))
     }
 
     /// Reports the sample folder's location gone, as C11's watch does (PRD P0-02).

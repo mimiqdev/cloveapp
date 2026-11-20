@@ -154,6 +154,73 @@ struct FolderPreparationIntegrationTests {
         await workspace.library.closeFolder()
     }
 
+    @Test func retryingCannotOpenPhotoRecoversWithoutRescanningAndRespectsPauseState() async throws
+    {
+        let workspace = try PreparationTestWorkspace()
+        defer { workspace.remove() }
+
+        let goodURL = workspace.folderA.appendingPathComponent("GOOD_0001.jpg")
+        let recoverURL = workspace.folderA.appendingPathComponent("RECOVER_0002.jpg")
+        try PreparationTestWorkspace.writeJPEG(
+            to: goodURL, gray: 0.4, subjectArea: [64, 64, 24, 24])
+        try PreparationTestWorkspace.writeJPEG(
+            to: recoverURL, gray: 0.7, subjectArea: [64, 64, 24, 24])
+        // Remove read permissions temporarily so opening fails with cannotOpen while scan/stat succeeds.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: recoverURL.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: recoverURL.path)
+        }
+
+        let model = BrowsingModel(library: workspace.library)
+        await model.openPickedFolder(workspace.folderA)
+
+        try await waitUntil {
+            !model.isFolderOpening
+                && model.preparationStatus.phase == .completeWithIssues
+        }
+
+        let initialGeneration = model.openGeneration
+        let failedStatus = model.preparationStatus
+        #expect(failedStatus.totalPhotos == 2)
+        #expect(failedStatus.readyForBothCount == 1)
+        #expect(failedStatus.previews.completed == 1)
+        #expect(failedStatus.previews.failed == 1)
+        #expect(failedStatus.analysis.completed == 1)
+        #expect(failedStatus.analysis.failed == 1)
+        #expect(failedStatus.canRetryIssues)
+        #expect(failedStatus.issues.contains { $0.fileName == "RECOVER_0002.jpg" })
+
+        // Restore readability without changing file size or mtime.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: recoverURL.path)
+
+        // While paused for memory pressure, retry must be ignored.
+        await workspace.library.handleMemoryPressure(.critical)
+        #expect(!model.preparationStatus.canRetryIssues)
+        await model.retryPreparationIssues()
+        #expect(model.preparationStatus.previews.failed == 1)
+        #expect(model.preparationStatus.analysis.failed == 1)
+
+        // Resuming from memory pressure makes Retry available again.
+        await workspace.library.handleMemoryPressure(.normal)
+        try await waitUntil { model.preparationStatus.canRetryIssues }
+
+        await model.retryPreparationIssues()
+
+        try await waitUntil {
+            model.preparationStatus.phase == .complete
+                && model.preparationStatus.readyForBothCount == 2
+        }
+        #expect(model.openGeneration == initialGeneration)
+        #expect(model.preparationStatus.issues.isEmpty)
+        #expect(model.preparationStatus.previews.completed == 2)
+        #expect(model.preparationStatus.analysis.completed == 2)
+
+        await workspace.library.closeFolder()
+    }
+
     @Test func replacingAndClosingFolderIsolatesStaleGenerations() async throws {
         let workspace = try PreparationTestWorkspace()
         defer { workspace.remove() }

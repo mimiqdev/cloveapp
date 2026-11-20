@@ -47,12 +47,13 @@ public struct RegionSharpnessRecord: Sendable {
 /// Memory stays authoritative under its full session-bound key, evicted least-recently-used first,
 /// and holds no image buffers; the disk tier backs initial loads across folder sessions.
 ///
-/// An analysis whose acquisition reported a transient or identity-breaking failure is never
-/// stored: `staleSource` means the photo changed under the analysis, so the answer belongs to
-/// no revision the caller can ask for again, and `queueFull`/`closed` mean the photo was
-/// never analysed at all — asking for it again later should start real work, not replay the
-/// contention. Every other explicit answer (missing metadata, no faces, unusable pixels,
-/// unscorable regions) is a fact about the photo and is kept.
+/// An analysis whose acquisition or preview reported a transient or identity-breaking failure is
+/// never stored: `cannotOpen` may come from temporary external-drive or File Provider access
+/// hiccups, `staleSource` means the photo changed under the analysis, so the answer belongs to no
+/// revision the caller can ask for again, and `queueFull`/`closed` mean the photo was never
+/// analysed at all — asking for it again later should start real work, not replay the failure.
+/// Every other explicit answer (missing metadata, no faces, unusable preview, unscorable regions)
+/// is a fact about the photo and is kept.
 public final class RegionSharpnessResultStore: Sendable {
     private struct Entry {
         let record: RegionSharpnessRecord
@@ -112,6 +113,29 @@ public final class RegionSharpnessResultStore: Sendable {
             state.entries = state.entries.filter { entry in
                 Set(entry.value.record.request.fileURLs).isDisjoint(with: files)
             }
+        }
+    }
+
+    /// Drops specific keys from both memory and disk tiers (used when explicitly retrying
+    /// previously settled analysis failures).
+    public func remove(for keys: [SharpnessResultKey]) {
+        removeMemory(for: keys)
+        removeDisk(for: keys)
+    }
+
+    func removeMemory(for keys: [SharpnessResultKey]) {
+        guard !keys.isEmpty else { return }
+        state.withLock { state in
+            for key in keys {
+                state.entries.removeValue(forKey: key)
+            }
+        }
+    }
+
+    func removeDisk(for keys: [SharpnessResultKey]) {
+        guard !keys.isEmpty, let disk else { return }
+        for key in keys {
+            disk.remove(for: key)
         }
     }
 

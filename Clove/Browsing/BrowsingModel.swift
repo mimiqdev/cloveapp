@@ -84,6 +84,15 @@ final class BrowsingModel {
             folder: folder, generation: generation)
     }
 
+    /// Re-queues failed or deferred folder preparation tasks without rescanning the folder.
+    func retryPreparationIssues() async {
+        guard !hasLeftFolder, !isChangingFolder, folderLocationLoss == nil,
+            preparationStatus.canRetryIssues
+        else { return }
+        dismissedPreparationCompletion = nil
+        await library.retryPreparationIssues()
+    }
+
     /// Progress from discovered photos, including photos still waiting for metadata.
     var readingProgress: (read: Int, total: Int)? {
         guard !hasFinishedScan else { return nil }

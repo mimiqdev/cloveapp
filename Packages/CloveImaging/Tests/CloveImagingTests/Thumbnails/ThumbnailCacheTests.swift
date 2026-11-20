@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import CloveImaging
@@ -193,5 +194,37 @@ actor ThumbnailCacheTests {
         #expect(
             ThumbnailCache.Configuration.deviceAware(physicalMemory: 16 * 1024 * 1024 * 1024)
                 .memoryBytes == 128 * mib)
+    }
+
+    @Test func cannotOpenIsNotCachedInMemoryAndInvalidateMemoryTargetsOnlySpecifiedSources() throws
+    {
+        let directory = try ThumbnailTestDirectory()
+        defer { directory.remove() }
+        let first = try thumbnailRequest(directory.image(name: "first.jpg"))
+        let second = try thumbnailRequest(directory.image(name: "second.jpg"))
+        let cache = try directory.cache()
+
+        let observed = Mutex<[ThumbnailCachedOutcome]>([])
+        let token = cache.addStoreObserver { _, outcome in
+            observed.withLock { $0.append(outcome) }
+        }
+        defer { cache.removeStoreObserver(token) }
+
+        // Transient cannotOpen notifies observers but never poisons memory or disk lookups.
+        try cache.store(.unavailable(.cannotOpen), for: first)
+        #expect(observed.withLock { $0 } == [.unavailable(.cannotOpen)])
+        #expect(cache.cachedOutcome(for: first) == nil)
+        #expect(cache.result(for: first) == nil)
+
+        // Durable noUsablePreview stays cached until explicitly invalidated for retry.
+        try cache.store(.unavailable(.noUsablePreview), for: first)
+        try cache.store(ThumbnailExtractor().extract(second), for: second)
+        #expect(cache.cachedOutcome(for: first) == .unavailable(.noUsablePreview))
+        #expect(cache.cachedOutcome(for: second) == .available)
+
+        cache.invalidateMemory(sources: [first.source])
+        #expect(cache.cachedOutcome(for: first) == nil)
+        #expect(cache.result(for: first) == nil)
+        #expect(cache.cachedOutcome(for: second) == .available)
     }
 }
