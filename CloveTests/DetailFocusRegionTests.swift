@@ -749,6 +749,100 @@ struct DetailFocusRegionTests {
                 == "clove.detail.region.af.1")
     }
 
+    @Test func doubleTapStageConversionUsesCentreForBlankSpaceAndRealPointInsidePhoto() throws {
+        // Portrait photo inside a wide stage (pillarboxed left and right).
+        let portraitStage = DetailZoomContainerView(
+            frame: CGRect(x: 0, y: 0, width: 600, height: 500))
+        portraitStage.setImage(try testPixels(width: 2000, height: 3000))
+        portraitStage.setNeedsLayout()
+        portraitStage.layoutIfNeeded()
+
+        let portraitRect = portraitStage.imageRectAtFit()
+        #expect(portraitRect.minX > 100)
+        #expect(portraitStage.bounds.maxX - portraitRect.maxX > 100)
+
+        let leftBlank = portraitStage.doubleTapLocation(at: CGPoint(x: 20, y: 250))
+        #expect(leftBlank.imagePoint == nil)
+        #expect(leftBlank.zoomAnchor == .center)
+        #expect(leftBlank.proximityAnchor.x == 0)
+        #expect(abs(leftBlank.proximityAnchor.y - 0.5) < 0.001)
+
+        let rightBlank = portraitStage.doubleTapLocation(at: CGPoint(x: 580, y: 250))
+        #expect(rightBlank.imagePoint == nil)
+        #expect(rightBlank.zoomAnchor == .center)
+        #expect(rightBlank.proximityAnchor.x == 1)
+        #expect(abs(rightBlank.proximityAnchor.y - 0.5) < 0.001)
+
+        let insideNearLeft = portraitStage.doubleTapLocation(
+            at: CGPoint(x: portraitRect.minX + 4, y: 250))
+        #expect(insideNearLeft.imagePoint != nil)
+        #expect(insideNearLeft.zoomAnchor.x > 0 && insideNearLeft.zoomAnchor.x < 0.05)
+
+        let insideNearRight = portraitStage.doubleTapLocation(
+            at: CGPoint(x: portraitRect.maxX - 4, y: 250))
+        #expect(insideNearRight.imagePoint != nil)
+        #expect(insideNearRight.zoomAnchor.x > 0.95 && insideNearRight.zoomAnchor.x < 1)
+
+        var delivered: [DetailDoubleTapLocation] = []
+        portraitStage.onDoubleTap = { delivered.append($0) }
+        portraitStage.doubleTap(at: CGPoint(x: 20, y: 250))
+        #expect(delivered == [leftBlank])
+
+        portraitStage.setDoubleTapEnabled(false)
+        portraitStage.doubleTap(at: CGPoint(x: 580, y: 250))
+        #expect(delivered.count == 1)
+
+        // Landscape photo inside a tall stage (letterboxed top and bottom).
+        let landscapeStage = DetailZoomContainerView(
+            frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        landscapeStage.setImage(try testPixels(width: 3000, height: 2000))
+        landscapeStage.setNeedsLayout()
+        landscapeStage.layoutIfNeeded()
+
+        let landscapeRect = landscapeStage.imageRectAtFit()
+        #expect(landscapeRect.minY > 100)
+        #expect(landscapeStage.bounds.maxY - landscapeRect.maxY > 100)
+
+        let topBlank = landscapeStage.doubleTapLocation(at: CGPoint(x: 120, y: 40))
+        #expect(topBlank.imagePoint == nil)
+        #expect(topBlank.zoomAnchor == .center)
+        #expect(abs(topBlank.proximityAnchor.x - 0.3) < 0.001)
+        #expect(topBlank.proximityAnchor.y == 0)
+
+        let bottomBlank = landscapeStage.doubleTapLocation(at: CGPoint(x: 320, y: 560))
+        #expect(bottomBlank.imagePoint == nil)
+        #expect(bottomBlank.zoomAnchor == .center)
+        #expect(abs(bottomBlank.proximityAnchor.x - 0.8) < 0.001)
+        #expect(bottomBlank.proximityAnchor.y == 1)
+
+        let insideNearTop = landscapeStage.doubleTapLocation(
+            at: CGPoint(x: 120, y: landscapeRect.minY + 4))
+        #expect(insideNearTop.imagePoint != nil)
+        #expect(insideNearTop.zoomAnchor.y > 0 && insideNearTop.zoomAnchor.y < 0.05)
+
+        // Multiple regions still break ties using the blank tap's clamped proximity anchor.
+        let photoID = photo("blank-area-tie-break")
+        let leftAF = makeEvidence(
+            .cameraAutofocus,
+            normalized: NormalizedRegion(x: 0.15, y: 0.45, width: 0.10, height: 0.10))
+        let rightAF = makeEvidence(
+            .cameraAutofocus,
+            normalized: NormalizedRegion(x: 0.75, y: 0.45, width: 0.10, height: 0.10))
+        var regionState = DetailFocusRegionState()
+        regionState.begin(for: photoID)
+        regionState.finish(
+            makeAnalysis(autofocus: .regions([leftAF, rightAF]), faces: .regions([])),
+            for: photoID)
+        #expect(
+            regionState.preferredDoubleTapRegion(
+                at: leftBlank.proximityAnchor, visible: true, inspectedRegionID: nil)?.id
+                == "clove.detail.region.af.0")
+        #expect(
+            regionState.preferredDoubleTapRegion(
+                at: rightBlank.proximityAnchor, visible: true, inspectedRegionID: nil)?.id
+                == "clove.detail.region.af.1")
+    }
+
     @Test func scorelessEvidenceIsActionableAndNormalizedGeometryPreservesUnavailability() {
         let valid = DetailFocusRegion(
             id: "clove.detail.region.af.0",

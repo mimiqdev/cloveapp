@@ -884,7 +884,7 @@ struct DetailDisplayPresentationTests {
         try await waitFor("focus regions presented") { findFocusControl(in: preview) != nil }
 
         // Zoom to focus (the default) centres 100% on the presented AF region.
-        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.6)))
         try await waitFor("focus zoom") { preview.isZoomed }
         let focusAnchor = try #require(preview.zoomSnapshot).anchor
         #expect(abs(focusAnchor.x - 0.30) < 0.05)
@@ -896,7 +896,7 @@ struct DetailDisplayPresentationTests {
         // view, so the tap below is one the screen has already refused.
         store.update { $0.doubleTap = .off }
         try await waitFor("double tap recognizer off") { !preview.doubleTapIsEnabled }
-        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.6)))
         try await Task.sleep(for: .milliseconds(250))
         #expect(!preview.isZoomed)
 
@@ -904,7 +904,7 @@ struct DetailDisplayPresentationTests {
         // returning marks the setting reaching the view.
         store.update { $0.doubleTap = .zoomToTapPoint }
         try await waitFor("double tap recognizer back") { preview.doubleTapIsEnabled }
-        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.6)))
         try await waitFor("tap point zoom") { preview.isZoomed }
         let tapAnchor = try #require(preview.zoomSnapshot).anchor
         #expect(abs(tapAnchor.x - 0.5) < 0.02)
@@ -1658,7 +1658,7 @@ struct DetailDisplayPresentationTests {
         // 1. Double-tapping the photo body away from the AF region centres 100% on AF, and the
         // chrome stays where it was, so the preview container keeps its size (#302).
         let heightBefore = preview.bounds.height
-        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.6)))
         try await waitFor { preview.isZoomed }
         try await Task.sleep(for: .milliseconds(450))
         #expect(preview.bounds.height == heightBefore)
@@ -1672,7 +1672,7 @@ struct DetailDisplayPresentationTests {
         #expect(accessibilityValue.contains("centred at 30%, 35%"))
 
         // 2. Return to fit, then tap the AF control directly and verify it stays centred.
-        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.5))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.5)))
         try await waitFor { !preview.isZoomed }
         try await Task.sleep(for: .milliseconds(350))
         let afControl = try #require(
@@ -1734,7 +1734,7 @@ struct DetailDisplayPresentationTests {
 
         let preview = try #require(findPreview(in: window))
         let heightBefore = preview.bounds.height
-        preview.onDoubleTap?(UnitPoint(x: 0.5, y: 0.6))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.6)))
         try await waitFor { preview.isZoomed }
         try await Task.sleep(for: .milliseconds(450))
 
@@ -1822,7 +1822,7 @@ struct DetailDisplayPresentationTests {
         // Apply a mark and zoom to 100%, then toggle between Photo Preview and Focus View.
         let fourStars = try #require(Rating(rawValue: 4))
         browsing.apply(.rating(fourStars), to: target.id)
-        preview.onDoubleTap?(UnitPoint(x: 0.35, y: 0.4))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.35, y: 0.4)))
         try await waitFor { preview.isZoomed }
         try await Task.sleep(for: .milliseconds(350))
         let windowCountBeforeToggle = source.windows.count
@@ -2116,6 +2116,198 @@ struct DetailDisplayPresentationTests {
         #expect(browsing.showsFocusRegions)
     }
 
+    @Test(arguments: [DetailPresentation.photoPreview, DetailPresentation.focus])
+    func expandedDuoPortraitBlankAreaDoubleTapUsesCentreWhilePhotoEdgesUseTapPoint(
+        initialPresentation: DetailPresentation
+    ) async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = PortraitFocusDetailImages()
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02678" })
+        browsing.openPhoto(target.id)
+
+        let presentationBox = TestPresentationBox(value: initialPresentation)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                DetailScreen(
+                    browsing: browsing,
+                    images: source,
+                    duo: DuoDetailLayout(
+                        presentation: Binding(
+                            get: { presentationBox.value },
+                            set: { presentationBox.value = $0 }),
+                        filter: AnyView(EmptyView()),
+                        more: AnyView(EmptyView()),
+                        bottom: AnyView(EmptyView()),
+                        showsGrid: true))
+            }
+            .environment(store)
+            .environment(\.isDuoExpanded, true)
+            .environment(\.usesSystemBrowsingToolbar, true))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("portrait photo and focus region did not settle") {
+            guard let preview = self.findPreview(in: window),
+                source.delivered,
+                self.findFocusControl(in: preview) != nil
+            else { return false }
+            let imageRect = preview.imageRectAtFit()
+            let layoutMatches =
+                initialPresentation == .photoPreview
+                ? self.findCollectionView(in: window) != nil
+                : self.findFilmstripScrollView(in: window, excluding: preview) != nil
+            return layoutMatches
+                && imageRect.height > imageRect.width
+                && imageRect.minX > 40
+                && preview.bounds.maxX - imageRect.maxX > 40
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let imageRect = preview.imageRectAtFit()
+        let leftBlank = CGPoint(x: imageRect.minX * 0.3, y: preview.bounds.midY)
+        let rightBlank = CGPoint(
+            x: imageRect.maxX + (preview.bounds.maxX - imageRect.maxX) * 0.7,
+            y: preview.bounds.midY)
+        let nearLeftEdge = CGPoint(x: imageRect.minX + 4, y: preview.bounds.midY)
+        let nearRightEdge = CGPoint(x: imageRect.maxX - 4, y: preview.bounds.midY)
+        let topLeftStageEdge = CGPoint(x: 2, y: 2)
+        let bottomRightStageEdge = CGPoint(
+            x: preview.bounds.maxX - 2, y: preview.bounds.maxY - 2)
+
+        // 1. Focus regions Off + Zoom to focus: blank pillarbox taps zoom to photo centre, while
+        // taps inside the portrait near its real edges zoom to those edges; stage-edge double taps
+        // return to fit.
+        browsing.showsFocusRegions = false
+        try await waitFor("focus regions did not hide") {
+            self.findAllFocusControls(in: preview).isEmpty
+        }
+
+        preview.doubleTap(at: leftBlank)
+        try await waitFor("left blank zoom did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let leftBlankAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(leftBlankAnchor.x - 0.5) < 0.05)
+        #expect(abs(leftBlankAnchor.y - 0.5) < 0.05)
+
+        preview.doubleTap(at: topLeftStageEdge)
+        try await waitFor("return to fit from left blank zoom") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+
+        preview.doubleTap(at: rightBlank)
+        try await waitFor("right blank zoom did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let rightBlankAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(rightBlankAnchor.x - 0.5) < 0.05)
+        #expect(abs(rightBlankAnchor.y - 0.5) < 0.05)
+
+        preview.doubleTap(at: bottomRightStageEdge)
+        try await waitFor("return to fit from right blank zoom") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+
+        preview.doubleTap(at: nearLeftEdge)
+        try await waitFor("near-left portrait edge zoom did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let nearLeftAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(nearLeftAnchor.x < 0.15)
+
+        preview.doubleTap(at: topLeftStageEdge)
+        try await waitFor("return to fit from near-left edge") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+
+        preview.doubleTap(at: nearRightEdge)
+        try await waitFor("near-right portrait edge zoom did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let nearRightAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(nearRightAnchor.x > 0.85)
+
+        preview.doubleTap(at: bottomRightStageEdge)
+        try await waitFor("return to fit from near-right edge") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+
+        // 2. Focus regions On + Zoom to focus: blank-area double tap still prioritizes the off-center
+        // AF region.
+        browsing.showsFocusRegions = true
+        try await waitFor("focus regions did not return") {
+            self.findFocusControl(in: preview) != nil
+        }
+        preview.doubleTap(at: leftBlank)
+        try await waitFor("focus-target zoom from blank area did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let focusAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(focusAnchor.x - 0.70) < 0.05)
+        #expect(abs(focusAnchor.y - 0.30) < 0.05)
+
+        preview.doubleTap(at: topLeftStageEdge)
+        try await waitFor("return to fit from focus-target zoom") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+
+        // 3. Off ignores double taps while single-tap chrome and direct region taps remain intact.
+        store.update { $0.doubleTap = .off }
+        try await waitFor("doubleTap off did not reach preview") { !preview.doubleTapIsEnabled }
+        preview.doubleTap(at: leftBlank)
+        preview.doubleTap(at: nearLeftEdge)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!preview.isZoomed)
+
+        // 4. Zoom to tap point (even with Focus regions On): blank area uses centre; near-edge tap
+        // inside photo uses the tapped edge. Wait for `doubleTapIsEnabled` returning from Off so
+        // SwiftUI has delivered the updated setting to DetailMarkingView.
+        store.update { $0.doubleTap = .zoomToTapPoint }
+        try await waitFor("zoomToTapPoint setting") { preview.doubleTapIsEnabled }
+        preview.doubleTap(at: rightBlank)
+        try await waitFor("zoomToTapPoint blank area did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let tapPointBlankAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(tapPointBlankAnchor.x - 0.5) < 0.05)
+
+        preview.doubleTap(at: bottomRightStageEdge)
+        try await waitFor("return to fit from zoomToTapPoint blank area") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+
+        preview.doubleTap(at: nearLeftEdge)
+        try await waitFor("zoomToTapPoint near-left edge did not settle") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let tapPointNearLeftAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(tapPointNearLeftAnchor.x < 0.15)
+
+        preview.doubleTap(at: topLeftStageEdge)
+        try await waitFor("return to fit from zoomToTapPoint near-left") { !preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+
+        #expect(preview.chromeTapIsEnabled)
+        if initialPresentation == .focus {
+            preview.onChromeToggle?()
+            try await waitFor("chrome toggle did not hide filmstrip") {
+                self.findFilmstripScrollView(in: window, excluding: preview) == nil
+            }
+            preview.onChromeToggle?()
+            try await waitFor("chrome toggle did not restore filmstrip") {
+                self.findFilmstripScrollView(in: window, excluding: preview) != nil
+            }
+        }
+
+        let afControl = try #require(findFocusControl(in: preview))
+        afControl.sendActions(for: .touchUpInside)
+        try await waitFor("direct region tap did not zoom") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(250))
+        let directRegionAnchor = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(directRegionAnchor.x - 0.70) < 0.05)
+        #expect(abs(directRegionAnchor.y - 0.30) < 0.05)
+    }
+
     @Test func expandedDuoFocusOffSurvivesNavigationPresentationSwitchAndLateCallbacks()
         async throws
     {
@@ -2324,7 +2516,7 @@ struct DetailDisplayPresentationTests {
                 (imageView.image?.cgImage?.width ?? 0) >= SampleDetailImages.previewLongEdge
             }
             if !preview.isZoomed {
-                preview.onDoubleTap?(UnitPoint(x: 0.45, y: 0.45))
+                preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.45, y: 0.45)))
             }
             try await waitFor("preview zoomed in round \(round)") {
                 preview.isZoomed && preview.twoFingerMarkingSwipeIsEnabled
@@ -2845,7 +3037,7 @@ struct DetailDisplayPresentationTests {
         #expect(tapFrames.frames["clove.detail.landscapeBottomRow"] == nil)
 
         // Zoom to a non-center anchor, open the Label tap picker, and capture pixel request count.
-        preview.onDoubleTap?(UnitPoint(x: 0.35, y: 0.4))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.35, y: 0.4)))
         try await waitFor("zoom did not settle in portrait") {
             preview.isZoomed && source.delivered.contains(.nativeRAW)
         }
@@ -3517,6 +3709,74 @@ private final class PortraitDetailImages: DetailImageSource {
         context.fill(CGRect(x: 0, y: 0, width: 800, height: 1_200))
         context.setFillColor(gray: 0.72, alpha: 1)
         context.fill(CGRect(x: 0, y: 800, width: 800, height: 400))
+        return context.makeImage()
+    }()
+}
+
+@MainActor
+private final class PortraitFocusDetailImages: DetailImageSource, DetailRegionSharpnessSource {
+    private let sample = SampleDetailImages()
+    private(set) var delivered = false
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        await sample.placeholder(for: photo, gridThumbnails: gridThumbnails)
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async { await sample.prepare(window) }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        let outcome = await sample.image(for: photo, request: request)
+        guard case .image(let image) = outcome else { return outcome }
+        delivered = true
+        guard let pixels = Self.portraitPixels else { return outcome }
+        return .image(
+            DetailImage(
+                image: pixels, source: image.source, quality: image.quality,
+                hasRAW: image.hasRAW,
+                fullResolutionSize: CGSize(width: 2_400, height: 3_600)))
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async { await sample.leave(window: window) }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        let offCentreAF = RegionSharpnessEvidence(
+            kind: .cameraAutofocus,
+            groupIndex: nil,
+            region: NormalizedRegion(x: 0.65, y: 0.25, width: 0.10, height: 0.10),
+            score: nil,
+            unavailableBecause: nil)
+        onAutofocus(.regions([offCentreAF]))
+        return RegionSharpnessAnalysis(
+            autofocus: .regions([offCentreAF]),
+            faces: .unavailable(.noFacesDetected),
+            acquisitionFailure: nil,
+            timings: RegionSharpnessTimings())
+    }
+
+    private static let portraitPixels: CGImage? = {
+        guard
+            let context = CGContext(
+                data: nil, width: 800, height: 1_200, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.setFillColor(gray: 0.42, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 800, height: 1_200))
         return context.makeImage()
     }()
 }

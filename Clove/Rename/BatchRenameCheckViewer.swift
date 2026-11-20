@@ -61,7 +61,7 @@ struct BatchRenameCheckViewer: View {
                 },
                 onChromeToggle: {},
                 onStep: { step($0) },
-                onDoubleTap: { anchor in doubleTap(anchor) }, onMarkingSwipe: { _ in },
+                onDoubleTap: { tap in doubleTap(tap.zoomAnchor) }, onMarkingSwipe: { _ in },
                 onSwipeBegin: {}, hasPrevious: index > 0, hasNext: index + 1 < flow.order.count
             )
             .accessibilityLabel(photo.fileName)
