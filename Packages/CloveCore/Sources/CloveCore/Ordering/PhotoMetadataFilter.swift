@@ -135,7 +135,9 @@ public struct PhotoFilterOption<Value: Hashable & Sendable>: Hashable, Sendable 
 }
 
 /// Available metadata and keyword filter options derived from a folder's placed photos.
-/// Any dimension with fewer than two distinct non-empty values is auto-hidden (returned empty).
+/// Camera, lens, and focal-length dimensions auto-hide when fewer than two distinct non-empty
+/// values exist; keywords auto-hide when no photo has keywords or when every photo shares the exact
+/// same single keyword.
 public struct PhotoMetadataFilterOptions: Equatable, Sendable {
     public static let empty = PhotoMetadataFilterOptions(photos: [])
 
@@ -180,7 +182,10 @@ public struct PhotoMetadataFilterOptions: Equatable, Sendable {
                 return PhotoFilterOption(value: bucket, count: count)
             }
             : []
-        keywords = Self.sortedByFrequencyOptions(keywordCounts)
+        let showsKeywords =
+            keywordCounts.count >= 2
+            || (keywordCounts.count == 1 && (keywordCounts.values.first ?? 0) < photos.count)
+        keywords = showsKeywords ? Self.sortedByFrequencyOptions(keywordCounts) : []
     }
 
     private static func sortedAlphabeticalOptions(_ counts: [String: Int])
@@ -199,8 +204,7 @@ public struct PhotoMetadataFilterOptions: Equatable, Sendable {
     private static func sortedByFrequencyOptions(_ counts: [String: Int])
         -> [PhotoFilterOption<String>]
     {
-        guard counts.count >= 2 else { return [] }
-        return counts.keys
+        counts.keys
             .sorted { lhs, rhs in
                 let lhsCount = counts[lhs, default: 0]
                 let rhsCount = counts[rhs, default: 0]

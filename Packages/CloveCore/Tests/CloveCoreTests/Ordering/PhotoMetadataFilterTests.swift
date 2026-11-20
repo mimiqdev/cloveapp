@@ -131,7 +131,7 @@ struct PhotoMetadataFilterTests {
     }
 
     @Test func optionsAutoHideDimensionsWithFewerThanTwoDistinctValues() {
-        // Single-body, single-prime shoot with only one keyword: all 4 dimensions auto-hide.
+        // Single-body, single-prime shoot where every photo shares one keyword: all 4 dimensions auto-hide.
         let homogeneous = [
             makePhoto(
                 "a", seconds: 1,
@@ -143,7 +143,7 @@ struct PhotoMetadataFilterTests {
                 marks: PhotoMarks(keywords: ["wedding"]),
                 metadata: PhotoFilterMetadata(
                     camera: "ILCE-1M2", lens: "FE 50mm F1.2 GM", focalLengthMillimetres: 50)),
-            makePhoto("c", seconds: 3),
+            makePhoto("c", seconds: 3, marks: PhotoMarks(keywords: ["wedding"])),
         ]
         let hidden = PhotoMetadataFilterOptions(photos: homogeneous)
         #expect(hidden.cameras.isEmpty)
@@ -151,6 +151,43 @@ struct PhotoMetadataFilterTests {
         #expect(hidden.focalLengths.isEmpty)
         #expect(hidden.keywords.isEmpty)
         #expect(!hidden.hasAnyDimension)
+
+        // Single-body, single-prime shoot with zero keywords also hides all 4 dimensions.
+        let untagged = [
+            makePhoto(
+                "a", seconds: 1,
+                metadata: PhotoFilterMetadata(
+                    camera: "ILCE-1M2", lens: "FE 50mm F1.2 GM", focalLengthMillimetres: 50)),
+            makePhoto("b", seconds: 2),
+        ]
+        let hiddenUntagged = PhotoMetadataFilterOptions(photos: untagged)
+        #expect(!hiddenUntagged.hasAnyDimension)
+        #expect(hiddenUntagged.keywords.isEmpty)
+
+        // A single keyword on a strict subset of photos narrows the folder and stays visible,
+        // while single-value EXIF dimensions stay hidden.
+        let singleKeywordSubset = [
+            makePhoto(
+                "a", seconds: 1,
+                marks: PhotoMarks(keywords: ["Client"]),
+                metadata: PhotoFilterMetadata(
+                    camera: "ILCE-1M2", lens: "FE 50mm F1.2 GM", focalLengthMillimetres: 50)),
+            makePhoto(
+                "b", seconds: 2,
+                marks: PhotoMarks(keywords: ["Client"]),
+                metadata: PhotoFilterMetadata(
+                    camera: "ILCE-1M2", lens: "FE 50mm F1.2 GM", focalLengthMillimetres: 50)),
+            makePhoto(
+                "c", seconds: 3,
+                metadata: PhotoFilterMetadata(
+                    camera: "ILCE-1M2", lens: "FE 50mm F1.2 GM", focalLengthMillimetres: 50)),
+        ]
+        let subsetOptions = PhotoMetadataFilterOptions(photos: singleKeywordSubset)
+        #expect(subsetOptions.cameras.isEmpty)
+        #expect(subsetOptions.lenses.isEmpty)
+        #expect(subsetOptions.focalLengths.isEmpty)
+        #expect(subsetOptions.keywords == [PhotoFilterOption(value: "Client", count: 2)])
+        #expect(subsetOptions.hasAnyDimension)
 
         // Two distinct values reveal only those dimensions, with exact counts and deterministic order.
         let mixed = [
