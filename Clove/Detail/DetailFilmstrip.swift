@@ -167,6 +167,7 @@ struct DetailFilmstrip: View {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("clove.detail.filmstrip.timeline")
+                .reportTapPickerFrame("clove.detail.filmstrip.timeline")
                 .padding(.horizontal, metrics.horizontalPadding)
                 .padding(.vertical, metrics.verticalTrackPadding)
             }
@@ -273,6 +274,7 @@ struct DetailFilmstrip: View {
                     .frame(height: metrics.thumbnailHeight)
 
                     collapseCapButton
+                        .reportTapPickerFrame("clove.detail.filmstrip.group.fold")
                         .layoutPriority(1)
                 }
                 .padding(3)
@@ -281,6 +283,7 @@ struct DetailFilmstrip: View {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
+                .reportTapPickerFrame("clove.detail.filmstrip.expandedGroup")
                 .padding(.horizontal, metrics.horizontalPadding)
             }
             .contentShape(Rectangle())

@@ -131,6 +131,7 @@ struct TapPickerTests {
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let store = SettingsStore.sample
 
+        var capsuleFramesByPresentation: [DetailPresentation: CGRect] = [:]
         for (presentation, paneIdentifier) in [
             (DetailPresentation.photoPreview, "clove.duo.photoPreview"),
             (DetailPresentation.focus, "clove.duo.focus"),
@@ -187,6 +188,8 @@ struct TapPickerTests {
             try await waitFor("\(paneIdentifier) mounted") {
                 box.frames[paneIdentifier] != nil && box.frames["clove.duo.capsule"] != nil
             }
+            let capsuleFrame = try #require(box.frames["clove.duo.capsule"])
+            capsuleFramesByPresentation[presentation] = capsuleFrame
 
             try await verifyPickers(
                 box: box,
@@ -198,6 +201,224 @@ struct TapPickerTests {
                 labelPickerIdentifier: "clove.duo.labels",
                 expectedDockLeftEdge: window.frame.width - 89.5)
         }
+
+        let previewCapsule = try #require(capsuleFramesByPresentation[.photoPreview])
+        let focusCapsule = try #require(capsuleFramesByPresentation[.focus])
+        expectSameMarkingCapsuleFrame(previewCapsule, focusCapsule)
+    }
+
+    @Test(arguments: [CloveTheme.light, CloveTheme.dark])
+    func duoExpandedMarkingCapsuleAlignsAcrossPresentationsAndTracks(theme: CloveTheme)
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first)
+        let standalone = try #require(browsing.photos.first { $0.fileName == "MMQ02680.ARW" })
+        let lastPhoto = try #require(browsing.photos.last)
+        browsing.openPhoto(standalone.id)
+
+        let box = TapPickerTestBox()
+        let presentationBox = PresentationStateBox(value: .photoPreview)
+
+        struct LiveDuoHost: View {
+            let browsing: BrowsingModel
+            let store: SettingsStore
+            let theme: CloveTheme
+            @Bindable var presentation: PresentationStateBox
+            let box: TapPickerTestBox
+
+            var body: some View {
+                NavigationStack {
+                    DetailScreen(
+                        browsing: browsing,
+                        duo: DuoDetailLayout(
+                            presentation: $presentation.value,
+                            filter: AnyView(EmptyView()),
+                            more: AnyView(EmptyView()),
+                            bottom: AnyView(EmptyView()),
+                            showsGrid: true))
+                }
+                .environment(store)
+                .environment(\.cloveTheme, theme)
+                .environment(\.colorScheme, theme == .dark ? .dark : .light)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, true)
+                .environment(\.scenePhase, .active)
+                .environment(\.tapPickerTriggerRequest, box.trigger)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    box.frames = frames
+                }
+            }
+        }
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+        let host = UIHostingController(
+            rootView: LiveDuoHost(
+                browsing: browsing, store: store, theme: theme, presentation: presentationBox,
+                box: box))
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.overrideUserInterfaceStyle = theme == .dark ? .dark : .light
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let dockLeftEdge = window.frame.width - 89.5
+
+        // 1. Start in Photo Preview.
+        try await waitFor("initial Photo Preview mounted (\(theme.rawValue))") {
+            box.frames["clove.duo.photoPreview"] != nil
+                && box.frames["clove.duo.capsule"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let previewPane = try #require(box.frames["clove.duo.photoPreview"])
+        let initialPreviewCapsule = try #require(box.frames["clove.duo.capsule"])
+        let previewStageInPreview = try #require(findZoomPreview(in: window))
+        let previewStageFrameInPreview = previewStageInPreview.convert(
+            previewStageInPreview.bounds, to: window)
+        #expect(abs(initialPreviewCapsule.width - 168) <= 0.5)
+        #expect(abs(initialPreviewCapsule.height - 48) <= 0.5)
+        #expect(
+            abs((previewStageFrameInPreview.maxX - 16) - initialPreviewCapsule.maxX) <= 0.5,
+            Comment(
+                rawValue:
+                    "previewStage=\(previewStageFrameInPreview) previewPane=\(previewPane) capsule=\(initialPreviewCapsule)"
+            ))
+        #expect(initialPreviewCapsule.maxX <= previewPane.maxX - 16 + 0.5)
+        #expect(initialPreviewCapsule.maxX <= dockLeftEdge - 16 + 0.5)
+        #expect(initialPreviewCapsule.minY >= previewStageFrameInPreview.maxY - 0.5)
+        try await verifyPickers(
+            box: box,
+            paneIdentifier: "clove.duo.photoPreview",
+            capsuleIdentifier: "clove.duo.capsule",
+            ratingButtonIdentifier: "clove.duo.capsule.rating",
+            ratingPickerIdentifier: "clove.duo.capsule.stars",
+            labelButtonIdentifier: "clove.duo.capsule.label",
+            labelPickerIdentifier: "clove.duo.labels",
+            expectedDockLeftEdge: dockLeftEdge)
+
+        // 2. Switch dynamically to Focus View (Timeline).
+        presentationBox.value = .focus
+        try await waitFor("Focus View Timeline mounted (\(theme.rawValue))") {
+            box.frames["clove.duo.focus"] != nil
+                && box.frames["clove.duo.capsule"] != nil
+                && box.frames["clove.detail.filmstrip"] != nil
+                && box.frames["clove.detail.filmstrip.timeline"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        let focusPane = try #require(box.frames["clove.duo.focus"])
+        let focusTimelineCapsule = try #require(box.frames["clove.duo.capsule"])
+        let filmstripFrame = try #require(box.frames["clove.detail.filmstrip"])
+        let timelineTrackFrame = try #require(box.frames["clove.detail.filmstrip.timeline"])
+        let focusStage = try #require(findZoomPreview(in: window))
+        let focusStageFrame = focusStage.convert(focusStage.bounds, to: window)
+        expectSameMarkingCapsuleFrame(initialPreviewCapsule, focusTimelineCapsule)
+        #expect(abs(focusTimelineCapsule.midY - filmstripFrame.midY) <= 1.0)
+        #expect(abs(focusTimelineCapsule.midY - timelineTrackFrame.midY) <= 1.0)
+        #expect(filmstripFrame.maxX <= focusTimelineCapsule.minX)
+        #expect(abs((focusTimelineCapsule.minX - filmstripFrame.maxX) - 6) <= 1.0)
+        #expect(
+            abs((focusStageFrame.maxX - 16) - focusTimelineCapsule.maxX) <= 0.5,
+            Comment(
+                rawValue:
+                    "focusStage=\(focusStageFrame) focusPane=\(focusPane) capsule=\(focusTimelineCapsule)"
+            ))
+        #expect(focusTimelineCapsule.maxX <= focusPane.maxX - 16 + 0.5)
+        #expect(focusTimelineCapsule.minY >= focusStageFrame.maxY - 0.5)
+        try await verifyPickers(
+            box: box,
+            paneIdentifier: "clove.duo.focus",
+            capsuleIdentifier: "clove.duo.capsule",
+            ratingButtonIdentifier: "clove.duo.capsule.rating",
+            ratingPickerIdentifier: "clove.duo.capsule.stars",
+            labelButtonIdentifier: "clove.duo.capsule.label",
+            labelPickerIdentifier: "clove.duo.labels",
+            expectedDockLeftEdge: dockLeftEdge)
+
+        // Scroll Timeline to the last photo and ensure the trailing reservation stays single/clear.
+        browsing.openPhoto(lastPhoto.id)
+        try await waitFor("timeline scrolled to last photo (\(theme.rawValue))") {
+            guard let strip = box.frames["clove.detail.filmstrip"],
+                let track = box.frames["clove.detail.filmstrip.timeline"],
+                let capsule = box.frames["clove.duo.capsule"]
+            else { return false }
+            return abs((strip.maxX - track.maxX) - 10) <= 1.5
+                && strip.maxX <= capsule.minX
+        }
+        let filmstripAtEnd = try #require(box.frames["clove.detail.filmstrip"])
+        let timelineAtEnd = try #require(box.frames["clove.detail.filmstrip.timeline"])
+        let capsuleAtEnd = try #require(box.frames["clove.duo.capsule"])
+        expectSameMarkingCapsuleFrame(initialPreviewCapsule, capsuleAtEnd)
+        #expect(filmstripAtEnd.maxX <= capsuleAtEnd.minX)
+        #expect(timelineAtEnd.maxX <= capsuleAtEnd.minX)
+        #expect(abs((filmstripAtEnd.maxX - timelineAtEnd.maxX) - 10) <= 1.5)
+
+        // Chrome toggle hides both filmstrip and capsule, then restores the same capsule frame.
+        focusStage.onChromeToggle?()
+        try await waitFor("chrome toggle hides capsule and filmstrip (\(theme.rawValue))") {
+            box.frames["clove.duo.capsule"] == nil
+                && box.frames["clove.detail.filmstrip"] == nil
+        }
+        focusStage.onChromeToggle?()
+        try await waitFor("chrome toggle restores capsule and filmstrip (\(theme.rawValue))") {
+            box.frames["clove.duo.capsule"] != nil
+                && box.frames["clove.detail.filmstrip"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let restoredCapsule = try #require(box.frames["clove.duo.capsule"])
+        expectSameMarkingCapsuleFrame(initialPreviewCapsule, restoredCapsule)
+
+        // 3. Enter Group Focus inside Focus View and verify tray & fold cap centering/clearance.
+        browsing.openGroup(group.id, on: group.members[0])
+        try await waitFor("Focus View Group Focus mounted (\(theme.rawValue))") {
+            box.frames["clove.detail.filmstrip.expandedGroup"] != nil
+                && box.frames["clove.detail.filmstrip.group.fold"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(250))
+        let groupCapsule = try #require(box.frames["clove.duo.capsule"])
+        let groupTrayFrame = try #require(box.frames["clove.detail.filmstrip.expandedGroup"])
+        let foldCapFrame = try #require(box.frames["clove.detail.filmstrip.group.fold"])
+        let groupFilmstripFrame = try #require(box.frames["clove.detail.filmstrip"])
+        expectSameMarkingCapsuleFrame(initialPreviewCapsule, groupCapsule)
+        #expect(abs(groupCapsule.midY - groupTrayFrame.midY) <= 1.0)
+        #expect(abs(groupCapsule.midY - foldCapFrame.midY) <= 1.0)
+        #expect(abs(groupCapsule.midY - groupFilmstripFrame.midY) <= 1.0)
+        #expect(groupFilmstripFrame.maxX <= groupCapsule.minX)
+        #expect(groupTrayFrame.maxX <= groupCapsule.minX)
+        #expect(foldCapFrame.maxX <= groupCapsule.minX)
+
+        // 4. Switch dynamically back to Photo Preview.
+        presentationBox.value = .photoPreview
+        try await waitFor("returned to Photo Preview (\(theme.rawValue))") {
+            box.frames["clove.duo.photoPreview"] != nil
+                && box.frames["clove.duo.focus"] == nil
+                && box.frames["clove.duo.capsule"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        let returnedPreviewCapsule = try #require(box.frames["clove.duo.capsule"])
+        expectSameMarkingCapsuleFrame(initialPreviewCapsule, returnedPreviewCapsule)
+        try await verifyPickers(
+            box: box,
+            paneIdentifier: "clove.duo.photoPreview",
+            capsuleIdentifier: "clove.duo.capsule",
+            ratingButtonIdentifier: "clove.duo.capsule.rating",
+            ratingPickerIdentifier: "clove.duo.capsule.stars",
+            labelButtonIdentifier: "clove.duo.capsule.label",
+            labelPickerIdentifier: "clove.duo.labels",
+            expectedDockLeftEdge: dockLeftEdge)
     }
 
     @Test func nestedTapPickerContainersIsolateHorizontallyOffsetInnerHost() async throws {
@@ -903,6 +1124,27 @@ struct TapPickerTests {
         }
     }
 
+    private func expectSameMarkingCapsuleFrame(
+        _ first: CGRect,
+        _ second: CGRect,
+        tolerance: CGFloat = 0.5,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(abs(first.minX - second.minX) <= tolerance, sourceLocation: sourceLocation)
+        #expect(abs(first.maxX - second.maxX) <= tolerance, sourceLocation: sourceLocation)
+        #expect(abs(first.minY - second.minY) <= tolerance, sourceLocation: sourceLocation)
+        #expect(abs(first.midY - second.midY) <= tolerance, sourceLocation: sourceLocation)
+        #expect(abs(first.maxY - second.maxY) <= tolerance, sourceLocation: sourceLocation)
+    }
+
+    private func findZoomPreview(in view: UIView) -> DetailZoomContainerView? {
+        if let preview = view as? DetailZoomContainerView { return preview }
+        for child in view.subviews {
+            if let preview = findZoomPreview(in: child) { return preview }
+        }
+        return nil
+    }
+
     private func waitFor(
         _ message: String,
         timeout: Duration = .seconds(3),
@@ -916,6 +1158,16 @@ struct TapPickerTests {
             }
             try await Task.sleep(for: .milliseconds(25))
         }
+    }
+}
+
+@MainActor
+@Observable
+private final class PresentationStateBox {
+    var value: DetailPresentation
+
+    init(value: DetailPresentation) {
+        self.value = value
     }
 }
 

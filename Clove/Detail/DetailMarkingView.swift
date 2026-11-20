@@ -780,32 +780,42 @@ struct DetailMarkingView: View {
                     CloveMotion.slideTransition(
                         edge: .bottom, offset: 12, reduceMotion: reduceMotion))
             }
-            // The marking toolbar gets its own reserved bottom-right area beside the narrowed
-            // filmstrip, never over the image and never in the system side toolbar (#200, #227).
-            // The toolbar sibling is the one reservation: the strip's viewport narrows by its
-            // width, and the strip's content fills that viewport up to the toolbar (#237).
-            // The two regions share the photo stage's background, so no contrasting sidebar slab
-            // divides them.
-            if showsFilmstrip && chromeIsVisible {
-                HStack(alignment: .bottom, spacing: 0) {
-                    DetailFilmstrip(
-                        timeline: timeline,
-                        expandedGroup: expandedGroup,
-                        current: photo.id,
-                        thumbnails: browsing.thumbnails,
-                        openPhoto: openFilmstripPhoto,
-                        selectGroupPhoto: selectFilmstripGroupPhoto,
-                        expandGroup: expandFilmstripGroup,
-                        collapseGroup: collapseFilmstripGroup)
+            // The marking toolbar gets its own reserved bottom-right area inside the shared 70 pt
+            // bottom control band, never over the image and never in the system side toolbar
+            // (#200, #227). Both Photo Preview and Focus View anchor it with the same 16 pt
+            // trailing inset and vertical centering on the band so switching presentations keeps
+            // the capsule stationary. In Focus View, the toolbar sibling is the one reservation:
+            // its width (plus a 6 pt leading optical gap) narrows the filmstrip's viewport once,
+            // and the strip's content fills that viewport up to the toolbar (#237). The two
+            // regions share the photo stage's background, so no contrasting sidebar slab divides
+            // them.
+            if chromeIsVisible && (showsFilmstrip || isDuoExpanded) {
+                let markingLeadingGap: CGFloat = 6
+                let markingTrailingInset: CGFloat = 16
+                HStack(alignment: .center, spacing: 0) {
+                    if showsFilmstrip {
+                        DetailFilmstrip(
+                            timeline: timeline,
+                            expandedGroup: expandedGroup,
+                            current: photo.id,
+                            thumbnails: browsing.thumbnails,
+                            openPhoto: openFilmstripPhoto,
+                            selectGroupPhoto: selectFilmstripGroupPhoto,
+                            expandGroup: expandFilmstripGroup,
+                            collapseGroup: collapseFilmstripGroup
+                        )
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        Spacer(minLength: 0)
+                    }
                     if isDuoExpanded {
                         duoMarkingToolbar
+                            .padding(.leading, showsFilmstrip ? markingLeadingGap : 0)
+                            .padding(.trailing, markingTrailingInset)
+                            .layoutPriority(1)
                     }
                 }
-            } else if isDuoExpanded && chromeIsVisible {
-                duoMarkingToolbar
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                .frame(height: DetailFilmstrip.Metrics.standard.bandHeight)
             }
         }
         .animation(
