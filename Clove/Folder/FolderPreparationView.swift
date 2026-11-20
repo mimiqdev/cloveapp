@@ -206,6 +206,7 @@ struct FolderPreparationIndicator: View {
     let identifierPrefix: String
     var inListRow = false
     var usesCompactLayoutPadding = true
+    var usesFloatingBackdrop = false
     var presentTrigger: Int = 0
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -271,34 +272,93 @@ struct FolderPreparationIndicator: View {
 
     @ViewBuilder
     private var indicatorButton: some View {
-        let baseButton = Button {
-            presentedMode = presentationMode
-        } label: {
-            glyph
-                .frame(width: 14, height: 14)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-                .reportHeaderControlFrame(identifierPrefix)
-        }
-        .padding(.vertical, usesCompactLayoutPadding ? -11 : 0)
-        .padding(.leading, usesCompactLayoutPadding ? -9 : 0)
-        .padding(.trailing, usesCompactLayoutPadding ? -15 : 0)
-        .accessibilityLabel(AppLocalization.string("Folder preparation", language: language))
-        .accessibilityValue(
-            FolderPreparationAccessibility.indicatorAccessibilityValue(
-                for: status, language: language)
-        )
-        .accessibilityHint(
-            AppLocalization.string(
-                "Shows folder analysis and preview preparation details.", language: language)
-        )
-        .accessibilityIdentifier(identifierPrefix)
-
         let styledButton = Group {
-            if inListRow {
-                baseButton.buttonStyle(.borderless)
+            if usesFloatingBackdrop {
+                if #available(iOS 26.0, *) {
+                    Button {
+                        presentedMode = presentationMode
+                    } label: {
+                        glyph
+                            .frame(width: 14, height: 14)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Circle())
+                    .accessibilityLabel(
+                        AppLocalization.string("Folder preparation", language: language)
+                    )
+                    .accessibilityValue(
+                        FolderPreparationAccessibility.indicatorAccessibilityValue(
+                            for: status, language: language)
+                    )
+                    .accessibilityHint(
+                        AppLocalization.string(
+                            "Shows folder analysis and preview preparation details.",
+                            language: language)
+                    )
+                    .accessibilityIdentifier(identifierPrefix)
+                    .reportHeaderControlFrame(identifierPrefix)
+                } else {
+                    Button {
+                        presentedMode = presentationMode
+                    } label: {
+                        glyph
+                            .frame(width: 14, height: 14)
+                            .frame(width: 40, height: 40)
+                            .cloveGlass(in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                            .reportHeaderControlFrame(identifierPrefix)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        AppLocalization.string("Folder preparation", language: language)
+                    )
+                    .accessibilityValue(
+                        FolderPreparationAccessibility.indicatorAccessibilityValue(
+                            for: status, language: language)
+                    )
+                    .accessibilityHint(
+                        AppLocalization.string(
+                            "Shows folder analysis and preview preparation details.",
+                            language: language)
+                    )
+                    .accessibilityIdentifier(identifierPrefix)
+                }
             } else {
-                baseButton.buttonStyle(.plain)
+                let baseButton = Button {
+                    presentedMode = presentationMode
+                } label: {
+                    glyph
+                        .frame(width: 14, height: 14)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                        .reportHeaderControlFrame(identifierPrefix)
+                }
+                .padding(.vertical, usesCompactLayoutPadding ? -11 : 0)
+                .padding(.leading, usesCompactLayoutPadding ? -9 : 0)
+                .padding(.trailing, usesCompactLayoutPadding ? -15 : 0)
+                .accessibilityLabel(
+                    AppLocalization.string("Folder preparation", language: language)
+                )
+                .accessibilityValue(
+                    FolderPreparationAccessibility.indicatorAccessibilityValue(
+                        for: status, language: language)
+                )
+                .accessibilityHint(
+                    AppLocalization.string(
+                        "Shows folder analysis and preview preparation details.",
+                        language: language)
+                )
+                .accessibilityIdentifier(identifierPrefix)
+
+                if inListRow {
+                    baseButton.buttonStyle(.borderless)
+                } else {
+                    baseButton.buttonStyle(.plain)
+                }
             }
         }
 
