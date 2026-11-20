@@ -5,16 +5,29 @@ import SwiftUI
 struct SaveStatusIndicator: View {
     let browsing: BrowsingModel
     let identifierPrefix: String
+    var usesFloatingBackdrop = false
     @Environment(\.appLanguage) private var language
 
     var body: some View {
         if let situation = browsing.folderSituation {
-            Image(
+            let icon = Image(
                 systemName: situation == .driveDisconnected
                     ? "externaldrive.badge.xmark" : "lock.fill"
             )
-            .foregroundStyle(Color.clove.text.secondary)
-            .frame(width: 28, height: 24)
+            Group {
+                if usesFloatingBackdrop {
+                    icon
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(Color.clove.text.primary)
+                        .frame(width: 36, height: 36)
+                        .cloveGlass(in: Circle())
+                        .allowsHitTesting(false)
+                } else {
+                    icon
+                        .foregroundStyle(Color.clove.text.secondary)
+                        .frame(width: 28, height: 24)
+                }
+            }
             .accessibilityLabel(
                 AppLocalization.string(
                     situation == .driveDisconnected ? "Not connected" : "View only",

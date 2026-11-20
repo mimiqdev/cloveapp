@@ -1981,7 +1981,7 @@ struct DetailDisplayPresentationTests {
     }
 
     @Test
-    func expandedDuoFocusToggleLivesInPhotoHeaderWithoutDuplicatesAcrossPresentationsAndPoses()
+    func expandedDuoFocusToggleFloatsInPhotoViewportWithoutDuplicatesAcrossPresentationsAndPoses()
         async throws
     {
         guard #available(iOS 27.1, *) else { return }
@@ -2020,60 +2020,75 @@ struct DetailDisplayPresentationTests {
             window.rootViewController = nil
         }
 
-        // Photo Preview: expanded Duo reserves the compact 48pt photo-stage header (44pt control +
-        // 2pt vertical padding each side) above preview and beside the 30% grid, reclaiming 8pt vs
-        // the prior 56pt header while presenting focus overlays.
-        try await waitFor("Expanded Duo Photo Preview header did not settle") {
+        // Photo Preview: expanded Duo reclaims the top header space for the photo viewport and
+        // floats the focus toggle beside the viewport-pinned identity badge.
+        try await waitFor("Expanded Duo Photo Preview viewport overlay did not settle") {
             let preview = self.findPreview(in: window)
             return preview != nil
                 && self.findCollectionView(in: window) != nil
                 && source.delivered.contains(.screenRAW)
                 && self.findFocusControl(in: preview!) != nil
-                && headerFrames.frames["clove.detail.photoHeader"] != nil
+                && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                && headerFrames.frames["clove.detail.focusToggle"] != nil
         }
         let splitGrid = try #require(findCollectionView(in: window))
         let previewInSplit = try #require(findPreview(in: window))
         let splitGridFrame = splitGrid.convert(splitGrid.bounds, to: window)
         let splitPreviewFrame = previewInSplit.convert(previewInSplit.bounds, to: window)
-        let splitHeaderFrame = try #require(headerFrames.frames["clove.detail.photoHeader"])
+        let splitOverlayFrame = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
+        let splitFocusFrame = try #require(headerFrames.frames["clove.detail.focusToggle"])
+        #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
         #expect(splitPreviewFrame.minX >= splitGridFrame.maxX - 1)
-        #expect(abs(splitHeaderFrame.height - 48) <= 1.0)
-        #expect(abs(splitPreviewFrame.minY - splitHeaderFrame.maxY) <= 1.5)
+        #expect(abs(splitPreviewFrame.minY - splitGridFrame.minY) <= 4.0)
+        #expect(abs(splitOverlayFrame.minX - (splitPreviewFrame.minX + 16)) <= 1.5)
+        #expect(abs(splitOverlayFrame.minY - (splitPreviewFrame.minY + 12)) <= 1.5)
+        #expect(splitFocusFrame.minX >= splitOverlayFrame.maxX + 6)
+        #expect(abs(splitFocusFrame.minY - (splitPreviewFrame.minY + 12)) <= 1.5)
+        #expect(splitFocusFrame.width >= 44 && splitFocusFrame.height >= 44)
 
         browsing.showsFocusRegions = false
         try await waitFor("Focus controls hid when toggled Off in Photo Preview") {
             guard let preview = self.findPreview(in: window) else { return false }
             return self.findAllFocusControls(in: preview).isEmpty
         }
+        #expect(
+            sameFrame(previewInSplit.convert(previewInSplit.bounds, to: window), splitPreviewFrame))
         browsing.showsFocusRegions = true
         try await waitFor("Focus controls returned when toggled On in Photo Preview") {
             guard let preview = self.findPreview(in: window) else { return false }
             return self.findFocusControl(in: preview) != nil
         }
 
-        // Focus View: same 48pt compact header sits above preview without restarting analysis.
+        // Focus View: full-width photo viewport keeps the same upper-leading overlay without
+        // restarting analysis.
         let analyzesBeforeFocus = source.analyzeCalls.count
         presentationBox.value = .focus
-        try await waitFor("Expanded Duo Focus View header did not settle") {
+        try await waitFor("Expanded Duo Focus View viewport overlay did not settle") {
             let preview = self.findPreview(in: window)
             return preview != nil
                 && self.findCollectionView(in: window) == nil
                 && self.findFilmstripScrollView(in: window, excluding: preview!) != nil
                 && self.findFocusControl(in: preview!) != nil
-                && (headerFrames.frames["clove.detail.photoHeader"]?.minX
+                && (headerFrames.frames["clove.detail.photoCornerOverlay"]?.minX
                     ?? .greatestFiniteMagnitude)
-                    < splitHeaderFrame.minX - 40
+                    < splitOverlayFrame.minX - 40
         }
         #expect(source.analyzeCalls.count == analyzesBeforeFocus)
         let previewInFocus = try #require(findPreview(in: window))
         let focusPreviewFrame = previewInFocus.convert(previewInFocus.bounds, to: window)
-        let focusHeaderFrame = try #require(headerFrames.frames["clove.detail.photoHeader"])
-        #expect(abs(focusHeaderFrame.height - 48) <= 1.0)
-        #expect(abs(focusPreviewFrame.minY - focusHeaderFrame.maxY) <= 1.5)
+        let focusOverlayFrame = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
+        let focusToggleFrame = try #require(headerFrames.frames["clove.detail.focusToggle"])
+        #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
+        #expect(abs(focusPreviewFrame.minY - splitPreviewFrame.minY) <= 1.5)
         #expect(focusPreviewFrame.minX < splitPreviewFrame.minX)
+        #expect(abs(focusOverlayFrame.minX - (focusPreviewFrame.minX + 16)) <= 1.5)
+        #expect(abs(focusOverlayFrame.minY - (focusPreviewFrame.minY + 12)) <= 1.5)
+        #expect(focusToggleFrame.minX >= focusOverlayFrame.maxX + 6)
+        #expect(abs(focusToggleFrame.minY - (focusPreviewFrame.minY + 12)) <= 1.5)
 
-        // Pose transitions: Half-fold (no vertical toolbar) & Duo Cover remove the inline photo
-        // header cleanly; returning to Expanded Duo Open pose restores it without losing state.
+        // Pose transitions: Half-fold (no vertical toolbar) & Duo Cover remove the expanded
+        // viewport overlay cleanly; returning to Expanded Duo Open pose restores it without losing
+        // state.
         presentationBox.value = .photoPreview
         host.rootView = TestDuoPoseDetailHost(
             browsing: browsing,
@@ -2089,11 +2104,10 @@ struct DetailDisplayPresentationTests {
         .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
             headerFrames.frames = $0
         }
-        try await waitFor("Half-fold removed inline expanded photo header") {
-            guard let preview = self.findPreview(in: window),
-                self.findCollectionView(in: window) != nil
-            else { return false }
-            return preview.convert(preview.bounds, to: window).minY < splitPreviewFrame.minY - 12
+        try await waitFor("Half-fold removed expanded viewport overlay") {
+            self.findPreview(in: window) != nil
+                && self.findCollectionView(in: window) != nil
+                && headerFrames.frames["clove.detail.photoCornerOverlay"] == nil
         }
 
         host.rootView = TestDuoPoseDetailHost(
@@ -2115,6 +2129,7 @@ struct DetailDisplayPresentationTests {
             guard let preview = self.findPreview(in: window) else { return false }
             return self.findCollectionView(in: window) == nil
                 && self.findFilmstripScrollView(in: window, excluding: preview) != nil
+                && headerFrames.frames["clove.detail.photoCornerOverlay"] == nil
         }
 
         host.traitOverrides.horizontalSizeClass = .regular
@@ -2132,9 +2147,11 @@ struct DetailDisplayPresentationTests {
         .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
             headerFrames.frames = $0
         }
-        try await waitFor("Expanded Duo Open pose restored inline photo header and overlays") {
+        try await waitFor("Expanded Duo Open pose restored viewport overlay and focus controls") {
             guard let preview = self.findPreview(in: window),
-                self.findCollectionView(in: window) != nil
+                self.findCollectionView(in: window) != nil,
+                headerFrames.frames["clove.detail.photoCornerOverlay"] != nil,
+                headerFrames.frames["clove.detail.focusToggle"] != nil
             else { return false }
             return abs(preview.convert(preview.bounds, to: window).minY - splitPreviewFrame.minY)
                 <= 1.5
@@ -2159,6 +2176,7 @@ struct DetailDisplayPresentationTests {
         browsing.openPhoto(target.id)
 
         let presentationBox = TestPresentationBox(value: initialPresentation)
+        let overlayFrames = DetailFrameBox()
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
         let host = UIHostingController(
@@ -2177,7 +2195,10 @@ struct DetailDisplayPresentationTests {
             }
             .environment(store)
             .environment(\.isDuoExpanded, true)
-            .environment(\.usesSystemBrowsingToolbar, true))
+            .environment(\.usesSystemBrowsingToolbar, true)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                overlayFrames.frames = $0
+            })
         host.traitOverrides.horizontalSizeClass = .regular
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -2204,6 +2225,11 @@ struct DetailDisplayPresentationTests {
 
         let preview = try #require(findPreview(in: window))
         let imageRect = preview.imageRectAtFit()
+        if let cornerOverlay = overlayFrames.frames["clove.detail.photoCornerOverlay"] {
+            let cornerCenterInWindow = CGPoint(x: cornerOverlay.midX, y: cornerOverlay.midY)
+            let hitThroughCorner = window.hitTest(cornerCenterInWindow, with: nil)
+            #expect(hitThroughCorner?.isDescendant(of: preview) == true)
+        }
         let leftBlank = CGPoint(x: imageRect.minX * 0.3, y: preview.bounds.midY)
         let rightBlank = CGPoint(
             x: imageRect.maxX + (preview.bounds.maxX - imageRect.maxX) * 0.7,
@@ -3600,7 +3626,7 @@ struct DetailDisplayPresentationTests {
 
     @Test
     func
-        expandedDuoIconHeaderAndCornerOverlayPreserveExtensionsAndAdaptAcrossModesAndSizes()
+        expandedDuoViewportOverlayPreservesExtensionsAdaptsAcrossModesSizesAndRejectGlyph()
         async throws
     {
         guard #available(iOS 27.1, *) else { return }
@@ -3707,7 +3733,7 @@ struct DetailDisplayPresentationTests {
                         headerFrames: headerFrames, headerCounts: headerCounts))
                 host.traitOverrides.horizontalSizeClass = .regular
                 host.additionalSafeAreaInsets = UIEdgeInsets(
-                    top: 0, left: 0, bottom: 0, right: 89.5)
+                    top: 16, left: 0, bottom: 0, right: 89.5)
                 window.rootViewController = host
                 window.makeKeyAndVisible()
                 return host
@@ -3720,44 +3746,47 @@ struct DetailDisplayPresentationTests {
             }
 
             // 1. Photo Preview on long filename in Timeline:
-            // - Icon-only 48 pt top header (focusToggle only during normal access)
-            // - Single two-line corner overlay inside the visible photo, inset 10 pt
+            // - No reserved 48 pt top header; previewArea starts at the top safe area
+            // - Identity badge pinned at (16, 12) inside viewport, focus toggle floating beside it
             // - Long filename middle-truncates while preserving full .ARW extension width
+            // - Top-trailing reject glyph stays clear of the floating controls
             browsing.openPhoto(library.identity(longStem))
-            try await waitFor("Photo Preview corner overlay did not lay out") {
-                headerFrames.frames["clove.detail.photoHeader"] != nil
-                    && headerFrames.frames["clove.detail.focusToggle"] != nil
+            browsing.apply(.rating(.rejected), to: library.identity(longStem))
+            try await waitFor("Photo Preview viewport overlay did not lay out") {
+                headerFrames.frames["clove.detail.focusToggle"] != nil
                     && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
                     && headerFrames.frames["clove.detail.fileName"] != nil
                     && headerFrames.frames["clove.detail.fileName.extension"] != nil
                     && headerFrames.frames["clove.detail.zoom"] != nil
+                    && headerFrames.frames["clove.detail.rejectGlyph"] != nil
                     && self.findPreview(in: window) != nil
                     && self.findCollectionView(in: window) != nil
             }
 
             let previewPhotoPreview = try #require(findPreview(in: window))
             let splitGrid = try #require(findCollectionView(in: window))
-            let headerPP = try #require(headerFrames.frames["clove.detail.photoHeader"])
             let focusPP = try #require(headerFrames.frames["clove.detail.focusToggle"])
             let overlayPP = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let filePP = try #require(headerFrames.frames["clove.detail.fileName"])
             let extPP = try #require(headerFrames.frames["clove.detail.fileName.extension"])
             let zoomPP = try #require(headerFrames.frames["clove.detail.zoom"])
+            let rejectPP = try #require(headerFrames.frames["clove.detail.rejectGlyph"])
             let stagePreviewRect = previewPhotoPreview.convert(
                 previewPhotoPreview.bounds, to: window)
             let splitGridRect = splitGrid.convert(splitGrid.bounds, to: window)
-            let photoRectPP = try #require(fittedPhotoRect(in: previewPhotoPreview, window: window))
 
-            #expect(abs(headerPP.height - 48) <= 1.0)
-            #expect(abs(stagePreviewRect.minY - headerPP.maxY) <= 1.0)
-            #expect(headerPP.minX >= splitGridRect.maxX - 1)
+            #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
+            #expect(stagePreviewRect.minX >= splitGridRect.maxX - 1)
+            #expect(stagePreviewRect.minY >= 15.5)
+            #expect(abs(overlayPP.minX - (stagePreviewRect.minX + 16)) <= 1.5)
+            #expect(abs(overlayPP.minY - (stagePreviewRect.minY + 12)) <= 1.5)
             #expect(focusPP.width >= 44 && focusPP.height >= 44)
+            #expect(focusPP.minX >= overlayPP.maxX + 6)
+            #expect(abs(focusPP.minY - (stagePreviewRect.minY + 12)) <= 1.5)
+            #expect(!focusPP.intersects(rejectPP))
+            #expect(focusPP.maxX <= rejectPP.minX - 4)
             #expect(headerFrames.frames["clove.detail.saveState"] == nil)
-            #expect(overlayPP.minY >= headerPP.maxY + 9)
-            #expect(abs(overlayPP.minX - (photoRectPP.minX + 10)) <= 1.5)
-            #expect(abs(overlayPP.minY - (photoRectPP.minY + 10)) <= 1.5)
             #expect(filePP.maxY <= zoomPP.minY + 1)
-            #expect(overlayPP.maxX <= photoRectPP.maxX - 9)
             #expect(filePP.width < fullLongWidth)
             #expect(extPP.width >= fullExtensionWidth - 2)
             #expect(extPP.maxX <= filePP.maxX + 1)
@@ -3770,96 +3799,97 @@ struct DetailDisplayPresentationTests {
             }
 
             // 2. Narrower Photo Preview width + drive loss:
-            // - SaveStatusIndicator appears in icon-only header beside focusToggle
-            // - FolderSaveBanner appears below header while corner overlay shifts cleanly inside photo
+            // - SaveStatusIndicator floats beside focusToggle inside the viewport
+            // - FolderSaveBanner appears above previewArea while overlay stays pinned at (16, 12)
             window.frame = CGRect(x: 0, y: 0, width: 760, height: 680)
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
             library.reportDriveLoss()
-            try await waitFor("SaveStatusIndicator did not appear in icon-only header") {
+            try await waitFor("SaveStatusIndicator did not appear in viewport overlay") {
                 guard let preview = self.findPreview(in: window),
-                    let photoRect = self.fittedPhotoRect(in: preview, window: window),
                     let overlay = headerFrames.frames["clove.detail.photoCornerOverlay"]
                 else { return false }
+                let stageRect = preview.convert(preview.bounds, to: window)
                 return headerFrames.frames["clove.detail.saveState"] != nil
                     && headerFrames.frames["clove.detail.saveStatus.failure"] != nil
-                    && abs(overlay.minX - (photoRect.minX + 10)) <= 1.5
-                    && abs(overlay.minY - (photoRect.minY + 10)) <= 1.5
+                    && abs(overlay.minX - (stageRect.minX + 16)) <= 1.5
+                    && abs(overlay.minY - (stageRect.minY + 12)) <= 1.5
             }
-            let narrowHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
             let narrowFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
             let narrowSave = try #require(headerFrames.frames["clove.detail.saveState"])
             let narrowBanner = try #require(
                 headerFrames.frames["clove.detail.saveStatus.failure"])
             let narrowOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let narrowExt = try #require(headerFrames.frames["clove.detail.fileName.extension"])
+            let narrowReject = try #require(headerFrames.frames["clove.detail.rejectGlyph"])
             let narrowPreview = try #require(findPreview(in: window))
-            let narrowPhotoRect = try #require(fittedPhotoRect(in: narrowPreview, window: window))
-            #expect(abs(narrowHeader.height - 48) <= 1.0)
+            let narrowStageRect = narrowPreview.convert(narrowPreview.bounds, to: window)
+            #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
+            #expect(narrowFocus.minX >= narrowOverlay.maxX + 6)
             #expect(narrowFocus.maxX < narrowSave.minX)
-            #expect(narrowSave.minY >= narrowHeader.minY - 1)
-            #expect(narrowSave.maxY <= narrowHeader.maxY + 1)
-            #expect(narrowSave.maxX <= narrowHeader.maxX - 15)
-            #expect(narrowBanner.minY >= narrowHeader.maxY - 1)
-            #expect(abs(narrowOverlay.minX - (narrowPhotoRect.minX + 10)) <= 1.5)
-            #expect(abs(narrowOverlay.minY - (narrowPhotoRect.minY + 10)) <= 1.5)
+            #expect(!narrowSave.intersects(narrowReject))
+            #expect(narrowSave.maxX <= narrowReject.minX - 4)
+            #expect(narrowStageRect.minY >= narrowBanner.maxY - 1)
+            #expect(abs(narrowOverlay.minX - (narrowStageRect.minX + 16)) <= 1.5)
+            #expect(abs(narrowOverlay.minY - (narrowStageRect.minY + 12)) <= 1.5)
             #expect(narrowExt.width >= fullExtensionWidth - 2)
 
             // 3. Switch to Focus View + Group Focus on shorter filename:
-            // - Icon-only header starts at leading edge of full photo stage
-            // - Corner overlay keeps single Group Focus identity inside visible photo
+            // - Overlay stays pinned to (16, 12) of the full-width viewport
             window.frame = CGRect(x: 0, y: 0, width: 920, height: 680)
             browsing.openGroup(group.id, on: library.identity(shortStem))
             presentationBox.value = .focus
-            try await waitFor("Focus View header and corner overlay did not settle") {
+            try await waitFor("Focus View viewport overlay did not settle") {
                 guard let preview = self.findPreview(in: window),
-                    let header = headerFrames.frames["clove.detail.photoHeader"],
-                    let overlay = headerFrames.frames["clove.detail.photoCornerOverlay"],
-                    let photoRect = self.fittedPhotoRect(in: preview, window: window)
+                    let overlay = headerFrames.frames["clove.detail.photoCornerOverlay"]
                 else { return false }
+                let stageRect = preview.convert(preview.bounds, to: window)
                 return self.findCollectionView(in: window) == nil
                     && self.findFilmstripScrollView(in: window, excluding: preview) != nil
-                    && header.minX < headerPP.minX - 40
-                    && abs(overlay.minX - (photoRect.minX + 10)) <= 1.5
-                    && abs(overlay.minY - (photoRect.minY + 10)) <= 1.5
+                    && overlay.minX < overlayPP.minX - 40
+                    && abs(overlay.minX - (stageRect.minX + 16)) <= 1.5
+                    && abs(overlay.minY - (stageRect.minY + 12)) <= 1.5
             }
-            let focusHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
             let focusToggleInFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
             let focusSave = try #require(headerFrames.frames["clove.detail.saveState"])
             let focusOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let focusPreview = try #require(findPreview(in: window))
-            let focusPhotoRect = try #require(fittedPhotoRect(in: focusPreview, window: window))
-            #expect(abs(focusHeader.height - 48) <= 1.0)
-            #expect(focusHeader.minX < headerPP.minX - 40)
+            let focusStageRect = focusPreview.convert(focusPreview.bounds, to: window)
+            #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
+            #expect(focusOverlay.minX < overlayPP.minX - 40)
+            #expect(focusToggleInFocus.minX >= focusOverlay.maxX + 6)
             #expect(focusToggleInFocus.maxX < focusSave.minX)
-            #expect(focusSave.maxX < focusHeader.maxX - 120)
-            #expect(abs(focusOverlay.minX - (focusPhotoRect.minX + 10)) <= 1.5)
-            #expect(abs(focusOverlay.minY - (focusPhotoRect.minY + 10)) <= 1.5)
+            #expect(focusSave.maxX < focusStageRect.maxX - 120)
+            #expect(abs(focusOverlay.minX - (focusStageRect.minX + 16)) <= 1.5)
+            #expect(abs(focusOverlay.minY - (focusStageRect.minY + 12)) <= 1.5)
             #expect(headerCounts.counts["clove.detail.fileName"] == 1)
             #expect(headerCounts.counts["clove.detail.zoom"] == 1)
 
-            // 4. Accessibility Dynamic Type size: corner overlay scales cleanly without clipping,
-            // while icon-only header stays 48 pt with >= 44×44 focus toggle.
+            // 4. Accessibility Dynamic Type size: viewport identity badge scales cleanly without
+            // clipping while keeping >= 44×44 focus toggle and viewport insets intact.
             let standardOverlayHeight = focusOverlay.height
             _ = mountHost(dynamicTypeSize: .accessibility2)
             presentationBox.value = .photoPreview
-            try await waitFor("Accessibility Dynamic Type corner overlay did not scale") {
+            try await waitFor("Accessibility Dynamic Type viewport overlay did not scale") {
                 guard let overlay = headerFrames.frames["clove.detail.photoCornerOverlay"] else {
                     return false
                 }
                 return overlay.height > standardOverlayHeight + 6
                     && self.findCollectionView(in: window) != nil
             }
-            let a11yHeader = try #require(headerFrames.frames["clove.detail.photoHeader"])
             let a11yFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
             let a11yOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let a11yFile = try #require(headerFrames.frames["clove.detail.fileName"])
             let a11yZoom = try #require(headerFrames.frames["clove.detail.zoom"])
             let a11yPreview = try #require(findPreview(in: window))
-            let a11yPhotoRect = try #require(fittedPhotoRect(in: a11yPreview, window: window))
-            #expect(abs(a11yHeader.height - 48) <= 1.0)
+            let a11yStageRect = a11yPreview.convert(a11yPreview.bounds, to: window)
+            #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
+            #expect(abs(a11yOverlay.minX - (a11yStageRect.minX + 16)) <= 1.5)
+            #expect(abs(a11yOverlay.minY - (a11yStageRect.minY + 12)) <= 1.5)
             #expect(a11yFocus.width >= 44 && a11yFocus.height >= 44)
-            #expect(a11yOverlay.maxX <= a11yPhotoRect.maxX - 9)
+            #expect(a11yFocus.minX >= a11yOverlay.maxX + 6)
+            #expect(abs(a11yFocus.minY - (a11yStageRect.minY + 12)) <= 1.5)
+            #expect(a11yFocus.maxX <= a11yStageRect.maxX - 40)
             #expect(a11yFile.maxY <= a11yZoom.minY + 1)
             #expect(a11yZoom.maxY <= a11yOverlay.maxY)
         }
@@ -4024,23 +4054,25 @@ struct DetailDisplayPresentationTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func expandedDuoCornerOverlayFollowsPortraitAndLandscapeGeometryZoomPanAndChromeToggle(
-        portrait: Bool
+    @Test(arguments: [DetailPresentation.photoPreview, DetailPresentation.focus])
+    func expandedDuoViewportOverlayStaysPinnedAcrossAspectSwitchesZoomPanAndReclaimsTopSpace(
+        initialPresentation: DetailPresentation
     ) async throws {
         guard #available(iOS 27.1, *) else { return }
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
-        let source = AspectTestDetailImages(portrait: portrait)
         let store = SettingsStore.sample
         store.markGestureGuideSeen()
         let browsing = BrowsingModel(library: TestLibrary.sample())
         browsing.openFolder()
         try await waitFor("folder open") { !browsing.isFolderOpening }
-        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02680" }?.id)
-        browsing.openPhoto(target)
+        let landscapeID = try #require(browsing.photos.first { $0.id.stem == "mmq02680" }?.id)
+        let portraitID = try #require(browsing.photos.first { $0.id.stem == "mmq02681" }?.id)
+        let source = AspectByPhotoDetailImages(portraitPhotos: [portraitID])
+        browsing.openPhoto(landscapeID)
 
-        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let presentationBox = TestPresentationBox(value: initialPresentation)
         let framesBox = DetailFrameBox()
+        let paneFramesBox = DetailFrameBox()
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 920, height: 700)
         let host = UIHostingController(
@@ -4058,6 +4090,9 @@ struct DetailDisplayPresentationTests {
             )
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 framesBox.frames = $0
+            }
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                paneFramesBox.frames = $0
             })
         host.traitOverrides.horizontalSizeClass = .regular
         window.rootViewController = host
@@ -4067,41 +4102,73 @@ struct DetailDisplayPresentationTests {
             window.rootViewController = nil
         }
 
-        try await waitFor("Aspect photo and corner overlay settled") {
-            guard source.delivered,
+        let paneKey =
+            initialPresentation == .photoPreview ? "clove.duo.photoPreview" : "clove.duo.focus"
+        try await waitFor("Landscape photo and viewport overlay settled") {
+            guard source.deliveredPhotos.contains(landscapeID),
                 let preview = self.findPreview(in: window),
-                let overlay = framesBox.frames["clove.detail.photoCornerOverlay"]
+                let overlay = framesBox.frames["clove.detail.photoCornerOverlay"],
+                framesBox.frames["clove.detail.focusToggle"] != nil,
+                paneFramesBox.frames[paneKey] != nil
             else { return false }
             let fit = preview.imageRectAtFit()
-            let fitMatches = portrait ? fit.height > fit.width : fit.width > fit.height
-            let fitInWindow = preview.convert(fit, to: window)
-            return fitMatches
-                && abs(overlay.minX - (fitInWindow.minX + 10)) <= 1.5
-                && abs(overlay.minY - (fitInWindow.minY + 10)) <= 1.5
+            let stageInWindow = preview.convert(preview.bounds, to: window)
+            let layoutMatches =
+                initialPresentation == .photoPreview
+                ? self.findCollectionView(in: window) != nil
+                : self.findFilmstripScrollView(in: window, excluding: preview) != nil
+            return layoutMatches
+                && fit.width > fit.height
+                && abs(overlay.minX - (stageInWindow.minX + 16)) <= 1.5
+                && abs(overlay.minY - (stageInWindow.minY + 12)) <= 1.5
         }
 
         let preview = try #require(findPreview(in: window))
-        let headerFrame = try #require(framesBox.frames["clove.detail.photoHeader"])
-        let previewFrameAtFit = preview.convert(preview.bounds, to: window)
-        let fitRect = preview.imageRectAtFit()
-        let fitInWindow = preview.convert(fitRect, to: window)
-        let overlayAtFit = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let duoPaneFrame = try #require(paneFramesBox.frames[paneKey])
+        let stageAtLandscape = preview.convert(preview.bounds, to: window)
+        let landscapeFit = preview.imageRectAtFit()
+        let landscapeOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let landscapeFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
 
-        if portrait {
-            // Portrait photo has pillarbox margins: overlay starts 10 pt inside imageRectAtFit, not preview.minX.
-            #expect(fitRect.minX > 30)
-            #expect(overlayAtFit.minX > previewFrameAtFit.minX + 30)
-        } else {
-            // Wide landscape photo has letterbox margins: overlay starts 10 pt inside imageRectAtFit, not preview.minY.
-            #expect(fitRect.minY > 30)
-            #expect(overlayAtFit.minY > previewFrameAtFit.minY + 30)
+        // No reserved 48 pt top header: usable stage starts at the top of the Duo photo pane and
+        // takes the full usable height above the 70 pt bottom review/capsule band.
+        #expect(framesBox.frames["clove.detail.photoHeader"] == nil)
+        #expect(abs(stageAtLandscape.minY - duoPaneFrame.minY) <= 1.5)
+        #expect(abs(stageAtLandscape.height - (duoPaneFrame.height - 70)) <= 1.5)
+        // Wide landscape maximizes usable width without cropping and still keeps the badge pinned
+        // to the viewport corner rather than the letterboxed image top.
+        #expect(landscapeFit.minY > 30)
+        #expect(abs(landscapeFit.width - stageAtLandscape.width) <= 1.5)
+        #expect(abs(landscapeOverlay.minX - (stageAtLandscape.minX + 16)) <= 1.5)
+        #expect(abs(landscapeOverlay.minY - (stageAtLandscape.minY + 12)) <= 1.5)
+        #expect(landscapeOverlay.minY < stageAtLandscape.minY + landscapeFit.minY)
+        #expect(landscapeFocus.minX >= landscapeOverlay.maxX + 6)
+        #expect(abs(landscapeFocus.minY - (stageAtLandscape.minY + 12)) <= 1.5)
+
+        // Switch to portrait photo: portrait fills the full recovered stage height while the
+        // identity badge and focus toggle remain pinned at the exact same viewport coordinates.
+        browsing.openPhoto(portraitID)
+        try await waitFor("Portrait photo settled") {
+            guard source.deliveredPhotos.contains(portraitID) else { return false }
+            let fit = preview.imageRectAtFit()
+            return fit.height > fit.width && abs(fit.height - preview.bounds.height) <= 1.5
         }
-        #expect(abs(overlayAtFit.minX - (fitInWindow.minX + 10)) <= 1.5)
-        #expect(abs(overlayAtFit.minY - (fitInWindow.minY + 10)) <= 1.5)
+        let stageAtPortrait = preview.convert(preview.bounds, to: window)
+        let portraitFit = preview.imageRectAtFit()
+        let portraitOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let portraitFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
 
+        #expect(sameFrame(stageAtPortrait, stageAtLandscape))
+        #expect(portraitFit.minX > 30)
+        #expect(abs(portraitFit.height - stageAtPortrait.height) <= 1.5)
+        #expect(abs(portraitFit.height - (duoPaneFrame.height - 70)) <= 1.5)
+        #expect(abs(portraitOverlay.minX - landscapeOverlay.minX) <= 1.0)
+        #expect(abs(portraitOverlay.minY - landscapeOverlay.minY) <= 1.0)
+        #expect(abs(portraitFocus.minX - landscapeFocus.minX) <= 2.0)
+        #expect(abs(portraitFocus.minY - landscapeFocus.minY) <= 1.0)
+
+        // Zoom to 100%, pan, and simulate rubber-band overscroll: viewport coordinates never drift.
         let zoomWidthAtFit = try #require(framesBox.frames["clove.detail.zoom"]).width
-
-        // Zoom to 100%, pan, and simulate rubber-band overscroll: corner overlay follows live visible crop.
         preview.onDoubleTap?(.center)
         try await waitFor("zoom to 100% settled") {
             guard let zoomFrame = framesBox.frames["clove.detail.zoom"] else { return false }
@@ -4111,56 +4178,200 @@ struct DetailDisplayPresentationTests {
 
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         scroll.setContentOffset(CGPoint(x: -28, y: -36), animated: false)
-        try await waitFor("corner overlay tracked rubber-band visible crop") {
-            guard let visible = preview.currentVisiblePhotoRect(),
-                let overlay = framesBox.frames["clove.detail.photoCornerOverlay"]
-            else { return false }
-            let visibleInWindow = preview.convert(visible, to: window)
-            return visible.minY >= 20
-                && abs(overlay.minX - (visibleInWindow.minX + 10)) <= 1.5
-                && abs(overlay.minY - (visibleInWindow.minY + 10)) <= 1.5
-        }
+        try await Task.sleep(for: .milliseconds(150))
 
-        // Return to fit and toggle chrome off -> overlay disappears without resizing header or shifting photo top.
+        let zoomedOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let zoomedFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
+        #expect(abs(zoomedOverlay.minX - portraitOverlay.minX) <= 1.0)
+        #expect(abs(zoomedOverlay.minY - portraitOverlay.minY) <= 1.0)
+        #expect(abs(zoomedFocus.minX - portraitFocus.minX) <= 1.0)
+        #expect(abs(zoomedFocus.minY - portraitFocus.minY) <= 1.0)
+
+        // Return to fit and toggle top overlay status: fitted photo and stage stay invariant.
         preview.onDoubleTap?(.center)
         try await waitFor("returned to fit") { !preview.isZoomed }
-        try await Task.sleep(for: .milliseconds(250))
+        try await Task.sleep(for: .milliseconds(200))
 
-        // Switch to Focus View with chrome toggle to verify overlay hides and restores cleanly.
-        presentationBox.value = .focus
-        try await waitFor("Focus View settled") {
-            guard let currentPreview = self.findPreview(in: window) else { return false }
-            return self.findFilmstripScrollView(in: window, excluding: currentPreview) != nil
-                && framesBox.frames["clove.detail.photoCornerOverlay"] != nil
-        }
-        let fitBeforeHide = preview.imageRectAtFit()
-        let previewMinYBeforeHide = preview.convert(preview.bounds, to: window).minY
-        let headerHeightBeforeHide = try #require(framesBox.frames["clove.detail.photoHeader"])
-            .height
+        let fitBeforeToggle = preview.imageRectAtFit()
+        browsing.showsFocusRegions = false
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(sameFrame(preview.imageRectAtFit(), fitBeforeToggle))
+        browsing.showsFocusRegions = true
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(sameFrame(preview.imageRectAtFit(), fitBeforeToggle))
 
+        // Chrome toggle hides the identity badge and restores it at the exact same coordinates
+        // without changing the fitted photo on restore.
         preview.onChromeToggle?()
-        try await waitFor("corner overlay hid with chrome") {
+        try await waitFor("identity overlay hid with chrome") {
             framesBox.frames["clove.detail.photoCornerOverlay"] == nil
                 && framesBox.frames["clove.detail.fileName"] == nil
                 && framesBox.frames["clove.detail.zoom"] == nil
+                && framesBox.frames["clove.detail.focusToggle"] != nil
         }
-        let headerAfterHide = try #require(framesBox.frames["clove.detail.photoHeader"])
-        #expect(abs(headerAfterHide.height - headerHeightBeforeHide) <= 0.5)
-        #expect(
-            abs(preview.convert(preview.bounds, to: window).minY - previewMinYBeforeHide) <= 0.5)
-        #expect(abs(headerFrame.height - 48) <= 1.0)
 
         preview.onChromeToggle?()
-        try await waitFor("corner overlay restored with chrome") {
-            framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+        try await waitFor("identity overlay restored with chrome") {
+            let currentFit = preview.imageRectAtFit()
+            return framesBox.frames["clove.detail.photoCornerOverlay"] != nil
                 && framesBox.frames["clove.detail.fileName"] != nil
                 && framesBox.frames["clove.detail.zoom"] != nil
+                && abs(currentFit.height - fitBeforeToggle.height) <= 1.0
         }
+        let restoredOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        #expect(abs(restoredOverlay.minX - portraitOverlay.minX) <= 1.0)
+        #expect(abs(restoredOverlay.minY - portraitOverlay.minY) <= 1.0)
         let fitAfterRestore = preview.imageRectAtFit()
-        #expect(abs(fitAfterRestore.minX - fitBeforeHide.minX) <= 1.0)
-        #expect(abs(fitAfterRestore.minY - fitBeforeHide.minY) <= 1.0)
-        #expect(abs(fitAfterRestore.width - fitBeforeHide.width) <= 1.0)
-        #expect(abs(fitAfterRestore.height - fitBeforeHide.height) <= 1.0)
+        #expect(abs(fitAfterRestore.minX - fitBeforeToggle.minX) <= 1.0)
+        #expect(abs(fitAfterRestore.minY - fitBeforeToggle.minY) <= 1.0)
+        #expect(abs(fitAfterRestore.width - fitBeforeToggle.width) <= 1.0)
+        #expect(abs(fitAfterRestore.height - fitBeforeToggle.height) <= 1.0)
+    }
+
+    @Test
+    func expandedDuoViewportOverlayRemainsStableAcrossLoadingPlaceholderErrorAndContrast()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder open") { !browsing.isFolderOpening }
+        let loadingID = browsing.photos[2].id
+        let unavailableID = browsing.photos[3].id
+        let deferredID = browsing.photos[4].id
+        let source = StateControlledDetailImages(
+            heldPhoto: loadingID,
+            unavailablePhoto: unavailableID,
+            deferredPhoto: deferredID)
+        browsing.openPhoto(loadingID)
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let framesBox = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 920, height: 680)
+        let host = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: source,
+                presentation: presentationBox,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: true,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .dark,
+                settingsStore: store
+            )
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                framesBox.frames = $0
+            })
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            source.releaseHeld()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // 1. Loading state (before placeholder or image arrives): badge & focus toggle already sit
+        // at the exact viewport inset.
+        try await waitFor("loading state viewport overlay did not appear") {
+            self.findPreview(in: window) != nil
+                && framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+                && framesBox.frames["clove.detail.focusToggle"] != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let stageRect = preview.convert(preview.bounds, to: window)
+        let loadingOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let loadingFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
+        #expect(abs(loadingOverlay.minX - (stageRect.minX + 16)) <= 1.5)
+        #expect(abs(loadingOverlay.minY - (stageRect.minY + 12)) <= 1.5)
+        #expect(loadingFocus.minX >= loadingOverlay.maxX + 6)
+
+        // 2. Loaded state: coordinates remain identical.
+        source.releaseHeld()
+        try await waitFor("loaded image did not arrive") {
+            source.deliveredPhotos.contains(loadingID)
+        }
+        let loadedOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let loadedFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
+        #expect(abs(loadedOverlay.minX - loadingOverlay.minX) <= 1.0)
+        #expect(abs(loadedOverlay.minY - loadingOverlay.minY) <= 1.0)
+        #expect(abs(loadedFocus.minX - loadingFocus.minX) <= 1.0)
+        #expect(abs(loadedFocus.minY - loadingFocus.minY) <= 1.0)
+
+        // 3. Unavailable & deferred error states: overlay remains pinned and clear of error copy.
+        for errorID in [unavailableID, deferredID] {
+            browsing.openPhoto(errorID)
+            try await waitFor("error state did not appear") {
+                framesBox.frames["clove.detail.unavailable"] != nil
+            }
+            let errorFrame = try #require(framesBox.frames["clove.detail.unavailable"])
+            let errorOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+            let errorFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
+            #expect(abs(errorOverlay.minX - loadingOverlay.minX) <= 1.0)
+            #expect(abs(errorOverlay.minY - loadingOverlay.minY) <= 1.0)
+            #expect(abs(errorFocus.minY - loadingFocus.minY) <= 1.0)
+            #expect(!errorFrame.intersects(errorOverlay))
+            #expect(!errorFrame.intersects(errorFocus))
+        }
+
+        // 4. Contrast check across Light & Dark themes on bright white, pure black, and stage.
+        let library = TestLibrary.forLaunch(
+            environment: [
+                TestLibrary.launchVariable: "1",
+                TestLibrary.preparationVariable: "preparing",
+            ])
+        let contrastBrowsing = BrowsingModel(library: library)
+        contrastBrowsing.openFolder()
+        let lostLibrary = ControlledPhotoLibrary(rejected: [], stems: ["MMQ02680"])
+        let lostBrowsing = BrowsingModel(library: lostLibrary)
+        lostBrowsing.openFolder()
+        lostLibrary.reportScanFinished()
+        lostLibrary.reportDriveLoss()
+        try await waitFor("lost browsing situation did not report") {
+            lostBrowsing.folderSituation != nil
+        }
+
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            let backgrounds: [Color] = [.white, .black, theme.tokens.stage.color]
+            for bg in backgrounds {
+                let blank = ImageRenderer(
+                    content: bg.frame(width: 220, height: 64)
+                )
+                blank.scale = 1
+                let rendered = ImageRenderer(
+                    content: ZStack(alignment: .leading) {
+                        bg
+                        HStack(spacing: 8) {
+                            DetailPhotoCornerOverlay(
+                                fileName: "MMQ02680.ARW",
+                                positionText: "1 / 36",
+                                isGroupFocus: false,
+                                zoomText: nil,
+                                language: .english)
+                            SaveStatusIndicator(
+                                browsing: lostBrowsing,
+                                identifierPrefix: "clove.detail.saveState",
+                                usesFloatingBackdrop: true)
+                        }
+                        .padding(.horizontal, 8)
+                    }
+                    .frame(width: 220, height: 64)
+                    .environment(\.cloveTheme, theme)
+                )
+                rendered.scale = 1
+                let blankImage = try #require(blank.cgImage)
+                let overlayImage = try #require(rendered.cgImage)
+                #expect(
+                    UIImage(cgImage: overlayImage).pngData()
+                        != UIImage(cgImage: blankImage).pngData())
+            }
+        }
     }
 
     @Test
@@ -4211,6 +4422,7 @@ struct DetailDisplayPresentationTests {
         try await waitFor("corner overlay, focus region, indicators, and limitation settled") {
             guard let preview = self.findPreview(in: window) else { return false }
             return framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+                && framesBox.frames["clove.detail.focusToggle"] != nil
                 && self.findFocusControl(in: preview) != nil
                 && framesBox.frames["clove.detail.focusIndicators"] != nil
                 && framesBox.frames["clove.detail.limitation"] != nil
@@ -4218,22 +4430,43 @@ struct DetailDisplayPresentationTests {
 
         let preview = try #require(findPreview(in: window))
         let cornerOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
+        let focusToggleFrame = try #require(framesBox.frames["clove.detail.focusToggle"])
         let indicatorsFrame = try #require(framesBox.frames["clove.detail.focusIndicators"])
         let limitationFrame = try #require(framesBox.frames["clove.detail.limitation"])
 
-        // Passive indicators and limitation note stack cleanly below the corner overlay without overlap.
+        // Passive indicators and limitation note stack cleanly below the top row without overlap.
+        #expect(!cornerOverlay.intersects(focusToggleFrame))
         #expect(!cornerOverlay.intersects(indicatorsFrame))
-        #expect(indicatorsFrame.minY >= cornerOverlay.maxY + 4)
+        #expect(!focusToggleFrame.intersects(indicatorsFrame))
+        #expect(indicatorsFrame.minY >= max(cornerOverlay.maxY, focusToggleFrame.maxY) + 4)
         #expect(!indicatorsFrame.intersects(limitationFrame))
         #expect(limitationFrame.minY >= indicatorsFrame.maxY + 4)
 
         // Focus region placed under the upper-leading corner (x=0.08, y=0.08) still receives hits
-        // right through the passive corner overlay.
+        // right through the passive corner overlay, while passive indicators, limitation note, and
+        // empty area pass through to the preview and the floating focus toggle receives its own tap.
         let cornerRegion = try #require(findFocusControl(in: preview))
         let regionCenterInWindow = cornerRegion.convert(
             CGPoint(x: cornerRegion.bounds.midX, y: cornerRegion.bounds.midY), to: window)
         let hitView = window.hitTest(regionCenterInWindow, with: nil)
         #expect(hitView === cornerRegion)
+
+        let indicatorHit = window.hitTest(
+            CGPoint(x: indicatorsFrame.midX, y: indicatorsFrame.midY), with: nil)
+        #expect(indicatorHit?.isDescendant(of: preview) == true)
+        let limitationHit = window.hitTest(
+            CGPoint(x: limitationFrame.midX, y: limitationFrame.midY), with: nil)
+        #expect(limitationHit?.isDescendant(of: preview) == true)
+        let trailingControlsEdge = max(
+            focusToggleFrame.maxX,
+            framesBox.frames["clove.detail.preparation"]?.maxX ?? 0)
+        let emptyAreaHit = window.hitTest(
+            CGPoint(x: trailingControlsEdge + 40, y: focusToggleFrame.midY), with: nil)
+        #expect(emptyAreaHit?.isDescendant(of: preview) == true)
+        let toggleHit = window.hitTest(
+            CGPoint(x: focusToggleFrame.midX, y: focusToggleFrame.midY), with: nil)
+        #expect(toggleHit != nil)
+        #expect(toggleHit?.isDescendant(of: preview) == false)
 
         // Double-tap through the corner overlay area zooms to 100% and returns to fit.
         let overlayCenterInPreview = window.convert(
@@ -5022,13 +5255,13 @@ private final class GatedLateFocusDetailImages: DetailImageSource, DetailRegionS
 }
 
 @MainActor
-private final class AspectTestDetailImages: DetailImageSource {
+private final class AspectByPhotoDetailImages: DetailImageSource {
     private let sample = SampleDetailImages()
-    private let portrait: Bool
-    private(set) var delivered = false
+    private let portraitPhotos: Set<PhotoIdentity>
+    private(set) var deliveredPhotos: Set<PhotoIdentity> = []
 
-    init(portrait: Bool) {
-        self.portrait = portrait
+    init(portraitPhotos: Set<PhotoIdentity>) {
+        self.portraitPhotos = portraitPhotos
     }
 
     func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
@@ -5042,14 +5275,15 @@ private final class AspectTestDetailImages: DetailImageSource {
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
         let outcome = await sample.image(for: photo, request: request)
         guard case .image(let image) = outcome else { return outcome }
-        delivered = true
-        let pixels = portrait ? Self.portraitPixels : Self.wideLandscapePixels
+        deliveredPhotos.insert(photo)
+        let isPortrait = portraitPhotos.contains(photo)
+        let pixels = isPortrait ? Self.portraitPixels : Self.wideLandscapePixels
         guard let pixels else { return outcome }
         return .image(
             DetailImage(
                 image: pixels, source: image.source, quality: image.quality,
                 hasRAW: image.hasRAW,
-                fullResolutionSize: portrait
+                fullResolutionSize: isPortrait
                     ? CGSize(width: 2_000, height: 3_000)
                     : CGSize(width: 3_600, height: 1_500)))
     }
@@ -5078,6 +5312,69 @@ private final class AspectTestDetailImages: DetailImageSource {
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()
     }
+}
+
+@MainActor
+private final class StateControlledDetailImages: DetailImageSource {
+    private let sample = SampleDetailImages()
+    private let heldPhoto: PhotoIdentity
+    private let unavailablePhoto: PhotoIdentity
+    private let deferredPhoto: PhotoIdentity
+    private var released = false
+    private(set) var deliveredPhotos: Set<PhotoIdentity> = []
+
+    init(
+        heldPhoto: PhotoIdentity,
+        unavailablePhoto: PhotoIdentity,
+        deferredPhoto: PhotoIdentity
+    ) {
+        self.heldPhoto = heldPhoto
+        self.unavailablePhoto = unavailablePhoto
+        self.deferredPhoto = deferredPhoto
+    }
+
+    func releaseHeld() {
+        released = true
+    }
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        nil
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async { await sample.prepare(window) }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        if photo == unavailablePhoto {
+            return .unavailable(.cannotOpen)
+        }
+        if photo == deferredPhoto {
+            return .deferred
+        }
+        if photo == heldPhoto {
+            for _ in 0..<250 {
+                guard !Task.isCancelled else { return .deferred }
+                if released { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        let outcome = await sample.image(for: photo, request: request)
+        if case .image = outcome {
+            deliveredPhotos.insert(photo)
+        }
+        return outcome
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async { await sample.leave(window: window) }
 }
 
 @MainActor

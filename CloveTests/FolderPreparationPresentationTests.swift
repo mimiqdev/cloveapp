@@ -285,54 +285,167 @@ struct FolderPreparationPresentationTests {
             window.rootViewController = nil
         }
 
-        try await waitFor("Duo header preparation and focus controls laid out") {
+        try await waitFor("Duo viewport preparation and focus controls laid out") {
             frameBox.frames["clove.detail.preparation"] != nil
                 && frameBox.frames["clove.detail.focusToggle"] != nil
+                && frameBox.frames["clove.detail.photoCornerOverlay"] != nil
                 && frameBox.frames["clove.detail.fileName"] != nil
                 && frameBox.frames["clove.detail.zoom"] != nil
+                && self.findPreview(in: window) != nil
         }
 
+        let preview = try #require(findPreview(in: window))
+        let previewRect = preview.convert(preview.bounds, to: window)
+        let overlay = try #require(frameBox.frames["clove.detail.photoCornerOverlay"])
         let prep = try #require(frameBox.frames["clove.detail.preparation"])
         let focus = try #require(frameBox.frames["clove.detail.focusToggle"])
         let fileName = try #require(frameBox.frames["clove.detail.fileName"])
         let zoom = try #require(frameBox.frames["clove.detail.zoom"])
-        let header = try #require(frameBox.frames["clove.detail.photoHeader"])
 
-        #expect(abs(header.height - 48) <= 1.0)
+        #expect(frameBox.frames["clove.detail.photoHeader"] == nil)
         #expect(prep.width >= 43)
         #expect(prep.height >= 43)
         #expect(!prep.intersects(focus))
+        #expect(!focus.intersects(overlay))
+        #expect(overlay.maxX < focus.minX)
         #expect(focus.maxX < prep.minX)
-        #expect(prep.minY >= header.minY - 1)
-        #expect(prep.maxY <= header.maxY + 1)
-        #expect(fileName.minY >= header.maxY + 9)
+        #expect(abs(overlay.minX - (previewRect.minX + 16)) <= 1.5)
+        #expect(abs(overlay.minY - (previewRect.minY + 12)) <= 1.5)
+        #expect(abs(focus.minY - (previewRect.minY + 12)) <= 1.5)
+        #expect(abs(prep.minY - (previewRect.minY + 12)) <= 1.5)
         #expect(fileName.maxY <= zoom.minY + 1)
         #expect(abs(fileName.minX - zoom.minX) <= 2)
         #expect(frameBox.frames["clove.detail.saveState"] == nil)
+        // Floating preparation button receives hits cleanly over the viewport.
+        let prepHit = window.hitTest(CGPoint(x: prep.midX, y: prep.midY), with: nil)
+        #expect(prepHit != nil)
+        #expect(prepHit?.isDescendant(of: preview) == false)
 
-        // Switching to Focus View preserves the icon-only leading preparation ring without collision
-        // and keeps the filename/position corner overlay inside the photo stage.
+        // Switching to Focus View preserves the floating viewport controls without collision.
         presentationBox.value = .focus
-        let photoPreviewHeaderMinX = header.minX
-        try await waitFor("Focus View preparation header did not lay out") {
-            guard let focusHeader = frameBox.frames["clove.detail.photoHeader"] else {
+        let photoPreviewOverlayMinX = overlay.minX
+        try await waitFor("Focus View viewport overlay did not lay out") {
+            guard let focusOverlay = frameBox.frames["clove.detail.photoCornerOverlay"] else {
                 return false
             }
-            return focusHeader.minX < photoPreviewHeaderMinX - 40
+            return focusOverlay.minX < photoPreviewOverlayMinX - 40
         }
+        let previewInFocus = try #require(findPreview(in: window))
+        let focusPreviewRect = previewInFocus.convert(previewInFocus.bounds, to: window)
+        let overlayInFocus = try #require(frameBox.frames["clove.detail.photoCornerOverlay"])
         let prepInFocus = try #require(frameBox.frames["clove.detail.preparation"])
         let focusInFocus = try #require(frameBox.frames["clove.detail.focusToggle"])
         let fileInFocus = try #require(frameBox.frames["clove.detail.fileName"])
         let zoomInFocus = try #require(frameBox.frames["clove.detail.zoom"])
-        let headerInFocus = try #require(frameBox.frames["clove.detail.photoHeader"])
 
-        #expect(abs(headerInFocus.height - 48) <= 1.0)
+        #expect(frameBox.frames["clove.detail.photoHeader"] == nil)
         #expect(prepInFocus.width >= 43)
         #expect(prepInFocus.height >= 43)
         #expect(!prepInFocus.intersects(focusInFocus))
+        #expect(!focusInFocus.intersects(overlayInFocus))
+        #expect(overlayInFocus.maxX < focusInFocus.minX)
         #expect(focusInFocus.maxX < prepInFocus.minX)
-        #expect(fileInFocus.minY >= headerInFocus.maxY + 9)
+        #expect(abs(overlayInFocus.minX - (focusPreviewRect.minX + 16)) <= 1.5)
+        #expect(abs(overlayInFocus.minY - (focusPreviewRect.minY + 12)) <= 1.5)
+        #expect(abs(prepInFocus.minY - (focusPreviewRect.minY + 12)) <= 1.5)
         #expect(fileInFocus.maxY <= zoomInFocus.minY + 1)
+
+        // Dismissing preparation completion does not resize the stage or shift the fitted image.
+        let stageBeforeDismiss = previewInFocus.convert(previewInFocus.bounds, to: window)
+        let fitBeforeDismiss = previewInFocus.imageRectAtFit()
+        browsing.dismissPreparationCompletion(
+            folder: browsing.preparationStatus.folder,
+            generation: browsing.preparationStatus.generation)
+        try await Task.sleep(for: .milliseconds(80))
+        let stageAfterDismiss = previewInFocus.convert(previewInFocus.bounds, to: window)
+        let fitAfterDismiss = previewInFocus.imageRectAtFit()
+        #expect(abs(stageAfterDismiss.minY - stageBeforeDismiss.minY) <= 0.5)
+        #expect(abs(stageAfterDismiss.height - stageBeforeDismiss.height) <= 0.5)
+        #expect(abs(fitAfterDismiss.width - fitBeforeDismiss.width) <= 0.5)
+        #expect(abs(fitAfterDismiss.height - fitBeforeDismiss.height) <= 0.5)
+    }
+
+    @Test func floatingDuoPreparationRingOpensPopoverAndHidingItDoesNotResizeStage() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = TestLibrary.forLaunch(
+            environment: [
+                TestLibrary.launchVariable: "1",
+                TestLibrary.preparationVariable: "complete",
+            ])
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        let first = try #require(browsing.photos.first?.id)
+        browsing.openPhoto(first)
+
+        let envBox = PreparationEnvironmentBox()
+        envBox.isDuoExpanded = true
+        let frameBox = FrameStoreBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+
+        struct FloatingPopoverHost: View {
+            let browsing: BrowsingModel
+            let envBox: PreparationEnvironmentBox
+            let frameBox: FrameStoreBox
+
+            var body: some View {
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(Color.clove.bg.stage)
+                    HStack(spacing: 8) {
+                        DetailPhotoCornerOverlay(
+                            fileName: "MMQ02680.ARW",
+                            positionText: "1 / 36",
+                            isGroupFocus: false,
+                            zoomText: nil,
+                            language: .english)
+                        FolderPreparationIndicator(
+                            browsing: browsing,
+                            identifierPrefix: "clove.detail.preparation",
+                            usesCompactLayoutPadding: false,
+                            usesFloatingBackdrop: true,
+                            presentTrigger: envBox.presentTrigger)
+                    }
+                    .padding(.top, 12)
+                    .padding(.leading, 16)
+                }
+                .environment(\.isDuoExpanded, true)
+                .environment(\.scenePhase, envBox.scenePhase)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    frameBox.frames = $0
+                }
+            }
+        }
+
+        let host = UIHostingController(
+            rootView: FloatingPopoverHost(
+                browsing: browsing, envBox: envBox, frameBox: frameBox))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("floating preparation indicator laid out") {
+            frameBox.frames["clove.detail.preparation"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(60))
+        envBox.presentTrigger += 1
+        try await waitFor("floating preparation popover did not present") {
+            self.topPresentedViewController(from: host) != nil
+        }
+        host.dismiss(animated: false)
+        try await waitFor("floating preparation popover did not dismiss") {
+            self.topPresentedViewController(from: host) == nil
+        }
+        browsing.dismissPreparationCompletion(
+            folder: browsing.preparationStatus.folder,
+            generation: browsing.preparationStatus.generation)
+        try await waitFor("floating preparation ring did not hide after completion dismissal") {
+            frameBox.frames["clove.detail.preparation"] == nil
+        }
     }
 
     @Test func preparationDetailsDismissOnModeRoutePostureAndInactiveSceneTransitions()
@@ -488,6 +601,14 @@ struct FolderPreparationPresentationTests {
             }
             try await Task.sleep(for: .milliseconds(25))
         }
+    }
+
+    private func findPreview(in view: UIView) -> DetailZoomContainerView? {
+        if let preview = view as? DetailZoomContainerView { return preview }
+        for child in view.subviews {
+            if let found = findPreview(in: child) { return found }
+        }
+        return nil
     }
 
     private func findRenderedPixels(in window: UIWindow) -> Data? {

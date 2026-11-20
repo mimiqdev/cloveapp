@@ -148,10 +148,6 @@ struct DetailMarkingView: View {
     /// The preview's size in points, from the layout, for the zoom and pixel-demand math.
     @State private var viewSize: CGSize = .zero
 
-    /// The visible portion of the drawn photo inside `previewArea`, for the expanded Duo corner
-    /// overlay.
-    @State private var visiblePhotoRect: CGRect?
-
     /// The scroll view's current scale, reported as the user pinches (PRD P0-04).
     @State private var scale: CGFloat = 1
 
@@ -339,7 +335,7 @@ struct DetailMarkingView: View {
 
     private var usesRail: Bool { !isOrdinaryPhone && horizontalSizeClass == .regular && duo == nil }
 
-    private var showsExpandedPhotoHeader: Bool {
+    private var usesExpandedDuoViewportOverlay: Bool {
         isDuoExpanded && (usesVerticalToolbar || !hasFoldRegion)
     }
 
@@ -480,15 +476,15 @@ struct DetailMarkingView: View {
     }
 
     private var focusRegionsToggle: some View {
-        focusRegionsButton(inStageHeader: false)
+        focusRegionsButton(inStageOverlay: false)
     }
 
     @ViewBuilder
-    private func focusRegionsButton(inStageHeader: Bool) -> some View {
+    private func focusRegionsButton(inStageOverlay: Bool) -> some View {
         let focusLabel = AppLocalization.string("Focus regions", language: language)
         let focusValue = AppLocalization.string(
             browsing.showsFocusRegions ? "On" : "Off", language: language)
-        if inStageHeader {
+        if inStageOverlay {
             Group {
                 if #available(iOS 26.0, *) {
                     Button {
@@ -582,30 +578,6 @@ struct DetailMarkingView: View {
         }
     }
 
-    @available(iOS 27.1, *)
-    private var duoPhotoHeader: some View {
-        HStack(alignment: .center, spacing: 8) {
-            focusRegionsButton(inStageHeader: true)
-                .layoutPriority(2)
-            FolderPreparationIndicator(
-                browsing: browsing,
-                identifierPrefix: "clove.detail.preparation",
-                usesCompactLayoutPadding: false
-            )
-            .layoutPriority(2)
-            SaveStatusIndicator(
-                browsing: browsing, identifierPrefix: "clove.detail.saveState"
-            )
-            .layoutPriority(2)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 2)
-        .frame(minHeight: 48)
-        .background(Color.clove.bg.stage)
-        .reportHeaderControlFrame("clove.detail.photoHeader")
-    }
-
     @ViewBuilder private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
         if #available(iOS 27.1, *) {
             Group {
@@ -625,7 +597,7 @@ struct DetailMarkingView: View {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark
                 ) {
-                    if isDuoExpanded && !showsExpandedPhotoHeader {
+                    if isDuoExpanded && !usesExpandedDuoViewportOverlay {
                         focusRegionsToggle
                     }
                 } tools: {
@@ -664,7 +636,7 @@ struct DetailMarkingView: View {
                         duo.bottom
                     }
                 }
-                if !showsExpandedPhotoHeader && (!duo.showsGrid || !showsPhotoGrid) {
+                if !usesExpandedDuoViewportOverlay && (!duo.showsGrid || !showsPhotoGrid) {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
                         .axisBehavior(.horizontalOnly)
                 }
@@ -700,9 +672,6 @@ struct DetailMarkingView: View {
     private func duoPhotoPane(showsFilmstrip: Bool) -> some View {
         let activeStagePill = chromeIsVisible ? stagePill : nil
         VStack(spacing: 0) {
-            if showsExpandedPhotoHeader {
-                duoPhotoHeader
-            }
             FolderSaveBanner(
                 browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             previewArea
@@ -1281,10 +1250,7 @@ struct DetailMarkingView: View {
             onFocusRegionTap: { focusRegionTapped($0) },
             previewAccessibilityLabel: displayMarks.isRejected
                 ? AppLocalization.format("%@, Rejected", language: language, photo.fileName)
-                : photo.fileName,
-            onVisiblePhotoRectChange: { rect in
-                visiblePhotoRect = rect
-            }
+                : photo.fileName
         )
         .overlay {
             DetailSwipeFeedbackBadge(
@@ -1394,11 +1360,13 @@ struct DetailMarkingView: View {
                     .foregroundStyle(.secondary)
                     .padding()
                     .accessibilityIdentifier("clove.detail.unavailable")
+                    .reportHeaderControlFrame("clove.detail.unavailable")
             case .deferred:
                 Text(AppLocalization.string("The preview did not load.", language: language))
                     .foregroundStyle(.secondary)
                     .padding()
                     .accessibilityIdentifier("clove.detail.unavailable")
+                    .reportHeaderControlFrame("clove.detail.unavailable")
             case .shown:
                 EmptyView()
             }
@@ -1406,49 +1374,63 @@ struct DetailMarkingView: View {
     }
 
     /// Compact passive face/AF result indicators and any preview-only limitation note stacked cleanly
-    /// in the viewport's upper-leading corner inside its safe area, or below the translucent photo
-    /// identity overlay in the visible photo's upper-leading corner on expanded Duo.
+    /// in the viewport's upper-leading corner inside its safe area. On expanded Duo, the upper-leading
+    /// viewport corner also pins the passive photo identity badge beside the floating focus,
+    /// preparation, and save/access controls so the photo stage reclaims the former top header height.
     @ViewBuilder private var topLeadingStageOverlays: some View {
         let indicators = focusRegionState.resultIndicators(
             visible: shown != nil && chromeIsVisible && browsing.showsFocusRegions)
         let showsLimitation = limitation != nil && shown != nil
-        if showsExpandedPhotoHeader {
-            if let photoRect = visiblePhotoRect, shown != nil || placeholder != nil {
-                let showsCornerOverlay = chromeIsVisible
-                if showsCornerOverlay || !indicators.isEmpty || showsLimitation {
-                    Color.clear
-                        .overlay(alignment: .topLeading) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                if showsCornerOverlay {
-                                    DetailPhotoCornerOverlay(
-                                        fileName: photo.fileName,
-                                        positionText: cornerPositionText,
-                                        isGroupFocus: isCornerGroupFocus,
-                                        zoomText: scale > DetailFitScale.tolerance
-                                            ? zoomName : nil,
-                                        language: language
-                                    )
-                                    .transition(.opacity)
-                                }
-                                if !indicators.isEmpty {
-                                    DetailFocusResultIndicatorsView(
-                                        indicators: indicators,
-                                        usesPhotoBacking: true,
-                                        language: language)
-                                }
-                                limitationNote
-                            }
-                            .frame(
-                                maxWidth: cornerOverlayMaxWidth(in: photoRect),
-                                alignment: .leading
-                            )
-                            .padding(.top, photoRect.minY + 10)
-                            .padding(.leading, photoRect.minX + 10)
-                        }
-                        .clipped()
-                        .allowsHitTesting(false)
+        if usesExpandedDuoViewportOverlay {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    if chromeIsVisible {
+                        DetailPhotoCornerOverlay(
+                            fileName: photo.fileName,
+                            positionText: cornerPositionText,
+                            isGroupFocus: isCornerGroupFocus,
+                            zoomText: scale > DetailFitScale.tolerance
+                                ? zoomName : nil,
+                            language: language
+                        )
+                        .layoutPriority(0)
+                        .transition(.opacity)
+                    }
+                    HStack(alignment: .center, spacing: 8) {
+                        focusRegionsButton(inStageOverlay: true)
+                            .layoutPriority(2)
+                        FolderPreparationIndicator(
+                            browsing: browsing,
+                            identifierPrefix: "clove.detail.preparation",
+                            usesCompactLayoutPadding: false,
+                            usesFloatingBackdrop: true
+                        )
+                        .layoutPriority(2)
+                        SaveStatusIndicator(
+                            browsing: browsing,
+                            identifierPrefix: "clove.detail.saveState",
+                            usesFloatingBackdrop: true
+                        )
+                        .layoutPriority(2)
+                    }
+                    .layoutPriority(2)
                 }
+                if !indicators.isEmpty {
+                    DetailFocusResultIndicatorsView(
+                        indicators: indicators,
+                        usesPhotoBacking: DetailFocusResultIndicators.coversPhotoPixels(
+                            indicators: indicators,
+                            scale: scale,
+                            imagePixels: shown.map { pixelSize($0) },
+                            viewSize: viewSize,
+                            origin: CGPoint(x: 16, y: 62)),
+                        language: language)
+                }
+                limitationNote
             }
+            .padding(.top, 12)
+            .padding(.leading, 16)
+            .padding(.trailing, 46)
         } else if !indicators.isEmpty || showsLimitation {
             VStack(alignment: .leading, spacing: 6) {
                 if !indicators.isEmpty {
@@ -1508,17 +1490,6 @@ struct DetailMarkingView: View {
         return (nil, false)
     }
 
-    private func cornerOverlayMaxWidth(in photoRect: CGRect) -> CGFloat {
-        let trailingPhotoEdge = photoRect.maxX - 10
-        let trailingLimit: CGFloat =
-            if displayMarks.isRejected && photoRect.minY < 38 && viewSize.width > 0 {
-                min(trailingPhotoEdge, max(0, viewSize.width - 38))
-            } else {
-                trailingPhotoEdge
-            }
-        return max(0, trailingLimit - (photoRect.minX + 10))
-    }
-
     /// The "preview only" note a failed render or a capped source must show (PRD P0-04).
     @ViewBuilder private var limitationNote: some View {
         if let limitation, shown != nil {
@@ -1527,6 +1498,7 @@ struct DetailMarkingView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(.thinMaterial, in: Capsule())
+                .allowsHitTesting(false)
                 .accessibilityIdentifier("clove.detail.limitation")
                 .reportHeaderControlFrame("clove.detail.limitation")
         }
@@ -2437,6 +2409,7 @@ private struct DetailRejectGlyphOverlay: View {
                     .allowsHitTesting(false)
                     .accessibilityIdentifier("clove.detail.rejectGlyph")
                     .accessibilityHidden(true)
+                    .reportHeaderControlFrame("clove.detail.rejectGlyph")
                     .transition(
                         .asymmetric(
                             insertion: CloveMotion.scaleOpacityTransition(
@@ -2476,8 +2449,8 @@ struct DetailHeaderFileNameParts: Equatable, Sendable {
     }
 }
 
-/// Passive two-line photo identity badge anchored in the upper-leading corner of the visible
-/// photo on expanded Duo.
+/// Passive two-line photo identity badge pinned to the upper-leading corner of the photo viewport
+/// on expanded Duo.
 struct DetailPhotoCornerOverlay: View {
     let fileName: String
     let positionText: String?

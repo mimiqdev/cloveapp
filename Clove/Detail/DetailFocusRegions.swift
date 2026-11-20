@@ -382,7 +382,8 @@ struct DetailFocusResultIndicators: Equatable, Sendable {
         indicators: DetailFocusResultIndicators,
         scale: CGFloat,
         imagePixels: CGSize?,
-        viewSize: CGSize
+        viewSize: CGSize,
+        origin: CGPoint = CGPoint(x: 12, y: 8)
     ) -> Bool {
         guard !indicators.isEmpty else { return false }
         if scale > DetailFitScale.tolerance { return true }
@@ -395,7 +396,7 @@ struct DetailFocusResultIndicators: Equatable, Sendable {
             height: fitted.height)
         let badgeWidth: CGFloat =
             (indicators.face != nil && indicators.missingAutofocusMetadata) ? 52 : 30
-        let badgeRect = CGRect(x: 12, y: 8, width: badgeWidth, height: 24)
+        let badgeRect = CGRect(origin: origin, size: CGSize(width: badgeWidth, height: 24))
         return fittedRect.intersects(badgeRect)
     }
 }
