@@ -466,5 +466,6 @@ struct DetailFocusResultIndicatorsView: View {
         .allowsHitTesting(false)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.focusIndicators")
+        .reportHeaderControlFrame("clove.detail.focusIndicators")
     }
 }

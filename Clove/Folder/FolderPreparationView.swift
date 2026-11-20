@@ -174,13 +174,28 @@ struct HeaderControlFramesPreferenceKey: PreferenceKey {
     }
 }
 
+struct HeaderControlCountsPreferenceKey: PreferenceKey {
+    static let defaultValue: [String: Int] = [:]
+
+    static func reduce(value: inout [String: Int], nextValue: () -> [String: Int]) {
+        for (key, count) in nextValue() {
+            value[key, default: 0] += count
+        }
+    }
+}
+
 extension View {
     func reportHeaderControlFrame(_ identifier: String) -> some View {
         background {
             GeometryReader { proxy in
-                Color.clear.preference(
-                    key: HeaderControlFramesPreferenceKey.self,
-                    value: [identifier: proxy.frame(in: .global)])
+                Color.clear
+                    .preference(
+                        key: HeaderControlFramesPreferenceKey.self,
+                        value: [identifier: proxy.frame(in: .global)]
+                    )
+                    .preference(
+                        key: HeaderControlCountsPreferenceKey.self,
+                        value: [identifier: 1])
             }
         }
     }
@@ -190,6 +205,7 @@ struct FolderPreparationIndicator: View {
     let browsing: BrowsingModel
     let identifierPrefix: String
     var inListRow = false
+    var usesCompactLayoutPadding = true
     var presentTrigger: Int = 0
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -264,9 +280,9 @@ struct FolderPreparationIndicator: View {
                 .contentShape(Rectangle())
                 .reportHeaderControlFrame(identifierPrefix)
         }
-        .padding(.vertical, -11)
-        .padding(.leading, -9)
-        .padding(.trailing, -15)
+        .padding(.vertical, usesCompactLayoutPadding ? -11 : 0)
+        .padding(.leading, usesCompactLayoutPadding ? -9 : 0)
+        .padding(.trailing, usesCompactLayoutPadding ? -15 : 0)
         .accessibilityLabel(AppLocalization.string("Folder preparation", language: language))
         .accessibilityValue(
             FolderPreparationAccessibility.indicatorAccessibilityValue(

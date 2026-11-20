@@ -148,6 +148,10 @@ struct DetailMarkingView: View {
     /// The preview's size in points, from the layout, for the zoom and pixel-demand math.
     @State private var viewSize: CGSize = .zero
 
+    /// The visible portion of the drawn photo inside `previewArea`, for the expanded Duo corner
+    /// overlay.
+    @State private var visiblePhotoRect: CGRect?
+
     /// The scroll view's current scale, reported as the user pinches (PRD P0-04).
     @State private var scale: CGFloat = 1
 
@@ -569,6 +573,7 @@ struct DetailMarkingView: View {
                 Text(detailSubtitle)
                     .lineLimit(1)
                     .accessibilityIdentifier("clove.detail.zoom")
+                    .reportHeaderControlFrame("clove.detail.zoom")
                 SaveStatusIndicator(
                     browsing: browsing, identifierPrefix: "clove.detail.saveState")
             }
@@ -582,7 +587,16 @@ struct DetailMarkingView: View {
         HStack(alignment: .center, spacing: 8) {
             focusRegionsButton(inStageHeader: true)
                 .layoutPriority(2)
-            duoHeaderContent
+            FolderPreparationIndicator(
+                browsing: browsing,
+                identifierPrefix: "clove.detail.preparation",
+                usesCompactLayoutPadding: false
+            )
+            .layoutPriority(2)
+            SaveStatusIndicator(
+                browsing: browsing, identifierPrefix: "clove.detail.saveState"
+            )
+            .layoutPriority(2)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
@@ -590,49 +604,6 @@ struct DetailMarkingView: View {
         .frame(minHeight: 48)
         .background(Color.clove.bg.stage)
         .reportHeaderControlFrame("clove.detail.photoHeader")
-    }
-
-    @ViewBuilder
-    private var duoHeaderContent: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 2) {
-                duoHeaderTitleRow
-                duoHeaderMetadataRow(maxLines: 2)
-            }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                duoHeaderTitleRow
-                duoHeaderMetadataRow(maxLines: 1)
-            }
-        }
-    }
-
-    private var duoHeaderTitleRow: some View {
-        HStack(alignment: .center, spacing: 0) {
-            DetailHeaderFileNameView(fileName: photo.fileName)
-            FolderPreparationIndicator(
-                browsing: browsing,
-                identifierPrefix: "clove.detail.preparation"
-            )
-            .layoutPriority(2)
-        }
-    }
-
-    private func duoHeaderMetadataRow(maxLines: Int) -> some View {
-        HStack(alignment: .center, spacing: 0) {
-            Text(detailSubtitle)
-                .lineLimit(maxLines)
-                .truncationMode(.tail)
-                .accessibilityIdentifier("clove.detail.zoom")
-                .reportHeaderControlFrame("clove.detail.zoom")
-            SaveStatusIndicator(
-                browsing: browsing, identifierPrefix: "clove.detail.saveState"
-            )
-            .layoutPriority(2)
-        }
-        .font(.caption)
-        .foregroundStyle(Color.clove.text.secondary)
-        .layoutPriority(1)
     }
 
     @ViewBuilder private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
@@ -889,6 +860,7 @@ struct DetailMarkingView: View {
                         Text(detailSubtitle)
                             .lineLimit(1)
                             .accessibilityIdentifier("clove.detail.zoom")
+                            .reportHeaderControlFrame("clove.detail.zoom")
                         SaveStatusIndicator(
                             browsing: browsing, identifierPrefix: "clove.detail.saveState")
                     }
@@ -1309,7 +1281,10 @@ struct DetailMarkingView: View {
             onFocusRegionTap: { focusRegionTapped($0) },
             previewAccessibilityLabel: displayMarks.isRejected
                 ? AppLocalization.format("%@, Rejected", language: language, photo.fileName)
-                : photo.fileName
+                : photo.fileName,
+            onVisiblePhotoRectChange: { rect in
+                visiblePhotoRect = rect
+            }
         )
         .overlay {
             DetailSwipeFeedbackBadge(
@@ -1431,12 +1406,50 @@ struct DetailMarkingView: View {
     }
 
     /// Compact passive face/AF result indicators and any preview-only limitation note stacked cleanly
-    /// in the viewport's upper-leading corner inside its safe area.
+    /// in the viewport's upper-leading corner inside its safe area, or below the translucent photo
+    /// identity overlay in the visible photo's upper-leading corner on expanded Duo.
     @ViewBuilder private var topLeadingStageOverlays: some View {
         let indicators = focusRegionState.resultIndicators(
             visible: shown != nil && chromeIsVisible && browsing.showsFocusRegions)
         let showsLimitation = limitation != nil && shown != nil
-        if !indicators.isEmpty || showsLimitation {
+        if showsExpandedPhotoHeader {
+            if let photoRect = visiblePhotoRect, shown != nil || placeholder != nil {
+                let showsCornerOverlay = chromeIsVisible
+                if showsCornerOverlay || !indicators.isEmpty || showsLimitation {
+                    Color.clear
+                        .overlay(alignment: .topLeading) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if showsCornerOverlay {
+                                    DetailPhotoCornerOverlay(
+                                        fileName: photo.fileName,
+                                        positionText: cornerPositionText,
+                                        isGroupFocus: isCornerGroupFocus,
+                                        zoomText: scale > DetailFitScale.tolerance
+                                            ? zoomName : nil,
+                                        language: language
+                                    )
+                                    .transition(.opacity)
+                                }
+                                if !indicators.isEmpty {
+                                    DetailFocusResultIndicatorsView(
+                                        indicators: indicators,
+                                        usesPhotoBacking: true,
+                                        language: language)
+                                }
+                                limitationNote
+                            }
+                            .frame(
+                                maxWidth: cornerOverlayMaxWidth(in: photoRect),
+                                alignment: .leading
+                            )
+                            .padding(.top, photoRect.minY + 10)
+                            .padding(.leading, photoRect.minX + 10)
+                        }
+                        .clipped()
+                        .allowsHitTesting(false)
+                }
+            }
+        } else if !indicators.isEmpty || showsLimitation {
             VStack(alignment: .leading, spacing: 6) {
                 if !indicators.isEmpty {
                     DetailFocusResultIndicatorsView(
@@ -1456,6 +1469,56 @@ struct DetailMarkingView: View {
         }
     }
 
+    private var isCornerGroupFocus: Bool {
+        Self.cornerPositionDescriptor(
+            photo: photo, timeline: timeline, expandedGroup: expandedGroup, language: language
+        ).isGroupFocus
+    }
+
+    private var cornerPositionText: String? {
+        Self.cornerPositionDescriptor(
+            photo: photo, timeline: timeline, expandedGroup: expandedGroup, language: language
+        ).positionText
+    }
+
+    static func cornerPositionDescriptor(
+        photo: GridPhoto,
+        timeline: DetailTimeline,
+        expandedGroup: ActiveBrowsingGroup?,
+        language: ResolvedAppLanguage
+    ) -> (positionText: String?, isGroupFocus: Bool) {
+        if let expandedGroup,
+            let index = expandedGroup.visibleMembers.firstIndex(where: { $0.id == photo.id })
+        {
+            return (
+                AppLocalization.format(
+                    "%lld / %lld", language: language, Int64(index + 1),
+                    Int64(expandedGroup.visibleMembers.count)),
+                true
+            )
+        }
+        if let index = timeline.slotIndex(containing: photo.id) {
+            return (
+                AppLocalization.format(
+                    "%lld / %lld", language: language, Int64(index + 1),
+                    Int64(timeline.slots.count)),
+                false
+            )
+        }
+        return (nil, false)
+    }
+
+    private func cornerOverlayMaxWidth(in photoRect: CGRect) -> CGFloat {
+        let trailingPhotoEdge = photoRect.maxX - 10
+        let trailingLimit: CGFloat =
+            if displayMarks.isRejected && photoRect.minY < 38 && viewSize.width > 0 {
+                min(trailingPhotoEdge, max(0, viewSize.width - 38))
+            } else {
+                trailingPhotoEdge
+            }
+        return max(0, trailingLimit - (photoRect.minX + 10))
+    }
+
     /// The "preview only" note a failed render or a capped source must show (PRD P0-04).
     @ViewBuilder private var limitationNote: some View {
         if let limitation, shown != nil {
@@ -1465,6 +1528,7 @@ struct DetailMarkingView: View {
                 .padding(.vertical, 6)
                 .background(.thinMaterial, in: Capsule())
                 .accessibilityIdentifier("clove.detail.limitation")
+                .reportHeaderControlFrame("clove.detail.limitation")
         }
     }
 
@@ -2412,30 +2476,97 @@ struct DetailHeaderFileNameParts: Equatable, Sendable {
     }
 }
 
-private struct DetailHeaderFileNameView: View {
+/// Passive two-line photo identity badge anchored in the upper-leading corner of the visible
+/// photo on expanded Duo.
+struct DetailPhotoCornerOverlay: View {
     let fileName: String
+    let positionText: String?
+    let isGroupFocus: Bool
+    let zoomText: String?
+    let language: ResolvedAppLanguage
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var fileNameSize: CGFloat = 12
+    @ScaledMetric(relativeTo: .caption2) private var metadataSize: CGFloat = 11
+
+    static func metadataStrings(
+        positionText: String?,
+        isGroupFocus: Bool,
+        zoomText: String?,
+        language: ResolvedAppLanguage
+    ) -> (visible: String?, accessible: String) {
+        let metadataParts = [positionText, zoomText].compactMap { $0 }
+        let visible = metadataParts.isEmpty ? nil : metadataParts.joined(separator: " · ")
+        let accessiblePosition = positionText.map { pos in
+            isGroupFocus
+                ? AppLocalization.format("Group · %@", language: language, pos)
+                : pos
+        }
+        let accessible = [accessiblePosition, zoomText]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        return (visible, accessible)
+    }
 
     var body: some View {
         let parts = DetailHeaderFileNameParts(fileName)
-        HStack(spacing: 0) {
-            Text(parts.stem)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .layoutPriority(0)
-            if !parts.extensionSuffix.isEmpty {
-                Text(parts.extensionSuffix)
+        let strings = Self.metadataStrings(
+            positionText: positionText,
+            isGroupFocus: isGroupFocus,
+            zoomText: zoomText,
+            language: language)
+        let metadataText = strings.visible
+        let accessibleMetadata = strings.accessible
+
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 0) {
+                Text(parts.stem)
                     .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .layoutPriority(1)
-                    .reportHeaderControlFrame("clove.detail.fileName.extension")
+                    .truncationMode(.middle)
+                    .layoutPriority(0)
+                if !parts.extensionSuffix.isEmpty {
+                    Text(parts.extensionSuffix)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .layoutPriority(1)
+                        .reportHeaderControlFrame("clove.detail.fileName.extension")
+                }
+            }
+            .font(.system(size: fileNameSize, weight: .semibold))
+            .foregroundStyle(Color.white)
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isStaticText)
+            .accessibilityLabel(fileName)
+            .accessibilityIdentifier("clove.detail.fileName")
+            .reportHeaderControlFrame("clove.detail.fileName")
+
+            if let metadataText {
+                HStack(alignment: .center, spacing: 4) {
+                    if isGroupFocus {
+                        Image(systemName: "square.stack")
+                            .font(.system(size: metadataSize, weight: .medium))
+                            .accessibilityHidden(true)
+                    }
+                    Text(metadataText)
+                        .font(.system(size: metadataSize).monospacedDigit())
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .truncationMode(.tail)
+                }
+                .foregroundStyle(Color.white.opacity(0.86))
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isStaticText)
+                .accessibilityLabel(accessibleMetadata)
+                .accessibilityIdentifier("clove.detail.zoom")
+                .reportHeaderControlFrame("clove.detail.zoom")
             }
         }
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(Color.clove.text.primary)
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isStaticText)
-        .accessibilityLabel(fileName)
-        .accessibilityIdentifier("clove.detail.fileName")
-        .reportHeaderControlFrame("clove.detail.fileName")
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(
+            Color.black.opacity(0.62),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .allowsHitTesting(false)
+        .reportHeaderControlFrame("clove.detail.photoCornerOverlay")
     }
 }

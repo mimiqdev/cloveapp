@@ -364,3 +364,12 @@ Supersedes the centered 56 pt two-line header inside `duoPhotoHeader` (#292) for
 - **Extension-preserving middle truncation & accessibility:** long filenames middle-truncate the stem while keeping the file extension visible and retaining the full `photo.fileName` for VoiceOver and `PhotoInformationSheet`. At accessibility Dynamic Type sizes (`isAccessibilitySize`) the title and metadata stack into two leading lines without fixed height clipping (`minHeight: 48`), while keeping >= 44×44 pt non-overlapping hit targets.
 - **Other layouts unchanged:** Duo cover, Half Fold, ordinary iPhone, and iPad retain their existing headers (`detailToolbarTitle` / `BrowsingHeader`).
 
+## Expanded Duo photo corner overlay and icon-only upper chrome (#377)
+
+Supersedes the text in `duoPhotoHeader` (#370) for expanded Duo **Photo Preview** and **Focus View** (both Timeline and Group Focus).
+
+- **Icon-only 48 pt upper chrome (`duoPhotoHeader`):** removes filename and metadata text from `duoPhotoHeader`, keeping only the leading row of `focusRegionsToggle` (`clove.detail.focusToggle`), clickable `FolderPreparationIndicator` (`clove.detail.preparation`) when active, and `SaveStatusIndicator` (`clove.detail.saveState`) only for view-only or disconnected storage (none during normal access), with `FolderSaveBanner` preserved below.
+- **Translucent photo corner overlay (`DetailPhotoCornerOverlay`):** renders one passive two-line label (`12 pt` semibold filename with extension-preserving middle truncation; `11 pt` position/magnification, `square.stack` glyph + accessible `"Group · …"` label in Group Focus, and no `+ JPG` / `+ HIF` suffix, scaling with Dynamic Type) over `black` at 62% opacity with `8 pt` continuous corners.
+- **Visible-photo geometry & pass-through:** inset `10 pt` inside the upper-leading corner of the live visible photo pixels (`DetailZoomContainerView` aspect-fit rect at fit, and live visible crop during zoom, pan, or rubber-band overscroll), constrained within the visible crop width, stacking above any passive focus-result glyphs or preview-only note, hiding with photo chrome (`!chromeIsVisible`) without resizing the stage or shifting the fitted photo, and passing all gestures and underlying focus-region taps cleanly through (`.allowsHitTesting(false)`).
+- **Other layouts unchanged:** Duo cover, Half Fold, ordinary iPhone, and iPad retain their existing top-bar headers (`detailToolbarTitle` / `BrowsingHeader`), including `+ JPG` / `+ HIF`.
+

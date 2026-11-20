@@ -44,6 +44,7 @@ struct FolderSaveBanner: View {
                     }
                 }
                 .padding(12)
+                .reportHeaderControlFrame(identifierPrefix)
                 .transition(
                     .asymmetric(
                         insertion: CloveMotion.slideTransition(
