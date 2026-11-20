@@ -59,6 +59,16 @@ public struct PhotoOrdering: Sendable {
         placed[index].marks = marks
     }
 
+    /// Replaces a photo's scan-time filter metadata without affecting order or withheld state.
+    public mutating func setMetadata(_ metadata: PhotoFilterMetadata, for id: PhotoIdentity) {
+        if pending[id] != nil {
+            pending[id]?.metadata = metadata
+            return
+        }
+        guard let index = placed.firstIndex(where: { $0.id == id }) else { return }
+        placed[index].metadata = metadata
+    }
+
     /// Drops photos that left the opened folder, such as the sets a move to `_Rejected`
     /// took away (G1 decision 5). Unknown identities are ignored.
     public mutating func remove(_ ids: [PhotoIdentity]) {
@@ -68,13 +78,16 @@ public struct PhotoOrdering: Sendable {
         pending = pending.filter { !removing.contains($0.key) }
     }
 
-    /// The placed photos in `order`, holding only the ones `filter` accepts (PRD P0-03).
-    /// Filtering never reorders, and neither option changes the stored photos.
-    public func photos(order: PhotoOrder = .captureTime, matching filter: PhotoFilter = .all)
-        -> [GridPhoto]
-    {
-        let accepted = placed.filter {
-            filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
+    /// The placed photos in `order`, holding only the ones `filter` and `metadataFilter` accept
+    /// (PRD P0-03). Filtering never reorders, and neither option changes the stored photos.
+    public func photos(
+        order: PhotoOrder = .captureTime,
+        matching filter: PhotoFilter = .all,
+        metadataFilter: PhotoMetadataFilter = .none
+    ) -> [GridPhoto] {
+        let accepted = placed.filter { photo in
+            filter.matches(photo.marks, relativeFolderPath: photo.id.relativeFolderPath)
+                && metadataFilter.matches(photo)
         }
         switch order {
         case .captureTime:
