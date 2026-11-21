@@ -298,7 +298,6 @@ struct CompareView: View {
     private var bottomReviewBar: some View {
         HStack(spacing: 10) {
             if session.mode == .stepping {
-                steppingControls
                 if layoutPolicy.showsFilmstrip {
                     CompareFilmstrip(
                         photos: scopePhotos,
@@ -312,7 +311,10 @@ struct CompareView: View {
                         }
                     )
                     .frame(maxWidth: .infinity)
+                    steppingControls
+                        .layoutPriority(1)
                 } else {
+                    steppingControls
                     Spacer(minLength: 8)
                 }
             } else {
