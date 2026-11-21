@@ -29,6 +29,7 @@ struct CompareView: View {
 
     @State private var paneA = ComparePaneController(side: .reference)
     @State private var paneB = ComparePaneController(side: .challenger)
+    @State private var transitionState = CompareTransitionState()
 
     @FocusState private var hasKeyFocus: Bool
 
@@ -66,6 +67,7 @@ struct CompareView: View {
             }
             .onAppear {
                 hasKeyFocus = true
+                ensureTransitionPrepared()
             }
             .task {
                 await images.setCompareRetention(active: true, keeping: session.activePhoto)
@@ -100,6 +102,11 @@ struct CompareView: View {
                     syncInactivePaneToActive()
                 }
             }
+            .onChange(of: ComparePair(reference: session.reference, challenger: session.challenger))
+        {
+            _, _ in
+            ensureTransitionPrepared()
+        }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("clove.compare")
             .navigationBarBackButtonHidden(true)
@@ -264,6 +271,7 @@ struct CompareView: View {
             photo: photo,
             marks: browsing.shownMarks(for: photoID),
             isActive: isActive,
+            isSyncLocked: session.isSyncLocked,
             controller: controller,
             images: images,
             thumbnails: browsing.thumbnails,
@@ -277,18 +285,22 @@ struct CompareView: View {
                 browsing.selectCompareSide(side)
             },
             onViewportChanged: { snapshot in
-                guard session.isSyncLocked, let snapshot else { return }
-                sync(from: controller, to: peer, snapshot: snapshot)
-            },
-            onInitialPixelsReady: {
-                guard session.isSyncLocked, side == .challenger else { return }
-                if peer.scale > DetailFitScale.tolerance,
-                    let snapshot = peer.probe.container?.zoomSnapshot
-                {
-                    sync(from: peer, to: controller, snapshot: snapshot)
-                } else {
-                    controller.probe.container?.applySyncedViewport(scale: 1, anchor: .centre)
+                guard session.isSyncLocked else { return }
+                if let snapshot {
+                    sync(from: controller, to: peer, snapshot: snapshot)
+                } else if !(controller.probe.container?.isZoomed ?? false) {
+                    sync(
+                        from: controller,
+                        to: peer,
+                        snapshot: DetailZoomSnapshot(scale: 1, anchor: .centre)
+                    )
                 }
+            },
+            onPrepareTransition: {
+                ensureTransitionPrepared()
+            },
+            syncedOpeningCapture: {
+                side == .challenger ? paneA.captureViewport(for: session.reference) : nil
             }
         )
     }
@@ -356,7 +368,7 @@ struct CompareView: View {
 
             Button {
                 tapPickerDismissToken += 1
-                browsing.promoteCompareChallengerToReference()
+                promoteChallengerToReference()
             } label: {
                 Text(AppLocalization.string("Set as A", language: language))
                     .font(.subheadline.weight(.semibold))
@@ -510,15 +522,112 @@ struct CompareView: View {
 
     // MARK: - Sync & Layout Helpers
 
+    private func ensureTransitionPrepared() {
+        let currentSession = browsing.compareSession ?? session
+        let currentPair = ComparePair(
+            reference: currentSession.reference,
+            challenger: currentSession.challenger)
+        guard let previousPair = transitionState.settledPair else {
+            transitionState.settledPair = currentPair
+            return
+        }
+        guard previousPair != currentPair else { return }
+        transitionState.settledPair = currentPair
+        applyTransition(
+            from: previousPair,
+            to: currentPair,
+            captureA: paneA.captureViewport(for: previousPair.reference),
+            captureB: paneB.captureViewport(for: previousPair.challenger),
+            isSyncLocked: currentSession.isSyncLocked
+        )
+    }
+
+    private func promoteChallengerToReference() {
+        ensureTransitionPrepared()
+        guard session.canPromoteChallenger else { return }
+        let oldPair = ComparePair(reference: session.reference, challenger: session.challenger)
+        let captureA = paneA.captureViewport(for: oldPair.reference)
+        let captureB = paneB.captureViewport(for: oldPair.challenger)
+        guard browsing.promoteCompareChallengerToReference() else { return }
+        guard let updatedSession = browsing.compareSession else { return }
+        let newPair = ComparePair(
+            reference: updatedSession.reference,
+            challenger: updatedSession.challenger)
+        transitionState.settledPair = newPair
+        applyTransition(
+            from: oldPair,
+            to: newPair,
+            captureA: captureA,
+            captureB: captureB,
+            isSyncLocked: updatedSession.isSyncLocked
+        )
+    }
+
+    private func applyTransition(
+        from oldPair: ComparePair,
+        to newPair: ComparePair,
+        captureA: KeptCompareZoom?,
+        captureB: KeptCompareZoom?,
+        isSyncLocked: Bool
+    ) {
+        if oldPair.reference != newPair.reference {
+            paneA.keptZoom = captureB
+            if captureB == nil {
+                paneA.zoomMode = .fit
+                paneA.issueZoom(.fit)
+            }
+        }
+
+        if oldPair.challenger != newPair.challenger {
+            if oldPair.reference != newPair.reference {
+                let isTwoPhotoSwap = newPair.challenger == oldPair.reference
+                let targetB: KeptCompareZoom? =
+                    if isSyncLocked {
+                        captureB
+                    } else if isTwoPhotoSwap {
+                        captureA
+                    } else {
+                        captureB
+                    }
+                paneB.keptZoom = targetB
+                if targetB == nil {
+                    paneB.zoomMode = .fit
+                    paneB.issueZoom(.fit)
+                }
+            } else if isSyncLocked {
+                // Sync On stepping reads Pane A's latest viewport once new B pixels land.
+                paneB.keptZoom = nil
+                if captureA == nil {
+                    paneB.zoomMode = .fit
+                    paneB.issueZoom(.fit)
+                }
+            } else {
+                // Sync Off keeps any already-pending capture intact across rapid multi-steps
+                // before the previous candidate's pixels finish loading.
+                if paneB.loadedPhotoID == oldPair.challenger && paneB.shown != nil {
+                    paneB.keptZoom = captureB
+                }
+                if paneB.keptZoom == nil {
+                    paneB.zoomMode = .fit
+                    paneB.issueZoom(.fit)
+                }
+            }
+        }
+    }
+
     private func sync(
         from source: ComparePaneController,
         to target: ComparePaneController,
-        snapshot: DetailZoomSnapshot
+        snapshot: DetailZoomSnapshot,
+        sourceNativeOverride: CGFloat? = nil,
+        sourceIsFullResolutionOverride: Bool? = nil
     ) {
+        let sourceNative = sourceNativeOverride ?? source.nativeFullResolutionScale
+        let sourceIsFullRes = sourceIsFullResolutionOverride ?? source.zoomMode.isFullResolution
         let converted: CGFloat
         if snapshot.scale <= DetailFitScale.tolerance {
             converted = 1
-        } else if let sourceNative = source.nativeFullResolutionScale,
+        } else if let sourceNative,
             let targetNative = target.nativeFullResolutionScale
         {
             converted = DetailZoom.convertedScale(
@@ -526,15 +635,58 @@ struct CompareView: View {
         } else {
             converted = snapshot.scale
         }
+
+        if converted <= DetailFitScale.tolerance {
+            target.zoomMode = .fit
+            target.commandedScale = 1
+            target.anchor = .centre
+            target.scale = 1
+        } else {
+            target.zoomMode =
+                sourceIsFullRes
+                ? .fullResolution(anchor: snapshot.anchor, size: target.shown?.fullResolutionPixels)
+                : .manual
+            target.commandedScale = converted
+            target.anchor = snapshot.anchor
+            target.scale = converted
+        }
+
+        let targetPhoto = session.photo(for: target.side)
+        if target.loadedPhotoID != targetPhoto {
+            if converted <= DetailFitScale.tolerance {
+                target.keptZoom = nil
+            } else {
+                target.keptZoom = KeptCompareZoom(
+                    scale: snapshot.scale,
+                    nativeScale: sourceNative,
+                    anchor: snapshot.anchor,
+                    isFullResolution: sourceIsFullRes
+                )
+            }
+        }
+
         target.probe.container?.applySyncedViewport(scale: converted, anchor: snapshot.anchor)
     }
 
     private func syncInactivePaneToActive() {
         let (source, target) =
             session.activeSide == .reference ? (paneA, paneB) : (paneB, paneA)
-        let snapshot =
-            source.probe.container?.zoomSnapshot ?? DetailZoomSnapshot(scale: 1, anchor: .centre)
-        sync(from: source, to: target, snapshot: snapshot)
+        let sourcePhoto = session.photo(for: source.side)
+        if let capture = source.captureViewport(for: sourcePhoto) {
+            sync(
+                from: source,
+                to: target,
+                snapshot: DetailZoomSnapshot(scale: capture.scale, anchor: capture.anchor),
+                sourceNativeOverride: capture.nativeScale,
+                sourceIsFullResolutionOverride: capture.isFullResolution
+            )
+        } else {
+            sync(
+                from: source,
+                to: target,
+                snapshot: DetailZoomSnapshot(scale: 1, anchor: .centre)
+            )
+        }
     }
 
     private func checkSupportedLayout(for size: CGSize) {
@@ -573,6 +725,23 @@ private struct CompareGeometrySnapshot: Equatable {
     let verticalFold: ClosedRange<CGFloat>?
 }
 
+private struct ComparePair: Equatable {
+    let reference: PhotoIdentity
+    let challenger: PhotoIdentity
+}
+
+@MainActor
+private final class CompareTransitionState {
+    var settledPair: ComparePair?
+}
+
+private struct KeptCompareZoom: Equatable {
+    let scale: CGFloat
+    let nativeScale: CGFloat?
+    let anchor: DetailZoomAnchor
+    let isFullResolution: Bool
+}
+
 // MARK: - Per-Pane State & Controller
 
 @MainActor
@@ -592,6 +761,12 @@ private final class ComparePaneController {
     enum ZoomMode: Equatable {
         case fit
         case fullResolution(anchor: DetailZoomAnchor, size: CGSize?)
+        case manual
+
+        var isFullResolution: Bool {
+            if case .fullResolution = self { return true }
+            return false
+        }
     }
 
     var shown: DetailImage?
@@ -599,15 +774,21 @@ private final class ComparePaneController {
     var limitation: DetailLimitation?
     var previewOnly = false
     var scale: CGFloat = 1
+    var commandedScale: CGFloat = 1
+    var anchor: DetailZoomAnchor = .centre
     var viewSize: CGSize = .zero
     var displayScale: CGFloat = 2
     var command: DetailZoomCommand?
     var commandCounter = 0
     var zoomMode: ZoomMode = .fit
+    var keptZoom: KeptCompareZoom?
+    var loadedPhotoID: PhotoIdentity?
     var focusRegionState = DetailFocusRegionState()
     var inspectedFocusRegionID: String?
     var focusAnalysisID = UUID()
     var upgradeTask: Task<Void, Never>?
+    var upgradeRequest: DetailPixelRequest?
+    var upgradeToken: UUID?
     var zoomReportTask: Task<Void, Never>?
     var screenPixels: Int = 2400
 
@@ -618,6 +799,8 @@ private final class ComparePaneController {
     func cancelTasks() {
         upgradeTask?.cancel()
         upgradeTask = nil
+        upgradeRequest = nil
+        upgradeToken = nil
         zoomReportTask?.cancel()
         zoomReportTask = nil
     }
@@ -637,6 +820,7 @@ private final class ComparePaneController {
     }
 
     var isAtFullResolution: Bool {
+        if zoomMode.isFullResolution { return true }
         guard let shown, viewSize.width > 0, let pixels = shown.fullResolutionPixels else {
             return scale > DetailFitScale.tolerance
         }
@@ -671,10 +855,43 @@ private final class ComparePaneController {
         command = DetailZoomCommand(id: commandCounter, kind: kind)
         switch kind {
         case .fit:
+            commandedScale = 1
             scale = 1
-        case .scale(let target, _):
+            anchor = .centre
+        case .scale(let target, let targetAnchor):
+            commandedScale = target
             scale = target
+            anchor = DetailZoomAnchor(x: targetAnchor.x, y: targetAnchor.y)
         }
+    }
+
+    /// Snapshots the pane's active zoom viewport, or returns its pending capture if initial pixels
+    /// for `expectedPhoto` have not landed yet.
+    func captureViewport(for expectedPhoto: PhotoIdentity? = nil) -> KeptCompareZoom? {
+        if let expectedPhoto, loadedPhotoID != expectedPhoto {
+            return keptZoom
+        }
+        if keptZoom != nil && shown == nil {
+            return keptZoom
+        }
+        guard scale > DetailFitScale.tolerance else { return nil }
+        let liveSnapshot = probe.container?.zoomSnapshot
+        let resolvedScale: CGFloat
+        let resolvedAnchor: DetailZoomAnchor
+        if let liveSnapshot, abs(liveSnapshot.scale - scale) <= 0.01 {
+            resolvedScale = liveSnapshot.scale
+            resolvedAnchor = liveSnapshot.anchor
+        } else {
+            resolvedScale = scale
+            resolvedAnchor = anchor
+        }
+        guard resolvedScale > DetailFitScale.tolerance else { return nil }
+        return KeptCompareZoom(
+            scale: resolvedScale,
+            nativeScale: nativeFullResolutionScale,
+            anchor: resolvedAnchor,
+            isFullResolution: zoomMode.isFullResolution
+        )
     }
 }
 
@@ -687,6 +904,7 @@ private struct ComparePaneView: View {
     let photo: GridPhoto?
     let marks: PhotoMarks
     let isActive: Bool
+    let isSyncLocked: Bool
     let controller: ComparePaneController
     let images: any DetailImageSource
     let thumbnails: any GridThumbnailSource
@@ -697,7 +915,8 @@ private struct ComparePaneView: View {
     let identifierPrefix: String
     let onSelectPane: () -> Void
     let onViewportChanged: (DetailZoomSnapshot?) -> Void
-    let onInitialPixelsReady: () -> Void
+    let onPrepareTransition: () -> Void
+    let syncedOpeningCapture: () -> KeptCompareZoom?
 
     @Environment(\.displayScale) private var displayScale
     @Environment(\.cloveTheme) private var theme
@@ -723,12 +942,11 @@ private struct ComparePaneView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifierPrefix)
         .onChange(of: photoID) { _, _ in
+            onPrepareTransition()
             controller.cancelTasks()
             controller.inspectedFocusRegionID = nil
             controller.focusAnalysisID = UUID()
             controller.focusRegionState = DetailFocusRegionState()
-            controller.zoomMode = .fit
-            controller.issueZoom(.fit)
         }
         .task(id: photoID) {
             await loadPixels(for: photoID)
@@ -819,17 +1037,21 @@ private struct ComparePaneView: View {
                 currentRating: marks.rating,
                 feedback: DetailSwipeFeedback(),
                 onZoomChange: { newScale in
-                    handleZoomScaleChange(newScale)
+                    handleZoomScaleChange(newScale, fromUserGesture: true)
                 },
                 isCompareMode: true,
                 onViewportChanged: { snapshot in
                     if let snapshot {
-                        handleZoomScaleChange(snapshot.scale)
+                        controller.anchor = snapshot.anchor
+                        handleZoomScaleChange(snapshot.scale, fromUserGesture: true)
+                    } else if !(controller.probe.container?.isZoomed ?? false) {
+                        controller.anchor = .centre
+                        handleZoomScaleChange(1, fromUserGesture: true)
                     }
                     onViewportChanged(snapshot)
                 },
                 onSyncedScaleApplied: { syncedScale in
-                    handleZoomScaleChange(syncedScale)
+                    handleZoomScaleChange(syncedScale, fromUserGesture: false)
                 },
                 onChromeToggle: {
                     onSelectPane()
@@ -908,6 +1130,7 @@ private struct ComparePaneView: View {
     // MARK: - Pane Loading & Upgrades
 
     private func loadPixels(for targetID: PhotoIdentity) async {
+        onPrepareTransition()
         controller.cancelTasks()
         controller.limitation = nil
         controller.previewOnly = false
@@ -924,7 +1147,6 @@ private struct ComparePaneView: View {
         if let warm = images.warmImage(for: targetID, request: previewRequest) {
             show(warm, for: targetID)
             presentedWarm = true
-            onInitialPixelsReady()
         } else {
             controller.phase = .placeholder(nil)
             let thumb = await images.placeholder(for: targetID, gridThumbnails: thumbnails)
@@ -951,18 +1173,22 @@ private struct ComparePaneView: View {
             switch outcome {
             case .image(let image):
                 if !presentedWarm
-                    || image.image !== controller.shown?.image
-                    || image.quality != controller.shown?.quality
-                    || image.source != controller.shown?.source
-                    || image.fullResolutionSize != controller.shown?.fullResolutionSize
+                    || (controller.shown?.isBestAvailable != true
+                        && (image.image !== controller.shown?.image
+                            || image.quality != controller.shown?.quality
+                            || image.source != controller.shown?.source
+                            || image.fullResolutionSize != controller.shown?.fullResolutionSize))
                 {
                     show(image, for: targetID)
-                    onInitialPixelsReady()
                 }
                 await upgradeScreenRAWIfNeeded(for: targetID, screenPixels: controller.screenPixels)
                 return
             case .unavailable(let failure):
                 controller.phase = .unavailable(failure)
+                controller.loadedPhotoID = nil
+                controller.keptZoom = nil
+                controller.zoomMode = .fit
+                controller.issueZoom(.fit)
                 return
             case .deferred:
                 attempts += 1
@@ -999,6 +1225,39 @@ private struct ComparePaneView: View {
         if image.limitation != nil {
             controller.previewOnly = true
         }
+        if controller.loadedPhotoID != targetID {
+            controller.loadedPhotoID = targetID
+            let openingCapture: KeptCompareZoom? =
+                if isSyncLocked && side == .challenger {
+                    controller.keptZoom ?? syncedOpeningCapture()
+                } else {
+                    controller.keptZoom
+                }
+            controller.keptZoom = nil
+
+            if let openingCapture, openingCapture.scale > DetailFitScale.tolerance {
+                let opening = openingScale(for: image, from: openingCapture)
+                if opening > DetailFitScale.tolerance {
+                    if openingCapture.isFullResolution {
+                        controller.zoomMode = .fullResolution(
+                            anchor: openingCapture.anchor,
+                            size: image.fullResolutionPixels
+                        )
+                    } else {
+                        controller.zoomMode = .manual
+                    }
+                    controller.issueZoom(.scale(opening, anchor: openingCapture.anchor.unitPoint))
+                    upgradeIfNeeded(for: targetID)
+                } else {
+                    controller.zoomMode = .fit
+                    controller.issueZoom(.fit)
+                }
+            } else {
+                controller.zoomMode = .fit
+                controller.issueZoom(.fit)
+            }
+            return
+        }
         if case .fullResolution(let chosen, let targetSize) = controller.zoomMode,
             controller.viewSize.width > 0
         {
@@ -1025,13 +1284,49 @@ private struct ComparePaneView: View {
         }
     }
 
-    private func handleZoomScaleChange(_ newScale: CGFloat) {
+    private func openingScale(for image: DetailImage, from kept: KeptCompareZoom) -> CGFloat {
+        guard controller.viewSize.width > 0 else { return kept.scale }
+        if let nativeScale = controller.nativeFullResolutionScale {
+            if kept.isFullResolution {
+                return nativeScale
+            }
+            if let previousNative = kept.nativeScale {
+                return DetailZoom.convertedScale(
+                    kept.scale, fromNativeScale: previousNative, toNativeScale: nativeScale)
+            }
+            return kept.scale
+        }
+        if kept.isFullResolution, controller.previewOnly,
+            let fallback = DetailZoom.fullResolutionTarget(
+                nativePixels: nil,
+                shownPixels: controller.pixelSizeOfShown,
+                viewSize: controller.viewSize,
+                screenScale: controller.displayScale,
+                previewIsAll: true)
+        {
+            return fallback
+        }
+        return kept.scale
+    }
+
+    private func handleZoomScaleChange(_ newScale: CGFloat, fromUserGesture: Bool) {
         controller.scale = newScale
         guard newScale > DetailFitScale.tolerance else {
             controller.inspectedFocusRegionID = nil
             controller.zoomMode = .fit
+            controller.commandedScale = 1
+            controller.anchor = .centre
+            if fromUserGesture && controller.loadedPhotoID != photoID {
+                controller.keptZoom = nil
+            }
             controller.upgradeTask?.cancel()
+            controller.upgradeTask = nil
+            controller.upgradeRequest = nil
+            controller.upgradeToken = nil
             return
+        }
+        if abs(newScale - controller.commandedScale) > 0.01 {
+            controller.zoomMode = .manual
         }
         upgradeIfNeeded(for: photoID)
     }
@@ -1042,15 +1337,32 @@ private struct ComparePaneView: View {
             let shown = controller.shown,
             controller.requestPixels(scale: controller.scale) > max(shown.width, shown.height)
         else { return }
+        let need: DetailPixelRequest.Need =
+            controller.isAtFullResolution ? .fullResolution : .morePixels
+        let request = DetailPixelRequest(
+            displayPixels: controller.requestPixels(scale: controller.scale),
+            need: need,
+            mode: displayMode,
+            screenPixels: controller.screenPixels)
+        if controller.upgradeTask != nil, controller.upgradeRequest == request {
+            return
+        }
+        launchUpgradeTask(for: targetID, request: request)
+    }
+
+    private func launchUpgradeTask(for targetID: PhotoIdentity, request: DetailPixelRequest) {
         controller.upgradeTask?.cancel()
+        let token = UUID()
+        controller.upgradeRequest = request
+        controller.upgradeToken = token
         controller.upgradeTask = Task {
-            let need: DetailPixelRequest.Need =
-                controller.isAtFullResolution ? .fullResolution : .morePixels
-            let request = DetailPixelRequest(
-                displayPixels: controller.requestPixels(scale: controller.scale),
-                need: need,
-                mode: displayMode,
-                screenPixels: controller.screenPixels)
+            defer {
+                if controller.upgradeToken == token {
+                    controller.upgradeTask = nil
+                    controller.upgradeRequest = nil
+                    controller.upgradeToken = nil
+                }
+            }
             let outcome = await images.image(
                 for: targetID, request: request, consumer: controller.consumer)
             guard !Task.isCancelled, self.photoID == targetID else { return }
@@ -1064,6 +1376,7 @@ private struct ComparePaneView: View {
         guard settings.doubleTap != .off else { return }
         guard controller.scale <= DetailFitScale.tolerance else {
             controller.inspectedFocusRegionID = nil
+            controller.keptZoom = nil
             controller.zoomMode = .fit
             controller.issueZoom(.fit)
             onViewportChanged(DetailZoomSnapshot(scale: 1, anchor: .centre))
@@ -1105,22 +1418,12 @@ private struct ComparePaneView: View {
             onViewportChanged(DetailZoomSnapshot(scale: target, anchor: chosen))
         }
         guard !controller.previewOnly else { return }
-        controller.upgradeTask?.cancel()
-        let currentPhoto = photoID
-        let screenPixels = controller.screenPixels
-        controller.upgradeTask = Task {
-            let request = DetailPixelRequest(
-                displayPixels: controller.requestPixels(scale: controller.scale),
-                need: .fullResolution,
-                mode: displayMode,
-                screenPixels: screenPixels)
-            let outcome = await images.image(
-                for: currentPhoto, request: request, consumer: controller.consumer)
-            guard !Task.isCancelled, self.photoID == currentPhoto else { return }
-            if case .image(let image) = outcome {
-                show(image, for: currentPhoto)
-            }
-        }
+        let request = DetailPixelRequest(
+            displayPixels: controller.requestPixels(scale: controller.scale),
+            need: .fullResolution,
+            mode: displayMode,
+            screenPixels: controller.screenPixels)
+        launchUpgradeTask(for: photoID, request: request)
     }
 
     private func loadFocusRegions(for targetID: PhotoIdentity) async {
