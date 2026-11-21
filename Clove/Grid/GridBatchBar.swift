@@ -11,6 +11,8 @@ struct GridBatchBar: View {
     var onRename: () -> Void = {}
     var onKeywords: () -> Void = {}
     var onSaveToPhotos: () -> Void = {}
+    var showsCompare = false
+    var onCompare: () -> Void = {}
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
     @Environment(\.tapPickerController) private var tapPicker
@@ -54,6 +56,10 @@ struct GridBatchBar: View {
                     }
                 }
             Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
+            if showsCompare {
+                compareButton
+                Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
+            }
             actionsMenu
         }
         .frame(height: 48)
@@ -153,6 +159,29 @@ struct GridBatchBar: View {
         .accessibilityLabel(AppLocalization.string("Actions", language: language))
         .accessibilityIdentifier("clove.grid.batch.actions")
         .reportTapPickerFrame("clove.grid.batch.actions")
+    }
+
+    private var compareButton: some View {
+        Button {
+            tapPicker?.dismiss()
+            onCompare()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "rectangle.split.2x1")
+                    .imageScale(.small)
+                Text(AppLocalization.string("Compare", language: language))
+                    .lineLimit(1)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.clove.accent)
+            .padding(.horizontal, 12)
+            .frame(minWidth: 44, minHeight: 48, maxHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(AppLocalization.string("Compare", language: language))
+        .accessibilityIdentifier("clove.grid.batch.compare")
+        .reportTapPickerFrame("clove.grid.batch.compare")
     }
 
     private var isRejected: Bool {

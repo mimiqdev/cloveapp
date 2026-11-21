@@ -28,7 +28,7 @@ struct DetailCacheKey: Hashable, Sendable {
     }
 
     private let path: String
-    private let locationIdentity: String
+    let locationIdentity: String
     private let size: Int64
     private let modificationTime: Date
     private let purpose: DetailCachePurpose
@@ -94,7 +94,8 @@ public final class DetailCache: Sendable {
         var warm: [DetailCacheKey: WarmEntry] = [:]
         var warmCost = 0
         var encodingEpoch: UInt64 = 0
-        var native: (key: DetailCacheKey, image: DetailImage)?
+        var nativeEntries: [(key: DetailCacheKey, image: DetailImage)] = []
+        var nativeRetentionLimit = 1
         var nativeSizes: [DetailSource: NativeSize] = [:]
         var currentPhoto: DetailCacheKey?
         var cameraFailures: Set<DetailSource> = []
@@ -126,17 +127,19 @@ public final class DetailCache: Sendable {
             state.warm.removeAll()
             state.warmCost = 0
             state.encodingEpoch &+= 1
-            state.native = nil
+            state.nativeEntries.removeAll()
             state.nativeSizes.removeAll()
             state.cameraFailures.removeAll()
         }
     }
 
-    /// Changing photo releases the sole full decode before the next allocation.
+    /// Changing photo releases the sole full decode before the next allocation when retention is 1.
     func navigate(to request: DetailRequest) {
         state.withLock { state in
             let photo = Self.fullKey(request)
-            if state.currentPhoto != photo { state.native = nil }
+            if state.nativeRetentionLimit == 1, state.currentPhoto != photo {
+                state.nativeEntries.removeAll()
+            }
             state.currentPhoto = photo
         }
     }
@@ -175,8 +178,40 @@ public final class DetailCache: Sendable {
     /// Releases the single native render without touching previews.
     ///
     /// G1 "Scheduling and cache": release the old native image before rendering the next.
+    /// Releases all native renders without touching previews.
+    /// G1 "Scheduling and cache": release the old native image before rendering the next.
     func releaseNative() {
-        state.withLock { $0.native = nil }
+        state.withLock { $0.nativeEntries.removeAll() }
+    }
+
+    /// Releases native renders associated with a specific source location (used when Compare steps past a candidate).
+    func releaseNative(locationIdentity: String) {
+        state.withLock { state in
+            state.nativeEntries.removeAll { $0.key.locationIdentity == locationIdentity }
+        }
+    }
+
+    /// Releases oldest native renders before starting a new full-resolution decode so memory stays bounded.
+    func prepareForNativeDecode() {
+        state.withLock { state in
+            let target = max(0, state.nativeRetentionLimit - 1)
+            Self.trimNative(&state, maxCount: target, preferring: nil)
+        }
+    }
+
+    /// Configures how many native full-resolution renders may stay resident (1 in Detail, 2 in Compare).
+    /// Shrinking immediately evicts excess buffers while preferring to retain `preferredLocation`.
+    func setNativeRetentionLimit(_ limit: Int, preferringLocation preferredLocation: String? = nil)
+    {
+        let clamped = max(1, limit)
+        state.withLock { state in
+            state.nativeRetentionLimit = clamped
+            Self.trimNative(&state, maxCount: clamped, preferringLocation: preferredLocation)
+        }
+    }
+
+    var nativeRetentionLimit: Int {
+        state.withLock { $0.nativeRetentionLimit }
     }
 
     /// Synchronous memory lookup that never triggers JPEG decoding or file I/O.
@@ -313,12 +348,46 @@ public final class DetailCache: Sendable {
     }
 
     func native(for key: DetailCacheKey) -> DetailImage? {
-        state.withLock { $0.native?.key == key ? $0.native?.image : nil }
+        state.withLock { state in
+            guard let index = state.nativeEntries.firstIndex(where: { $0.key == key }) else {
+                return nil
+            }
+            let entry = state.nativeEntries.remove(at: index)
+            state.nativeEntries.append(entry)
+            return entry.image
+        }
     }
 
-    /// Holds at most one native render: a newer one replaces the older (G1 "Scheduling").
+    /// Holds at most `nativeRetentionLimit` native renders in MRU order.
     func storeNative(_ image: DetailImage, for key: DetailCacheKey) {
-        state.withLock { $0.native = (key, image) }
+        state.withLock { state in
+            state.nativeEntries.removeAll { $0.key == key }
+            state.nativeEntries.append((key, image))
+            Self.trimNative(&state, maxCount: state.nativeRetentionLimit, preferring: key)
+        }
+    }
+
+    private static func trimNative(
+        _ state: inout State,
+        maxCount: Int,
+        preferring preferredKey: DetailCacheKey? = nil,
+        preferringLocation preferredLocation: String? = nil
+    ) {
+        while state.nativeEntries.count > maxCount {
+            if let preferredKey,
+                let dropIndex = state.nativeEntries.firstIndex(where: { $0.key != preferredKey })
+            {
+                state.nativeEntries.remove(at: dropIndex)
+            } else if let preferredLocation,
+                let dropIndex = state.nativeEntries.firstIndex(where: {
+                    $0.key.locationIdentity != preferredLocation
+                })
+            {
+                state.nativeEntries.remove(at: dropIndex)
+            } else {
+                state.nativeEntries.removeFirst()
+            }
+        }
     }
 
     /// The photo's native 100% size if it was already read, including the answer that it could
@@ -344,5 +413,7 @@ public final class DetailCache: Sendable {
     var imageCount: Int {
         state.withLock { Set($0.images.keys).union($0.pending.keys).count }
     }
-    var holdsNativeImage: Bool { state.withLock { $0.native != nil } }
+    var holdsNativeImage: Bool { state.withLock { !$0.nativeEntries.isEmpty } }
+
+    var heldNativeCount: Int { state.withLock { $0.nativeEntries.count } }
 }

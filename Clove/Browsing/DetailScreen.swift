@@ -72,7 +72,15 @@ struct DetailScreen: View {
 
     var body: some View {
         Group {
-            if let photo = browsing.currentPhoto {
+            if let compare = browsing.compareSession {
+                CompareView(
+                    browsing: browsing,
+                    session: compare,
+                    settings: settings,
+                    images: images,
+                    displayMode: store.photoDisplayMode,
+                    duo: duo)
+            } else if let photo = browsing.currentPhoto {
                 content(for: photo)
             } else {
                 ContentUnavailableView {
@@ -87,6 +95,11 @@ struct DetailScreen: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail")
+        .onChange(of: browsing.compareSession != nil) { _, isComparing in
+            if isComparing {
+                autoAdvance.cancel()
+            }
+        }
         .onChange(of: settings.similarGroupsEnabled) { _, enabled in
             if !enabled {
                 autoAdvance.cancel()

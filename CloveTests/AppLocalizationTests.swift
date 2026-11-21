@@ -480,4 +480,29 @@ struct AppLocalizationTests {
             AppLocalization.groupingTimeWindowTitle(.thirtySeconds, language: .traditionalChinese)
                 == "30 秒")
     }
+
+    @Test func compareStringsLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Compare", "Compare", "对比", "對比"),
+            ("Sync On", "Sync On", "同步开", "同步開"),
+            ("Sync Off", "Sync Off", "同步关", "同步關"),
+            ("Set as A", "Set as A", "设为 A", "設為 A"),
+            ("Previous candidate", "Previous candidate", "上一张候选", "上一張候選"),
+            ("Next candidate", "Next candidate", "下一张候选", "下一張候選"),
+            ("Reference photo A", "Reference photo A", "参考照片 A", "參考相片 A"),
+            ("Challenger photo B", "Challenger photo B", "对比照片 B", "對比相片 B"),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+        #expect(
+            AppLocalization.format("Reference photo %@", language: .simplifiedChinese, "IMG_01.ARW")
+                == "参考照片 IMG_01.ARW")
+        #expect(
+            AppLocalization.format(
+                "Challenger photo %@", language: .traditionalChinese, "IMG_02.ARW")
+                == "對比相片 IMG_02.ARW")
+    }
 }
