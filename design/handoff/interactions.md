@@ -143,3 +143,11 @@ Focus View ──Back──▶ Grid View
 - Settings ▶ Appearance offers an independent three-way appearance mode (`Light` / `Dark` / `System`, default `System`) and six paired theme families (`Default`, `Catppuccin`, `Darkroom`, `Night`, `Nord`, `Gruvbox`, default `Default`).
 - Changing mode preserves the selected family, and changing family preserves the selected mode. In `System` mode, the resolved palette follows the device appearance within the selected family without falling back to `Default`.
 - Apply by swapping the resolved token set at the app root (`mode` + `family` + actual device appearance). Photos are never tinted.
+
+## Side-by-side Compare
+
+- **Entry**: Detail toolbar button (`rectangle.split.2x1`) opens Compare in `.stepping` mode (active Group Focus members when expanded, else filtered Detail Timeline; requires `>= 2` photos, defaults `A = current`, `B = next` or previous if last, `activeSide = .challenger`, `isSyncLocked = true`). Grid multi-select batch bar offers `Compare` when **exactly 2** visible photos are selected, opening `.fixedPair` mode (`A = first`, `B = second`, `activeSide = .reference`, `isSyncLocked = true`).
+- **Stepping & `Set as A`**: `<` / `>` and filmstrip taps replace B (skipping A). `Set as A` promotes B to A and loads the next available challenger in scope (wrapping forward, or cleanly swapping A and B when scope has exactly 2 photos without modifying marks).
+- **Gestures & Sync**: single-finger drag always pans; Detail swipe-to-rate and swipe-to-switch stay disabled. When `Sync On` (`lock.fill`), pinch, double-tap (preferring eligible focus regions when enabled), and single-finger pan mirror across panes using native-relative scale and normalized center anchors; when `Sync Off` (`lock.open`), panes zoom and pan independently.
+- **Marking & Undo**: ratings, Reject, color labels, and Undo act strictly on `activeSide` via `BrowsingModel` and never auto-advance or dismiss the Compare pair, even when the active Grid filter would exclude the marked photo. iPad keyboard shortcuts support `Esc` (exit Compare), `←`/`→` (step B in `.stepping` mode), ratings, Reject, labels, and `⌘Z` Undo on the active side.
+- **Rotation & folding**: resizing or rotating to portrait iPhone or Duo Cover exits Compare cleanly to Detail on `activeSide`'s photo and restores single-photo full-resolution retention.

@@ -84,6 +84,10 @@ protocol DetailImageSource: AnyObject {
         -> CGImage?
     func prepare(_ window: DetailPhotoWindow) async
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest, consumer: UUID) async
+        -> DetailImageOutcome
+    func setCompareRetention(active: Bool, keeping photo: PhotoIdentity?) async
+    func releaseComparePhoto(_ photo: PhotoIdentity) async
     func prefetchPreviews(_ window: DetailPhotoWindow) async
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async
     func leave(window: UUID) async
@@ -101,6 +105,13 @@ extension DetailImageSource {
         return nil
     }
     func prepare(_ window: DetailPhotoWindow) async {}
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest, consumer: UUID) async
+        -> DetailImageOutcome
+    {
+        await image(for: photo, request: request)
+    }
+    func setCompareRetention(active: Bool, keeping photo: PhotoIdentity?) async {}
+    func releaseComparePhoto(_ photo: PhotoIdentity) async {}
     func prefetchPreviews(_ window: DetailPhotoWindow) async {}
     func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {}
     func leave(window: UUID) async {}

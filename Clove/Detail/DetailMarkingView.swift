@@ -350,6 +350,34 @@ struct DetailMarkingView: View {
             availableHeight: Double(containerSize.height))
     }
 
+    private var compareLayoutPolicy: CompareLayoutPolicy {
+        CompareLayoutPolicy(
+            availableWidth: Double(containerSize.width),
+            availableHeight: Double(containerSize.height),
+            isRegularWidth: horizontalSizeClass == .regular,
+            isCompactHeight: verticalSizeClass == .compact,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover)
+    }
+
+    private var canEnterCompare: Bool {
+        compareLayoutPolicy.supportsCompare
+            && browsing.canEnterCompareFromDetail(timeline: timeline)
+    }
+
+    private var compareToolbarButton: some View {
+        Button(
+            AppLocalization.string("Compare", language: language),
+            systemImage: "rectangle.split.2x1"
+        ) {
+            dismissGestureGuide()
+            tapPickerDismissToken += 1
+            actions.markingSwipeBegan()
+            browsing.enterCompareFromDetail(timeline: timeline)
+        }
+        .accessibilityIdentifier("clove.detail.compare")
+    }
+
     private var presentationBinding: Binding<DetailPresentation> {
         presentation ?? duo?.presentation ?? $widePresentation
     }
@@ -423,6 +451,9 @@ struct DetailMarkingView: View {
                                         ? Color.clove.reject : Color.clove.text.primary
                                 )
                                 .accessibilityIdentifier(pill.identifier)
+                        }
+                        if canEnterCompare {
+                            compareToolbarButton
                         }
                         Button(
                             AppLocalization.string("Info", language: language),
@@ -610,6 +641,9 @@ struct DetailMarkingView: View {
                     }
                     if !isDuoExpanded {
                         focusRegionsToggle
+                    }
+                    if canEnterCompare {
+                        compareToolbarButton
                     }
                     Button(
                         AppLocalization.string("Info", language: language),
@@ -848,6 +882,20 @@ struct DetailMarkingView: View {
                             pill
                                 .fixedSize()
                                 .reportHeaderControlFrame(pill.identifier)
+                        }
+                        if canEnterCompare {
+                            GlassIconButton(
+                                label: AppLocalization.string("Compare", language: language),
+                                symbol: "rectangle.split.2x1",
+                                size: usesRail ? .pad : .phone,
+                                identifier: "clove.detail.compare"
+                            ) {
+                                dismissGestureGuide()
+                                tapPickerDismissToken += 1
+                                actions.markingSwipeBegan()
+                                browsing.enterCompareFromDetail(timeline: timeline)
+                            }
+                            .reportHeaderControlFrame("clove.detail.compare")
                         }
                         GlassIconButton(
                             label: AppLocalization.string("Info", language: language),

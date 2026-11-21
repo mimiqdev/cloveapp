@@ -271,3 +271,10 @@ A first draft of the flow in #176 for the designer. The engine is #175.
 - Keyboard shortcuts on iPad. The rail exists, but no shortcut sheet was designed.
 - Metadata editing in Info, which is planned for later.
 - Accessibility sizes and VoiceOver labels. Follow the system defaults; the labels are in `copy.md`.
+
+## 14 Compare
+
+- **Eligible wide surfaces**: iPad, unfolded iPhone Duo, and landscape iPhone (omitted on portrait iPhone and Duo Cover; rotating to portrait or folding to Cover exits Compare back to Detail on the active pane's photo without losing marks).
+- **Top bar**: leading `Done` glass pill, centered `Compare` title, and trailing `Sync On` (`lock.fill`, warm `accent` fill) / `Sync Off` (`lock.open`, neutral glass) toggle, clear of the Duo right side-toolbar safe area.
+- **Side-by-side panes**: 50/50 split (split strictly along the vertical center hinge on unfolded Duo while respecting the trailing system side-toolbar safe area on B). Each pane is clipped inside a subtle dark-neutral rounded frame (`2 pt` `accent` stroke on active pane, `1 pt` hairline `separator` on inactive pane) with a slim header carrying the `A`/`B` pill, middle-truncated filename preserving extension, live zoom readout (`Fit`, `100%`, `%`), and read-only current marks (star + count and/or label dot when set, red `flag.slash.fill` when rejected). Tapping either pane switches `activeSide`.
+- **Bottom review bar**: `[Undo] [A/B] [Marking Capsule]` trailing, acting strictly on `activeSide`. Stepping mode adds `<`, `>`, and `Set as A` leading, plus a compact scrollable **filmstrip** (`A`/`B` badges, tapping replaces B) on iPad and unfolded Duo; landscape iPhone omits the filmstrip, and Fixed Pair mode omits `<`, `>`, `Set as A`, and the filmstrip.

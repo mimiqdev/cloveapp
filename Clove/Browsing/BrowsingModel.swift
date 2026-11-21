@@ -135,6 +135,10 @@ final class BrowsingModel {
     /// persisted in `BrowsingState`.
     private(set) var expandedGroup: GroupID?
 
+    /// Transient side-by-side comparison session (`nil` outside Compare). Session-only; excluded
+    /// from `BrowsingState` persistence and preserved across mark/filter updates until exited.
+    private(set) var compareSession: CompareSession?
+
     private var similarGroupsEnabled = true
 
     /// Sidebar and regular-width navigation use the same name for the active filter.
@@ -306,6 +310,14 @@ final class BrowsingModel {
         return storedPhotos[index]
     }
 
+    /// Resolves a photo in the open folder by identity even when active filters hide it from `photos`.
+    func placedPhoto(for id: PhotoIdentity) -> GridPhoto? {
+        if let placedIndex = placedPhotoIndices[id] {
+            return allPlacedPhotos[placedIndex]
+        }
+        return photoIndices[id].map { storedPhotos[$0] }
+    }
+
     /// The open group's photos with their marks, in the group's member order (PRD P0-12).
     var groupPhotos: [GridPhoto] {
         guard let group = currentGroup else { return [] }
@@ -473,6 +485,7 @@ final class BrowsingModel {
 
     /// Shows one photo's detail in Timeline mode (`expandedGroup = nil`).
     func openPhoto(_ photo: PhotoIdentity) {
+        compareSession = nil
         expandedGroup = nil
         state.currentPhoto = photo
         library.setEntryResumePhoto(photo)
@@ -482,6 +495,7 @@ final class BrowsingModel {
     /// Opens an active visible group directly in Group Focus on its Representative Photo (or on
     /// `photo` when provided and visible inside that group).
     func openGroup(_ groupID: GroupID, on photo: PhotoIdentity? = nil) {
+        compareSession = nil
         let timeline = DetailTimeline(
             photos: photos, groups: groups,
             groupsEnabled: similarGroupsEnabled && readingProgress == nil)
@@ -530,6 +544,102 @@ final class BrowsingModel {
         }
     }
 
+    // MARK: - Side-by-side Compare
+
+    /// Returns the stepping scope for Compare when entered from Detail Timeline or Group Focus.
+    func compareScope(timeline: DetailTimeline) -> (
+        kind: CompareScopeKind, photos: [PhotoIdentity]
+    )? {
+        if let expanded = expandedGroup,
+            let group = timeline.activeGroup(with: expanded)
+        {
+            return (.group(group.id), group.visibleMembers.map(\.id))
+        }
+        let stage = timeline.stagePhotos.map(\.id)
+        guard !stage.isEmpty else { return nil }
+        return (.timeline, stage)
+    }
+
+    /// Whether Detail or Group Focus has at least two unique photos available to compare.
+    func canEnterCompareFromDetail(timeline: DetailTimeline) -> Bool {
+        guard let current = state.currentPhoto,
+            let (kind, scope) = compareScope(timeline: timeline)
+        else { return false }
+        return CompareSession(steppingFrom: current, in: scope, kind: kind) != nil
+    }
+
+    /// Enters side-by-side Compare in stepping mode from the active Detail Timeline or Group Focus photo.
+    @discardableResult
+    func enterCompareFromDetail(timeline: DetailTimeline) -> Bool {
+        guard let current = state.currentPhoto,
+            let (kind, scope) = compareScope(timeline: timeline),
+            let session = CompareSession(steppingFrom: current, in: scope, kind: kind)
+        else { return false }
+        compareSession = session
+        state.route = .detail
+        return true
+    }
+
+    /// Enters side-by-side Compare in fixed-pair mode for two selected Grid photos.
+    @discardableResult
+    func enterComparePair(first: PhotoIdentity, second: PhotoIdentity) -> Bool {
+        guard placedPhoto(for: first) != nil, placedPhoto(for: second) != nil,
+            let session = CompareSession(fixedPair: first, second: second)
+        else { return false }
+        expandedGroup = nil
+        state.currentPhoto = first
+        library.setEntryResumePhoto(first)
+        state.route = .detail
+        compareSession = session
+        return true
+    }
+
+    /// Enters fixed-pair Compare from the current 2-photo Grid batch selection.
+    @discardableResult
+    func enterCompareFromBatchSelection() -> Bool {
+        let targets = batchTargets
+        guard targets.count == 2 else { return false }
+        return enterComparePair(first: targets[0].id, second: targets[1].id)
+    }
+
+    /// Exits Compare back to normal Detail on the active pane's photo without discarding marks.
+    func exitCompare() {
+        guard let activePhoto = compareSession?.activePhoto else { return }
+        compareSession = nil
+        state.currentPhoto = activePhoto
+        library.setEntryResumePhoto(activePhoto)
+        state.route = .detail
+        reconcileExpandedGroup()
+    }
+
+    /// Switches active focus to `side` (reference A or challenger B) for marking and Undo.
+    func selectCompareSide(_ side: CompareSide) {
+        compareSession?.selectSide(side)
+    }
+
+    /// Toggles pan/zoom synchronization between Compare panes.
+    func toggleCompareSyncLock() {
+        compareSession?.toggleSyncLock()
+    }
+
+    /// Steps challenger B by `offset` (`-1` previous, `1` next) skipping reference A.
+    @discardableResult
+    func stepCompareChallenger(offset: Int) -> Bool {
+        compareSession?.stepChallenger(offset: offset) ?? false
+    }
+
+    /// Replaces challenger B with `photo` when in stepping mode and distinct from A.
+    @discardableResult
+    func selectCompareChallenger(_ photo: PhotoIdentity) -> Bool {
+        compareSession?.selectChallenger(photo) ?? false
+    }
+
+    /// Promotes challenger B to reference A and loads the next candidate in scope (or swaps in 2-photo scope).
+    @discardableResult
+    func promoteCompareChallengerToReference() -> Bool {
+        compareSession?.promoteChallengerToReference() ?? false
+    }
+
     /// Runs similar groups again for the open folder, without the group cache (PRD P0-11).
     ///
     /// Run again is the grid's own action (PRD Similar groups rules), so the model passes it to
@@ -571,6 +681,7 @@ final class BrowsingModel {
 
     /// Shows Clove's settings (PRD Gesture-related settings).
     func showSettings() {
+        compareSession = nil
         expandedGroup = nil
         settingsReturnRoute = state.route == .entry ? .entry : .grid
         state.route = .settings
@@ -590,6 +701,7 @@ final class BrowsingModel {
         case .settings:
             state.route = settingsReturnRoute
         case .detail:
+            compareSession = nil
             expandedGroup = nil
             state.route = state.folder == nil ? .entry : .grid
         }
@@ -804,6 +916,7 @@ final class BrowsingModel {
         var completed = CompletedBatchRename(plan: plan, result: result)
         // Files changed even on partial failure. No undo entry may retain their old paths.
         markUndo = nil
+        compareSession = nil
         lastRejectMove = nil
         keptEditsByMove = [:]
         dismissRejectMoveToast()
@@ -1051,8 +1164,14 @@ final class BrowsingModel {
 
     var canUndoMark: Bool { canMark && markUndo != nil }
 
+    /// Whether Compare Undo can restore a mark recorded on the active pane's photo.
+    var canUndoCompareMark: Bool {
+        guard let activePhoto = compareSession?.activePhoto else { return false }
+        return canUndoMark && markUndo?.photo == activePhoto
+    }
+
     /// Restore the latest marking or finishing action together.
-    func undoLastMark() {
+    func undoLastMark(restoringNavigation: Bool = true) {
         guard canUndoMark, let undo = markUndo else { return }
         let edits = undo.edits.compactMap { edit -> DesiredMarkEdit? in
             guard
@@ -1063,7 +1182,7 @@ final class BrowsingModel {
             return request(change, for: edit.photo)
         }
         submit(.batch(edits))
-        if let returnPhoto = undo.photo {
+        if restoringNavigation, let returnPhoto = undo.photo {
             let timeline = DetailTimeline(
                 photos: photos, groups: groups,
                 groupsEnabled: similarGroupsEnabled && readingProgress == nil)
@@ -1073,6 +1192,12 @@ final class BrowsingModel {
                 openPhoto(returnPhoto)
             }
         }
+    }
+
+    /// Undoes the active Compare pane's latest mark while keeping the pair and active pane in place.
+    func undoCompareMark() {
+        guard canUndoCompareMark else { return }
+        undoLastMark(restoringNavigation: false)
     }
 
     // MARK: - Ordered actions
@@ -1343,6 +1468,7 @@ final class BrowsingModel {
         // destination keeps the user on the old folder while C4 drains (G1 keeps the scope until
         // the work ends, but that is not something the user has to watch).
         if let lastViewed = state.currentPhoto { library.setEntryResumePhoto(lastViewed) }
+        compareSession = nil
         expandedGroup = nil
         state.route = .entry
         hasLeftFolder = true
@@ -1379,6 +1505,7 @@ final class BrowsingModel {
         state.folder = nil
         state.currentPhoto = nil
         state.selection = []
+        compareSession = nil
         expandedGroup = nil
         state.route = .entry
         folderLocationLoss = nil
@@ -1592,6 +1719,7 @@ final class BrowsingModel {
         clearRecentFailureForOpenFolder()
         state.currentPhoto = nil
         state.selection = []
+        compareSession = nil
         expandedGroup = nil
         state.route = .grid
         // The previous folder's completed move cannot be undone through this folder's session.
@@ -1784,9 +1912,13 @@ final class BrowsingModel {
         if !state.selection.isSubset(of: present) {
             state.selection.formIntersection(present)
         }
+        if compareSession != nil, !(compareSession?.reconcile(available: present) ?? false) {
+            compareSession = nil
+        }
         if let current = state.currentPhoto, !present.contains(current) {
             state.currentPhoto = nil
             if state.route == .detail {
+                compareSession = nil
                 expandedGroup = nil
                 state.route = .grid
             }
@@ -1796,6 +1928,8 @@ final class BrowsingModel {
     /// Clears `expandedGroup` whenever leaving Detail, turning grouping off, scanning, or when the
     /// expanded group drops below two visible members (issue #304, decisions 2 & 3).
     private func reconcileExpandedGroup() {
+        // Keep group membership intact while Compare is active so marks under filters never dismiss Compare.
+        if compareSession != nil { return }
         guard let expanded = expandedGroup else { return }
         guard state.route == .detail, similarGroupsEnabled, readingProgress == nil,
             DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)

@@ -26,6 +26,7 @@ struct GridScreen: View {
     @State private var areGroupsUnfolded: Bool
     private var isFilterAnchorReady: Bool { filterAnchorAttachments > 0 }
     @State private var isLandscapeContainer = false
+    @State private var containerSize: CGSize = .zero
     @State private var presentation = DetailPresentation.photoPreview
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
     /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
@@ -82,6 +83,16 @@ struct GridScreen: View {
             && (verticalSizeClass == .compact || isLandscapeContainer)
     }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
+    private var supportsCompare: Bool {
+        CompareLayoutPolicy(
+            availableWidth: Double(containerSize.width),
+            availableHeight: Double(containerSize.height),
+            isRegularWidth: horizontalSizeClass == .regular,
+            isCompactHeight: verticalSizeClass == .compact,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover
+        ).supportsCompare
+    }
     private var showsMoveRejects: Bool {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
             && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
@@ -135,6 +146,7 @@ struct GridScreen: View {
             .onGeometryChange(for: CGSize.self) {
                 $0.size
             } action: { size in
+                containerSize = size
                 isLandscapeContainer = size.width > size.height && size.width > 0
             }
             .onChange(of: browsing.state.folder) { _, _ in
@@ -196,7 +208,9 @@ struct GridScreen: View {
                         onDeselectAll: { selectsEmpty = true },
                         onRename: { renameFlow = BatchRenameFlow(browsing: browsing) },
                         onKeywords: { showsKeywordsSheet = true },
-                        onSaveToPhotos: startSaveToPhotos
+                        onSaveToPhotos: startSaveToPhotos,
+                        showsCompare: browsing.batchTargets.count == 2 && supportsCompare,
+                        onCompare: { browsing.enterCompareFromBatchSelection() }
                     )
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)

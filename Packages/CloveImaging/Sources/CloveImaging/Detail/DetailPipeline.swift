@@ -219,6 +219,21 @@ public actor DetailPipeline {
         cache.releaseNative()
     }
 
+    /// Configures how many full-resolution native renders stay buffered (1 in Detail, 2 in Compare).
+    public func setNativeRetentionLimit(
+        _ limit: Int, keepingLocation preferredLocation: String? = nil
+    ) {
+        cache.setNativeRetentionLimit(limit, preferringLocation: preferredLocation)
+    }
+
+    /// Evicts native full-resolution buffers for a photo no longer displayed in Compare.
+    public func releaseNative(locationIdentity: String) {
+        cache.releaseNative(locationIdentity: locationIdentity)
+    }
+
+    var nativeRetentionLimit: Int { cache.nativeRetentionLimit }
+    var heldNativeCount: Int { cache.heldNativeCount }
+
     public func releaseCachedImages() {
         for job in Array(jobs.values) { cancel(job.id) }
         latest.removeAll()
@@ -333,7 +348,11 @@ public actor DetailPipeline {
                     }
                 }
                 if effort != .previewOnly && priority == .visible {
-                    for queued in queue where jobs[queued]?.lane == .render {
+                    let keepPeerConsumers = cache.nativeRetentionLimit > 1
+                    for queued in queue
+                    where jobs[queued]?.lane == .render
+                        && (!keepPeerConsumers || jobs[queued]?.consumer == consumer)
+                    {
                         cancel(queued)
                     }
                 }
@@ -595,7 +614,7 @@ public actor DetailPipeline {
                 source: fullCamera, locationIdentity: request.locationIdentity,
                 purpose: .fullRaster)
             if let held = cache.native(for: key) { return verified(.available(held)) }
-            cache.releaseNative()
+            cache.prepareForNativeDecode()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             let rasterInterval = Self.signposter.beginInterval(
                 "DetailFullRaster", id: Self.signposter.makeSignpostID())
@@ -641,7 +660,7 @@ public actor DetailPipeline {
                 source: raw, locationIdentity: request.locationIdentity,
                 purpose: .nativeRAW)
             if let held = cache.native(for: key) { return verified(.available(held)) }
-            cache.releaseNative()
+            cache.prepareForNativeDecode()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             nativeRAWStarted()
             let nativeInterval = Self.signposter.beginInterval(
@@ -670,7 +689,7 @@ public actor DetailPipeline {
                 source: jpeg, locationIdentity: request.locationIdentity,
                 purpose: .fullRaster)
             if let held = cache.native(for: key) { return verified(.available(held)) }
-            cache.releaseNative()
+            cache.prepareForNativeDecode()
             if job.cancellation.isCancelled { return .unavailable(.noUsablePreview) }
             let rasterInterval = Self.signposter.beginInterval(
                 "DetailFullRaster", id: Self.signposter.makeSignpostID())

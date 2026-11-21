@@ -115,6 +115,12 @@ final class PipelineDetailImages: DetailImageSource {
     }
 
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        await image(for: photo, request: request, consumer: consumer)
+    }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest, consumer: UUID) async
+        -> DetailImageOutcome
+    {
         await onUserActivity?()
         guard let sources = sources(for: photo) else { return .unavailable(.cannotOpen) }
         return await admitted.image { [pipeline, consumer, knownSources] in
@@ -140,6 +146,16 @@ final class PipelineDetailImages: DetailImageSource {
                 }
             } catch { return .deferred }
         }
+    }
+
+    func setCompareRetention(active: Bool, keeping photo: PhotoIdentity?) async {
+        let keptLocation = photo.flatMap { sources(for: $0)?.locationIdentity }
+        await pipeline.setNativeRetentionLimit(active ? 2 : 1, keepingLocation: keptLocation)
+    }
+
+    func releaseComparePhoto(_ photo: PhotoIdentity) async {
+        guard let locationIdentity = sources(for: photo)?.locationIdentity else { return }
+        await pipeline.releaseNative(locationIdentity: locationIdentity)
     }
 
     /// Warm +/-2 embedded previews immediately on arrival on the preview lane.

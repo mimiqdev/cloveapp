@@ -155,98 +155,6 @@
         }
       }
     },
-    "%lld RAW skipped": {
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld RAW skipped"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld RAW skipped"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "已跳过 %lld 张 RAW"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hant": {
-          "variations": {
-            "plural": {
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "已略過 %lld 張 RAW"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "%lld RAW-only photos have no JPEG or HEIF and will be skipped.": {
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "1 RAW-only photo has no JPEG or HEIF and will be skipped."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld RAW-only photos have no JPEG or HEIF and will be skipped."
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "其中 %lld 张仅包含 RAW，没有 JPEG 或 HEIF，将被跳过。"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hant": {
-          "variations": {
-            "plural": {
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "其中 %lld 張僅包含 RAW，沒有 JPEG 或 HEIF，將會略過。"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "%lld couldn't be moved": {
       "localizations": {
         "en": {
@@ -973,6 +881,98 @@
         }
       }
     },
+    "%lld RAW skipped": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld RAW skipped"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld RAW skipped"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已跳过 %lld 张 RAW"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已略過 %lld 張 RAW"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld RAW-only photos have no JPEG or HEIF and will be skipped.": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "1 RAW-only photo has no JPEG or HEIF and will be skipped."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld RAW-only photos have no JPEG or HEIF and will be skipped."
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "其中 %lld 张仅包含 RAW，没有 JPEG 或 HEIF，将被跳过。"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "其中 %lld 張僅包含 RAW，沒有 JPEG 或 HEIF，將會略過。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld selected": {
       "localizations": {
         "en": {
@@ -1327,28 +1327,6 @@
         }
       }
     },
-    "Add Keywords…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add Keywords…"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加关键词…"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加入關鍵字…"
-          }
-        }
-      }
-    },
     "Add capture date": {
       "localizations": {
         "en": {
@@ -1389,6 +1367,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "輸入關鍵字，以逗號分隔"
+          }
+        }
+      }
+    },
+    "Add Keywords…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Keywords…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加关键词…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入關鍵字…"
           }
         }
       }
@@ -1965,6 +1965,50 @@
         }
       }
     },
+    "Challenger photo %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Challenger photo %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对比照片 %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對比相片 %@"
+          }
+        }
+      }
+    },
+    "Challenger photo B": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Challenger photo B"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对比照片 B"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對比相片 B"
+          }
+        }
+      }
+    },
     "Choose a folder other than the rejects folder.": {
       "localizations": {
         "en": {
@@ -2269,6 +2313,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "加標籤後跳轉"
+          }
+        }
+      }
+    },
+    "Compare": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compare"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对比"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對比"
           }
         }
       }
@@ -2819,6 +2885,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "磁碟未連接"
+          }
+        }
+      }
+    },
+    "e.g. Wedding_": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. Wedding_"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例如 Wedding_"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例如 Wedding_"
           }
         }
       }
@@ -3419,28 +3507,6 @@
         }
       }
     },
-    "Focus View": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Focus View"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "焦点视图"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "焦點檢視"
-          }
-        }
-      }
-    },
     "Focus analysis": {
       "localizations": {
         "en": {
@@ -3481,6 +3547,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "對焦區域"
+          }
+        }
+      }
+    },
+    "Focus View": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Focus View"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "焦点视图"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "焦點檢視"
           }
         }
       }
@@ -3837,6 +3925,28 @@
         }
       }
     },
+    "Hide photo grid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide photo grid"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏照片网格"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隱藏相片格狀檢視"
+          }
+        }
+      }
+    },
     "HIF companion": {
       "localizations": {
         "en": {
@@ -3859,24 +3969,24 @@
         }
       }
     },
-    "Hide photo grid": {
+    "iCloud Drive": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hide photo grid"
+            "value": "iCloud Drive"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "隐藏照片网格"
+            "value": "iCloud 云盘"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "隱藏相片格狀檢視"
+            "value": "iCloud 雲碟"
           }
         }
       }
@@ -4565,28 +4675,6 @@
         }
       }
     },
-    "Move Rejects": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move Rejects"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "整理淘汰片"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "整理淘汰片"
-          }
-        }
-      }
-    },
     "Move earlier": {
       "localizations": {
         "en": {
@@ -4627,6 +4715,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "向後移"
+          }
+        }
+      }
+    },
+    "Move Rejects": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Rejects"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整理淘汰片"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整理淘汰片"
           }
         }
       }
@@ -4873,6 +4983,28 @@
         }
       }
     },
+    "Next candidate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next candidate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一张候选"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一張候選"
+          }
+        }
+      }
+    },
     "Next photo": {
       "localizations": {
         "en": {
@@ -4935,28 +5067,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "夜間"
-          }
-        }
-      }
-    },
-    "No JPEG or HEIF to save": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No JPEG or HEIF to save"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有可存储的 JPEG 或 HEIF"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "沒有可儲存的 JPEG 或 HEIF"
           }
         }
       }
@@ -5045,6 +5155,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "未偵測到人臉"
+          }
+        }
+      }
+    },
+    "No JPEG or HEIF to save": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No JPEG or HEIF to save"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可存储的 JPEG 或 HEIF"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有可儲存的 JPEG 或 HEIF"
           }
         }
       }
@@ -5335,28 +5467,6 @@
         }
       }
     },
-    "OK": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OK"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "好"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "好"
-          }
-        }
-      }
-    },
     "Off": {
       "localizations": {
         "en": {
@@ -5379,6 +5489,28 @@
         }
       }
     },
+    "OK": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "好"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "好"
+          }
+        }
+      }
+    },
     "On": {
       "localizations": {
         "en": {
@@ -5397,6 +5529,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "開"
+          }
+        }
+      }
+    },
+    "On all selected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On all selected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部已选均有"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部已選皆有"
           }
         }
       }
@@ -5441,28 +5595,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "我的 iPhone"
-          }
-        }
-      }
-    },
-    "On all selected": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "On all selected"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "全部已选均有"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "全部已選皆有"
           }
         }
       }
@@ -5845,28 +5977,6 @@
         }
       }
     },
-    "Photo Preview": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Photo Preview"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "照片预览"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "相片預覽"
-          }
-        }
-      }
-    },
     "Photo display": {
       "localizations": {
         "en": {
@@ -5885,6 +5995,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "相片顯示"
+          }
+        }
+      }
+    },
+    "Photo Preview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo Preview"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "照片预览"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相片預覽"
           }
         }
       }
@@ -6307,6 +6439,28 @@
         }
       }
     },
+    "Previous candidate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous candidate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一张候选"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一張候選"
+          }
+        }
+      }
+    },
     "Previous or next photo": {
       "localizations": {
         "en": {
@@ -6435,72 +6589,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "輕掃快速評分僅作用於已啟用的星級。請至少保留一個星級；即使關閉某星級，來自其他應用的已有評分仍會顯示。"
-          }
-        }
-      }
-    },
-    "RAW": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "RAW"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "RAW"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "RAW"
-          }
-        }
-      }
-    },
-    "RAW marks save to XMP sidecars for Lightroom and Capture One": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "RAW marks save to XMP sidecars for Lightroom and Capture One"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "RAW 写入标准 XMP，直通 Lightroom 与 Capture One"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "RAW 寫入標準 XMP，直通 Lightroom 與 Capture One"
-          }
-        }
-      }
-    },
-    "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "“RAW”会显示文件本身的色彩（加载期间先以相机预览占位）；“相机预览”更快更轻量。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "「RAW」會顯示檔案本身的色彩（載入期間先以相機預覽佔位）；「相機預覽」更快更輕量。"
           }
         }
       }
@@ -6705,6 +6793,72 @@
         }
       }
     },
+    "RAW": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW"
+          }
+        }
+      }
+    },
+    "RAW marks save to XMP sidecars for Lightroom and Capture One": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW marks save to XMP sidecars for Lightroom and Capture One"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW 写入标准 XMP，直通 Lightroom 与 Capture One"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW 寫入標準 XMP，直通 Lightroom 與 Capture One"
+          }
+        }
+      }
+    },
+    "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“RAW”会显示文件本身的色彩（加载期间先以相机预览占位）；“相机预览”更快更轻量。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「RAW」會顯示檔案本身的色彩（載入期間先以相機預覽佔位）；「相機預覽」更快更輕量。"
+          }
+        }
+      }
+    },
     "Reading photos…": {
       "localizations": {
         "en": {
@@ -6811,6 +6965,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "紅色"
+          }
+        }
+      }
+    },
+    "Reference photo %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reference photo %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "参考照片 %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "參考相片 %@"
+          }
+        }
+      }
+    },
+    "Reference photo A": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reference photo A"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "参考照片 A"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "參考相片 A"
           }
         }
       }
@@ -7927,6 +8125,28 @@
         }
       }
     },
+    "Set as A": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set as A"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设为 A"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設為 A"
+          }
+        }
+      }
+    },
     "Settings": {
       "localizations": {
         "en": {
@@ -8607,6 +8827,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "上滑評星 · 下滑淘汰 · 點兩下 100% 查焦"
+          }
+        }
+      }
+    },
+    "Sync Off": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Off"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步关"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步關"
+          }
+        }
+      }
+    },
+    "Sync On": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync On"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步开"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步開"
           }
         }
       }
@@ -10235,50 +10499,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已放大"
-          }
-        }
-      }
-    },
-    "e.g. Wedding_": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "e.g. Wedding_"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "例如 Wedding_"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "例如 Wedding_"
-          }
-        }
-      }
-    },
-    "iCloud Drive": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud Drive"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud 云盘"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud 雲碟"
           }
         }
       }

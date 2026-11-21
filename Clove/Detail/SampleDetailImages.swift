@@ -32,9 +32,10 @@ final class SampleDetailImages: DetailImageSource {
     /// bound. The filmstrip draws grid thumbnails, not these images.
     private static let previewCacheLimit = 8
 
-    /// At most two full renders stay in memory, the same one-image-at-a-time budget G1 gives
-    /// the real pipeline (its single native render is held outside the preview cache).
-    private static let fullCacheLimit = 1
+    /// How many full renders stay in memory (1 in Detail, raised to 2 while Compare is active).
+    private var fullCacheLimit = 1
+    var activeFullCacheLimit: Int { fullCacheLimit }
+    var heldFullCount: Int { fulls.count }
 
     private let unavailable: Set<PhotoIdentity>
     private let previewOnly: Set<PhotoIdentity>
@@ -125,20 +126,45 @@ final class SampleDetailImages: DetailImageSource {
         return image
     }
 
+    func setCompareRetention(active: Bool, keeping photo: PhotoIdentity?) async {
+        fullCacheLimit = active ? 2 : 1
+        while fullOrder.count > fullCacheLimit {
+            if let photo,
+                let dropIndex = fullOrder.firstIndex(where: { $0 != photo })
+            {
+                let dropped = fullOrder.remove(at: dropIndex)
+                fulls[dropped] = nil
+            } else {
+                fulls[fullOrder.removeFirst()] = nil
+            }
+        }
+    }
+
+    func releaseComparePhoto(_ photo: PhotoIdentity) async {
+        fulls[photo] = nil
+        fullOrder.removeAll { $0 == photo }
+        screens[photo] = nil
+    }
+
     /// The photo's larger render, held only for the photos the view recently asked for.
     private func full(for photo: PhotoIdentity, mode: PhotoDisplayMode) -> DetailImage {
         if let image = fulls[photo], image.quality == (mode == .rawFirst ? .nativeRAW : .raster) {
+            if let index = fullOrder.firstIndex(of: photo) {
+                fullOrder.remove(at: index)
+                fullOrder.append(photo)
+            }
             return image
         }
-        fulls.removeAll()
-        fullOrder.removeAll()
+        while fullOrder.count >= fullCacheLimit {
+            fulls[fullOrder.removeFirst()] = nil
+        }
         if mode == .rawFirst { rawRenderCount += 1 } else { cameraDecodeCount += 1 }
         let image = render(
             photo, longEdge: Self.fullLongEdge,
             quality: mode == .rawFirst ? .nativeRAW : .raster)
         fulls[photo] = image
         fullOrder.append(photo)
-        if fullOrder.count > Self.fullCacheLimit {
+        while fullOrder.count > fullCacheLimit {
             fulls[fullOrder.removeFirst()] = nil
         }
         return image

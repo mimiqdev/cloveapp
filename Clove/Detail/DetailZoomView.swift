@@ -142,6 +142,15 @@ struct DetailZoomView: UIViewRepresentable {
     /// Reports every scale the scroll view shows, for the screen's pixel-demand decision.
     let onZoomChange: (CGFloat) -> Void
 
+    /// Enables Compare gestures: suspends rating/navigation swipes, keeps single-finger pan at all zoom levels.
+    var isCompareMode = false
+
+    /// Reports live viewport scale and normalized anchor when the user zooms or pans in Compare mode.
+    var onViewportChanged: ((DetailZoomSnapshot?) -> Void)?
+
+    /// Reports scale changes applied programmatically via Compare sync without echoing back to the peer.
+    var onSyncedScaleApplied: ((CGFloat) -> Void)?
+
     /// Toggles chrome when single-tapping anywhere on the preview.
     var onChromeToggle: () -> Void = {}
 
@@ -191,6 +200,9 @@ struct DetailZoomView: UIViewRepresentable {
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(resolvedPreviewAccessibilityLabel(language: language))
         view.onZoomChange = onZoomChange
+        view.isCompareMode = isCompareMode
+        view.onViewportChanged = onViewportChanged
+        view.onSyncedScaleApplied = onSyncedScaleApplied
         view.onChromeToggle = onChromeToggle
         view.onStep = onStep
         view.onDoubleTap = onDoubleTap
@@ -214,6 +226,9 @@ struct DetailZoomView: UIViewRepresentable {
         view.onFocusRegionTap = onFocusRegionTap
         view.setPreviewAccessibilityLabel(resolvedPreviewAccessibilityLabel(language: language))
         view.onZoomChange = onZoomChange
+        view.isCompareMode = isCompareMode
+        view.onViewportChanged = onViewportChanged
+        view.onSyncedScaleApplied = onSyncedScaleApplied
         view.onChromeToggle = onChromeToggle
         view.onStep = onStep
         view.onDoubleTap = onDoubleTap
@@ -315,6 +330,14 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     }
 
     var onZoomChange: ((CGFloat) -> Void)?
+    var isCompareMode = false {
+        didSet {
+            guard oldValue != isCompareMode else { return }
+            updateGestureAvailability()
+        }
+    }
+    var onViewportChanged: ((DetailZoomSnapshot?) -> Void)?
+    var onSyncedScaleApplied: ((CGFloat) -> Void)?
     var onFocusRegionTap: ((DetailFocusRegion) -> Void)?
     var focusRegionColours = DetailFocusRegionColours(
         normal: .white, contrastEdge: UIColor.black.withAlphaComponent(0.45),
@@ -511,6 +534,13 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// `.pan` leaves one-finger panning with the scroll view and runs the rating ladder from the
     /// two-finger swipe.
     private func updateGestureAvailability() {
+        if isCompareMode {
+            chromeTap.isEnabled = true
+            markingPan.isEnabled = false
+            twoFingerMarkingSwipe.isEnabled = false
+            scrollView.panGestureRecognizer.minimumNumberOfTouches = 1
+            return
+        }
         let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
         chromeTap.isEnabled = true
         let mode = rules.settings.zoomedGestures
@@ -699,6 +729,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         updatePreviewAccessibility()
         if !isApplyingZoom {
             onZoomChange?(scrollView.zoomScale)
+            onViewportChanged?(zoomSnapshot)
         }
         schedulePendingZoomFlushIfNeeded()
     }
@@ -717,16 +748,23 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
                     pendingZoom = .layoutRetarget(scale: scale, anchor: currentAnchor)
                 }
             }
+            if !isLayingOut,
+                scrollView.isDragging || scrollView.isDecelerating || scrollView.isTracking
+            {
+                onViewportChanged?(zoomSnapshot)
+            }
         }
         schedulePendingZoomFlushIfNeeded()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         guard !decelerate else { return }
+        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 
@@ -734,10 +772,12 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         _ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat
     ) {
         guard !scrollView.isZoomBouncing else { return }
+        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 
@@ -766,6 +806,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     /// Locks the dominant axis once. Later samples cannot switch between navigation and marking.
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        if isCompareMode && (recognizer === markingPan || recognizer === twoFingerMarkingSwipe) {
+            return false
+        }
         let isZoomed = scrollView.zoomScale > DetailFitScale.tolerance
         if recognizer === twoFingerMarkingSwipe {
             return isZoomed
@@ -985,6 +1028,46 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         if scrollView.contentOffset != visible.origin {
             scrollView.setContentOffset(visible.origin, animated: false)
         }
+    }
+
+    /// Applies a synchronized pan/zoom target from a peer Compare pane without re-emitting `onViewportChanged`.
+    func applySyncedViewport(scale: CGFloat, anchor: DetailZoomAnchor) {
+        let clampedTarget = max(1, scale)
+        guard bounds.width > 0, bounds.height > 0, shownPixels.width > 0, shownPixels.height > 0
+        else {
+            pendingZoom =
+                clampedTarget <= DetailFitScale.tolerance
+                ? .fit : .scale(clampedTarget, anchor: anchor)
+            schedulePendingZoomFlushIfNeeded()
+            return
+        }
+        guard !isLayingOut, !isInScrollCallback else {
+            pendingZoom =
+                clampedTarget <= DetailFitScale.tolerance
+                ? .fit : .scale(clampedTarget, anchor: anchor)
+            schedulePendingZoomFlushIfNeeded()
+            return
+        }
+        isApplyingZoom = true
+        defer { isApplyingZoom = false }
+        needsResetBeforeZoom = false
+        pendingZoom = nil
+        // Stop any active inertial deceleration before snapping to the peer viewport.
+        scrollView.setContentOffset(scrollView.contentOffset, animated: false)
+        if clampedTarget <= DetailFitScale.tolerance {
+            if abs(scrollView.zoomScale - 1) > 0.0001 {
+                scrollView.setZoomScale(1, animated: false)
+            }
+            if scrollView.contentOffset != .zero {
+                scrollView.setContentOffset(.zero, animated: false)
+            }
+        } else {
+            zoom(to: clampedTarget, around: anchor)
+        }
+        layoutFocusRegions()
+        updateGestureAvailability()
+        updatePreviewAccessibility()
+        onSyncedScaleApplied?(scrollView.zoomScale)
     }
 
     /// Resolves a stage-space point into the tapped image coordinate (when inside the fitted
