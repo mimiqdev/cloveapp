@@ -98,33 +98,58 @@ enum TIFFMetadataExtractor {
             builder.imageExtent = sofExtent
         }
 
-        if options.parsePentaxVendorPayload, let pentaxEntry = ifd0.uniqueEntry(tag: 0xC634) {
-            if let payload = readPentaxPayload(
-                entry: pentaxEntry,
+        if options.parsePentaxVendorPayload, let vendorEntry = ifd0.uniqueEntry(tag: 0xC634) {
+            if let payload = readDNGPrivateDataPayload(
+                entry: vendorEntry,
                 context: context,
                 limits: limits,
                 builder: builder
             ) {
-                if let outcome = VendorReaders.readPentax(
-                    reader: reader,
-                    payloadOffset: payload.offset,
-                    payloadLength: payload.length,
-                    limits: limits
-                ) {
-                    builder.container = ContainerDescription(
-                        kind: options.containerKind,
-                        byteOrder: options.byteOrder,
-                        makerNoteFlavor: .pentaxVendorPayload,
-                        entryPoint: .tiffIFD0Tag(0xC634)
+                switch payload.kind {
+                case .pentax:
+                    if let outcome = VendorReaders.readPentax(
+                        reader: reader,
+                        payloadOffset: payload.offset,
+                        payloadLength: payload.length,
+                        limits: limits
+                    ) {
+                        builder.container = ContainerDescription(
+                            kind: options.containerKind,
+                            byteOrder: options.byteOrder,
+                            makerNoteFlavor: .pentaxVendorPayload,
+                            entryPoint: .tiffIFD0Tag(0xC634)
+                        )
+                        applyVendorResult(outcome, vendor: .pentax, builder: builder)
+                        return
+                    }
+                    builder.focusPathUnsupported = true
+                    builder.addIssue(
+                        .unsupportedVendorFocusLayout,
+                        context: "Pentax vendor payload 0xc634"
                     )
-                    applyVendorResult(outcome, vendor: .pentax, builder: builder)
-                    return
+                case .ricoh:
+                    if let outcome = RicohReader.readDNGPrivateData(
+                        reader: reader,
+                        payloadOffset: payload.offset,
+                        payloadLength: payload.length,
+                        limits: limits,
+                        imageExtent: builder.imageExtent
+                    ) {
+                        builder.container = ContainerDescription(
+                            kind: options.containerKind,
+                            byteOrder: options.byteOrder,
+                            makerNoteFlavor: .ricohVendorPayload,
+                            entryPoint: .tiffIFD0Tag(0xC634)
+                        )
+                        applyVendorResult(outcome, vendor: .ricoh, builder: builder)
+                        return
+                    }
+                    builder.focusPathUnsupported = true
+                    builder.addIssue(
+                        .unsupportedVendorFocusLayout,
+                        context: "Ricoh vendor payload 0xc634"
+                    )
                 }
-                builder.focusPathUnsupported = true
-                builder.addIssue(
-                    .unsupportedVendorFocusLayout,
-                    context: "Pentax vendor payload 0xc634"
-                )
             }
         }
 
@@ -376,30 +401,35 @@ enum TIFFMetadataExtractor {
         }
     }
 
-    private static func readPentaxPayload(
+    private enum DNGPrivateDataKind {
+        case pentax
+        case ricoh
+    }
+
+    private static func readDNGPrivateDataPayload(
         entry: TIFFEntry,
         context: TIFFContext,
         limits: FocusMetadataReader.Limits,
         builder: ExtractionBuilder
-    ) -> (offset: Int, length: Int)? {
+    ) -> (kind: DNGPrivateDataKind, offset: Int, length: Int)? {
         guard entry.type == 1 || entry.type == 7 else {
             builder.addIssue(
                 .unexpectedFieldShape,
-                context: "IFD0 tag 0xc634 Pentax payload"
+                context: "IFD0 tag 0xc634 vendor payload"
             )
             return nil
         }
         guard let byteCount = entry.declaredByteCount, byteCount > 0 else {
             builder.addIssue(
                 .unexpectedFieldShape,
-                context: "IFD0 tag 0xc634 Pentax payload"
+                context: "IFD0 tag 0xc634 vendor payload"
             )
             return nil
         }
         guard byteCount <= limits.maximumMakerNoteBytes else {
             builder.addIssue(
                 .unexpectedFieldShape,
-                context: "IFD0 tag 0xc634 Pentax payload",
+                context: "IFD0 tag 0xc634 vendor payload",
                 detail: "The declared payload exceeds the MakerNote size limit."
             )
             return nil
@@ -409,19 +439,22 @@ enum TIFFMetadataExtractor {
             guard byteCount <= context.regionEnd - offset else {
                 builder.addIssue(
                     .offsetOutOfBounds,
-                    context: "IFD0 tag 0xc634 Pentax payload"
+                    context: "IFD0 tag 0xc634 vendor payload"
                 )
                 return nil
             }
             let prefixLength = min(10, byteCount)
             let prefix = try context.read(atAbsolute: offset, count: prefixLength)
-            guard prefix.starts(with: Array("PENTAX".utf8)) else {
-                // 0xc634 is also present in small, unrelated vendor fields.
-                return nil
+            if prefix.starts(with: Array("PENTAX".utf8)) {
+                return (.pentax, offset, byteCount)
             }
-            return (offset, byteCount)
+            if prefix.starts(with: Array("RICOH\0II".utf8)) {
+                return (.ricoh, offset, byteCount)
+            }
+            // 0xc634 is also present in small, unrelated vendor fields.
+            return nil
         } catch let failure as ParseFailure {
-            builder.addIssue(failure: failure, context: "IFD0 tag 0xc634 Pentax payload")
+            builder.addIssue(failure: failure, context: "IFD0 tag 0xc634 vendor payload")
             return nil
         } catch {
             return nil
@@ -502,7 +535,7 @@ enum TIFFMetadataExtractor {
             return
         }
 
-        let prefixLength = min(16, byteCount)
+        let prefixLength = min(24, byteCount)
         let prefix: [UInt8]
         do {
             prefix = try context.read(atAbsolute: makerNoteOffset, count: prefixLength)
@@ -589,6 +622,33 @@ enum TIFFMetadataExtractor {
             return
         }
 
+        if let (flavor, outcome) = RicohReader.readMakerNote(
+            reader: reader,
+            makerNoteOffset: makerNoteOffset,
+            makerNoteLength: byteCount,
+            headerBytes: prefix,
+            outerContext: context,
+            limits: limits,
+            imageExtent: builder.imageExtent
+        ) {
+            setMakerNoteFlavor(flavor, builder: builder)
+            applyVendorResult(outcome, vendor: .ricoh, builder: builder)
+            return
+        }
+
+        if let (flavor, outcome) = LeicaReader.readMakerNote(
+            reader: reader,
+            makerNoteOffset: makerNoteOffset,
+            makerNoteLength: byteCount,
+            headerBytes: prefix,
+            outerContext: context,
+            limits: limits
+        ) {
+            setMakerNoteFlavor(flavor, builder: builder)
+            applyVendorResult(outcome, vendor: .leica, builder: builder)
+            return
+        }
+
         if vendor == .canon {
             setMakerNoteFlavor(.canon, builder: builder)
             let outcome = CanonReader.readMakerNote(
@@ -622,6 +682,19 @@ enum TIFFMetadataExtractor {
                 builder: builder,
                 limits: limits
             )
+            return
+        }
+
+        if vendor == .hasselblad {
+            setMakerNoteFlavor(.hasselblad, builder: builder)
+            let outcome = HasselbladReader.readMakerNote(
+                reader: reader,
+                makerNoteOffset: makerNoteOffset,
+                makerNoteLength: byteCount,
+                context: context,
+                limits: limits
+            )
+            applyVendorResult(outcome, vendor: .hasselblad, builder: builder)
             return
         }
 
@@ -758,7 +831,12 @@ enum TIFFMetadataExtractor {
         if makeValue.contains("FUJI") { return .fujifilm }
         if makeValue.contains("PANASONIC") { return .panasonic }
         if makeValue.contains("OLYMPUS") || makeValue.contains("OM DIGITAL") { return .olympus }
-        if makeValue.contains("PENTAX") || makeValue.contains("RICOH") { return .pentax }
+        if makeValue.contains("HASSELBLAD") { return .hasselblad }
+        if makeValue.contains("LEICA") { return .leica }
+        if makeValue.contains("PENTAX") { return .pentax }
+        if makeValue.contains("RICOH") {
+            return modelValue.contains("PENTAX") ? .pentax : .ricoh
+        }
 
         if modelValue.contains("ILCE") || modelValue.hasPrefix("NEX-")
             || modelValue.hasPrefix("DSC-") || modelValue.hasPrefix("ZV-")
@@ -770,7 +848,16 @@ enum TIFFMetadataExtractor {
         if modelValue.contains("FUJIFILM") { return .fujifilm }
         if modelValue.contains("PANASONIC") { return .panasonic }
         if modelValue.contains("OLYMPUS") { return .olympus }
+        if modelValue.contains("HASSELBLAD")
+            || modelValue.hasPrefix("X1D")
+            || modelValue.hasPrefix("X2D")
+            || modelValue.hasPrefix("CFV")
+        {
+            return .hasselblad
+        }
+        if modelValue.contains("LEICA") { return .leica }
         if modelValue.contains("PENTAX") { return .pentax }
+        if modelValue.contains("RICOH") || modelValue.hasPrefix("GR ") { return .ricoh }
         return .unknown
     }
 }

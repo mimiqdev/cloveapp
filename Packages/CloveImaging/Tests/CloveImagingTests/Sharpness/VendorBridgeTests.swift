@@ -313,4 +313,275 @@ struct VendorBridgeTests {
         #expect(abs(fujiLocated.region.width - AutofocusMetadataReader.locatedRegionSize) < 1e-6)
         #expect(abs(fujiLocated.region.height - AutofocusMetadataReader.locatedRegionSize) < 1e-6)
     }
+
+    private static func ricohDNGData(
+        model: String = "RICOH GR IIIx",
+        orientation: UInt16 = 1,
+        afState: UInt16 = 2,
+        slot: (cx: UInt16, cy: UInt16, w: UInt16, h: UInt16, flags: UInt16) = (360, 240, 64, 52, 15)
+    ) -> Data {
+        var afWords = [UInt16](repeating: 0, count: 7 + 25 * 7)
+        afWords[0] = afState
+        afWords[1] = 8193
+        afWords[2] = 25
+        afWords[3] = slot.flags == 0 ? 0 : 1
+        afWords[4] = (slot.flags & 0x0004) != 0 ? 1 : 0
+        if afState == 2 && slot.flags != 0 {
+            afWords[7] = 720
+            afWords[8] = 480
+            afWords[9] = slot.cx
+            afWords[10] = slot.cy
+            afWords[11] = slot.w
+            afWords[12] = slot.h
+            afWords[13] = slot.flags
+        }
+        let afBytes = afWords.flatMap { Self.u16($0) }
+
+        var payload = Array("RICOH\0II".utf8)
+        payload.append(contentsOf: Self.u16(1))
+        payload.append(contentsOf: Self.u16(0x040C))
+        payload.append(contentsOf: Self.u16(7))
+        payload.append(contentsOf: Self.u32(UInt32(afBytes.count)))
+        payload.append(contentsOf: Self.u32(UInt32(payload.count + 8)))
+        payload.append(contentsOf: [0, 0, 0, 0])
+        payload.append(contentsOf: afBytes)
+
+        let makeBytes = Array("RICOH IMAGING COMPANY, LTD.\0".utf8)
+        let modelBytes = Array((model + "\0").utf8)
+        return Data(
+            Self.singleIFD([
+                (0x010F, 2, UInt32(makeBytes.count), makeBytes),
+                (0x0110, 2, UInt32(modelBytes.count), modelBytes),
+                (0x0112, 3, 1, Self.u16(orientation)),
+                (0xC634, 7, UInt32(payload.count), payload),
+            ])
+        )
+    }
+
+    private static func hasselbladTIFFData(
+        model: String = "X2D 100C",
+        orientation: UInt16 = 1,
+        words: [UInt16] = [1, 5001, 5001, 464, 672, 0, 0]
+    ) -> Data {
+        let boxBytes = words.flatMap { Self.u16($0) }
+        // IFD0 entries: Make, Model, Orientation, ExifIFD
+        let makeBytes = Array("Hasselblad\0".utf8)
+        let modelBytes = Array((model + "\0").utf8)
+        let ifd0Entries: [(UInt16, UInt16, UInt32, [UInt8])] = [
+            (0x010F, 2, UInt32(makeBytes.count), makeBytes),
+            (0x0110, 2, UInt32(modelBytes.count), modelBytes),
+            (0x0112, 3, 1, Self.u16(orientation)),
+        ]
+        // Build IFD0 with ExifIFD pointing cleanly right after IFD0 out-of-line data.
+        let ifd0Count = ifd0Entries.count + 1
+        let ifd0TableSize = 2 + ifd0Count * 12 + 4
+        var cursor = 8 + ifd0TableSize
+        var ifd0Out: [UInt8] = []
+        var ifd0Table = [UInt8]()
+        ifd0Table.append(contentsOf: Self.u16(UInt16(ifd0Count)))
+        for (tag, type, count, val) in ifd0Entries {
+            ifd0Table.append(contentsOf: Self.u16(tag))
+            ifd0Table.append(contentsOf: Self.u16(type))
+            ifd0Table.append(contentsOf: Self.u32(count))
+            if val.count <= 4 {
+                ifd0Table.append(contentsOf: val)
+                ifd0Table.append(contentsOf: [UInt8](repeating: 0, count: 4 - val.count))
+            } else {
+                ifd0Table.append(contentsOf: Self.u32(UInt32(cursor)))
+                ifd0Out.append(contentsOf: val)
+                cursor += val.count
+            }
+        }
+        let exifOffset = cursor
+        ifd0Table.append(contentsOf: Self.u16(0x8769))
+        ifd0Table.append(contentsOf: Self.u16(4))
+        ifd0Table.append(contentsOf: Self.u32(1))
+        ifd0Table.append(contentsOf: Self.u32(UInt32(exifOffset)))
+        ifd0Table.append(contentsOf: [0, 0, 0, 0])
+
+        let mnOffset = exifOffset + 2 + 12 + 4
+        let mnValueOffset = mnOffset + 2 + 12 + 4
+        var mnBytes: [UInt8] = []
+        mnBytes.append(contentsOf: Self.u16(1))
+        mnBytes.append(contentsOf: Self.u16(0x0047))
+        mnBytes.append(contentsOf: Self.u16(3))
+        mnBytes.append(contentsOf: Self.u32(UInt32(words.count)))
+        mnBytes.append(contentsOf: Self.u32(UInt32(mnValueOffset)))
+        mnBytes.append(contentsOf: [0, 0, 0, 0])
+        mnBytes.append(contentsOf: boxBytes)
+
+        var exifBytes: [UInt8] = []
+        exifBytes.append(contentsOf: Self.u16(1))
+        exifBytes.append(contentsOf: Self.u16(0x927C))
+        exifBytes.append(contentsOf: Self.u16(7))
+        exifBytes.append(contentsOf: Self.u32(UInt32(mnBytes.count)))
+        exifBytes.append(contentsOf: Self.u32(UInt32(mnOffset)))
+        exifBytes.append(contentsOf: [0, 0, 0, 0])
+        exifBytes.append(contentsOf: mnBytes)
+
+        var tiff: [UInt8] = [0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00]
+        tiff.append(contentsOf: ifd0Table)
+        tiff.append(contentsOf: ifd0Out)
+        tiff.append(contentsOf: exifBytes)
+        return Data(tiff)
+    }
+
+    private static func leicaTIFFData(model: String = "LEICA SL3") -> Data {
+        let makeBytes = Array("Leica Camera AG\0".utf8)
+        let modelBytes = Array((model + "\0").utf8)
+        let mnHeader = Array("LEICA\0\u{0a}\0".utf8)
+        let ifd0Entries: [(UInt16, UInt16, UInt32, [UInt8])] = [
+            (0x010F, 2, UInt32(makeBytes.count), makeBytes),
+            (0x0110, 2, UInt32(modelBytes.count), modelBytes),
+        ]
+        let ifd0Count = ifd0Entries.count + 1
+        let ifd0TableSize = 2 + ifd0Count * 12 + 4
+        var cursor = 8 + ifd0TableSize
+        var ifd0Out: [UInt8] = []
+        var ifd0Table: [UInt8] = []
+        ifd0Table.append(contentsOf: Self.u16(UInt16(ifd0Count)))
+        for (tag, type, count, val) in ifd0Entries {
+            ifd0Table.append(contentsOf: Self.u16(tag))
+            ifd0Table.append(contentsOf: Self.u16(type))
+            ifd0Table.append(contentsOf: Self.u32(count))
+            ifd0Table.append(contentsOf: Self.u32(UInt32(cursor)))
+            ifd0Out.append(contentsOf: val)
+            cursor += val.count
+        }
+        let exifOffset = cursor
+        ifd0Table.append(contentsOf: Self.u16(0x8769))
+        ifd0Table.append(contentsOf: Self.u16(4))
+        ifd0Table.append(contentsOf: Self.u32(1))
+        ifd0Table.append(contentsOf: Self.u32(UInt32(exifOffset)))
+        ifd0Table.append(contentsOf: [0, 0, 0, 0])
+
+        let mnOffset = exifOffset + 2 + 12 + 4
+        var mnBytes = mnHeader
+        mnBytes.append(contentsOf: Self.u16(1))
+        mnBytes.append(contentsOf: Self.u16(0x0304))
+        mnBytes.append(contentsOf: Self.u16(1))
+        mnBytes.append(contentsOf: Self.u32(1))
+        mnBytes.append(contentsOf: [0x01, 0, 0, 0])
+        mnBytes.append(contentsOf: [0, 0, 0, 0])
+
+        var exifBytes: [UInt8] = []
+        exifBytes.append(contentsOf: Self.u16(1))
+        exifBytes.append(contentsOf: Self.u16(0x927C))
+        exifBytes.append(contentsOf: Self.u16(7))
+        exifBytes.append(contentsOf: Self.u32(UInt32(mnBytes.count)))
+        exifBytes.append(contentsOf: Self.u32(UInt32(mnOffset)))
+        exifBytes.append(contentsOf: [0, 0, 0, 0])
+        exifBytes.append(contentsOf: mnBytes)
+
+        var tiff: [UInt8] = [0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00]
+        tiff.append(contentsOf: ifd0Table)
+        tiff.append(contentsOf: ifd0Out)
+        tiff.append(contentsOf: exifBytes)
+        return Data(tiff)
+    }
+
+    @Test("Ricoh and Hasselblad map display geometry without double-rotation across orientations")
+    func ricohAndHasselbladDisplayMapping() throws {
+        // Ricoh GR IIIx portrait Orientation 8 off-center box
+        let ricohReport = try FocusMetadataReader().read(
+            data: Self.ricohDNGData(
+                model: "RICOH GR IIIx",
+                orientation: 8,
+                slot: (cx: 216, cy: 144, w: 72, h: 48, flags: 15)
+            )
+        )
+        guard
+            case .success(let ricohLocated) = Self.makeReader(for: ricohReport).regions(
+                of: URL(fileURLWithPath: "/"),
+                properties: [
+                    "{TIFF}": ["Make": "RICOH IMAGING COMPANY, LTD.", "Orientation": 8]
+                ])
+        else {
+            Issue.record("Expected Ricoh region through bridge")
+            return
+        }
+        // Stored: (216/720, 144/480) = (0.30, 0.30). Orient 8 (270 deg CW): display (0.30, 0.70).
+        #expect(abs(ricohLocated.region.centerX - 0.30) < 1e-6)
+        #expect(abs(ricohLocated.region.centerY - 0.70) < 1e-6)
+        #expect(abs(ricohLocated.region.width - 0.10) < 1e-6)
+        #expect(abs(ricohLocated.region.height - 0.10) < 1e-6)
+
+        // Hasselblad X1D II 50C portrait Orientation 8
+        let hasselbladReport = try FocusMetadataReader().read(
+            data: Self.hasselbladTIFFData(
+                model: "X1D II 50C",
+                orientation: 8,
+                words: [1, 6124, 5042, 928, 1344, 0, 0]
+            )
+        )
+        guard
+            case .success(let hassyLocated) = Self.makeReader(for: hasselbladReport).regions(
+                of: URL(fileURLWithPath: "/"),
+                properties: ["{TIFF}": ["Make": "Hasselblad", "Orientation": 8]])
+        else {
+            Issue.record("Expected Hasselblad region through bridge")
+            return
+        }
+        // Orient 8 (270 deg CW): display (0.5042, 1 - 0.6124 = 0.3876), size (0.1344, 0.0928)
+        #expect(abs(hassyLocated.region.centerX - 0.5042) < 1e-6)
+        #expect(abs(hassyLocated.region.centerY - 0.3876) < 1e-6)
+        #expect(abs(hassyLocated.region.width - 0.1344) < 1e-6)
+        #expect(abs(hassyLocated.region.height - 0.0928) < 1e-6)
+    }
+
+    @Test("Ricoh, Hasselblad, and Leica unavailability emits explicit focusmeta bridge evidence")
+    func ricohHasselbladAndLeicaUnavailabilityEvidence() throws {
+        let ricohMF = try FocusMetadataReader().read(
+            data: Self.ricohDNGData(model: "RICOH GR III", afState: 255)
+        )
+        guard
+            case .failure(let ricohEvidence) = Self.makeReader(for: ricohMF).regions(
+                of: URL(fileURLWithPath: "/"),
+                properties: ["{TIFF}": ["Make": "RICOH IMAGING COMPANY, LTD."]])
+        else {
+            Issue.record("Ricoh MF must report failure evidence")
+            return
+        }
+        #expect(
+            ricohEvidence.inspected.contains {
+                $0.path == "focusmeta.RicohMakerNote RICOH GR III" && $0.finding != .missing
+            }
+        )
+
+        let hasselbladMF = try FocusMetadataReader().read(
+            data: Self.hasselbladTIFFData(
+                model: "CFV 100C",
+                words: [1, 0, 0, 0, 0, 0, 0]
+            )
+        )
+        guard
+            case .failure(let hassyEvidence) = Self.makeReader(for: hasselbladMF).regions(
+                of: URL(fileURLWithPath: "/"),
+                properties: ["{TIFF}": ["Make": "Hasselblad"]])
+        else {
+            Issue.record("Hasselblad Flexbody/MF must report failure evidence")
+            return
+        }
+        #expect(
+            hassyEvidence.inspected.contains {
+                $0.path == "focusmeta.HasselbladMakerNote CFV 100C" && $0.finding != .missing
+            }
+        )
+
+        let leicaReport = try FocusMetadataReader().read(
+            data: Self.leicaTIFFData(model: "LEICA SL3"))
+        guard
+            case .failure(let leicaEvidence) = Self.makeReader(for: leicaReport).regions(
+                of: URL(fileURLWithPath: "/"),
+                properties: ["{TIFF}": ["Make": "Leica Camera AG"]])
+        else {
+            Issue.record("Leica must stay unavailable")
+            return
+        }
+        #expect(
+            leicaEvidence.inspected.contains {
+                $0.path == "focusmeta.LeicaMakerNote LEICA SL3" && $0.finding != .missing
+            }
+        )
+    }
 }

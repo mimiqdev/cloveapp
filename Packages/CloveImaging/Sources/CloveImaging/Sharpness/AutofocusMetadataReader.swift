@@ -214,11 +214,17 @@ public struct AutofocusMetadataReader: Sendable {
         let make = conclusion.recordedMake.map { " (\($0))" } ?? ""
         let camera = conclusion.model.map { " \($0)" } ?? ""
         switch vendor {
-        case .sony, .canon, .nikon, .fujifilm:
+        case .sony, .canon, .nikon, .fujifilm, .ricoh, .hasselblad:
             let label = Self.verifiedVendorLabel(vendor)
             let reason = Self.vendorUnavailabilityReason(vendorName: label, conclusion: conclusion)
             return .init(
                 path: "focusmeta.\(label)MakerNote\(camera)", finding: .unreadable(reason))
+        case .leica:
+            let label = Self.verifiedVendorLabel(vendor)
+            let reason = Self.vendorUnavailabilityReason(vendorName: label, conclusion: conclusion)
+            return .init(
+                path: "focusmeta.\(label)MakerNote\(camera.isEmpty ? make : camera)",
+                finding: .unreadable(reason))
         case .panasonic:
             return .init(
                 path: "focusmeta.panasonicMakerNote\(make)",
@@ -242,6 +248,9 @@ public struct AutofocusMetadataReader: Sendable {
         case .canon: return "Canon"
         case .nikon: return "Nikon"
         case .fujifilm: return "Fujifilm"
+        case .ricoh: return "Ricoh"
+        case .hasselblad: return "Hasselblad"
+        case .leica: return "Leica"
         default: return vendor?.rawValue ?? "Vendor"
         }
     }

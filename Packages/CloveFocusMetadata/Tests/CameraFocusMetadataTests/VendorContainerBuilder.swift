@@ -463,4 +463,300 @@ enum VendorContainerBuilder {
         builder.irotPayload = irot
         return Data(builder.build())
     }
+
+    static func rw2(exifTIFF: [UInt8]) -> Data {
+        let jpegBytes = Array(jpeg(exifTIFF: exifTIFF))
+        var tiff = singleIFDTIFF(
+            order: .littleEndian,
+            entries: [
+                (0x002E, 7, UInt32(jpegBytes.count), jpegBytes)
+            ]
+        )
+        guard tiff.count >= 4 else { return Data(tiff) }
+        tiff[2] = 0x55
+        tiff[3] = 0x00
+        return Data(tiff)
+    }
+
+    static func ricohStructuredBlock(
+        header: [UInt8] = Array("RICOH\0II".utf8),
+        afState: UInt16 = 2,
+        formatVersion: UInt16 = 8194,
+        declaredMaxBoxes: UInt16? = nil,
+        actualSlotCount: Int = 25,
+        slots: [(
+            refW: UInt16, refH: UInt16, cx: UInt16, cy: UInt16, w: UInt16, h: UInt16, flags: UInt16
+        )],
+        focusSetting: UInt16? = 8,
+        omitAFInfo: Bool = false,
+        duplicateAFInfo: Bool = false,
+        overrideAFBytes: [UInt8]? = nil
+    ) -> [UInt8] {
+        var entries: [(UInt16, UInt16, UInt32, [UInt8])] = []
+        if let focusSetting {
+            var val: [UInt8] = []
+            TestSupport.appendUInt16(focusSetting, to: &val, order: .littleEndian)
+            entries.append((0x000D, 3, 1, val))
+        }
+
+        let afBytes: [UInt8]
+        if let overrideAFBytes {
+            afBytes = overrideAFBytes
+        } else {
+            let maxBoxes = declaredMaxBoxes ?? UInt16(actualSlotCount)
+            var words: [UInt16] = Array(repeating: 0, count: 7 + actualSlotCount * 7)
+            let activeCount = UInt16(slots.filter { ($0.flags & 0x0004) != 0 }.count)
+            words[0] = afState
+            words[1] = formatVersion
+            words[2] = maxBoxes
+            words[3] = UInt16(slots.count)
+            words[4] = activeCount
+            for (index, slot) in slots.enumerated() where index < actualSlotCount {
+                let base = 7 + index * 7
+                words[base] = slot.refW
+                words[base + 1] = slot.refH
+                words[base + 2] = slot.cx
+                words[base + 3] = slot.cy
+                words[base + 4] = slot.w
+                words[base + 5] = slot.h
+                words[base + 6] = slot.flags
+            }
+            afBytes = encodeWords(words, order: .littleEndian)
+        }
+
+        if !omitAFInfo {
+            entries.append((0x040C, 7, UInt32(afBytes.count), afBytes))
+            if duplicateAFInfo {
+                entries.append((0x040C, 7, UInt32(afBytes.count), afBytes))
+            }
+        }
+
+        var block = header
+        let tableSize = 2 + entries.count * 12 + 4
+        var cursor = header.count + tableSize
+        var outOfLine: [UInt8] = []
+        TestSupport.appendUInt16(UInt16(entries.count), to: &block, order: .littleEndian)
+        for (tag, type, count, value) in entries {
+            TestSupport.appendUInt16(tag, to: &block, order: .littleEndian)
+            TestSupport.appendUInt16(type, to: &block, order: .littleEndian)
+            TestSupport.appendUInt32(count, to: &block, order: .littleEndian)
+            if value.count <= 4 {
+                block.append(contentsOf: value)
+                block.append(contentsOf: Array(repeating: 0, count: 4 - value.count))
+            } else {
+                TestSupport.appendUInt32(UInt32(cursor), to: &block, order: .littleEndian)
+                outOfLine.append(contentsOf: value)
+                cursor += value.count
+            }
+        }
+        TestSupport.appendUInt32(0, to: &block, order: .littleEndian)
+        block.append(contentsOf: outOfLine)
+        return block
+    }
+
+    static func ricohDNGWithPrivateData(
+        make: String? = "RICOH IMAGING COMPANY, LTD.",
+        model: String? = "RICOH GR IIIx",
+        orientation: UInt16? = 1,
+        imageExtent: (Int, Int)? = (6000, 4000),
+        privateData: [UInt8]
+    ) -> [UInt8] {
+        var ifd0Entries: [(UInt16, UInt16, UInt32, [UInt8])] = []
+        if let make {
+            let bytes = Array(make.utf8) + [0]
+            ifd0Entries.append((0x010F, 2, UInt32(bytes.count), bytes))
+        }
+        if let model {
+            let bytes = Array(model.utf8) + [0]
+            ifd0Entries.append((0x0110, 2, UInt32(bytes.count), bytes))
+        }
+        if let orientation {
+            var val: [UInt8] = []
+            TestSupport.appendUInt16(orientation, to: &val, order: .littleEndian)
+            ifd0Entries.append((0x0112, 3, 1, val))
+        }
+        if let imageExtent {
+            var exifEntries: [(UInt16, UInt16, UInt32, [UInt8])] = []
+            var wVal: [UInt8] = []
+            var hVal: [UInt8] = []
+            TestSupport.appendUInt32(UInt32(imageExtent.0), to: &wVal, order: .littleEndian)
+            TestSupport.appendUInt32(UInt32(imageExtent.1), to: &hVal, order: .littleEndian)
+            exifEntries.append((0xA002, 4, 1, wVal))
+            exifEntries.append((0xA003, 4, 1, hVal))
+            ifd0Entries.append((0xC634, 7, UInt32(privateData.count), privateData))
+
+            var exifBytes: [UInt8] = []
+            TestSupport.appendUInt16(
+                UInt16(exifEntries.count), to: &exifBytes, order: .littleEndian)
+            for (tag, type, count, val) in exifEntries {
+                TestSupport.appendUInt16(tag, to: &exifBytes, order: .littleEndian)
+                TestSupport.appendUInt16(type, to: &exifBytes, order: .littleEndian)
+                TestSupport.appendUInt32(count, to: &exifBytes, order: .littleEndian)
+                exifBytes.append(contentsOf: val)
+            }
+            TestSupport.appendUInt32(0, to: &exifBytes, order: .littleEndian)
+
+            var placeholderOffset = [UInt8](repeating: 0, count: 4)
+            ifd0Entries.append((0x8769, 4, 1, placeholderOffset))
+            let ifd0TableSize = 2 + ifd0Entries.count * 12 + 4
+            var cursor = 8 + ifd0TableSize
+            var outOfLine: [UInt8] = []
+            var bytes: [UInt8] = [0x49, 0x49, 0x2A, 0x00]
+            TestSupport.appendUInt32(8, to: &bytes, order: .littleEndian)
+            TestSupport.appendUInt16(UInt16(ifd0Entries.count), to: &bytes, order: .littleEndian)
+            for (tag, type, count, val) in ifd0Entries {
+                TestSupport.appendUInt16(tag, to: &bytes, order: .littleEndian)
+                TestSupport.appendUInt16(type, to: &bytes, order: .littleEndian)
+                TestSupport.appendUInt32(count, to: &bytes, order: .littleEndian)
+                if tag == 0x8769 {
+                    TestSupport.appendUInt32(UInt32(cursor), to: &bytes, order: .littleEndian)
+                    outOfLine.append(contentsOf: exifBytes)
+                    cursor += exifBytes.count
+                } else if val.count <= 4 {
+                    bytes.append(contentsOf: val)
+                    bytes.append(contentsOf: Array(repeating: 0, count: 4 - val.count))
+                } else {
+                    TestSupport.appendUInt32(UInt32(cursor), to: &bytes, order: .littleEndian)
+                    outOfLine.append(contentsOf: val)
+                    cursor += val.count
+                }
+            }
+            _ = placeholderOffset.popLast()
+            TestSupport.appendUInt32(0, to: &bytes, order: .littleEndian)
+            bytes.append(contentsOf: outOfLine)
+            return bytes
+        }
+
+        ifd0Entries.append((0xC634, 7, UInt32(privateData.count), privateData))
+        return singleIFDTIFF(order: .littleEndian, entries: ifd0Entries)
+    }
+
+    static func enclosingTIFFMakerNoteTIFF(
+        order: TIFFByteOrder = .littleEndian,
+        make: String?,
+        model: String?,
+        orientation: UInt16? = 1,
+        imageExtent: (Int, Int)? = nil,
+        makerNoteHeader: [UInt8] = [],
+        makerNoteEntries: [(tag: UInt16, type: UInt16, count: UInt32, value: [UInt8])],
+        useMakerNoteRelativeOffsets: Bool = false,
+        placeMakerNoteValuesOutsideMakerNoteRange: Bool = false
+    ) -> [UInt8] {
+        var ifd0Entries: [(UInt16, UInt16, UInt32, [UInt8])] = []
+        if let make {
+            let bytes = Array(make.utf8) + [0]
+            ifd0Entries.append((0x010F, 2, UInt32(bytes.count), bytes))
+        }
+        if let model {
+            let bytes = Array(model.utf8) + [0]
+            ifd0Entries.append((0x0110, 2, UInt32(bytes.count), bytes))
+        }
+        if let orientation {
+            var val: [UInt8] = []
+            TestSupport.appendUInt16(orientation, to: &val, order: order)
+            ifd0Entries.append((0x0112, 3, 1, val))
+        }
+        ifd0Entries.append((0x8769, 4, 1, [0, 0, 0, 0]))
+
+        var exifEntries: [(UInt16, UInt16, UInt32, [UInt8])] = []
+        if let imageExtent {
+            var wVal: [UInt8] = []
+            var hVal: [UInt8] = []
+            TestSupport.appendUInt32(UInt32(imageExtent.0), to: &wVal, order: order)
+            TestSupport.appendUInt32(UInt32(imageExtent.1), to: &hVal, order: order)
+            exifEntries.append((0xA002, 4, 1, wVal))
+            exifEntries.append((0xA003, 4, 1, hVal))
+        }
+        let makerNoteIndex = exifEntries.count
+        exifEntries.append((0x927C, 7, 0, []))
+
+        let ifd0TableSize = 2 + ifd0Entries.count * 12 + 4
+        let exifStart = 8 + ifd0TableSize
+        let exifTableSize = 2 + exifEntries.count * 12 + 4
+
+        var mnOffset = exifStart + exifTableSize
+        for e in ifd0Entries where e.3.count > 4 { mnOffset += e.3.count }
+        for (idx, e) in exifEntries.enumerated() where idx < makerNoteIndex && e.3.count > 4 {
+            mnOffset += e.3.count
+        }
+
+        let mnTableSize = makerNoteHeader.count + 2 + makerNoteEntries.count * 12 + 4
+        var mnOutOfLine: [UInt8] = []
+        var mnBytes = makerNoteHeader
+        TestSupport.appendUInt16(UInt16(makerNoteEntries.count), to: &mnBytes, order: order)
+
+        let mnExternalStart = mnOffset + mnTableSize
+        var valueCursor =
+            useMakerNoteRelativeOffsets
+            ? mnTableSize
+            : (placeMakerNoteValuesOutsideMakerNoteRange ? mnExternalStart : mnOffset + mnTableSize)
+
+        for entry in makerNoteEntries {
+            TestSupport.appendUInt16(entry.tag, to: &mnBytes, order: order)
+            TestSupport.appendUInt16(entry.type, to: &mnBytes, order: order)
+            TestSupport.appendUInt32(entry.count, to: &mnBytes, order: order)
+            if entry.value.count <= 4 {
+                mnBytes.append(contentsOf: entry.value)
+                mnBytes.append(contentsOf: Array(repeating: 0, count: 4 - entry.value.count))
+            } else {
+                TestSupport.appendUInt32(UInt32(valueCursor), to: &mnBytes, order: order)
+                mnOutOfLine.append(contentsOf: entry.value)
+                valueCursor += entry.value.count
+            }
+        }
+        TestSupport.appendUInt32(0, to: &mnBytes, order: order)
+
+        let declaredMakerNoteBytes: [UInt8]
+        let trailingExternalBytes: [UInt8]
+        if placeMakerNoteValuesOutsideMakerNoteRange {
+            // Mirrors real Hasselblad .fff / .3FR files where Exif 0x927c byteCount wraps
+            // only the IFD table while out-of-line values sit later in the outer TIFF.
+            declaredMakerNoteBytes = mnBytes
+            trailingExternalBytes = mnOutOfLine
+        } else {
+            mnBytes.append(contentsOf: mnOutOfLine)
+            declaredMakerNoteBytes = mnBytes
+            trailingExternalBytes = []
+        }
+
+        exifEntries[makerNoteIndex] = (
+            0x927C, 7, UInt32(declaredMakerNoteBytes.count), declaredMakerNoteBytes
+        )
+
+        var cursor = exifStart + exifTableSize
+        var outOfLine: [UInt8] = []
+        func buildTable(_ entries: [(UInt16, UInt16, UInt32, [UInt8])]) -> [UInt8] {
+            var table: [UInt8] = []
+            TestSupport.appendUInt16(UInt16(entries.count), to: &table, order: order)
+            for (tag, type, count, val) in entries {
+                TestSupport.appendUInt16(tag, to: &table, order: order)
+                TestSupport.appendUInt16(type, to: &table, order: order)
+                TestSupport.appendUInt32(count, to: &table, order: order)
+                if tag == 0x8769 {
+                    TestSupport.appendUInt32(UInt32(exifStart), to: &table, order: order)
+                } else if val.count <= 4 {
+                    table.append(contentsOf: val)
+                    table.append(contentsOf: Array(repeating: 0, count: 4 - val.count))
+                } else {
+                    TestSupport.appendUInt32(UInt32(cursor), to: &table, order: order)
+                    outOfLine.append(contentsOf: val)
+                    cursor += val.count
+                }
+            }
+            TestSupport.appendUInt32(0, to: &table, order: order)
+            return table
+        }
+
+        let finalIFD0 = buildTable(ifd0Entries)
+        let finalExif = buildTable(exifEntries)
+
+        var tiff: [UInt8] =
+            order == .littleEndian ? [0x49, 0x49, 0x2A, 0x00] : [0x4D, 0x4D, 0x00, 0x2A]
+        TestSupport.appendUInt32(8, to: &tiff, order: order)
+        tiff.append(contentsOf: finalIFD0)
+        tiff.append(contentsOf: finalExif)
+        tiff.append(contentsOf: outOfLine)
+        tiff.append(contentsOf: trailingExternalBytes)
+        return tiff
+    }
 }
