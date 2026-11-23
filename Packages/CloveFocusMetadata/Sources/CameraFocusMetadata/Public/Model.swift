@@ -9,6 +9,9 @@ public enum CameraVendor: String, Sendable, Hashable, CaseIterable {
     case panasonic
     case olympus
     case pentax
+    case ricoh
+    case hasselblad
+    case leica
     case unknown
 }
 
@@ -59,6 +62,18 @@ public enum MakerNoteFlavor: String, Sendable, Hashable {
     case olympus
     /// Pentax payload in a TIFF vendor tag rather than the Exif MakerNote.
     case pentaxVendorPayload
+    /// `RICOH\0II` identifier in Exif MakerNote followed by a payload-relative directory.
+    case ricoh
+    /// `Ricoh\0\0\0` identifier followed by an enclosing-TIFF-relative directory.
+    case ricohLegacy
+    /// Ricoh `RICOH\0II` payload stored in DNG IFD0 tag `0xc634`.
+    case ricohVendorPayload
+    /// Unprefixed Hasselblad MakerNote directory whose offsets use the enclosing TIFF.
+    case hasselblad
+    /// `LEICA\0` prefix followed by a two-byte variant code and MakerNote directory.
+    case leica
+    /// `LEICA CAMERA AG\0\0\0` Panasonic-derived prefix followed by an enclosing-TIFF directory.
+    case leicaPanasonicDerived
 }
 
 /// The container entry point that supplied the result.
@@ -226,6 +241,11 @@ public enum FocusSource: String, Sendable, Hashable {
     case panasonicAFPosition = "Panasonic MakerNote 0x004d rational pair"
     case olympusCameraSettings = "Olympus CameraSettings 0x0301-0x0305"
     case pentaxFocusSelection = "Pentax vendor tag 0x000e"
+    case ricohPrivateData = "Ricoh DNGPrivateData 0x040c"
+    case ricohMakerNote = "Ricoh MakerNote focus fields"
+    case hasselbladMakerNote = "Hasselblad MakerNote 0x0047"
+    case leicaMakerNote = "Leica MakerNote focus fields"
+    case leicaPanasonicAFPosition = "Leica MakerNote 0x004d rational pair"
 }
 
 /// A recorded focus hint and the geometry that can safely be derived from it.

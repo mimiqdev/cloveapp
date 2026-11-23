@@ -6,10 +6,12 @@ detect faces, score focus, or write metadata.
 
 The library covers verified autofocus metadata across **Sony** (ILCE-1M2 ARW/HIF),
 **Canon** (CR3 `CMT3` and CR2/JPEG/HEIF MakerNote `0x0026`), **Nikon** (Z-series
-mirrorless `0x00b7` v0300/v0301/v0400/v0401/v0402 and ContrastDetect `v0100`), and
-**Fujifilm** (RAF/JPEG/HEIF `0x1023` FocusPixel with resolved reference extent).
-Other vendors and legacy DSLR point-index layouts expose bounded raw observations
-only, with their pixel geometry explicitly unverified.
+mirrorless `0x00b7` v0300/v0301/v0400/v0401/v0402 and ContrastDetect `v0100`),
+**Fujifilm** (RAF/JPEG/HEIF `0x1023` FocusPixel with resolved reference extent),
+**Ricoh** (GR III/GR IIIx/GR IV DNG `0xc634` and JPEG `Exif 0x927c` `0x040c`), and
+**Hasselblad** (X1D/X1D II 50C/X2D 100C/CFV 50C II/CFV 100C `.3FR`/`.FFF` `0x0047`).
+**Leica**, **Panasonic**, **Olympus**, **Pentax**, and legacy **Nikon**/`Ricoh\0\0\0`
+layouts expose bounded raw observations only, with pixel geometry explicitly unverified.
 
 ## Requirements
 
@@ -149,6 +151,8 @@ source. A recorded focus tuple is never assumed to be already rotated.
 | Canon CR3 (`moov` UUID → `CMT1`/`CMT2`/`CMT3`), CR2/TIFF, JPEG, HEIF | `CMT1` IFD0 (`0x010f`–`0x0112`, `0x0131`), `CMT2`/`Exif` (`0xa002`, `0xa003`), `0x0026` (`AFInfo2`/`AFInfo3`) | Union `.region` of active `AFPointsInFocus` (or valid `PrimaryAFPoint`) on `AFImageWidth × AFImageHeight`; signed `Int16` center-origin with `+X` right, `+Y` up | `ValidAFPoints == 0` / manual focus or empty masks → `.noRegionRecorded`; non-matching `words[0]` layout → `.vendorSemanticsUnverified` |
 | Nikon NEF, JPEG, HEIF | MakerNote `0x0007` mode string, `0x00b7` (`AFInfo2`) | Verified continuous layouts (`0300`, `0301` at byte offset 42; `0400`–`0402` at byte offset 62; `0100` ContrastDetect `bytes[4] == 1` at byte offset 16): center `(AFAreaXPosition, AFAreaYPosition)` in top-left `AFImageWidth × AFImageHeight` → `.region` (or `.location` if width/height are 0) | DSLR phase-detect (`0101`, `0100` OVF) & Nikon 1 (`0200`, `0201`) → `.rawVendorObservation` + `.vendorSemanticsUnverified`; all-zero area fields → `.noRegionRecorded` |
 | Fujifilm RAF, JPEG, HEIF | Embedded JPEG / `Exif` (`0xa002`, `0xa003`), JPEG `SOF`, HEIF `ispe`; MakerNote `0x1021`, `0x1023`, `0x102d`, `0x1301` | Top-left `.location` from `0x1023` (`FocusPixel`) against the resolved embedded JPEG / Exif / `ispe` extent | `0x1021 == 1` (manual focus) → `.noRegionRecorded`; missing extent → `.referenceExtentUnresolved`; out-of-range coordinates → `.centerOutsideReference` |
+| Ricoh GR III / GR IIIx / GR IV DNG, JPEG | IFD0 `0xc634` (`RICOH\0II` payload-relative IFD) or Exif `0x927c` (`RICOH\0II` MakerNote-relative IFD); `0x040c` | Union `.region` of active in-focus `(flags & 0x04) != 0` boxes (`flags` 7/15; ignoring background `flags == 3`) on top-left `720 × 480` stored grid | `words[0] == 255` (MF / Snap Focus) or empty active slots → `.noRegionRecorded`; physically transposed pixels vs `720 × 480` → `.orientationConflict`; legacy `Ricoh\0\0\0` → `.rawVendorObservation` + `.vendorSemanticsUnverified` |
+| Hasselblad X1D / X1D II 50C / X2D 100C / CFV 50C II / CFV 100C `.3FR`, `.FFF` | Unprefixed Exif `0x927c` IFD (LE in `.3FR`, BE in `.FFF`; table inside MakerNote, values in outer TIFF); `0x0047` | `.region` from 7-word `[1, cx, cy, w, h, 0, 0]` on top-left `10000 × 10000` normalized stored grid | `words[0] == 0` or all-zero `(cx, cy, w, h)` (Flexbody / no AF) → `.noRegionRecorded`; non-7-word or unknown flag → `.vendorSemanticsUnverified` |
 
 ## Other manufacturers
 
@@ -156,6 +160,7 @@ Remaining vendor entry points are deliberately narrow:
 
 | Sample path | Library behavior |
 | --- | --- |
+| Leica (`LEICA\0` variants & `LEICA CAMERA AG\0\0\0` `.RWL`) | Bounded variant/AF-adjacent tag & opaque block size observations (`0x004d` origin unverified on `.RWL`, `0x05ff`/`0x0442`–`0x0447` unverified on native `LEICA\0`); geometry unverified |
 | Panasonic RW2 embedded JPEG | Raw `0x004d` rationals and related fields; origin unverified |
 | Olympus ORF CameraSettings | Raw `0x0301`–`0x0305`; empty storage reported as no region |
 | Pentax DNG `0xc634` payload | Raw `0x000d`, `0x000e`, `0x021f`; geometry unverified |

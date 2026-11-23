@@ -205,7 +205,9 @@ import CameraFocusMetadata
         #expect(read.vendor == .canon)
         #expect(read.displayGeometry == nil)
 
-        for vendor in [CameraVendor.canon, .nikon, .olympus, .pentax, .unknown] {
+        for vendor in [
+            CameraVendor.canon, .nikon, .ricoh, .hasselblad, .olympus, .pentax, .leica, .unknown,
+        ] {
             let conclusion = AutofocusMetadataReader.FocusMetadataConclusion(
                 vendor: vendor, model: read.model, recordedMake: read.recordedMake,
                 focus: read.focus, displayGeometry: read.displayGeometry,
