@@ -6,65 +6,195 @@ enum CR3Reader {
         0x81, 0x11, 0xF4, 0xCE, 0x46, 0x2B, 0x6A, 0x48,
     ]
 
+    private struct VendorBoxes {
+        var cmt1: BMFFBox?
+        var cmt2: BMFFBox?
+        var cmt3: BMFFBox?
+    }
+
     static func extract(
         reader: BoundedReader,
         builder: ExtractionBuilder,
         limits: FocusMetadataReader.Limits
     ) {
+        let boxes: VendorBoxes
         do {
-            guard let cmt3 = try findCMT3(reader: reader, limits: limits) else {
-                builder.focusPathUnsupported = true
-                builder.addIssue(
-                    .unsupportedVendorFocusLayout,
-                    context: "Canon CR3",
-                    detail: "The known CMT3 vendor box was not found."
-                )
-                return
-            }
-            if builder.camera == nil {
-                builder.camera = CameraIdentity(
-                    vendor: .canon,
-                    make: nil,
-                    model: nil,
-                    recordedSoftware: nil
-                )
-            }
+            boxes = try findVendorBoxes(reader: reader, limits: limits)
+        } catch let failure as ParseFailure {
+            builder.focusPathMalformed = true
+            builder.addIssue(failure: failure, context: "Canon CR3")
+            return
+        } catch {
+            builder.focusPathUnsupported = true
+            return
+        }
+
+        guard let cmt3 = boxes.cmt3 else {
+            builder.focusPathUnsupported = true
+            builder.addIssue(
+                .unsupportedVendorFocusLayout,
+                context: "Canon CR3",
+                detail: "The known CMT3 vendor box was not found."
+            )
+            return
+        }
+
+        if let cmt1 = boxes.cmt1 {
+            parseCMT1(cmt1, reader: reader, builder: builder, limits: limits)
+        }
+        if builder.camera == nil {
+            builder.camera = CameraIdentity(
+                vendor: .canon,
+                make: nil,
+                model: nil,
+                recordedSoftware: nil
+            )
+        }
+
+        if let cmt2 = boxes.cmt2 {
+            parseCMT2(cmt2, reader: reader, builder: builder, limits: limits)
+        }
+
+        do {
             let header = try TIFFHeaderParser.read(
                 reader: reader,
                 at: cmt3.payloadStart,
                 regionEnd: cmt3.end
             )
-            TIFFMetadataExtractor.extract(
+            TIFFMetadataExtractor.extractCanonCMT3(
                 reader: reader,
-                options: TIFFExtractionOptions(
-                    containerKind: .canonCR3,
-                    entryPoint: .isoBMFFVendorBox(
-                        fourCC: "CMT3",
-                        tiffHeaderOffset: 0
-                    ),
-                    base: cmt3.payloadStart,
-                    regionEnd: cmt3.end,
-                    byteOrder: header.byteOrder,
-                    firstIFDOffset: header.firstIFDOffset,
-                    parseMakerNote: false,
-                    parsePentaxVendorPayload: false,
-                    parseCanonVendorBlock: true
-                ),
+                tiffOffset: cmt3.payloadStart,
+                tiffEnd: cmt3.end,
+                byteOrder: header.byteOrder,
                 builder: builder,
                 limits: limits
             )
         } catch let failure as ParseFailure {
-            builder.focusPathUnsupported = true
-            builder.addIssue(failure: failure, context: "Canon CR3")
+            builder.focusPathMalformed = true
+            builder.addIssue(failure: failure, context: "Canon CR3 CMT3")
         } catch {
-            builder.focusPathUnsupported = true
+            builder.focusPathMalformed = true
         }
     }
 
-    private static func findCMT3(
+    private static func parseCMT1(
+        _ box: BMFFBox,
+        reader: BoundedReader,
+        builder: ExtractionBuilder,
+        limits: FocusMetadataReader.Limits
+    ) {
+        do {
+            let parsed = try readSingleIFD(reader: reader, box: box, limits: limits)
+            let make = TIFFMetadataExtractor.readASCII(
+                parsed.index,
+                tag: 0x010F,
+                context: parsed.context,
+                builder: builder
+            )
+            let model = TIFFMetadataExtractor.readASCII(
+                parsed.index,
+                tag: 0x0110,
+                context: parsed.context,
+                builder: builder
+            )
+            let software = TIFFMetadataExtractor.readASCII(
+                parsed.index,
+                tag: 0x0131,
+                context: parsed.context,
+                builder: builder
+            )
+            let detected = TIFFMetadataExtractor.cameraVendor(make: make, model: model)
+            let vendor = detected == .unknown ? CameraVendor.canon : detected
+            builder.camera = CameraIdentity(
+                vendor: vendor,
+                make: make,
+                model: model,
+                recordedSoftware: software
+            )
+            TIFFMetadataExtractor.readOrientation(
+                parsed.index,
+                context: parsed.context,
+                builder: builder
+            )
+        } catch let failure as ParseFailure {
+            builder.focusPathMalformed = true
+            builder.addIssue(failure: failure, context: "Canon CR3 CMT1")
+        } catch {
+            builder.focusPathMalformed = true
+        }
+    }
+
+    private static func parseCMT2(
+        _ box: BMFFBox,
+        reader: BoundedReader,
+        builder: ExtractionBuilder,
+        limits: FocusMetadataReader.Limits
+    ) {
+        do {
+            let parsed = try readSingleIFD(reader: reader, box: box, limits: limits)
+            TIFFMetadataExtractor.readImageExtent(
+                parsed.index,
+                context: parsed.context,
+                builder: builder
+            )
+            if builder.imageExtent == nil {
+                var visited: Set<Int> = []
+                if let nestedExif = TIFFMetadataExtractor.readExifDirectory(
+                    parsed.index,
+                    reader: reader,
+                    context: parsed.context,
+                    limits: limits,
+                    visited: &visited,
+                    builder: builder
+                ) {
+                    TIFFMetadataExtractor.readImageExtent(
+                        nestedExif,
+                        context: parsed.context,
+                        builder: builder
+                    )
+                }
+            }
+        } catch let failure as ParseFailure {
+            builder.focusPathMalformed = true
+            builder.addIssue(failure: failure, context: "Canon CR3 CMT2")
+        } catch {
+            builder.focusPathMalformed = true
+        }
+    }
+
+    private static func readSingleIFD(
+        reader: BoundedReader,
+        box: BMFFBox,
+        limits: FocusMetadataReader.Limits
+    ) throws -> (index: TIFFEntryIndex, context: TIFFContext) {
+        let header = try TIFFHeaderParser.read(
+            reader: reader,
+            at: box.payloadStart,
+            regionEnd: box.end
+        )
+        let context = TIFFContext(
+            reader: reader,
+            base: box.payloadStart,
+            regionEnd: box.end,
+            byteOrder: header.byteOrder
+        )
+        var visited: Set<Int> = []
+        let absolute = try context.absolute(relativeOffset: header.firstIFDOffset)
+        let index = try TIFFDirectoryParser.parse(
+            reader: reader,
+            atAbsolute: absolute,
+            context: context,
+            limits: limits,
+            visited: &visited,
+            depth: 0
+        )
+        return (index, context)
+    }
+
+    private static func findVendorBoxes(
         reader: BoundedReader,
         limits: FocusMetadataReader.Limits
-    ) throws -> BMFFBox? {
+    ) throws -> VendorBoxes {
         var counter = 0
         var moov: BMFFBox?
         try BMFFParser.forEachBox(
@@ -79,7 +209,7 @@ enum CR3Reader {
                 moov = box
             }
         }
-        guard let moov else { return nil }
+        guard let moov else { return VendorBoxes() }
 
         var uuidBox: BMFFBox?
         var innerCounter = 0
@@ -100,9 +230,9 @@ enum CR3Reader {
                 uuidBox = box
             }
         }
-        guard let uuidBox else { return nil }
+        guard let uuidBox else { return VendorBoxes() }
 
-        var cmt3: BMFFBox?
+        var result = VendorBoxes()
         var vendorCounter = 0
         try BMFFParser.forEachBox(
             reader: reader,
@@ -112,10 +242,17 @@ enum CR3Reader {
             limits: limits,
             boxCounter: &vendorCounter
         ) { box in
-            if box.type == "CMT3", cmt3 == nil {
-                cmt3 = box
+            switch box.type {
+            case "CMT1" where result.cmt1 == nil:
+                result.cmt1 = box
+            case "CMT2" where result.cmt2 == nil:
+                result.cmt2 = box
+            case "CMT3" where result.cmt3 == nil:
+                result.cmt3 = box
+            default:
+                break
             }
         }
-        return cmt3
+        return result
     }
 }

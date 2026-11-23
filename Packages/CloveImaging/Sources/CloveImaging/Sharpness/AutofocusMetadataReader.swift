@@ -54,22 +54,23 @@ public struct AutofocusRegion: Sendable {
 
 /// Reads camera autofocus regions from ImageIO's property dictionaries, falling back to
 /// the vendored focusmeta reader for the cameras whose AF records ImageIO never exposes
-/// (Sony today: private maker notes). Proven paths stay on ImageIO unchanged; see
-/// ``regionsFromMetadataFile(of:)`` for when the fallback runs.
+/// (e.g., Sony, Canon CR3/CR2, Nikon Z, and Fujifilm fallbacks). Proven ImageIO paths run
+/// first; see ``regionsFromMetadataFile(of:)`` for when the fallback runs.
 ///
-/// Only coordinate shapes proven against the repository's fixtures are interpreted; anything
-/// else reports unavailable with the evidence of what was inspected (#208):
+/// Only coordinate shapes proven against real samples are interpreted; anything else reports
+/// unavailable with the evidence of what was inspected (#208):
 ///
-/// - `{ExifAux}.AFInfo` — a `[x, y, width, height, flag]` array of normalized values, proven on
-///   `fujifilm-x-s10.RAF` and `panasonic-dmc-gh4.RW2` (corner + size, both entries identical).
+/// - `{ExifAux}.AFInfo` — a `[x, y, width, height, flag]` array of bottom-left normalized
+///   values, proven on Fujifilm (`X-Pro3`, `X-S20`, `X-T20`, `X-S10`), Canon (`5D4`), and
+///   Panasonic (`LX7`, `GH4`). ImageIO's bottom-left `y` is converted to top-left display space
+///   before orientation is applied.
 /// - `{Exif}.SubjectArea` — a `[x, y, width, height]` array of pixels relative to the file's
 ///   pixel dimensions, proven on `apple-iphone-12-pro.DNG` (center + size; the fixture's values
 ///   overflow as a corner rect and are exact as a center rect).
 ///
-/// Sony cameras record AF data in private maker-note blocks that ImageIO does not expose — this
-/// host's SDK has no Sony dictionary at all — so after both paths above report missing, the
-/// reader re-reads the file with focusmeta, which parses the Sony blocks directly and maps its
-/// display-space geometry into the same ``NormalizedRegion`` the proven paths produce.
+/// When both ImageIO paths report missing (or non-matching AFInfo shapes), the reader
+/// re-reads the file with focusmeta, which parses the vendor blocks directly (Sony, Canon,
+/// Nikon, Fujifilm) and maps its display-space geometry into ``NormalizedRegion``.
 public struct AutofocusMetadataReader: Sendable {
     /// Reads whole metadata containers (Sony maker notes live outside ImageIO's property
     /// dictionaries). Production reads the file; tests read synthetic bytes or state
@@ -141,8 +142,8 @@ public struct AutofocusMetadataReader: Sendable {
             inspected.append(.init(path: "{Exif}.SubjectArea", finding: .missing))
         }
 
-        // The ImageIO paths found nothing. Sony records AF in private maker notes ImageIO
-        // never exposes, so re-read the container with focusmeta before reporting the gap.
+        // The ImageIO paths found nothing. Re-read the container directly with focusmeta for
+        // vendors whose AF records live in private maker notes or CR3 boxes.
         return regionsFromMetadataFile(of: url, inspected: inspected, make: make)
     }
 
@@ -203,23 +204,24 @@ public struct AutofocusMetadataReader: Sendable {
                 exifOrientation: 1))
     }
 
-    /// What focusmeta concluded, as one evidence entry. Sony's verified scope is named
-    /// plainly; every other vendor's raw observations map to the explicit unavailability
-    /// focusmeta itself reports.
+    /// What focusmeta concluded, as one evidence entry. Verified vendors (Sony, Canon, Nikon,
+    /// Fujifilm) surface the library's specific unavailability reason; unverified vendors map to
+    /// explicit vendor unavailability.
     static func focusmetaInspection(
         _ conclusion: FocusMetadataConclusion
     ) -> AutofocusMetadataEvidence.Inspection {
         let vendor = conclusion.vendor
         let make = conclusion.recordedMake.map { " (\($0))" } ?? ""
+        let camera = conclusion.model.map { " \($0)" } ?? ""
         switch vendor {
-        case .sony:
-            let camera = conclusion.model.map { " \($0)" } ?? ""
-            let reason = Self.sonyUnavailabilityReason(conclusion)
+        case .sony, .canon, .nikon, .fujifilm:
+            let label = Self.verifiedVendorLabel(vendor)
+            let reason = Self.vendorUnavailabilityReason(vendorName: label, conclusion: conclusion)
             return .init(
-                path: "focusmeta.SonyMakerNote\(camera)", finding: .unreadable(reason))
-        case .fujifilm, .panasonic:
+                path: "focusmeta.\(label)MakerNote\(camera)", finding: .unreadable(reason))
+        case .panasonic:
             return .init(
-                path: "focusmeta.\(vendor.map(\.rawValue) ?? "vendor")MakerNote\(make)",
+                path: "focusmeta.panasonicMakerNote\(make)",
                 finding: .unreadable(
                     "geometry semantics unverified; ImageIO's reading above is the proven one"))
         case nil:
@@ -234,13 +236,25 @@ public struct AutofocusMetadataReader: Sendable {
         }
     }
 
-    /// The short reason focusmeta could not present Sony geometry: its unavailability case,
-    /// or — when the container parsed but no focus record exists at all — that absence.
-    private static func sonyUnavailabilityReason(
-        _ conclusion: FocusMetadataConclusion
+    private static func verifiedVendorLabel(_ vendor: CameraVendor?) -> String {
+        switch vendor {
+        case .sony: return "Sony"
+        case .canon: return "Canon"
+        case .nikon: return "Nikon"
+        case .fujifilm: return "Fujifilm"
+        default: return vendor?.rawValue ?? "Vendor"
+        }
+    }
+
+    /// The short reason focusmeta could not present verified vendor geometry: its
+    /// unavailability case, or — when the container parsed but no focus record exists at all —
+    /// that absence.
+    private static func vendorUnavailabilityReason(
+        vendorName: String,
+        conclusion: FocusMetadataConclusion
     ) -> String {
         if case .unavailable(let reason)? = conclusion.focus?.geometry {
-            return "Sony focus geometry unavailable: \(reason)"
+            return "\(vendorName) focus geometry unavailable: \(reason)"
         }
         if conclusion.focus == nil {
             return conclusion.status == .focusMetadataMissing
@@ -290,9 +304,10 @@ public struct AutofocusMetadataReader: Sendable {
             width: region.width, height: region.height)
     }
 
-    /// `[x, y, width, height, "f"|"t"]` with corner + size semantics. The Fuji fixture repeats
-    /// the tuple twice; both entries are required to agree, and the Panasonic fixture's single
-    /// tuple centers at the 49-point grid's exact middle, confirming the corner reading.
+    /// `[x, y, width, height, "f"|"t"]` with bottom-left origin + size semantics, empirically
+    /// confirmed against Fujifilm (`X-Pro3`, `X-S20`, `X-T20`, `X-S10`), Canon (`5D4`), and
+    /// Panasonic (`LX7`, `GH4`). Converts ImageIO's bottom-left `y` into Clove's top-left
+    /// normalized space. The Fuji fixture repeats the tuple twice; both entries must agree.
     static func afInfoRegion(_ raw: Any) -> NormalizedRegion? {
         guard let values = raw as? [Any] else { return nil }
         var tuples: [[Double]] = []
@@ -316,7 +331,10 @@ public struct AutofocusMetadataReader: Sendable {
         guard x.isFinite, y.isFinite, width.isFinite, height.isFinite, width > 0, height > 0,
             x >= 0, y >= 0, x + width <= 1.0001, y + height <= 1.0001
         else { return nil }
-        return NormalizedRegion(x: x, y: y, width: min(width, 1 - x), height: min(height, 1 - y))
+        let clampedWidth = min(width, 1 - x)
+        let clampedHeight = min(height, 1 - y)
+        let topLeftY = max(0, 1 - y - clampedHeight)
+        return NormalizedRegion(x: x, y: topLeftY, width: clampedWidth, height: clampedHeight)
     }
 
     /// `[centerX, centerY, width, height]` in pixels. The Apple fixture's values (2009, 1506,

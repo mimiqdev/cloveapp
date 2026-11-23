@@ -1,3 +1,4 @@
+import CameraFocusMetadata
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -24,20 +25,52 @@ struct SharpnessFixtureTests {
     }
 
     /// The Fuji fixture's AFInfo is a corner+size tuple repeated twice; both entries agree.
+    /// ImageIO reports bottom-left y; Clove converts it to top-left and agrees with focusmeta's
+    /// 0x1023 location.
     @Test func fujiFixtureAFInfoProducesTheRecordedRegion() throws {
+        let url = SharpnessFixtures.file("fujifilm-x-s10.RAF")
         let properties = try properties(of: "fujifilm-x-s10.RAF")
         guard
-            case .success(let located) = reader.regions(
-                of: SharpnessFixtures.file("fujifilm-x-s10.RAF"), properties: properties)
+            case .success(let located) = reader.regions(of: url, properties: properties)
         else {
             Issue.record("The Fuji fixture's AFInfo is the proven shape")
             return
         }
         let region = located.region
         #expect(abs(region.x - 0.265_172_1) < 1e-6)
-        #expect(abs(region.y - 0.579_993_2) < 1e-6)
+        #expect(abs(region.y - (1 - 0.579_993_2 - 0.049_932_07)) < 1e-6)
         #expect(abs(region.width - 0.049_818_84) < 1e-6)
         #expect(abs(region.height - 0.049_932_07) < 1e-6)
+
+        let report = try FocusMetadataReader().read(fileAt: url)
+        guard case .location(let displayLocation)? = report.displayGeometry else {
+            Issue.record("Expected verified Fujifilm display location from focusmeta")
+            return
+        }
+        #expect(abs(displayLocation.normalizedCenter.x - region.centerX) < 1e-4)
+        #expect(abs(displayLocation.normalizedCenter.y - region.centerY) < 1e-4)
+    }
+
+    /// Canon EOS R6 CR3 fixture records manual focus (`ValidAFPoints == 0`) cleanly through
+    /// focusmeta with explicit `noRegionRecorded` unavailability evidence.
+    @Test func canonCR3FixtureReportsManualFocusEvidence() throws {
+        let url = SharpnessFixtures.file("canon-eos-r6.CR3")
+        let properties = try properties(of: "canon-eos-r6.CR3")
+        let report = try FocusMetadataReader().read(fileAt: url)
+        #expect(report.status == .verifiedVendorFocusMetadata)
+        #expect(report.camera?.vendor == .canon)
+        #expect(report.camera?.model == "Canon EOS R6")
+        #expect(report.focus?.geometry == .unavailable(.noRegionRecorded(vendor: .canon)))
+        guard case .failure(let evidence) = reader.regions(of: url, properties: properties) else {
+            Issue.record("MF CR3 fixture must report unavailable rather than a fallback box")
+            return
+        }
+        #expect(
+            evidence.inspected.contains {
+                $0.path == "focusmeta.CanonMakerNote Canon EOS R6"
+                    && $0.finding != .missing
+            }
+        )
     }
 
     /// The Panasonic fixture's single tuple centers its box at the frame's exact middle.

@@ -11,9 +11,10 @@ import Testing
     let reader = AutofocusMetadataReader()
 
     /// `fujifilm-x-s10.RAF`: two identical corner+size tuples in `{ExifAux}.AFInfo`.
+    /// ImageIO encodes `AFInfo` y from bottom-left; Clove normalizes to top-left display space.
     @Test func readsFujiAFInfoCornerTuple() throws {
         let properties: [String: Any] = [
-            "{TIFF}": ["Make": "FUJIFILM", "Orientation": 1],
+            "{TIFF}": ["Make": "FUJILM", "Orientation": 1],
             "{ExifAux}": [
                 "AFInfo": [
                     0.265_172_1, 0.579_993_2, 0.049_818_84, 0.049_932_07, "f",
@@ -21,11 +22,27 @@ import Testing
                 ]
             ],
         ]
-        let region = try #require(try resultProperties(properties))
-        // The stored corner (x, y) survives orientation 1 unchanged.
+        let region = try resultProperties(properties)
+        // Bottom-left y = 0.5799932, height = 0.04993207 -> top-left y = 1 - y - h = 0.37007473.
         #expect(abs(region.x - 0.265_172_1) < 1e-6)
-        #expect(abs(region.y - 0.579_993_2) < 1e-6)
+        #expect(abs(region.y - (1 - 0.579_993_2 - 0.049_932_07)) < 1e-6)
         #expect(abs(region.width - 0.049_818_84) < 1e-6)
+        #expect(abs(region.height - 0.049_932_07) < 1e-6)
+    }
+
+    /// Orientation 6 rotates bottom-left-converted AFInfo from stored space into display space.
+    @Test func afInfoBottomLeftYRotatesCleanlyForOrientation6() throws {
+        // Stored top-left corner: (0.20, 1 - 0.70 - 0.10 = 0.20), size (0.10, 0.10), center (0.25, 0.25).
+        // Under Orientation 6 (90 deg CW): displayCenter = (1 - 0.25, 0.25) = (0.75, 0.25).
+        let properties: [String: Any] = [
+            "{TIFF}": ["Make": "FUJIFILM", "Orientation": 6],
+            "{ExifAux}": [
+                "AFInfo": [0.20, 0.70, 0.10, 0.10, "t"]
+            ],
+        ]
+        let region = try resultProperties(properties)
+        #expect(abs(region.centerX - 0.75) < 1e-6)
+        #expect(abs(region.centerY - 0.25) < 1e-6)
     }
 
     /// `panasonic-dmc-gh4.RW2`: one corner+size tuple whose box centers at the frame's exact
@@ -35,7 +52,7 @@ import Testing
             "{TIFF}": ["Make": "Panasonic"],
             "{ExifAux}": ["AFInfo": [0.475, 0.475, 0.05, 0.05, "f"]],
         ]
-        let region = try #require(try resultProperties(properties))
+        let region = try resultProperties(properties)
         // Corner semantics: (0.475, 0.475) + 0.05 centers at (0.5, 0.5).
         #expect(abs(region.centerX - 0.5) < 1e-6)
         #expect(abs(region.centerY - 0.5) < 1e-6)
@@ -53,7 +70,7 @@ import Testing
                 "PixelYDimension": 3024,
             ],
         ]
-        let region = try #require(try resultProperties(properties))
+        let region = try resultProperties(properties)
         #expect(abs(region.centerX - 0.5) < 5e-3)
         #expect(abs(region.centerY - 0.5) < 5e-3)
         // Orientation 6 swaps the axes; the centered box stays inside the frame either way.
@@ -74,7 +91,7 @@ import Testing
                 "PixelYDimension": 3000,
             ],
         ]
-        let region = try #require(try resultProperties(properties))
+        let region = try resultProperties(properties)
         // Storage-space center, normalized: (0.25, 2200/3000 ≈ 0.7333).
         // Display space (orientation 6, 90° CW): (x, y) → (1 − y, x), so the center lands at
         // (0.2667, 0.25); the box is now 300 wide and 400 tall.
@@ -98,7 +115,7 @@ import Testing
                 "PixelYDimension": 3000,
             ],
         ]
-        let region = try #require(try resultProperties(properties))
+        let region = try resultProperties(properties)
         // Orientation 6 swaps the axes; orientation 1 would not.
         #expect(abs(region.width - 300.0 / 3000.0) < 1e-9)
         #expect(abs(region.height - 400.0 / 4000.0) < 1e-9)
@@ -114,7 +131,7 @@ import Testing
                 "PixelYDimension": 3000,
             ],
         ]
-        let region = try #require(try resultProperties(properties))
+        let region = try resultProperties(properties)
         #expect(abs(region.width - 300.0 / 3000.0) < 1e-9)
         #expect(abs(region.height - 400.0 / 4000.0) < 1e-9)
     }
