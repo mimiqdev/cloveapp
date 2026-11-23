@@ -3,245 +3,15 @@ import Foundation
 struct VendorReadOutcome {
     var records: [VendorRawRecord] = []
     var issues: [MetadataIssue] = []
+    var uncertainties: [Uncertainty] = []
     var malformedFocusPath = false
+    var isVerifiedScope = false
     var source: FocusSource
-    var unavailability: FocusGeometryUnavailability
+    var geometry: FocusGeometry
     var referenceExtent: PixelExtent? = nil
 }
 
 enum VendorReaders {
-    static func readNikon(
-        reader: BoundedReader,
-        makerNoteOffset: Int,
-        makerNoteLength: Int,
-        limits: FocusMetadataReader.Limits
-    ) -> VendorReadOutcome? {
-        guard makerNoteLength >= 10 else { return nil }
-        let prefix: [UInt8]
-        do {
-            prefix = try reader.read(at: makerNoteOffset, count: 10)
-        } catch {
-            return nil
-        }
-        guard prefix.starts(with: [0x4E, 0x69, 0x6B, 0x6F, 0x6E, 0x00]) else {
-            return nil
-        }
-
-        var outcome = VendorReadOutcome(
-            source: .nikonAFInformation,
-            unavailability: .vendorSemanticsUnverified(vendor: .nikon)
-        )
-        let makerNoteEnd = makerNoteOffset + makerNoteLength
-        let headerOffset = makerNoteOffset + 10
-        let header: TIFFHeaderInfo
-        do {
-            header = try TIFFHeaderParser.read(
-                reader: reader,
-                at: headerOffset,
-                regionEnd: makerNoteEnd
-            )
-        } catch let failure as ParseFailure {
-            outcome.issues.append(
-                MetadataIssue(failure: failure, context: "Nikon embedded TIFF header")
-            )
-            outcome.malformedFocusPath = true
-            return outcome
-        } catch {
-            outcome.malformedFocusPath = true
-            return outcome
-        }
-
-        let context = TIFFContext(
-            reader: reader,
-            base: headerOffset,
-            regionEnd: makerNoteEnd,
-            byteOrder: header.byteOrder
-        )
-        var visited: Set<Int> = []
-        let index: TIFFEntryIndex
-        do {
-            let absolute = try context.absolute(relativeOffset: header.firstIFDOffset)
-            index = try TIFFDirectoryParser.parse(
-                reader: reader,
-                atAbsolute: absolute,
-                context: context,
-                limits: limits,
-                visited: &visited,
-                depth: 1
-            )
-        } catch let failure as ParseFailure {
-            outcome.issues.append(
-                MetadataIssue(failure: failure, context: "Nikon MakerNote directory")
-            )
-            outcome.malformedFocusPath = true
-            return outcome
-        } catch {
-            outcome.malformedFocusPath = true
-            return outcome
-        }
-
-        if let entry = index.uniqueEntry(tag: 0x0007), entry.type == 2 {
-            do {
-                if let value = try context.readASCII(of: entry) {
-                    outcome.records.append(
-                        VendorRawRecord(
-                            tag: 0x0007,
-                            name: "Recorded focus mode string",
-                            fieldType: entry.type,
-                            values: .ascii(value)
-                        )
-                    )
-                }
-            } catch let failure as ParseFailure {
-                outcome.issues.append(
-                    MetadataIssue(failure: failure, context: "Nikon 0x0007")
-                )
-            } catch {}
-        }
-
-        if let entry = index.uniqueEntry(tag: 0x00B7), entry.type == 7, entry.count == 84 {
-            do {
-                let bytes = try context.readValue(of: entry)
-                outcome.records.append(
-                    VendorRawRecord(
-                        tag: 0x00B7,
-                        name: "AF information block",
-                        fieldType: entry.type,
-                        values: .unsignedBytes(bytes)
-                    )
-                )
-            } catch let failure as ParseFailure {
-                outcome.issues.append(
-                    MetadataIssue(failure: failure, context: "Nikon 0x00b7")
-                )
-                outcome.malformedFocusPath = true
-            } catch {}
-        }
-
-        if outcome.records.isEmpty {
-            outcome.issues.append(
-                MetadataIssue(
-                    kind: .missingFocusMetadata,
-                    context: "Nikon MakerNote",
-                    detail: "No observed Nikon focus fields were present."
-                )
-            )
-        }
-        return outcome
-    }
-
-    static func readFujifilm(
-        reader: BoundedReader,
-        makerNoteOffset: Int,
-        makerNoteLength: Int,
-        outerByteOrder: TIFFByteOrder,
-        limits: FocusMetadataReader.Limits
-    ) -> VendorReadOutcome? {
-        guard makerNoteLength >= 12 else { return nil }
-        let header: [UInt8]
-        do {
-            header = try reader.read(at: makerNoteOffset, count: 12)
-        } catch {
-            return nil
-        }
-        guard header.starts(with: Array("FUJIFILM".utf8)) else {
-            return nil
-        }
-        let directoryOffset =
-            Int(header[8]) | Int(header[9]) << 8 | Int(header[10]) << 16 | Int(header[11]) << 24
-        guard directoryOffset >= 0 else { return nil }
-
-        var outcome = VendorReadOutcome(
-            source: .fujifilmFocusPixel,
-            unavailability: .referenceExtentUnresolved(vendor: .fujifilm)
-        )
-        let makerNoteEnd = makerNoteOffset + makerNoteLength
-        let context = TIFFContext(
-            reader: reader,
-            base: makerNoteOffset,
-            regionEnd: makerNoteEnd,
-            byteOrder: outerByteOrder
-        )
-        var visited: Set<Int> = []
-        let index: TIFFEntryIndex
-        do {
-            index = try TIFFDirectoryParser.parse(
-                reader: reader,
-                atAbsolute: makerNoteOffset + directoryOffset,
-                context: context,
-                limits: limits,
-                visited: &visited,
-                depth: 1
-            )
-        } catch let failure as ParseFailure {
-            outcome.issues.append(
-                MetadataIssue(failure: failure, context: "Fujifilm MakerNote directory")
-            )
-            outcome.malformedFocusPath = true
-            return outcome
-        } catch {
-            outcome.malformedFocusPath = true
-            return outcome
-        }
-
-        if let entry = index.uniqueEntry(tag: 0x1023), entry.type == 3, entry.count == 2 {
-            do {
-                if let values = try context.readUnsignedValues(of: entry) {
-                    outcome.records.append(
-                        VendorRawRecord(
-                            tag: 0x1023,
-                            name: "Focus pixel word pair",
-                            fieldType: entry.type,
-                            values: .unsignedWords(values)
-                        )
-                    )
-                }
-            } catch let failure as ParseFailure {
-                outcome.issues.append(
-                    MetadataIssue(failure: failure, context: "Fujifilm 0x1023")
-                )
-                outcome.malformedFocusPath = true
-            } catch {}
-        }
-        appendSimpleWordRecord(
-            tag: 0x1021,
-            expectedType: 3,
-            expectedCount: 1,
-            name: "Vendor tag 0x1021 value",
-            index: index,
-            context: context,
-            outcome: &outcome
-        )
-        appendSimpleWordRecord(
-            tag: 0x102D,
-            expectedType: 4,
-            expectedCount: 1,
-            name: "Vendor tag 0x102d value",
-            index: index,
-            context: context,
-            outcome: &outcome
-        )
-        appendSimpleWordRecord(
-            tag: 0x1301,
-            expectedType: 3,
-            expectedCount: 1,
-            name: "Vendor tag 0x1301 value",
-            index: index,
-            context: context,
-            outcome: &outcome
-        )
-
-        if outcome.records.isEmpty {
-            outcome.issues.append(
-                MetadataIssue(
-                    kind: .missingFocusMetadata,
-                    context: "Fujifilm MakerNote"
-                )
-            )
-        }
-        return outcome
-    }
-
     static func readPanasonic(
         reader: BoundedReader,
         makerNoteOffset: Int,
@@ -262,7 +32,7 @@ enum VendorReaders {
 
         var outcome = VendorReadOutcome(
             source: .panasonicAFPosition,
-            unavailability: .originConventionUnverified(vendor: .panasonic)
+            geometry: .unavailable(.originConventionUnverified(vendor: .panasonic))
         )
         var visited: Set<Int> = []
         let index: TIFFEntryIndex
@@ -389,7 +159,7 @@ enum VendorReaders {
 
         var outcome = VendorReadOutcome(
             source: .olympusCameraSettings,
-            unavailability: .vendorSemanticsUnverified(vendor: .olympus)
+            geometry: .unavailable(.vendorSemanticsUnverified(vendor: .olympus))
         )
         let makerNoteEnd = makerNoteOffset + makerNoteLength
         let context = TIFFContext(
@@ -545,7 +315,7 @@ enum VendorReaders {
                 rationalsAreZero = false
             }
             if areaIsZero && rationalsAreZero {
-                outcome.unavailability = .noRegionRecorded(vendor: .olympus)
+                outcome.geometry = .unavailable(.noRegionRecorded(vendor: .olympus))
             }
         }
 
@@ -588,7 +358,7 @@ enum VendorReaders {
 
         var outcome = VendorReadOutcome(
             source: .pentaxFocusSelection,
-            unavailability: .vendorSemanticsUnverified(vendor: .pentax)
+            geometry: .unavailable(.vendorSemanticsUnverified(vendor: .pentax))
         )
         let payloadEnd = payloadOffset + payloadLength
         let context = TIFFContext(
@@ -666,87 +436,7 @@ enum VendorReaders {
         return outcome
     }
 
-    static func readCanonCMT3(
-        reader: BoundedReader,
-        tiffOffset: Int,
-        tiffEnd: Int,
-        limits: FocusMetadataReader.Limits
-    ) -> VendorReadOutcome? {
-        let header: TIFFHeaderInfo
-        do {
-            header = try TIFFHeaderParser.read(reader: reader, at: tiffOffset, regionEnd: tiffEnd)
-        } catch {
-            return nil
-        }
-        let context = TIFFContext(
-            reader: reader,
-            base: tiffOffset,
-            regionEnd: tiffEnd,
-            byteOrder: header.byteOrder
-        )
-        var visited: Set<Int> = []
-        let index: TIFFEntryIndex
-        do {
-            let absolute = try context.absolute(relativeOffset: header.firstIFDOffset)
-            index = try TIFFDirectoryParser.parse(
-                reader: reader,
-                atAbsolute: absolute,
-                context: context,
-                limits: limits,
-                visited: &visited,
-                depth: 1
-            )
-        } catch {
-            return nil
-        }
-
-        var outcome = VendorReadOutcome(
-            source: .canonCR3AFInformation,
-            unavailability: .vendorSemanticsUnverified(vendor: .canon)
-        )
-        guard let entry = index.uniqueEntry(tag: 0x0026), entry.type == 3,
-            entry.count == 4419
-        else {
-            outcome.issues.append(
-                MetadataIssue(
-                    kind: .missingFocusMetadata,
-                    context: "Canon CMT3 0x0026"
-                )
-            )
-            return outcome
-        }
-        do {
-            if let values = try context.readUnsignedValues(of: entry), values.count >= 8 {
-                outcome.records.append(
-                    VendorRawRecord(
-                        tag: 0x0026,
-                        name: "AF information block prefix words",
-                        fieldType: entry.type,
-                        values: .unsignedWords(Array(values.prefix(8)))
-                    )
-                )
-                if let final = values.last {
-                    outcome.records.append(
-                        VendorRawRecord(
-                            tag: 0x0026,
-                            name: "AF information block final word",
-                            fieldType: entry.type,
-                            values: .unsignedWords([final])
-                        )
-                    )
-                }
-            }
-        } catch let failure as ParseFailure {
-            outcome.issues.append(
-                MetadataIssue(failure: failure, context: "Canon 0x0026")
-            )
-            outcome.malformedFocusPath = true
-        } catch {}
-
-        return outcome
-    }
-
-    private static func appendSimpleWordRecord(
+    static func appendSimpleWordRecord(
         tag: UInt16,
         expectedType: UInt16,
         expectedCount: UInt32,

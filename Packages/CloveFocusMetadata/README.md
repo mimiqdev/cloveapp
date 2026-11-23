@@ -4,9 +4,12 @@ A small, read-only Swift library for recorded camera focus metadata. It parses
 metadata containers directly with bounded reads; it does not decode images,
 detect faces, score focus, or write metadata.
 
-The first verified release targets the Sony ILCE-1M2 AF-C ARW/HIF scope
-documented in the sanitized format handoff. Other vendors expose bounded raw
-observations only, with their pixel geometry explicitly unverified.
+The library covers verified autofocus metadata across **Sony** (ILCE-1M2 ARW/HIF),
+**Canon** (CR3 `CMT3` and CR2/JPEG/HEIF MakerNote `0x0026`), **Nikon** (Z-series
+mirrorless `0x00b7` v0300/v0301/v0400/v0401/v0402 and ContrastDetect `v0100`), and
+**Fujifilm** (RAF/JPEG/HEIF `0x1023` FocusPixel with resolved reference extent).
+Other vendors and legacy DSLR point-index layouts expose bounded raw observations
+only, with their pixel geometry explicitly unverified.
 
 ## Requirements
 
@@ -54,7 +57,7 @@ Structural problems inside a recognized container are reported through
 
 | Field | Meaning |
 | --- | --- |
-| `status` | Verified Sony metadata, raw vendor observation, missing, unsupported, or malformed |
+| `status` | Verified Sony/vendor metadata, raw vendor observation, missing, unsupported, or malformed |
 | `container` | Container kind, TIFF byte order, MakerNote flavor, and entry point |
 | `camera` | Recorded make, model, and software string |
 | `imageExtent` | Recorded stored image extent before display rotation |
@@ -139,22 +142,26 @@ suppresses display transform/geometry while retaining the other stored
 observations. Display geometry is produced only with one unambiguous orientation
 source. A recorded focus tuple is never assumed to be already rotated.
 
+## Verified Batch 1 scope (Canon, Nikon, Fujifilm)
+
+| Vendor & Containers | Verified Fields | Geometry & Origin | Explicit Unverified / Unavailable Cases |
+| --- | --- | --- | --- |
+| Canon CR3 (`moov` UUID → `CMT1`/`CMT2`/`CMT3`), CR2/TIFF, JPEG, HEIF | `CMT1` IFD0 (`0x010f`–`0x0112`, `0x0131`), `CMT2`/`Exif` (`0xa002`, `0xa003`), `0x0026` (`AFInfo2`/`AFInfo3`) | Union `.region` of active `AFPointsInFocus` (or valid `PrimaryAFPoint`) on `AFImageWidth × AFImageHeight`; signed `Int16` center-origin with `+X` right, `+Y` up | `ValidAFPoints == 0` / manual focus or empty masks → `.noRegionRecorded`; non-matching `words[0]` layout → `.vendorSemanticsUnverified` |
+| Nikon NEF, JPEG, HEIF | MakerNote `0x0007` mode string, `0x00b7` (`AFInfo2`) | Verified continuous layouts (`0300`, `0301` at byte offset 42; `0400`–`0402` at byte offset 62; `0100` ContrastDetect `bytes[4] == 1` at byte offset 16): center `(AFAreaXPosition, AFAreaYPosition)` in top-left `AFImageWidth × AFImageHeight` → `.region` (or `.location` if width/height are 0) | DSLR phase-detect (`0101`, `0100` OVF) & Nikon 1 (`0200`, `0201`) → `.rawVendorObservation` + `.vendorSemanticsUnverified`; all-zero area fields → `.noRegionRecorded` |
+| Fujifilm RAF, JPEG, HEIF | Embedded JPEG / `Exif` (`0xa002`, `0xa003`), JPEG `SOF`, HEIF `ispe`; MakerNote `0x1021`, `0x1023`, `0x102d`, `0x1301` | Top-left `.location` from `0x1023` (`FocusPixel`) against the resolved embedded JPEG / Exif / `ispe` extent | `0x1021 == 1` (manual focus) → `.noRegionRecorded`; missing extent → `.referenceExtentUnresolved`; out-of-range coordinates → `.centerOutsideReference` |
+
 ## Other manufacturers
 
-Other entry points are deliberately narrow:
+Remaining vendor entry points are deliberately narrow:
 
 | Sample path | Library behavior |
 | --- | --- |
-| Canon CR3 `moov` UUID → `CMT3` | Raw `0x0026` AF block prefix/final words; geometry unverified |
-| Nikon MakerNote `0x00b7` | Raw AF block and recorded mode string; geometry unverified |
-| Fujifilm RAF embedded JPEG | Raw `0x1021`, `0x1023`, `0x102d`, `0x1301`; reference extent unresolved |
 | Panasonic RW2 embedded JPEG | Raw `0x004d` rationals and related fields; origin unverified |
 | Olympus ORF CameraSettings | Raw `0x0301`–`0x0305`; empty storage reported as no region |
 | Pentax DNG `0xc634` payload | Raw `0x000d`, `0x000e`, `0x021f`; geometry unverified |
 
-No vendor beyond the Sony scope receives a usable pixel region. Raw records use
-the field shapes that were actually observed; this is not a general vendor
-support claim.
+Unverified vendor layouts never claim pixel regions; raw records use the field
+shapes that were actually observed.
 
 ## Bounded I/O and privacy
 
@@ -222,7 +229,8 @@ The verified evidence does not settle, among other things:
 - replacement or precedence semantics for `0x204a`
 - Exif/HEIF orientation conflicts, mirroring, and cropped derived images
 - other Sony models, JPEGs, reduced-resolution modes, and crop modes
-- usable pixel geometry for every non-Sony vendor
+- usable pixel geometry for Panasonic, Olympus, Pentax, and Nikon DSLR point-index layouts (`0101`, `0200`, `0201`)
+- Fujifilm AF area box width/height beyond `0x1023` point coordinates
 
 These are reported as uncertainties or explicit unsupported outcomes rather than
 filled in with invented defaults.

@@ -9,7 +9,8 @@ struct TIFFExtractionOptions {
     var firstIFDOffset: UInt32
     var parseMakerNote = true
     var parsePentaxVendorPayload = true
-    var parseCanonVendorBlock = false
+    var heifPrimaryExtent: PixelExtent? = nil
+    var jpegSOFExtentProvider: (() -> PixelExtent?)? = nil
 }
 
 enum TIFFMetadataExtractor {
@@ -82,22 +83,19 @@ enum TIFFMetadataExtractor {
             readImageExtent(exifIndex, context: context, builder: builder)
         }
 
-        if options.parseCanonVendorBlock {
-            if let outcome = VendorReaders.readCanonCMT3(
-                reader: reader,
-                tiffOffset: options.base,
-                tiffEnd: options.regionEnd,
-                limits: limits
-            ) {
-                applyVendorResult(outcome, vendor: .canon, builder: builder)
-            } else {
-                builder.focusPathUnsupported = true
+        if let primaryExtent = options.heifPrimaryExtent {
+            if let exifExtent = builder.imageExtent, exifExtent != primaryExtent {
                 builder.addIssue(
-                    .unsupportedVendorFocusLayout,
-                    context: "Canon CMT3 vendor block"
+                    .unverifiedGeometry,
+                    context: "HEIF ispe and Exif dimensions",
+                    detail:
+                        "The primary-image extent and Exif dimensions differ; ispe is reported."
                 )
+                builder.addUncertainty(.referenceExtentMismatch)
             }
-            return
+            builder.imageExtent = primaryExtent
+        } else if builder.imageExtent == nil, let sofExtent = options.jpegSOFExtentProvider?() {
+            builder.imageExtent = sofExtent
         }
 
         if options.parsePentaxVendorPayload, let pentaxEntry = ifd0.uniqueEntry(tag: 0xC634) {
@@ -152,7 +150,38 @@ enum TIFFMetadataExtractor {
         )
     }
 
-    private static func readASCII(
+    static func extractCanonCMT3(
+        reader: BoundedReader,
+        tiffOffset: Int,
+        tiffEnd: Int,
+        byteOrder: TIFFByteOrder,
+        builder: ExtractionBuilder,
+        limits: FocusMetadataReader.Limits
+    ) {
+        builder.container = ContainerDescription(
+            kind: .canonCR3,
+            byteOrder: byteOrder,
+            makerNoteFlavor: nil,
+            entryPoint: .isoBMFFVendorBox(fourCC: "CMT3", tiffHeaderOffset: 0)
+        )
+        if let outcome = CanonReader.readCMT3(
+            reader: reader,
+            tiffOffset: tiffOffset,
+            tiffEnd: tiffEnd,
+            limits: limits,
+            imageExtent: builder.imageExtent
+        ) {
+            applyVendorResult(outcome, vendor: .canon, builder: builder)
+        } else {
+            builder.focusPathMalformed = true
+            builder.addIssue(
+                .invalidIFD,
+                context: "Canon CMT3 vendor block"
+            )
+        }
+    }
+
+    static func readASCII(
         _ index: TIFFEntryIndex,
         tag: UInt16,
         context: TIFFContext,
@@ -186,7 +215,7 @@ enum TIFFMetadataExtractor {
         }
     }
 
-    private static func readOrientation(
+    static func readOrientation(
         _ index: TIFFEntryIndex,
         context: TIFFContext,
         builder: ExtractionBuilder
@@ -222,7 +251,7 @@ enum TIFFMetadataExtractor {
         } catch {}
     }
 
-    private static func readExifDirectory(
+    static func readExifDirectory(
         _ ifd0: TIFFEntryIndex,
         reader: BoundedReader,
         context: TIFFContext,
@@ -273,7 +302,7 @@ enum TIFFMetadataExtractor {
         }
     }
 
-    private static func readImageExtent(
+    static func readImageExtent(
         _ exifIndex: TIFFEntryIndex,
         context: TIFFContext,
         builder: ExtractionBuilder
@@ -500,11 +529,12 @@ enum TIFFMetadataExtractor {
             return
         }
         if prefix.starts(with: Array("Nikon".utf8)) {
-            if let outcome = VendorReaders.readNikon(
+            if let outcome = NikonReader.read(
                 reader: reader,
                 makerNoteOffset: makerNoteOffset,
                 makerNoteLength: byteCount,
-                limits: limits
+                limits: limits,
+                imageExtent: builder.imageExtent
             ) {
                 setMakerNoteFlavor(.nikonEmbeddedTIFF, builder: builder)
                 applyVendorResult(outcome, vendor: .nikon, builder: builder)
@@ -514,12 +544,13 @@ enum TIFFMetadataExtractor {
             return
         }
         if prefix.starts(with: Array("FUJIFILM".utf8)) {
-            if let outcome = VendorReaders.readFujifilm(
+            if let outcome = FujifilmReader.read(
                 reader: reader,
                 makerNoteOffset: makerNoteOffset,
                 makerNoteLength: byteCount,
                 outerByteOrder: context.byteOrder,
-                limits: limits
+                limits: limits,
+                imageExtent: builder.imageExtent
             ) {
                 setMakerNoteFlavor(.fujifilm, builder: builder)
                 applyVendorResult(outcome, vendor: .fujifilm, builder: builder)
@@ -555,6 +586,20 @@ enum TIFFMetadataExtractor {
             } else {
                 unsupportedMakerNote(builder: builder, name: "Olympus")
             }
+            return
+        }
+
+        if vendor == .canon {
+            setMakerNoteFlavor(.canon, builder: builder)
+            let outcome = CanonReader.readMakerNote(
+                reader: reader,
+                makerNoteOffset: makerNoteOffset,
+                makerNoteLength: byteCount,
+                context: context,
+                limits: limits,
+                imageExtent: builder.imageExtent
+            )
+            applyVendorResult(outcome, vendor: .canon, builder: builder)
             return
         }
 
@@ -628,19 +673,25 @@ enum TIFFMetadataExtractor {
     ) {
         builder.focusPathSupported = true
         builder.addIssues(outcome.issues)
+        builder.addUncertainties(outcome.uncertainties)
         if outcome.malformedFocusPath {
             builder.focusPathMalformed = true
+        }
+        if outcome.isVerifiedScope {
+            builder.isVerifiedVendorFocus = true
         }
         guard !outcome.records.isEmpty else { return }
         builder.focus = RecordedFocus(
             source: outcome.source,
             referenceExtent: outcome.referenceExtent,
-            geometry: .unavailable(outcome.unavailability),
+            geometry: outcome.geometry,
             frame: nil,
             sony: nil,
             vendor: VendorFocusFields(vendor: vendor, records: outcome.records)
         )
-        builder.addUncertainty(.vendorGeometryUnverified)
+        if !outcome.isVerifiedScope {
+            builder.addUncertainty(.vendorGeometryUnverified)
+        }
     }
 
     private static func setMakerNoteFlavor(
@@ -714,6 +765,7 @@ enum TIFFMetadataExtractor {
         {
             return .sony
         }
+        if modelValue.contains("CANON") || modelValue.hasPrefix("EOS ") { return .canon }
         if modelValue.contains("NIKON") { return .nikon }
         if modelValue.contains("FUJIFILM") { return .fujifilm }
         if modelValue.contains("PANASONIC") { return .panasonic }

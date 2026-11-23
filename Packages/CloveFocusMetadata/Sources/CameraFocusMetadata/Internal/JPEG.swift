@@ -16,6 +16,37 @@ enum JPEGScanner {
         jpegEnd: Int,
         limits: FocusMetadataReader.Limits
     ) throws -> JPEGExifSegment? {
+        try scanSegments(
+            reader: reader,
+            jpegStart: jpegStart,
+            jpegEnd: jpegEnd,
+            limits: limits,
+            findSOF: false
+        ).exif
+    }
+
+    static func findSOFExtent(
+        reader: BoundedReader,
+        jpegStart: Int,
+        jpegEnd: Int,
+        limits: FocusMetadataReader.Limits
+    ) throws -> PixelExtent? {
+        try scanSegments(
+            reader: reader,
+            jpegStart: jpegStart,
+            jpegEnd: jpegEnd,
+            limits: limits,
+            findSOF: true
+        ).sofExtent
+    }
+
+    private static func scanSegments(
+        reader: BoundedReader,
+        jpegStart: Int,
+        jpegEnd: Int,
+        limits: FocusMetadataReader.Limits,
+        findSOF: Bool
+    ) throws -> (exif: JPEGExifSegment?, sofExtent: PixelExtent?) {
         guard jpegStart >= 0, jpegEnd <= reader.length, jpegStart <= jpegEnd else {
             throw ParseFailure.outOfBounds
         }
@@ -30,6 +61,8 @@ enum JPEGScanner {
         let scanEnd = min(jpegEnd, jpegStart + limits.maximumJPEGScanBytes)
         var cursor = jpegStart + 2
         var segmentCount = 0
+        var exifSegment: JPEGExifSegment?
+        var sofExtent: PixelExtent?
 
         while cursor + 1 < scanEnd {
             segmentCount += 1
@@ -74,14 +107,27 @@ enum JPEGScanner {
             }
             let payloadStart = markerCodeOffset + 3
 
-            if marker == 0xE1, length >= 8, payloadStart + 6 <= segmentEnd {
+            if exifSegment == nil, marker == 0xE1, length >= 8, payloadStart + 6 <= segmentEnd {
                 let identifier = try reader.read(at: payloadStart, count: 6)
                 if identifier == [0x45, 0x78, 0x69, 0x66, 0x00, 0x00] {
-                    return JPEGExifSegment(
+                    exifSegment = JPEGExifSegment(
                         app1Offset: cursor,
                         tiffOffset: payloadStart + 6,
                         tiffEnd: segmentEnd
                     )
+                    if !findSOF {
+                        return (exifSegment, nil)
+                    }
+                }
+            }
+
+            if findSOF, sofExtent == nil, isSOFMarker(marker), payloadStart + 5 <= segmentEnd {
+                let frameHeader = try reader.read(at: payloadStart, count: 5)
+                let height = (Int(frameHeader[1]) << 8) | Int(frameHeader[2])
+                let width = (Int(frameHeader[3]) << 8) | Int(frameHeader[4])
+                sofExtent = PixelExtent(width: width, height: height)
+                if exifSegment != nil {
+                    return (exifSegment, sofExtent)
                 }
             }
 
@@ -93,6 +139,10 @@ enum JPEGScanner {
                 break
             }
         }
-        return nil
+        return (exifSegment, sofExtent)
+    }
+
+    private static func isSOFMarker(_ marker: UInt8) -> Bool {
+        (0xC0...0xCF).contains(marker) && marker != 0xC4 && marker != 0xC8 && marker != 0xCC
     }
 }

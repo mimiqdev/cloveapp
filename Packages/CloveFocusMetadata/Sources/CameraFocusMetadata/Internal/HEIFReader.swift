@@ -200,7 +200,7 @@ enum HEIFReader {
                     firstIFDOffset: header.firstIFDOffset,
                     parseMakerNote: true,
                     parsePentaxVendorPayload: false,
-                    parseCanonVendorBlock: false
+                    heifPrimaryExtent: primaryExtent
                 ),
                 builder: builder,
                 limits: limits
@@ -214,18 +214,6 @@ enum HEIFReader {
             return
         }
 
-        if let primaryExtent {
-            if let exifExtent = builder.imageExtent, exifExtent != primaryExtent {
-                builder.addIssue(
-                    .unverifiedGeometry,
-                    context: "HEIF ispe and Exif dimensions",
-                    detail:
-                        "The primary-image extent and Exif dimensions differ; ispe is reported."
-                )
-                builder.addUncertainty(.referenceExtentMismatch)
-            }
-            builder.imageExtent = primaryExtent
-        }
         if let primaryRotation {
             builder.primaryImageRotation = primaryRotation
         }

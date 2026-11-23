@@ -15,6 +15,7 @@ final class ExtractionBuilder {
     var focusPathMalformed = false
     var focusPathUnsupported = false
     var focusPathSupported = false
+    var isVerifiedVendorFocus = false
 
     init(container: ContainerDescription) {
         self.container = container
@@ -237,7 +238,10 @@ final class ExtractionBuilder {
             return .malformed
         }
         if let focus {
-            return focus.sony != nil ? .verifiedSonyFocusMetadata : .rawVendorObservation
+            if focus.sony != nil {
+                return .verifiedSonyFocusMetadata
+            }
+            return isVerifiedVendorFocus ? .verifiedVendorFocusMetadata : .rawVendorObservation
         }
         if focusPathUnsupported {
             return .unsupported

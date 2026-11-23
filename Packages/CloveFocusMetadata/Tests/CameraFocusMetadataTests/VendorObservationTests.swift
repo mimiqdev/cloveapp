@@ -38,16 +38,18 @@ private func record(
 @Suite("Other-vendor raw observations (explicit local setting)")
 struct VendorObservationTests {
     @Test(
-        "Canon CR3 exposes the observed CMT3 block without pixel geometry",
+        "Canon CR3 parses CMT3 AF metadata and reports manual/no-active-AF as noRegionRecorded",
         .enabled(if: VendorSample.url("P01.CR3") != nil)
     )
     func canonCR3() throws {
         let report = try VendorSample.read("P01.CR3")
-        #expect(report.status == .rawVendorObservation)
+        #expect(report.status == .verifiedVendorFocusMetadata)
         #expect(report.camera?.vendor == .canon)
-        #expect(report.focus?.geometry == .unavailable(.vendorSemanticsUnverified(vendor: .canon)))
+        #expect(report.camera?.model == "Canon EOS R6")
+        #expect(report.imageExtent == PixelExtent(width: 5472, height: 3648))
+        #expect(report.focus?.geometry == .unavailable(.noRegionRecorded(vendor: .canon)))
         #expect(report.displayGeometry == nil)
-        #expect(report.uncertainties.contains(.vendorGeometryUnverified))
+        #expect(!report.uncertainties.contains(.vendorGeometryUnverified))
 
         let prefix = try #require(
             record(report, tag: 0x0026, name: "AF information block prefix words")
@@ -90,17 +92,31 @@ struct VendorObservationTests {
     }
 
     @Test(
-        "Fujifilm RAF exposes the recorded point with an unresolved reference extent",
+        "Fujifilm RAF resolves the 0x1023 focus pixel against the Exif extent",
         .enabled(if: VendorSample.url("P03.RAF") != nil)
     )
     func fujifilmRAF() throws {
         let report = try VendorSample.read("P03.RAF")
-        #expect(report.status == .rawVendorObservation)
+        #expect(report.status == .verifiedVendorFocusMetadata)
         #expect(report.camera?.vendor == .fujifilm)
-        #expect(
-            report.focus?.geometry
-                == .unavailable(.referenceExtentUnresolved(vendor: .fujifilm))
-        )
+        #expect(report.imageExtent == PixelExtent(width: 4416, height: 2944))
+        guard case .location(let stored)? = report.focus?.geometry else {
+            Issue.record(
+                "Expected verified location geometry, got \(String(describing: report.focus?.geometry))"
+            )
+            return
+        }
+        #expect(stored.extent == PixelExtent(width: 4416, height: 2944))
+        #expect(stored.center == ContinuousPoint(x: 1281, y: 1163))
+        guard case .location(let display)? = report.displayGeometry else {
+            Issue.record(
+                "Expected display location geometry, got \(String(describing: report.displayGeometry))"
+            )
+            return
+        }
+        #expect(display.extent == PixelExtent(width: 4416, height: 2944))
+        #expect(display.center == ContinuousPoint(x: 1281, y: 1163))
+        #expect(!report.uncertainties.contains(.vendorGeometryUnverified))
         #expect(
             record(report, tag: 0x1023, name: "Focus pixel word pair")?.values
                 == .unsignedWords([1281, 1163])

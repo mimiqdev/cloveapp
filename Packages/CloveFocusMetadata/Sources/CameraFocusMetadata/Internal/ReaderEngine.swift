@@ -398,7 +398,15 @@ final class ReaderEngine {
                     base: segment.tiffOffset,
                     regionEnd: segment.tiffEnd,
                     byteOrder: header.byteOrder,
-                    firstIFDOffset: header.firstIFDOffset
+                    firstIFDOffset: header.firstIFDOffset,
+                    jpegSOFExtentProvider: { [limits = self.limits] in
+                        try? JPEGScanner.findSOFExtent(
+                            reader: reader,
+                            jpegStart: jpegStart,
+                            jpegEnd: jpegEnd,
+                            limits: limits
+                        )
+                    }
                 ),
                 builder: builder,
                 limits: limits

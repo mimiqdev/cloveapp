@@ -49,6 +49,8 @@ public enum MakerNoteFlavor: String, Sendable, Hashable {
     case sonyPrefixed
     /// Nikon prefix followed by an embedded TIFF header.
     case nikonEmbeddedTIFF
+    /// Canon unprefixed directory whose offsets use the enclosing TIFF.
+    case canon
     /// `FUJIFILM` identifier followed by a MakerNote-relative directory.
     case fujifilm
     /// `Panasonic` prefix followed by a directory whose offsets use the enclosing TIFF.
@@ -218,6 +220,7 @@ public enum FocusSource: String, Sendable, Hashable {
     case sonyLocationRecord = "Sony 0x2027 location record"
     case sonyFocusFields = "Sony MakerNote focus fields"
     case canonCR3AFInformation = "Canon CMT3 0x0026 block"
+    case canonMakerNoteAFInformation = "Canon MakerNote 0x0026 block"
     case nikonAFInformation = "Nikon MakerNote 0x00b7 block"
     case fujifilmFocusPixel = "Fujifilm MakerNote 0x1023 word pair"
     case panasonicAFPosition = "Panasonic MakerNote 0x004d rational pair"
@@ -243,6 +246,8 @@ public struct RecordedFocus: Sendable, Hashable {
 public enum ExtractionStatus: String, Sendable, Hashable {
     /// The observed Sony location/frame shapes were parsed within the verified ILCE-1M2 scope.
     case verifiedSonyFocusMetadata
+    /// Verified autofocus metadata was parsed within a supported vendor scope.
+    case verifiedVendorFocusMetadata
     /// Raw vendor observations are exposed, but no verified pixel geometry is claimed.
     case rawVendorObservation
     /// The container was parsed and the supported focus fields were absent.
