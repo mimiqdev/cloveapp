@@ -65,6 +65,84 @@ struct CurrentPhotoIndicatorTests {
         #expect(try renderCornerSample(cornerRadius: 6).a == 0)
     }
 
+    @Test func filmstripMarkerDrawsOpaqueTwoToneCapsuleAcrossThemesAndBackgrounds() throws {
+        for theme in [CloveTheme.light, CloveTheme.dark, CloveTheme.nord, CloveTheme.gruvbox] {
+            #expect(
+                hostedSize(FilmstripCurrentPhotoMarker().environment(\.cloveTheme, theme))
+                    == CGSize(width: 12, height: 4))
+
+            let expectedCore = try renderedColourPixel(Color.clove.text.primary, theme: theme)
+            let expectedEdge = try renderedColourPixel(Color.clove.bg.canvas, theme: theme)
+
+            let backdrops: [(String, AnyView, RGBA, RGBA)] = [
+                (
+                    "dark",
+                    AnyView(Color.black),
+                    RGBA(r: 0, g: 0, b: 0, a: 255),
+                    RGBA(r: 0, g: 0, b: 0, a: 255)
+                ),
+                (
+                    "bright",
+                    AnyView(Color.white),
+                    RGBA(r: 255, g: 255, b: 255, a: 255),
+                    RGBA(r: 255, g: 255, b: 255, a: 255)
+                ),
+                (
+                    "split",
+                    AnyView(
+                        HStack(spacing: 0) {
+                            Color.black
+                            Color.white
+                        }
+                    ),
+                    RGBA(r: 0, g: 0, b: 0, a: 255),
+                    RGBA(r: 255, g: 255, b: 255, a: 255)
+                ),
+            ]
+
+            for (label, backdrop, leftCornerExpected, rightCornerExpected) in backdrops {
+                let view = ZStack {
+                    backdrop
+                    FilmstripCurrentPhotoMarker()
+                }
+                .frame(width: 12, height: 4)
+                .environment(\.cloveTheme, theme)
+
+                let renderer = ImageRenderer(content: view)
+                renderer.scale = 2
+                let image = try #require(renderer.cgImage)
+                let pixels = try rgbaPixels(from: image)
+
+                // Opaque core in `text/primary` across dark, center, and bright spans.
+                for x in [6, 12, 18] {
+                    let core = pixels.pixel(x: x, y: 4)
+                    #expect(core.a == 255)
+                    assertColorClose(core, expectedCore, "\(theme.rawValue) \(label) core x=\(x)")
+                }
+
+                // Opaque 1 pt inside edge in `bg/canvas` around all sides.
+                assertColorClose(
+                    pixels.pixel(x: 12, y: 1), expectedEdge, "\(theme.rawValue) \(label) top edge")
+                assertColorClose(
+                    pixels.pixel(x: 12, y: 6), expectedEdge,
+                    "\(theme.rawValue) \(label) bottom edge")
+                assertColorClose(
+                    pixels.pixel(x: 1, y: 4), expectedEdge, "\(theme.rawValue) \(label) left edge")
+                assertColorClose(
+                    pixels.pixel(x: 22, y: 4), expectedEdge,
+                    "\(theme.rawValue) \(label) right edge")
+
+                // Outside rounded corners, the underlying backdrop remains untouched.
+                assertColorClose(
+                    pixels.pixel(x: 0, y: 0), leftCornerExpected,
+                    "\(theme.rawValue) \(label) outside top-left")
+                assertColorClose(
+                    pixels.pixel(x: 23, y: 7), rightCornerExpected,
+                    "\(theme.rawValue) \(label) outside bottom-right")
+            }
+        }
+    }
+
     @Test func indicatorPreservesTileDimensionsAndFilmstripSpacing() async throws {
         let whiteThumb = solidCGImage(red: 1, green: 1, blue: 1)
         let source = StaticThumbnailSource(image: whiteThumb)
@@ -103,7 +181,7 @@ struct CurrentPhotoIndicatorTests {
 
         func captureFilmstrip(
             current: PhotoIdentity?, expanded: ActiveBrowsingGroup?,
-            metrics: DetailFilmstrip.Metrics
+            metrics: DetailFilmstrip.Metrics, theme: CloveTheme = .light
         ) async throws -> PixelBuffer {
             let strip = DetailFilmstrip(
                 timeline: timeline,
@@ -119,7 +197,7 @@ struct CurrentPhotoIndicatorTests {
             .frame(width: 390, height: metrics.bandHeight)
             .background(Color.black)
             .ignoresSafeArea()
-            .environment(\.cloveTheme, .light)
+            .environment(\.cloveTheme, theme)
 
             let host = UIHostingController(rootView: strip)
             host.safeAreaRegions = []
@@ -156,7 +234,24 @@ struct CurrentPhotoIndicatorTests {
             return spans
         }
 
-        let expectedAccent = try renderedAccentPixel(theme: .light)
+        func verticalLitSpan(in pixels: PixelBuffer, sampleX: Int) -> ClosedRange<Int>? {
+            var minY: Int?
+            var maxY: Int?
+            for y in 0..<pixels.height {
+                let px = pixels.pixel(x: sampleX, y: y)
+                let isLit = px.r > 120 && px.g > 120 && px.b > 120
+                if isLit {
+                    if minY == nil { minY = y }
+                    maxY = y
+                }
+            }
+            guard let minY, let maxY else { return nil }
+            return minY...maxY
+        }
+
+        let expectedCore = try renderedColourPixel(Color.clove.text.primary, theme: .light)
+        let expectedEdge = try renderedColourPixel(Color.clove.bg.canvas, theme: .light)
+        let liftPx = Int(FilmstripCurrentPhotoMarker.lift * 2)  // 6 pt -> 12 px at 2x
 
         for metrics in [DetailFilmstrip.Metrics.standard, .compact] {
             let baseline = try await captureFilmstrip(
@@ -174,16 +269,14 @@ struct CurrentPhotoIndicatorTests {
             #expect(baselineSpans.count == 3)
             #expect(standaloneSpans.count == 3)
             #expect(stackSpans.count == 3)
-            // Non-current neighbor slots do not shift by even a single pixel.
+            // Non-current neighbor slots do not shift horizontally by even a single pixel.
             #expect(baselineSpans[1] == standaloneSpans[1])
             #expect(baselineSpans[2] == standaloneSpans[2])
             #expect(baselineSpans[0] == stackSpans[0])
             #expect(baselineSpans[2] == stackSpans[2])
-            // Current slot keeps exact leading edge and dimensions (<= 1 px anti-aliasing on stroked edge).
-            #expect(baselineSpans[0].lowerBound == standaloneSpans[0].lowerBound)
-            #expect(abs(baselineSpans[0].upperBound - standaloneSpans[0].upperBound) <= 1)
-            #expect(baselineSpans[1].lowerBound == stackSpans[1].lowerBound)
-            #expect(abs(baselineSpans[1].upperBound - stackSpans[1].upperBound) <= 1)
+            // Current slot keeps exact horizontal span and dimensions.
+            #expect(baselineSpans[0] == standaloneSpans[0])
+            #expect(baselineSpans[1] == stackSpans[1])
 
             let expectedWidthPx = Int(metrics.thumbnailWidth * 2)
             let expectedGapPx = Int(metrics.timelineSpacing * 2)
@@ -197,18 +290,65 @@ struct CurrentPhotoIndicatorTests {
                 abs((baselineSpans[2].lowerBound - baselineSpans[1].upperBound - 1) - expectedGapPx)
                     <= 1)
 
-            // Locator sits at the bottom inner edge of whichever slot is current without shifting neighbors.
-            let locatorY = Int((metrics.bandHeight - metrics.verticalTrackPadding) * 2) - 5
+            // Vertical lift (6 pt) & two-tone marker (12 x 4 pt, 2 pt below) without shifting neighbors.
             let firstCenterX = (baselineSpans[0].lowerBound + baselineSpans[0].upperBound) / 2
             let secondCenterX = (baselineSpans[1].lowerBound + baselineSpans[1].upperBound) / 2
-            assertColorClose(
-                withStandalone.pixel(x: firstCenterX, y: locatorY), expectedAccent,
-                "standalone filmstrip locator")
-            assertColorClose(
-                withCollapsedStack.pixel(x: secondCenterX, y: locatorY), expectedAccent,
-                "collapsed stack filmstrip locator")
+            let thirdCenterX = (baselineSpans[2].lowerBound + baselineSpans[2].upperBound) / 2
 
-            // Group Focus keeps identical member slot spans as current switches within the group.
+            let baseSoloY = try #require(verticalLitSpan(in: baseline, sampleX: firstCenterX - 24))
+            let raisedSoloY = try #require(
+                verticalLitSpan(in: withStandalone, sampleX: firstCenterX - 24))
+            let neighborStackY = try #require(
+                verticalLitSpan(in: withStandalone, sampleX: secondCenterX - 24))
+            let baseStackY = try #require(
+                verticalLitSpan(in: baseline, sampleX: secondCenterX - 24))
+            let raisedStackY = try #require(
+                verticalLitSpan(in: withCollapsedStack, sampleX: secondCenterX - 24))
+            let neighborEndY = try #require(
+                verticalLitSpan(in: withCollapsedStack, sampleX: thirdCenterX - 24))
+            let baseEndY = try #require(verticalLitSpan(in: baseline, sampleX: thirdCenterX - 24))
+
+            #expect(baseSoloY.lowerBound - raisedSoloY.lowerBound == liftPx)
+            #expect(baseSoloY.upperBound - raisedSoloY.upperBound == liftPx)
+            #expect(neighborStackY == baseStackY)
+
+            // Raised stack includes peeking cards 4 pt above the cover; top peek must stay inside bandHeight.
+            #expect(baseStackY.lowerBound - raisedStackY.lowerBound == liftPx)
+            #expect(baseStackY.upperBound - raisedStackY.upperBound == liftPx)
+            #expect(raisedStackY.lowerBound >= Int(metrics.verticalTrackPadding * 2))
+            #expect(neighborEndY == baseEndY)
+
+            // Marker spans the bottom 4 pt (8 px) of the slot, separated from the raised tile by a 2 pt (4 px) gap.
+            let slotBottomPx = Int((metrics.bandHeight - metrics.verticalTrackPadding) * 2)
+            let markerTopPx = slotBottomPx - 8
+            #expect(raisedSoloY.upperBound + 1 == markerTopPx - 4)
+            #expect(raisedStackY.upperBound + 1 == markerTopPx - 4)
+            for centerX in [firstCenterX] {
+                assertColorClose(
+                    withStandalone.pixel(x: centerX, y: markerTopPx + 1), expectedEdge,
+                    "standalone marker top 1 pt edge", tolerance: 30)
+                assertColorClose(
+                    withStandalone.pixel(x: centerX, y: markerTopPx + 4), expectedCore,
+                    "standalone marker core")
+                assertColorClose(
+                    withStandalone.pixel(x: centerX, y: markerTopPx + 6), expectedEdge,
+                    "standalone marker bottom 1 pt edge", tolerance: 30)
+                // 2 pt gap between raised thumbnail and marker stays clear.
+                #expect(withStandalone.pixel(x: centerX, y: markerTopPx - 2).r < 20)
+            }
+            assertColorClose(
+                withCollapsedStack.pixel(x: secondCenterX, y: markerTopPx + 1), expectedEdge,
+                "collapsed stack marker top 1 pt edge", tolerance: 30)
+            assertColorClose(
+                withCollapsedStack.pixel(x: secondCenterX, y: markerTopPx + 4), expectedCore,
+                "collapsed stack marker core")
+            assertColorClose(
+                withCollapsedStack.pixel(x: secondCenterX, y: markerTopPx + 6), expectedEdge,
+                "collapsed stack marker bottom 1 pt edge", tolerance: 30)
+            #expect(withCollapsedStack.pixel(x: secondCenterX, y: markerTopPx - 2).r < 20)
+
+            // Group Focus keeps identical member slot spans as current switches within the group,
+            // raises only the current member by 6 pt, and renders the two-tone marker unclipped.
             let expandedGroup = try #require(timeline.activeGroup(with: groupID))
             let focusFirst = try await captureFilmstrip(
                 current: second.id, expanded: expandedGroup, metrics: metrics)
@@ -222,15 +362,61 @@ struct CurrentPhotoIndicatorTests {
                 #expect(abs(lhs.lowerBound - rhs.lowerBound) <= 1)
                 #expect(abs(lhs.upperBound - rhs.upperBound) <= 1)
             }
+
+            // Locate the two 54/48 pt member spans (skipping the 30/28 pt end caps).
+            let memberSpansFirst = focusSpansFirst.filter {
+                abs(($0.upperBound - $0.lowerBound + 1) - expectedWidthPx) <= 1
+            }
+            let memberSpansSecond = focusSpansSecond.filter {
+                abs(($0.upperBound - $0.lowerBound + 1) - expectedWidthPx) <= 1
+            }
+            #expect(memberSpansFirst.count == 2)
+            #expect(memberSpansSecond.count == 2)
+            let m0CenterX = (memberSpansFirst[0].lowerBound + memberSpansFirst[0].upperBound) / 2
+            let m1CenterX = (memberSpansFirst[1].lowerBound + memberSpansFirst[1].upperBound) / 2
+            let firstSelectedY = try #require(
+                verticalLitSpan(in: focusFirst, sampleX: m0CenterX - 24))
+            let secondIdleY = try #require(
+                verticalLitSpan(in: focusFirst, sampleX: m1CenterX - 24))
+            let firstIdleY = try #require(
+                verticalLitSpan(in: focusSecond, sampleX: m0CenterX - 24))
+            let secondSelectedY = try #require(
+                verticalLitSpan(in: focusSecond, sampleX: m1CenterX - 24))
+            #expect(secondIdleY.lowerBound - firstSelectedY.lowerBound == liftPx)
+            #expect(firstIdleY.lowerBound - secondSelectedY.lowerBound == liftPx)
+            let focusMarkerTopPx = secondIdleY.upperBound + 1 - 8
+            assertColorClose(
+                focusFirst.pixel(x: m0CenterX, y: focusMarkerTopPx + 4), expectedCore,
+                "group focus first member marker core")
+            assertColorClose(
+                focusFirst.pixel(x: m0CenterX, y: focusMarkerTopPx + 1), expectedEdge,
+                "group focus first member marker edge", tolerance: 30)
+            assertColorClose(
+                focusSecond.pixel(x: m1CenterX, y: focusMarkerTopPx + 4), expectedCore,
+                "group focus second member marker core")
+            assertColorClose(
+                focusSecond.pixel(x: m1CenterX, y: focusMarkerTopPx + 1), expectedEdge,
+                "group focus second member marker edge", tolerance: 30)
         }
     }
 
-    @Test func rejectedCurrentThumbnailsDimPhotoWhileKeepingFullOpacityAccentIndicator()
+    @Test func rejectedCurrentThumbnailsDimPhotoWhileKeepingFullOpacityTwoToneMarker()
         async throws
     {
         let whiteThumb = solidCGImage(red: 1, green: 1, blue: 1)
-        let photo = makePhoto("IND_REJ", isRejected: true, rating: .unrated)
-        let nonRejectedPhoto = makePhoto("IND_OK", isRejected: false, rating: .unrated)
+        let rejectedStandalone = makePhoto("IND_REJ", isRejected: true, rating: .unrated)
+        let normalStandalone = makePhoto("IND_OK", isRejected: false, rating: .unrated)
+        let rejectedMemberA = makePhoto("IND_G1", isRejected: true, rating: .unrated)
+        let rejectedMemberB = makePhoto("IND_G2", isRejected: true, rating: .unrated)
+        let groupID = GroupID(rawValue: "rej-group")
+        let groups = [
+            BrowsingGroup(id: groupID, members: [rejectedMemberA.id, rejectedMemberB.id])
+        ]
+        let timeline = DetailTimeline(
+            photos: [normalStandalone, rejectedStandalone, rejectedMemberA, rejectedMemberB],
+            groups: groups,
+            groupsEnabled: true)
+        let expandedGroup = try #require(timeline.activeGroup(with: groupID))
         let source = StaticThumbnailSource(image: whiteThumb)
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -242,15 +428,20 @@ struct CurrentPhotoIndicatorTests {
         }
 
         for theme in [CloveTheme.light, CloveTheme.dark] {
-            let expectedAccent = try renderedAccentPixel(theme: theme)
+            let expectedCore = try renderedColourPixel(Color.clove.text.primary, theme: theme)
+            let expectedEdge = try renderedColourPixel(Color.clove.bg.canvas, theme: theme)
 
-            func renderFrame(_ target: GridPhoto) async throws -> PixelBuffer {
+            // 1. Standalone rejected DetailPhotoFrame dims pixels without drawing old accent outline.
+            func renderRaisedTile(_ target: GridPhoto) async throws -> PixelBuffer {
                 let view = ZStack {
                     Color.black
-                    DetailPhotoFrame(
-                        photo: target, isCurrent: true, thumbnails: source, side: 54, height: 60)
+                    FilmstripRaisedTile(width: 54, baseHeight: 60, isCurrent: true) {
+                        DetailPhotoFrame(
+                            photo: target, isCurrent: true, thumbnails: source, side: 54,
+                            height: 60)
+                    }
                 }
-                .frame(width: 54, height: 60)
+                .frame(width: 54, height: 66)
                 .ignoresSafeArea()
                 .environment(\.cloveTheme, theme)
 
@@ -262,23 +453,94 @@ struct CurrentPhotoIndicatorTests {
                 host.view.layoutIfNeeded()
                 try await Task.sleep(for: .milliseconds(80))
                 let region = CGRect(
-                    x: (390 - 54) / 2.0, y: (320 - 60) / 2.0, width: 54, height: 60)
+                    x: (390 - 54) / 2.0, y: (320 - 66) / 2.0, width: 54, height: 66)
                 return try captureWindowRegion(region, in: window, scale: 2)
             }
 
-            let normalPixels = try await renderFrame(nonRejectedPhoto)
-            let rejectedPixels = try await renderFrame(photo)
+            let normalPixels = try await renderRaisedTile(normalStandalone)
+            let rejectedPixels = try await renderRaisedTile(rejectedStandalone)
 
-            // Interior photo pixels dim when rejected.
+            // Interior photo pixels dim when rejected; top border has no accent outline.
             let normalInterior = normalPixels.pixel(x: 54, y: 60)
             let rejectedInterior = rejectedPixels.pixel(x: 54, y: 60)
             #expect(rejectedInterior.r < normalInterior.r)
+            assertColorClose(
+                rejectedPixels.pixel(x: 54, y: 1), rejectedInterior,
+                "\(theme.rawValue) no inset accent outline")
 
-            // Indicator outline and centered bottom locator stay full-opacity accent.
+            // Two-tone marker below the rejected thumbnail stays at full opacity 1.0.
             assertColorClose(
-                rejectedPixels.pixel(x: 54, y: 1), expectedAccent, "rejected top outline")
+                rejectedPixels.pixel(x: 54, y: 125), expectedEdge,
+                "\(theme.rawValue) rejected marker top edge", tolerance: 24)
             assertColorClose(
-                rejectedPixels.pixel(x: 54, y: 115), expectedAccent, "rejected bottom locator")
+                rejectedPixels.pixel(x: 54, y: 128), expectedCore,
+                "\(theme.rawValue) rejected marker core")
+            assertColorClose(
+                rejectedPixels.pixel(x: 54, y: 130), expectedEdge,
+                "\(theme.rawValue) rejected marker bottom edge", tolerance: 24)
+
+            // 2. All-rejected collapsed stack and rejected Group Focus member in DetailFilmstrip
+            //    keep their two-tone marker at full opacity 1.0.
+            let metrics = DetailFilmstrip.Metrics.standard
+            func renderFilmstrip(
+                current: PhotoIdentity, expanded: ActiveBrowsingGroup?
+            ) async throws -> PixelBuffer {
+                let strip = DetailFilmstrip(
+                    timeline: timeline,
+                    expandedGroup: expanded,
+                    current: current,
+                    thumbnails: source,
+                    metrics: metrics,
+                    openPhoto: { _ in },
+                    selectGroupPhoto: { _ in },
+                    expandGroup: { _ in },
+                    collapseGroup: {}
+                )
+                .frame(width: 390, height: metrics.bandHeight)
+                .background(Color(red: 0.5, green: 0.5, blue: 0.5))
+                .ignoresSafeArea()
+                .environment(\.cloveTheme, theme)
+
+                let host = UIHostingController(rootView: strip)
+                host.safeAreaRegions = []
+                window.rootViewController = host
+                window.makeKeyAndVisible()
+                host.view.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(120))
+                let region = CGRect(
+                    x: 0, y: (320 - metrics.bandHeight) / 2.0, width: 390,
+                    height: metrics.bandHeight)
+                return try captureWindowRegion(region, in: window, scale: 2)
+            }
+
+            let stackPixels = try await renderFilmstrip(current: rejectedMemberA.id, expanded: nil)
+            // Timeline ScrollView is leading-aligned:
+            // slot 0 [10..64], slot 1 [72..126], slot 2 (collapsed stack) [134..188] -> center = 161 pt = 322 px.
+            let stackCenterPt =
+                metrics.horizontalPadding
+                + 2 * (metrics.thumbnailWidth + metrics.timelineSpacing)
+                + metrics.thumbnailWidth / 2
+            let stackCenterX = Int(stackCenterPt * 2)
+            let slotBottomPx = Int((metrics.bandHeight - metrics.verticalTrackPadding) * 2)
+            assertColorClose(
+                stackPixels.pixel(x: stackCenterX, y: slotBottomPx - 4), expectedCore,
+                "\(theme.rawValue) all-rejected stack marker core")
+            assertColorClose(
+                stackPixels.pixel(x: stackCenterX, y: slotBottomPx - 7), expectedEdge,
+                "\(theme.rawValue) all-rejected stack marker edge", tolerance: 24)
+
+            let groupPixels = try await renderFilmstrip(
+                current: rejectedMemberA.id, expanded: expandedGroup)
+            // Group Focus with 2 members + 2 caps (30, 3, 54, 3, 54, 3, 30) = 177 pt + 6 padding = 183 pt centered in 390 pt:
+            // member 0 starts at 195 - 91.5 + 3 + 30 + 3 = 139.5 pt, width 54 -> center = 166.5 pt = 333 px.
+            let groupMemberCenterX = 333
+            let trayContentBottomPx = Int(metrics.bandHeight) + Int(metrics.thumbnailHeight + 6)
+            assertColorClose(
+                groupPixels.pixel(x: groupMemberCenterX, y: trayContentBottomPx - 4), expectedCore,
+                "\(theme.rawValue) rejected group focus marker core")
+            assertColorClose(
+                groupPixels.pixel(x: groupMemberCenterX, y: trayContentBottomPx - 7), expectedEdge,
+                "\(theme.rawValue) rejected group focus marker edge", tolerance: 24)
         }
     }
 
@@ -363,7 +625,8 @@ struct CurrentPhotoIndicatorTests {
         let source = StaticThumbnailSource(image: solidCGImage(red: 0.25, green: 0.3, blue: 0.35))
         let rated = makePhoto("IND_COMPACT", rating: Rating(rawValue: 5) ?? .unrated)
         let theme = CloveTheme.dark
-        let expectedAccent = try renderedAccentPixel(theme: theme)
+        let expectedCore = try renderedColourPixel(Color.clove.text.primary, theme: theme)
+        let expectedEdge = try renderedColourPixel(Color.clove.bg.canvas, theme: theme)
 
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -376,10 +639,12 @@ struct CurrentPhotoIndicatorTests {
 
         let view = ZStack {
             Color.black
-            DetailPhotoFrame(
-                photo: rated, isCurrent: true, thumbnails: source, side: 48, height: 48)
+            FilmstripRaisedTile(width: 48, baseHeight: 48, isCurrent: true) {
+                DetailPhotoFrame(
+                    photo: rated, isCurrent: true, thumbnails: source, side: 48, height: 48)
+            }
         }
-        .frame(width: 48, height: 48)
+        .frame(width: 48, height: 54)
         .ignoresSafeArea()
         .environment(\.cloveTheme, theme)
 
@@ -390,18 +655,22 @@ struct CurrentPhotoIndicatorTests {
         window.makeKeyAndVisible()
         host.view.layoutIfNeeded()
         #expect(
-            host.sizeThatFits(in: CGSize(width: 200, height: 200)) == CGSize(width: 48, height: 48))
+            host.sizeThatFits(in: CGSize(width: 200, height: 200)) == CGSize(width: 48, height: 54))
         try await Task.sleep(for: .milliseconds(80))
 
-        let region = CGRect(x: (390 - 48) / 2.0, y: (320 - 48) / 2.0, width: 48, height: 48)
+        let region = CGRect(x: (390 - 48) / 2.0, y: (320 - 54) / 2.0, width: 48, height: 54)
         let pixels = try captureWindowRegion(region, in: window, scale: 2)
-        // Centered 14 × 2 pt bottom locator stays unobstructed across full width at inner bottom edge.
-        assertColorClose(pixels.pixel(x: 48, y: 91), expectedAccent, "compact locator center")
-        assertColorClose(pixels.pixel(x: 40, y: 91), expectedAccent, "compact locator left")
-        assertColorClose(pixels.pixel(x: 56, y: 91), expectedAccent, "compact locator right")
-        assertColorClose(pixels.pixel(x: 48, y: 1), expectedAccent, "compact top outline")
-        // Rating pill renders cleanly above bottom inset, without colliding with bottom locator.
-        #expect(!colorsClose(pixels.pixel(x: 16, y: 78), expectedAccent))
+        // Centered 12 × 4 pt two-tone marker renders 2 pt below the raised 48 × 48 thumbnail.
+        assertColorClose(
+            pixels.pixel(x: 48, y: 101), expectedEdge, "compact marker top edge", tolerance: 24)
+        assertColorClose(pixels.pixel(x: 48, y: 104), expectedCore, "compact marker core")
+        assertColorClose(
+            pixels.pixel(x: 48, y: 106), expectedEdge, "compact marker bottom edge", tolerance: 24)
+        // 2 pt gap between thumbnail bottom (96 px) and marker top (100 px) stays clear.
+        #expect(pixels.pixel(x: 48, y: 98).r < 20)
+        // Raised thumbnail reaches the top of the 54 pt slot without an inset accent outline.
+        let topThumb = pixels.pixel(x: 48, y: 1)
+        #expect(topThumb.r > 40 && topThumb.b > 60)
     }
 
     @Test func splitGridHighlightsCurrentPhotoWhileRegularGridStaysQuiet() async throws {
@@ -558,8 +827,12 @@ struct CurrentPhotoIndicatorTests {
     }
 
     private func renderedAccentPixel(theme: CloveTheme) throws -> RGBA {
+        try renderedColourPixel(Color.clove.accent, theme: theme)
+    }
+
+    private func renderedColourPixel(_ style: CloveColour, theme: CloveTheme) throws -> RGBA {
         let swatch = Rectangle()
-            .fill(Color.clove.accent)
+            .fill(style)
             .frame(width: 10, height: 10)
             .environment(\.cloveTheme, theme)
         let renderer = ImageRenderer(content: swatch)
@@ -608,20 +881,20 @@ struct CurrentPhotoIndicatorTests {
     }
 
     private func assertColorClose(
-        _ actual: RGBA, _ expected: RGBA, _ label: String,
+        _ actual: RGBA, _ expected: RGBA, _ label: String, tolerance: Int = 10,
         sourceLocation: SourceLocation = #_sourceLocation
     ) {
         #expect(
-            colorsClose(actual, expected),
+            colorsClose(actual, expected, tolerance: tolerance),
             "\(label): actual \(actual) != expected \(expected)",
             sourceLocation: sourceLocation)
     }
 
-    private func colorsClose(_ actual: RGBA, _ expected: RGBA) -> Bool {
-        abs(Int(actual.r) - Int(expected.r)) <= 10
-            && abs(Int(actual.g) - Int(expected.g)) <= 10
-            && abs(Int(actual.b) - Int(expected.b)) <= 10
-            && abs(Int(actual.a) - Int(expected.a)) <= 10
+    private func colorsClose(_ actual: RGBA, _ expected: RGBA, tolerance: Int = 10) -> Bool {
+        abs(Int(actual.r) - Int(expected.r)) <= tolerance
+            && abs(Int(actual.g) - Int(expected.g)) <= tolerance
+            && abs(Int(actual.b) - Int(expected.b)) <= tolerance
+            && abs(Int(actual.a) - Int(expected.a)) <= tolerance
     }
 
     private func findSubview<T: UIView>(ofType type: T.Type, in root: UIView) -> T? {

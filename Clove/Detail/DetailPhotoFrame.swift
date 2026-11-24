@@ -1,19 +1,11 @@
 import CloveCore
 import SwiftUI
 
-/// One photo's frame in a filmstrip or a group's sidebar: its thumbnail, its marks and the border
-/// that says which photo is on screen (PRD P0-04; PRD In-group culling, layout).
+/// One photo's frame in a filmstrip: its thumbnail, its marks, and its accessibility selection
+/// trait (PRD P0-04; PRD In-group culling, layout).
 ///
-/// PRD In-group culling requires every photo of a group to show its rating or Reject and rejected
-/// photos to be dimmed, so the frame carries both and the group's filmstrip and sidebar grid draw
-/// it. The detail filmstrip draws the same frame, because marks on the strip are useful there
-/// too and one frame keeps the two screens from drifting apart.
-///
-/// A frame that fails to draw is a state, not a blank picture presented as loaded (PRD Scan
-/// scope): the placeholder keeps the empty frame rather than claiming an image.
-///
-/// Rejected thumbnails dim without a reject badge; the current frame keeps its quiet accent
-/// indicator.
+/// Rejected thumbnails dim without a reject badge; filmstrips compose tile elevation and
+/// ``FilmstripCurrentPhotoMarker`` outside this frame so the marker stays at full opacity.
 struct DetailPhotoFrame: View {
     /// The photo the frame draws (PRD P0-05).
     let photo: GridPhoto
@@ -24,7 +16,7 @@ struct DetailPhotoFrame: View {
     /// The grid thumbnails the frame draws (PRD P0-03).
     let thumbnails: any GridThumbnailSource
 
-    /// The frame's side in points; the filmstrip uses one size and a sidebar grid another.
+    /// The frame's side in points; the filmstrip uses one size and Compare another.
     var side: CGFloat = 56
     var height: CGFloat?
     var showsMarks = true
@@ -47,11 +39,6 @@ struct DetailPhotoFrame: View {
                 appliesRejectedOpacity && photo.marks.isRejected
                     ? theme.tokens.rejectedOpacity : 1
             )
-            .overlay {
-                if isCurrent {
-                    CurrentPhotoIndicator(cornerRadius: 6)
-                }
-            }
             .task(id: photo.id) {
                 guard thumbnail == nil else { return }
                 if case .image(let pixels) = await thumbnails.thumbnail(

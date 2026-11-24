@@ -1521,7 +1521,7 @@ private struct ComparePaneMarksSummary: View {
 
 // MARK: - Compact Stepping Filmstrip
 
-private struct CompareFilmstrip: View {
+struct CompareFilmstrip: View {
     let photos: [GridPhoto]
     let reference: PhotoIdentity
     let challenger: PhotoIdentity
@@ -1535,20 +1535,22 @@ private struct CompareFilmstrip: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 6) {
+                LazyHStack(alignment: .bottom, spacing: 6) {
                     ForEach(photos) { photo in
                         filmstripItem(photo)
                     }
                 }
                 .padding(.horizontal, 4)
+                .padding(.vertical, 3)
             }
+            .filmstripScrollEdgeEffectHidden()
             .onChange(of: challenger, initial: true) { _, target in
                 withAnimation {
                     proxy.scrollTo(target, anchor: .center)
                 }
             }
         }
-        .frame(height: 50)
+        .frame(height: 56)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.compare.filmstrip")
     }
@@ -1564,38 +1566,45 @@ private struct CompareFilmstrip: View {
                 nil
             }
         let isReference = photo.id == reference
+        let isChallenger = photo.id == challenger
         let isSelectedPane =
-            (photo.id == reference && activeSide == .reference)
-            || (photo.id == challenger && activeSide == .challenger)
+            (isReference && activeSide == .reference)
+            || (isChallenger && activeSide == .challenger)
 
         Button {
             guard !isReference else { return }
             onSelectCandidate(photo.id)
         } label: {
-            DetailPhotoFrame(
-                photo: photo,
-                isCurrent: photo.id == challenger || isSelectedPane,
-                thumbnails: thumbnails,
-                side: 44,
-                height: 44,
-                showsMarks: true
-            )
-            .overlay(alignment: .topLeading) {
-                if let roleBadge {
-                    Text(roleBadge)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.white)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(
-                            isSelectedPane
-                                ? theme.tokens.accent.color : Color.black.opacity(0.65),
-                            in: Capsule()
-                        )
-                        .padding(2)
+            FilmstripRaisedTile(
+                width: 44,
+                baseHeight: 44,
+                isCurrent: isChallenger
+            ) {
+                DetailPhotoFrame(
+                    photo: photo,
+                    isCurrent: isChallenger,
+                    thumbnails: thumbnails,
+                    side: 44,
+                    height: 44,
+                    showsMarks: true
+                )
+                .overlay(alignment: .topLeading) {
+                    if let roleBadge {
+                        Text(roleBadge)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(
+                                isSelectedPane
+                                    ? theme.tokens.accent.color : Color.black.opacity(0.65),
+                                in: Capsule()
+                            )
+                            .padding(2)
+                    }
                 }
+                .opacity(isReference && !isChallenger ? 0.78 : 1)
             }
-            .opacity(isReference && photo.id != challenger ? 0.78 : 1)
         }
         .buttonStyle(.plain)
         .id(photo.id)
@@ -1603,7 +1612,7 @@ private struct CompareFilmstrip: View {
         .accessibilityValue(
             roleBadge ?? MarkSummary.text(for: photo.marks, language: language)
         )
-        .accessibilityAddTraits(photo.id == challenger ? [.isSelected] : [])
+        .accessibilityAddTraits(isChallenger ? [.isSelected] : [])
         .accessibilityIdentifier("clove.compare.filmstrip.\(photo.id.stem.lowercased())")
     }
 }
