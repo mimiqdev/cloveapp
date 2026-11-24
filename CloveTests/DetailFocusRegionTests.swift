@@ -899,6 +899,126 @@ struct DetailFocusRegionTests {
         #expect(partialValid.isActionable)
     }
 
+    @Test func focusTrackingStateHandlesTransitionsAsyncAndManualPanThresholds() {
+        let photoA = photo("group-a")
+        let photoB = photo("group-b")
+        let photoC = photo("group-c")
+        let anchorA = DetailZoomAnchor(x: 0.30, y: 0.35)
+        let afB = makeEvidence(
+            .cameraAutofocus,
+            normalized: NormalizedRegion(x: 0.64, y: 0.56, width: 0.12, height: 0.16))
+        let eyeB = makeEvidence(
+            .eye, group: 0,
+            normalized: NormalizedRegion(x: 0.15, y: 0.20, width: 0.05, height: 0.05))
+        let noAF = RegionSharpnessPathResult.unavailable(
+            .noAutofocusMetadata(
+                AutofocusMetadataEvidence(inspected: [], cameraMake: "Test", exifOrientation: 1)))
+
+        var tracking = DetailFocusTrackingState()
+        #expect(!tracking.isTracking)
+        #expect(tracking.pendingRecenter == nil)
+
+        // 1. Focus-region zoom enables tracking; stepping with no regions ready records pending.
+        tracking.beginTracking()
+        #expect(tracking.isTracking)
+        tracking.preparePhotoTransition(
+            to: photoB, keepsPosition: true, hasZoomedState: true, referenceAnchor: anchorA)
+        #expect(tracking.pendingRecenter?.photo == photoB)
+
+        // If pixels are not shown yet, async arrival does not prematurely consume pending recenter.
+        var regionsB = DetailFocusRegionState()
+        regionsB.begin(for: photoB)
+        regionsB.receiveAutofocus(.regions([afB]), for: photoB)
+        #expect(
+            tracking.resolveAsyncRecenter(
+                for: photoB, isFinalResult: false, focusRegions: regionsB, showsFocusRegions: true,
+                isShowingPhoto: false, isZoomedFullResolution: true) == .ignore)
+        #expect(tracking.pendingRecenter?.photo == photoB)
+
+        // Once pixels arrive, opening resolves directly to AF and satisfies pending recenter.
+        let openingB = tracking.resolveOpening(
+            for: photoB, fallbackAnchor: anchorA, focusRegions: regionsB, showsFocusRegions: true)
+        guard case .focusRegion(let openedRegion) = openingB else {
+            Issue.record("Expected opening to resolve immediately to photoB AF region")
+            return
+        }
+        #expect(openedRegion.id == "clove.detail.region.af.0")
+        #expect(tracking.pendingRecenter == nil)
+
+        // 2. Async AF miss leaves pending active so finish can still center on eye/face.
+        tracking.preparePhotoTransition(
+            to: photoB, keepsPosition: true, hasZoomedState: true, referenceAnchor: anchorA)
+        var delayedEyeB = DetailFocusRegionState()
+        delayedEyeB.begin(for: photoB)
+        delayedEyeB.receiveAutofocus(noAF, for: photoB)
+        #expect(
+            tracking.resolveAsyncRecenter(
+                for: photoB, isFinalResult: false, focusRegions: delayedEyeB,
+                showsFocusRegions: true, isShowingPhoto: true, isZoomedFullResolution: true)
+                == .ignore)
+        #expect(tracking.pendingRecenter?.photo == photoB)
+
+        delayedEyeB.finish(
+            makeAnalysis(autofocus: noAF, faces: .regions([eyeB])), for: photoB)
+        let eyeResult = tracking.resolveAsyncRecenter(
+            for: photoB, isFinalResult: true, focusRegions: delayedEyeB, showsFocusRegions: true,
+            isShowingPhoto: true, isZoomedFullResolution: true)
+        guard case .recenter(let recenteredEye) = eyeResult else {
+            Issue.record("Expected finish to recenter onto eye region")
+            return
+        }
+        #expect(recenteredEye.id == "clove.detail.region.face.0-0")
+        #expect(tracking.pendingRecenter == nil)
+        #expect(tracking.isTracking)
+
+        // 3. No actionable regions on finish clears inspection while keeping tracking alive for C.
+        tracking.preparePhotoTransition(
+            to: photoC, keepsPosition: true, hasZoomedState: true, referenceAnchor: anchorA)
+        var emptyC = DetailFocusRegionState()
+        emptyC.begin(for: photoC)
+        emptyC.finish(
+            makeAnalysis(autofocus: noAF, faces: .unavailable(.noFacesDetected)), for: photoC)
+        #expect(
+            tracking.resolveAsyncRecenter(
+                for: photoC, isFinalResult: true, focusRegions: emptyC, showsFocusRegions: true,
+                isShowingPhoto: true, isZoomedFullResolution: true)
+                == .clearInspectionKeepAnchor)
+        #expect(tracking.pendingRecenter == nil)
+        #expect(tracking.isTracking)
+
+        // 4. Leaving Group Focus clears tracking.
+        tracking.preparePhotoTransition(
+            to: photoA, keepsPosition: false, hasZoomedState: true, referenceAnchor: anchorA)
+        #expect(!tracking.isTracking)
+        #expect(tracking.pendingRecenter == nil)
+
+        // 5. Edge-clamped focus region with zero user movement does not count as manual pan,
+        //    while panning past 6 content points clears even on high-res scales.
+        let viewSize = CGSize(width: 1024, height: 768)
+        let imagePixels = CGSize(width: 8192, height: 5464)
+        let cornerTarget = DetailZoomAnchor(x: 0.04, y: 0.04)
+        let scale: CGFloat = 4.0
+        let clampedExpected = DetailFocusTrackingState.expectedViewportAnchor(
+            for: cornerTarget, scale: scale, imagePixels: imagePixels, viewSize: viewSize)
+        #expect(clampedExpected.x > 0.10)
+        #expect(
+            !DetailFocusTrackingState.didManuallyPan(
+                snapshot: DetailZoomSnapshot(scale: scale, anchor: clampedExpected),
+                fromTargetAnchor: cornerTarget, imagePixels: imagePixels, viewSize: viewSize))
+        let tinyJitter = DetailZoomAnchor(
+            x: clampedExpected.x + 2 / (1024 * scale), y: clampedExpected.y)
+        #expect(
+            !DetailFocusTrackingState.didManuallyPan(
+                snapshot: DetailZoomSnapshot(scale: scale, anchor: tinyJitter),
+                fromTargetAnchor: cornerTarget, imagePixels: imagePixels, viewSize: viewSize))
+        let realPan = DetailZoomAnchor(
+            x: clampedExpected.x + 12 / (1024 * scale), y: clampedExpected.y)
+        #expect(
+            DetailFocusTrackingState.didManuallyPan(
+                snapshot: DetailZoomSnapshot(scale: scale, anchor: realPan),
+                fromTargetAnchor: cornerTarget, imagePixels: imagePixels, viewSize: viewSize))
+    }
+
     private func makeRegion(
         id: String = "test-region",
         kind: SharpnessRegionKind = .cameraAutofocus,
