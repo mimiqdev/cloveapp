@@ -527,4 +527,26 @@ struct AppLocalizationTests {
                 "Challenger photo %@", language: .traditionalChinese, "IMG_02.ARW")
                 == "對比相片 IMG_02.ARW")
     }
+
+    @Test func groupPickerStringsLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Show group photos", "Show group photos", "显示组内照片", "顯示群組相片"),
+            ("Similar group", "Similar group", "相似照片组", "相似相片組"),
+            ("Collapse group", "Collapse group", "收起分组", "收合群組"),
+            ("Done", "Done", "完成", "完成"),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+        #expect(AppLocalization.format("%lld photos", language: .english, Int64(1)) == "1 photo")
+        #expect(AppLocalization.format("%lld photos", language: .english, Int64(12)) == "12 photos")
+        #expect(
+            AppLocalization.format("%lld photos", language: .simplifiedChinese, Int64(12))
+                == "12 张照片")
+        #expect(
+            AppLocalization.format("%lld photos", language: .traditionalChinese, Int64(12))
+                == "12 張相片")
+    }
 }

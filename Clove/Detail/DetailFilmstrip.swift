@@ -9,8 +9,9 @@ import UIKit
 ///   already-selected collapsed stack, or dragging downward on any collapsed stack, enters Group
 ///   Focus. Tapping an unselected stack opens its Representative Photo in Timeline.
 /// - Group Focus (`expandedGroup != nil`): renders ONLY the expanded group's `visibleMembers` inside
-///   `ExpandedGroupSurface`, with a permanently visible, non-scrolling trailing `chevron.up`
-///   collapse cap. Dragging upward anywhere on the strip collapses back to Timeline.
+///   `ExpandedGroupSurface`, framed by permanently visible, non-scrolling high-contrast end caps: a
+///   leading `square.grid.2x2` grid picker button and a trailing `chevron.up` collapse cap. Dragging
+///   upward anywhere on the strip collapses back to Timeline.
 ///
 /// Both tracks live independently inside one constant `70 pt` band (`body`), keeping Timeline's
 /// `ScrollView` alive across Group Focus so collapsing never resets its scroll offset or shifts
@@ -61,6 +62,8 @@ struct DetailFilmstrip: View {
     let current: PhotoIdentity?
     let thumbnails: any GridThumbnailSource
     let metrics: Metrics
+    let gridPickerDismissToken: Int
+    let gridPickerPresentTrigger: Int
     let openPhoto: (PhotoIdentity) -> Void
     let selectGroupPhoto: (PhotoIdentity) -> Void
     let expandGroup: (GroupID) -> Void
@@ -96,10 +99,21 @@ struct DetailFilmstrip: View {
     @State private var groupTilt: Double = 0
     @State private var groupMemberSpacing: CGFloat = DetailFilmstrip.groupRestingSpacing
     @State private var groupMemberScaleX: CGFloat = 1
+    @State private var presentedGridPickerMode: GroupPhotoGridPickerPresentationMode?
+    @State private var isGridPickerAnchorReady = false
 
     @Environment(\.cloveTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appLanguage) private var language
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
+    @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
+    @Environment(\.hasFoldRegion) private var hasFoldRegion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
 
     init(
         timeline: DetailTimeline,
@@ -107,6 +121,8 @@ struct DetailFilmstrip: View {
         current: PhotoIdentity?,
         thumbnails: any GridThumbnailSource,
         metrics: Metrics = .standard,
+        gridPickerDismissToken: Int = 0,
+        gridPickerPresentTrigger: Int = 0,
         openPhoto: @escaping (PhotoIdentity) -> Void,
         selectGroupPhoto: @escaping (PhotoIdentity) -> Void,
         expandGroup: @escaping (GroupID) -> Void,
@@ -117,6 +133,8 @@ struct DetailFilmstrip: View {
         self.current = current
         self.thumbnails = thumbnails
         self.metrics = metrics
+        self.gridPickerDismissToken = gridPickerDismissToken
+        self.gridPickerPresentTrigger = gridPickerPresentTrigger
         self.openPhoto = openPhoto
         self.selectGroupPhoto = selectGroupPhoto
         self.expandGroup = expandGroup
@@ -225,6 +243,10 @@ struct DetailFilmstrip: View {
             )
             .overlay {
                 HStack(spacing: 3) {
+                    gridPickerCapButton(for: group)
+                        .reportTapPickerFrame("clove.detail.filmstrip.group.gridPicker")
+                        .layoutPriority(1)
+
                     ScrollViewReader { proxy in
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .bottom, spacing: groupMemberSpacing) {
@@ -330,18 +352,141 @@ struct DetailFilmstrip: View {
             .accessibilityHidden(expandedGroup == nil)
     }
 
+    private var groupCapCornerRadius: CGFloat {
+        max(5, metrics.groupTrayCornerRadius - 3)
+    }
+
+    private var gridPickerPresentationMode: GroupPhotoGridPickerPresentationMode {
+        GroupPhotoGridPickerPresentationMode.resolved(horizontalSizeClass: horizontalSizeClass)
+    }
+
+    private var gridPickerDismissTrigger: FilmstripGridPickerDismissTrigger {
+        FilmstripGridPickerDismissTrigger(
+            expandedGroupID: expandedGroup?.id,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            usesVerticalToolbar: usesVerticalToolbar,
+            hasFoldRegion: hasFoldRegion,
+            externalToken: gridPickerDismissToken)
+    }
+
+    private func gridPickerCapButton(for group: ActiveBrowsingGroup) -> some View {
+        Button {
+            guard expandedGroup != nil, isGridPickerAnchorReady, scenePhase == .active else {
+                return
+            }
+            tapPicker?.dismiss()
+            presentedGridPickerMode = gridPickerPresentationMode
+        } label: {
+            ExpandedGroupCapLabel(
+                symbol: "square.grid.2x2",
+                width: metrics.collapseCapWidth,
+                height: metrics.thumbnailHeight,
+                cornerRadius: groupCapCornerRadius)
+        }
+        .buttonStyle(.cloveGlassPress)
+        .accessibilityLabel(AppLocalization.string("Show group photos", language: language))
+        .accessibilityIdentifier("clove.detail.filmstrip.group.gridPicker")
+        .popover(
+            isPresented: Binding(
+                get: {
+                    presentedGridPickerMode == .popover
+                        && expandedGroup != nil
+                        && isGridPickerAnchorReady
+                        && scenePhase == .active
+                },
+                set: {
+                    if !$0, presentedGridPickerMode == .popover {
+                        presentedGridPickerMode = nil
+                    }
+                }),
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            gridPickerContent(for: expandedGroup ?? group, showsDoneButton: false)
+        }
+        .sheet(
+            isPresented: Binding(
+                get: {
+                    presentedGridPickerMode == .sheet
+                        && expandedGroup != nil
+                        && isGridPickerAnchorReady
+                        && scenePhase == .active
+                },
+                set: {
+                    if !$0, presentedGridPickerMode == .sheet {
+                        presentedGridPickerMode = nil
+                    }
+                })
+        ) {
+            gridPickerContent(for: expandedGroup ?? group, showsDoneButton: true)
+        }
+        .onChange(of: tapPickerTriggerRequest) { _, request in
+            if request?.id == "clove.detail.filmstrip.group.gridPicker",
+                expandedGroup != nil,
+                isGridPickerAnchorReady,
+                scenePhase == .active
+            {
+                tapPicker?.dismiss()
+                presentedGridPickerMode = gridPickerPresentationMode
+            }
+        }
+        .onChange(of: gridPickerPresentTrigger) { _, _ in
+            if expandedGroup != nil, isGridPickerAnchorReady, scenePhase == .active {
+                tapPicker?.dismiss()
+                presentedGridPickerMode = gridPickerPresentationMode
+            }
+        }
+        .onChange(of: gridPickerDismissTrigger) { _, _ in
+            presentedGridPickerMode = nil
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                presentedGridPickerMode = nil
+            }
+        }
+        .onAppear {
+            isGridPickerAnchorReady = true
+        }
+        .onDisappear {
+            isGridPickerAnchorReady = false
+            presentedGridPickerMode = nil
+        }
+    }
+
+    private func gridPickerContent(
+        for group: ActiveBrowsingGroup,
+        showsDoneButton: Bool
+    ) -> some View {
+        GroupPhotoGridPicker(
+            group: group,
+            current: current,
+            thumbnails: thumbnails,
+            showsDoneButton: showsDoneButton
+        ) { chosen in
+            guard expandedGroup != nil else { return }
+            presentedGridPickerMode = nil
+            selectGroupPhoto(chosen)
+        }
+        .environment(\.cloveTheme, theme)
+        .environment(\.appLanguage, language)
+        .environment(\.locale, language.locale)
+    }
+
     private var collapseCapButton: some View {
         Button {
             guard expandedGroup != nil else { return }
             collapseGroup()
         } label: {
-            Image(systemName: "chevron.up")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.clove.text.primary)
-                .frame(width: metrics.collapseCapWidth, height: metrics.thumbnailHeight)
-                .contentShape(Rectangle())
+            ExpandedGroupCapLabel(
+                symbol: "chevron.up",
+                width: metrics.collapseCapWidth,
+                height: metrics.thumbnailHeight,
+                cornerRadius: groupCapCornerRadius)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
         .accessibilityLabel(AppLocalization.string("Collapse group", language: language))
         .accessibilityIdentifier("clove.detail.filmstrip.group.fold")
     }
@@ -773,4 +918,40 @@ private struct FilmstripGroupStack: View {
             }
         }
     }
+}
+
+private struct ExpandedGroupCapLabel: View {
+    let symbol: String
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Color.clove.bg.canvas)
+            .frame(width: width, height: height)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.clove.text.primary)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(
+                                Color.clove.bg.canvas.opacity(0.24),
+                                lineWidth: 0.75)
+                    }
+            }
+            .contentShape(Rectangle())
+    }
+}
+
+private struct FilmstripGridPickerDismissTrigger: Equatable {
+    let expandedGroupID: GroupID?
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let usesVerticalToolbar: Bool
+    let hasFoldRegion: Bool
+    let externalToken: Int
 }

@@ -3190,6 +3190,95 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testGroupFocusGridPickerListsMembersSelectsAndDismisses() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        // Timeline must keep the leading grid picker button hidden.
+        element(app, "clove.grid.photo.mmq02695").tap()
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.group.gridPicker").exists)
+
+        // Enter Group Focus via the burst-2696 stack and Expand Group pill.
+        let stack = element(app, "clove.detail.filmstrip.group.burst-2696")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), stack))
+        stack.tap()
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        let expandPill = element(app, "clove.detail.expandGroup")
+        XCTAssertTrue(expandPill.waitForExistence(timeout: 5))
+        expandPill.tap()
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+
+        let gridPickerButton = element(app, "clove.detail.filmstrip.group.gridPicker")
+        let foldButton = element(app, "clove.detail.filmstrip.group.fold")
+        let firstMember = element(app, "clove.detail.filmstrip.mmq02696")
+        let thirdMember = element(app, "clove.detail.filmstrip.mmq02698")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), gridPickerButton))
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), foldButton))
+        XCTAssertLessThanOrEqual(gridPickerButton.frame.maxX, firstMember.frame.minX + 1)
+        XCTAssertGreaterThanOrEqual(foldButton.frame.minX, thirdMember.frame.maxX - 1)
+        XCTAssertEqual(gridPickerButton.frame.width, foldButton.frame.width, accuracy: 1)
+        XCTAssertEqual(gridPickerButton.frame.height, foldButton.frame.height, accuracy: 1)
+
+        // Open the picker: shows every visible member, marks current, dismisses on Done.
+        gridPickerButton.tap()
+        let picker = element(app, "clove.detail.groupPicker")
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.groupPicker.count").waitForExistence(timeout: 5))
+        let pick2696 = element(app, "clove.detail.groupPicker.photo.mmq02696")
+        let pick2697 = element(app, "clove.detail.groupPicker.photo.mmq02697")
+        let pick2698 = element(app, "clove.detail.groupPicker.photo.mmq02698")
+        XCTAssertTrue(pick2696.waitForExistence(timeout: 5))
+        XCTAssertTrue(pick2697.exists)
+        XCTAssertTrue(pick2698.exists)
+        XCTAssertFalse(element(app, "clove.detail.groupPicker.photo.mmq02695").exists)
+        XCTAssertFalse(element(app, "clove.detail.groupPicker.photo.mmq02699").exists)
+        XCTAssertTrue(pick2696.isSelected)
+        XCTAssertFalse(pick2698.isSelected)
+
+        let doneButton = element(app, "clove.detail.groupPicker.done")
+        if doneButton.exists {
+            doneButton.tap()
+            XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+            XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+            gridPickerButton.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        }
+
+        // Selecting another member jumps to it and dismisses while keeping Group Focus expanded.
+        element(app, "clove.detail.groupPicker.photo.mmq02698").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+        XCTAssertTrue(waitForLabel("MMQ02698.ARW", fileName))
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+
+        // Rate mmq02698 and filter Grid to Unmarked so only visible members appear in the picker.
+        rate(4, in: app)
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+        element(app, "clove.grid.filter").tap()
+        let unmarkedFilter = element(app, "clove.grid.filter.unmarked")
+        XCTAssertTrue(unmarkedFilter.waitForExistence(timeout: 5))
+        unmarkedFilter.tap()
+
+        element(app, "clove.grid.group.burst-2696").tap()
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        gridPickerButton.tap()
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            element(app, "clove.detail.groupPicker.photo.mmq02696").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.detail.groupPicker.photo.mmq02697").exists)
+        XCTAssertFalse(element(app, "clove.detail.groupPicker.photo.mmq02698").exists)
+
+        element(app, "clove.detail.groupPicker.photo.mmq02697").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), picker))
+        XCTAssertTrue(waitForLabel("MMQ02697.ARW", fileName))
+    }
+
+    @MainActor
     func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }
