@@ -360,6 +360,433 @@ struct DetailDisplayPresentationTests {
         try await waitFor { !preview.isZoomed && preview.zoomSnapshot == nil }
     }
 
+    @Test
+    func groupFocusDoubleTapRecentersAcrossAsyncMembersHandlesNoRegionFallbackAndResetsOnExit()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let context = makeGroupFocusTrackingContext()
+        let source = context.source
+        let browsing = context.browsing
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        store.update { $0.doubleTap = .zoomToFocus }
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        browsing.showsFocusRegions = true
+        browsing.openGroup(context.group.id, on: context.g1)
+
+        // Hold g2 and g4 focus analysis so they arrive asynchronously after pixels are shown.
+        source.gatedFocusPhotos = [context.g2, context.g4]
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            source.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("g1 loaded with focus regions") {
+            guard let preview = findPreview(in: window) else { return false }
+            return source.prefetched.last?.current.photo == context.g1
+                && self.findFocusControl(in: preview) != nil
+        }
+        let preview = try #require(findPreview(in: window))
+
+        // 1. Double-tap Zoom to focus on g1 centers on g1's AF (0.30, 0.35).
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.5)))
+        try await waitFor("g1 zoomed to AF") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(150))
+        let g1Snapshot = try #require(preview.zoomSnapshot)
+        #expect(abs(g1Snapshot.anchor.x - 0.30) < 0.02)
+        #expect(abs(g1Snapshot.anchor.y - 0.35) < 0.02)
+        let expectedFullScale = g1Snapshot.scale
+
+        // 2. Step to g2 while g2's focus analysis is still in flight: stays at 100% (no jump to
+        //    Fit) using g1's anchor as fallback, then async AF re-centers onto (0.70, 0.64) and
+        //    subsequent finish with a shifted eye does not jump a second time.
+        browsing.selectGroupPhoto(context.g2)
+        try await waitFor("g2 preview shown at retained 100%") {
+            source.prefetched.last?.current.photo == context.g2
+                && source.isAnalysisWaiting(for: context.g2)
+                && preview.isZoomed
+        }
+        let g2Fallback = try #require(preview.zoomSnapshot)
+        #expect(abs(g2Fallback.scale - expectedFullScale) < 0.02)
+        #expect(abs(g2Fallback.anchor.x - 0.30) < 0.02)
+        #expect(abs(g2Fallback.anchor.y - 0.35) < 0.02)
+
+        source.deliverAutofocus(for: context.g2)
+        try await waitFor("g2 recentered onto async AF") {
+            guard let snapshot = preview.zoomSnapshot else { return false }
+            return abs(snapshot.anchor.x - 0.70) < 0.02
+                && abs(snapshot.anchor.y - 0.64) < 0.02
+        }
+        let g2ControlsAfterAF = findAllFocusControls(in: preview)
+        #expect(g2ControlsAfterAF.map(\.region.id) == ["clove.detail.region.af.0"])
+
+        source.finishAnalysis(for: context.g2)
+        try await Task.sleep(for: .milliseconds(120))
+        let g2Settled = try #require(preview.zoomSnapshot)
+        #expect(abs(g2Settled.scale - expectedFullScale) < 0.02)
+        #expect(abs(g2Settled.anchor.x - 0.70) < 0.02)
+        #expect(abs(g2Settled.anchor.y - 0.64) < 0.02)
+
+        // 3. Step to g3 (no actionable focus regions): retains previous anchor without jumping to
+        //    Fit, clears inspected focus region, and keeps focus-point tracking active.
+        browsing.selectGroupPhoto(context.g3)
+        try await waitFor("g3 settled") {
+            source.prefetched.last?.current.photo == context.g3
+                && source.finishedAnalysisPhotos.contains(context.g3)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let g3Snapshot = try #require(preview.zoomSnapshot)
+        #expect(abs(g3Snapshot.scale - expectedFullScale) < 0.02)
+        #expect(abs(g3Snapshot.anchor.x - 0.70) < 0.02)
+        #expect(abs(g3Snapshot.anchor.y - 0.64) < 0.02)
+        #expect(findAllFocusControls(in: preview).isEmpty)
+
+        // 4. Step to g4 (no AF metadata, shifted eye arriving on finish): receiveAutofocus misses,
+        //    pending recenter stays active, and finish re-centers onto g4's eye (0.205, 0.685).
+        browsing.selectGroupPhoto(context.g4)
+        try await waitFor("g4 preview shown and waiting for analysis") {
+            source.prefetched.last?.current.photo == context.g4
+                && source.isAnalysisWaiting(for: context.g4)
+        }
+        source.deliverAutofocus(for: context.g4)
+        try await Task.sleep(for: .milliseconds(80))
+        let g4BeforeFaces = try #require(preview.zoomSnapshot)
+        #expect(abs(g4BeforeFaces.anchor.x - 0.70) < 0.02)
+        #expect(abs(g4BeforeFaces.anchor.y - 0.64) < 0.02)
+
+        source.finishAnalysis(for: context.g4)
+        try await waitFor("g4 recentered onto eye region") {
+            guard let snapshot = preview.zoomSnapshot else { return false }
+            return abs(snapshot.anchor.x - 0.205) < 0.02
+                && abs(snapshot.anchor.y - 0.685) < 0.02
+        }
+        #expect(
+            findAllFocusControls(in: preview).map(\.region.id) == ["clove.detail.region.face.0-0"])
+
+        // 5. Leaving Group Focus to an outside photo resets to Fit and clears tracking.
+        browsing.openPhoto(context.outside)
+        try await waitFor("outside photo returned to Fit") {
+            source.prefetched.last?.current.photo == context.outside
+                && !preview.isZoomed && preview.zoomSnapshot == nil
+        }
+    }
+
+    @Test func groupFocusRegionTapPreloadedAnalysisRapidSteppingAndRawUpgradeWorkCleanly()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let context = makeGroupFocusTrackingContext()
+        let source = context.source
+        let browsing = context.browsing
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        store.update { $0.doubleTap = .zoomToTapPoint }
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        browsing.showsFocusRegions = true
+        browsing.openGroup(context.group.id, on: context.g1)
+
+        // Delay g2's image so focus analysis finishes BEFORE show(image), and omit initial
+        // full-resolution size on g2's preview so RAW upgrade runs after recenter.
+        source.gatedImagePhotos = [context.g2, context.g3]
+        source.previewOmitsFullSize = [context.g2]
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            source.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("g1 loaded with multiple focus controls") {
+            guard let preview = findPreview(in: window) else { return false }
+            return source.prefetched.last?.current.photo == context.g1
+                && self.findAllFocusControls(in: preview).count >= 2
+        }
+        let preview = try #require(findPreview(in: window))
+
+        // 1. Tap g1's eye focus control directly (even with doubleTap == .zoomToTapPoint).
+        let g1EyeControl = try #require(
+            findAllFocusControls(in: preview).first {
+                $0.region.id == "clove.detail.region.face.0-0"
+            })
+        g1EyeControl.sendActions(for: .touchUpInside)
+        try await waitFor("g1 zoomed onto tapped eye") {
+            guard let snapshot = preview.zoomSnapshot else { return false }
+            return abs(snapshot.anchor.x - 0.65) < 0.02
+                && abs(snapshot.anchor.y - 0.315) < 0.02
+        }
+
+        // 2. Step to g2 while g2's image is held so analysis completes BEFORE show(image).
+        browsing.selectGroupPhoto(context.g2)
+        try await waitFor("g2 focus analysis finished before image landed") {
+            source.finishedAnalysisPhotos.contains(context.g2)
+        }
+        source.releaseImage(for: context.g2)
+        try await waitFor("g2 opened directly on its focus region and upgraded RAW") {
+            guard let snapshot = preview.zoomSnapshot else { return false }
+            return source.deliveredFullPhotos.contains(context.g2)
+                && abs(snapshot.anchor.x - 0.70) < 0.02
+                && abs(snapshot.anchor.y - 0.64) < 0.02
+        }
+        #expect(findAllFocusControls(in: preview).map(\.region.id) == ["clove.detail.region.af.0"])
+
+        // 3. Rapid step g2 -> g3 (held, never loads pixels) -> g4: tracking stays active across g3
+        //    and re-centers onto g4's focus region.
+        browsing.selectGroupPhoto(context.g3)
+        try await Task.sleep(for: .milliseconds(30))
+        browsing.selectGroupPhoto(context.g4)
+        try await waitFor("g4 settled after rapid stepping") {
+            guard let snapshot = preview.zoomSnapshot else { return false }
+            return source.prefetched.last?.current.photo == context.g4
+                && abs(snapshot.anchor.x - 0.205) < 0.02
+                && abs(snapshot.anchor.y - 0.685) < 0.02
+        }
+
+        // 4. Collapsing Group Focus onto the Representative Photo (g1 != g4) resets to Fit.
+        browsing.collapseGroup()
+        try await waitFor("collapse onto different representative returned to Fit") {
+            browsing.state.currentPhoto == context.g1 && !preview.isZoomed
+        }
+    }
+
+    @Test func groupFocusManualPanAndPinchCancelFocusPointTracking() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let context = makeGroupFocusTrackingContext()
+        let source = context.source
+        let browsing = context.browsing
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        store.update {
+            $0.doubleTap = .zoomToFocus
+            $0.zoomedGestures = .pan
+        }
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        browsing.showsFocusRegions = true
+        browsing.openGroup(context.group.id, on: context.g1)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            source.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("g1 loaded") {
+            guard let preview = findPreview(in: window) else { return false }
+            return source.prefetched.last?.current.photo == context.g1
+                && self.findFocusControl(in: preview) != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+
+        // 1. Zoom to focus on g1, simulate an accidental zero-movement touch-down callback, and
+        //    verify stepping to g2 still re-centers onto g2's AF.
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.5)))
+        try await waitFor("g1 zoomed") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(120))
+        let settledG1 = try #require(preview.zoomSnapshot)
+        preview.onViewportChanged?(settledG1)
+
+        browsing.selectGroupPhoto(context.g2)
+        try await waitFor("g2 still recentered after zero-movement touch") {
+            guard let snapshot = preview.zoomSnapshot else { return false }
+            return source.prefetched.last?.current.photo == context.g2
+                && abs(snapshot.anchor.x - 0.70) < 0.02
+                && abs(snapshot.anchor.y - 0.64) < 0.02
+        }
+
+        // 2. Manually pan on g2 away from its focus point: inspected region clears and stepping
+        //    back to g1 preserves the manual pan anchor instead of snapping to g1's AF.
+        scroll.setContentOffset(
+            CGPoint(
+                x: (scroll.contentSize.width - scroll.bounds.width) * 0.25,
+                y: (scroll.contentSize.height - scroll.bounds.height) * 0.50),
+            animated: false)
+        preview.scrollViewDidEndDragging(scroll, willDecelerate: false)
+        let manualPanBefore = try #require(preview.zoomSnapshot)
+        try await waitFor("manual pan cleared isolated inspection") {
+            self.findAllFocusControls(in: preview).count >= 2
+        }
+
+        browsing.selectGroupPhoto(context.g1)
+        try await waitFor("g1 kept manual pan anchor") {
+            source.prefetched.last?.current.photo == context.g1
+        }
+        try await Task.sleep(for: .milliseconds(120))
+        let afterPanStep = try #require(preview.zoomSnapshot)
+        #expect(abs(afterPanStep.anchor.x - manualPanBefore.anchor.x) < 0.02)
+        #expect(abs(afterPanStep.anchor.y - manualPanBefore.anchor.y) < 0.02)
+
+        // 3. Return to Fit, re-enter focus tracking on g1, then manually pinch to a custom scale
+        //    and verify stepping to g2 preserves the manual scale and anchor.
+        preview.onDoubleTap?(.center)
+        try await waitFor("returned to Fit") { !preview.isZoomed }
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.5, y: 0.5)))
+        try await waitFor("g1 re-zoomed to AF") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(120))
+
+        let pinchedScale = max(3.6, (preview.zoomSnapshot?.scale ?? 2.0) + 1.1)
+        scroll.setZoomScale(pinchedScale, animated: false)
+        preview.scrollViewDidZoom(scroll)
+        let pinchedBefore = try #require(preview.zoomSnapshot)
+
+        browsing.selectGroupPhoto(context.g2)
+        try await waitFor("g2 settled after manual pinch") {
+            source.prefetched.last?.current.photo == context.g2
+        }
+        try await Task.sleep(for: .milliseconds(120))
+        let afterPinchStep = try #require(preview.zoomSnapshot)
+        #expect(abs(afterPinchStep.scale - pinchedBefore.scale) < 0.05)
+        #expect(abs(afterPinchStep.anchor.x - 0.70) > 0.08)
+    }
+
+    @Test func groupFocusTapPointAndNoRegionDoubleTapKeepFixedAnchorAcrossSteps() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let context = makeGroupFocusTrackingContext()
+        let source = context.source
+        let browsing = context.browsing
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        browsing.showsFocusRegions = true
+        browsing.openGroup(context.group.id, on: context.g1)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            source.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("g1 loaded") {
+            guard let preview = findPreview(in: window) else { return false }
+            return source.prefetched.last?.current.photo == context.g1
+                && self.findFocusControl(in: preview) != nil
+        }
+        let preview = try #require(findPreview(in: window))
+
+        // 1. Zoom to tap point keeps fixed tap anchor when stepping to g2 (does not jump to g2 AF).
+        store.update { $0.doubleTap = .zoomToTapPoint }
+        try await waitFor("setting propagated") {
+            store.settings.doubleTap == .zoomToTapPoint
+        }
+        try await Task.sleep(for: .milliseconds(60))
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.42, y: 0.58)))
+        try await waitFor("g1 zoomed to tap point") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(120))
+
+        browsing.selectGroupPhoto(context.g2)
+        try await waitFor("g2 settled") {
+            source.prefetched.last?.current.photo == context.g2
+        }
+        try await Task.sleep(for: .milliseconds(120))
+        let afterTapPointStep = try #require(preview.zoomSnapshot)
+        #expect(abs(afterTapPointStep.anchor.x - 0.42) < 0.02)
+        #expect(abs(afterTapPointStep.anchor.y - 0.58) < 0.02)
+
+        // 2. Return to Fit, move to g3 (no focus regions), double-tap in .zoomToFocus mode:
+        //    stepping to g2 preserves the tapped anchor without snapping to g2's AF.
+        preview.onDoubleTap?(.center)
+        try await waitFor("returned to Fit") { !preview.isZoomed }
+        store.update { $0.doubleTap = .zoomToFocus }
+        browsing.selectGroupPhoto(context.g3)
+        try await waitFor("g3 settled") {
+            source.prefetched.last?.current.photo == context.g3
+                && source.finishedAnalysisPhotos.contains(context.g3)
+        }
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.42, y: 0.58)))
+        try await waitFor("g3 zoomed to tap point") { preview.isZoomed }
+        try await Task.sleep(for: .milliseconds(120))
+
+        browsing.selectGroupPhoto(context.g2)
+        try await waitFor("g2 kept fixed anchor from no-region double-tap") {
+            source.prefetched.last?.current.photo == context.g2
+        }
+        try await Task.sleep(for: .milliseconds(120))
+        let afterNoRegionStep = try #require(preview.zoomSnapshot)
+        #expect(abs(afterNoRegionStep.anchor.x - 0.42) < 0.02)
+        #expect(abs(afterNoRegionStep.anchor.y - 0.58) < 0.02)
+    }
+
+    private func makeGroupFocusTrackingContext() -> (
+        browsing: BrowsingModel,
+        source: GroupFocusTrackingDetailImages,
+        group: BrowsingGroup,
+        g1: PhotoIdentity,
+        g2: PhotoIdentity,
+        g3: PhotoIdentity,
+        g4: PhotoIdentity,
+        outside: PhotoIdentity
+    ) {
+        let folder = FolderIdentity(rawValue: "group-focus-tracking-tests")
+        func makeID(_ stem: String) -> PhotoIdentity {
+            PhotoIdentity(folderID: folder, relativeFolderPath: "DCIM/100CAM", stem: stem)
+        }
+        let g1ID = makeID("GFT_0001")
+        let g2ID = makeID("GFT_0002")
+        let g3ID = makeID("GFT_0003")
+        let g4ID = makeID("GFT_0004")
+        let outsideID = makeID("GFT_0005")
+        let base = Date(timeIntervalSince1970: 1_760_100_000)
+        let photos = [
+            GridPhoto(
+                id: g1ID, fileName: "GFT_0001.ARW",
+                time: .known(PhotoTime(captureTime: base, hasUTCOffset: true)),
+                marks: PhotoMarks(rating: Rating(rawValue: 4)!)),
+            GridPhoto(
+                id: g2ID, fileName: "GFT_0002.ARW",
+                time: .known(
+                    PhotoTime(captureTime: base.addingTimeInterval(1), hasUTCOffset: true)),
+                marks: PhotoMarks()),
+            GridPhoto(
+                id: g3ID, fileName: "GFT_0003.ARW",
+                time: .known(
+                    PhotoTime(captureTime: base.addingTimeInterval(2), hasUTCOffset: true)),
+                marks: PhotoMarks()),
+            GridPhoto(
+                id: g4ID, fileName: "GFT_0004.ARW",
+                time: .known(
+                    PhotoTime(captureTime: base.addingTimeInterval(3), hasUTCOffset: true)),
+                marks: PhotoMarks()),
+            GridPhoto(
+                id: outsideID, fileName: "GFT_0005.ARW",
+                time: .known(
+                    PhotoTime(captureTime: base.addingTimeInterval(10), hasUTCOffset: true)),
+                marks: PhotoMarks()),
+        ]
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "burst-gft"), members: [g1ID, g2ID, g3ID, g4ID])
+        let source = GroupFocusTrackingDetailImages(
+            g1: g1ID, g2: g2ID, g3: g3ID, g4: g4ID, outside: outsideID)
+        let library = TestLibrary(photos: photos, groups: [group], detailImages: source)
+        let browsing = BrowsingModel(library: library)
+        return (browsing, source, group, g1ID, g2ID, g3ID, g4ID, outsideID)
+    }
+
     @Test func attachmentUsesStableDisplayEdgeAndReturningToFirstUsesHeldRaw() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
@@ -6118,5 +6545,199 @@ private final class SolidWhiteThumbnails: GridThumbnailSource {
 
     func companions(for photo: PhotoIdentity) -> GridCompanions {
         GridCompanions()
+    }
+}
+
+@MainActor
+private final class GroupFocusTrackingDetailImages: DetailImageSource, DetailRegionSharpnessSource {
+    private let sample = SampleDetailImages()
+    let g1: PhotoIdentity
+    let g2: PhotoIdentity
+    let g3: PhotoIdentity
+    let g4: PhotoIdentity
+    let outside: PhotoIdentity
+
+    var gatedFocusPhotos: Set<PhotoIdentity> = []
+    var gatedImagePhotos: Set<PhotoIdentity> = []
+    var previewOmitsFullSize: Set<PhotoIdentity> = []
+
+    private(set) var prefetched: [DetailPhotoWindow] = []
+    private(set) var finishedAnalysisPhotos: Set<PhotoIdentity> = []
+    private(set) var deliveredFullPhotos: Set<PhotoIdentity> = []
+
+    private var pendingAutofocus: [PhotoIdentity: @Sendable (RegionSharpnessPathResult) -> Void] =
+        [:]
+    private var pendingFocusFinish:
+        [PhotoIdentity: CheckedContinuation<RegionSharpnessAnalysis?, Never>] = [:]
+    private var pendingImages: [PhotoIdentity: [CheckedContinuation<Void, Never>]] = [:]
+
+    init(
+        g1: PhotoIdentity,
+        g2: PhotoIdentity,
+        g3: PhotoIdentity,
+        g4: PhotoIdentity,
+        outside: PhotoIdentity
+    ) {
+        self.g1 = g1
+        self.g2 = g2
+        self.g3 = g3
+        self.g4 = g4
+        self.outside = outside
+    }
+
+    func isAnalysisWaiting(for photo: PhotoIdentity) -> Bool {
+        pendingFocusFinish[photo] != nil
+    }
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        nil
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async {
+        await sample.prepare(window)
+    }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        if gatedImagePhotos.contains(photo), request.need == .preview {
+            await withCheckedContinuation { continuation in
+                pendingImages[photo, default: []].append(continuation)
+            }
+        }
+        let outcome = await sample.image(for: photo, request: request)
+        guard case .image(let image) = outcome else { return outcome }
+        if request.need == .fullResolution || image.quality == .nativeRAW {
+            deliveredFullPhotos.insert(photo)
+        }
+        if previewOmitsFullSize.contains(photo), image.quality == .preview {
+            return .image(
+                DetailImage(
+                    image: image.image,
+                    source: image.source,
+                    quality: image.quality,
+                    hasRAW: image.hasRAW,
+                    limitation: image.limitation,
+                    fullResolutionSize: nil))
+        }
+        return outcome
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+        prefetched.append(window)
+    }
+
+    func leave(window: UUID) async {
+        await sample.leave(window: window)
+    }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        if gatedFocusPhotos.contains(photo) {
+            pendingAutofocus[photo] = onAutofocus
+            let result = await withCheckedContinuation { continuation in
+                pendingFocusFinish[photo] = continuation
+            }
+            finishedAnalysisPhotos.insert(photo)
+            return result
+        }
+        let analysis = analysisFor(photo)
+        onAutofocus(analysis.autofocus)
+        await Task.yield()
+        finishedAnalysisPhotos.insert(photo)
+        return analysis
+    }
+
+    func deliverAutofocus(for photo: PhotoIdentity) {
+        let af = analysisFor(photo).autofocus
+        pendingAutofocus.removeValue(forKey: photo)?(af)
+    }
+
+    func finishAnalysis(for photo: PhotoIdentity) {
+        finishedAnalysisPhotos.insert(photo)
+        pendingFocusFinish.removeValue(forKey: photo)?.resume(returning: analysisFor(photo))
+    }
+
+    func releaseImage(for photo: PhotoIdentity) {
+        gatedImagePhotos.remove(photo)
+        let waiting = pendingImages.removeValue(forKey: photo) ?? []
+        for continuation in waiting {
+            continuation.resume()
+        }
+    }
+
+    func releaseAll() {
+        for photo in Array(pendingAutofocus.keys) {
+            deliverAutofocus(for: photo)
+        }
+        for photo in Array(pendingFocusFinish.keys) {
+            finishAnalysis(for: photo)
+        }
+        for photo in Array(pendingImages.keys) {
+            releaseImage(for: photo)
+        }
+    }
+
+    private func analysisFor(_ photo: PhotoIdentity) -> RegionSharpnessAnalysis {
+        let noAF = RegionSharpnessPathResult.unavailable(
+            .noAutofocusMetadata(
+                AutofocusMetadataEvidence(inspected: [], cameraMake: "Sample", exifOrientation: 1)))
+        let score = RegionSharpnessScore(
+            tenengradMeanSquare: 12, sampledPixels: 64, sampledWidth: 8, sampledHeight: 8)
+        switch photo {
+        case g1:
+            let af = RegionSharpnessEvidence(
+                kind: .cameraAutofocus, groupIndex: nil,
+                region: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16),
+                score: nil, unavailableBecause: nil)
+            let eye = RegionSharpnessEvidence(
+                kind: .eye, groupIndex: 0,
+                region: NormalizedRegion(x: 0.625, y: 0.29, width: 0.05, height: 0.05),
+                score: score, unavailableBecause: nil)
+            return RegionSharpnessAnalysis(
+                autofocus: .regions([af]), faces: .regions([eye]),
+                acquisitionFailure: nil, timings: RegionSharpnessTimings())
+        case g2:
+            let af = RegionSharpnessEvidence(
+                kind: .cameraAutofocus, groupIndex: nil,
+                region: NormalizedRegion(x: 0.64, y: 0.56, width: 0.12, height: 0.16),
+                score: nil, unavailableBecause: nil)
+            let eye = RegionSharpnessEvidence(
+                kind: .eye, groupIndex: 0,
+                region: NormalizedRegion(x: 0.15, y: 0.20, width: 0.05, height: 0.05),
+                score: score, unavailableBecause: nil)
+            return RegionSharpnessAnalysis(
+                autofocus: .regions([af]), faces: .regions([eye]),
+                acquisitionFailure: nil, timings: RegionSharpnessTimings())
+        case g3:
+            return RegionSharpnessAnalysis(
+                autofocus: noAF, faces: .unavailable(.noFacesDetected),
+                acquisitionFailure: nil, timings: RegionSharpnessTimings())
+        case g4:
+            let eye = RegionSharpnessEvidence(
+                kind: .eye, groupIndex: 0,
+                region: NormalizedRegion(x: 0.18, y: 0.66, width: 0.05, height: 0.05),
+                score: score, unavailableBecause: nil)
+            return RegionSharpnessAnalysis(
+                autofocus: noAF, faces: .regions([eye]),
+                acquisitionFailure: nil, timings: RegionSharpnessTimings())
+        default:
+            let af = RegionSharpnessEvidence(
+                kind: .cameraAutofocus, groupIndex: nil,
+                region: NormalizedRegion(x: 0.44, y: 0.44, width: 0.12, height: 0.12),
+                score: nil, unavailableBecause: nil)
+            return RegionSharpnessAnalysis(
+                autofocus: .regions([af]), faces: .unavailable(.noFacesDetected),
+                acquisitionFailure: nil, timings: RegionSharpnessTimings())
+        }
     }
 }

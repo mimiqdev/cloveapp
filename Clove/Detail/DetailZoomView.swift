@@ -145,7 +145,7 @@ struct DetailZoomView: UIViewRepresentable {
     /// Enables Compare gestures: suspends rating/navigation swipes, keeps single-finger pan at all zoom levels.
     var isCompareMode = false
 
-    /// Reports live viewport scale and normalized anchor when the user zooms or pans in Compare mode.
+    /// Reports live viewport scale and normalized anchor when the user zooms or pans.
     var onViewportChanged: ((DetailZoomSnapshot?) -> Void)?
 
     /// Reports scale changes applied programmatically via Compare sync without echoing back to the peer.
@@ -594,6 +594,13 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         }
     }
 
+    /// Cancels a queued programmatic scale command when a manual gesture takes over.
+    func cancelPendingScaleZoom() {
+        if case .scale = pendingZoom {
+            pendingZoom = nil
+        }
+    }
+
     private func schedulePendingZoomFlushIfNeeded() {
         guard pendingZoom != nil, !isFlushScheduled else { return }
         guard !scrollView.isDragging, !scrollView.isDecelerating,
@@ -727,7 +734,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         layoutFocusRegions()
         updateGestureAvailability()
         updatePreviewAccessibility()
-        if !isApplyingZoom {
+        if !isApplyingZoom && !isLayingOut {
             onZoomChange?(scrollView.zoomScale)
             onViewportChanged?(zoomSnapshot)
         }
@@ -759,12 +766,12 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         guard !decelerate else { return }
-        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
+        if !isApplyingZoom && !isLayingOut { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
+        if !isApplyingZoom && !isLayingOut { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 
@@ -772,12 +779,12 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         _ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat
     ) {
         guard !scrollView.isZoomBouncing else { return }
-        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
+        if !isApplyingZoom && !isLayingOut { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        if !isApplyingZoom { onViewportChanged?(zoomSnapshot) }
+        if !isApplyingZoom && !isLayingOut { onViewportChanged?(zoomSnapshot) }
         scheduleFlushOnNextRunLoop()
     }
 

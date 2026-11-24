@@ -133,9 +133,11 @@ struct DetailMarkingView: View {
     @State private var focusRegionState = DetailFocusRegionState()
     @State private var focusAnalysisID = UUID()
     @State private var inspectedFocusRegionID: String?
+    @State private var focusTracking = DetailFocusTrackingState()
 
     /// Detail pixels on screen; the grid thumbnail stands in until these arrive.
     @State private var shown: DetailImage?
+    @State private var shownPhoto: PhotoIdentity?
 
     /// The first-preview state, so a failure is a visible state and not a blank image.
     @State private var phase: DetailMarkingPreviewPhase = .placeholder(nil)
@@ -238,6 +240,16 @@ struct DetailMarkingView: View {
                 pendingRestoredZoom = nil
                 focusAnalysisID = UUID()
                 focusRegionState = DetailFocusRegionState()
+                focusTracking.cancelPendingRecenter()
+            }
+            .onChange(of: expandedGroup?.id) { oldGroup, newGroup in
+                if oldGroup != nil, newGroup == nil {
+                    focusTracking.reset()
+                }
+            }
+            .onChange(of: browsing.state.folder) { _, _ in
+                focusTracking.reset()
+                inspectedFocusRegionID = nil
             }
             .onChange(of: duoPopoverDismissTrigger) { _, _ in
                 showsToolbarStars = false
@@ -269,6 +281,8 @@ struct DetailMarkingView: View {
                 toolbarDragRating = nil
                 upgradeTask?.cancel()
                 shown = nil
+                shownPhoto = nil
+                focusTracking.reset()
                 currentWindow = nil
                 Task { await images.leave(window: windowID) }
             }
@@ -986,7 +1000,7 @@ struct DetailMarkingView: View {
             pendingRestoredZoom = nil
             return
         }
-        if case .fullResolution(_, let size) = zoomMode {
+        if case .fullResolution(_, let size) = zoomMode, !focusTracking.isTracking {
             zoomMode = .fullResolution(anchor: snapshot.anchor, size: size)
         }
         pendingRestoredZoom = snapshot
@@ -1273,6 +1287,7 @@ struct DetailMarkingView: View {
             currentRating: browsing.shownMarks(for: photo.id).rating,
             feedback: swipeFeedback,
             onZoomChange: { zoomChanged($0) },
+            onViewportChanged: { viewportChanged($0) },
             onChromeToggle: { toggleChrome() },
             onStep: {
                 dismissGestureGuide()
@@ -1566,11 +1581,13 @@ struct DetailMarkingView: View {
         focusAnalysisID = analysisID
         guard browsing.showsFocusRegions else {
             focusRegionState = DetailFocusRegionState()
+            applyAsyncRecenterIfNeeded(for: photo.id, isFinalResult: true)
             return
         }
         focusRegionState.begin(for: photo.id)
         guard let source = images as? DetailRegionSharpnessSource else {
             focusRegionState.finish(nil, for: photo.id)
+            applyAsyncRecenterIfNeeded(for: photo.id, isFinalResult: true)
             return
         }
         let group =
@@ -1586,11 +1603,16 @@ struct DetailMarkingView: View {
         ) { result in
             Task { @MainActor in
                 guard focusAnalysisID == analysisID else { return }
+                guard focusRegionState.photo == photo.id, focusRegionState.isAnalyzing else {
+                    return
+                }
                 focusRegionState.receiveAutofocus(result, for: photo.id)
+                applyAsyncRecenterIfNeeded(for: photo.id, isFinalResult: false)
             }
         }
         guard !Task.isCancelled, focusAnalysisID == analysisID else { return }
         focusRegionState.finish(analysis, for: photo.id)
+        applyAsyncRecenterIfNeeded(for: photo.id, isFinalResult: true)
     }
 
     // MARK: - Pixels
@@ -1649,13 +1671,41 @@ struct DetailMarkingView: View {
                 // A view at fit keeps no zoom, so nothing carries into the next photo. That
                 // includes a 100% that is still waiting for the render's size: it belongs to the
                 // photo that was tapped, not to the one a swipe moves to (#111).
-                if snapshot == nil { zoomMode = .fit }
+                if snapshot == nil {
+                    zoomMode = .fit
+                    focusTracking.reset()
+                } else {
+                    let referenceAnchor: DetailZoomAnchor? =
+                        if case .fullResolution(let chosen, _) = zoomMode {
+                            chosen
+                        } else {
+                            snapshot?.anchor
+                        }
+                    focusTracking.preparePhotoTransition(
+                        to: photo.id,
+                        keepsPosition: true,
+                        hasZoomedState: isAtFullResolution,
+                        referenceAnchor: referenceAnchor)
+                }
+            } else {
+                let referenceAnchor: DetailZoomAnchor? =
+                    if case .fullResolution(let chosen, _) = zoomMode {
+                        chosen
+                    } else {
+                        keptZoom?.anchor
+                    }
+                focusTracking.preparePhotoTransition(
+                    to: photo.id,
+                    keepsPosition: true,
+                    hasZoomedState: keptScale != nil && isAtFullResolution,
+                    referenceAnchor: referenceAnchor)
             }
         } else {
             keptZoom = nil
             keptScale = nil
             keptNativeScale = nil
             zoomMode = .fit
+            focusTracking.reset()
             setZoom(.fit)
         }
         limitation = nil
@@ -1688,6 +1738,7 @@ struct DetailMarkingView: View {
                 previewPrefetchTask = Task { await images.prefetchPreviews(window) }
             } else {
                 shown = nil
+                shownPhoto = nil
                 phase = .placeholder(nil)
                 let thumbnail = await images.placeholder(
                     for: photo.id, gridThumbnails: browsing.thumbnails)
@@ -1701,6 +1752,7 @@ struct DetailMarkingView: View {
             }
         } else {
             shown = nil
+            shownPhoto = nil
             phase = .placeholder(nil)
             let thumbnail = await images.placeholder(
                 for: photo.id, gridThumbnails: browsing.thumbnails)
@@ -1842,6 +1894,7 @@ struct DetailMarkingView: View {
     /// falls back to the inspection scale instead of staying at fit (#111).
     private func show(_ image: DetailImage) {
         shown = image
+        shownPhoto = photo.id
         limitation = image.limitation
         phase = .shown
         if image.limitation != nil {
@@ -1849,18 +1902,34 @@ struct DetailMarkingView: View {
         }
         if let keptScale {
             let previousNativeScale = keptNativeScale
-            let anchor = keptZoom?.anchor ?? .centre
+            let fallbackAnchor = keptZoom?.anchor ?? .centre
             self.keptScale = nil
             self.keptNativeScale = nil
             self.keptZoom = nil
             let opening = openingScale(
                 keptScale, previousNativeScale: previousNativeScale, for: image)
-            if case .fullResolution(let chosen, _) = zoomMode {
+            let openingAnchor: DetailZoomAnchor
+            switch focusTracking.resolveOpening(
+                for: photo.id,
+                fallbackAnchor: fallbackAnchor,
+                focusRegions: focusRegionState,
+                showsFocusRegions: browsing.showsFocusRegions)
+            {
+            case .focusRegion(let targetRegion):
+                openingAnchor = DetailZoomAnchor(
+                    x: targetRegion.centre.x, y: targetRegion.centre.y)
+                inspectedFocusRegionID = targetRegion.id
+            case .keepAnchor(let anchor):
+                openingAnchor = anchor
+                inspectedFocusRegionID = nil
+            }
+            if case .fullResolution = zoomMode {
                 // The opening scale was converted to this photo's 100%, so a later render corrects
                 // against this photo's size rather than the previous one's.
-                zoomMode = .fullResolution(anchor: chosen, size: image.fullResolutionPixels)
+                zoomMode = .fullResolution(
+                    anchor: openingAnchor, size: image.fullResolutionPixels)
             }
-            setZoom(.scale(opening, anchor: anchor.unitPoint))
+            setZoom(.scale(opening, anchor: openingAnchor.unitPoint))
             // The group's retained zoom may need more pixels than the preview holds (G1 "Preview,
             // detail (I2)").
             if keepsPosition && !isLoadingFit { upgradeIfNeeded() }
@@ -1873,7 +1942,9 @@ struct DetailMarkingView: View {
                     // not report; the unit image point under the viewport stays where the user put
                     // it.
                     zoomMode = .fullResolution(anchor: chosen, size: pixels)
-                    let anchor = probe.container?.zoomSnapshot?.anchor ?? chosen
+                    let anchor =
+                        focusTracking.isTracking
+                        ? chosen : (probe.container?.zoomSnapshot?.anchor ?? chosen)
                     setZoom(.scale(target, anchor: anchor.unitPoint))
                 }
             } else if previewOnly,
@@ -1996,9 +2067,11 @@ struct DetailMarkingView: View {
         scale = value
         if value <= DetailFitScale.tolerance {
             inspectedFocusRegionID = nil
+            focusTracking.reset()
         }
         if abs(value - commandedScale) > 0.01 {
             zoomMode = .manual
+            focusTracking.reset()
         }
         guard value > DetailFitScale.tolerance, !previewOnly, let shown else { return }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
@@ -2008,6 +2081,61 @@ struct DetailMarkingView: View {
             guard !Task.isCancelled else { return }
             await upgrade(need: isAtFullResolution ? .fullResolution : .morePixels)
         }
+    }
+
+    private func viewportChanged(_ snapshot: DetailZoomSnapshot?) {
+        guard focusTracking.isTracking || focusTracking.pendingRecenter != nil else { return }
+        guard let snapshot, snapshot.scale > DetailFitScale.tolerance else { return }
+        guard case .fullResolution(let targetAnchor, let size) = zoomMode else { return }
+        let imagePixels = shown.map { pixelSize($0) }
+        guard
+            DetailFocusTrackingState.didManuallyPan(
+                snapshot: snapshot,
+                fromTargetAnchor: targetAnchor,
+                imagePixels: imagePixels,
+                viewSize: viewSize)
+        else { return }
+        focusTracking.reset()
+        inspectedFocusRegionID = nil
+        probe.container?.cancelPendingScaleZoom()
+        zoomMode = .fullResolution(anchor: snapshot.anchor, size: size)
+    }
+
+    private func applyAsyncRecenterIfNeeded(for photoID: PhotoIdentity, isFinalResult: Bool) {
+        guard photo.id == photoID else { return }
+        let result = focusTracking.resolveAsyncRecenter(
+            for: photoID,
+            isFinalResult: isFinalResult,
+            focusRegions: focusRegionState,
+            showsFocusRegions: browsing.showsFocusRegions,
+            isShowingPhoto: shown != nil && shownPhoto == photoID,
+            isZoomedFullResolution: isAtFullResolution && scale > DetailFitScale.tolerance)
+        switch result {
+        case .recenter(let targetRegion):
+            recenterZoomToFocusRegion(targetRegion)
+        case .clearInspectionKeepAnchor:
+            inspectedFocusRegionID = nil
+        case .ignore:
+            break
+        }
+    }
+
+    private func recenterZoomToFocusRegion(_ region: DetailFocusRegion) {
+        guard let shown else { return }
+        let chosen = DetailZoomAnchor(x: region.centre.x, y: region.centre.y)
+        zoomMode = .fullResolution(anchor: chosen, size: shown.fullResolutionPixels)
+        inspectedFocusRegionID = region.id
+        let targetScale: CGFloat
+        if let pixels = shown.fullResolutionPixels,
+            let resolved = DetailZoom.fullResolutionTarget(
+                nativePixels: pixels, shownPixels: pixelSize(shown),
+                viewSize: viewSize, screenScale: displayScale, previewIsAll: previewOnly)
+        {
+            targetScale = resolved
+        } else {
+            targetScale = scale
+        }
+        setZoom(.scale(targetScale, anchor: region.centre))
     }
 
     /// Whether the current zoom is the explicit 100%, which keeps asking for native pixels.
@@ -2039,6 +2167,7 @@ struct DetailMarkingView: View {
         guard settings.doubleTap != .off else { return }
         guard scale <= DetailFitScale.tolerance else {
             inspectedFocusRegionID = nil
+            focusTracking.reset()
             zoomMode = .fit
             setZoom(.fit)
             return
@@ -2051,9 +2180,11 @@ struct DetailMarkingView: View {
                 inspectedRegionID: inspectedFocusRegionID)
         {
             inspectedFocusRegionID = targetRegion.id
+            focusTracking.beginTracking()
             inspectFullResolution(at: targetRegion.centre)
         } else {
             inspectedFocusRegionID = nil
+            focusTracking.reset()
             inspectFullResolution(at: tap.zoomAnchor)
         }
     }
@@ -2062,8 +2193,9 @@ struct DetailMarkingView: View {
     /// double-tap setting. It neither resolves a marking input nor calls a navigation action.
     private func focusRegionTapped(_ region: DetailFocusRegion) {
         dismissGestureGuide()
-        guard region.isActionable else { return }
+        guard region.isActionable, shown != nil else { return }
         inspectedFocusRegionID = region.id
+        focusTracking.beginTracking()
         inspectFullResolution(at: region.centre)
     }
 
@@ -2095,7 +2227,8 @@ struct DetailMarkingView: View {
             target > DetailFitScale.tolerance,
             force || abs(target - scale) > 0.005
         else { return }
-        let anchor = probe.container?.zoomSnapshot?.anchor ?? chosen
+        let anchor =
+            focusTracking.isTracking ? chosen : (probe.container?.zoomSnapshot?.anchor ?? chosen)
         zoomMode = .fullResolution(anchor: anchor, size: shown.fullResolutionPixels)
         setZoom(.scale(target, anchor: anchor.unitPoint))
     }

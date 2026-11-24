@@ -141,7 +141,7 @@ struct DetailFocusRegionState {
     private(set) var photo: PhotoIdentity?
     private var autofocus: RegionSharpnessPathResult?
     private var faces: RegionSharpnessPathResult?
-    private var isAnalyzing = false
+    private(set) var isAnalyzing = false
     private var analysisUnavailable = false
 
     /// All retained evidence mapped to presentation values before per-person and overlap filtering.
@@ -340,6 +340,168 @@ struct DetailFocusRegionState {
                 ? autofocusRegions.filter(\.isActionable) : autofocusRegions
             return !blockingAF.contains { af in af.collidesLocally(with: marker) }
         }
+    }
+}
+
+/// Tracks whether 100% inspection entered via focus-region targeting so stepping within Group Focus
+/// re-centers each incoming photo onto its own preferred focus region until the user returns to
+/// fit, pinches, pans away, or leaves Group Focus.
+struct DetailFocusTrackingState: Equatable, Sendable {
+    struct PendingRecenter: Equatable, Sendable {
+        let photo: PhotoIdentity
+        let referenceAnchor: UnitPoint
+    }
+
+    enum OpeningResolution: Equatable, Sendable {
+        case focusRegion(DetailFocusRegion)
+        case keepAnchor(DetailZoomAnchor)
+    }
+
+    enum AsyncRecenterResult: Equatable, Sendable {
+        case recenter(DetailFocusRegion)
+        case clearInspectionKeepAnchor
+        case ignore
+    }
+
+    /// Distance in zoomed content points above which a user drag counts as manually panning away
+    /// from the tracked focus point rather than an accidental touch-down or rounding jitter.
+    static let manualPanPointThreshold: CGFloat = 6
+
+    /// Fallback normalized anchor distance when view or image geometry is not yet laid out.
+    static let manualPanNormalizedFallbackThreshold: CGFloat = 0.005
+
+    private(set) var isTracking = false
+    private(set) var pendingRecenter: PendingRecenter?
+
+    mutating func beginTracking() {
+        isTracking = true
+        pendingRecenter = nil
+    }
+
+    mutating func reset() {
+        isTracking = false
+        pendingRecenter = nil
+    }
+
+    mutating func cancelPendingRecenter() {
+        pendingRecenter = nil
+    }
+
+    mutating func preparePhotoTransition(
+        to photo: PhotoIdentity,
+        keepsPosition: Bool,
+        hasZoomedState: Bool,
+        referenceAnchor: DetailZoomAnchor?
+    ) {
+        guard keepsPosition, hasZoomedState else {
+            reset()
+            return
+        }
+        guard isTracking else {
+            pendingRecenter = nil
+            return
+        }
+        pendingRecenter = PendingRecenter(
+            photo: photo,
+            referenceAnchor: (referenceAnchor ?? .centre).unitPoint)
+    }
+
+    mutating func resolveOpening(
+        for photo: PhotoIdentity,
+        fallbackAnchor: DetailZoomAnchor,
+        focusRegions: DetailFocusRegionState,
+        showsFocusRegions: Bool
+    ) -> OpeningResolution {
+        guard isTracking, let pending = pendingRecenter, pending.photo == photo else {
+            return .keepAnchor(fallbackAnchor)
+        }
+        if let targetRegion = focusRegions.preferredDoubleTapRegion(
+            at: pending.referenceAnchor,
+            visible: showsFocusRegions,
+            inspectedRegionID: nil)
+        {
+            pendingRecenter = nil
+            return .focusRegion(targetRegion)
+        }
+        if !showsFocusRegions || (focusRegions.photo == photo && !focusRegions.isAnalyzing) {
+            pendingRecenter = nil
+        }
+        return .keepAnchor(fallbackAnchor)
+    }
+
+    mutating func resolveAsyncRecenter(
+        for photo: PhotoIdentity,
+        isFinalResult: Bool,
+        focusRegions: DetailFocusRegionState,
+        showsFocusRegions: Bool,
+        isShowingPhoto: Bool,
+        isZoomedFullResolution: Bool
+    ) -> AsyncRecenterResult {
+        guard isTracking, let pending = pendingRecenter, pending.photo == photo else {
+            return .ignore
+        }
+        guard isShowingPhoto, isZoomedFullResolution else {
+            return .ignore
+        }
+        if let targetRegion = focusRegions.preferredDoubleTapRegion(
+            at: pending.referenceAnchor,
+            visible: showsFocusRegions,
+            inspectedRegionID: nil)
+        {
+            pendingRecenter = nil
+            return .recenter(targetRegion)
+        }
+        if isFinalResult || !showsFocusRegions {
+            pendingRecenter = nil
+            return .clearInspectionKeepAnchor
+        }
+        return .ignore
+    }
+
+    static func expectedViewportAnchor(
+        for targetAnchor: DetailZoomAnchor,
+        scale: CGFloat,
+        imagePixels: CGSize,
+        viewSize: CGSize
+    ) -> DetailZoomAnchor {
+        guard scale > DetailFitScale.tolerance,
+            imagePixels.width > 0, imagePixels.height > 0,
+            viewSize.width > 0, viewSize.height > 0
+        else { return targetAnchor }
+        let contentSize = CGSize(width: viewSize.width * scale, height: viewSize.height * scale)
+        let point = DetailZoom.contentPoint(
+            for: targetAnchor, scale: scale, imagePixels: imagePixels, viewSize: viewSize)
+        let visible = DetailZoom.visibleRect(
+            centredOn: point, contentSize: contentSize, viewSize: viewSize)
+        return DetailZoom.centreAnchor(
+            scale: scale, contentOffset: visible.origin,
+            imagePixels: imagePixels, viewSize: viewSize) ?? targetAnchor
+    }
+
+    static func didManuallyPan(
+        snapshot: DetailZoomSnapshot,
+        fromTargetAnchor targetAnchor: DetailZoomAnchor,
+        imagePixels: CGSize?,
+        viewSize: CGSize
+    ) -> Bool {
+        guard snapshot.scale > DetailFitScale.tolerance else { return false }
+        if let imagePixels, imagePixels.width > 0, imagePixels.height > 0,
+            viewSize.width > 0, viewSize.height > 0
+        {
+            let expected = expectedViewportAnchor(
+                for: targetAnchor,
+                scale: snapshot.scale,
+                imagePixels: imagePixels,
+                viewSize: viewSize)
+            let fitted = DetailZoom.fittedSize(imagePixels: imagePixels, viewSize: viewSize)
+            guard fitted.width > 0, fitted.height > 0 else { return false }
+            let dx = (snapshot.anchor.x - expected.x) * fitted.width * snapshot.scale
+            let dy = (snapshot.anchor.y - expected.y) * fitted.height * snapshot.scale
+            return hypot(dx, dy) > manualPanPointThreshold
+        }
+        let dx = snapshot.anchor.x - targetAnchor.x
+        let dy = snapshot.anchor.y - targetAnchor.y
+        return hypot(dx, dy) > manualPanNormalizedFallbackThreshold
     }
 }
 
