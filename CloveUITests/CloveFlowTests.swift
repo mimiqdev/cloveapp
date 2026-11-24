@@ -3278,6 +3278,44 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(waitForLabel("MMQ02697.ARW", fileName))
     }
 
+    /// Run on a throwaway iPad with CLOVE_SIM_DEVICE_TYPE; the default iPhone gate skips it.
+    @MainActor
+    func testCompareFilmstripSelectionStaysOnChallenger() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
+        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.group.burst-2696").tap()
+        let compareButton = element(app, "clove.detail.compare")
+        XCTAssertTrue(compareButton.waitForExistence(timeout: 5))
+        compareButton.tap()
+
+        XCTAssertTrue(element(app, "clove.compare.filmstrip").waitForExistence(timeout: 5))
+
+        let tileA = element(app, "clove.compare.filmstrip.mmq02696")
+        let tileB = element(app, "clove.compare.filmstrip.mmq02697")
+        let tileC = element(app, "clove.compare.filmstrip.mmq02698")
+        XCTAssertTrue(tileA.waitForExistence(timeout: 5))
+        XCTAssertTrue(tileB.waitForExistence(timeout: 5))
+        XCTAssertFalse(tileA.isSelected)
+        XCTAssertTrue(tileB.isSelected)
+
+        // Switching active side to A leaves .isSelected strictly on challenger B.
+        element(app, "clove.compare.paneA.header").tap()
+        let activeBadge = element(app, "clove.compare.activeSideBadge")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "A"), activeBadge))
+        XCTAssertFalse(tileA.isSelected)
+        XCTAssertTrue(tileB.isSelected)
+
+        // Stepping B moves .isSelected to the new challenger and clears the prior one.
+        element(app, "clove.compare.next").tap()
+        XCTAssertTrue(tileC.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tileC))
+        XCTAssertFalse(tileB.isSelected)
+        XCTAssertFalse(tileA.isSelected)
+    }
+
     @MainActor
     func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()

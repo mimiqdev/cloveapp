@@ -13,10 +13,12 @@ import UIKit
 ///   leading `square.grid.2x2` grid picker button and a trailing `chevron.up` collapse cap. Dragging
 ///   upward anywhere on the strip collapses back to Timeline.
 ///
-/// Both tracks live independently inside one constant `70 pt` band (`body`), keeping Timeline's
-/// `ScrollView` alive across Group Focus so collapsing never resets its scroll offset or shifts
-/// neighboring thumbnails (#318). The screen draws the finishing pill itself, so the strip's height
-/// never changes with that pill's availability and its layout can never take photo space (#305).
+/// Both tracks live independently inside one constant-height band (`body`: `76 pt` standard,
+/// `62 pt` compact), keeping Timeline's `ScrollView` alive across Group Focus so collapsing never
+/// resets its scroll offset or shifts neighboring thumbnails (#318) and reserving room for the
+/// `6 pt` raised current tile plus its `12 × 4 pt` two-tone marker `2 pt` below (#407). The
+/// screen draws the finishing pill itself, so the strip's height never changes with that pill's
+/// availability and its layout can never take photo space (#305).
 struct DetailFilmstrip: View {
     struct Metrics: Equatable {
         let thumbnailWidth: CGFloat
@@ -35,7 +37,7 @@ struct DetailFilmstrip: View {
             thumbnailHeight: 60,
             stackHeight: 64,
             timelineSpacing: 8,
-            bandHeight: 70,
+            bandHeight: 76,
             collapseCapWidth: 30,
             horizontalPadding: 10,
             verticalTrackPadding: 3,
@@ -48,7 +50,7 @@ struct DetailFilmstrip: View {
             thumbnailHeight: 48,
             stackHeight: 52,
             timelineSpacing: 4,
-            bandHeight: 56,
+            bandHeight: 62,
             collapseCapWidth: 28,
             horizontalPadding: 8,
             verticalTrackPadding: 2,
@@ -189,6 +191,7 @@ struct DetailFilmstrip: View {
                 .padding(.horizontal, metrics.horizontalPadding)
                 .padding(.vertical, metrics.verticalTrackPadding)
             }
+            .filmstripScrollEdgeEffectHidden()
             .coordinateSpace(name: Self.timelineViewportSpace)
             .onGeometryChange(for: CGFloat.self) {
                 $0.size.width
@@ -242,7 +245,7 @@ struct DetailFilmstrip: View {
                 maxWidth: .infinity, minHeight: metrics.bandHeight, maxHeight: metrics.bandHeight
             )
             .overlay {
-                HStack(spacing: 3) {
+                HStack(alignment: .bottom, spacing: 3) {
                     gridPickerCapButton(for: group)
                         .reportTapPickerFrame("clove.detail.filmstrip.group.gridPicker")
                         .layoutPriority(1)
@@ -268,6 +271,7 @@ struct DetailFilmstrip: View {
                                 }
                             }
                         }
+                        .filmstripScrollEdgeEffectHidden()
                         .coordinateSpace(name: Self.groupViewportSpace)
                         .onGeometryChange(for: CGFloat.self) {
                             $0.size.width
@@ -293,7 +297,7 @@ struct DetailFilmstrip: View {
                         }
                     }
                     .frame(maxWidth: currentMembersWidth)
-                    .frame(height: metrics.thumbnailHeight)
+                    .frame(height: metrics.thumbnailHeight + FilmstripCurrentPhotoMarker.lift)
 
                     collapseCapButton
                         .reportTapPickerFrame("clove.detail.filmstrip.group.fold")
@@ -669,18 +673,22 @@ struct DetailFilmstrip: View {
                 openPhoto(active.representative.id)
             }
         } label: {
-            FilmstripGroupStack(
-                cover: active.representative,
-                peekingIDs: peekingIDs,
-                isCurrent: holdsCurrent,
-                isDimmed: isDimmed,
-                visibleCount: active.visibleMembers.count,
-                thumbnailWidth: metrics.thumbnailWidth,
-                thumbnailHeight: metrics.thumbnailHeight,
-                peek: metrics.groupStackPeek,
-                thumbnails: thumbnails
-            )
-            .frame(width: metrics.thumbnailWidth, height: metrics.stackHeight)
+            FilmstripRaisedTile(
+                width: metrics.thumbnailWidth,
+                baseHeight: metrics.stackHeight,
+                isCurrent: holdsCurrent
+            ) {
+                FilmstripGroupStack(
+                    cover: active.representative,
+                    peekingIDs: peekingIDs,
+                    isDimmed: isDimmed,
+                    visibleCount: active.visibleMembers.count,
+                    thumbnailWidth: metrics.thumbnailWidth,
+                    thumbnailHeight: metrics.thumbnailHeight,
+                    peek: metrics.groupStackPeek,
+                    thumbnails: thumbnails
+                )
+            }
         }
         .buttonStyle(.plain)
         .simultaneousGesture(
@@ -742,10 +750,16 @@ struct DetailFilmstrip: View {
             guard !suppressTap() else { return }
             tap()
         } label: {
-            DetailPhotoFrame(
-                photo: photo, isCurrent: photo.id == current, thumbnails: thumbnails,
-                side: metrics.thumbnailWidth, height: metrics.thumbnailHeight
-            )
+            FilmstripRaisedTile(
+                width: metrics.thumbnailWidth,
+                baseHeight: metrics.thumbnailHeight,
+                isCurrent: photo.id == current
+            ) {
+                DetailPhotoFrame(
+                    photo: photo, isCurrent: photo.id == current, thumbnails: thumbnails,
+                    side: metrics.thumbnailWidth, height: metrics.thumbnailHeight
+                )
+            }
             .scaleEffect(x: scaleX, y: 1, anchor: .center)
         }
         .buttonStyle(.plain)
@@ -854,7 +868,6 @@ private struct FilmstripItemFrameTracker: ViewModifier {
 private struct FilmstripGroupStack: View {
     let cover: GridPhoto
     let peekingIDs: [PhotoIdentity]
-    let isCurrent: Bool
     let isDimmed: Bool
     let visibleCount: Int
     let thumbnailWidth: CGFloat
@@ -876,12 +889,6 @@ private struct FilmstripGroupStack: View {
                 showsMarks: true, appliesRejectedOpacity: false)
         }
         .opacity(isDimmed ? theme.tokens.rejectedOpacity : 1)
-        .overlay(alignment: .bottom) {
-            if isCurrent {
-                CurrentPhotoIndicator(cornerRadius: 5)
-                    .frame(width: thumbnailWidth, height: thumbnailHeight)
-            }
-        }
         .overlay(alignment: .topTrailing) {
             GroupCountBadge(count: visibleCount, presentation: .filmstrip)
                 .padding(2)

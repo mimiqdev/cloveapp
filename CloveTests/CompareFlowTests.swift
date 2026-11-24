@@ -774,6 +774,221 @@ struct CompareFlowTests {
         #expect(abs(snapConvertedSmall.anchor.y - manualAnchor.y) < 0.02)
     }
 
+    @Test(
+        "CompareFilmstrip raises only challenger B with full-opacity two-tone marker across activeSide switches and stepping"
+    )
+    func compareFilmstripPinsLiftAndTwoToneMarkerToChallengerOnly() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let folder = FolderIdentity(rawValue: "compare-filmstrip-marker")
+        let p1 = GridPhoto(
+            id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "CMP0001"),
+            fileName: "CMP0001.ARW",
+            time: .unavailable,
+            marks: PhotoMarks())
+        let p2 = GridPhoto(
+            id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "CMP0002"),
+            fileName: "CMP0002.ARW",
+            time: .unavailable,
+            marks: PhotoMarks(rating: .rejected))
+        let p3 = GridPhoto(
+            id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "CMP0003"),
+            fileName: "CMP0003.ARW",
+            time: .unavailable,
+            marks: PhotoMarks())
+        let photos = [p1, p2, p3]
+        let whiteThumb = makeSolidCGImage(
+            width: 32, height: 32, red: 1, green: 1, blue: 1)
+        let thumbnails = CompareStaticThumbnails(image: whiteThumb)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 140)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        func renderColor(
+            _ style: CloveColour,
+            referenceDimmedOverWhite: Bool = false,
+            theme: CloveTheme
+        ) throws -> (UInt8, UInt8, UInt8) {
+            let swatch: AnyView =
+                if referenceDimmedOverWhite {
+                    AnyView(
+                        ZStack {
+                            Color.black
+                            Color.white
+                                .overlay {
+                                    Rectangle().fill(style)
+                                }
+                                .opacity(0.78)
+                        })
+                } else {
+                    AnyView(
+                        ZStack {
+                            Color.black
+                            Rectangle().fill(style)
+                        })
+                }
+            let renderer = ImageRenderer(
+                content: swatch.frame(width: 8, height: 8).environment(\.cloveTheme, theme))
+            renderer.scale = 1
+            let cg = try #require(renderer.cgImage)
+            let (r, g, b, _) = try pixelAt(x: 4, y: 4, in: cg)
+            return (r, g, b)
+        }
+
+        func captureFilmstrip(
+            challenger: PhotoIdentity,
+            activeSide: CompareSide,
+            theme: CloveTheme
+        ) async throws -> CGImage {
+            let strip = CompareFilmstrip(
+                photos: photos,
+                reference: p1.id,
+                challenger: challenger,
+                activeSide: activeSide,
+                thumbnails: thumbnails,
+                onSelectCandidate: { _ in }
+            )
+            .frame(width: 240, height: 56)
+            .background(Color.black)
+            .ignoresSafeArea()
+            .environment(\.cloveTheme, theme)
+
+            let host = UIHostingController(rootView: AnyView(strip))
+            host.safeAreaRegions = []
+            host.view.backgroundColor = .black
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(120))
+            let region = CGRect(x: 40, y: (140 - 56) / 2.0, width: 240, height: 56)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 2
+            let rendered = UIGraphicsImageRenderer(size: region.size, format: format).image { ctx in
+                ctx.cgContext.translateBy(x: -region.minX, y: -region.minY)
+                _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            return try #require(rendered.cgImage)
+        }
+
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            let expectedCore = try renderColor(Color.clove.text.primary, theme: theme)
+            let expectedEdge = try renderColor(Color.clove.bg.canvas, theme: theme)
+            let expectedDimmedAccent = try renderColor(
+                Color.clove.accent, referenceDimmedOverWhite: true, theme: theme)
+
+            // 1. activeSide == .challenger: B (p2, rejected) is raised 6 pt and carries the marker.
+            let bActiveImage = try await captureFilmstrip(
+                challenger: p2.id, activeSide: .challenger, theme: theme)
+            // 2. activeSide == .reference: B STILL carries the lift & marker; A gets accent badge only.
+            let aActiveImage = try await captureFilmstrip(
+                challenger: p2.id, activeSide: .reference, theme: theme)
+            // 3. Stepping B to p3: lift & marker move to p3 while p2 drops back to baseline.
+            let steppedImage = try await captureFilmstrip(
+                challenger: p3.id, activeSide: .reference, theme: theme)
+
+            // ScrollView starts flush-leading at x=0 (padding 4):
+            // verify horizontal spans dynamically from mid-band pixels so center scrolling doesn't shift coordinates.
+            let spans = try horizontalTileSpans(in: bActiveImage, y: 56)
+            #expect(spans.count == 3)
+            let xA = (spans[0].lowerBound + spans[0].upperBound) / 2
+            let xB = (spans[1].lowerBound + spans[1].upperBound) / 2
+            let x3 = (spans[2].lowerBound + spans[2].upperBound) / 2
+
+            // Tile vertical bounds (sample away from top-left A/B badge and centered marker):
+            let sampleA = xA + 20
+            let sampleB = xB + 20
+            let sample3 = x3 + 20
+
+            let bActiveSpanA = try #require(try verticalLitSpan(in: bActiveImage, x: sampleA))
+            let bActiveSpanB = try #require(try verticalLitSpan(in: bActiveImage, x: sampleB))
+            let bActiveSpan3 = try #require(try verticalLitSpan(in: bActiveImage, x: sample3))
+            #expect(bActiveSpanA.lowerBound - bActiveSpanB.lowerBound == 12)
+            #expect(bActiveSpanA.upperBound - bActiveSpanB.upperBound == 12)
+            #expect(bActiveSpanA == bActiveSpan3)
+
+            // Marker sits at bottom of slot (y = 53 pt = 106 px bottom -> center 102 px, top edge 99 px).
+            let markerTopPx = 106 - 8
+            #expect(try pixelAt(x: xB, y: markerTopPx - 2, in: bActiveImage).0 < 20)
+            try expectColorClose(
+                pixelAt(x: xB, y: markerTopPx + 4, in: bActiveImage), expectedCore,
+                "\(theme.rawValue) rejected B marker core")
+            try expectColorClose(
+                pixelAt(x: xB, y: markerTopPx + 1, in: bActiveImage), expectedEdge,
+                "\(theme.rawValue) rejected B marker edge", tolerance: 30)
+            // Unraised A occupies the baseline down to markerTopPx + 7 (no 2 pt gap, no marker).
+            #expect(try pixelAt(x: xA, y: markerTopPx - 2, in: bActiveImage).0 > 120)
+            #expect(try pixelAt(x: xA, y: markerTopPx + 9, in: bActiveImage).0 < 20)
+            #expect(
+                try !isColorClose(
+                    pixelAt(x: xA, y: markerTopPx + 4, in: bActiveImage), expectedCore))
+
+            // Switching activeSide to .reference leaves lift & marker strictly on B (not A!).
+            let aActiveSpanA = try #require(try verticalLitSpan(in: aActiveImage, x: sampleA))
+            let aActiveSpanB = try #require(try verticalLitSpan(in: aActiveImage, x: sampleB))
+            #expect(aActiveSpanA.lowerBound - aActiveSpanB.lowerBound == 12)
+            #expect(aActiveSpanA.upperBound - aActiveSpanB.upperBound == 12)
+            #expect(try pixelAt(x: xB, y: markerTopPx - 2, in: aActiveImage).0 < 20)
+            try expectColorClose(
+                pixelAt(x: xB, y: markerTopPx + 4, in: aActiveImage), expectedCore,
+                "\(theme.rawValue) A-active still keeps marker on B core")
+            try expectColorClose(
+                pixelAt(x: xB, y: markerTopPx + 1, in: aActiveImage), expectedEdge,
+                "\(theme.rawValue) A-active still keeps marker on B edge", tolerance: 30)
+            #expect(try pixelAt(x: xA, y: markerTopPx - 2, in: aActiveImage).0 > 120)
+            #expect(try pixelAt(x: xA, y: markerTopPx + 9, in: aActiveImage).0 < 20)
+            #expect(
+                try !isColorClose(
+                    pixelAt(x: xA, y: markerTopPx + 4, in: aActiveImage), expectedCore))
+
+            // Badge A turns accent (within 0.78 reference frame opacity) when activeSide == .reference.
+            let hasAccentOnBadgeA = { (image: CGImage) in
+                (18..<48).contains { y in
+                    (spans[0].lowerBound..<(spans[0].lowerBound + 34)).contains { x in
+                        guard let px = try? pixelAt(x: x, y: y, in: image) else { return false }
+                        return abs(Int(px.0) - Int(expectedDimmedAccent.0)) <= 16
+                            && abs(Int(px.1) - Int(expectedDimmedAccent.1)) <= 16
+                            && abs(Int(px.2) - Int(expectedDimmedAccent.2)) <= 16
+                    }
+                }
+            }
+            #expect(
+                !hasAccentOnBadgeA(bActiveImage),
+                "\(theme.rawValue) A badge quiet when challenger active")
+            #expect(
+                hasAccentOnBadgeA(aActiveImage),
+                "\(theme.rawValue) A badge accent when reference active")
+
+            // Stepping B to p3 moves lift and marker to p3 and drops p2 back to baseline.
+            let steppedSpans = try horizontalTileSpans(in: steppedImage, y: 56)
+            #expect(steppedSpans.count == 3)
+            let sxA = (steppedSpans[0].lowerBound + steppedSpans[0].upperBound) / 2
+            let sx2 = (steppedSpans[1].lowerBound + steppedSpans[1].upperBound) / 2
+            let sx3 = (steppedSpans[2].lowerBound + steppedSpans[2].upperBound) / 2
+            let steppedSpanA = try #require(try verticalLitSpan(in: steppedImage, x: sxA + 20))
+            let steppedSpan2 = try #require(try verticalLitSpan(in: steppedImage, x: sx2 + 20))
+            let steppedSpan3 = try #require(try verticalLitSpan(in: steppedImage, x: sx3 + 20))
+            #expect(steppedSpanA == steppedSpan2)
+            #expect(steppedSpan2.lowerBound - steppedSpan3.lowerBound == 12)
+            #expect(try pixelAt(x: sx3, y: markerTopPx - 2, in: steppedImage).0 < 20)
+            try expectColorClose(
+                pixelAt(x: sx3, y: markerTopPx + 4, in: steppedImage), expectedCore,
+                "\(theme.rawValue) stepped challenger p3 marker core")
+            try expectColorClose(
+                pixelAt(x: sx3, y: markerTopPx + 1, in: steppedImage), expectedEdge,
+                "\(theme.rawValue) stepped challenger p3 marker edge", tolerance: 30)
+            // Dropped p2 (rejected) returns to baseline down to markerTopPx + 7 (no marker gap above it).
+            #expect(try pixelAt(x: sx2, y: markerTopPx - 2, in: steppedImage).0 > 40)
+            #expect(try pixelAt(x: sx2, y: markerTopPx + 9, in: steppedImage).0 < 20)
+            #expect(
+                try !isColorClose(
+                    pixelAt(x: sx2, y: markerTopPx + 4, in: steppedImage), expectedCore))
+        }
+    }
+
     private struct HostedCompare {
         let window: UIWindow
         let host: UIHostingController<AnyView>
@@ -844,16 +1059,106 @@ struct CompareFlowTests {
         }
     }
 
-    private func makeSolidCGImage(width: Int, height: Int) -> CGImage {
+    private func makeSolidCGImage(
+        width: Int, height: Int, red: CGFloat = 0.4, green: CGFloat = 0.5, blue: CGFloat = 0.6
+    ) -> CGImage {
         let context = CGContext(
             data: nil, width: width, height: height,
             bitsPerComponent: 8, bytesPerRow: width * 4,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-        context.setFillColor(CGColor(red: 0.4, green: 0.5, blue: 0.6, alpha: 1))
+        context.setFillColor(CGColor(red: red, green: green, blue: blue, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()!
     }
+
+    private func pixelAt(x: Int, y: Int, in image: CGImage) throws -> (UInt8, UInt8, UInt8, UInt8) {
+        let width = image.width
+        let height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let bitmapInfo =
+            CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let context = try #require(
+            CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let offset = (y * width + x) * 4
+        return (bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3])
+    }
+
+    private func expectColorClose(
+        _ actual: (UInt8, UInt8, UInt8, UInt8),
+        _ expected: (UInt8, UInt8, UInt8),
+        _ label: String,
+        tolerance: Int = 12,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(
+            isColorClose(actual, expected, tolerance: tolerance),
+            "\(label): actual \(actual) != expected \(expected)",
+            sourceLocation: sourceLocation)
+    }
+
+    private func isColorClose(
+        _ actual: (UInt8, UInt8, UInt8, UInt8),
+        _ expected: (UInt8, UInt8, UInt8),
+        tolerance: Int = 12
+    ) -> Bool {
+        abs(Int(actual.0) - Int(expected.0)) <= tolerance
+            && abs(Int(actual.1) - Int(expected.1)) <= tolerance
+            && abs(Int(actual.2) - Int(expected.2)) <= tolerance
+            && actual.3 == 255
+    }
+
+    private func horizontalTileSpans(in image: CGImage, y: Int) throws -> [ClosedRange<Int>] {
+        var spans: [ClosedRange<Int>] = []
+        var start: Int?
+        for x in 0..<image.width {
+            let (r, g, b, _) = try pixelAt(x: x, y: y, in: image)
+            let isLit = r > 20 || g > 20 || b > 20
+            if isLit {
+                if start == nil { start = x }
+            } else if let openStart = start {
+                spans.append(openStart...(x - 1))
+                start = nil
+            }
+        }
+        if let openStart = start {
+            spans.append(openStart...(image.width - 1))
+        }
+        return spans
+    }
+
+    private func verticalLitSpan(in image: CGImage, x: Int) throws -> ClosedRange<Int>? {
+        var minY: Int?
+        var maxY: Int?
+        for y in 0..<image.height {
+            let (r, g, b, _) = try pixelAt(x: x, y: y, in: image)
+            if r > 40 || g > 40 || b > 40 {
+                if minY == nil { minY = y }
+                maxY = y
+            }
+        }
+        guard let minY, let maxY else { return nil }
+        return minY...maxY
+    }
+}
+
+@MainActor
+private final class CompareStaticThumbnails: GridThumbnailSource {
+    private let image: CGImage
+
+    init(image: CGImage) {
+        self.image = image
+    }
+
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? { .image(image) }
+    func companions(for photo: PhotoIdentity) -> GridCompanions { GridCompanions() }
+    func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority) async
+        -> GridThumbnailOutcome
+    { .image(image) }
 }
 
 @MainActor

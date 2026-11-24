@@ -1304,7 +1304,7 @@ struct DetailDisplayPresentationTests {
         // scroll view reaches into the bottom safe area, so its absolute height differs there; its
         // own constancy is checked below.
         if !duo {
-            #expect(abs(stripAtFit.height - 70) <= 1)
+            #expect(abs(stripAtFit.height - DetailFilmstrip.Metrics.standard.bandHeight) <= 1)
         }
         if duo {
             // The dock still starts at the stage's bottom edge, so the stage and the dock are both
@@ -3529,7 +3529,7 @@ struct DetailDisplayPresentationTests {
 
                 let stripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
                 let capsuleFrame = try #require(tapFrames.frames["clove.detail.capsule"])
-                #expect(stripFrame.height <= 58)
+                #expect(abs(stripFrame.height - DetailFilmstrip.Metrics.compact.bandHeight) <= 0.5)
                 #expect(stripFrame.maxX <= capsuleFrame.minX + 1)
                 #expect(abs(capsuleFrame.width - 168) <= 2)
                 #expect(abs(capsuleFrame.height - 48) <= 2)
@@ -4660,10 +4660,11 @@ struct DetailDisplayPresentationTests {
         let landscapeFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
 
         // No reserved 48 pt top header: usable stage starts at the top of the Duo photo pane and
-        // takes the full usable height above the 70 pt bottom review/capsule band.
+        // takes the full usable height above the bottom review/capsule band.
+        let bandHeight = DetailFilmstrip.Metrics.standard.bandHeight
         #expect(framesBox.frames["clove.detail.photoHeader"] == nil)
         #expect(abs(stageAtLandscape.minY - duoPaneFrame.minY) <= 1.5)
-        #expect(abs(stageAtLandscape.height - (duoPaneFrame.height - 70)) <= 1.5)
+        #expect(abs(stageAtLandscape.height - (duoPaneFrame.height - bandHeight)) <= 1.5)
         // Wide landscape maximizes usable width without cropping and still keeps the badge pinned
         // to the viewport corner rather than the letterboxed image top.
         #expect(landscapeFit.minY > 30)
@@ -4690,7 +4691,7 @@ struct DetailDisplayPresentationTests {
         #expect(sameFrame(stageAtPortrait, stageAtLandscape))
         #expect(portraitFit.minX > 30)
         #expect(abs(portraitFit.height - stageAtPortrait.height) <= 1.5)
-        #expect(abs(portraitFit.height - (duoPaneFrame.height - 70)) <= 1.5)
+        #expect(abs(portraitFit.height - (duoPaneFrame.height - bandHeight)) <= 1.5)
         #expect(abs(portraitOverlay.minX - landscapeOverlay.minX) <= 1.0)
         #expect(abs(portraitOverlay.minY - landscapeOverlay.minY) <= 1.0)
         #expect(abs(portraitFocus.minX - landscapeFocus.minX) <= 2.0)
@@ -5297,6 +5298,8 @@ struct DetailDisplayPresentationTests {
                     #expect(abs(gridPickerFrame.midY - foldFrame.midY) <= 0.5)
                     #expect(gridPickerFrame.minX >= trayFrame.minX - 0.5)
                     #expect(foldFrame.maxX <= trayFrame.maxX + 0.5)
+                    #expect(abs((trayFrame.maxY - 3) - gridPickerFrame.maxY) <= 0.5)
+                    #expect(abs((trayFrame.maxY - 3) - foldFrame.maxY) <= 0.5)
 
                     // Sample the solid top-interior corner of each end cap to confirm both render
                     // the opaque inverted primaryText backing over both white and black backdrops.

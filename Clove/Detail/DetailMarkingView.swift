@@ -772,9 +772,8 @@ struct DetailMarkingView: View {
                     CloveMotion.slideTransition(
                         edge: .bottom, offset: 12, reduceMotion: reduceMotion))
             }
-            // The marking toolbar gets its own reserved bottom-right area inside the shared 70 pt
-            // bottom control band, never over the image and never in the system side toolbar
-            // (#200, #227). Both Photo Preview and Focus View anchor it with the same 16 pt
+            // The marking toolbar gets its own reserved bottom-right area inside the shared bottom
+            // control band, never over the image and never in the system side toolbar (#200, #227). Both Photo Preview and Focus View anchor it with the same 16 pt
             // trailing inset and vertical centering on the band so switching presentations keeps
             // the capsule stationary. In Focus View, the toolbar sibling is the one reservation:
             // its width (plus a 6 pt leading optical gap) narrows the filmstrip's viewport once,
