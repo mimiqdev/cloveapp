@@ -8213,6 +8213,28 @@
         }
       }
     },
+    "Show group photos": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show group photos"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示组内照片"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示群組相片"
+          }
+        }
+      }
+    },
     "Show or hide controls": {
       "localizations": {
         "en": {
@@ -8385,6 +8407,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "顯示檔案夾分析與預覽準備詳情。"
+          }
+        }
+      }
+    },
+    "Similar group": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Similar group"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似照片组"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似相片組"
           }
         }
       }

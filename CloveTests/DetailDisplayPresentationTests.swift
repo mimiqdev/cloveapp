@@ -1727,7 +1727,7 @@ struct DetailDisplayPresentationTests {
             .environment(\.isDuoExpanded, true)
             .environment(\.usesSystemBrowsingToolbar, true)
         let host = UIHostingController(rootView: NavigationStack { rootView })
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -1814,7 +1814,7 @@ struct DetailDisplayPresentationTests {
             .environment(store)
             .environment(\.isDuoExpanded, true)
             .environment(\.usesSystemBrowsingToolbar, true))
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -1893,7 +1893,7 @@ struct DetailDisplayPresentationTests {
             rootView: TestDetailPresentationHost(
                 browsing: browsing, images: source, presentation: presentationBox,
                 usesSystemToolbar: usesSystemToolbar))
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -1994,7 +1994,7 @@ struct DetailDisplayPresentationTests {
                     .environment(\.cloveUserInterfaceIdiom, .pad))
         }
         let host = UIHostingController(rootView: rootView)
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -2054,7 +2054,7 @@ struct DetailDisplayPresentationTests {
         let host = UIHostingController(
             rootView: TestDuoDetailHost(
                 browsing: browsing, images: source, presentation: presentationBox))
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -2114,7 +2114,7 @@ struct DetailDisplayPresentationTests {
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 headerFrames.frames = $0
             })
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -2234,7 +2234,7 @@ struct DetailDisplayPresentationTests {
                 && headerFrames.frames["clove.detail.photoCornerOverlay"] == nil
         }
 
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         host.rootView = TestDuoPoseDetailHost(
             browsing: browsing,
             images: source,
@@ -2301,7 +2301,7 @@ struct DetailDisplayPresentationTests {
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 overlayFrames.frames = $0
             })
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -2489,7 +2489,7 @@ struct DetailDisplayPresentationTests {
                 hasFoldRegion: true,
                 showsGrid: true,
                 theme: .dark))
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -2797,7 +2797,7 @@ struct DetailDisplayPresentationTests {
             rootView: TestDetailPresentationHost(
                 browsing: browsing, images: source, presentation: presentationBox,
                 usesSystemToolbar: usesSystemToolbar))
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
         window.rootViewController = host
@@ -2988,7 +2988,7 @@ struct DetailDisplayPresentationTests {
                 tapFrames.frames = frames
             })
         // Pro Max iPhone reports regular horizontal / compact vertical in landscape.
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         host.traitOverrides.verticalSizeClass = .compact
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -3208,7 +3208,7 @@ struct DetailDisplayPresentationTests {
 
         // Rotate to Pro Max landscape: open tap picker dismisses, state + zoom stay intact,
         // no redundant image load occurs, and landscapeBottomRow mounts.
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         host.traitOverrides.verticalSizeClass = .compact
         window.frame = CGRect(x: 0, y: 0, width: 932, height: 430)
         host.view.setNeedsLayout()
@@ -3318,7 +3318,7 @@ struct DetailDisplayPresentationTests {
             let host = UIHostingController(
                 rootView: HostedDuoPane(
                     browsing: browsing, store: store, theme: theme, framesBox: framesBox))
-            host.traitOverrides.horizontalSizeClass = .regular
+            host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
             host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -3597,7 +3597,7 @@ struct DetailDisplayPresentationTests {
             rootView: HostView(
                 browsing: browsing, store: store, presentation: presentationBox,
                 framesBox: framesBox))
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -3833,7 +3833,7 @@ struct DetailDisplayPresentationTests {
                         browsing: browsing, store: store, theme: theme,
                         dynamicTypeSize: dynamicTypeSize, presentation: presentationBox,
                         headerFrames: headerFrames, headerCounts: headerCounts))
-                host.traitOverrides.horizontalSizeClass = .regular
+                host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
                 host.additionalSafeAreaInsets = UIEdgeInsets(
                     top: 16, left: 0, bottom: 0, right: 89.5)
                 window.rootViewController = host
@@ -4059,7 +4059,7 @@ struct DetailDisplayPresentationTests {
                 .onPreferenceChange(HeaderControlCountsPreferenceKey.self) {
                     countsBox.counts = $0
                 })
-            host.traitOverrides.horizontalSizeClass = .regular
+            host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
             window.rootViewController = host
             window.makeKeyAndVisible()
             defer {
@@ -4196,7 +4196,7 @@ struct DetailDisplayPresentationTests {
             .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
                 paneFramesBox.frames = $0
             })
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -4370,7 +4370,7 @@ struct DetailDisplayPresentationTests {
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 framesBox.frames = $0
             })
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -4513,7 +4513,7 @@ struct DetailDisplayPresentationTests {
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 framesBox.frames = $0
             })
-        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -4761,6 +4761,534 @@ struct DetailDisplayPresentationTests {
         #expect(halfFoldFrames.frames["clove.detail.photoCornerOverlay"] == nil)
     }
 
+    @Test func expandedFilmstripEndCapsStaySymmetricalHighContrastAndKeepTimelineClean()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let folder = FolderIdentity(rawValue: "filmstrip-caps-test")
+        let photos = (1...5).map { index in
+            GridPhoto(
+                id: PhotoIdentity(
+                    folderID: folder, relativeFolderPath: "", stem: "CAP00\(index)"),
+                fileName: "CAP00\(index).ARW",
+                time: .unavailable,
+                marks: PhotoMarks())
+        }
+        let groupID = GroupID(rawValue: "caps-group")
+        let groups = [
+            BrowsingGroup(id: groupID, members: [photos[1].id, photos[2].id, photos[3].id])
+        ]
+        let timeline = DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
+        let expanded = try #require(timeline.activeGroup(with: groupID))
+
+        for metrics in [DetailFilmstrip.Metrics.standard, .compact] {
+            for theme in [CloveTheme.light, CloveTheme.dark, CloveTheme.nord] {
+                for backdrop in [Color.white, Color.black] {
+                    let state = FilmstripCapTestState(
+                        timeline: timeline,
+                        expandedGroup: nil,
+                        current: photos[1].id)
+                    let framesBox = DetailFrameBox()
+
+                    struct HostView: View {
+                        @Bindable var state: FilmstripCapTestState
+                        let metrics: DetailFilmstrip.Metrics
+                        let theme: CloveTheme
+                        let backdrop: Color
+
+                        var body: some View {
+                            ZStack {
+                                backdrop
+                                DetailFilmstrip(
+                                    timeline: state.timeline,
+                                    expandedGroup: state.expandedGroup,
+                                    current: state.current,
+                                    thumbnails: TestLibrary.sampleThumbnails,
+                                    metrics: metrics,
+                                    openPhoto: { _ in },
+                                    selectGroupPhoto: { state.current = $0 },
+                                    expandGroup: { _ in },
+                                    collapseGroup: { state.expandedGroup = nil }
+                                )
+                            }
+                            .frame(width: 402, height: 120)
+                            .environment(\.cloveTheme, theme)
+                            .environment(\.scenePhase, .active)
+                        }
+                    }
+
+                    let host = UIHostingController(
+                        rootView: HostView(
+                            state: state, metrics: metrics, theme: theme, backdrop: backdrop
+                        )
+                        .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                            framesBox.frames = frames
+                        })
+                    let window = UIWindow(windowScene: scene)
+                    window.frame = CGRect(x: 0, y: 0, width: 402, height: 120)
+                    window.rootViewController = host
+                    window.makeKeyAndVisible()
+                    defer {
+                        window.isHidden = true
+                        window.rootViewController = nil
+                    }
+
+                    try await waitFor("Timeline filmstrip did not lay out") {
+                        framesBox.frames["clove.detail.filmstrip"] != nil
+                            && framesBox.frames["clove.detail.filmstrip.timeline"] != nil
+                    }
+                    let timelineStripFrame = try #require(
+                        framesBox.frames["clove.detail.filmstrip"])
+                    #expect(abs(timelineStripFrame.height - metrics.bandHeight) <= 0.5)
+                    #expect(framesBox.frames["clove.detail.filmstrip.group.gridPicker"] == nil)
+                    #expect(framesBox.frames["clove.detail.filmstrip.group.fold"] == nil)
+                    #expect(framesBox.frames["clove.detail.filmstrip.expandedGroup"] == nil)
+
+                    state.expandedGroup = expanded
+                    try await waitFor("Expanded group caps did not lay out") {
+                        framesBox.frames["clove.detail.filmstrip.group.gridPicker"] != nil
+                            && framesBox.frames["clove.detail.filmstrip.group.fold"] != nil
+                            && framesBox.frames["clove.detail.filmstrip.expandedGroup"] != nil
+                    }
+                    try await Task.sleep(for: .milliseconds(320))
+
+                    let expandedStripFrame = try #require(
+                        framesBox.frames["clove.detail.filmstrip"])
+                    let trayFrame = try #require(
+                        framesBox.frames["clove.detail.filmstrip.expandedGroup"])
+                    let gridPickerFrame = try #require(
+                        framesBox.frames["clove.detail.filmstrip.group.gridPicker"])
+                    let foldFrame = try #require(
+                        framesBox.frames["clove.detail.filmstrip.group.fold"])
+
+                    #expect(abs(expandedStripFrame.height - metrics.bandHeight) <= 0.5)
+                    #expect(abs(gridPickerFrame.width - metrics.collapseCapWidth) <= 0.5)
+                    #expect(abs(foldFrame.width - metrics.collapseCapWidth) <= 0.5)
+                    #expect(abs(gridPickerFrame.height - metrics.thumbnailHeight) <= 0.5)
+                    #expect(abs(foldFrame.height - metrics.thumbnailHeight) <= 0.5)
+                    #expect(gridPickerFrame.maxX < foldFrame.minX)
+                    #expect(abs(gridPickerFrame.midY - foldFrame.midY) <= 0.5)
+                    #expect(gridPickerFrame.minX >= trayFrame.minX - 0.5)
+                    #expect(foldFrame.maxX <= trayFrame.maxX + 0.5)
+
+                    // Sample the solid top-interior corner of each end cap to confirm both render
+                    // the opaque inverted primaryText backing over both white and black backdrops.
+                    let format = UIGraphicsImageRendererFormat()
+                    format.scale = 1
+                    let snapshot = UIGraphicsImageRenderer(
+                        size: window.bounds.size, format: format
+                    ).image { _ in
+                        _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                    }
+                    let cgImage = try #require(snapshot.cgImage)
+                    let expectedBacking = theme.tokens.primaryText
+                    for capFrame in [gridPickerFrame, foldFrame] {
+                        let sample = try rgbaPixel(
+                            in: cgImage,
+                            at: CGPoint(x: capFrame.minX + 5, y: capFrame.minY + 5))
+                        #expect(abs(sample.r - expectedBacking.red) < 0.08)
+                        #expect(abs(sample.g - expectedBacking.green) < 0.08)
+                        #expect(abs(sample.b - expectedBacking.blue) < 0.08)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func groupPhotoGridPickerAdaptsPresentationAndDismissesSafely() async throws {
+        #expect(
+            GroupPhotoGridPickerPresentationMode.resolved(horizontalSizeClass: .regular)
+                == .popover)
+        #expect(
+            GroupPhotoGridPickerPresentationMode.resolved(horizontalSizeClass: .compact) == .sheet)
+        #expect(GroupPhotoGridPickerPresentationMode.resolved(horizontalSizeClass: nil) == .sheet)
+        #expect(GroupPhotoGridPicker.popoverHeight(memberCount: 3, compactHeight: false) < 200)
+        #expect(GroupPhotoGridPicker.popoverHeight(memberCount: 40, compactHeight: false) <= 400)
+        #expect(GroupPhotoGridPicker.popoverHeight(memberCount: 40, compactHeight: true) <= 240)
+
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let folder = FolderIdentity(rawValue: "grid-picker-presentation")
+        let photos = (1...8).map { index in
+            GridPhoto(
+                id: PhotoIdentity(
+                    folderID: folder, relativeFolderPath: "", stem: "GRP00\(index)"),
+                fileName: "GRP00\(index).ARW",
+                time: .unavailable,
+                marks: PhotoMarks())
+        }
+        let firstGroupID = GroupID(rawValue: "group-a")
+        let secondGroupID = GroupID(rawValue: "group-b")
+        let groups = [
+            BrowsingGroup(id: firstGroupID, members: Array(photos[0..<4].map(\.id))),
+            BrowsingGroup(id: secondGroupID, members: Array(photos[4..<8].map(\.id))),
+        ]
+        let timeline = DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
+        let firstGroup = try #require(timeline.activeGroup(with: firstGroupID))
+        let secondGroup = try #require(timeline.activeGroup(with: secondGroupID))
+
+        let state = FilmstripCapTestState(
+            timeline: timeline,
+            expandedGroup: firstGroup,
+            current: photos[0].id)
+        let triggerBox = DetailPickerTriggerBox()
+
+        struct HostView: View {
+            @Bindable var state: FilmstripCapTestState
+            @Bindable var triggerBox: DetailPickerTriggerBox
+
+            var body: some View {
+                VStack {
+                    Spacer()
+                    DetailFilmstrip(
+                        timeline: state.timeline,
+                        expandedGroup: state.expandedGroup,
+                        current: state.current,
+                        thumbnails: TestLibrary.sampleThumbnails,
+                        gridPickerDismissToken: state.dismissToken,
+                        openPhoto: { _ in },
+                        selectGroupPhoto: { state.current = $0 },
+                        expandGroup: { _ in },
+                        collapseGroup: { state.expandedGroup = nil }
+                    )
+                }
+                .environment(\.cloveTheme, .light)
+                .environment(\.scenePhase, state.scenePhase)
+                .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+            }
+        }
+
+        let host = UIHostingController(rootView: HostView(state: state, triggerBox: triggerBox))
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+
+        // 1. Compact width presents a sheet.
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("compact sheet did not present") {
+            self.topPresentedViewController(from: host)?.sheetPresentationController != nil
+        }
+
+        // 2. Flipping size class (compact -> regular) auto-dismisses cleanly.
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor("sheet did not dismiss on horizontalSizeClass change") {
+            self.topPresentedViewController(from: host) == nil
+        }
+
+        // 3. Regular width presents a popover anchored to the grid picker button.
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("regular popover did not present") {
+            self.topPresentedViewController(from: host)?.popoverPresentationController != nil
+        }
+
+        // 4. Collapsing Group Focus dismisses the popover.
+        state.expandedGroup = nil
+        try await waitFor("popover did not dismiss when expandedGroup became nil") {
+            self.topPresentedViewController(from: host) == nil
+        }
+
+        // 5. Switching to a different expanded group ID dismisses the popover.
+        state.expandedGroup = firstGroup
+        try await Task.sleep(for: .milliseconds(100))
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("popover did not re-present") {
+            self.topPresentedViewController(from: host) != nil
+        }
+        state.expandedGroup = secondGroup
+        state.current = photos[4].id
+        try await waitFor("popover did not dismiss on group ID change") {
+            self.topPresentedViewController(from: host) == nil
+        }
+
+        // 6. Scene backgrounding / inactivation dismisses the popover.
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("popover did not re-present before scenePhase change") {
+            self.topPresentedViewController(from: host) != nil
+        }
+        state.scenePhase = .inactive
+        UIView.performWithoutAnimation {
+            _ = window.snapshotView(afterScreenUpdates: true)
+        }
+        try await waitFor("popover did not dismiss on inactive scenePhase") {
+            self.topPresentedViewController(from: host) == nil
+        }
+
+        // 7. External dismiss token (chrome hide / marking key) dismisses the popover.
+        state.scenePhase = .active
+        try await Task.sleep(for: .milliseconds(80))
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("popover did not re-present before dismissToken") {
+            self.topPresentedViewController(from: host) != nil
+        }
+        state.dismissToken += 1
+        try await waitFor("popover did not dismiss on dismissToken change") {
+            self.topPresentedViewController(from: host) == nil
+        }
+    }
+
+    @Test func groupPhotoGridPickerListsVisibleMembersMarksCurrentAndSelectsPhoto() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let folder = FolderIdentity(rawValue: "grid-picker-members")
+        let allPhotos = try (1...24).map { index in
+            let stem = String(format: "GRP%03d", index)
+            let marks: PhotoMarks =
+                switch index {
+                case 1: PhotoMarks(rating: try #require(Rating(rawValue: 4)))
+                case 2: PhotoMarks(label: ColourLabel(colour: .green))
+                case 3: PhotoMarks(rating: .rejected)
+                default: PhotoMarks()
+                }
+            return GridPhoto(
+                id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: stem),
+                fileName: "\(stem).ARW",
+                time: .unavailable,
+                marks: marks)
+        }
+        let outsidePhoto = GridPhoto(
+            id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "OUT001"),
+            fileName: "OUT001.ARW",
+            time: .unavailable,
+            marks: PhotoMarks())
+        let groupID = GroupID(rawValue: "grid-picker-burst")
+        let groups = [BrowsingGroup(id: groupID, members: allPhotos.map(\.id))]
+
+        // 1. Respects active filters: filtered-out members drop from visibleMembers & shrink height.
+        let fullTimeline = DetailTimeline(
+            photos: allPhotos + [outsidePhoto], groups: groups, groupsEnabled: true)
+        let fullGroup = try #require(fullTimeline.activeGroup(with: groupID))
+        #expect(fullGroup.visibleMembers.count == 24)
+        #expect(!fullGroup.visibleMembers.contains(where: { $0.id == outsidePhoto.id }))
+
+        let smallPhotos = Array(allPhotos.prefix(8))
+        let smallGroups = [BrowsingGroup(id: groupID, members: smallPhotos.map(\.id))]
+        let unfilteredSmall = DetailTimeline(
+            photos: smallPhotos, groups: smallGroups, groupsEnabled: true)
+        let filteredSmallPhotos = smallPhotos.enumerated().compactMap { offset, photo in
+            offset < 4 ? photo : nil
+        }
+        let filteredSmall = DetailTimeline(
+            photos: filteredSmallPhotos, groups: smallGroups, groupsEnabled: true)
+        let filteredGroup = try #require(filteredSmall.activeGroup(with: groupID))
+        #expect(filteredGroup.visibleMembers.count == 4)
+        #expect(
+            GroupPhotoGridPicker.popoverHeight(
+                memberCount: filteredGroup.visibleMembers.count, compactHeight: false)
+                < GroupPhotoGridPicker.popoverHeight(
+                    memberCount: try #require(unfilteredSmall.activeGroup(with: groupID))
+                        .visibleMembers.count,
+                    compactHeight: false))
+
+        // 2. Long burst auto-scrolls the picker to `current` when presented from DetailFilmstrip.
+        let targetCurrent = allPhotos[21].id
+        let triggerBox = DetailPickerTriggerBox()
+        struct FilmstripPopoverHost: View {
+            let timeline: DetailTimeline
+            let expandedGroup: ActiveBrowsingGroup
+            let current: PhotoIdentity
+            let thumbnails: any GridThumbnailSource
+            @Bindable var triggerBox: DetailPickerTriggerBox
+
+            var body: some View {
+                VStack {
+                    Spacer()
+                    DetailFilmstrip(
+                        timeline: timeline,
+                        expandedGroup: expandedGroup,
+                        current: current,
+                        thumbnails: thumbnails,
+                        openPhoto: { _ in },
+                        selectGroupPhoto: { _ in },
+                        expandGroup: { _ in },
+                        collapseGroup: {}
+                    )
+                }
+                .environment(\.cloveTheme, .dark)
+                .environment(\.scenePhase, .active)
+                .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+            }
+        }
+
+        let solidThumbnails = SolidWhiteThumbnails()
+        let host = UIHostingController(
+            rootView: FilmstripPopoverHost(
+                timeline: fullTimeline,
+                expandedGroup: fullGroup,
+                current: targetCurrent,
+                thumbnails: solidThumbnails,
+                triggerBox: triggerBox))
+        host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("group picker popover did not scroll to current photo") {
+            guard let presented = self.topPresentedViewController(from: host),
+                let scrollView = self.findFirstScrollView(in: presented.view)
+            else { return false }
+            return scrollView.contentSize.height > scrollView.bounds.height + 1
+                && scrollView.contentOffset.y > 0
+        }
+
+        host.dismiss(animated: false)
+
+        // 3. Visual indicators inside GroupPhotoGridPicker: current ring, green label, reject dim.
+        let fourGroup = try #require(filteredSmall.activeGroup(with: groupID))
+        let pickerHeight = GroupPhotoGridPicker.popoverHeight(
+            memberCount: fourGroup.visibleMembers.count, compactHeight: false)
+        let pickerHost = UIHostingController(
+            rootView: GroupPhotoGridPicker(
+                group: fourGroup,
+                current: smallPhotos[0].id,
+                thumbnails: solidThumbnails,
+                showsDoneButton: false,
+                onSelect: { _ in }
+            )
+            .ignoresSafeArea()
+            .environment(\.cloveTheme, .dark))
+        pickerHost.safeAreaRegions = []
+        let pickerWindow = UIWindow(windowScene: scene)
+        pickerWindow.frame = CGRect(x: 0, y: 120, width: 340, height: pickerHeight)
+        pickerWindow.rootViewController = pickerHost
+        pickerWindow.makeKeyAndVisible()
+        defer {
+            pickerWindow.isHidden = true
+            pickerWindow.rootViewController = nil
+        }
+
+        pickerWindow.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(120))
+        pickerWindow.layoutIfNeeded()
+
+        let scale: CGFloat = 2
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        let renderer = UIGraphicsImageRenderer(size: pickerWindow.bounds.size, format: format)
+        let image = renderer.image { _ in
+            pickerWindow.drawHierarchy(in: pickerWindow.bounds, afterScreenUpdates: true)
+        }
+        let cgImage = try #require(image.cgImage)
+
+        // Locate exact pixel bounds of the unmarked white thumbnail (cell index 3).
+        let cellSide: CGFloat = (340 - 24 - 18) / 4
+        let stepX: CGFloat = cellSide + 6
+        func cellMinX(_ index: Int) -> CGFloat { (12 + CGFloat(index) * stepX) * scale }
+        let normalCenterX = cellMinX(3) + (cellSide * scale) / 2
+        var whiteRowYs: [Int] = []
+        for y in 0..<cgImage.height {
+            let probe = try rgbaPixel(in: cgImage, at: CGPoint(x: normalCenterX, y: CGFloat(y)))
+            if probe.r > 0.9, probe.g > 0.9, probe.b > 0.9 {
+                whiteRowYs.append(y)
+            }
+        }
+        let cellTopY = CGFloat(try #require(whiteRowYs.first))
+        let cellBottomY = CGFloat(try #require(whiteRowYs.last))
+        let cellCenterY = (cellTopY + cellBottomY) / 2
+        #expect(cellBottomY - cellTopY >= 130)
+
+        // Rejected photo (index 2) renders noticeably dimmer than normal photo (index 3).
+        let rejectedCenter = try rgbaPixel(
+            in: cgImage, at: CGPoint(x: cellMinX(2) + (cellSide * scale) / 2, y: cellCenterY))
+        let normalCenter = try rgbaPixel(
+            in: cgImage, at: CGPoint(x: normalCenterX, y: cellCenterY))
+        #expect(normalCenter.r > 0.9)
+        #expect(rejectedCenter.r < normalCenter.r - 0.35)
+
+        // CurrentPhotoIndicator accent ring renders on cell 0's left edge and not on cell 3's.
+        let accent = CloveTheme.dark.tokens.accent
+        let hasAccentOnCell0 = try (0...10).contains { dx in
+            let sample = try rgbaPixel(
+                in: cgImage, at: CGPoint(x: cellMinX(0) - 2 + CGFloat(dx), y: cellCenterY))
+            return abs(sample.r - accent.red) < 0.15
+                && abs(sample.g - accent.green) < 0.15
+                && abs(sample.b - accent.blue) < 0.15
+        }
+        let hasAccentOnCell3 = try (0...10).contains { dx in
+            let sample = try rgbaPixel(
+                in: cgImage, at: CGPoint(x: cellMinX(3) - 2 + CGFloat(dx), y: cellCenterY))
+            return abs(sample.r - accent.red) < 0.15
+                && abs(sample.g - accent.green) < 0.15
+                && abs(sample.b - accent.blue) < 0.15
+        }
+        #expect(hasAccentOnCell0)
+        #expect(!hasAccentOnCell3)
+
+        // Green label dot appears in the bottom-trailing corner of cell 1 (index 1).
+        var foundGreenDot = false
+        for dy in 2...36 {
+            for dx in 2...36 {
+                let sample = try rgbaPixel(
+                    in: cgImage,
+                    at: CGPoint(
+                        x: cellMinX(1) + cellSide * scale - CGFloat(dx),
+                        y: cellBottomY - CGFloat(dy)))
+                if sample.g > sample.r + 0.12, sample.g > sample.b + 0.12 {
+                    foundGreenDot = true
+                    break
+                }
+            }
+            if foundGreenDot { break }
+        }
+        #expect(foundGreenDot)
+    }
+
+    private func rgbaPixel(in image: CGImage, at point: CGPoint) throws -> (
+        r: Double, g: Double, b: Double, a: Double
+    ) {
+        let x = max(0, min(image.width - 1, Int(point.x.rounded())))
+        let y = max(0, min(image.height - 1, Int(point.y.rounded())))
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try #require(
+            CGContext(
+                data: &bytes,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue))
+        context.draw(
+            image,
+            in: CGRect(
+                x: -CGFloat(x),
+                y: -CGFloat(image.height - 1 - y),
+                width: CGFloat(image.width),
+                height: CGFloat(image.height)))
+        return (
+            Double(bytes[0]) / 255.0,
+            Double(bytes[1]) / 255.0,
+            Double(bytes[2]) / 255.0,
+            Double(bytes[3]) / 255.0
+        )
+    }
+
+    private func topPresentedViewController(from controller: UIViewController) -> UIViewController?
+    {
+        if let presented = controller.presentedViewController { return presented }
+        for child in controller.children {
+            if let presented = topPresentedViewController(from: child) { return presented }
+        }
+        return nil
+    }
+
     private func sendSwipe(
         to preview: DetailZoomContainerView,
         start: CGPoint = CGPoint(x: 195, y: 300),
@@ -4813,37 +5341,24 @@ struct DetailDisplayPresentationTests {
 
     private func findAccessibilityElement(
         withIdentifier identifier: String, in view: UIView
-    ) -> NSObject? {
-        allAccessibilityElements(withIdentifier: identifier, in: view).first
+    ) -> UIView? {
+        if view.accessibilityIdentifier == identifier { return view }
+        for child in view.subviews {
+            if let found = findAccessibilityElement(withIdentifier: identifier, in: child) {
+                return found
+            }
+        }
+        return nil
     }
 
-    private func allAccessibilityElements(
-        withIdentifier identifier: String, in view: UIView
-    ) -> [NSObject] {
-        var matches: [NSObject] = []
-        func visitAccessibilityObject(_ object: NSObject) {
-            if (object.value(forKey: "accessibilityIdentifier") as? String) == identifier {
-                matches.append(object)
-            }
-            if let nested = object.value(forKey: "accessibilityElements") as? [NSObject] {
-                for element in nested where element !== object {
-                    visitAccessibilityObject(element)
-                }
-            }
-        }
-        if view.accessibilityIdentifier == identifier {
-            matches.append(view)
-        }
-        if let elements = view.accessibilityElements as? [NSObject] {
-            for element in elements {
-                visitAccessibilityObject(element)
-            }
+    private func findFirstScrollView(in view: UIView) -> UIScrollView? {
+        if let scrollView = view as? UIScrollView, !(view is UICollectionView) {
+            return scrollView
         }
         for child in view.subviews {
-            matches.append(
-                contentsOf: allAccessibilityElements(withIdentifier: identifier, in: child))
+            if let found = findFirstScrollView(in: child) { return found }
         }
-        return matches
+        return nil
     }
 
     private func findCollectionView(in view: UIView) -> UICollectionView? {
@@ -5556,5 +6071,52 @@ private final class DetailPickerTriggerBox {
     func sendTrigger(_ id: String) {
         nonce += 1
         trigger = TapPickerTriggerRequest(id: id, nonce: nonce)
+    }
+}
+
+@MainActor
+@Observable
+private final class FilmstripCapTestState {
+    let timeline: DetailTimeline
+    var expandedGroup: ActiveBrowsingGroup?
+    var current: PhotoIdentity?
+    var scenePhase: ScenePhase = .active
+    var dismissToken = 0
+
+    init(
+        timeline: DetailTimeline,
+        expandedGroup: ActiveBrowsingGroup?,
+        current: PhotoIdentity?
+    ) {
+        self.timeline = timeline
+        self.expandedGroup = expandedGroup
+        self.current = current
+    }
+}
+
+@MainActor
+private final class SolidWhiteThumbnails: GridThumbnailSource {
+    private let whiteImage: CGImage = {
+        let context = CGContext(
+            data: nil, width: 120, height: 120, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 120, height: 120))
+        return context.makeImage()!
+    }()
+
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? {
+        .image(whiteImage)
+    }
+
+    func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority)
+        async -> GridThumbnailOutcome
+    {
+        .image(whiteImage)
+    }
+
+    func companions(for photo: PhotoIdentity) -> GridCompanions {
+        GridCompanions()
     }
 }

@@ -129,6 +129,7 @@ struct DetailMarkingView: View {
     /// swipe's star bar must stay above the pill there too (#305).
     @State private var duoPillHeight: CGFloat = 0
     @State private var tapPickerDismissToken = 0
+    @State private var gridPickerDismissToken = 0
     @State private var focusRegionState = DetailFocusRegionState()
     @State private var focusAnalysisID = UUID()
     @State private var inspectedFocusRegionID: String?
@@ -241,6 +242,9 @@ struct DetailMarkingView: View {
             .onChange(of: duoPopoverDismissTrigger) { _, _ in
                 showsToolbarStars = false
                 toolbarDragRating = nil
+            }
+            .onChange(of: tapPickerDismissTrigger) { _, _ in
+                gridPickerDismissToken += 1
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active {
@@ -773,6 +777,7 @@ struct DetailMarkingView: View {
                             expandedGroup: expandedGroup,
                             current: photo.id,
                             thumbnails: browsing.thumbnails,
+                            gridPickerDismissToken: gridPickerDismissToken,
                             openPhoto: openFilmstripPhoto,
                             selectGroupPhoto: selectFilmstripGroupPhoto,
                             expandGroup: expandFilmstripGroup,
@@ -1091,6 +1096,7 @@ struct DetailMarkingView: View {
                         expandedGroup: expandedGroup,
                         current: photo.id,
                         thumbnails: browsing.thumbnails,
+                        gridPickerDismissToken: gridPickerDismissToken,
                         openPhoto: openFilmstripPhoto,
                         selectGroupPhoto: selectFilmstripGroupPhoto,
                         expandGroup: expandFilmstripGroup,
@@ -1158,6 +1164,7 @@ struct DetailMarkingView: View {
                 current: photo.id,
                 thumbnails: browsing.thumbnails,
                 metrics: .compact,
+                gridPickerDismissToken: gridPickerDismissToken,
                 openPhoto: openFilmstripPhoto,
                 selectGroupPhoto: selectFilmstripGroupPhoto,
                 expandGroup: expandFilmstripGroup,
