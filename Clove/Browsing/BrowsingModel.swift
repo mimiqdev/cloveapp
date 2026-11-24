@@ -53,6 +53,9 @@ final class BrowsingModel {
     /// Display-only activity forwarded by the folder's visual grouping pass.
     private(set) var isFindingSimilarShots = false
 
+    /// Whether visual similarity grouping is actively running with similar groups enabled.
+    var isGroupingInProgress: Bool { isFindingSimilarShots && similarGroupsEnabled }
+
     /// Folder-wide analysis and preview preparation progress shared by Grid, Preview, and Focus.
     private(set) var preparationStatus: FolderPreparationStatus = .idle
 
@@ -64,6 +67,7 @@ final class BrowsingModel {
     private var dismissedPreparationCompletion: DismissedPreparationCompletion?
 
     var showsPreparationIndicator: Bool {
+        if isGroupingInProgress { return true }
         guard preparationStatus.phase != .idle else { return false }
         if preparationStatus.phase == .complete,
             let dismissed = dismissedPreparationCompletion,
@@ -76,7 +80,9 @@ final class BrowsingModel {
     }
 
     func dismissPreparationCompletion(folder: FolderIdentity, generation: Int) {
-        guard preparationStatus.phase == .complete,
+        guard !isGroupingInProgress,
+            preparationStatus.phase == .complete,
+            preparationStatus.waitingReason == nil,
             preparationStatus.folder == folder,
             preparationStatus.generation == generation
         else { return }
@@ -1685,8 +1691,9 @@ final class BrowsingModel {
             guard folder == library.folder, generation == library.openGeneration else { return }
             await discardDisconnectedChanges(loss, generation: generation)
             if preparationStatus.folder == folder, preparationStatus.generation == generation,
-                preparationStatus.phase != .idle, preparationStatus.phase != .complete,
-                preparationStatus.phase != .completeWithIssues
+                isGroupingInProgress
+                    || (preparationStatus.phase != .idle && preparationStatus.phase != .complete
+                        && preparationStatus.phase != .completeWithIssues)
             {
                 preparationStatus.waitingReason = .folderUnavailable(loss.reason)
                 dismissedPreparationCompletion = nil

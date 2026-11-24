@@ -172,6 +172,25 @@ struct FolderPreparationPresentationTests {
             issues: [])
         #expect(!unsupportedOnly.hasRetryableIssues)
         #expect(!FolderPreparationAccessibility.canRetryIssues(for: unsupportedOnly))
+
+        // Grouping reflects active and paused VoiceOver states when prep is .complete or .idle.
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: .idle, isFindingSimilarShots: true) == "Finding similar shots")
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: complete, isFindingSimilarShots: true) == "Finding similar shots")
+        var pausedComplete = complete
+        pausedComplete.waitingReason = .memoryPressure
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: pausedComplete, isFindingSimilarShots: true) == "Paused for memory")
+        var disconnectedComplete = complete
+        disconnectedComplete.waitingReason = .folderUnavailable(.externalVolumeDisconnected)
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: disconnectedComplete, isFindingSimilarShots: true)
+                == "Paused · drive disconnected")
     }
 
     @Test func browsingModelRetryPreparationIssuesResolvesSampleIssuesAndBlocksWhenDisconnected()
@@ -241,6 +260,140 @@ struct FolderPreparationPresentationTests {
             folder: browsing.preparationStatus.folder,
             generation: browsing.preparationStatus.generation)
         #expect(!browsing.showsPreparationIndicator)
+    }
+
+    @Test func groupingActivityKeepsPreparationIndicatorVisibleAndReflectsPauseInDetails()
+        async throws
+    {
+        let library = GroupingPresentationStubLibrary()
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("stub folder completed initial preparation") {
+            browsing.preparationStatus.phase == .complete
+        }
+
+        // Dismiss completion first, as happens after the initial open finishes.
+        browsing.dismissPreparationCompletion(
+            folder: browsing.preparationStatus.folder,
+            generation: browsing.preparationStatus.generation)
+        #expect(!browsing.showsPreparationIndicator)
+
+        // Running grouping again re-shows the indicator even while prep status is .complete.
+        library.emit(.groupingActivity(true))
+        try await waitFor("grouping activity started on browsing model") {
+            browsing.isGroupingInProgress
+        }
+        #expect(browsing.showsPreparationIndicator)
+
+        // Completion dismissal must not hide the indicator while grouping is running.
+        browsing.dismissPreparationCompletion(
+            folder: browsing.preparationStatus.folder,
+            generation: browsing.preparationStatus.generation)
+        #expect(browsing.showsPreparationIndicator)
+
+        // Also stays visible when preparationStatus is .idle and grouping is active.
+        let idleLibrary = GroupingPresentationStubLibrary(initialPhaseIdle: true)
+        let idleModel = BrowsingModel(library: idleLibrary)
+        idleModel.openFolder()
+        #expect(idleModel.preparationStatus.phase == .idle)
+        #expect(!idleModel.showsPreparationIndicator)
+        idleLibrary.emit(.groupingActivity(true))
+        try await waitFor("idle folder shows indicator during grouping") {
+            idleModel.isGroupingInProgress && idleModel.showsPreparationIndicator
+        }
+
+        // Turning off similarGroupsEnabled stops showing grouping progress immediately.
+        await idleModel.setSimilarGroupsEnabled(false)
+        #expect(!idleModel.isGroupingInProgress)
+        #expect(!idleModel.showsPreparationIndicator)
+
+        // Render FolderPreparationDetails across active grouping, paused grouping, and finished states.
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let detailsWindow = UIWindow(windowScene: scene)
+        detailsWindow.frame = CGRect(x: 0, y: 0, width: 420, height: 640)
+        let detailsHost = UIHostingController(
+            rootView: FolderPreparationDetails(browsing: browsing, showsDoneButton: false)
+                .environment(\.cloveTheme, .light))
+        detailsWindow.rootViewController = detailsHost
+        detailsWindow.makeKeyAndVisible()
+        detailsWindow.layoutIfNeeded()
+        defer {
+            detailsWindow.isHidden = true
+            detailsWindow.rootViewController = nil
+        }
+
+        try await Task.sleep(for: .milliseconds(80))
+        let activeDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
+
+        var pausedStatus = browsing.preparationStatus
+        pausedStatus.waitingReason = .memoryPressure
+        library.emit(.preparation(pausedStatus))
+        try await waitFor("waiting reason applied to browsing model") {
+            browsing.preparationStatus.waitingReason == .memoryPressure
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let pausedDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
+        #expect(pausedDetailsPixels != activeDetailsPixels)
+
+        // Indicator stays mounted past the 2s completion window while grouping is running,
+        // updates when paused/resumed, and auto-dismisses once grouping finishes.
+        pausedStatus.waitingReason = nil
+        library.emit(.preparation(pausedStatus))
+        try await waitFor("waiting reason cleared") {
+            browsing.preparationStatus.waitingReason == nil
+        }
+
+        let frameBox = FrameStoreBox()
+        let indicatorWindow = UIWindow(windowScene: scene)
+        indicatorWindow.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let indicatorHost = UIHostingController(
+            rootView: FolderPreparationIndicator(
+                browsing: browsing, identifierPrefix: "clove.grid.preparation"
+            )
+            .environment(\.cloveTheme, .light)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                frameBox.frames = frames
+            })
+        indicatorWindow.rootViewController = indicatorHost
+        indicatorWindow.makeKeyAndVisible()
+        defer {
+            indicatorWindow.isHidden = true
+            indicatorWindow.rootViewController = nil
+        }
+
+        try await waitFor("indicator mounted while grouping") {
+            frameBox.frames["clove.grid.preparation"] != nil
+        }
+        // Wait past the 2s completion auto-dismiss interval to verify grouping keeps it visible.
+        try await Task.sleep(for: .milliseconds(2200))
+        #expect(browsing.showsPreparationIndicator)
+        #expect(frameBox.frames["clove.grid.preparation"] != nil)
+
+        let activeIndicatorPixels = try #require(findRenderedPixels(in: indicatorWindow))
+        pausedStatus.waitingReason = .memoryPressure
+        library.emit(.preparation(pausedStatus))
+        try await waitFor("indicator saw paused status") {
+            browsing.preparationStatus.waitingReason == .memoryPressure
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let pausedIndicatorPixels = try #require(findRenderedPixels(in: indicatorWindow))
+        #expect(pausedIndicatorPixels != activeIndicatorPixels)
+
+        // Clearing pause and ending grouping removes the grouping row and auto-dismisses indicator.
+        pausedStatus.waitingReason = nil
+        library.emit(.preparation(pausedStatus))
+        library.emit(.groupingActivity(false))
+        try await waitFor("grouping finished") {
+            !browsing.isGroupingInProgress && browsing.preparationStatus.waitingReason == nil
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let finishedDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
+        #expect(finishedDetailsPixels != activeDetailsPixels)
+
+        try await waitFor("indicator auto-dismissed after grouping finished", timeout: .seconds(4))
+        {
+            !browsing.showsPreparationIndicator && frameBox.frames["clove.grid.preparation"] == nil
+        }
     }
 
     @Test func detailsViewRendersHonestMetricsWithoutPauseOrCancelControlsAcrossThemes()
@@ -714,4 +867,46 @@ private final class PresentationBox {
 @MainActor
 private final class FrameStoreBox {
     var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+private final class GroupingPresentationStubLibrary: FolderLibrary {
+    let folder = FolderIdentity(rawValue: "stub-grouping-prep")
+    let openGeneration = 1
+    let photos: [GridPhoto] = []
+    let groups: [BrowsingGroup] = []
+    private(set) var preparationStatus: FolderPreparationStatus
+    let updates: AsyncStream<FolderLibraryUpdate>
+    private let continuation: AsyncStream<FolderLibraryUpdate>.Continuation
+
+    init(initialPhaseIdle: Bool = false) {
+        (updates, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
+        if initialPhaseIdle {
+            preparationStatus = .idle
+        } else {
+            preparationStatus = FolderPreparationStatus(
+                folder: folder,
+                folderName: "Coastal light",
+                generation: 1,
+                isEnumerating: false,
+                isPartialScan: false,
+                waitingReason: nil,
+                totalPhotos: 12,
+                analysis: FolderPreparationTaskCounts(completed: 12),
+                previews: FolderPreparationTaskCounts(completed: 12),
+                readyForBothCount: 12,
+                bothSettledCount: 12,
+                issues: [])
+        }
+        continuation.yield(.scanStarted)
+        continuation.yield(.preparation(preparationStatus))
+        continuation.yield(.scanFinished(FolderScanSummary(photoCount: 12, status: .complete)))
+    }
+
+    func emit(_ update: FolderLibraryUpdate) {
+        if case .preparation(let status) = update {
+            preparationStatus = status
+        }
+        continuation.yield(update)
+    }
 }

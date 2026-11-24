@@ -708,6 +708,78 @@ struct BrowsingLayoutTests {
         }
     }
 
+    @Test func gridSubtitleShowsPhotoCountAndFiltersInsteadOfFindingSimilarShotsDuringGrouping()
+        async throws
+    {
+        let library = try #require(
+            TestLibrary.forLaunch(
+                environment: [
+                    TestLibrary.launchVariable: "1",
+                    "CLOVE_TEST_LIBRARY_OPENING": "grouping",
+                ]) as? TestLibrary)
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        try await waitFor("grouping activity applied to model") {
+            model.isFindingSimilarShots && model.readingProgress == nil
+        }
+
+        // Subtitle helper returns real photo count and active filter counts while grouping runs.
+        #expect(
+            GridScreen.subtitleText(browsing: model, isSelecting: false, isRegular: false)
+                == "36 photos")
+        #expect(
+            GridScreen.subtitleText(browsing: model, isSelecting: false, isRegular: true)
+                == "36 photos")
+
+        model.setFilter(.rejected)
+        let rejectedCount = model.photos.count
+        #expect(
+            GridScreen.subtitleText(browsing: model, isSelecting: false, isRegular: false)
+                == "Rejected · \(rejectedCount)")
+        model.setFilter(.all)
+
+        // Progress line is active when grouping without a waiting reason.
+        let activeLine = GridScreen.progressLineState(browsing: model, similarGroupsEnabled: true)
+        #expect(activeLine.progress == 1)
+        #expect(activeLine.tone == .grouping)
+
+        // GridScreen mounts preparation indicator beside title during grouping.
+        let box = TestHeaderFramesBox()
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                GridScreen(browsing: model, thumbnails: model.thumbnails)
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .phone)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                box.frames = frames
+            })
+        host.traitOverrides.horizontalSizeClass = .compact
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 844)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("grid header laid out during grouping") {
+            box.frames["clove.grid.title"] != nil
+                && box.frames["clove.grid.preparation"] != nil
+        }
+
+        // Pausing via location loss / waitingReason hides the active grouping line.
+        library.reportLocationLoss(.externalVolumeDisconnected)
+        try await waitFor("waiting reason applied to model") {
+            model.preparationStatus.waitingReason != nil
+        }
+        let pausedLine = GridScreen.progressLineState(browsing: model, similarGroupsEnabled: true)
+        #expect(pausedLine.progress == nil)
+    }
+
     private func findCollectionView(in view: UIView) -> UICollectionView? {
         if let collection = view as? UICollectionView { return collection }
         for child in view.subviews {

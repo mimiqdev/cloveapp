@@ -345,6 +345,28 @@ struct AppLocalizationTests {
             FolderPreparationAccessibility.retryButtonAccessibilityHint(
                 for: pausedStatus, language: .traditionalChinese) == "檔案夾準備已暫停時無法使用。")
 
+        #expect(AppLocalization.string("Paused", language: .english) == "Paused")
+        #expect(AppLocalization.string("Paused", language: .simplifiedChinese) == "已暂停")
+        #expect(AppLocalization.string("Paused", language: .traditionalChinese) == "已暫停")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(for: status, language: .english)
+                == "Finding similar shots…")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, language: .simplifiedChinese) == "正在查找相似照片…")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, language: .traditionalChinese) == "正在尋找相似相片…")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(for: pausedStatus, language: .english)
+                == "Paused")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: pausedStatus, language: .simplifiedChinese) == "已暂停")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: pausedStatus, language: .traditionalChinese) == "已暫停")
+
         let detected = DetailFocusFaceIndicator.detected
         let none = DetailFocusFaceIndicator.noFacesDetected
         let indicators = DetailFocusResultIndicators(
