@@ -226,4 +226,202 @@ struct DetailTimelineTests {
         #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: -16, vertical: -24))
         #expect(!FilmstripVerticalGesture.shouldCollapse(horizontal: 0, vertical: 30))
     }
+
+    @Test func clearingMarksInTimelineStaysAcrossDestinationsWhilePositiveMarksAdvance() throws {
+        let three = try MarkingFixtures.stars(3)
+        let four = try MarkingFixtures.stars(4)
+        let red = ColourLabel(colour: .red)
+        let blue = ColourLabel(colour: .blue)
+
+        let rated = photo(
+            "rated", time: capture(seconds(0)), marks: PhotoMarks(rating: three, label: red))
+        let rejected = photo(
+            "rejected", time: capture(seconds(1)), marks: PhotoMarks(rating: .rejected))
+        let labelled = photo(
+            "labelled", time: capture(seconds(2)), marks: PhotoMarks(rating: four, label: red))
+        let next = photo("next", time: capture(seconds(3)))
+        let timeline = DetailTimeline(photos: [rated, rejected, labelled, next], groups: [])
+
+        for destination in [AutoAdvanceDestination.nextPhoto, .nextUnmarkedPhoto] {
+            let rules = MarkingInputRules(
+                settings: AppSettings(
+                    autoAdvance: AutoAdvance(
+                        destination: destination,
+                        triggers: AutoAdvanceTriggers(rating: true, reject: true, colourLabel: true)
+                    )))
+
+            // Clearing a star rating stays even when the photo still holds a colour label.
+            for input in [
+                rules.result(forRating: three, marks: rated.marks),
+                rules.result(for: .rating(.unrated), marks: rated.marks),
+                rules.result(forSwipeRating: .unrated, marks: rated.marks, isZoomed: false),
+            ] {
+                guard case .mark(let change, let kind) = input else {
+                    Issue.record("Expected clearing rating to produce .mark")
+                    continue
+                }
+                let plan = timeline.autoAdvancePlan(
+                    after: kind, change: change, from: rated.id, expandedGroup: nil, rules: rules)
+                #expect(plan.target == .stay)
+                #expect(!plan.advances)
+            }
+
+            // Un-rejecting (.rejected -> .unrated) stays via Reject toggle or swipe.
+            for input in [
+                rules.result(forRejectToggle: rejected.marks),
+                rules.result(forSwipeRating: .unrated, marks: rejected.marks, isZoomed: false),
+            ] {
+                guard case .mark(let change, let kind) = input else {
+                    Issue.record("Expected un-rejecting to produce .mark")
+                    continue
+                }
+                let plan = timeline.autoAdvancePlan(
+                    after: kind, change: change, from: rejected.id, expandedGroup: nil, rules: rules
+                )
+                #expect(plan.target == .stay)
+                #expect(!plan.advances)
+            }
+
+            // Clearing a colour label stays even when the colourLabel trigger is ON and stars remain.
+            for input in [
+                rules.result(forLabel: red, marks: labelled.marks),
+                rules.result(forLabel: .clear, marks: labelled.marks),
+                rules.result(for: .colourLabel(.red), marks: labelled.marks),
+            ] {
+                guard case .mark(let change, let kind) = input else {
+                    Issue.record("Expected clearing label to produce .mark")
+                    continue
+                }
+                let plan = timeline.autoAdvancePlan(
+                    after: kind, change: change, from: labelled.id, expandedGroup: nil, rules: rules
+                )
+                #expect(plan.target == .stay)
+                #expect(!plan.advances)
+            }
+
+            // Positive marks continue to advance to the expected slot.
+            let expectedTarget: AutoAdvanceTarget =
+                destination == .nextPhoto ? .nextPhoto(next.id) : .nextUnmarkedPhoto(next.id)
+            for (kind, change) in [
+                (MarkKind.rating, MarkChange(rating: three)),
+                (MarkKind.reject, MarkChange(rating: .rejected)),
+                (MarkKind.colourLabel, MarkChange(label: blue)),
+            ] {
+                let plan = timeline.autoAdvancePlan(
+                    after: kind, change: change, from: labelled.id, expandedGroup: nil, rules: rules
+                )
+                #expect(plan.target == expectedTarget)
+                #expect(plan.advances)
+            }
+        }
+    }
+
+    @Test func clearingMarksInFirstPassGroupFocusStaysWithoutAdvancingOrExiting() throws {
+        let four = try MarkingFixtures.stars(4)
+        let red = ColourLabel(colour: .red)
+        let blue = ColourLabel(colour: .blue)
+
+        let g0 = photo("g0", time: capture(seconds(0)), marks: PhotoMarks(rating: four, label: red))
+        let g1 = photo("g1", time: capture(seconds(1)))  // unmarked
+        let g2 = photo("g2", time: capture(seconds(2)), marks: PhotoMarks(rating: .rejected))
+        let sAfter = photo("sAfter", time: capture(seconds(3)))
+        let burst = BrowsingGroup(id: GroupID(rawValue: "b"), members: [g0.id, g1.id, g2.id])
+        let timeline = DetailTimeline(photos: [g0, g1, g2, sAfter], groups: [burst])
+
+        for destination in [AutoAdvanceDestination.nextPhoto, .nextUnmarkedPhoto] {
+            let rules = MarkingInputRules(
+                settings: AppSettings(
+                    autoAdvance: AutoAdvance(
+                        destination: destination,
+                        triggers: AutoAdvanceTriggers(rating: true, reject: true, colourLabel: true)
+                    )))
+
+            // Clearing rating on g0 (which also holds red) stays instead of jumping to unmarked g1.
+            let clearRatingPlan = timeline.autoAdvancePlan(
+                after: .rating, change: MarkChange(rating: .unrated), from: g0.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(clearRatingPlan.target == .stay)
+            #expect(!clearRatingPlan.exitsGroupFocus)
+            #expect(!clearRatingPlan.advances)
+
+            // Clearing label on g0 (which still holds 4 stars) stays instead of jumping to g1.
+            let clearLabelPlan = timeline.autoAdvancePlan(
+                after: .colourLabel, change: MarkChange(label: .clear), from: g0.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(clearLabelPlan.target == .stay)
+            #expect(!clearLabelPlan.exitsGroupFocus)
+            #expect(!clearLabelPlan.advances)
+
+            // Un-rejecting g2 stays on g2 instead of wrapping to g1.
+            let unrejectPlan = timeline.autoAdvancePlan(
+                after: .reject, change: MarkChange(rating: .unrated), from: g2.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(unrejectPlan.target == .stay)
+            #expect(!unrejectPlan.exitsGroupFocus)
+            #expect(!unrejectPlan.advances)
+
+            // Positive mark on the final unmarked member g1 still advances/exits.
+            let positivePlan = timeline.autoAdvancePlan(
+                after: .colourLabel, change: MarkChange(label: blue), from: g1.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(positivePlan.exitsGroupFocus)
+            #expect(positivePlan.advances)
+        }
+    }
+
+    @Test func clearingMarksInSecondPassGroupFocusStaysWithoutAdvancingOrExiting() throws {
+        let three = try MarkingFixtures.stars(3)
+        let four = try MarkingFixtures.stars(4)
+        let red = ColourLabel(colour: .red)
+        let blue = ColourLabel(colour: .blue)
+
+        let g0 = photo("g0", time: capture(seconds(0)), marks: PhotoMarks(rating: four, label: red))
+        let g1 = photo("g1", time: capture(seconds(1)), marks: PhotoMarks(rating: .rejected))
+        let g2 = photo("g2", time: capture(seconds(2)), marks: PhotoMarks(rating: three))
+        let sAfter = photo("sAfter", time: capture(seconds(3)))
+        let burst = BrowsingGroup(id: GroupID(rawValue: "b"), members: [g0.id, g1.id, g2.id])
+        let timeline = DetailTimeline(photos: [g0, g1, g2, sAfter], groups: [burst])
+
+        for destination in [AutoAdvanceDestination.nextPhoto, .nextUnmarkedPhoto] {
+            let rules = MarkingInputRules(
+                settings: AppSettings(
+                    autoAdvance: AutoAdvance(
+                        destination: destination,
+                        triggers: AutoAdvanceTriggers(rating: true, reject: true, colourLabel: true)
+                    )))
+
+            let clearRatingPlan = timeline.autoAdvancePlan(
+                after: .rating, change: MarkChange(rating: .unrated), from: g0.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(clearRatingPlan.target == .stay)
+            #expect(!clearRatingPlan.exitsGroupFocus)
+            #expect(!clearRatingPlan.advances)
+
+            let clearLabelPlan = timeline.autoAdvancePlan(
+                after: .colourLabel, change: MarkChange(label: .clear), from: g0.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(clearLabelPlan.target == .stay)
+            #expect(!clearLabelPlan.exitsGroupFocus)
+            #expect(!clearLabelPlan.advances)
+
+            let unrejectPlan = timeline.autoAdvancePlan(
+                after: .reject, change: MarkChange(rating: .unrated), from: g1.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(unrejectPlan.target == .stay)
+            #expect(!unrejectPlan.exitsGroupFocus)
+            #expect(!unrejectPlan.advances)
+        }
+
+        // Positive second-pass edit with .nextPhoto still steps inside the group.
+        let nextPhotoRules = MarkingInputRules(
+            settings: AppSettings(
+                autoAdvance: AutoAdvance(
+                    destination: .nextPhoto,
+                    triggers: AutoAdvanceTriggers(rating: true, reject: true, colourLabel: true))))
+        let positiveLabelPlan = timeline.autoAdvancePlan(
+            after: .colourLabel, change: MarkChange(label: blue), from: g0.id,
+            expandedGroup: burst.id, rules: nextPhotoRules)
+        #expect(positiveLabelPlan.target == .groupUndecidedPhoto(g1.id))
+        #expect(!positiveLabelPlan.exitsGroupFocus)
+    }
 }

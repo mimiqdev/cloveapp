@@ -39,6 +39,16 @@ public struct MarkChange: Hashable, Sendable {
     /// Whether the request names no field at all; an empty change writes nothing.
     public var isEmpty: Bool { rating == nil && label == nil && keywords == nil }
 
+    /// Whether this request clears the mark identified by `kind` back to its cleared state.
+    public func isClearing(for kind: MarkKind) -> Bool {
+        switch kind {
+        case .rating, .reject:
+            rating == .unrated
+        case .colourLabel:
+            label == .clear
+        }
+    }
+
 }
 
 /// Identifies one returned write result.

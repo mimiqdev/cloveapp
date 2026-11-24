@@ -483,6 +483,108 @@ struct DetailDisplayPresentationTests {
         #expect(browsing.state.currentPhoto == photos[6].id)
     }
 
+    @Test func clearingMarksInDetailScreenStaysWithoutAutoAdvanceWhilePositiveMarksAdvance()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedDetailImages()
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        store.update {
+            $0.autoAdvance.destination = .nextPhoto
+            $0.autoAdvance.triggers.rating = true
+            $0.autoAdvance.triggers.reject = true
+            $0.autoAdvance.triggers.colourLabel = true
+        }
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening }
+        let photos = browsing.photos
+        let three = try #require(Rating(rawValue: 3))
+        // MMQ02683 (photos[5]) and MMQ02684 (photos[6]) are consecutive standalone Timeline slots.
+        browsing.apply(.rating(three), to: photos[5].id)
+        browsing.apply(.label(ColourLabel(colour: .red)), to: photos[5].id)
+        browsing.openPhoto(photos[5].id)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor {
+            source.prefetched.last?.current.photo == photos[5].id
+                && findPreview(in: window)?.currentRating == three
+        }
+        let preview = try #require(findPreview(in: window))
+        let markingPan = try #require(
+            preview.gestureRecognizers?.compactMap { $0 as? DetailSingleFingerPanGestureRecognizer }
+                .first)
+
+        func sendVerticalSwipe(_ travelY: CGFloat) throws {
+            let start = CGPoint(x: 195, y: 300)
+            _ = preview.gestureRecognizer(
+                markingPan, shouldReceive: DetailMutableTouch(view: preview, location: start))
+            let pan = DetailTestPan()
+            let initialY: CGFloat = travelY < 0 ? -15 : 15
+            pan.travel = CGPoint(x: 0, y: initialY)
+            pan.locationPoint = CGPoint(x: start.x, y: start.y + initialY)
+            try #require(preview.gestureRecognizerShouldBegin(pan))
+            preview.handleMarkingPan(pan)
+            pan.sampleState = .changed
+            pan.travel = CGPoint(x: 0, y: travelY)
+            pan.locationPoint = CGPoint(x: start.x, y: start.y + travelY)
+            preview.handleMarkingPan(pan)
+            pan.sampleState = .ended
+            preview.handleMarkingPan(pan)
+        }
+
+        // 1. Swiping down to clear rating to .unrated stays on photos[5] in Timeline.
+        try sendVerticalSwipe(50)
+        #expect(browsing.shownMarks(for: photos[5].id).rating == .unrated)
+        #expect(browsing.shownMarks(for: photos[5].id).label.colour == .red)
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(browsing.state.currentPhoto == photos[5].id)
+
+        // 2. Swiping up from Rejected to .unrated stays on photos[5].
+        browsing.apply(.rating(.rejected), to: photos[5].id)
+        try await waitFor { preview.currentRating == .rejected }
+        try sendVerticalSwipe(-32)
+        #expect(browsing.shownMarks(for: photos[5].id).rating == .unrated)
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(browsing.state.currentPhoto == photos[5].id)
+
+        // 3. Clearing rating inside Group Focus also stays without advancing or exiting Group Focus.
+        let group = try #require(browsing.groups.first)
+        let rep = group.members[0]
+        browsing.apply(.rating(three), to: rep)
+        browsing.openGroup(group.id, on: rep)
+        try await waitFor {
+            browsing.expandedGroup == group.id && source.prefetched.last?.current.photo == rep
+                && preview.currentRating == three
+        }
+        try sendVerticalSwipe(50)
+        #expect(browsing.shownMarks(for: rep).rating == .unrated)
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(browsing.state.currentPhoto == rep)
+        #expect(browsing.expandedGroup == group.id)
+
+        // 4. Positive mark in Timeline still auto-advances after the pause.
+        browsing.collapseGroup()
+        browsing.openPhoto(photos[5].id)
+        try await waitFor {
+            browsing.expandedGroup == nil && source.prefetched.last?.current.photo == photos[5].id
+                && preview.currentRating == .unrated
+        }
+        try sendVerticalSwipe(-130)
+        #expect(browsing.shownMarks(for: photos[5].id).rating != .unrated)
+        try await waitFor { browsing.state.currentPhoto == photos[6].id }
+    }
+
     @Test func zoomBeginningCancelsAnInProgressNavigationPan() throws {
         let preview = DetailZoomContainerView(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
         preview.hasNext = true
