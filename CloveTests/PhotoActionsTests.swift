@@ -525,6 +525,55 @@ struct PhotoActionsTests {
             result: completed.result, rejectsFolderName: completed.rejectsFolderName)
         #expect(copy.showsDetails)
     }
+
+    @Test func clearingMarkCancelsPendingAdvanceAndStaysOnCurrentPhoto() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["a", "b", "c"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        let a = library.identity("a")
+        let b = library.identity("b")
+        model.openPhoto(a)
+
+        let three = try #require(Rating(rawValue: 3))
+        let timeline = DetailTimeline(photos: model.photos, groups: model.groups)
+        let rules = MarkingInputRules(
+            settings: AppSettings(
+                autoAdvance: AutoAdvance(
+                    destination: .nextPhoto,
+                    triggers: AutoAdvanceTriggers(rating: true, reject: true, colourLabel: true))))
+        let autoAdvance = MarkAutoAdvance()
+
+        let positivePlan = timeline.autoAdvancePlan(
+            after: .rating, change: MarkChange(rating: three), from: a, expandedGroup: nil,
+            rules: rules)
+        #expect(positivePlan.advances)
+        autoAdvance.schedule(positivePlan) { target in
+            if case .nextPhoto(let next) = target {
+                model.openPhoto(next)
+            }
+        }
+        model.apply(MarkChange(rating: three), to: a)
+
+        try await Task.sleep(for: .milliseconds(80))
+
+        // Clearing the rating before AutoAdvance.pause fires cancels the pending advance and stays.
+        let clearPlan = timeline.autoAdvancePlan(
+            after: .rating, change: MarkChange(rating: .unrated), from: a, expandedGroup: nil,
+            rules: rules)
+        #expect(!clearPlan.advances)
+        autoAdvance.schedule(clearPlan) { target in
+            if case .nextPhoto(let next) = target {
+                model.openPhoto(next)
+            }
+        }
+        model.apply(MarkChange(rating: .unrated), to: a)
+
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(model.state.currentPhoto == a)
+        #expect(model.state.currentPhoto != b)
+        #expect(model.shownMarks(for: a).rating == .unrated)
+        await model.drainActions()
+    }
 }
 
 private struct PhotoActionWaitFailure: Error {}

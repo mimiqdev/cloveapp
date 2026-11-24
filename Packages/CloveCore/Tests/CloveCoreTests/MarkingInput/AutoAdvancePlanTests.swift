@@ -179,4 +179,146 @@ import CloveCore
     @Test func thePauseIsThreeTenthsOfASecond() {
         #expect(AutoAdvance.pause == .milliseconds(300))
     }
+
+    @Test func markChangeIsClearingIdentifiesClearedMarksByKind() throws {
+        let three = try MarkingFixtures.stars(3)
+        let red = ColourLabel(colour: .red)
+
+        #expect(MarkChange(rating: .unrated).isClearing(for: .rating))
+        #expect(MarkChange(rating: .unrated).isClearing(for: .reject))
+        #expect(!MarkChange(rating: .unrated).isClearing(for: .colourLabel))
+
+        #expect(MarkChange(label: .clear).isClearing(for: .colourLabel))
+        #expect(!MarkChange(label: .clear).isClearing(for: .rating))
+        #expect(!MarkChange(label: .clear).isClearing(for: .reject))
+
+        #expect(!MarkChange(rating: three).isClearing(for: .rating))
+        #expect(!MarkChange(rating: .rejected).isClearing(for: .reject))
+        #expect(!MarkChange(label: red).isClearing(for: .colourLabel))
+        #expect(!MarkChange().isClearing(for: .rating))
+        #expect(!MarkChange().isClearing(for: .reject))
+        #expect(!MarkChange().isClearing(for: .colourLabel))
+    }
+
+    @Test func clearingRatingViaBarKeyOrSwipeStaysWithoutAdvancing() throws {
+        let (a, b, c) = try photos()
+        let three = try MarkingFixtures.stars(3)
+        let ratedAndLabelled = PhotoMarks(rating: three, label: ColourLabel(colour: .red))
+
+        let destinations: [AutoAdvanceDestination] = [.nextPhoto, .nextUnmarkedPhoto]
+        for destination in destinations {
+            let rules = MarkingInputRules(
+                settings: AppSettings(autoAdvance: AutoAdvance(destination: destination)))
+            let inputs: [MarkingResult] = [
+                rules.result(forRating: three, marks: ratedAndLabelled),
+                rules.result(for: .rating(.unrated), marks: ratedAndLabelled),
+                rules.result(forSwipeRating: .unrated, marks: ratedAndLabelled, isZoomed: false),
+            ]
+            for input in inputs {
+                guard case .mark(let change, let kind) = input else {
+                    Issue.record("Expected clearing input to produce .mark")
+                    continue
+                }
+                let plan = rules.autoAdvancePlan(
+                    after: kind, change: change, from: a.id, photos: [a, b, c])
+                #expect(plan.target == .stay)
+                #expect(!plan.advances)
+
+                let groupPlan = rules.autoAdvancePlan(
+                    after: kind, change: change, from: a.id, photos: [a, b, c],
+                    group: .nextUndecidedPhoto(c.id))
+                #expect(groupPlan.target == .stay)
+                #expect(!groupPlan.advances)
+            }
+        }
+    }
+
+    @Test func togglingRejectOffStaysWithoutAdvancing() throws {
+        let (a, b, c) = try photos()
+        let rejected = PhotoMarks(rating: .rejected, label: ColourLabel(colour: .green))
+
+        for destination in [AutoAdvanceDestination.nextPhoto, .nextUnmarkedPhoto] {
+            let rules = MarkingInputRules(
+                settings: AppSettings(autoAdvance: AutoAdvance(destination: destination)))
+            let inputs: [MarkingResult] = [
+                rules.result(forRejectToggle: rejected),
+                rules.result(forSwipeRating: .unrated, marks: rejected, isZoomed: false),
+            ]
+            for input in inputs {
+                guard case .mark(let change, let kind) = input else {
+                    Issue.record("Expected un-reject input to produce .mark")
+                    continue
+                }
+                let plan = rules.autoAdvancePlan(
+                    after: kind, change: change, from: a.id, photos: [a, b, c])
+                #expect(plan.target == .stay)
+                #expect(!plan.advances)
+
+                let groupPlan = rules.autoAdvancePlan(
+                    after: kind, change: change, from: a.id, photos: [a, b, c],
+                    group: .nextUndecidedPhoto(c.id))
+                #expect(groupPlan.target == .stay)
+                #expect(!groupPlan.advances)
+            }
+        }
+    }
+
+    @Test func clearingColourLabelStaysWithoutAdvancingEvenWhenTriggerIsOn() throws {
+        let (a, b, c) = try photos()
+        let three = try MarkingFixtures.stars(3)
+        let red = ColourLabel(colour: .red)
+        let ratedAndLabelled = PhotoMarks(rating: three, label: red)
+
+        for destination in [AutoAdvanceDestination.nextPhoto, .nextUnmarkedPhoto] {
+            let rules = MarkingInputRules(
+                settings: AppSettings(
+                    autoAdvance: AutoAdvance(
+                        destination: destination,
+                        triggers: AutoAdvanceTriggers(colourLabel: true))))
+            let inputs: [MarkingResult] = [
+                rules.result(forLabel: red, marks: ratedAndLabelled),
+                rules.result(forLabel: .clear, marks: ratedAndLabelled),
+                rules.result(for: .colourLabel(.red), marks: ratedAndLabelled),
+            ]
+            for input in inputs {
+                guard case .mark(let change, let kind) = input else {
+                    Issue.record("Expected clearing label input to produce .mark")
+                    continue
+                }
+                let plan = rules.autoAdvancePlan(
+                    after: kind, change: change, from: a.id, photos: [a, b, c])
+                #expect(plan.target == .stay)
+                #expect(!plan.advances)
+
+                let groupPlan = rules.autoAdvancePlan(
+                    after: kind, change: change, from: a.id, photos: [a, b, c],
+                    group: .nextUndecidedPhoto(c.id))
+                #expect(groupPlan.target == .stay)
+                #expect(!groupPlan.advances)
+            }
+        }
+    }
+
+    @Test func positiveMarksContinueToAdvance() throws {
+        let (a, b, c) = try photos()
+        let three = try MarkingFixtures.stars(3)
+        let blue = ColourLabel(colour: .blue)
+        let rules = MarkingInputRules(
+            settings: AppSettings(
+                autoAdvance: AutoAdvance(
+                    destination: .nextPhoto,
+                    triggers: AutoAdvanceTriggers(colourLabel: true))))
+
+        let ratingPlan = rules.autoAdvancePlan(
+            after: .rating, change: MarkChange(rating: three), from: a.id, photos: [a, b, c])
+        #expect(ratingPlan.target == .nextPhoto(b.id))
+
+        let rejectPlan = rules.autoAdvancePlan(
+            after: .reject, change: MarkChange(rating: .rejected), from: a.id, photos: [a, b, c])
+        #expect(rejectPlan.target == .nextPhoto(b.id))
+
+        let labelPlan = rules.autoAdvancePlan(
+            after: .colourLabel, change: MarkChange(label: blue), from: a.id, photos: [a, b, c])
+        #expect(labelPlan.target == .nextPhoto(b.id))
+    }
 }

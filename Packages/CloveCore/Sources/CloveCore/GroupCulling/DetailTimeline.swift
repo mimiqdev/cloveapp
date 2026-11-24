@@ -224,6 +224,9 @@ public struct DetailTimeline: Hashable, Sendable {
     }
 
     /// Resolves Timeline or Group Focus auto-advance before the incoming mark mutates state.
+    ///
+    /// Clearing a mark (rating to `.unrated`, Reject toggle off, or colour label to `.clear`)
+    /// stays on the current photo without advancing or exiting Group Focus.
     public func autoAdvancePlan(
         after kind: MarkKind,
         change: MarkChange,
@@ -232,7 +235,9 @@ public struct DetailTimeline: Hashable, Sendable {
         rules: MarkingInputRules
     ) -> AutoAdvancePlan {
         let stay = AutoAdvancePlan(target: .stay, markedPhoto: photoID)
-        guard rules.settings.autoAdvance.shouldAdvance(after: kind) else { return stay }
+        guard rules.settings.autoAdvance.shouldAdvance(after: kind),
+            !change.isClearing(for: kind)
+        else { return stay }
 
         if let expandedGroup, let active = activeGroup(with: expandedGroup) {
             let members = active.visibleMembers

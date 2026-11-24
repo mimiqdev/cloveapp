@@ -154,19 +154,23 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// Where to go after a written mark, and the photo undo returns to (PRD Auto-advance).
     ///
     /// Call this only for a `.mark` result: a `.noChange` result carries no mark kind and
-    /// advances nothing (PRD P0-06 acceptance). `photos` is the ordered list the detail view is
+    /// advances nothing (PRD P0-06 acceptance). Clearing a mark back to `.unrated` or `.clear`
+    /// stays on the current photo without advancing. `photos` is the ordered list the detail view is
     /// navigating, with the marks it shows. `group` is the group view's own answer; it replaces
     /// the policy's next photo because the group's Undecided rule and completion belong to the
     /// group view (PRD In-group culling). Without a target photo, or in a completed group, the
     /// view stays (PRD Auto-advance).
     public func autoAdvancePlan(
         after mark: MarkKind,
+        change: MarkChange? = nil,
         from photo: PhotoIdentity,
         photos: [GridPhoto],
         group: GroupAdvance? = nil
     ) -> AutoAdvancePlan {
         let stay = AutoAdvancePlan(target: .stay, markedPhoto: photo)
-        guard settings.autoAdvance.shouldAdvance(after: mark) else { return stay }
+        guard settings.autoAdvance.shouldAdvance(after: mark),
+            change?.isClearing(for: mark) != true
+        else { return stay }
         if let group {
             guard case .nextUndecidedPhoto(let next) = group, next != photo else { return stay }
             return AutoAdvancePlan(target: .groupUndecidedPhoto(next), markedPhoto: photo)
