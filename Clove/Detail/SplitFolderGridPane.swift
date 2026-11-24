@@ -45,7 +45,9 @@ struct SplitFolderGridPane: View {
                 ProgressLine(
                     progress: progress.total > 0
                         ? Double(progress.read) / Double(progress.total) : 0)
-            } else if browsing.isFindingSimilarShots, similarGroupsEnabled {
+            } else if browsing.isFindingSimilarShots, similarGroupsEnabled,
+                browsing.preparationStatus.waitingReason == nil
+            {
                 ProgressLine(progress: 1, tone: .grouping)
             }
             if !display.cells.isEmpty || browsing.isFolderOpening {

@@ -132,12 +132,26 @@ enum FolderPreparationAccessibility {
         status.canRetryIssues
     }
 
-    static func indicatorAccessibilityValue(
+    static func groupingStatusText(
         for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+    ) -> String {
+        status.waitingReason != nil
+            ? AppLocalization.string("Paused", language: language)
+            : AppLocalization.string("Finding similar shots…", language: language)
+    }
+
+    static func indicatorAccessibilityValue(
+        for status: FolderPreparationStatus,
+        isFindingSimilarShots: Bool = false,
+        language: ResolvedAppLanguage = .english
     ) -> String {
         switch status.phase {
         case .idle:
-            return ""
+            guard isFindingSimilarShots else { return "" }
+            if let reason = status.waitingReason {
+                return waitingTitle(for: reason, language: language)
+            }
+            return AppLocalization.string("Finding similar shots", language: language)
         case .enumeratingUnknown:
             return AppLocalization.string("Scanning folder", language: language)
         case .preparing:
@@ -154,11 +168,20 @@ enum FolderPreparationAccessibility {
             }
             return prefix
         case .complete:
+            if isFindingSimilarShots {
+                if let reason = status.waitingReason {
+                    return waitingTitle(for: reason, language: language)
+                }
+                return AppLocalization.string("Finding similar shots", language: language)
+            }
             let ready = AppLocalization.format(
                 "%lld of %lld ready", language: language, Int64(status.readyForBothCount),
                 Int64(status.totalPhotos))
             return AppLocalization.format("Complete, %@", language: language, ready)
         case .completeWithIssues:
+            if isFindingSimilarShots, let reason = status.waitingReason {
+                return waitingTitle(for: reason, language: language)
+            }
             let issues = AppLocalization.format(
                 "%lld issue", language: language, Int64(status.totalIssueCount))
             let ready = AppLocalization.format(
@@ -176,6 +199,8 @@ private struct PreparationCompletionKey: Equatable {
     let generation: Int
     let isShowingDetails: Bool
     let isVisible: Bool
+    let isGroupingInProgress: Bool
+    let waitingReason: FolderPreparationWaitingReason?
 }
 
 private struct FolderPreparationPresentationModeKey: EnvironmentKey {
@@ -249,6 +274,10 @@ struct FolderPreparationIndicator: View {
         browsing.preparationStatus
     }
 
+    private var isGroupingInProgress: Bool {
+        browsing.isGroupingInProgress
+    }
+
     private var isShowingDetails: Bool {
         presentedMode != nil
     }
@@ -280,9 +309,15 @@ struct FolderPreparationIndicator: View {
                         folder: status.folder,
                         generation: status.generation,
                         isShowingDetails: isShowingDetails,
-                        isVisible: shouldShow)
+                        isVisible: shouldShow,
+                        isGroupingInProgress: isGroupingInProgress,
+                        waitingReason: status.waitingReason)
                 ) {
-                    guard status.phase == .complete, !isShowingDetails else { return }
+                    guard status.phase == .complete,
+                        status.waitingReason == nil,
+                        !isShowingDetails,
+                        !isGroupingInProgress
+                    else { return }
                     try? await Task.sleep(for: .seconds(2))
                     guard !Task.isCancelled else { return }
                     withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
@@ -314,7 +349,9 @@ struct FolderPreparationIndicator: View {
                     )
                     .accessibilityValue(
                         FolderPreparationAccessibility.indicatorAccessibilityValue(
-                            for: status, language: language)
+                            for: status,
+                            isFindingSimilarShots: isGroupingInProgress,
+                            language: language)
                     )
                     .accessibilityHint(
                         AppLocalization.string(
@@ -341,7 +378,9 @@ struct FolderPreparationIndicator: View {
                     )
                     .accessibilityValue(
                         FolderPreparationAccessibility.indicatorAccessibilityValue(
-                            for: status, language: language)
+                            for: status,
+                            isFindingSimilarShots: isGroupingInProgress,
+                            language: language)
                     )
                     .accessibilityHint(
                         AppLocalization.string(
@@ -368,7 +407,9 @@ struct FolderPreparationIndicator: View {
                 )
                 .accessibilityValue(
                     FolderPreparationAccessibility.indicatorAccessibilityValue(
-                        for: status, language: language)
+                        for: status,
+                        isFindingSimilarShots: isGroupingInProgress,
+                        language: language)
                 )
                 .accessibilityHint(
                     AppLocalization.string(
@@ -426,60 +467,75 @@ struct FolderPreparationIndicator: View {
 
     @ViewBuilder
     private var glyph: some View {
-        switch status.phase {
-        case .idle:
-            EmptyView()
-        case .enumeratingUnknown:
+        if status.waitingReason != nil,
+            isGroupingInProgress || status.phase != .completeWithIssues
+        {
+            pausedGlyph
+        } else if isGroupingInProgress, status.phase == .complete || status.phase == .idle {
             ProgressView()
                 .controlSize(.small)
-                .tint(theme.tokens.accent.color)
+                .tint(theme.tokens.group.color)
                 .scaleEffect(0.75)
-        case .preparing:
-            let fraction = status.readyFraction ?? 0
-            ZStack {
-                Circle()
-                    .stroke(theme.tokens.secondaryText.color.opacity(0.24), lineWidth: 2)
-                Circle()
-                    .trim(from: 0, to: fraction)
-                    .stroke(
-                        theme.tokens.accent.color,
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .animation(
-                        CloveMotion.progress(reduceMotion: reduceMotion),
-                        value: fraction)
-            }
-        case .waiting:
-            let fraction = status.readyFraction ?? 0
-            ZStack {
-                Circle()
-                    .stroke(theme.tokens.secondaryText.color.opacity(0.24), lineWidth: 2)
-                if fraction > 0 {
+        } else {
+            switch status.phase {
+            case .idle:
+                EmptyView()
+            case .enumeratingUnknown:
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(theme.tokens.accent.color)
+                    .scaleEffect(0.75)
+            case .preparing:
+                let fraction = status.readyFraction ?? 0
+                ZStack {
+                    Circle()
+                        .stroke(theme.tokens.secondaryText.color.opacity(0.24), lineWidth: 2)
                     Circle()
                         .trim(from: 0, to: fraction)
                         .stroke(
-                            theme.tokens.secondaryText.color.opacity(0.7),
+                            theme.tokens.accent.color,
                             style: StrokeStyle(lineWidth: 2, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))
+                        .animation(
+                            CloveMotion.progress(reduceMotion: reduceMotion),
+                            value: fraction)
                 }
-                Image(systemName: "pause.fill")
-                    .font(.system(size: 6, weight: .bold))
-                    .foregroundStyle(Color.clove.text.secondary)
+            case .waiting:
+                pausedGlyph
+            case .complete:
+                ZStack {
+                    Circle()
+                        .stroke(theme.tokens.accent.color, lineWidth: 2)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundStyle(theme.tokens.accent.color)
+                }
+            case .completeWithIssues:
+                Image(systemName: "exclamationmark.circle")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Color.clove.status.failed)
             }
-        case .complete:
-            ZStack {
+        }
+    }
+
+    private var pausedGlyph: some View {
+        let fraction = status.readyFraction ?? 0
+        return ZStack {
+            Circle()
+                .stroke(theme.tokens.secondaryText.color.opacity(0.24), lineWidth: 2)
+            if fraction > 0 {
                 Circle()
-                    .stroke(theme.tokens.accent.color, lineWidth: 2)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 7.5, weight: .bold))
-                    .foregroundStyle(theme.tokens.accent.color)
+                    .trim(from: 0, to: fraction)
+                    .stroke(
+                        theme.tokens.secondaryText.color.opacity(0.7),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
             }
-        case .completeWithIssues:
-            Image(systemName: "exclamationmark.circle")
-                .font(.system(size: 13.5, weight: .semibold))
-                .foregroundStyle(Color.clove.status.failed)
+            Image(systemName: "pause.fill")
+                .font(.system(size: 6, weight: .bold))
+                .foregroundStyle(Color.clove.text.secondary)
         }
     }
 }
@@ -637,9 +693,43 @@ struct FolderPreparationDetails: View {
                     status.previews, language: language),
                 tint: barTint,
                 identifierPrefix: "clove.preparation.previews")
+            if browsing.isGroupingInProgress {
+                Divider()
+                groupingRow
+            }
         }
         .padding(14)
         .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var groupingRow: some View {
+        let title = AppLocalization.string("Similar groups", language: language)
+        let statusText = FolderPreparationAccessibility.groupingStatusText(
+            for: status, language: language)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                Spacer(minLength: 8)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(Color.clove.text.secondary)
+                    .accessibilityIdentifier("clove.preparation.grouping.status")
+            }
+            Group {
+                if status.waitingReason != nil {
+                    ProgressView(value: 0, total: 1)
+                        .tint(theme.tokens.secondaryText.color)
+                } else {
+                    ProgressView()
+                        .tint(theme.tokens.group.color)
+                }
+            }
+            .progressViewStyle(.linear)
+            .accessibilityLabel(title)
+            .accessibilityValue(statusText)
+            .accessibilityIdentifier("clove.preparation.grouping.progress")
+        }
     }
 
     @ViewBuilder

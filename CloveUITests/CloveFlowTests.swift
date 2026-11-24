@@ -2985,6 +2985,53 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testFolderPreparationGroupingSubtitleAndPauseDetails() {
+        let activeApp = launchSample(["CLOVE_TEST_LIBRARY_OPENING": "grouping"])
+        openLibrary(activeApp)
+
+        let subtitle = element(activeApp, "clove.grid.subtitle")
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(subtitle.label, "36 photos")
+        XCTAssertFalse(activeApp.staticTexts["Finding similar shots…"].exists)
+
+        let prep = element(activeApp, "clove.grid.preparation")
+        XCTAssertTrue(prep.waitForExistence(timeout: 5))
+        XCTAssertEqual(prep.value as? String, "Finding similar shots")
+
+        prep.tap()
+        let details = element(activeApp, "clove.preparation.details")
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            element(activeApp, "clove.preparation.grouping.status").label,
+            "Finding similar shots…")
+        XCTAssertTrue(
+            element(activeApp, "clove.preparation.grouping.progress").waitForExistence(timeout: 5))
+        activeApp.terminate()
+
+        let pausedApp = launchSample([
+            "CLOVE_TEST_LIBRARY_OPENING": "grouping",
+            "CLOVE_TEST_LIBRARY_PREPARATION": "waiting_pressure",
+        ])
+        openLibrary(pausedApp)
+
+        let pausedSubtitle = element(pausedApp, "clove.grid.subtitle")
+        XCTAssertTrue(pausedSubtitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(pausedSubtitle.label, "36 photos")
+
+        let pausedPrep = element(pausedApp, "clove.grid.preparation")
+        XCTAssertTrue(pausedPrep.waitForExistence(timeout: 5))
+        XCTAssertEqual(pausedPrep.value as? String, "Paused for memory, 15 of 36 ready")
+
+        pausedPrep.tap()
+        XCTAssertTrue(element(pausedApp, "clove.preparation.details").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(pausedApp, "clove.preparation.waiting").exists)
+        XCTAssertEqual(element(pausedApp, "clove.preparation.grouping.status").label, "Paused")
+        XCTAssertTrue(
+            element(pausedApp, "clove.preparation.grouping.progress").waitForExistence(timeout: 5))
+        pausedApp.terminate()
+    }
+
+    @MainActor
     func testCaptureTapPickerReferencesWhenRequested() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["CLOVE_CAPTURE_TAP_PICKERS"] == "1")
         defer { XCUIDevice.shared.orientation = .portrait }

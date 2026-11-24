@@ -120,11 +120,20 @@ struct GridScreen: View {
     }
 
     private var gridProgressLine: (progress: Double?, tone: ProgressLine.Tone) {
+        Self.progressLineState(
+            browsing: browsing, similarGroupsEnabled: store.settings.similarGroupsEnabled)
+    }
+
+    static func progressLineState(
+        browsing: BrowsingModel, similarGroupsEnabled: Bool
+    ) -> (progress: Double?, tone: ProgressLine.Tone) {
         if let progress = browsing.readingProgress {
             let value = progress.total > 0 ? Double(progress.read) / Double(progress.total) : 0
             return (value, .reading)
         }
-        if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
+        if browsing.isFindingSimilarShots, similarGroupsEnabled,
+            browsing.preparationStatus.waitingReason == nil
+        {
             return (1, .grouping)
         }
         return (nil, .reading)
@@ -455,6 +464,7 @@ struct GridScreen: View {
                                     } else {
                                         Text(subtitle)
                                             .lineLimit(1)
+                                            .accessibilityIdentifier("clove.grid.subtitle")
                                     }
                                     SaveStatusIndicator(
                                         browsing: browsing, identifierPrefix: "clove.grid.saveState"
@@ -558,7 +568,9 @@ struct GridScreen: View {
                                 .accessibilityIdentifier("clove.grid.batch.hiddenCount")
                                 .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
                         } else {
-                            Text(subtitle).lineLimit(1)
+                            Text(subtitle)
+                                .lineLimit(1)
+                                .accessibilityIdentifier("clove.grid.subtitle")
                         }
                         SaveStatusIndicator(
                             browsing: browsing, identifierPrefix: "clove.grid.saveState")
@@ -597,7 +609,9 @@ struct GridScreen: View {
                         .accessibilityIdentifier("clove.grid.batch.hiddenCount")
                         .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
                 } else {
-                    Text(subtitle).lineLimit(1)
+                    Text(subtitle)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("clove.grid.subtitle")
                 }
                 SaveStatusIndicator(
                     browsing: browsing, identifierPrefix: "clove.grid.saveState")
@@ -914,8 +928,9 @@ struct GridScreen: View {
 
     private var hasFilter: Bool { browsing.hasActiveFilter }
 
-    private var metadataFilterSubtitlePart: String? {
-        let filter = browsing.metadataFilter
+    private static func metadataFilterSubtitlePart(
+        for filter: PhotoMetadataFilter, language: ResolvedAppLanguage
+    ) -> String? {
         guard !filter.isEmpty else { return nil }
         if filter.activeCount == 1 {
             if let camera = filter.camera { return camera }
@@ -936,6 +951,16 @@ struct GridScreen: View {
     }
 
     private var subtitle: String {
+        Self.subtitleText(
+            browsing: browsing, isSelecting: isSelecting, isRegular: isRegular, language: language)
+    }
+
+    static func subtitleText(
+        browsing: BrowsingModel,
+        isSelecting: Bool,
+        isRegular: Bool,
+        language: ResolvedAppLanguage = .english
+    ) -> String {
         if isSelecting { return browsing.localizedFolderTitle(language: language) }
         if let progress = browsing.readingProgress {
             return progress.total == 0
@@ -943,9 +968,6 @@ struct GridScreen: View {
                 : AppLocalization.format(
                     "%lld of %lld", language: language, Int64(progress.read),
                     Int64(progress.total))
-        }
-        if browsing.isFindingSimilarShots, store.settings.similarGroupsEnabled {
-            return AppLocalization.string("Finding similar shots…", language: language)
         }
         let count = browsing.photos.count
         let countText = count.formatted(.number.locale(language.locale))
@@ -959,7 +981,9 @@ struct GridScreen: View {
         }
         switch browsing.state.filter {
         case .all:
-            if let metadataPart = metadataFilterSubtitlePart {
+            if let metadataPart = metadataFilterSubtitlePart(
+                for: browsing.metadataFilter, language: language)
+            {
                 return AppLocalization.format(
                     "%@ · %@", language: language, metadataPart, countText)
             }

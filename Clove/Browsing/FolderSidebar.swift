@@ -187,10 +187,18 @@ struct FolderSidebar: View {
                                 "%lld group", language: language, Int64(browsing.groups.count)))
                         Spacer()
                         if browsing.isFindingSimilarShots {
-                            ProgressView().controlSize(.small)
-                                .accessibilityLabel(
-                                    AppLocalization.string(
-                                        "Finding similar shots", language: language))
+                            if browsing.preparationStatus.waitingReason == nil {
+                                ProgressView().controlSize(.small)
+                                    .accessibilityLabel(
+                                        AppLocalization.string(
+                                            "Finding similar shots", language: language))
+                            } else {
+                                Image(systemName: "pause.circle")
+                                    .foregroundStyle(Color.clove.text.secondary)
+                                    .frame(width: 28, height: 28)
+                                    .accessibilityLabel(
+                                        AppLocalization.string("Paused", language: language))
+                            }
                         } else {
                             Button {
                                 Task { await browsing.runGroupingAgain() }

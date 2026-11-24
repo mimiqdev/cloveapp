@@ -390,6 +390,47 @@ struct FolderPreparationIntegrationTests {
         await workspace.library.closeFolder()
     }
 
+    @Test func groupingWithMemoryPressurePublishesWaitingReasonAndRecoversOnNormal() async throws {
+        let workspace = try PreparationTestWorkspace(similarGroupsEnabled: true)
+        defer { workspace.remove() }
+
+        for index in 1...4 {
+            try PreparationTestWorkspace.writeJPEG(
+                to: workspace.folderA.appendingPathComponent("GRP_\(index).jpg"),
+                gray: 0.25 * CGFloat(index),
+                subjectArea: nil)
+        }
+
+        let model = BrowsingModel(library: workspace.library, similarGroupsEnabled: true)
+        await model.openPickedFolder(workspace.folderA)
+
+        try await waitUntil { model.readingProgress == nil }
+        await workspace.library.handleMemoryPressure(.critical)
+        #expect(workspace.library.isPausedForMemoryPressure)
+        try await waitUntil {
+            model.preparationStatus.waitingReason == .memoryPressure
+        }
+
+        // Even while grouping is paused under memory pressure, subtitle shows photo count.
+        #expect(
+            GridScreen.subtitleText(browsing: model, isSelecting: false, isRegular: false)
+                == "4 photos")
+        #expect(
+            GridScreen.progressLineState(browsing: model, similarGroupsEnabled: true).progress
+                == nil)
+
+        await workspace.library.handleMemoryPressure(.normal)
+        #expect(!workspace.library.isPausedForMemoryPressure)
+        try await waitUntil {
+            !model.isFolderOpening
+                && model.preparationStatus.waitingReason == nil
+                && model.preparationStatus.phase == .complete
+                && model.preparationStatus.readyForBothCount == 4
+        }
+
+        await workspace.library.closeFolder()
+    }
+
     private func waitUntil(
         timeout: Duration = .seconds(90),
         _ condition: @escaping @MainActor () async -> Bool
@@ -413,7 +454,7 @@ private final class PreparationTestWorkspace {
     let cacheRoot: URL
     let library: FolderLibrarySession
 
-    init() throws {
+    init(similarGroupsEnabled: Bool = false) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         folderA = root.appendingPathComponent("folder-a")
         folderB = root.appendingPathComponent("folder-b")
@@ -421,7 +462,9 @@ private final class PreparationTestWorkspace {
         try FileManager.default.createDirectory(at: folderA, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: folderB, withIntermediateDirectories: true)
 
-        library = Self.makeLibrary(in: root, recentsRoot: root, cacheRoot: cacheRoot)
+        library = Self.makeLibrary(
+            in: root, recentsRoot: root, cacheRoot: cacheRoot,
+            similarGroupsEnabled: similarGroupsEnabled)
     }
 
     func makeSecondLibrary() -> FolderLibrarySession {
@@ -434,7 +477,8 @@ private final class PreparationTestWorkspace {
     private static func makeLibrary(
         in storeRoot: URL,
         recentsRoot: URL,
-        cacheRoot: URL
+        cacheRoot: URL,
+        similarGroupsEnabled: Bool = false
     ) -> FolderLibrarySession {
         try? FileManager.default.createDirectory(at: storeRoot, withIntermediateDirectories: true)
         let stores = FolderLibrarySession.Stores(
@@ -448,7 +492,7 @@ private final class PreparationTestWorkspace {
             caches: Task.detached(priority: .userInitiated) {
                 await FolderLibrarySession.makeCaches(in: cacheRoot)
             },
-            similarGroupsEnabled: { false })
+            similarGroupsEnabled: { similarGroupsEnabled })
     }
 
     func remove() {
