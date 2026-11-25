@@ -1,7 +1,8 @@
 import CloveCore
 import SwiftUI
 
-/// The unified contextual selection toolbar for batch marking and batch actions on the grid.
+/// The dual-capsule contextual selection toolbar for batch marking and batch actions on the grid,
+/// plus a conditional Compare capsule when two visible photos are selected on wide layouts.
 /// Write failures are reported once by the shared toast.
 struct GridBatchBar: View {
     let browsing: BrowsingModel
@@ -16,6 +17,7 @@ struct GridBatchBar: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
     @Environment(\.tapPickerController) private var tapPicker
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var canOperate: Bool {
         !browsing.batchTargets.isEmpty && browsing.canMark
@@ -30,8 +32,10 @@ struct GridBatchBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 8) {
             markingGroup
+                .frame(width: 168, height: 48)
+                .cloveGlass(in: Capsule())
                 .disabled(!canOperate)
                 .opacity(canOperate ? 1 : 0.4)
                 .contextMenu {
@@ -55,15 +59,21 @@ struct GridBatchBar: View {
                         .accessibilityIdentifier("clove.grid.batch.deselectAll")
                     }
                 }
-            Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("clove.grid.batch.bar")
+                .reportTapPickerFrame("clove.grid.batch.bar")
+
+            actionsMenu
+
             if showsCompare {
                 compareButton
-                Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
+                    .transition(
+                        CloveMotion.scaleOpacityTransition(
+                            scale: 0.94, anchor: .center, reduceMotion: reduceMotion))
             }
-            actionsMenu
         }
         .frame(height: 48)
-        .cloveGlass(in: Capsule())
+        .animation(CloveMotion.chrome(reduceMotion: reduceMotion), value: showsCompare)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.grid.batch")
         .reportTapPickerFrame("clove.grid.batch")
@@ -76,7 +86,7 @@ struct GridBatchBar: View {
                 identifier: "clove.grid.batch.reject",
                 onToggle: { apply(.reject) }
             )
-            .frame(width: 54, height: 48)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .reportTapPickerFrame("clove.grid.batch.reject")
 
             Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
@@ -90,7 +100,7 @@ struct GridBatchBar: View {
                 pickerIdentifier: "clove.grid.batch.stars",
                 onRate: { apply(.rating($0)) }
             )
-            .frame(width: 54, height: 48)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .reportTapPickerFrame("clove.grid.batch.rating")
 
             Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
@@ -103,7 +113,7 @@ struct GridBatchBar: View {
                 pickerIdentifier: "clove.grid.batch.labels",
                 onPick: { apply(.label($0.map { ColourLabel(colour: $0) } ?? .clear)) }
             )
-            .frame(width: 54, height: 48)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .reportTapPickerFrame("clove.grid.batch.label")
         }
     }
@@ -112,11 +122,22 @@ struct GridBatchBar: View {
         Menu {
             Button {
                 tapPicker?.dismiss()
+                onRename()
+            } label: {
+                Label(
+                    AppLocalization.string("Rename…", language: language),
+                    systemImage: "pencil")
+            }
+            .disabled(!canOperate)
+            .accessibilityIdentifier("clove.grid.batch.rename")
+
+            Button {
+                tapPicker?.dismiss()
                 onSaveToPhotos()
             } label: {
                 Label(
-                    AppLocalization.string("Save to Photos", language: language),
-                    systemImage: "square.and.arrow.down")
+                    AppLocalization.string("Save to Photos…", language: language),
+                    systemImage: "photo.badge.plus")
             }
             .disabled(!canSaveToPhotos)
             .accessibilityIdentifier("clove.grid.batch.saveToPhotos")
@@ -131,30 +152,24 @@ struct GridBatchBar: View {
             }
             .disabled(!canOperate)
             .accessibilityIdentifier("clove.grid.batch.keywords")
-            Button {
-                tapPicker?.dismiss()
-                onRename()
-            } label: {
-                Label(
-                    AppLocalization.string("Rename…", language: language),
-                    systemImage: "pencil")
-            }
-            .disabled(!canOperate)
-            .accessibilityIdentifier("clove.grid.batch.rename")
         } label: {
             HStack(spacing: 4) {
                 Text(AppLocalization.string("Actions", language: language))
                     .lineLimit(1)
-                Image(systemName: "ellipsis.circle")
+                Image(systemName: "ellipsis")
                     .imageScale(.small)
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(hasAnyMenuAction ? Color.clove.accent : Color.clove.text.secondary)
+            .foregroundStyle(
+                hasAnyMenuAction ? Color.clove.text.primary : Color.clove.text.secondary
+            )
             .opacity(hasAnyMenuAction ? 1 : 0.45)
-            .padding(.horizontal, 14)
-            .frame(minWidth: 44, minHeight: 48, maxHeight: 48)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .frame(minWidth: 110, minHeight: 48, maxHeight: 48)
+            .contentShape(Capsule())
+            .cloveGlass(in: Capsule())
         }
+        .menuOrder(.fixed)
         .disabled(!hasAnyMenuAction)
         .accessibilityLabel(AppLocalization.string("Actions", language: language))
         .accessibilityIdentifier("clove.grid.batch.actions")
@@ -174,11 +189,12 @@ struct GridBatchBar: View {
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Color.clove.accent)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .frame(minWidth: 44, minHeight: 48, maxHeight: 48)
-            .contentShape(Rectangle())
+            .contentShape(Capsule())
+            .cloveGlass(in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.cloveGlassPress)
         .accessibilityLabel(AppLocalization.string("Compare", language: language))
         .accessibilityIdentifier("clove.grid.batch.compare")
         .reportTapPickerFrame("clove.grid.batch.compare")

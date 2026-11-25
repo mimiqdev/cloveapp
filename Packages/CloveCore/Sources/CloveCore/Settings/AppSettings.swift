@@ -52,6 +52,10 @@ public struct AppSettings: Hashable, Sendable {
     /// Whether Orange and Pink join the five default labels (PRD Marking rules); off by default.
     public var extendedColourLabelsEnabled: Bool
 
+    /// Whether batch Save to Photos and Add Keywords open a confirmation sheet before applying;
+    /// off by default so immediate actions apply without an extra confirmation sheet.
+    public var confirmBatchActions: Bool
+
     /// The validated folder name Move rejects writes into (PRD Move rejects); `_Rejected` by
     /// default.
     public var rejectsFolderName: RejectsFolderName
@@ -88,6 +92,7 @@ public struct AppSettings: Hashable, Sendable {
         doubleTap: DoubleTapBehaviour = .zoomToFocus,
         zoomedGestures: ZoomedGestures = .rateAndSwitch,
         extendedColourLabelsEnabled: Bool = false,
+        confirmBatchActions: Bool = false,
         rejectsFolderName: RejectsFolderName = .defaultFolderName,
         moveRejectsEnabled: Bool = true,
         similarGroupsEnabled: Bool = true,
@@ -103,6 +108,7 @@ public struct AppSettings: Hashable, Sendable {
         self.doubleTap = doubleTap
         self.zoomedGestures = zoomedGestures
         self.extendedColourLabelsEnabled = extendedColourLabelsEnabled
+        self.confirmBatchActions = confirmBatchActions
         self.rejectsFolderName = rejectsFolderName
         self.moveRejectsEnabled = moveRejectsEnabled
         self.similarGroupsEnabled = similarGroupsEnabled

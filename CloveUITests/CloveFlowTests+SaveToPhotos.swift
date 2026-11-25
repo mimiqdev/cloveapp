@@ -187,12 +187,88 @@ extension CloveFlowTests {
             openLibrary(app)
             enterGridSelectionMode(in: app)
 
-            let eligible = element(app, "clove.grid.photo.mmq02680")
+            // FolderSaveBanner overlays Row 1 when location is lost; pick an eligible cell clear of
+            // both the banner at the top and the batch bar at the bottom.
+            let grid = element(app, "clove.grid").collectionViews.firstMatch
+            let batchBar = element(app, "clove.grid.batch")
+            let eligible = element(app, "clove.grid.photo.mmq02695")
+            for _ in 0..<4
+            where !eligible.exists || !eligible.isHittable
+                || eligible.frame.maxY >= batchBar.frame.minY - 8
+            {
+                grid.swipeUp()
+            }
             XCTAssertTrue(eligible.waitForExistence(timeout: 5))
             eligible.tap()
             XCTAssertEqual(element(app, "clove.grid.batch.count").label, "1 selected")
             XCTAssertFalse(element(app, "clove.grid.batch.actions").isEnabled)
         }
+    }
+
+    @MainActor
+    func testSaveToPhotosConfirmationSheetWhenSettingEnabled() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_KEEP_TOAST": "1"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        openSettings(in: app)
+        openSettingsCategory("clove.settings.category.culling", in: app)
+        let confirmToggle = scrollToSettingsControl("clove.settings.confirmBatchActions", in: app)
+        XCTAssertTrue(confirmToggle.waitForExistence(timeout: 5))
+        if (confirmToggle.value as? String) != "1" {
+            confirmToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertEqual(confirmToggle.value as? String, "1")
+
+        openSettingsCategory("clove.settings.category.browsing", in: app)
+        setSimilarGroups(in: app, on: false)
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+
+        enterGridSelectionMode(in: app)
+
+        // All RAW-only: sheet opens with Save 0 Photos disabled and Cancel leaves state clean.
+        for stem in ["mmq02678", "mmq02679"] {
+            let tile = element(app, "clove.grid.photo.\(stem)")
+            XCTAssertTrue(tile.waitForExistence(timeout: 5))
+            tile.tap()
+        }
+        tapSaveToPhotosAction(in: app)
+
+        let sheet = element(app, "clove.photos.sheet")
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(sheet.navigationBars["Save to Photos"].exists)
+        let readyRow = element(app, "clove.photos.sheet.ready")
+        XCTAssertTrue(readyRow.label.contains("Ready to save"))
+        XCTAssertTrue(readyRow.label.contains("0 photos"))
+        let skippedRow = element(app, "clove.photos.sheet.skipped")
+        XCTAssertTrue(skippedRow.label.contains("RAW only · skipped"))
+        XCTAssertTrue(skippedRow.label.contains("2 photos"))
+        let confirmButton = element(app, "clove.photos.sheet.confirm")
+        XCTAssertEqual(confirmButton.label, "Save 0 Photos")
+        XCTAssertFalse(confirmButton.isEnabled)
+
+        element(app, "clove.photos.sheet.cancel").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), sheet))
+        XCTAssertFalse(element(app, "clove.photos.toast").exists)
+
+        // Add eligible RAW+JPEG: sheet shows Ready to save (1 photo), Save 1 Photo exports & shows toast.
+        element(app, "clove.grid.photo.mmq02680").tap()
+        tapSaveToPhotosAction(in: app)
+
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(readyRow.label.contains("1 photo"))
+        XCTAssertTrue(skippedRow.label.contains("2 photos"))
+        XCTAssertEqual(confirmButton.label, "Save 1 Photo")
+        XCTAssertTrue(confirmButton.isEnabled)
+        confirmButton.tap()
+
+        let toast = element(app, "clove.photos.toast")
+        XCTAssertTrue(toast.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            toast.staticTexts["Saved 1 photo to Photos · 2 RAW skipped"].waitForExistence(
+                timeout: 5))
+        XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
     }
 
     @MainActor

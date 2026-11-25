@@ -57,6 +57,7 @@ struct DuoDetailLayout {
 @available(iOS 27.1, *)
 struct BrowsingToolbar<
     NavigationTools: View,
+    HorizontalLeadingTools: View,
     StandaloneDockTool: View,
     HorizontalTools: View,
     Tools: View,
@@ -70,6 +71,7 @@ struct BrowsingToolbar<
     var showsUndo = true
     var backTitle: String? = nil
     var showsNavigationTools = true
+    var showsHorizontalLeadingTools = false
     var showsStandaloneDockTool = false
     var showsHorizontalTools = false
     var showsTools = true
@@ -77,6 +79,7 @@ struct BrowsingToolbar<
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @Environment(\.appLanguage) private var language
     @ViewBuilder var navigationTools: NavigationTools
+    @ViewBuilder var horizontalLeadingTools: HorizontalLeadingTools
     @ViewBuilder var standaloneDockTool: StandaloneDockTool
     @ViewBuilder var horizontalTools: HorizontalTools
     @ViewBuilder var tools: Tools
@@ -91,11 +94,13 @@ struct BrowsingToolbar<
         showsUndo: Bool = true,
         backTitle: String? = nil,
         showsNavigationTools: Bool = NavigationTools.self != EmptyView.self,
+        showsHorizontalLeadingTools: Bool = HorizontalLeadingTools.self != EmptyView.self,
         showsStandaloneDockTool: Bool = StandaloneDockTool.self != EmptyView.self,
         showsHorizontalTools: Bool = HorizontalTools.self != EmptyView.self,
         showsTools: Bool = true,
         showsBottom: Bool = Bottom.self != EmptyView.self,
         @ViewBuilder navigationTools: () -> NavigationTools = { EmptyView() },
+        @ViewBuilder horizontalLeadingTools: () -> HorizontalLeadingTools = { EmptyView() },
         @ViewBuilder standaloneDockTool: () -> StandaloneDockTool = { EmptyView() },
         @ViewBuilder horizontalTools: () -> HorizontalTools = { EmptyView() },
         @ViewBuilder tools: () -> Tools,
@@ -109,11 +114,13 @@ struct BrowsingToolbar<
         self.showsUndo = showsUndo
         self.backTitle = backTitle
         self.showsNavigationTools = showsNavigationTools
+        self.showsHorizontalLeadingTools = showsHorizontalLeadingTools
         self.showsStandaloneDockTool = showsStandaloneDockTool
         self.showsHorizontalTools = showsHorizontalTools
         self.showsTools = showsTools
         self.showsBottom = showsBottom
         self.navigationTools = navigationTools()
+        self.horizontalLeadingTools = horizontalLeadingTools()
         self.standaloneDockTool = standaloneDockTool()
         self.horizontalTools = horizontalTools()
         self.tools = tools()
@@ -123,6 +130,12 @@ struct BrowsingToolbar<
 
     var body: some ToolbarContent {
         if usesVerticalBar {
+            if showsHorizontalLeadingTools {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    horizontalLeadingTools
+                }
+                .axisBehavior(.horizontalOnly)
+            }
             if showsBack {
                 ToolbarItem(placement: .cancellationAction) {
                     backButton

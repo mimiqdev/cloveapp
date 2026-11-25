@@ -172,6 +172,104 @@ extension CloveFlowTests {
     }
 
     @MainActor
+    func testBatchKeywordsStagedConfirmationSheetWhenSettingEnabled() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_KEEP_TOAST": "1"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        openSettings(in: app)
+        openSettingsCategory("clove.settings.category.culling", in: app)
+        let confirmToggle = scrollToSettingsControl("clove.settings.confirmBatchActions", in: app)
+        XCTAssertTrue(confirmToggle.waitForExistence(timeout: 5))
+        if (confirmToggle.value as? String) != "1" {
+            confirmToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        }
+        XCTAssertEqual(confirmToggle.value as? String, "1")
+
+        openSettingsCategory("clove.settings.category.browsing", in: app)
+        setSimilarGroups(in: app, on: false)
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+
+        element(app, "clove.grid.more").tap()
+        app.buttons["Select"].tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        element(app, "clove.grid.photo.mmq02681").tap()
+
+        openBatchKeywordsSheet(app)
+        let sheet = element(app, "clove.keywords.sheet")
+        XCTAssertTrue(sheet.navigationBars["Add Keywords"].exists)
+        let confirmButton = element(app, "clove.keywords.confirm")
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(confirmButton.label, "Add to 2 Photos")
+        XCTAssertFalse(confirmButton.isEnabled)
+
+        // Stage typed keywords in memory without dismissing or writing, then Cancel discards them.
+        let input = app.textFields["clove.keywords.input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.tap()
+        input.typeText("Harbour, Dawn")
+        element(app, "clove.keywords.apply").tap()
+
+        XCTAssertTrue(element(app, "clove.keywords.staged.Harbour").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "clove.keywords.staged.Dawn").waitForExistence(timeout: 5))
+        XCTAssertTrue(confirmButton.isEnabled)
+        element(app, "clove.keywords.cancel").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), sheet))
+
+        // Reopen, stage again, and confirm via Add to 2 Photos.
+        openBatchKeywordsSheet(app)
+        let input2 = app.textFields["clove.keywords.input"]
+        XCTAssertTrue(input2.waitForExistence(timeout: 5))
+        input2.tap()
+        input2.typeText("Harbour, Dawn")
+        element(app, "clove.keywords.apply").tap()
+        XCTAssertTrue(element(app, "clove.keywords.staged.Harbour").waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "isEnabled == true"), confirmButton, timeout: 5))
+        confirmButton.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), sheet))
+
+        // Switch selection to {mmq02680, mmq02683}, verify Recent chip stages/unstages without writing until Confirm.
+        element(app, "clove.grid.photo.mmq02681").tap()
+        element(app, "clove.grid.photo.mmq02683").tap()
+        openBatchKeywordsSheet(app)
+
+        let recentChip = element(app, "clove.keywords.suggestion.Harbour")
+        XCTAssertTrue(recentChip.waitForExistence(timeout: 5))
+        recentChip.tap()
+        let stagedHarbour = element(app, "clove.keywords.staged.Harbour")
+        XCTAssertTrue(stagedHarbour.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirmButton.isEnabled)
+
+        stagedHarbour.tap()
+        XCTAssertTrue(recentChip.waitForExistence(timeout: 5))
+        XCTAssertFalse(confirmButton.isEnabled)
+
+        recentChip.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isEnabled == true"), confirmButton, timeout: 5))
+        confirmButton.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), sheet))
+
+        // Verify mmq02683 received Harbour and Undo removes it cleanly.
+        element(app, "clove.grid.batch.done").tap()
+        element(app, "clove.grid.photo.mmq02683").tap()
+        element(app, "clove.detail.info").tap()
+        XCTAssertTrue(element(app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
+        let keywordsRow = element(app, "clove.detail.info.keywords")
+        XCTAssertTrue(keywordsRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(keywordsRow.label.contains("Harbour"))
+        element(app, "clove.detail.info.done").tap()
+
+        let undoButton = element(app, "clove.detail.undo")
+        XCTAssertTrue(undoButton.waitForExistence(timeout: 5))
+        undoButton.tap()
+        element(app, "clove.detail.info").tap()
+        XCTAssertTrue(element(app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.info.keywords").exists)
+        element(app, "clove.detail.info.done").tap()
+    }
+
+    @MainActor
     private func disableSimilarGroupsForBatchKeywords(_ app: XCUIApplication) {
         openSettings(in: app)
         openSettingsCategory("clove.settings.category.browsing", in: app)

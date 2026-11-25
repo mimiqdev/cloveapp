@@ -1,6 +1,8 @@
 import CloveCore
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 
 @testable import Clove
 
@@ -276,6 +278,100 @@ struct SaveToPhotosTests {
             missingFileFixture.browsing.photosSaveToastMessage?.localizedText(language: .english)
                 == "Couldn't save to Photos.")
         await missingFileFixture.library.closeFolder()
+    }
+
+    @Test func saveToPhotosConfirmationSheetMountsForMixedAndRawOnlyPlansAndExportsOnConfirm()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let library = TestLibrary.sample(includeRasterSamples: true)
+        let browsing = BrowsingModel(library: library, similarGroupsEnabled: false)
+        browsing.openFolder()
+
+        let eligible = try #require(browsing.photos.first { $0.id.stem == "mmq02680" })
+        let rawOnly = try #require(browsing.photos.first { $0.id.stem == "mmq02678" })
+
+        // 1. Mixed plan presents Ready to save, RAW only · skipped, and enabled Save N Photos CTA.
+        browsing.toggleSelection(eligible.id)
+        browsing.toggleSelection(rawOnly.id)
+        let mixedPlan = browsing.planSaveToPhotos()
+        #expect(mixedPlan.eligibleCount == 1)
+        #expect(mixedPlan.skippedRawCount == 1)
+        #expect(
+            SaveToPhotosConfirmationSheet.confirmTitle(
+                eligibleCount: mixedPlan.eligibleCount, language: .english) == "Save 1 Photo")
+
+        do {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
+            let host = UIHostingController(
+                rootView: SaveToPhotosConfirmationSheet(
+                    plan: mixedPlan,
+                    hiddenSelectedCount: 0,
+                    onConfirm: {}
+                )
+                .environment(\.cloveTheme, .light)
+                .environment(\.appLanguage, .english))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitForMountedSheet(host: host, window: window)
+            await browsing.saveToPhotos(mixedPlan, language: .english)
+            #expect(
+                browsing.photosSaveToastMessage?.localizedText(language: .english)
+                    == "Saved 1 photo to Photos · 1 RAW skipped")
+        }
+
+        // 2. All RAW-only plan disables Save 0 Photos CTA while keeping Cancel available.
+        browsing.clearSelection()
+        browsing.toggleSelection(rawOnly.id)
+        let rawOnlyPlan = browsing.planSaveToPhotos()
+        #expect(rawOnlyPlan.eligibleCount == 0)
+        #expect(rawOnlyPlan.skippedRawCount == 1)
+        #expect(
+            SaveToPhotosConfirmationSheet.confirmTitle(
+                eligibleCount: rawOnlyPlan.eligibleCount, language: .english) == "Save 0 Photos")
+
+        do {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
+            let host = UIHostingController(
+                rootView: SaveToPhotosConfirmationSheet(plan: rawOnlyPlan) {}
+                    .environment(\.cloveTheme, .light)
+                    .environment(\.appLanguage, .english))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitForMountedSheet(host: host, window: window)
+        }
+    }
+
+    private func waitForMountedSheet(host: UIViewController, window: UIWindow) async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while ContinuousClock.now < deadline {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            if host.view.bounds.size.width > 0, !host.children.isEmpty {
+                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+                if image.size.width > 0, image.size.height > 0 {
+                    return
+                }
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        Issue.record("Timed out waiting for SaveToPhotosConfirmationSheet to mount")
+        throw CancellationError()
     }
 }
 

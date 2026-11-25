@@ -531,9 +531,11 @@ extension CloveFlowTests {
     @MainActor
     private func openSettingsFromGrid(in app: XCUIApplication) {
         element(in: app, "clove.grid.more").tap()
-        app.buttons["Settings"].tap()
+        let settingsButton = app.buttons["Settings"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 5), "More menu had no Settings item")
+        settingsButton.tap()
         XCTAssertTrue(
-            element(in: app, "clove.settings").exists,
+            element(in: app, "clove.settings").waitForExistence(timeout: 5),
             "Settings did not appear"
         )
     }

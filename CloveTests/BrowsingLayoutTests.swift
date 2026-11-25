@@ -821,30 +821,120 @@ struct BrowsingLayoutTests {
                 try await waitFor(
                     "grid selection header mounted (\(width), \(language.rawValue))"
                 ) {
-                    box.frames["clove.grid.batch.count"] != nil
+                    box.frames["clove.grid.selectAll"] != nil
+                        && box.frames["clove.grid.batch.count"] != nil
                         && box.frames["clove.grid.batch.hiddenCount"] != nil
                         && box.frames["clove.grid.filter"] != nil
-                        && box.frames["clove.grid.selectionOptions"] != nil
                         && box.frames["clove.grid.batch.done"] != nil
                 }
 
+                let selectAllFrame = try #require(box.frames["clove.grid.selectAll"])
                 let countFrame = try #require(box.frames["clove.grid.batch.count"])
                 let hiddenFrame = try #require(box.frames["clove.grid.batch.hiddenCount"])
                 let filterFrame = try #require(box.frames["clove.grid.filter"])
-                let optionsFrame = try #require(box.frames["clove.grid.selectionOptions"])
                 let doneFrame = try #require(box.frames["clove.grid.batch.done"])
 
-                for frame in [countFrame, hiddenFrame, filterFrame, optionsFrame, doneFrame] {
+                for frame in [selectAllFrame, countFrame, hiddenFrame, filterFrame, doneFrame] {
                     #expect(frame.width > 0 && frame.height > 0)
                     #expect(frame.minX >= 16 - 1.5)
                     #expect(frame.maxX <= width - 16 + 1.5)
                 }
 
+                let titleMinX = min(countFrame.minX, hiddenFrame.minX)
                 let titleMaxX = max(countFrame.maxX, hiddenFrame.maxX)
+                #expect(selectAllFrame.maxX <= titleMinX + 1.5)
                 #expect(titleMaxX <= filterFrame.minX + 1.5)
-                #expect(filterFrame.maxX <= optionsFrame.minX + 1.5)
-                #expect(optionsFrame.maxX <= doneFrame.minX + 1.5)
+                #expect(filterFrame.maxX <= doneFrame.minX + 1.5)
             }
+        }
+    }
+
+    @Test func selectModeHeaderChromeShowsLeadingSelectAllTogglingToDeselectAllAndCompactFilter()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+
+        // 1. Compact iPhone system toolbar: leading Select All/Deselect All + Filter + Done.
+        do {
+            let model = BrowsingModel(library: TestLibrary.sample(), similarGroupsEnabled: false)
+            model.openFolder()
+            try await waitFor("folder did not open") { !model.isFolderOpening }
+            let first = try #require(model.photos.first?.id)
+            model.toggleSelection(first)
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.usesSystemBrowsingToolbar, true))
+            host.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("compact select mode toolbar did not mount") {
+                self.hasToolbarItem(identifier: "clove.grid.selectAll", in: host, window: window)
+                    && self.hasToolbarItem(
+                        identifier: "clove.grid.filter", in: host, window: window)
+                    && self.hasToolbarItem(
+                        identifier: "clove.grid.batch.done", in: host, window: window)
+            }
+            let partialSnapshot = inspectToolbarState(in: host, window: window)
+            #expect(partialSnapshot.leadingIDs == ["clove.grid.selectAll"])
+            #expect(partialSnapshot.trailingIDs == ["clove.grid.filter", "clove.grid.batch.done"])
+            #expect(!partialSnapshot.contains("clove.grid.selectionOptions"))
+
+            model.selectAllVisible()
+            try await Task.sleep(for: .milliseconds(80))
+            let allSelectedSnapshot = inspectToolbarState(in: host, window: window)
+            #expect(allSelectedSnapshot.leadingIDs == ["clove.grid.selectAll"])
+        }
+
+        // 2. Wide iPad system toolbar: leading Select All + trailing Done, no Filter in header.
+        do {
+            let model = BrowsingModel(library: TestLibrary.sample(), similarGroupsEnabled: false)
+            model.openFolder()
+            try await waitFor("folder did not open") { !model.isFolderOpening }
+            let first = try #require(model.photos.first?.id)
+            model.toggleSelection(first)
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 900, height: 820)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.usesSystemBrowsingToolbar, true))
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("ipad select mode toolbar did not mount") {
+                self.hasToolbarItem(identifier: "clove.grid.selectAll", in: host, window: window)
+                    && self.hasToolbarItem(
+                        identifier: "clove.grid.batch.done", in: host, window: window)
+            }
+            let padSnapshot = inspectToolbarState(in: host, window: window)
+            #expect(padSnapshot.leadingIDs == ["clove.grid.selectAll"])
+            #expect(padSnapshot.trailingIDs == ["clove.grid.batch.done"])
+            #expect(!padSnapshot.contains("clove.grid.filter"))
+            #expect(!padSnapshot.contains("clove.grid.selectionOptions"))
         }
     }
 
@@ -1791,7 +1881,7 @@ struct BrowsingLayoutTests {
         try await waitFor(
             "Duo Cover Select mode controls did not mount: \(self.describeToolbarState(in: host, window: window))"
         ) {
-            self.hasToolbarItem(identifier: "clove.grid.selectionOptions", in: host, window: window)
+            self.hasToolbarItem(identifier: "clove.grid.selectAll", in: host, window: window)
                 && self.hasToolbarItem(
                     identifier: "clove.grid.batch.done", in: host, window: window)
                 && self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
@@ -1805,12 +1895,12 @@ struct BrowsingLayoutTests {
         #expect(!selectSnapshot.contains("clove.grid.moveRejects"))
         if host.traitCollection.verticalBarEdge != .unspecified,
             let navBar = findNavigationBar(in: window),
-            let selectionOptionsFrame = selectSnapshot.frame(for: "clove.grid.selectionOptions"),
+            let selectAllFrame = selectSnapshot.frame(for: "clove.grid.selectAll"),
             let doneFrame = selectSnapshot.frame(for: "clove.grid.batch.done"),
             let selectFilterFrame = selectSnapshot.frame(for: "clove.grid.filter")
         {
             let navBarFrame = navBar.convert(navBar.bounds, to: window)
-            #expect(selectionOptionsFrame.midY <= navBarFrame.maxY + 4)
+            #expect(selectAllFrame.midY <= navBarFrame.maxY + 4)
             #expect(doneFrame.midY <= navBarFrame.maxY + 4)
             #expect(selectFilterFrame.midY > window.bounds.height * 0.65)
         }
@@ -2224,7 +2314,8 @@ struct BrowsingLayoutTests {
             case "Undo": return usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo"
             case "Move rejects": return "clove.grid.moveRejects"
             case "Done": return "clove.grid.batch.done"
-            case "Selection options": return "clove.grid.selectionOptions"
+            case "Select All", "Deselect All", "Select all", "Deselect all":
+                return "clove.grid.selectAll"
             case "Hide photo grid", "Show photo grid": return "clove.detail.gridToggle"
             case "Focus regions": return "clove.detail.focusToggle"
             default: return nil
@@ -2240,13 +2331,15 @@ struct BrowsingLayoutTests {
                 {
                     return mapped
                 }
-                if String(describing: type(of: custom)).contains("BarItemHost") {
-                    return "clove.detail.gridToggle"
-                }
             }
             for text in [item.accessibilityLabel, item.title].compactMap({ $0 }) where !text.isEmpty
             {
                 if let mapped = knownIdentifier(forText: text) { return mapped }
+            }
+            if let custom = item.customView,
+                String(describing: type(of: custom)).contains("BarItemHost")
+            {
+                return "clove.detail.gridToggle"
             }
             return nil
         }
@@ -2270,7 +2363,7 @@ struct BrowsingLayoutTests {
         }
 
         let horizontalOnlyIDs: Set<String> = [
-            "clove.grid.more", "clove.grid.selectionOptions", "clove.grid.batch.done",
+            "clove.grid.more", "clove.grid.selectAll", "clove.grid.batch.done",
         ]
         var plainItemFrames: [ObjectIdentifier: CGRect] = [:]
         if !usesVerticalBar {

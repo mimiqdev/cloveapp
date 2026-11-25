@@ -2679,9 +2679,12 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.more").tap()
         app.buttons["Select"].tap()
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "0 selected")
-        element(app, "clove.grid.selectionOptions").tap()
-        app.buttons["Select all"].tap()
+        let selectAllButton = element(app, "clove.grid.selectAll")
+        XCTAssertTrue(selectAllButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(selectAllButton.label, "Select All")
+        selectAllButton.tap()
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "36 selected")
+        XCTAssertTrue(waitForLabel("Deselect All", selectAllButton))
         XCTAssertTrue(element(app, "clove.grid.batch.rating").isEnabled)
         element(app, "clove.grid.batch.done").tap()
 
@@ -2713,7 +2716,7 @@ final class CloveFlowTests: XCTestCase {
             .tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), batchPicker))
 
-        batchBar.press(forDuration: 0.6)
+        element(app, "clove.grid.batch.bar").press(forDuration: 0.6)
         app.buttons["Clear rating"].tap()
         XCTAssertTrue(wait(NSPredicate(format: "NOT (label CONTAINS %@)", "stars"), rated))
         XCTAssertTrue(rated.label.contains("Purple"))

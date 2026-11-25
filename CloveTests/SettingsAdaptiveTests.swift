@@ -97,6 +97,7 @@ struct SettingsAdaptiveTests {
 
         store.update {
             $0.moveRejectsEnabled = false
+            $0.confirmBatchActions = true
             $0.rejectsFolderName =
                 (try? RejectsFolderName.validated("_Trash")) ?? .defaultFolderName
             $0.photoDisplayMode = .rawFirst
@@ -117,7 +118,51 @@ struct SettingsAdaptiveTests {
         #expect(store.settings.similarGroupsEnabled)
         #expect(store.settings.groupingSensitivity == .standard)
         #expect(store.settings.groupingTimeWindow == .twoSeconds)
+        #expect(!store.settings.confirmBatchActions)
         #expect(store.photoDisplayMode == .cameraPreviewFirst)
+    }
+
+    @Test func cullingSettingsIncludesBatchActionsConfirmationToggleAndPersists() async throws {
+        let storage = SampleSettingsStorage()
+        let persistence = SettingsPersistence(storage: storage)
+        let store = SettingsStore(
+            persistence: persistence,
+            rememberedAdvanceStorage: storage,
+            physicalMemory: 8 * 1024 * 1024 * 1024)
+        #expect(!store.settings.confirmBatchActions)
+
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(
+            rootView: List {
+                CullingAndMarkingSettingsSections(showsCategoryTitle: false)
+            }
+            .listStyle(.insetGrouped)
+            .environment(store)
+            .environment(\.cloveTheme, .light))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitForLayout("culling settings list did not settle") {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            guard
+                let collection = self.findSubviews(ofType: UICollectionView.self, in: window).first
+            else {
+                return false
+            }
+            return collection.numberOfSections == 4
+                && collection.numberOfItems(inSection: 3) == 1
+        }
+
+        store.update { $0.confirmBatchActions = true }
+        #expect(persistence.load().confirmBatchActions)
     }
 
     @Test func disablingSimilarGroupsPreservesTimeWindowAndSensitivity() {

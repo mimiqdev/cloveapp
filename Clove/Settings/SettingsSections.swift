@@ -269,6 +269,26 @@ struct CullingAndMarkingSettingsSections: View {
         }
         .listRowBackground(theme.tokens.card.color)
 
+        Section {
+            Toggle(
+                AppLocalization.string("Confirm Save to Photos & Keywords", language: language),
+                isOn: settingsBinding(store, \.confirmBatchActions)
+            )
+            .accessibilityIdentifier("clove.settings.confirmBatchActions")
+        } header: {
+            SettingsSectionHeader(
+                AppLocalization.string("Batch actions", language: language),
+                identifier: "batchActions")
+        } footer: {
+            Text(
+                AppLocalization.string(
+                    "When enabled, Save to Photos and Add Keywords show a confirmation sheet before applying. When off, they apply immediately.",
+                    language: language)
+            )
+            .foregroundStyle(Color.clove.text.secondary)
+        }
+        .listRowBackground(theme.tokens.card.color)
+
         SettingsSaveFailureSection()
     }
 

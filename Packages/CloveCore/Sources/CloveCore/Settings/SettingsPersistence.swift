@@ -14,6 +14,7 @@ enum SettingsKey: String, CaseIterable {
     case doubleTap = "detail.doubleTap"
     case zoomedGestures = "detail.zoomedGestures"
     case extendedColourLabels = "labels.extended"
+    case confirmBatchActions = "batch.confirmActions"
     case rejectsFolderName = "rejects.folderName"
     case moveRejects = "rejects.moveEnabled"
     case similarGroups = "groups.similarEnabled"
@@ -65,6 +66,7 @@ public struct SettingsPersistence: Sendable {
             zoomedGestures: rawValue(.zoomedGestures) ?? defaults.zoomedGestures,
             extendedColourLabelsEnabled: boolean(.extendedColourLabels)
                 ?? defaults.extendedColourLabelsEnabled,
+            confirmBatchActions: boolean(.confirmBatchActions) ?? defaults.confirmBatchActions,
             rejectsFolderName: rejectsFolderName() ?? defaults.rejectsFolderName,
             moveRejectsEnabled: boolean(.moveRejects) ?? defaults.moveRejectsEnabled,
             similarGroupsEnabled: boolean(.similarGroups) ?? defaults.similarGroupsEnabled,
@@ -87,6 +89,7 @@ public struct SettingsPersistence: Sendable {
         setText(settings.doubleTap.rawValue, .doubleTap)
         setText(settings.zoomedGestures.rawValue, .zoomedGestures)
         setBoolean(settings.extendedColourLabelsEnabled, .extendedColourLabels)
+        setBoolean(settings.confirmBatchActions, .confirmBatchActions)
         setText(settings.rejectsFolderName.rawValue, .rejectsFolderName)
         setBoolean(settings.moveRejectsEnabled, .moveRejects)
         setBoolean(settings.similarGroupsEnabled, .similarGroups)

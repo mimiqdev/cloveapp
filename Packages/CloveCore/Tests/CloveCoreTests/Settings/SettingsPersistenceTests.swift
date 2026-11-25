@@ -58,6 +58,10 @@ import CloveCore
             { $0.extendedColourLabelsEnabled = defaults.extendedColourLabelsEnabled }
         ),
         (
+            "batch.confirmActions", invalid,
+            { $0.confirmBatchActions = defaults.confirmBatchActions }
+        ),
+        (
             "rejects.folderName", ".hidden",
             { $0.rejectsFolderName = defaults.rejectsFolderName }
         ),
@@ -139,6 +143,28 @@ import CloveCore
     var expected = older
     expected.appearance = AppearanceChoice()
     #expect(SettingsPersistence(storage: storage).load() == expected)
+}
+
+@Test func confirmBatchActionsDefaultsFalseWhenMissingAndRoundTripsAndResets() {
+    let storage = InMemorySettingsStorage()
+    var older = AppSettings()
+    older.gesturesEnabled = false
+    older.confirmBatchActions = true
+    SettingsPersistence(storage: storage).save(older)
+    storage.setString(nil, forKey: "batch.confirmActions")
+
+    let loadedMissing = SettingsPersistence(storage: storage).load()
+    #expect(!loadedMissing.confirmBatchActions)
+    #expect(!loadedMissing.gesturesEnabled)
+
+    let persistence = SettingsPersistence(storage: storage)
+    var enabled = loadedMissing
+    enabled.confirmBatchActions = true
+    #expect(persistence.saveVerified(enabled))
+    #expect(persistence.load().confirmBatchActions)
+
+    #expect(persistence.saveVerified(AppSettings()))
+    #expect(!persistence.load().confirmBatchActions)
 }
 
 /// Legacy `appearance.matchSystem == "true"` (or absent/corrupt) resolves to System + Default, even
