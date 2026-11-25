@@ -71,17 +71,15 @@ struct DetailFilmstrip: View {
     let expandGroup: (GroupID) -> Void
     let collapseGroup: () -> Void
 
-    private static let timelineViewportSpace = "clove.detail.filmstrip.timeline.viewport"
-    private static let groupViewportSpace = "clove.detail.filmstrip.group.viewport"
     private static let groupRestingSpacing: CGFloat = thumbnailSpacing
     private static let groupCompressedSpacing: CGFloat = -8
     private static let rollOffset: CGFloat = 18
     private static let rollDegrees: Double = 24
     private static let rollPerspective: CGFloat = 0.4
 
-    @State private var timelineLayoutState = FilmstripLayoutState()
-    @State private var groupLayoutState = FilmstripLayoutState()
-    @State private var groupTrackWidth: CGFloat = 0
+    @State private var trackWidth: CGFloat = 0
+    @State private var pendingTimelineScroll: Task<Void, Never>?
+    @State private var pendingGroupScroll: Task<Void, Never>?
     @State private var isTrackingVerticalStackDrag = false
     @State private var lastVerticalStackDragDate = Date.distantPast
     @State private var isTrackingVerticalGroupDrag = false
@@ -168,7 +166,7 @@ struct DetailFilmstrip: View {
     private func showsGridPicker(for group: ActiveBrowsingGroup) -> Bool {
         Self.showsGridPickerButton(
             memberCount: group.visibleMembers.count,
-            trackWidth: groupTrackWidth,
+            trackWidth: trackWidth,
             metrics: metrics
         )
     }
@@ -187,6 +185,13 @@ struct DetailFilmstrip: View {
         }
         .frame(height: metrics.bandHeight)
         .clipped()
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.width
+        } action: { newWidth in
+            if abs(trackWidth - newWidth) > 0.5 {
+                trackWidth = newWidth
+            }
+        }
         .onChange(of: expandedGroup) { _, newValue in
             if let newValue {
                 lastActiveGroup = newValue
@@ -224,8 +229,8 @@ struct DetailFilmstrip: View {
         .onDisappear {
             levelTransitionTask?.cancel()
             exitingGroupTask?.cancel()
-            timelineLayoutState.pendingScroll?.cancel()
-            groupLayoutState.pendingScroll?.cancel()
+            pendingTimelineScroll?.cancel()
+            pendingGroupScroll?.cancel()
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.filmstrip")
@@ -233,6 +238,21 @@ struct DetailFilmstrip: View {
     }
 
     // MARK: - Timeline Track
+
+    private var timelineScrollTrigger: TimelineScrollTrigger {
+        TimelineScrollTrigger(
+            current: current,
+            expandedGroupID: expandedGroup?.id,
+            slotCount: timeline.slots.count,
+            currentSlotIndex: current.flatMap { timeline.slotIndex(containing: $0) },
+            metrics: metrics,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            viewportWidth: Int(trackWidth.rounded())
+        )
+    }
 
     private var timelineTrack: some View {
         ScrollViewReader { proxy in
@@ -249,29 +269,27 @@ struct DetailFilmstrip: View {
                 .padding(.vertical, metrics.verticalTrackPadding)
             }
             .filmstripScrollEdgeEffectHidden()
-            .coordinateSpace(name: Self.timelineViewportSpace)
-            .onGeometryChange(for: CGFloat.self) {
-                $0.size.width
-            } action: {
-                timelineLayoutState.viewportWidth = $0
-            }
-            .onChange(of: current, initial: true) { oldPhoto, photo in
-                let isInitial = oldPhoto == photo
-                if expandedGroup == nil || isInitial {
-                    scheduleTimelineScroll(
-                        for: photo, using: proxy, forceScroll: false, animated: !isInitial)
-                }
-            }
-            .onChange(of: expandedGroup?.id) { oldID, newID in
-                if oldID != nil && newID == nil {
-                    scheduleTimelineScroll(
-                        for: current, using: proxy, forceScroll: false, animated: false)
-                }
-            }
-            .onChange(of: metrics) { _, _ in
-                if expandedGroup == nil {
-                    scheduleTimelineScroll(
-                        for: current, using: proxy, forceScroll: true, animated: false)
+            .onChange(of: timelineScrollTrigger, initial: true) { old, new in
+                let isInitial = old == new
+                let didLayoutChange =
+                    old.metrics != new.metrics
+                    || old.horizontalSizeClass != new.horizontalSizeClass
+                    || old.verticalSizeClass != new.verticalSizeClass
+                    || old.isDuoExpanded != new.isDuoExpanded
+                    || old.isDuoCover != new.isDuoCover
+                    || old.viewportWidth != new.viewportWidth
+                    || old.slotCount != new.slotCount
+                    || (old.current == new.current && old.currentSlotIndex != new.currentSlotIndex)
+                let didCollapseToTimeline = old.expandedGroupID != nil && new.expandedGroupID == nil
+
+                if isInitial || (old.viewportWidth == 0 && new.viewportWidth > 0) {
+                    scheduleTimelineScroll(for: new.current, using: proxy, animated: false)
+                } else if new.expandedGroupID == nil {
+                    if didCollapseToTimeline || didLayoutChange {
+                        scheduleTimelineScroll(for: new.current, using: proxy, animated: false)
+                    } else if old.current != new.current {
+                        scheduleTimelineScroll(for: new.current, using: proxy, animated: true)
+                    }
                 }
             }
         }
@@ -290,6 +308,24 @@ struct DetailFilmstrip: View {
 
     // MARK: - Group Focus Track
 
+    private func groupScrollTrigger(for group: ActiveBrowsingGroup) -> GroupScrollTrigger {
+        GroupScrollTrigger(
+            current: current,
+            expandedGroupID: expandedGroup?.id,
+            memberCount: group.visibleMembers.count,
+            currentMemberIndex: current.flatMap { id in
+                group.visibleMembers.firstIndex { $0.id == id }
+            },
+            metrics: metrics,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            showsGridPicker: showsGridPicker(for: group),
+            trackWidth: Int(trackWidth.rounded())
+        )
+    }
+
     private func groupFocusTrack(_ group: ActiveBrowsingGroup) -> some View {
         let currentMembersWidth = max(
             metrics.thumbnailWidth,
@@ -302,13 +338,6 @@ struct DetailFilmstrip: View {
             .frame(
                 maxWidth: .infinity, minHeight: metrics.bandHeight, maxHeight: metrics.bandHeight
             )
-            .onGeometryChange(for: CGFloat.self) {
-                $0.size.width
-            } action: {
-                if abs(groupTrackWidth - $0) > 0.5 {
-                    groupTrackWidth = $0
-                }
-            }
             .overlay {
                 HStack(alignment: .bottom, spacing: metrics.groupActionSpacing) {
                     if showsPicker {
@@ -326,8 +355,6 @@ struct DetailFilmstrip: View {
                                 ForEach(group.visibleMembers) { photo in
                                     frame(
                                         photo,
-                                        coordinateSpace: Self.groupViewportSpace,
-                                        layoutState: groupLayoutState,
                                         scaleX: groupMemberScaleX,
                                         suppressTap: {
                                             expandedGroup == nil
@@ -342,28 +369,29 @@ struct DetailFilmstrip: View {
                             }
                         }
                         .filmstripScrollEdgeEffectHidden()
-                        .coordinateSpace(name: Self.groupViewportSpace)
-                        .onGeometryChange(for: CGFloat.self) {
-                            $0.size.width
-                        } action: {
-                            groupLayoutState.viewportWidth = $0
-                        }
-                        .onAppear {
-                            groupLayoutState.frames.removeAll()
-                            scheduleGroupScroll(for: current, using: proxy, forceScroll: true)
-                        }
-                        .onChange(of: current) { _, photo in
-                            guard expandedGroup != nil else { return }
-                            scheduleGroupScroll(for: photo, using: proxy, forceScroll: false)
-                        }
-                        .onChange(of: group.id) { _, _ in
-                            groupLayoutState.frames.removeAll()
-                            scheduleGroupScroll(for: current, using: proxy, forceScroll: true)
-                        }
-                        .onChange(of: metrics) { _, _ in
-                            guard expandedGroup != nil else { return }
-                            groupLayoutState.frames.removeAll()
-                            scheduleGroupScroll(for: current, using: proxy, forceScroll: true)
+                        .onChange(of: groupScrollTrigger(for: group), initial: true) { old, new in
+                            guard new.expandedGroupID != nil else { return }
+                            let isInitial = old == new
+                            let didEnterOrSwitchGroup = old.expandedGroupID != new.expandedGroupID
+                            let didLayoutChange =
+                                old.metrics != new.metrics
+                                || old.horizontalSizeClass != new.horizontalSizeClass
+                                || old.verticalSizeClass != new.verticalSizeClass
+                                || old.isDuoExpanded != new.isDuoExpanded
+                                || old.isDuoCover != new.isDuoCover
+                                || old.showsGridPicker != new.showsGridPicker
+                                || old.trackWidth != new.trackWidth
+                                || old.memberCount != new.memberCount
+                                || (old.current == new.current
+                                    && old.currentMemberIndex != new.currentMemberIndex)
+
+                            if isInitial || didEnterOrSwitchGroup || didLayoutChange {
+                                scheduleGroupScroll(
+                                    for: new.current, using: proxy, animated: false)
+                            } else if old.current != new.current {
+                                scheduleGroupScroll(
+                                    for: new.current, using: proxy, animated: true)
+                            }
                         }
                     }
                     .frame(maxWidth: currentMembersWidth)
@@ -565,6 +593,9 @@ struct DetailFilmstrip: View {
         if oldID == nil, newID != nil {
             // Expand: Timeline -> Group Focus (上 → 下 roll + fan-out)
             exitingGroup = nil
+            let isOverflowing = expandedGroup.map(showsGridPicker(for:)) ?? false
+            let compressedSpacing =
+                isOverflowing ? Self.groupRestingSpacing : Self.groupCompressedSpacing
             if reduceMotion {
                 timelineOffsetY = 0
                 timelineTilt = 0
@@ -590,7 +621,7 @@ struct DetailFilmstrip: View {
                 timelineOpacity = 1
                 groupOffsetY = -Self.rollOffset
                 groupTilt = Self.rollDegrees
-                groupMemberSpacing = Self.groupCompressedSpacing
+                groupMemberSpacing = compressedSpacing
                 groupMemberScaleX = 0.9
                 groupOpacity = 0
                 levelTransitionTask = Task { @MainActor in
@@ -611,6 +642,9 @@ struct DetailFilmstrip: View {
         } else if oldID != nil, newID == nil {
             // Collapse: Group Focus -> Timeline (下 → 上 roll + gather-in + settle pulse + haptic)
             exitingGroup = lastActiveGroup
+            let isOverflowing = lastActiveGroup.map(showsGridPicker(for:)) ?? false
+            let collapsedSpacing =
+                isOverflowing ? Self.groupRestingSpacing : Self.groupCompressedSpacing
             UISelectionFeedbackGenerator().selectionChanged()
             if reduceMotion {
                 groupOffsetY = 0
@@ -647,7 +681,7 @@ struct DetailFilmstrip: View {
                     withAnimation(CloveMotion.filmstripLevel(reduceMotion: false)) {
                         groupOffsetY = -Self.rollOffset
                         groupTilt = Self.rollDegrees
-                        groupMemberSpacing = Self.groupCompressedSpacing
+                        groupMemberSpacing = collapsedSpacing
                         groupMemberScaleX = 0.9
                         groupOpacity = 0
                         timelineOffsetY = 0
@@ -694,8 +728,6 @@ struct DetailFilmstrip: View {
         case .photo(let photo):
             frame(
                 photo,
-                coordinateSpace: Self.timelineViewportSpace,
-                layoutState: timelineLayoutState,
                 scaleX: 1,
                 suppressTap: { expandedGroup != nil }
             ) {
@@ -777,11 +809,6 @@ struct DetailFilmstrip: View {
                 }
         )
         .id(GridCellItem.ID.group(active.id))
-        .modifier(
-            FilmstripItemFrameTracker(
-                id: .group(active.id), coordinateSpace: Self.timelineViewportSpace,
-                layoutState: timelineLayoutState)
-        )
         .accessibilityLabel(
             AppLocalization.format(
                 "Similar group of %lld photos", language: language,
@@ -794,8 +821,6 @@ struct DetailFilmstrip: View {
 
     private func frame(
         _ photo: GridPhoto,
-        coordinateSpace: String,
-        layoutState: FilmstripLayoutState,
         scaleX: CGFloat,
         suppressTap: @escaping () -> Bool,
         tap: @escaping () -> Void
@@ -819,10 +844,6 @@ struct DetailFilmstrip: View {
         }
         .buttonStyle(.plain)
         .id(cellID)
-        .modifier(
-            FilmstripItemFrameTracker(
-                id: cellID, coordinateSpace: coordinateSpace, layoutState: layoutState)
-        )
         .accessibilityAddTraits(photo.id == current ? [.isSelected] : [])
         .accessibilityIdentifier("clove.detail.filmstrip.\(photo.id.stem.lowercased())")
     }
@@ -837,87 +858,63 @@ struct DetailFilmstrip: View {
     }
 
     private func scheduleTimelineScroll(
-        for photo: PhotoIdentity?, using proxy: ScrollViewProxy, forceScroll: Bool, animated: Bool
+        for photo: PhotoIdentity?, using proxy: ScrollViewProxy, animated: Bool
     ) {
-        timelineLayoutState.pendingScroll?.cancel()
+        pendingTimelineScroll?.cancel()
         guard let photo else { return }
-        let target = timelineScrollTarget(for: photo)
-        timelineLayoutState.pendingScroll = Task { @MainActor in
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            if forceScroll {
-                proxy.scrollTo(target, anchor: .center)
-            } else {
-                guard !timelineLayoutState.isVisible(target) else { return }
-                if animated {
-                    withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
-                        proxy.scrollTo(target, anchor: .center)
-                    }
-                } else {
-                    proxy.scrollTo(target, anchor: .center)
-                }
-            }
-        }
+        pendingTimelineScroll = makeScrollTask(
+            to: timelineScrollTarget(for: photo), using: proxy, animated: animated)
     }
 
     private func scheduleGroupScroll(
-        for photo: PhotoIdentity?, using proxy: ScrollViewProxy, forceScroll: Bool
+        for photo: PhotoIdentity?, using proxy: ScrollViewProxy, animated: Bool
     ) {
-        groupLayoutState.pendingScroll?.cancel()
+        pendingGroupScroll?.cancel()
         guard let photo else { return }
-        let target = GridCellItem.ID.photo(photo)
-        groupLayoutState.pendingScroll = Task { @MainActor in
+        pendingGroupScroll = makeScrollTask(
+            to: GridCellItem.ID.photo(photo), using: proxy, animated: animated)
+    }
+
+    private func makeScrollTask(
+        to target: GridCellItem.ID,
+        using proxy: ScrollViewProxy,
+        animated: Bool
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
             await Task.yield()
             guard !Task.isCancelled else { return }
-            if forceScroll {
+            withAnimation(animated ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil) {
                 proxy.scrollTo(target, anchor: .center)
-            } else {
-                guard !groupLayoutState.isVisible(target) else { return }
-                withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
-                    proxy.scrollTo(target, anchor: .center)
-                }
             }
         }
     }
 }
 
-@MainActor
-private final class FilmstripLayoutState {
-    struct TrackedFrame {
-        let token: UUID
-        let frame: CGRect
-    }
-
-    var viewportWidth: CGFloat = 0
-    var frames: [GridCellItem.ID: TrackedFrame] = [:]
-    var pendingScroll: Task<Void, Never>?
-
-    func isVisible(_ target: GridCellItem.ID) -> Bool {
-        guard viewportWidth > 0, let frame = frames[target]?.frame else { return false }
-        let tolerance: CGFloat = 4
-        return frame.minX >= -tolerance && frame.maxX <= viewportWidth + tolerance
-    }
+private struct TimelineScrollTrigger: Equatable {
+    let current: PhotoIdentity?
+    let expandedGroupID: GroupID?
+    let slotCount: Int
+    let currentSlotIndex: Int?
+    let metrics: DetailFilmstrip.Metrics
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let viewportWidth: Int
 }
 
-private struct FilmstripItemFrameTracker: ViewModifier {
-    let id: GridCellItem.ID
-    let coordinateSpace: String
-    let layoutState: FilmstripLayoutState
-    @State private var token = UUID()
-
-    func body(content: Content) -> some View {
-        content
-            .onGeometryChange(for: CGRect.self) { proxy in
-                proxy.frame(in: .named(coordinateSpace))
-            } action: { rect in
-                layoutState.frames[id] = .init(token: token, frame: rect)
-            }
-            .onDisappear {
-                if layoutState.frames[id]?.token == token {
-                    layoutState.frames.removeValue(forKey: id)
-                }
-            }
-    }
+private struct GroupScrollTrigger: Equatable {
+    let current: PhotoIdentity?
+    let expandedGroupID: GroupID?
+    let memberCount: Int
+    let currentMemberIndex: Int?
+    let metrics: DetailFilmstrip.Metrics
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let showsGridPicker: Bool
+    let trackWidth: Int
 }
 
 private struct FilmstripGroupStack: View {

@@ -2059,6 +2059,7 @@ final class CloveFlowTests: XCTestCase {
         let fileName = element(app, "clove.detail.fileName")
         XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
 
+        let strip = element(app, "clove.detail.filmstrip")
         let neighborLeft = element(app, "clove.detail.filmstrip.mmq02694")
         let neighborCurrent = element(app, "clove.detail.filmstrip.mmq02695")
         let stack = element(app, "clove.detail.filmstrip.group.burst-2696")
@@ -2066,22 +2067,20 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), stack))
         XCTAssertTrue(neighborLeft.isHittable)
 
-        let leftBefore = neighborLeft.frame
-        let currentBefore = neighborCurrent.frame
+        XCTAssertEqual(neighborCurrent.frame.midX, strip.frame.midX, accuracy: 3)
         XCTAssertTrue(neighborCurrent.isSelected)
         XCTAssertFalse(neighborLeft.isSelected)
         XCTAssertFalse(stack.isSelected)
 
-        // First tap on a collapsed stack opens its representative in Timeline without expanding;
-        // neighbors stay anchored in place and the Expand nudge appears.
+        // First tap on a collapsed stack opens its representative in Timeline without expanding,
+        // centers the stack in the strip viewport, and shows the Expand nudge.
         stack.tap()
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
         XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
         XCTAssertTrue(element(app, "clove.detail.expandGroup").waitForExistence(timeout: 5))
-        XCTAssertEqual(neighborLeft.frame.minX, leftBefore.minX, accuracy: 2)
-        XCTAssertEqual(neighborCurrent.frame.minX, currentBefore.minX, accuracy: 2)
         XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), stack))
         XCTAssertFalse(neighborCurrent.isSelected)
+        XCTAssertEqual(stack.frame.midX, strip.frame.midX, accuracy: 3)
 
         // Second tap on the selected group's stack enters isolated Group Focus.
         stack.tap()
@@ -2092,7 +2091,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(firstMember.isSelected)
         XCTAssertFalse(neighborCurrent.exists)
 
-        // Tapping another visible member keeps firstMember anchored in Group Focus.
+        // Tapping another visible member keeps a short non-overflowing group centered without scrolling.
         let firstMemberBeforeTap = firstMember.frame
         let secondMember = element(app, "clove.detail.filmstrip.mmq02697")
         XCTAssertTrue(secondMember.isHittable)
@@ -2102,8 +2101,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), secondMember))
         XCTAssertFalse(firstMember.isSelected)
 
-        // Folding returns to Timeline on the Representative Photo (MMQ02696), centering the stack;
-        // tapping a visible neighbor keeps Timeline items anchored in place without jumping.
+        // Folding returns to Timeline on the Representative Photo (MMQ02696), preserving the
+        // centered stack; tapping a neighbor centers that neighbor in the viewport.
         element(app, "clove.detail.filmstrip.group.fold").tap()
         XCTAssertTrue(
             wait(
@@ -2112,21 +2111,22 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
         XCTAssertTrue(stack.waitForExistence(timeout: 5))
         XCTAssertTrue(stack.isSelected)
+        XCTAssertEqual(stack.frame.midX, strip.frame.midX, accuracy: 3)
         XCTAssertTrue(neighborCurrent.waitForExistence(timeout: 5))
         XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), neighborCurrent))
-        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), neighborLeft))
-        let leftAfterCollapse = neighborLeft.frame
-        let currentAfterCollapse = neighborCurrent.frame
-        let stackAfterCollapse = stack.frame
         neighborCurrent.tap()
         XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
-        XCTAssertEqual(neighborLeft.frame.minX, leftAfterCollapse.minX, accuracy: 2)
-        XCTAssertEqual(neighborCurrent.frame.minX, currentAfterCollapse.minX, accuracy: 2)
-        XCTAssertEqual(stack.frame.minX, stackAfterCollapse.minX, accuracy: 2)
         XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), neighborCurrent))
         XCTAssertFalse(stack.isSelected)
+        XCTAssertEqual(neighborCurrent.frame.midX, strip.frame.midX, accuracy: 3)
 
-        // Navigating forward across collapsed burst-2696 to an off-screen photo brings it into view (#252, #255).
+        // Manual drag browsing on the strip stays scrolled without snapping back until `current` changes.
+        dragStripForward(strip)
+        Thread.sleep(forTimeInterval: 0.4)
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02695.ARW")
+        XCTAssertTrue(!neighborCurrent.exists || neighborCurrent.frame.midX < strip.frame.midX - 60)
+
+        // Navigating forward across collapsed burst-2696 to an off-screen photo re-centers the destination (#252, #255).
         let preview = element(app, "clove.detail.preview")
         for _ in 0..<6 {
             preview.swipeLeft()
@@ -2136,6 +2136,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(
             wait(NSPredicate(format: "isHittable == true"), offscreenTarget),
             "off-screen navigation did not bring the destination thumbnail into view")
+        XCTAssertEqual(offscreenTarget.frame.midX, strip.frame.midX, accuracy: 3)
     }
 
     @MainActor

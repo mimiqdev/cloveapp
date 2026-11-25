@@ -1521,6 +1521,14 @@ private struct ComparePaneMarksSummary: View {
 
 // MARK: - Compact Stepping Filmstrip
 
+private struct CompareFilmstripScrollTrigger: Equatable {
+    let challenger: PhotoIdentity
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isDuoExpanded: Bool
+    let viewportWidth: Int
+}
+
 struct CompareFilmstrip: View {
     let photos: [GridPhoto]
     let reference: PhotoIdentity
@@ -1529,8 +1537,25 @@ struct CompareFilmstrip: View {
     let thumbnails: any GridThumbnailSource
     let onSelectCandidate: (PhotoIdentity) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.appLanguage) private var language
     @Environment(\.cloveTheme) private var theme
+
+    @State private var viewportWidth: CGFloat = 0
+    @State private var pendingScroll: Task<Void, Never>?
+
+    private var scrollTrigger: CompareFilmstripScrollTrigger {
+        CompareFilmstripScrollTrigger(
+            challenger: challenger,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isDuoExpanded: isDuoExpanded,
+            viewportWidth: Int(viewportWidth.rounded())
+        )
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -1546,15 +1571,50 @@ struct CompareFilmstrip: View {
                 .padding(.vertical, 3)
             }
             .filmstripScrollEdgeEffectHidden()
-            .onChange(of: challenger, initial: true) { _, target in
-                withAnimation {
-                    proxy.scrollTo(target, anchor: .center)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.width
+            } action: { newWidth in
+                if abs(viewportWidth - newWidth) > 0.5 {
+                    viewportWidth = newWidth
                 }
+            }
+            .onChange(of: scrollTrigger, initial: true) { old, new in
+                let isInitial = old == new
+                let didLayoutChange =
+                    old.horizontalSizeClass != new.horizontalSizeClass
+                    || old.verticalSizeClass != new.verticalSizeClass
+                    || old.isDuoExpanded != new.isDuoExpanded
+                    || old.viewportWidth != new.viewportWidth
+
+                if isInitial || (old.viewportWidth == 0 && new.viewportWidth > 0) || didLayoutChange
+                {
+                    scheduleScroll(for: new.challenger, using: proxy, animated: false)
+                } else if old.challenger != new.challenger {
+                    scheduleScroll(for: new.challenger, using: proxy, animated: true)
+                }
+            }
+            .onDisappear {
+                pendingScroll?.cancel()
             }
         }
         .frame(height: 56)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.compare.filmstrip")
+    }
+
+    private func scheduleScroll(
+        for target: PhotoIdentity,
+        using proxy: ScrollViewProxy,
+        animated: Bool
+    ) {
+        pendingScroll?.cancel()
+        pendingScroll = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(animated ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil) {
+                proxy.scrollTo(target, anchor: .center)
+            }
+        }
     }
 
     @ViewBuilder
