@@ -1659,6 +1659,28 @@
         }
       }
     },
+    "App language for controls and menus.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App language for controls and menus."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用控件与菜单的显示语言。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "應用程式控制項與選單的顯示語言。"
+          }
+        }
+      }
+    },
     "Appearance": {
       "localizations": {
         "en": {
@@ -2139,6 +2161,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "請在格狀檢視中選擇一張相片。"
+          }
+        }
+      }
+    },
+    "Choose camera previews or full RAW colors.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose camera previews or full RAW colors."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择相机预览或 RAW 文件原本色彩。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇相機預覽或 RAW 檔案原本色彩。"
           }
         }
       }
@@ -3045,6 +3089,28 @@
         }
       }
     },
+    "Enabled levels": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled levels"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用的评分等级"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已啟用的評分等級"
+          }
+        }
+      }
+    },
     "English": {
       "localizations": {
         "en": {
@@ -3861,6 +3927,28 @@
         }
       }
     },
+    "Gestures, rating scale, color labels, and auto-advance.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gestures, rating scale, color labels, and auto-advance."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手势、评分范围、颜色标签与自动跳转。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手勢、評分範圍、顏色標籤與自動跳轉。"
+          }
+        }
+      }
+    },
     "Got it": {
       "localizations": {
         "en": {
@@ -4411,6 +4499,28 @@
         }
       }
     },
+    "Light, dark, or system mode and theme.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Light, dark, or system mode and theme."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浅色、深色或跟随系统模式与主题。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "淺色、深色或跟隨系統模式與主題。"
+          }
+        }
+      }
+    },
     "Loaded": {
       "localizations": {
         "en": {
@@ -4849,6 +4959,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "向後移"
+          }
+        }
+      }
+    },
+    "Move rejected photos to a subfolder instead of deleting.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move rejected photos to a subfolder instead of deleting."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将淘汰照片移至子文件夹，而不是删除。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將淘汰相片移至子檔案夾，而非刪除。"
           }
         }
       }
@@ -5619,6 +5751,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "關"
+          }
+        }
+      }
+    },
+    "Offer Move Rejects": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offer Move Rejects"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供整理淘汰片"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供整理淘汰片"
           }
         }
       }
@@ -6811,6 +6965,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "輕掃快速評分僅作用於已啟用的星級。請至少保留一個星級；即使關閉某星級，來自其他應用的已有評分仍會顯示。"
+          }
+        }
+      }
+    },
+    "Quicker and lighter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quicker and lighter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更快更轻量"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更快更輕量"
           }
         }
       }
@@ -8789,6 +8965,28 @@
         }
       }
     },
+    "Similar shot grouping, time window, and detail zoom.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Similar shot grouping, time window, and detail zoom."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似照片分组、时间窗口与大图缩放。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似相片群組、時間窗口與大圖縮放。"
+          }
+        }
+      }
+    },
     "Similarity sensitivity": {
       "localizations": {
         "en": {
@@ -9423,6 +9621,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法移動該檔案，請重試。"
+          }
+        }
+      }
+    },
+    "The file's own colors": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file's own colors"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件本身的色彩"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檔案本身的色彩"
           }
         }
       }
@@ -10681,6 +10901,50 @@
         }
       }
     },
+    "Workflow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workflow"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作流程"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作流程"
+          }
+        }
+      }
+    },
+    "Workspace": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作區"
+          }
+        }
+      }
+    },
     "XMP sidecar": {
       "localizations": {
         "en": {
@@ -10765,6 +11029,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "你可以瀏覽此位置，但無法在此儲存標記。"
+          }
+        }
+      }
+    },
+    "Your preferences apply to every layout.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your preferences apply to every layout."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的偏好设置会应用于所有布局。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的偏好設定會套用於所有版面。"
           }
         }
       }

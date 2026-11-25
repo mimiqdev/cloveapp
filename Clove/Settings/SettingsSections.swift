@@ -421,30 +421,29 @@ struct PhotoDisplaySettingsSections: View {
 
     var body: some View {
         Section {
-            Picker(
-                AppLocalization.string("Show photos as", language: language),
-                selection: Binding(
-                    get: { store.photoDisplayMode },
-                    set: { mode in store.update { $0.photoDisplayMode = mode } }
-                )
+            SettingsCheckmarkRow(
+                title: AppLocalization.string("Camera preview", language: language),
+                subtitle: AppLocalization.string("Quicker and lighter", language: language),
+                isSelected: store.photoDisplayMode == .cameraPreviewFirst,
+                identifier: "clove.settings.photoDisplayMode.cameraPreviewFirst"
             ) {
-                Text(AppLocalization.string("RAW", language: language))
-                    .tag(PhotoDisplayMode.rawFirst)
-                Text(AppLocalization.string("Camera preview", language: language))
-                    .tag(PhotoDisplayMode.cameraPreviewFirst)
+                store.update { $0.photoDisplayMode = .cameraPreviewFirst }
             }
-            .accessibilityLabel(AppLocalization.string("Show photos as", language: language))
-            .accessibilityValue(
-                AppLocalization.string(
-                    store.photoDisplayMode == .rawFirst ? "RAW" : "Camera preview",
-                    language: language)
-            )
-            .accessibilityIdentifier("clove.settings.photoDisplayMode")
+
+            SettingsCheckmarkRow(
+                title: AppLocalization.string("RAW", language: language),
+                subtitle: AppLocalization.string("The file's own colors", language: language),
+                isSelected: store.photoDisplayMode == .rawFirst,
+                identifier: "clove.settings.photoDisplayMode.rawFirst"
+            ) {
+                store.update { $0.photoDisplayMode = .rawFirst }
+            }
         } header: {
-            if showsCategoryTitle {
-                SettingsDetailTitleHeader(
-                    title: SettingsCategory.photoDisplay.title(language: language))
-            }
+            SettingsCategorySectionHeader(
+                categoryTitle: showsCategoryTitle
+                    ? SettingsCategory.photoDisplay.title(language: language) : nil,
+                sectionTitle: AppLocalization.string("Show photos as", language: language),
+                identifier: "photoDisplay")
         } footer: {
             Text(
                 AppLocalization.string(
@@ -471,7 +470,7 @@ struct MoveRejectsSettingsSections: View {
     var body: some View {
         Section {
             Toggle(
-                AppLocalization.string("Move Rejects", language: language),
+                AppLocalization.string("Offer Move Rejects", language: language),
                 isOn: settingsBinding(store, \.moveRejectsEnabled)
             )
             .accessibilityIdentifier("clove.settings.moveRejectsEnabled")
@@ -495,10 +494,11 @@ struct MoveRejectsSettingsSections: View {
                     .accessibilityIdentifier("clove.settings.rejectsFolderNameProblem")
             }
         } header: {
-            if showsCategoryTitle {
-                SettingsDetailTitleHeader(
-                    title: SettingsCategory.moveRejects.title(language: language))
-            }
+            SettingsCategorySectionHeader(
+                categoryTitle: showsCategoryTitle
+                    ? SettingsCategory.moveRejects.title(language: language) : nil,
+                sectionTitle: AppLocalization.string("Move rejects", language: language),
+                identifier: "moveRejects")
         } footer: {
             Text(
                 AppLocalization.string(
@@ -538,7 +538,7 @@ struct MoveRejectsSettingsSections: View {
     }
 }
 
-/// Nested Rating scale subpage under Culling & marking using cumulative SF Symbols stars.
+/// Nested Rating scale subpage under Culling & marking using filled SF Symbols stars.
 struct RatingScaleSettingsList: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
@@ -566,6 +566,10 @@ struct RatingScaleSettingsList: View {
                     )
                     .accessibilityIdentifier("clove.settings.rating.\(rating.rawValue)")
                 }
+            } header: {
+                SettingsSectionHeader(
+                    AppLocalization.string("Enabled levels", language: language),
+                    identifier: "enabledLevels")
             } footer: {
                 Text(
                     AppLocalization.string(
@@ -622,6 +626,10 @@ struct AutoAdvanceDestinationSettingsList: View {
                         store.update { $0.autoAdvance.destination = destination }
                     }
                 }
+            } header: {
+                SettingsSectionHeader(
+                    AppLocalization.string("After marking", language: language),
+                    identifier: "afterMarking")
             } footer: {
                 Text(
                     AppLocalization.string(
@@ -664,32 +672,44 @@ struct SettingsSaveFailureSection: View {
 struct SettingsResetSection: View {
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
+    var showsFooter = true
+    var usesCardBackground = true
     let onTapReset: () -> Void
 
     var body: some View {
         Section {
-            Button(role: .destructive, action: onTapReset) {
+            Button(action: onTapReset) {
                 Text(AppLocalization.string("Reset to defaults", language: language))
-                    .foregroundStyle(Color.clove.reject)
+                    .foregroundStyle(Color.clove.text.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .accessibilityIdentifier("clove.settings.reset")
+        } footer: {
+            if showsFooter {
+                Text(
+                    AppLocalization.string(
+                        "Your preferences apply to every layout.", language: language)
+                )
+                .foregroundStyle(Color.clove.text.secondary)
+            }
         }
-        .listRowBackground(theme.tokens.card.color)
+        .listRowBackground(usesCardBackground ? theme.tokens.card.color : Color.clear)
     }
 }
 
-private struct CumulativeRatingStarsRow: View {
+struct CumulativeRatingStarsRow: View {
     let starCount: Int
     let isEnabled: Bool
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(1...5, id: \.self) { index in
-                let filled = index <= starCount
-                Image(systemName: filled ? "star.fill" : "star")
+            ForEach(1...max(1, starCount), id: \.self) { _ in
+                Image(systemName: "star.fill")
                     .font(.body)
                     .foregroundStyle(
-                        filled && isEnabled ? Color.clove.rating.on : Color.clove.rating.off
+                        isEnabled ? Color.clove.rating.on : Color.clove.rating.off
                     )
             }
         }
@@ -786,7 +806,7 @@ private struct SettingsCheckmarkRow: View {
     }
 }
 
-private struct SettingsSectionHeader: View {
+struct SettingsSectionHeader: View {
     let title: String
     let identifier: String
 

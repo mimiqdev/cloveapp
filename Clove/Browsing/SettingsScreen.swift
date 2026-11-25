@@ -11,29 +11,50 @@ struct SettingsScreen: View {
 
     @Bindable var navigation: SettingsNavigationState
     let availableWidth: CGFloat
+    let onDismiss: () -> Void
 
     @State private var showsResetConfirmation = false
     @State private var resetRevision = 0
+    @State private var measuredWidth: CGFloat = 0
 
     init(
         navigation: SettingsNavigationState = SettingsNavigationState(),
-        availableWidth: CGFloat = 0
+        availableWidth: CGFloat = 0,
+        onDismiss: @escaping () -> Void = {}
     ) {
         self.navigation = navigation
         self.availableWidth = availableWidth
+        self.onDismiss = onDismiss
     }
 
     /// Matches the outer regular-width `.insetGrouped` margin so both sides of the central divider
     /// stay visually symmetric without clipping scroll indicators.
     private static let splitDividerInset: CGFloat = 20
+    private static let detailMaxCardWidth: CGFloat = 640
+    private static let dividerWidth: CGFloat = 1
+
+    private var effectiveWidth: CGFloat {
+        measuredWidth > 0 ? measuredWidth : availableWidth
+    }
 
     private var isWide: Bool {
         SettingsLayoutMode.isWide(
-            horizontalSizeClass: horizontalSizeClass, availableWidth: availableWidth)
+            horizontalSizeClass: horizontalSizeClass, availableWidth: effectiveWidth)
     }
 
     private var sidebarWidth: CGFloat {
-        availableWidth >= 960 ? 296 : 276
+        effectiveWidth >= 960 ? 296 : 276
+    }
+
+    private var detailPaneWidth: CGFloat {
+        max(0, effectiveWidth - sidebarWidth - Self.dividerWidth)
+    }
+
+    private var detailTrailingInset: CGFloat {
+        guard detailPaneWidth > Self.splitDividerInset * 2 + Self.detailMaxCardWidth else {
+            return Self.splitDividerInset
+        }
+        return detailPaneWidth - Self.splitDividerInset - Self.detailMaxCardWidth
     }
 
     var body: some View {
@@ -46,7 +67,14 @@ struct SettingsScreen: View {
         }
         .background(Color.clove.surface.sheet)
         .foregroundStyle(Color.clove.text.primary)
-        .navigationBarTitleDisplayMode(isWide ? .inline : .large)
+        .navigationBarTitleDisplayMode(.large)
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.width
+        } action: { width in
+            if abs(measuredWidth - width) > 0.5 {
+                measuredWidth = width
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.settings")
         .onAppear {
@@ -74,32 +102,34 @@ struct SettingsScreen: View {
 
     private var compactHome: some View {
         List {
-            Section {
-                ForEach(SettingsCategory.allCases) { category in
-                    let categoryTitle = category.title(language: language)
-                    NavigationLink(value: BrowseDestination.settingsCategory(category)) {
-                        HStack(spacing: 12) {
-                            Image(systemName: category.symbol)
-                                .foregroundStyle(Color.clove.accent)
-                                .frame(width: 24)
-                                .accessibilityHidden(true)
-                            Text(categoryTitle)
-                                .foregroundStyle(Color.clove.text.primary)
-                            Spacer(minLength: 8)
-                            if let summary = compactSummary(for: category) {
-                                Text(summary)
-                                    .font(.subheadline)
+            ForEach(SettingsCategoryGroup.allCases) { group in
+                Section {
+                    ForEach(group.categories) { category in
+                        let categoryTitle = category.title(language: language)
+                        let categorySubtitle = category.subtitle(language: language)
+                        NavigationLink(value: BrowseDestination.settingsCategory(category)) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(categoryTitle)
+                                    .foregroundStyle(Color.clove.text.primary)
+                                Text(categorySubtitle)
+                                    .font(.footnote)
                                     .foregroundStyle(Color.clove.text.secondary)
-                                    .lineLimit(1)
+                                    .lineLimit(2)
                             }
+                            .padding(.vertical, 2)
                         }
+                        .accessibilityLabel(categoryTitle)
+                        .accessibilityValue(
+                            compactSummary(for: category) ?? categorySubtitle
+                        )
+                        .accessibilityIdentifier(category.identifier)
                     }
-                    .accessibilityLabel(categoryTitle)
-                    .accessibilityValue(compactSummary(for: category) ?? "")
-                    .accessibilityIdentifier(category.identifier)
+                } header: {
+                    SettingsSectionHeader(
+                        group.title(language: language), identifier: group.identifier)
                 }
+                .listRowBackground(theme.tokens.card.color)
             }
-            .listRowBackground(theme.tokens.card.color)
 
             SettingsResetSection { showsResetConfirmation = true }
             SettingsSaveFailureSection()
@@ -111,65 +141,115 @@ struct SettingsScreen: View {
 
     private var wideSplit: some View {
         HStack(spacing: 0) {
-            List {
-                Section {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text(AppLocalization.string("Settings", language: language))
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundStyle(Color.clove.text.primary)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("clove.settings.sidebarTitle")
+                        .reportHeaderControlFrame("clove.settings.sidebarTitle")
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 44, alignment: .leading)
+                .padding(.horizontal, Self.splitDividerInset)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+
+                List {
                     ForEach(SettingsCategory.allCases) { category in
                         let isSelected = navigation.selectedCategory == category
                         let categoryTitle = category.title(language: language)
-                        Button {
-                            navigation.selectCategory(category, wide: true)
-                        } label: {
-                            Label {
-                                Text(categoryTitle)
-                                    .reportHeaderControlFrame("\(category.identifier).title")
-                            } icon: {
-                                Image(systemName: category.symbol)
+                        Section {
+                            Button {
+                                navigation.selectCategory(category, wide: true)
+                            } label: {
+                                Label {
+                                    Text(categoryTitle)
+                                        .reportHeaderControlFrame("\(category.identifier).title")
+                                } icon: {
+                                    Image(systemName: category.symbol)
+                                }
+                                .foregroundStyle(
+                                    isSelected ? Color.clove.accent : Color.clove.text.primary
+                                )
+                                .fontWeight(isSelected ? .medium : .regular)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
-                            .foregroundStyle(
-                                isSelected ? Color.clove.accent : Color.clove.text.primary
+                            .buttonStyle(.plain)
+                            .listRowBackground(
+                                isSelected ? theme.tokens.card.color : Color.clear
                             )
-                            .fontWeight(isSelected ? .medium : .regular)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+                            .accessibilityAddTraits(isSelected ? .isSelected : [])
+                            .accessibilityIdentifier(category.identifier)
                         }
-                        .buttonStyle(.plain)
-                        .listRowBackground(
-                            isSelected
-                                ? theme.tokens.primaryText.color.opacity(0.08)
-                                : theme.tokens.card.color
-                        )
-                        .accessibilityAddTraits(isSelected ? .isSelected : [])
-                        .accessibilityIdentifier(category.identifier)
                     }
-                }
-                .listRowBackground(theme.tokens.card.color)
 
-                SettingsResetSection { showsResetConfirmation = true }
-                SettingsSaveFailureSection()
+                    SettingsResetSection(showsFooter: false, usesCardBackground: false) {
+                        showsResetConfirmation = true
+                    }
+                    SettingsSaveFailureSection()
+                }
+                .listStyle(.insetGrouped)
+                .listSectionSpacing(4)
+                .contentMargins(.top, 4, for: .scrollContent)
+                .contentMargins(.horizontal, Self.splitDividerInset, for: .scrollContent)
+                .scrollContentBackground(.hidden)
+                .background(Color.clove.surface.sheet)
             }
-            .listStyle(.insetGrouped)
-            .contentMargins(.trailing, Self.splitDividerInset, for: .scrollContent)
-            .scrollContentBackground(.hidden)
-            .background(Color.clove.surface.sheet)
             .frame(width: sidebarWidth)
 
             Rectangle()
                 .fill(Color.clove.separator)
-                .frame(width: 0.5)
-                .ignoresSafeArea(.container, edges: .bottom)
+                .frame(width: Self.dividerWidth)
+                .ignoresSafeArea(.container, edges: .vertical)
                 .reportHeaderControlFrame("clove.settings.wideDivider")
 
-            List {
-                SettingsCategoryContent(
-                    category: navigation.selectedCategory,
-                    showsCategoryTitle: true,
-                    resetRevision: resetRevision)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(navigation.selectedCategory.title(language: language))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(Color.clove.text.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .accessibilityAddTraits(.isHeader)
+                        .reportHeaderControlFrame("clove.settings.detailTitle")
+                    Spacer(minLength: 8)
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Text(AppLocalization.string("Done", language: language))
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Color.clove.accent)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: 44)
+                    .accessibilityLabel(AppLocalization.string("Done", language: language))
+                    .accessibilityIdentifier("clove.nav.back")
+                    .reportHeaderControlFrame("clove.settings.done")
+                }
+                .padding(.horizontal, Self.splitDividerInset)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+
+                List {
+                    SettingsCategoryContent(
+                        category: navigation.selectedCategory,
+                        showsCategoryTitle: false,
+                        resetRevision: resetRevision)
+                }
+                .id(navigation.selectedCategory)
+                .listStyle(.insetGrouped)
+                .contentMargins(.leading, Self.splitDividerInset, for: .scrollContent)
+                .contentMargins(.trailing, detailTrailingInset, for: .scrollContent)
+                .scrollContentBackground(.hidden)
+                .background(Color.clove.surface.sheet)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .id(navigation.selectedCategory)
-            .listStyle(.insetGrouped)
-            .contentMargins(.leading, Self.splitDividerInset, for: .scrollContent)
-            .scrollContentBackground(.hidden)
-            .background(Color.clove.surface.sheet)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color.clove.surface.sheet)
@@ -221,7 +301,7 @@ struct SettingsCategoryScreen: View {
         .background(Color.clove.surface.sheet)
         .foregroundStyle(Color.clove.text.primary)
         .navigationTitle(category.title(language: language))
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.settings.detail")
     }
@@ -242,7 +322,7 @@ struct SettingsSubpageScreen: View {
             }
         }
         .navigationTitle(subpage.title(language: language))
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.settings.subpage.\(subpage.rawValue)")
     }

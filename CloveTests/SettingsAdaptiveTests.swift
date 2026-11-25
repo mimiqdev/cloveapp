@@ -253,6 +253,7 @@ struct SettingsAdaptiveTests {
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
 
         for size in [
+            CGSize(width: 1366, height: 1024),
             CGSize(width: 1024, height: 768),
             CGSize(width: 840, height: 680),
             CGSize(width: 680, height: 680),
@@ -262,6 +263,7 @@ struct SettingsAdaptiveTests {
             let host = UIHostingController(
                 rootView: SettingsScreen(navigation: navigation, availableWidth: size.width)
                     .environment(SettingsStore.sample)
+                    .environment(\.cloveTheme, .light)
                     .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
                         framesBox.frames = frames
                     })
@@ -280,7 +282,9 @@ struct SettingsAdaptiveTests {
                 host.view.layoutIfNeeded()
                 let collections = self.findSubviews(ofType: UICollectionView.self, in: window)
                 return framesBox.frames["clove.settings.wideDivider"] != nil
+                    && framesBox.frames["clove.settings.sidebarTitle"] != nil
                     && framesBox.frames["clove.settings.detailTitle"] != nil
+                    && framesBox.frames["clove.settings.done"] != nil
                     && SettingsCategory.allCases.allSatisfy {
                         framesBox.frames["\($0.identifier).title"] != nil
                     }
@@ -290,6 +294,14 @@ struct SettingsAdaptiveTests {
 
             let divider = try #require(framesBox.frames["clove.settings.wideDivider"])
             #expect(divider.width > 0 && divider.width <= 1)
+
+            let sidebarTitle = try #require(framesBox.frames["clove.settings.sidebarTitle"])
+            #expect(sidebarTitle.minX >= 20 - 0.5)
+            #expect(divider.minX - sidebarTitle.maxX >= 20 - 0.5)
+
+            let doneFrame = try #require(framesBox.frames["clove.settings.done"])
+            #expect(doneFrame.minX > divider.maxX)
+            #expect(size.width - doneFrame.maxX >= 20 - 0.5)
 
             let collections = findSubviews(ofType: UICollectionView.self, in: window)
                 .sorted {
@@ -310,16 +322,30 @@ struct SettingsAdaptiveTests {
             #expect(sidebarCollection.contentSize.width <= sidebarCollection.bounds.width + 1)
             #expect(detailCollection.contentSize.width <= detailCollection.bounds.width + 1)
 
+            let expectedSheet = try renderedRGBA(CloveTheme.light.tokens.sheet.color)
+            let expectedCard = try renderedRGBA(CloveTheme.light.tokens.card.color)
+            let windowSnapshot = windowPixels(from: window)
+
             let sidebarCells = sidebarCollection.visibleCells.sorted {
                 $0.frame.minY < $1.frame.minY
             }
             #expect(sidebarCells.count == SettingsCategory.allCases.count + 1)
-            for cell in sidebarCells {
+            for (index, cell) in sidebarCells.enumerated() {
                 let cellFrame = cell.convert(cell.bounds, to: window)
                 #expect(cellFrame.minX >= 14)
-                #expect(divider.minX - cellFrame.maxX >= 14)
-                #expect(divider.minX - cellFrame.maxX >= 16)
+                #expect(divider.minX - cellFrame.maxX >= 19.5)
                 #expect(cellFrame.height <= 56)
+
+                // Only the selected category carries a card background; other sidebar rows and
+                // Reset sit directly on `surface/sheet`.
+                let sampleX = Int((cellFrame.maxX - 8).rounded())
+                let sampleY = Int(cellFrame.midY.rounded())
+                let pixel = windowSnapshot.pixel(x: sampleX, y: sampleY)
+                if index == 0 {
+                    assertRGBAClose(pixel, expectedCard, "selected sidebar row card background")
+                } else {
+                    assertRGBAClose(pixel, expectedSheet, "unselected sidebar row sits on sheet")
+                }
             }
 
             let firstSidebarCell = try #require(sidebarCells.first)
@@ -330,7 +356,7 @@ struct SettingsAdaptiveTests {
                 cardMaxX: firstSidebarCell.maxX)
 
             let appearanceTitle = try #require(framesBox.frames["clove.settings.detailTitle"])
-            #expect(appearanceTitle.minX - divider.maxX >= 16)
+            #expect(appearanceTitle.minX - divider.maxX >= 19.5)
 
             let appearanceDetailCells = detailCollection.visibleCells.sorted {
                 $0.frame.minY < $1.frame.minY
@@ -338,9 +364,9 @@ struct SettingsAdaptiveTests {
             #expect(!appearanceDetailCells.isEmpty)
             for cell in appearanceDetailCells {
                 let cellFrame = cell.convert(cell.bounds, to: window)
-                #expect(cellFrame.minX - divider.maxX >= 14)
-                #expect(cellFrame.minX - divider.maxX >= 16)
-                #expect(size.width - cellFrame.maxX >= 14)
+                #expect(cellFrame.minX - divider.maxX >= 19.5)
+                #expect(size.width - cellFrame.maxX >= 19.5)
+                #expect(cellFrame.width <= 640.5)
             }
             let firstDetailCell = try #require(appearanceDetailCells.first)
                 .convert(try #require(appearanceDetailCells.first).bounds, to: window)
@@ -373,7 +399,7 @@ struct SettingsAdaptiveTests {
                 cardMaxX: firstSidebarCell.maxX)
 
             let cullingTitle = try #require(framesBox.frames["clove.settings.detailTitle"])
-            #expect(cullingTitle.minX - divider.maxX >= 16)
+            #expect(cullingTitle.minX - divider.maxX >= 19.5)
 
             let updatedDetailCollection = try #require(
                 findSubviews(ofType: UICollectionView.self, in: window)
@@ -384,9 +410,9 @@ struct SettingsAdaptiveTests {
                     .last)
             for cell in updatedDetailCollection.visibleCells {
                 let cellFrame = cell.convert(cell.bounds, to: window)
-                #expect(cellFrame.minX - divider.maxX >= 14)
-                #expect(cellFrame.minX - divider.maxX >= 16)
-                #expect(size.width - cellFrame.maxX >= 14)
+                #expect(cellFrame.minX - divider.maxX >= 19.5)
+                #expect(size.width - cellFrame.maxX >= 19.5)
+                #expect(cellFrame.width <= 640.5)
             }
         }
     }
@@ -599,6 +625,144 @@ struct SettingsAdaptiveTests {
         }
     }
 
+    @Test func compactHomeGroupsWorkspaceAndWorkflowWithSubtitlesAndNeutralReset() async throws {
+        #expect(
+            SettingsCategoryGroup.workspace.categories == [
+                .appearance, .language, .browsingAndGroups, .photoDisplay,
+            ])
+        #expect(SettingsCategoryGroup.workflow.categories == [.cullingAndMarking, .moveRejects])
+        #expect(
+            SettingsCategory.allCases
+                == SettingsCategoryGroup.workspace.categories
+                + SettingsCategoryGroup.workflow.categories)
+        for category in SettingsCategory.allCases {
+            #expect(!category.subtitle(language: .english).isEmpty)
+        }
+
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                SettingsScreen(availableWidth: 390)
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveTheme, .light))
+        host.traitOverrides.horizontalSizeClass = .compact
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitForLayout("compact settings home did not settle") {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            guard
+                let collection = self.findSubviews(ofType: UICollectionView.self, in: window).first
+            else {
+                return false
+            }
+            return collection.numberOfSections == 3
+                && collection.numberOfItems(inSection: 0) == 4
+                && collection.numberOfItems(inSection: 1) == 2
+                && collection.numberOfItems(inSection: 2) == 1
+        }
+
+        let collection = try #require(
+            findSubviews(ofType: UICollectionView.self, in: window).first)
+        #expect(collection.numberOfSections == 3)
+        #expect(collection.numberOfItems(inSection: 0) == 4)
+        #expect(collection.numberOfItems(inSection: 1) == 2)
+        #expect(collection.numberOfItems(inSection: 2) == 1)
+    }
+
+    @Test func compactSubpagesUseLargeNavigationBarTitleMode() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        for root in [
+            AnyView(SettingsCategoryScreen(category: .photoDisplay)),
+            AnyView(SettingsSubpageScreen(subpage: .ratingScale)),
+            AnyView(SettingsSubpageScreen(subpage: .autoAdvanceDestination)),
+        ] {
+            let navController = UINavigationController(
+                rootViewController: UIHostingController(
+                    rootView: root.environment(SettingsStore.sample)))
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = navController
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitForLayout("compact subpage navigation did not settle") {
+                navController.view.setNeedsLayout()
+                navController.view.layoutIfNeeded()
+                return navController.topViewController?.navigationItem.largeTitleDisplayMode
+                    == .always
+            }
+        }
+    }
+
+    @Test func photoDisplayAndRatingScaleAndSubpageSectionsMatchFigma() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore(
+            persistence: SettingsPersistence(storage: SampleSettingsStorage()),
+            rememberedAdvanceStorage: SampleSettingsStorage(),
+            physicalMemory: 8 * 1024 * 1024 * 1024)
+
+        // Photo display: SHOW PHOTOS AS section with 2 checkmark rows (Camera preview, RAW).
+        do {
+            let host = UIHostingController(
+                rootView: List {
+                    PhotoDisplaySettingsSections(showsCategoryTitle: false)
+                }
+                .listStyle(.insetGrouped)
+                .environment(store)
+                .environment(\.cloveTheme, .light))
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitForLayout("photo display list did not settle") {
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                guard
+                    let collection = self.findSubviews(ofType: UICollectionView.self, in: window)
+                        .first
+                else {
+                    return false
+                }
+                return collection.numberOfSections == 1
+                    && collection.numberOfItems(inSection: 0) == 2
+            }
+        }
+
+        // Rating scale rows render 1...5 filled stars only (width grows monotonically from 1 to 5).
+        var starRowWidths: [CGFloat] = []
+        for count in 1...5 {
+            let rowHost = UIHostingController(
+                rootView: CumulativeRatingStarsRow(starCount: count, isEnabled: true)
+                    .environment(\.cloveTheme, .light))
+            let fitted = rowHost.sizeThatFits(in: CGSize(width: 400, height: 100))
+            starRowWidths.append(fitted.width)
+        }
+        for index in 1..<starRowWidths.count {
+            #expect(starRowWidths[index] > starRowWidths[index - 1] + 8)
+        }
+    }
+
     private func renderTilePixels<V: View>(_ view: V, theme: CloveTheme) throws -> TilePixelBuffer {
         let renderer = ImageRenderer(
             content:
@@ -630,6 +794,17 @@ struct SettingsAdaptiveTests {
                 bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo))
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return TilePixelBuffer(width: width, height: height, bytes: bytes)
+    }
+
+    private func windowPixels(from window: UIWindow) -> TilePixelBuffer {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds, format: format)
+        let image = renderer.image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        return (try? tilePixels(from: image.cgImage!))
+            ?? TilePixelBuffer(width: 1, height: 1, bytes: [0, 0, 0, 0])
     }
 
     private func assertRGBAClose(

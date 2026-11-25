@@ -2,13 +2,13 @@ import CloveCore
 import Observation
 import SwiftUI
 
-/// The top-level categories of the Settings screen (issue #264, #325).
+/// The top-level categories of the Settings screen (issue #264, #325, #436).
 enum SettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
     case appearance
     case language
-    case cullingAndMarking
     case browsingAndGroups
     case photoDisplay
+    case cullingAndMarking
     case moveRejects
 
     var id: String { rawValue }
@@ -21,10 +21,33 @@ enum SettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
         switch self {
         case .appearance: AppLocalization.string("Appearance", language: language)
         case .language: AppLocalization.string("Language", language: language)
-        case .cullingAndMarking: AppLocalization.string("Culling & marking", language: language)
         case .browsingAndGroups: AppLocalization.string("Browsing & groups", language: language)
         case .photoDisplay: AppLocalization.string("Photo display", language: language)
+        case .cullingAndMarking: AppLocalization.string("Culling & marking", language: language)
         case .moveRejects: AppLocalization.string("Move rejects", language: language)
+        }
+    }
+
+    func subtitle(language: ResolvedAppLanguage) -> String {
+        switch self {
+        case .appearance:
+            AppLocalization.string(
+                "Light, dark, or system mode and theme.", language: language)
+        case .language:
+            AppLocalization.string(
+                "App language for controls and menus.", language: language)
+        case .browsingAndGroups:
+            AppLocalization.string(
+                "Similar shot grouping, time window, and detail zoom.", language: language)
+        case .photoDisplay:
+            AppLocalization.string(
+                "Choose camera previews or full RAW colors.", language: language)
+        case .cullingAndMarking:
+            AppLocalization.string(
+                "Gestures, rating scale, color labels, and auto-advance.", language: language)
+        case .moveRejects:
+            AppLocalization.string(
+                "Move rejected photos to a subfolder instead of deleting.", language: language)
         }
     }
 
@@ -32,9 +55,9 @@ enum SettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
         switch self {
         case .appearance: "paintpalette"
         case .language: "globe"
-        case .cullingAndMarking: "slider.horizontal.3"
         case .browsingAndGroups: "rectangle.stack"
         case .photoDisplay: "photo"
+        case .cullingAndMarking: "slider.horizontal.3"
         case .moveRejects: "tray.and.arrow.down"
         }
     }
@@ -43,10 +66,34 @@ enum SettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
         switch self {
         case .appearance: "clove.settings.category.appearance"
         case .language: "clove.settings.category.language"
-        case .cullingAndMarking: "clove.settings.category.culling"
         case .browsingAndGroups: "clove.settings.category.browsing"
         case .photoDisplay: "clove.settings.category.photoDisplay"
+        case .cullingAndMarking: "clove.settings.category.culling"
         case .moveRejects: "clove.settings.category.moveRejects"
+        }
+    }
+}
+
+/// Top-level Settings Home groups separating environment preferences from culling workflow (#436).
+enum SettingsCategoryGroup: String, CaseIterable, Hashable, Identifiable, Sendable {
+    case workspace
+    case workflow
+
+    var id: String { rawValue }
+
+    var identifier: String { rawValue }
+
+    func title(language: ResolvedAppLanguage) -> String {
+        switch self {
+        case .workspace: AppLocalization.string("Workspace", language: language)
+        case .workflow: AppLocalization.string("Workflow", language: language)
+        }
+    }
+
+    var categories: [SettingsCategory] {
+        switch self {
+        case .workspace: [.appearance, .language, .browsingAndGroups, .photoDisplay]
+        case .workflow: [.cullingAndMarking, .moveRejects]
         }
     }
 }
