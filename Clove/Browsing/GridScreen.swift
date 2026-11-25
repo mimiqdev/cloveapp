@@ -27,7 +27,7 @@ struct GridScreen: View {
     private var isFilterAnchorReady: Bool { filterAnchorAttachments > 0 }
     @State private var isLandscapeContainer = false
     @State private var containerSize: CGSize = .zero
-    @State private var presentation = DetailPresentation.photoPreview
+    @State private var presentation = DetailPresentation.focus
     /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
     /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
     /// the grid where it opens today.
@@ -57,7 +57,7 @@ struct GridScreen: View {
         browsing: BrowsingModel,
         thumbnails: (any GridThumbnailSource)? = nil,
         filterPopoverTrigger: Int = 0,
-        initialPresentation: DetailPresentation = .photoPreview
+        initialPresentation: DetailPresentation = .focus
     ) {
         self.browsing = browsing
         self.thumbnails = thumbnails ?? browsing.thumbnails
@@ -169,7 +169,7 @@ struct GridScreen: View {
             .onChange(of: browsing.state.route) { _, route in
                 if route == .detail { hasOpenedPhoto = true }
                 if route != .detail {
-                    presentation = .photoPreview
+                    presentation = .focus
                 }
             }
             .onChange(of: filterPopoverTrigger) { _, _ in

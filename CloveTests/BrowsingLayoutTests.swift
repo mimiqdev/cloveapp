@@ -92,6 +92,131 @@ struct BrowsingLayoutTests {
         #expect(hasGridCollection(in: window))
     }
 
+    @Test func expandedDuoDetailPresentationDefaultsToFocusAndResetsAfterBack() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let model = BrowsingModel(library: TestLibrary.sample())
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+        let first = try #require(model.photos.first { $0.id.stem == "mmq02680" }?.id)
+        let second = try #require(model.photos.first { $0.id.stem == "mmq02682" }?.id)
+        let group = try #require(model.groups.first)
+
+        // 1. Expanded Duo BrowseShell -> GridScreen defaults to Focus View for standalone photos and
+        //    group stacks alike.
+        do {
+            let shellFrames = TestTapPickerFramesBox()
+            let shellHost = UIHostingController(
+                rootView: BrowseShell(browsing: model)
+                    .environment(SettingsStore.sample)
+                    .environment(\.isDuoExpanded, true)
+                    .environment(\.usesSystemBrowsingToolbar, true)
+                    .environment(\.usesVerticalBrowsingToolbar, true)
+                    .environment(\.hasFoldRegion, true)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                        shellFrames.frames = frames
+                    })
+            shellHost.traitOverrides.horizontalSizeClass = .regular
+            let shellWindow = UIWindow(windowScene: scene)
+            shellWindow.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+            shellWindow.rootViewController = shellHost
+            shellWindow.makeKeyAndVisible()
+            defer {
+                shellWindow.isHidden = true
+                shellWindow.rootViewController = nil
+            }
+
+            try await Task.sleep(for: .milliseconds(100))
+            model.openPhoto(first)
+            try await waitFor("expanded Duo standalone photo did not open in Focus View") {
+                shellFrames.frames["clove.duo.focus"] != nil
+                    && shellFrames.frames["clove.detail.filmstrip"] != nil
+                    && !self.hasGridCollection(in: shellWindow)
+                    && self.findFilmstripScrollView(in: shellWindow) != nil
+            }
+            #expect(shellFrames.frames["clove.duo.photoPreview"] == nil)
+
+            model.back()
+            try await waitFor("expanded Duo did not return to Grid View") {
+                shellFrames.frames["clove.duo.focus"] == nil
+                    && self.hasGridCollection(in: shellWindow)
+            }
+
+            model.openGroup(group.id)
+            try await waitFor("expanded Duo group stack did not open in Focus View") {
+                shellFrames.frames["clove.duo.focus"] != nil
+                    && shellFrames.frames["clove.detail.filmstrip.expandedGroup"] != nil
+                    && !self.hasGridCollection(in: shellWindow)
+                    && self.findFilmstripScrollView(in: shellWindow) != nil
+            }
+            #expect(shellFrames.frames["clove.duo.photoPreview"] == nil)
+
+            model.back()
+            try await waitFor("expanded Duo did not return to Grid View after group") {
+                shellFrames.frames["clove.duo.focus"] == nil
+                    && self.hasGridCollection(in: shellWindow)
+            }
+        }
+
+        // 2. Starting in Photo Preview (as after toggling sidebar.left) preserves Photo Preview
+        //    across Detail photo navigation, then resets to Focus View after Back.
+        let resetFrames = TestTapPickerFramesBox()
+        let resetHost = UIHostingController(
+            rootView: NavigationStack {
+                GridScreen(
+                    browsing: model,
+                    thumbnails: model.thumbnails,
+                    initialPresentation: .photoPreview)
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.isDuoExpanded, true)
+            .environment(\.usesSystemBrowsingToolbar, true)
+            .environment(\.usesVerticalBrowsingToolbar, true)
+            .environment(\.hasFoldRegion, true)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                resetFrames.frames = frames
+            })
+        resetHost.traitOverrides.horizontalSizeClass = .regular
+        let resetWindow = UIWindow(windowScene: scene)
+        resetWindow.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+        resetWindow.rootViewController = resetHost
+        resetWindow.makeKeyAndVisible()
+        defer {
+            resetWindow.isHidden = true
+            resetWindow.rootViewController = nil
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        model.openPhoto(first)
+        try await waitFor("Photo Preview did not mount for initialPresentation .photoPreview") {
+            resetFrames.frames["clove.duo.photoPreview"] != nil
+                && self.hasGridCollection(in: resetWindow)
+        }
+        #expect(resetFrames.frames["clove.duo.focus"] == nil)
+        #expect(findFilmstripScrollView(in: resetWindow) == nil)
+
+        model.openPhoto(second)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(resetFrames.frames["clove.duo.photoPreview"] != nil)
+        #expect(resetFrames.frames["clove.duo.focus"] == nil)
+
+        model.back()
+        try await waitFor("reset host did not return to Grid View") {
+            resetFrames.frames["clove.duo.photoPreview"] == nil
+                && self.hasGridCollection(in: resetWindow)
+        }
+
+        model.openPhoto(first)
+        try await waitFor("reopening after Back did not reset expanded Duo to Focus View") {
+            resetFrames.frames["clove.duo.focus"] != nil
+                && resetFrames.frames["clove.detail.filmstrip"] != nil
+                && !self.hasGridCollection(in: resetWindow)
+                && self.findFilmstripScrollView(in: resetWindow) != nil
+        }
+        #expect(resetFrames.frames["clove.duo.photoPreview"] == nil)
+    }
+
     @Test func phoneIdiomNeverMountsSplitSidebarDuringRegularRotationAndSnapshotTransitions()
         async throws
     {
@@ -908,6 +1033,17 @@ struct BrowsingLayoutTests {
     private func hasGridCollection(in view: UIView) -> Bool {
         if view is UICollectionView { return true }
         return view.subviews.contains { hasGridCollection(in: $0) }
+    }
+
+    private func findFilmstripScrollView(in view: UIView) -> UIScrollView? {
+        if view is DetailZoomContainerView { return nil }
+        if let scrollView = view as? UIScrollView, !(view is UICollectionView) {
+            return scrollView
+        }
+        for child in view.subviews {
+            if let found = findFilmstripScrollView(in: child) { return found }
+        }
+        return nil
     }
 
     private func findSplitViewController(in controller: UIViewController) -> UISplitViewController?

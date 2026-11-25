@@ -1489,20 +1489,19 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(element(app, "clove.duo.capsule").exists)
         capture("duo-grid")
         element(app, "clove.grid.photo.mmq02680").tap()
-        let photoPreview = element(app, "clove.duo.photoPreview")
-        XCTAssertTrue(photoPreview.waitForExistence(timeout: 5))
+        let focusPane = element(app, "clove.duo.focus")
+        XCTAssertTrue(focusPane.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertFalse(element(app, "clove.detail.rail").exists)
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
-        XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
+        let filmstrip = element(app, "clove.detail.filmstrip")
+        XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
         let gridToggle = element(app, "clove.detail.gridToggle")
         XCTAssertTrue(gridToggle.exists)
-        XCTAssertEqual(gridToggle.label, "Hide photo grid")
-        XCTAssertEqual(gridToggle.value as? String, "Photo Preview")
-        let grid = app.collectionViews.firstMatch
-        XCTAssertEqual(
-            grid.frame.width / (grid.frame.width + photoPreview.frame.width), 0.3, accuracy: 0.02)
+        XCTAssertEqual(gridToggle.label, "Show photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Focus View")
         let focusToggles = app.buttons.matching(identifier: "clove.detail.focusToggle")
         XCTAssertEqual(focusToggles.count, 1)
         let focusToggle = element(app, "clove.detail.focusToggle")
@@ -1510,7 +1509,6 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(focusToggle.value as? String, "On")
         XCTAssertGreaterThanOrEqual(focusToggle.frame.width, 43)
         XCTAssertGreaterThanOrEqual(focusToggle.frame.height, 43)
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minX, grid.frame.maxX - 1)
         XCTAssertGreaterThanOrEqual(focusToggle.frame.minY, preview.frame.minY + 11)
         let cornerFileName = element(app, "clove.detail.fileName")
         let cornerZoom = element(app, "clove.detail.zoom")
@@ -1527,10 +1525,29 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
         XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
         XCTAssertGreaterThanOrEqual(capsule.frame.minY, preview.frame.maxY)
-        XCTAssertEqual(capsule.frame.maxX, photoPreview.frame.maxX - 16, accuracy: 1)
+        XCTAssertEqual(capsule.frame.maxX, focusPane.frame.maxX - 16, accuracy: 1)
+        XCTAssertGreaterThan(capsule.frame.midX, focusPane.frame.midX)
+        XCTAssertLessThanOrEqual(filmstrip.frame.maxX, capsule.frame.minX + 1)
         XCTAssertFalse(element(app, "clove.duo.rating").exists)
         XCTAssertFalse(element(app, "clove.duo.reject").exists)
         XCTAssertFalse(element(app, "clove.duo.label").exists)
+        // Toggle explicitly into Photo Preview (30/70 split).
+        gridToggle.tap()
+        let photoPreview = element(app, "clove.duo.photoPreview")
+        XCTAssertTrue(photoPreview.waitForExistence(timeout: 5))
+        XCTAssertFalse(focusPane.exists)
+        XCTAssertFalse(filmstrip.exists)
+        XCTAssertEqual(gridToggle.label, "Hide photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Photo Preview")
+        let grid = app.collectionViews.firstMatch
+        XCTAssertEqual(
+            grid.frame.width / (grid.frame.width + photoPreview.frame.width), 0.3, accuracy: 0.02)
+        XCTAssertEqual(focusToggles.count, 1)
+        XCTAssertGreaterThanOrEqual(focusToggle.frame.minX, grid.frame.maxX - 1)
+        XCTAssertGreaterThanOrEqual(focusToggle.frame.minY, preview.frame.minY + 11)
+        XCTAssertGreaterThanOrEqual(cornerFileName.frame.minX, preview.frame.minX + 15)
+        XCTAssertGreaterThanOrEqual(focusToggle.frame.minX, cornerFileName.frame.maxX)
+        XCTAssertEqual(capsule.frame.maxX, photoPreview.frame.maxX - 16, accuracy: 1)
         capture("duo-photo-preview")
         rate(3, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
@@ -1558,7 +1575,6 @@ final class CloveFlowTests: XCTestCase {
         // Native toggle switches Photo Preview <-> Focus View cleanly; then return to Photo Preview
         // to verify the divider drag still transitions as well.
         gridToggle.tap()
-        let filmstrip = element(app, "clove.detail.filmstrip")
         XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
         XCTAssertEqual(gridToggle.label, "Show photo grid")
@@ -1635,6 +1651,19 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(
             wait(NSPredicate(format: "isHittable == true"), current),
             "the strip went blank after leaving the group")
+        // Toggle into Photo Preview, return to Grid via Back, and verify opening another photo
+        // opens Focus View again by default.
+        gridToggle.tap()
+        XCTAssertTrue(photoPreview.waitForExistence(timeout: 5))
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.capsule").exists)
+        element(app, "clove.grid.photo.mmq02682").tap()
+        XCTAssertTrue(focusPane.waitForExistence(timeout: 5))
+        XCTAssertTrue(filmstrip.waitForExistence(timeout: 5))
+        XCTAssertFalse(photoPreview.exists)
+        XCTAssertEqual(gridToggle.label, "Show photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Focus View")
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.duo.capsule").exists)
@@ -1660,9 +1689,24 @@ final class CloveFlowTests: XCTestCase {
             "Select Open in Device Hub to test the Duo inner display")
         prepareDuo(app)
         element(app, "clove.grid.group.burst-2696").tap()
-        XCTAssertTrue(element(app, "clove.duo.photoPreview").waitForExistence(timeout: 5))
+        let focusPane = element(app, "clove.duo.focus")
+        XCTAssertTrue(focusPane.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02696.ARW")
+        XCTAssertTrue(element(app, "clove.detail.filmstrip").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        let gridToggle = element(app, "clove.detail.gridToggle")
+        XCTAssertEqual(gridToggle.label, "Show photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Focus View")
+        // Toggle explicitly into Photo Preview to verify the split grid scopes to the active group.
+        gridToggle.tap()
+        XCTAssertTrue(element(app, "clove.duo.photoPreview").waitForExistence(timeout: 5))
+        XCTAssertFalse(focusPane.exists)
+        XCTAssertEqual(gridToggle.label, "Hide photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Photo Preview")
         XCTAssertTrue(waitForLabel("MMQ02696.ARW", preview))
         // Group Focus draws only burst-2696's visible members: no neighbouring folder photos,
         // no other group and no collapsed stack of this group.
@@ -1751,6 +1795,16 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.grid.group.burst-2696").exists)
         XCTAssertGreaterThanOrEqual(grid.frame.width, app.frame.width * 0.95)
         capture("duo-group-back-to-grid")
+        // Opening a stack again after Back resets Detail to Focus View in Group Focus by default.
+        element(app, "clove.grid.group.burst-2696").tap()
+        XCTAssertTrue(focusPane.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        XCTAssertEqual(gridToggle.label, "Show photo grid")
+        XCTAssertEqual(gridToggle.value as? String, "Focus View")
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid.more").waitForExistence(timeout: 5))
     }
 
     /// Runs on the Duo's cover display. A Duo simulator boots in the Closed pose

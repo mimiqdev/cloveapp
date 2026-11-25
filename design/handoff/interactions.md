@@ -80,9 +80,9 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 States and transitions:
 
 ```
-Grid View (full width, 6 col) ──tap photo / stack──▶ Photo Preview (grid 30 / photo 70, no filmstrip)
-Photo Preview ──tap Hide photo grid (sidebar.left) or drag divider left──▶ Focus View (photo + two-level filmstrip, no grid)
-Focus View ──tap Show photo grid (sidebar.left)──▶ Photo Preview
+Grid View (full width, 6 col) ──tap photo / stack──▶ Focus View (photo + two-level filmstrip, no grid)
+Focus View ──tap Show photo grid (sidebar.left)──▶ Photo Preview (grid 30 / photo 70, no filmstrip)
+Photo Preview ──tap Hide photo grid (sidebar.left) or drag divider left──▶ Focus View
 Photo Preview ──drag divider right, or Back──▶ Grid View
 Focus View ──Back──▶ Grid View
 ```
