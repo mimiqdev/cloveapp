@@ -50,11 +50,17 @@ final class BrowsingModel {
     /// until the scan finishes (design handoff, PRD P0-01).
     var isFolderOpening: Bool { !hasFinishedScan || isFindingSimilarShots }
 
-    /// Display-only activity forwarded by the folder's visual grouping pass.
-    private(set) var isFindingSimilarShots = false
+    /// Progress of the folder's visual similarity grouping pass.
+    private(set) var groupingProgress: FolderGroupingProgress = .idle
+
+    /// Whether visual similarity grouping is actively running.
+    var isFindingSimilarShots: Bool { groupingProgress.isAnalyzing }
 
     /// Whether visual similarity grouping is actively running with similar groups enabled.
     var isGroupingInProgress: Bool { isFindingSimilarShots && similarGroupsEnabled }
+
+    /// Normalized 0...1 progress of active visual similarity grouping when candidate count is positive.
+    var groupingFraction: Double? { groupingProgress.fraction }
 
     /// Folder-wide analysis and preview preparation progress shared by Grid, Preview, and Focus.
     private(set) var preparationStatus: FolderPreparationStatus = .idle
@@ -145,7 +151,7 @@ final class BrowsingModel {
     /// from `BrowsingState` persistence and preserved across mark/filter updates until exited.
     private(set) var compareSession: CompareSession?
 
-    private var similarGroupsEnabled = true
+    private(set) var similarGroupsEnabled = true
 
     /// Sidebar and regular-width navigation use the same name for the active filter.
     var filterTitle: String {
@@ -663,6 +669,7 @@ final class BrowsingModel {
         similarGroupsEnabled = enabled
         if !enabled {
             expandedGroup = nil
+            groupingProgress = .idle
         }
         await library.setSimilarGroupsEnabled(enabled)
     }
@@ -1476,6 +1483,7 @@ final class BrowsingModel {
         if let lastViewed = state.currentPhoto { library.setEntryResumePhoto(lastViewed) }
         compareSession = nil
         expandedGroup = nil
+        groupingProgress = .idle
         state.route = .entry
         hasLeftFolder = true
         state.folder = nil
@@ -1517,7 +1525,7 @@ final class BrowsingModel {
         folderLocationLoss = nil
         folderLocationLossGeneration = nil
         finishedScanFor = nil
-        isFindingSimilarShots = false
+        groupingProgress = .idle
         preparationStatus = .idle
         labelFilter = nil
         metadataFilter = .none
@@ -1645,8 +1653,8 @@ final class BrowsingModel {
         // (PRD P0-08's Leave anyway).
         guard !hasLeftFolder else { return }
         switch update {
-        case .groupingActivity(let isRunning):
-            isFindingSimilarShots = isRunning
+        case .groupingProgress(let progress):
+            groupingProgress = progress
         case .preparation(let status):
             if status.phase == .idle,
                 library.folder == FolderLibrarySession.noFolder
@@ -1665,7 +1673,7 @@ final class BrowsingModel {
             }
             preparationStatus = status
         case .scanStarted:
-            isFindingSimilarShots = false
+            groupingProgress = .idle
             // A reopen of the same folder starts a new scan, so the old finished marker cannot
             // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
             finishedScanFor = nil

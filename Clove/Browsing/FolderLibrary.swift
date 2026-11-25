@@ -1,6 +1,27 @@
 import CloveCore
 import Foundation
 
+/// Progress of visual similarity grouping for the currently open folder.
+enum FolderGroupingProgress: Hashable, Sendable {
+    /// Grouping has not started for the active scan, was disabled, or the folder closed.
+    case idle
+    /// Visual similarity analysis is running on `total` candidate photos with `completed` settled.
+    case analyzing(completed: Int, total: Int)
+    /// Grouping finished for the current open folder (visual pass completed, cache hit,
+    /// time-only mode, or zero candidate bursts).
+    case complete
+
+    var isAnalyzing: Bool {
+        if case .analyzing = self { return true }
+        return false
+    }
+
+    var fraction: Double? {
+        guard case .analyzing(let completed, let total) = self, total > 0 else { return nil }
+        return min(max(Double(completed) / Double(total), 0), 1)
+    }
+}
+
 /// One change a library publishes while a folder is open (PRD P0-02, P0-03, P0-08).
 ///
 /// The screens never poll the library: ``BrowsingModel`` consumes the one stream a library
@@ -44,8 +65,8 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// arrives when it changed something.
     case groups([BrowsingGroup])
 
-    /// The visual grouping pass is running or finished, including cached and cancelled runs.
-    case groupingActivity(Bool)
+    /// Progress of the visual grouping pass, including idle, analyzing counts, and completion.
+    case groupingProgress(FolderGroupingProgress)
 
     /// The open folder's combined analysis and preview-preparation status.
     case preparation(FolderPreparationStatus)

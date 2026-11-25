@@ -43,8 +43,8 @@ final class FolderGrouping {
     private let sets: @MainActor (PhotoIdentity) -> PhotoSet?
     /// Where each published result goes: the library turns it into its stream update (P0-11).
     private let publish: @MainActor ([BrowsingGroup]) -> Void
-    /// Presentation only: whether the visual pass still has work (handoff Opening).
-    private let analysisChanged: @MainActor (Bool) -> Void
+    /// Presentation only: visual grouping pass progress (handoff Opening).
+    private let progressChanged: @MainActor (FolderGroupingProgress) -> Void
 
     /// The folder's photos as grouping receives them, replaced by Run again (PRD P0-11).
     private var inputs: [GroupingPhoto] = []
@@ -91,7 +91,7 @@ final class FolderGrouping {
         refinementInterval: Duration = .seconds(1),
         sets: @escaping @MainActor (PhotoIdentity) -> PhotoSet?,
         publish: @escaping @MainActor ([BrowsingGroup]) -> Void,
-        analysisChanged: @escaping @MainActor (Bool) -> Void = { _ in }
+        progressChanged: @escaping @MainActor (FolderGroupingProgress) -> Void = { _ in }
     ) {
         self.folder = folder
         self.session = session
@@ -99,7 +99,7 @@ final class FolderGrouping {
         self.refinementInterval = refinementInterval
         self.sets = sets
         self.publish = publish
-        self.analysisChanged = analysisChanged
+        self.progressChanged = progressChanged
         // I3's record is the opaque feature both kinds answer with; C9 decides what a distance
         // means, so this only names the kind and never compares it with a threshold.
         let similarity = PhotoFeatureSimilarity<ImageFeatures> { left, right in
@@ -193,6 +193,7 @@ final class FolderGrouping {
     /// Queued feature work is dropped, a preview read already running may finish and is
     /// discarded, and the grouper's stream is removed; the caller can then release the scope.
     func close() async {
+        let wasClosed = isClosed
         isClosed = true
         let analysis = analysisTask
         analysisTask = nil
@@ -206,6 +207,9 @@ final class FolderGrouping {
         // A run that was waiting for its turn returns without publishing; the caller can then
         // release the folder's scope.
         await pending?.value
+        if !wasClosed {
+            progressChanged(.idle)
+        }
     }
 
     /// Stops starting new background feature work (G1 memory pressure).
@@ -251,15 +255,24 @@ final class FolderGrouping {
         // Jobs the replaced pass queued before it stopped are dropped here, so the new pass
         // starts from an empty queue (G1 scheduling row).
         await features.cancel(folder: folder.rawValue)
-        guard !isClosed else { return }
+        guard !isClosed else {
+            progressChanged(.idle)
+            return
+        }
         await grouping.run(
             photos: inputs, revision: revision, similarGroupsEnabled: enabled,
             reuseCache: reusingCache, thresholds: thresholds)
-        guard !isClosed else { return }
+        guard !isClosed else {
+            progressChanged(.idle)
+            return
+        }
         // The grouper's own result, read here rather than waited for, so the caller's next step
         // runs after the first publication instead of racing it.
         let result = await grouping.current
-        guard !isClosed else { return }
+        guard !isClosed else {
+            progressChanged(.idle)
+            return
+        }
         adopt(result.browsingGroups)
         startUpdates()
         startAnalysis(needsAnalysis: result.analysis != .analyzed)
@@ -292,19 +305,30 @@ final class FolderGrouping {
     private func startAnalysis(needsAnalysis: Bool) {
         analysisTask?.cancel()
         analysisTask = nil
-        guard enabled, !isClosed, needsAnalysis else {
-            analysisChanged(false)
+        guard enabled, !isClosed else {
+            progressChanged(.idle)
             return
         }
-        analysisChanged(true)
+        guard needsAnalysis else {
+            progressChanged(.complete)
+            return
+        }
         let runs = GroupingFeatureCandidates.runs(in: inputs, thresholds: thresholds)
+        let total = runs.reduce(0) { $0 + $1.count }
+        guard total > 0 else {
+            progressChanged(.complete)
+            return
+        }
+        progressChanged(.analyzing(completed: 0, total: total))
         analysisTask = Task { [weak self] in
             guard let self else { return }
-            // The previous task is awaited before a new run. Cancellation therefore finishes
-            // its own presentation before the replacement can report that it is running.
-            defer { self.analysisChanged(false) }
             await self.analyse(runs)
         }
+    }
+
+    private func reportAnalyzingProgress(completed: Int, total: Int) {
+        guard !isClosed, enabled, !Task.isCancelled else { return }
+        progressChanged(.analyzing(completed: completed, total: total))
     }
 
     /// Computes the candidates' features inside the folder's admitted work in burst order, refining
@@ -318,9 +342,10 @@ final class FolderGrouping {
     private func analyse(_ runs: [[GroupingPhoto]]) async {
         guard !isClosed, enabled else { return }
         let candidates = runs.flatMap { $0 }
+        let total = candidates.count
         let groupingInterval = PerformanceSignpost.folderGrouping.beginInterval(
             "FolderGroupingPass", id: PerformanceSignpost.folderGrouping.makeSignpostID(),
-            "candidates=\(candidates.count)")
+            "candidates=\(total)")
         defer {
             PerformanceSignpost.folderGrouping.endInterval("FolderGroupingPass", groupingInterval)
         }
@@ -338,6 +363,7 @@ final class FolderGrouping {
             }
             sources.append((photo, url))
         }
+        guard !Task.isCancelled, !isClosed, enabled else { return }
         let grouping = grouping
         let similarity = similarity
         let features = features
@@ -347,7 +373,7 @@ final class FolderGrouping {
         let admittedSources = sources
         let preSettled = unavailableBeforeAdmission
         do {
-            try await session.withAdmittedWork {
+            try await session.withAdmittedWork { [weak self] in
                 var neighborsByPhoto: [PhotoIdentity: [PhotoIdentity]] = [:]
                 var runIndexByPhoto: [PhotoIdentity: Int] = [:]
                 var runRemaining: [Int] = []
@@ -364,6 +390,7 @@ final class FolderGrouping {
                 }
 
                 var settledPhotos: Set<PhotoIdentity> = []
+                settledPhotos.reserveCapacity(total)
                 var readyBoundariesSinceRefine = 0
                 var completedRunSinceRefine = false
                 func recordSettled(_ photo: PhotoIdentity) {
@@ -378,7 +405,29 @@ final class FolderGrouping {
                     }
                 }
 
+                var lastReportedCompleted = 0
+                var lastReportedAt = ContinuousClock.now
+                func maybeReportProgress(force: Bool = false) async {
+                    guard !Task.isCancelled else { return }
+                    let completed = settledPhotos.count
+                    guard completed > lastReportedCompleted else { return }
+                    let elapsed = lastReportedAt.duration(to: .now)
+                    if force
+                        || lastReportedCompleted == 0
+                        || completed - lastReportedCompleted >= 4
+                        || elapsed >= .milliseconds(100)
+                        || completed >= total
+                    {
+                        lastReportedCompleted = completed
+                        lastReportedAt = .now
+                        await self?.reportAnalyzingProgress(completed: completed, total: total)
+                    }
+                }
+
                 for photo in preSettled { recordSettled(photo) }
+                if !preSettled.isEmpty {
+                    await maybeReportProgress()
+                }
 
                 // The revision each request keys on is a file read, so it happens here too
                 // (G1 folder access, I1's request identity). Keep request order aligned with grid
@@ -393,6 +442,7 @@ final class FolderGrouping {
                     guard let revision = try? ThumbnailRevision.read(from: source.url) else {
                         await similarity.settle(.unavailable, for: source.photo.id)
                         recordSettled(source.photo.id)
+                        await maybeReportProgress()
                         continue
                     }
                     let request = ImageFeatureRequest(
@@ -422,6 +472,7 @@ final class FolderGrouping {
                         }
                         recordSettled(photo)
                     }
+                    await maybeReportProgress()
                     guard remainingRequests > 0, readyBoundariesSinceRefine > 0 else { continue }
                     let elapsed = lastRefineAt.duration(to: .now)
                     let shouldRefine =
@@ -436,6 +487,7 @@ final class FolderGrouping {
                         readyBoundariesSinceRefine = 0
                         completedRunSinceRefine = false
                         lastRefineAt = .now
+                        await maybeReportProgress(force: true)
                         await grouping.refine(settledPhotos: settledPhotos)
                     }
                 }
@@ -444,8 +496,12 @@ final class FolderGrouping {
             // The folder ended before its features could read a file, so nothing is settled.
             return
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, !isClosed, enabled else { return }
         await grouping.refine()
+        let finalResult = await grouping.current
+        guard !Task.isCancelled, !isClosed, enabled else { return }
+        adopt(finalResult.browsingGroups)
+        progressChanged(.complete)
     }
 
     deinit {

@@ -173,24 +173,78 @@ struct FolderPreparationPresentationTests {
         #expect(!unsupportedOnly.hasRetryableIssues)
         #expect(!FolderPreparationAccessibility.canRetryIssues(for: unsupportedOnly))
 
-        // Grouping reflects active and paused VoiceOver states when prep is .complete or .idle.
+        // Grouping reflects determinate, active, and paused VoiceOver states when prep is .complete or .idle.
         #expect(
             FolderPreparationAccessibility.indicatorAccessibilityValue(
                 for: .idle, isFindingSimilarShots: true) == "Finding similar shots")
         #expect(
             FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: .idle, isFindingSimilarShots: true,
+                groupingProgress: .analyzing(completed: 12, total: 24))
+                == "Finding similar shots, 12 of 24 analyzed")
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
                 for: complete, isFindingSimilarShots: true) == "Finding similar shots")
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: complete, isFindingSimilarShots: true,
+                groupingProgress: .analyzing(completed: 5, total: 10))
+                == "Finding similar shots, 5 of 10 analyzed")
         var pausedComplete = complete
         pausedComplete.waitingReason = .memoryPressure
         #expect(
             FolderPreparationAccessibility.indicatorAccessibilityValue(
-                for: pausedComplete, isFindingSimilarShots: true) == "Paused for memory")
+                for: pausedComplete, isFindingSimilarShots: true,
+                groupingProgress: .analyzing(completed: 5, total: 10)) == "Paused for memory")
         var disconnectedComplete = complete
         disconnectedComplete.waitingReason = .folderUnavailable(.externalVolumeDisconnected)
         #expect(
             FolderPreparationAccessibility.indicatorAccessibilityValue(
-                for: disconnectedComplete, isFindingSimilarShots: true)
+                for: disconnectedComplete, isFindingSimilarShots: true,
+                groupingProgress: .analyzing(completed: 5, total: 10))
                 == "Paused · drive disconnected")
+
+        // Grouping status text covers scanning/.idle, determinate analyzing, paused, and complete.
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: enumerating, progress: .idle, groupCount: 0, isScanning: true)
+                == "Waiting for photo count")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: complete, progress: .idle, groupCount: 0, isScanning: false)
+                == "Waiting for photo count")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: complete, progress: .analyzing(completed: 12, total: 24))
+                == "12 of 24 analyzed")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: complete, progress: .analyzing(completed: 0, total: 0))
+                == "Finding similar shots…")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: pausedComplete, progress: .analyzing(completed: 12, total: 24))
+                == "Paused")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: complete, progress: .complete, groupCount: 0) == "0 groups")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: complete, progress: .complete, groupCount: 1) == "1 group")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: complete, progress: .complete, groupCount: 3) == "3 groups")
+
+        // FolderGroupingProgress helpers report active state and clamped fractions cleanly.
+        #expect(!FolderGroupingProgress.idle.isAnalyzing)
+        #expect(FolderGroupingProgress.idle.fraction == nil)
+        #expect(!FolderGroupingProgress.complete.isAnalyzing)
+        #expect(FolderGroupingProgress.complete.fraction == nil)
+        #expect(FolderGroupingProgress.analyzing(completed: 0, total: 0).isAnalyzing)
+        #expect(FolderGroupingProgress.analyzing(completed: 0, total: 0).fraction == nil)
+        #expect(FolderGroupingProgress.analyzing(completed: 6, total: 24).fraction == 0.25)
+        #expect(FolderGroupingProgress.analyzing(completed: -2, total: 10).fraction == 0)
+        #expect(FolderGroupingProgress.analyzing(completed: 15, total: 10).fraction == 1)
     }
 
     @Test func browsingModelRetryPreparationIssuesResolvesSampleIssuesAndBlocksWhenDisconnected()
@@ -262,7 +316,7 @@ struct FolderPreparationPresentationTests {
         #expect(!browsing.showsPreparationIndicator)
     }
 
-    @Test func groupingActivityKeepsPreparationIndicatorVisibleAndReflectsPauseInDetails()
+    @Test func groupingProgressKeepsPreparationIndicatorVisibleAndReflectsPauseInDetails()
         async throws
     {
         let library = GroupingPresentationStubLibrary()
@@ -279,9 +333,9 @@ struct FolderPreparationPresentationTests {
         #expect(!browsing.showsPreparationIndicator)
 
         // Running grouping again re-shows the indicator even while prep status is .complete.
-        library.emit(.groupingActivity(true))
-        try await waitFor("grouping activity started on browsing model") {
-            browsing.isGroupingInProgress
+        library.emit(.groupingProgress(.analyzing(completed: 2, total: 10)))
+        try await waitFor("grouping progress started on browsing model") {
+            browsing.isGroupingInProgress && browsing.groupingFraction == 0.2
         }
         #expect(browsing.showsPreparationIndicator)
 
@@ -297,7 +351,7 @@ struct FolderPreparationPresentationTests {
         idleModel.openFolder()
         #expect(idleModel.preparationStatus.phase == .idle)
         #expect(!idleModel.showsPreparationIndicator)
-        idleLibrary.emit(.groupingActivity(true))
+        idleLibrary.emit(.groupingProgress(.analyzing(completed: 1, total: 4)))
         try await waitFor("idle folder shows indicator during grouping") {
             idleModel.isGroupingInProgress && idleModel.showsPreparationIndicator
         }
@@ -305,9 +359,21 @@ struct FolderPreparationPresentationTests {
         // Turning off similarGroupsEnabled stops showing grouping progress immediately.
         await idleModel.setSimilarGroupsEnabled(false)
         #expect(!idleModel.isGroupingInProgress)
+        #expect(idleModel.groupingProgress == .idle)
         #expect(!idleModel.showsPreparationIndicator)
 
-        // Render FolderPreparationDetails across active grouping, paused grouping, and finished states.
+        // scanStarted resets groupingProgress back to .idle.
+        idleLibrary.emit(.groupingProgress(.analyzing(completed: 2, total: 4)))
+        await idleModel.setSimilarGroupsEnabled(true)
+        try await waitFor("re-enabled grouping progress observed") {
+            idleModel.isGroupingInProgress
+        }
+        idleLibrary.emit(.scanStarted)
+        try await waitFor("scanStarted cleared grouping progress") {
+            idleModel.groupingProgress == .idle && !idleModel.isGroupingInProgress
+        }
+
+        // Render FolderPreparationDetails across determinate progress, paused grouping, and complete states.
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let detailsWindow = UIWindow(windowScene: scene)
         detailsWindow.frame = CGRect(x: 0, y: 0, width: 420, height: 640)
@@ -323,7 +389,16 @@ struct FolderPreparationPresentationTests {
         }
 
         try await Task.sleep(for: .milliseconds(80))
-        let activeDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
+        let earlyDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
+
+        library.emit(.groupingProgress(.analyzing(completed: 8, total: 10)))
+        try await waitFor("grouping progress advanced to 8 of 10") {
+            browsing.groupingProgress == .analyzing(completed: 8, total: 10)
+                && browsing.groupingFraction == 0.8
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let lateDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
+        #expect(lateDetailsPixels != earlyDetailsPixels)
 
         var pausedStatus = browsing.preparationStatus
         pausedStatus.waitingReason = .memoryPressure
@@ -333,10 +408,10 @@ struct FolderPreparationPresentationTests {
         }
         try await Task.sleep(for: .milliseconds(80))
         let pausedDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
-        #expect(pausedDetailsPixels != activeDetailsPixels)
+        #expect(pausedDetailsPixels != lateDetailsPixels)
 
         // Indicator stays mounted past the 2s completion window while grouping is running,
-        // updates when paused/resumed, and auto-dismisses once grouping finishes.
+        // advances determinate ring as progress updates, pauses/resumes, and auto-dismisses at .complete.
         pausedStatus.waitingReason = nil
         library.emit(.preparation(pausedStatus))
         try await waitFor("waiting reason cleared") {
@@ -369,7 +444,15 @@ struct FolderPreparationPresentationTests {
         #expect(browsing.showsPreparationIndicator)
         #expect(frameBox.frames["clove.grid.preparation"] != nil)
 
-        let activeIndicatorPixels = try #require(findRenderedPixels(in: indicatorWindow))
+        let eightTenthsIndicatorPixels = try #require(findRenderedPixels(in: indicatorWindow))
+        library.emit(.groupingProgress(.analyzing(completed: 2, total: 10)))
+        try await waitFor("indicator progress updated to 2 of 10") {
+            browsing.groupingFraction == 0.2
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let twoTenthsIndicatorPixels = try #require(findRenderedPixels(in: indicatorWindow))
+        #expect(twoTenthsIndicatorPixels != eightTenthsIndicatorPixels)
+
         pausedStatus.waitingReason = .memoryPressure
         library.emit(.preparation(pausedStatus))
         try await waitFor("indicator saw paused status") {
@@ -377,23 +460,41 @@ struct FolderPreparationPresentationTests {
         }
         try await Task.sleep(for: .milliseconds(80))
         let pausedIndicatorPixels = try #require(findRenderedPixels(in: indicatorWindow))
-        #expect(pausedIndicatorPixels != activeIndicatorPixels)
+        #expect(pausedIndicatorPixels != twoTenthsIndicatorPixels)
 
-        // Clearing pause and ending grouping removes the grouping row and auto-dismisses indicator.
+        // Clearing pause and completing grouping keeps the persistent row in details and auto-dismisses indicator.
         pausedStatus.waitingReason = nil
         library.emit(.preparation(pausedStatus))
-        library.emit(.groupingActivity(false))
+        library.emit(.groupingProgress(.complete))
         try await waitFor("grouping finished") {
-            !browsing.isGroupingInProgress && browsing.preparationStatus.waitingReason == nil
+            !browsing.isGroupingInProgress
+                && browsing.groupingProgress == .complete
+                && browsing.preparationStatus.waitingReason == nil
         }
         try await Task.sleep(for: .milliseconds(80))
         let finishedDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
-        #expect(finishedDetailsPixels != activeDetailsPixels)
+        #expect(finishedDetailsPixels != earlyDetailsPixels)
+        #expect(finishedDetailsPixels != lateDetailsPixels)
 
         try await waitFor("indicator auto-dismissed after grouping finished", timeout: .seconds(4))
         {
             !browsing.showsPreparationIndicator && frameBox.frames["clove.grid.preparation"] == nil
         }
+
+        // Hiding similar groups removes the persistent Similar groups row from details.
+        await browsing.setSimilarGroupsEnabled(false)
+        try await Task.sleep(for: .milliseconds(80))
+        let disabledDetailsPixels = try #require(findRenderedPixels(in: detailsWindow))
+        #expect(disabledDetailsPixels != finishedDetailsPixels)
+
+        // Leaving the folder resets groupingProgress to .idle.
+        library.emit(.groupingProgress(.analyzing(completed: 1, total: 4)))
+        await browsing.setSimilarGroupsEnabled(true)
+        try await waitFor("grouping active before leaveFolder") {
+            browsing.isGroupingInProgress
+        }
+        browsing.back()
+        #expect(browsing.groupingProgress == .idle)
     }
 
     @Test func detailsViewRendersHonestMetricsWithoutPauseOrCancelControlsAcrossThemes()

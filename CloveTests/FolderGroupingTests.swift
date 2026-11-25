@@ -13,7 +13,7 @@ struct FolderGroupingTests {
         let fixture = try await GroupingTestWorkspace()
         defer { fixture.remove() }
 
-        var coldActivity: [Bool] = []
+        var coldProgress: [FolderGroupingProgress] = []
         var coldSetsLookups = 0
         var coldPublished: [[BrowsingGroup]] = []
         let coldGrouping = FolderGrouping(
@@ -27,17 +27,22 @@ struct FolderGroupingTests {
                 return fixture.sets[id]
             },
             publish: { groups in coldPublished.append(groups) },
-            analysisChanged: { active in coldActivity.append(active) })
+            progressChanged: { progress in coldProgress.append(progress) })
 
         await coldGrouping.begin(
             photos: fixture.groupingPhotos, revision: fixture.revision, enabled: true)
-        try await waitUntil { coldActivity.contains(true) && coldActivity.last == false }
+        try await waitUntil {
+            coldProgress.contains { $0.isAnalyzing } && coldProgress.last == .complete
+        }
+        #expect(coldProgress.first == .analyzing(completed: 0, total: 2))
+        #expect(coldProgress.contains(.analyzing(completed: 1, total: 2)))
+        #expect(coldProgress.contains(.analyzing(completed: 2, total: 2)))
         #expect(coldSetsLookups == fixture.groupingPhotos.count)
         let finishedCold = try #require(coldPublished.last)
         await coldGrouping.close()
 
         // Reopen with the same SimilarGroupsCache but empty feature and preview caches.
-        var warmActivity: [Bool] = []
+        var warmProgress: [FolderGroupingProgress] = []
         var warmSetsLookups = 0
         var warmPublished: [[BrowsingGroup]] = []
         let warmGrouping = FolderGrouping(
@@ -51,7 +56,7 @@ struct FolderGroupingTests {
                 return fixture.sets[id]
             },
             publish: { groups in warmPublished.append(groups) },
-            analysisChanged: { active in warmActivity.append(active) })
+            progressChanged: { progress in warmProgress.append(progress) })
 
         await warmGrouping.begin(
             photos: fixture.groupingPhotos, revision: fixture.revision, enabled: true)
@@ -59,7 +64,8 @@ struct FolderGroupingTests {
         try await Task.sleep(for: .milliseconds(50))
 
         #expect(warmPublished.last == finishedCold)
-        #expect(!warmActivity.contains(true))
+        #expect(!warmProgress.contains { $0.isAnalyzing })
+        #expect(warmProgress == [.complete])
         #expect(warmSetsLookups == 0)
         let warmFeatureFiles = try FileManager.default.contentsOfDirectory(
             at: fixture.warmFeatureDirectory, includingPropertiesForKeys: nil)
@@ -67,7 +73,10 @@ struct FolderGroupingTests {
 
         // Calling Run again after a warm hit must bypass the cache and re-analyze.
         await warmGrouping.runAgain(photos: fixture.groupingPhotos)
-        try await waitUntil { warmActivity.contains(true) && warmActivity.last == false }
+        try await waitUntil {
+            warmProgress.contains { $0.isAnalyzing } && warmProgress.last == .complete
+        }
+        #expect(warmProgress.contains(.analyzing(completed: 0, total: 2)))
         #expect(warmSetsLookups == fixture.groupingPhotos.count)
         await warmGrouping.close()
         await fixture.session.end()
@@ -77,7 +86,7 @@ struct FolderGroupingTests {
         let fixture = try await GroupingTestWorkspace()
         defer { fixture.remove() }
 
-        var coldActivity: [Bool] = []
+        var coldProgress: [FolderGroupingProgress] = []
         let coldGrouping = FolderGrouping(
             folder: fixture.folderID,
             session: fixture.session,
@@ -86,14 +95,16 @@ struct FolderGroupingTests {
             previewCache: fixture.coldThumbnails,
             sets: { fixture.sets[$0] },
             publish: { _ in },
-            analysisChanged: { coldActivity.append($0) })
+            progressChanged: { coldProgress.append($0) })
 
         await coldGrouping.begin(
             photos: fixture.groupingPhotos, revision: fixture.revision, enabled: true)
-        try await waitUntil { coldActivity.contains(true) && coldActivity.last == false }
+        try await waitUntil {
+            coldProgress.contains { $0.isAnalyzing } && coldProgress.last == .complete
+        }
         await coldGrouping.close()
 
-        var recalibratedActivity: [Bool] = []
+        var recalibratedProgress: [FolderGroupingProgress] = []
         var recalibratedSetsLookups = 0
         let recalibrated = FolderGrouping(
             folder: fixture.folderID,
@@ -107,12 +118,13 @@ struct FolderGroupingTests {
                 return fixture.sets[id]
             },
             publish: { _ in },
-            analysisChanged: { recalibratedActivity.append($0) })
+            progressChanged: { recalibratedProgress.append($0) })
 
         await recalibrated.begin(
             photos: fixture.groupingPhotos, revision: fixture.revision, enabled: true)
         try await waitUntil {
-            recalibratedActivity.contains(true) && recalibratedActivity.last == false
+            recalibratedProgress.contains { $0.isAnalyzing }
+                && recalibratedProgress.last == .complete
         }
         #expect(recalibratedSetsLookups == fixture.groupingPhotos.count)
         await recalibrated.close()
@@ -175,7 +187,7 @@ struct FolderGroupingTests {
             workers: 2)
 
         var published: [[BrowsingGroup]] = []
-        var activity: [Bool] = []
+        var progressHistory: [FolderGroupingProgress] = []
         let grouping = FolderGrouping(
             folder: folderID,
             session: session,
@@ -185,7 +197,7 @@ struct FolderGroupingTests {
             featurePipeline: pipeline,
             sets: { sets[$0] },
             publish: { published.append($0) },
-            analysisChanged: { activity.append($0) })
+            progressChanged: { progressHistory.append($0) })
 
         await grouping.begin(
             photos: groupingPhotos,
@@ -206,11 +218,16 @@ struct FolderGroupingTests {
                 [groupingPhotos[3].id, groupingPhotos[4].id],
             ]
         }
-        #expect(activity.last == true)
-        #expect(Set(await gate.startedNames.prefix(3)) == ["a.jpg", "b.jpg", "c.jpg"])
+        #expect(progressHistory.first == .analyzing(completed: 0, total: 5))
+        #expect(progressHistory.last?.isAnalyzing == true)
+        let started = await gate.startedNames
+        #expect(Set(started.prefix(4)).isSuperset(of: ["a.jpg", "b.jpg", "c.jpg"]))
 
         await gate.releaseHeld()
-        try await waitUntil { activity.contains(true) && activity.last == false }
+        try await waitUntil {
+            progressHistory.contains { $0.isAnalyzing } && progressHistory.last == .complete
+        }
+        #expect(progressHistory.contains(.analyzing(completed: 5, total: 5)))
         #expect(
             published.last?.map(\.members) == [
                 [groupingPhotos[1].id, groupingPhotos[2].id],
@@ -225,7 +242,7 @@ struct FolderGroupingTests {
         let fixture = try await GroupingTestWorkspace()
         defer { fixture.remove() }
 
-        var activity: [Bool] = []
+        var progressHistory: [FolderGroupingProgress] = []
         var setsLookups = 0
         var published: [[BrowsingGroup]] = []
         let timeOnly = GroupingThresholds(timeWindow: .twoSeconds, sensitivity: .timeOnly)
@@ -241,14 +258,15 @@ struct FolderGroupingTests {
                 return fixture.sets[id]
             },
             publish: { published.append($0) },
-            analysisChanged: { activity.append($0) })
+            progressChanged: { progressHistory.append($0) })
 
         await grouping.begin(
             photos: fixture.groupingPhotos, revision: fixture.revision, enabled: true)
         try await Task.sleep(for: .milliseconds(50))
 
         #expect(published.last?.map(\.members) == [fixture.groupingPhotos.map(\.id)])
-        #expect(!activity.contains(true))
+        #expect(!progressHistory.contains { $0.isAnalyzing })
+        #expect(progressHistory == [.complete])
         #expect(setsLookups == 0)
         let featureFiles = try FileManager.default.contentsOfDirectory(
             at: fixture.warmFeatureDirectory, includingPropertiesForKeys: nil)
@@ -314,7 +332,7 @@ struct FolderGroupingTests {
             workers: 2)
 
         var published: [[BrowsingGroup]] = []
-        var activity: [Bool] = []
+        var progressHistory: [FolderGroupingProgress] = []
         let grouping = FolderGrouping(
             folder: folderID,
             session: session,
@@ -325,29 +343,33 @@ struct FolderGroupingTests {
             featurePipeline: pipeline,
             sets: { sets[$0] },
             publish: { published.append($0) },
-            analysisChanged: { activity.append($0) })
+            progressChanged: { progressHistory.append($0) })
 
         // Standard (2s, 0.5): a & b join; c is outside 2s.
         await grouping.begin(
             photos: groupingPhotos,
             revision: GroupingInputRevision(rawValue: "dynamic-thresholds"),
             enabled: true)
-        try await waitUntil { activity.contains(true) && activity.last == false }
+        try await waitUntil {
+            progressHistory.contains { $0.isAnalyzing } && progressHistory.last == .complete
+        }
         #expect(published.last?.map(\.members) == [[groupingPhotos[0].id, groupingPhotos[1].id]])
         let previewsAfterStandard = await previewReader.startedNames.count
         #expect(previewsAfterStandard == 2)
 
         // Tight (2s, 0.35): splits a & b without decoding previews again (reuses cached features).
-        activity.removeAll()
+        progressHistory.removeAll()
         await grouping.setThresholds(
             GroupingThresholds(timeWindow: .twoSeconds, sensitivity: .tight),
             photos: groupingPhotos)
-        try await waitUntil { activity.contains(true) && activity.last == false }
+        try await waitUntil {
+            progressHistory.contains { $0.isAnalyzing } && progressHistory.last == .complete
+        }
         #expect(published.last?.isEmpty == true)
         #expect(await previewReader.startedNames.count == previewsAfterStandard)
 
         // Time-only (5s): joins a, b, and c immediately with zero visual analysis or preview reads.
-        activity.removeAll()
+        progressHistory.removeAll()
         await grouping.setThresholds(
             GroupingThresholds(timeWindow: .fiveSeconds, sensitivity: .timeOnly),
             photos: groupingPhotos)
@@ -356,8 +378,194 @@ struct FolderGroupingTests {
             published.last?.map(\.members) == [
                 [groupingPhotos[0].id, groupingPhotos[1].id, groupingPhotos[2].id]
             ])
-        #expect(!activity.contains(true))
+        #expect(!progressHistory.contains { $0.isAnalyzing })
+        #expect(progressHistory == [.complete])
         #expect(await previewReader.startedNames.count == previewsAfterStandard)
+
+        await grouping.close()
+        await session.end()
+    }
+
+    @Test func disabledOrClosedMidAnalysisEmitsIdleWithoutComplete() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let photosDir = root.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: photosDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let access = FolderAccess(
+            store: RecentFolderStore(fileURL: root.appendingPathComponent("recents.json")))
+        guard case .opened(let opened) = await access.pick(photosDir) else {
+            Issue.record("Expected test folder to open")
+            return
+        }
+        let session = opened.session
+        let folderID = session.folder.id
+
+        let names = ["a.jpg", "b.jpg"]
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        var sets: [PhotoIdentity: PhotoSet] = [:]
+        var groupingPhotos: [GroupingPhoto] = []
+        var imagesByName: [String: CGImage] = [:]
+        for (index, name) in names.enumerated() {
+            let fileURL = photosDir.appendingPathComponent(name)
+            let image = GroupingTestWorkspace.makeGrayImage(gray: 0.3)
+            try GroupingTestWorkspace.writeJPEG(image, to: fileURL)
+            imagesByName[name] = image
+            let set = try PhotoSet(folderID: folderID, relativeFolderPath: "", jpegURL: fileURL)
+            sets[set.id] = set
+            groupingPhotos.append(
+                GroupingPhoto(
+                    id: set.id,
+                    fileName: name,
+                    time: .known(
+                        PhotoTime(
+                            captureTime: base.addingTimeInterval(Double(index) * 0.2),
+                            hasUTCOffset: true)),
+                    cameraModel: "TestCam"))
+        }
+
+        // 1. Disabled grouping emits .idle without .analyzing or .complete.
+        let featureCache = try ImageFeatureCache(
+            directory: root.appendingPathComponent("features"))
+        let previewCache = try ThumbnailCache(
+            directory: root.appendingPathComponent("thumbs"))
+        let groupCache = SimilarGroupsCache(directory: root.appendingPathComponent("groups"))
+        let disabledPipeline = ImageFeaturePipeline(
+            cache: featureCache,
+            previews: GatedPreviewReader(images: imagesByName, heldNames: ["b.jpg"]),
+            prints: DeterministicFeaturePrintReader(),
+            workers: 2)
+        var disabledProgress: [FolderGroupingProgress] = []
+        let disabledGrouping = FolderGrouping(
+            folder: folderID,
+            session: session,
+            cache: groupCache,
+            featureCache: featureCache,
+            previewCache: previewCache,
+            featurePipeline: disabledPipeline,
+            sets: { sets[$0] },
+            publish: { _ in },
+            progressChanged: { disabledProgress.append($0) })
+        await disabledGrouping.begin(
+            photos: groupingPhotos,
+            revision: GroupingInputRevision(rawValue: "disabled"),
+            enabled: false)
+        #expect(disabledProgress == [.idle])
+
+        // 2. Enabling starts analysis; closing mid-analysis emits .idle and never .complete.
+        disabledProgress.removeAll()
+        let closeGate = GatedPreviewReader(images: imagesByName, heldNames: ["b.jpg"])
+        let closePipeline = ImageFeaturePipeline(
+            cache: featureCache,
+            previews: closeGate,
+            prints: DeterministicFeaturePrintReader(),
+            workers: 2)
+        let closeGrouping = FolderGrouping(
+            folder: folderID,
+            session: session,
+            cache: groupCache,
+            featureCache: featureCache,
+            previewCache: previewCache,
+            featurePipeline: closePipeline,
+            sets: { sets[$0] },
+            publish: { _ in },
+            progressChanged: { disabledProgress.append($0) })
+        await closeGrouping.begin(
+            photos: groupingPhotos,
+            revision: GroupingInputRevision(rawValue: "close-mid-analysis"),
+            enabled: true)
+        try await waitUntil {
+            disabledProgress.contains(.analyzing(completed: 1, total: 2))
+        }
+        try await waitUntil { await closeGate.waiterCount == 1 }
+        let closeTask = Task { await closeGrouping.close() }
+        try await Task.sleep(for: .milliseconds(20))
+        await closeGate.releaseHeld()
+        await closeTask.value
+        await disabledGrouping.close()
+        #expect(!disabledProgress.contains(.complete))
+        #expect(disabledProgress.last == .idle)
+        await session.end()
+    }
+
+    @Test func tenCandidateBatchEmitsMonotonicThrottledProgressToCompletion() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let photosDir = root.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: photosDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let access = FolderAccess(
+            store: RecentFolderStore(fileURL: root.appendingPathComponent("recents.json")))
+        guard case .opened(let opened) = await access.pick(photosDir) else {
+            Issue.record("Expected test folder to open")
+            return
+        }
+        let session = opened.session
+        let folderID = session.folder.id
+
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        var sets: [PhotoIdentity: PhotoSet] = [:]
+        var groupingPhotos: [GroupingPhoto] = []
+        var imagesByName: [String: CGImage] = [:]
+        for index in 0..<10 {
+            let name = String(format: "burst_%02d.jpg", index)
+            let fileURL = photosDir.appendingPathComponent(name)
+            let image = GroupingTestWorkspace.makeGrayImage(gray: 0.4)
+            try GroupingTestWorkspace.writeJPEG(image, to: fileURL)
+            imagesByName[name] = image
+            let set = try PhotoSet(folderID: folderID, relativeFolderPath: "", jpegURL: fileURL)
+            sets[set.id] = set
+            groupingPhotos.append(
+                GroupingPhoto(
+                    id: set.id,
+                    fileName: name,
+                    time: .known(
+                        PhotoTime(
+                            captureTime: base.addingTimeInterval(Double(index) * 0.2),
+                            hasUTCOffset: true)),
+                    cameraModel: "TestCam"))
+        }
+
+        let featureCache = try ImageFeatureCache(
+            directory: root.appendingPathComponent("features"))
+        let previewCache = try ThumbnailCache(
+            directory: root.appendingPathComponent("thumbs"))
+        let groupCache = SimilarGroupsCache(directory: root.appendingPathComponent("groups"))
+        let pipeline = ImageFeaturePipeline(
+            cache: featureCache,
+            previews: GatedPreviewReader(images: imagesByName, heldNames: []),
+            prints: DeterministicFeaturePrintReader(),
+            workers: 2)
+
+        var progressHistory: [FolderGroupingProgress] = []
+        let grouping = FolderGrouping(
+            folder: folderID,
+            session: session,
+            cache: groupCache,
+            featureCache: featureCache,
+            previewCache: previewCache,
+            featurePipeline: pipeline,
+            sets: { sets[$0] },
+            publish: { _ in },
+            progressChanged: { progressHistory.append($0) })
+
+        await grouping.begin(
+            photos: groupingPhotos,
+            revision: GroupingInputRevision(rawValue: "ten-burst"),
+            enabled: true)
+        try await waitUntil { progressHistory.last == .complete }
+
+        let analyzingCounts = progressHistory.compactMap { progress -> Int? in
+            guard case .analyzing(let completed, let total) = progress else { return nil }
+            #expect(total == 10)
+            return completed
+        }
+        #expect(analyzingCounts.first == 0)
+        #expect(analyzingCounts.contains(1))
+        #expect(analyzingCounts.last == 10)
+        #expect(analyzingCounts == analyzingCounts.sorted())
+        #expect(Set(analyzingCounts).count == analyzingCounts.count)
+        #expect(progressHistory.last == .complete)
 
         await grouping.close()
         await session.end()
@@ -365,10 +573,10 @@ struct FolderGroupingTests {
 
     private func waitUntil(
         timeout: Duration = .seconds(60),
-        _ condition: @escaping @MainActor () -> Bool
+        _ condition: @escaping @MainActor () async -> Bool
     ) async throws {
         let deadline = ContinuousClock.now + timeout
-        while !condition() {
+        while await !condition() {
             if ContinuousClock.now >= deadline {
                 Issue.record("Timed out waiting for condition")
                 return
@@ -477,6 +685,7 @@ private actor GatedPreviewReader: ImageFeaturePreviewReading {
     private var heldNames: Set<String>
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private(set) var startedNames: [String] = []
+    var waiterCount: Int { waiters.count }
 
     init(images: [String: CGImage], heldNames: Set<String>) {
         self.images = images
