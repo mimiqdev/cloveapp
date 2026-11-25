@@ -15,8 +15,7 @@ import SwiftUI
 ///
 /// All five levels always show, because the enabled-ratings setting affects input only (PRD
 /// Enabled rating levels): a disabled star is dimmed, a drag settles on the nearest enabled level
-/// below it, and a tap on it does nothing. The iPad rail's ladder keeps its own taller metrics
-/// with no chip, because the rail has its own Reject action.
+/// below it, and a tap on it does nothing.
 struct VerticalStarBar: View {
     /// The photo's rating.
     let rating: Rating
@@ -27,7 +26,7 @@ struct VerticalStarBar: View {
     /// The size components.md measures on the device.
     var size: ControlSize = .phone
 
-    /// Whether the reject chip is drawn; the swipe ladder has it, the rail does not.
+    /// Whether the reject chip is drawn below the star column.
     var showsRejectChip = true
 
     /// Whether each star is its own tappable button, for the popover a marking action opens;
@@ -122,7 +121,7 @@ struct VerticalStarBar: View {
         .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
     }
 
-    /// The swipe and rail ladder: one gesture owns physical taps and drags; the buttons also
+    /// The swipe ladder: one gesture owns physical taps and drags; the buttons also
     /// support VoiceOver (components.md).
     private func interactiveLadder(in extent: CGSize) -> some View {
         VerticalStarBarStars(
@@ -418,35 +417,18 @@ private struct StarBarAccessibility: ViewModifier {
     }
 }
 
-/// The ladder's geometry: 48 × 204 with a 44 pt chip and about 10 pt of gap on iPhone and the
-/// Duo; the iPad rail keeps its own 43 × 174 column (components.md).
+/// The ladder's geometry: 48 × 204 with a 44 pt chip and about 10 pt of gap (`components.md`).
 private struct VerticalStarBarMetrics {
     let size: ControlSize
 
-    /// The ladder's width: 48 on iPhone and the Duo, 43 on the iPad rail (components.md).
-    var width: CGFloat {
-        switch size {
-        case .phone, .duo: 48
-        case .pad: 43
-        }
-    }
+    /// The ladder's width: 48 pt (`components.md`).
+    var width: CGFloat { 48 }
 
-    /// The ladder's height: 204 with five rows of about 34, a gap of 7 and a padding of 10;
-    /// the iPad rail is 174 high (components.md).
-    var height: CGFloat {
-        switch size {
-        case .phone, .duo: 204
-        case .pad: 174
-        }
-    }
+    /// The ladder's height: 204 pt with five rows, gap 7, and padding 10 (`components.md`).
+    var height: CGFloat { 204 }
 
-    /// The corner radius: 24 on iPhone and the Duo, 22 on the iPad rail (components.md).
-    var cornerRadius: CGFloat {
-        switch size {
-        case .phone, .duo: 24
-        case .pad: 22
-        }
-    }
+    /// The corner radius: 24 pt (`components.md`).
+    var cornerRadius: CGFloat { 24 }
 
     /// The gap between the rows (components.md).
     var gap: CGFloat { 7 }
@@ -457,7 +439,7 @@ private struct VerticalStarBarMetrics {
     /// The star symbol's point size (components.md).
     var symbol: CGFloat { 15 }
 
-    /// The reject chip: 44 pt on iPhone and the Duo; the rail has none (components.md).
+    /// The reject chip: 44 pt (`components.md`).
     var chip: CGFloat { 44 }
 
     /// The gap between the ladder and the chip, about 10 pt (components.md).
@@ -469,10 +451,6 @@ private struct VerticalStarBarMetrics {
         VerticalStarBar(
             rating: Rating(rawValue: 2) ?? .unrated, identifier: "preview.starBar",
             onPreview: { _ in }, onCommit: { _ in }, onReject: {})
-        VerticalStarBar(
-            rating: Rating(rawValue: 2) ?? .unrated, size: .pad, showsRejectChip: false,
-            identifier: "preview.starBar.pad", onPreview: { _ in }, onCommit: { _ in },
-            onReject: {})
         VerticalStarBarDisplay(rating: Rating(rawValue: 3) ?? .unrated)
         VerticalStarBarDisplay(rating: .unrated)
         VerticalStarBarDisplay(rating: .rejected, isReject: true)

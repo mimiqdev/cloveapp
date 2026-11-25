@@ -73,7 +73,6 @@ struct DesignGalleryScreen: View {
                         moveRejects
                         markCapsule
                         ratingValues
-                        railColumn
                         starBar
                         ratingPicker
                         labelPicker
@@ -230,27 +229,6 @@ struct DesignGalleryScreen: View {
         }
     }
 
-    /// The rail's column: the ladder and the shared Reject and Label actions it composes
-    /// (components.md).
-    private var railColumn: some View {
-        section("Rail column") {
-            VStack(spacing: 10) {
-                VerticalStarBar(
-                    rating: threeStars, size: .pad, showsRejectChip: false,
-                    identifier: "clove.design.gallery.rail.stars",
-                    onPreview: noRate, onCommit: noRate, onReject: {})
-                MarkRejectAction(isRejected: true, identifier: "clove.design.gallery.rail.reject") {
-                }
-                .frame(width: 48, height: 40)
-                MarkLabelAction(
-                    label: .green, identifier: "clove.design.gallery.rail.label",
-                    onPick: { _ in }
-                )
-                .frame(width: 48, height: 40)
-            }
-        }
-    }
-
     /// Every rating value the toolbar's action shows, 0–5 (components.md).
     private var ratingValues: some View {
         section("Rating values") {
@@ -265,17 +243,12 @@ struct DesignGalleryScreen: View {
         }
     }
 
-    /// The quick-rating ladder at the iPhone and iPad sizes, and the display stages the swipe
-    /// feedback draws (components.md).
+    /// The quick-rating ladder and the display stages the swipe feedback draws (components.md).
     private var starBar: some View {
         section("Quick-rating ladder") {
             HStack(alignment: .top, spacing: 16) {
                 VerticalStarBar(
                     rating: threeStars, identifier: "clove.mark.starBar",
-                    onPreview: noRate, onCommit: noRate, onReject: {})
-                VerticalStarBar(
-                    rating: threeStars, size: .pad, showsRejectChip: false,
-                    identifier: "clove.design.gallery.starBar.pad",
                     onPreview: noRate, onCommit: noRate, onReject: {})
                 VerticalStarBar(
                     rating: fourStars, enabledRatings: oddRatings,

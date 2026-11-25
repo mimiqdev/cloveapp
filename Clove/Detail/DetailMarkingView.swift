@@ -352,7 +352,9 @@ struct DetailMarkingView: View {
         isOrdinaryPhone && (verticalSizeClass == .compact || isLandscapeContainer)
     }
 
-    private var usesRail: Bool { !isOrdinaryPhone && horizontalSizeClass == .regular && duo == nil }
+    private var isWidePadLayout: Bool {
+        !isOrdinaryPhone && horizontalSizeClass == .regular && duo == nil
+    }
 
     private var usesExpandedDuoViewportOverlay: Bool {
         isDuoExpanded && (usesVerticalToolbar || !hasFoldRegion)
@@ -546,7 +548,7 @@ struct DetailMarkingView: View {
                 symbol: "sidebar.left",
                 isActive: gridShown,
                 activeAccessibilityValue: stateValue,
-                size: usesRail ? .pad : .phone,
+                size: isWidePadLayout ? .pad : .phone,
                 identifier: "clove.detail.gridToggle"
             ) {
                 togglePresentation()
@@ -620,7 +622,7 @@ struct DetailMarkingView: View {
                 label: focusLabel,
                 symbol: "viewfinder",
                 isActive: browsing.showsFocusRegions,
-                size: usesRail ? .pad : .phone,
+                size: isWidePadLayout ? .pad : .phone,
                 identifier: "clove.detail.focusToggle"
             ) {
                 browsing.showsFocusRegions.toggle()
@@ -934,7 +936,7 @@ struct DetailMarkingView: View {
                             GlassIconButton(
                                 label: AppLocalization.string("Compare", language: language),
                                 symbol: "rectangle.split.2x1",
-                                size: usesRail ? .pad : .phone,
+                                size: isWidePadLayout ? .pad : .phone,
                                 identifier: "clove.detail.compare"
                             ) {
                                 dismissGestureGuide()
@@ -946,14 +948,14 @@ struct DetailMarkingView: View {
                         }
                         GlassIconButton(
                             label: AppLocalization.string("Info", language: language),
-                            symbol: "info.circle", size: usesRail ? .pad : .phone,
+                            symbol: "info.circle", size: isWidePadLayout ? .pad : .phone,
                             identifier: "clove.detail.info"
                         ) { showsInformation = true }
                         .reportHeaderControlFrame("clove.detail.info")
                         GlassIconButton(
                             label: AppLocalization.string("Undo", language: language),
                             symbol: "arrow.uturn.backward",
-                            size: usesRail ? .pad : .phone,
+                            size: isWidePadLayout ? .pad : .phone,
                             identifier: "clove.detail.undo",
                             action: undo
                         )
@@ -984,23 +986,14 @@ struct DetailMarkingView: View {
                 }
             }
         }
-        .tapPickerContainer(dismissWhen: tapPickerDismissTrigger)
     }
 
     private var standardDetailStage: some View {
-        HStack(spacing: 0) {
-            photoStage
-            if usesRail {
-                DetailMarkRail(
-                    marks: displayMarks, settings: settings,
-                    previewRating: swipeFeedback.rating,
-                    photoID: photo.id,
-                    rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
-                    toggleReject: { toggleReject() }, markingBegan: beginMarkingGesture
-                )
-                .disabled(!allowsMarkingInput)
-            }
-        }
+        photoStage
+            .tapPickerContainer(
+                dismissWhen: tapPickerDismissTrigger,
+                margin: isWidePadLayout ? 16 : 12,
+                gap: isWidePadLayout ? 12 : 10)
     }
 
     private var splitGridPane: some View {
@@ -1042,9 +1035,88 @@ struct DetailMarkingView: View {
                         standardStageOverlayChrome
                     }
                 }
-            if isOrdinaryPhoneLandscape && showsFilmstrip && chromeIsVisible {
+            if isWidePadLayout && chromeIsVisible {
+                iPadBottomControlBand
+                    .transition(.opacity)
+            } else if isOrdinaryPhoneLandscape && showsFilmstrip && chromeIsVisible {
                 landscapeBottomReviewRow
             }
+        }
+    }
+
+    private var iPadBottomToolbar: some View {
+        MarkingToolbar(
+            rating: swipeFeedback.rating
+                ?? (displayMarks.isRejected ? .unrated : displayMarks.rating),
+            label: displayMarks.isRejected ? nil : displayMarks.label.colour,
+            isRejected: displayMarks.isRejected,
+            enabledRatings: settings.enabledRatings,
+            labels: [nil] + settings.availableLabels.map { Optional($0) },
+            identifier: "clove.detail.capsule",
+            labelPickerIdentifier: "clove.detail.labels",
+            photoID: photo.id,
+            onRate: { rate($0) },
+            onReject: { toggleReject() },
+            onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
+            onBegin: beginToolbarMarking
+        )
+        .disabled(!allowsMarkingInput)
+        .opacity(allowsMarkingInput ? 1 : 0.32)
+        .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
+    }
+
+    @ViewBuilder private var iPadBottomControlBand: some View {
+        if showsFilmstrip {
+            HStack(alignment: .bottom, spacing: 24) {
+                DetailFilmstrip(
+                    timeline: timeline,
+                    expandedGroup: expandedGroup,
+                    current: photo.id,
+                    thumbnails: browsing.thumbnails,
+                    gridPickerDismissToken: gridPickerDismissToken,
+                    openPhoto: openFilmstripPhoto,
+                    selectGroupPhoto: selectFilmstripGroupPhoto,
+                    expandGroup: expandFilmstripGroup,
+                    collapseGroup: collapseFilmstripGroup
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 1)
+
+                iPadBottomToolbar
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 10)
+                    .layoutPriority(1)
+            }
+            .frame(height: 78, alignment: .bottom)
+            .background(Color.clove.bg.stage)
+            .reportTapPickerFrame("clove.detail.bottomBand")
+        } else {
+            IPadPhotoPreviewBandLayout(
+                toolbarTrailingInset: 24,
+                pillLeadingInset: 16,
+                pillTrailingGap: 12
+            ) {
+                if let stagePill {
+                    stagePill
+                        .layoutValue(key: IPadPhotoPreviewBandRoleKey.self, value: .pill)
+                        .transition(
+                            .asymmetric(
+                                insertion: CloveMotion.slideTransition(
+                                    edge: .bottom, offset: 8, reduceMotion: reduceMotion),
+                                removal: .identity))
+                }
+                iPadBottomToolbar
+                    .layoutValue(key: IPadPhotoPreviewBandRoleKey.self, value: .toolbar)
+            }
+            .animation(
+                stagePill != nil ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                value: stagePill?.identifier
+            )
+            .padding(.bottom, 10)
+            .frame(height: 84, alignment: .bottom)
+            .frame(maxWidth: .infinity)
+            .background(Color.clove.bg.stage)
+            .reportTapPickerFrame("clove.detail.bottomBand")
         }
     }
 
@@ -1080,7 +1152,11 @@ struct DetailMarkingView: View {
     }
 
     private var standardStageOverlayChrome: some View {
-        VStack(spacing: 8) {
+        let hasWidePadOverlayItems =
+            browsing.failureToastMessage != nil
+            || (showsZoomChip && scale > DetailFitScale.tolerance)
+            || (showsFilmstrip && chromeIsVisible && stagePill != nil)
+        return VStack(spacing: 8) {
             // The save/read failure toast sits above the filmstrip so it never
             // covers the mark capsule (handoff screens.md §03, components.md Toast).
             // It is transient feedback, not chrome, and remains visible at 100% zoom.
@@ -1106,10 +1182,31 @@ struct DetailMarkingView: View {
                     .foregroundStyle(Color.clove.text.primary)
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .cloveGlass(in: Capsule())
-                    .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 0 : 12)
+                    .padding(
+                        .bottom, (isWidePadLayout || (showsFilmstrip && chromeIsVisible)) ? 0 : 12
+                    )
                     .transition(.opacity)
             }
-            if showsFilmstrip && chromeIsVisible {
+            if isWidePadLayout {
+                if showsFilmstrip && chromeIsVisible {
+                    Group {
+                        if let stagePill {
+                            stagePill
+                                .transition(
+                                    .asymmetric(
+                                        insertion: CloveMotion.slideTransition(
+                                            edge: .bottom, offset: 8,
+                                            reduceMotion: reduceMotion),
+                                        removal: .identity))
+                        }
+                    }
+                    .animation(
+                        stagePill != nil
+                            ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                        value: stagePill?.identifier
+                    )
+                }
+            } else if showsFilmstrip && chromeIsVisible {
                 // The pill rides the floating chrome band above the strip. The band is an
                 // overlay, so its height never moves the stage (handoff components.md,
                 // Pill action; #305).
@@ -1141,31 +1238,29 @@ struct DetailMarkingView: View {
                         selectGroupPhoto: selectFilmstripGroupPhoto,
                         expandGroup: expandFilmstripGroup,
                         collapseGroup: collapseFilmstripGroup)
-                    if chromeIsVisible && !usesRail {
-                        MarkingToolbar(
-                            rating: swipeFeedback.rating
-                                ?? (displayMarks.isRejected
-                                    ? .unrated : displayMarks.rating),
-                            label: displayMarks.isRejected
-                                ? nil : displayMarks.label.colour,
-                            isRejected: displayMarks.isRejected,
-                            enabledRatings: settings.enabledRatings,
-                            labels: [nil] + settings.availableLabels.map { Optional($0) },
-                            identifier: "clove.detail.capsule",
-                            labelPickerIdentifier: "clove.detail.labels",
-                            photoID: photo.id,
-                            onRate: { rate($0) }, onReject: { toggleReject() },
-                            onLabel: {
-                                choose($0.map { ColourLabel(colour: $0) } ?? .clear)
-                            },
-                            onBegin: beginToolbarMarking
-                        )
-                        .disabled(!allowsMarkingInput)
-                        .accessibilityValue(
-                            MarkSummary.text(for: displayMarks, language: language)
-                        )
-                        .padding(.horizontal, 16)
-                    }
+                    MarkingToolbar(
+                        rating: swipeFeedback.rating
+                            ?? (displayMarks.isRejected
+                                ? .unrated : displayMarks.rating),
+                        label: displayMarks.isRejected
+                            ? nil : displayMarks.label.colour,
+                        isRejected: displayMarks.isRejected,
+                        enabledRatings: settings.enabledRatings,
+                        labels: [nil] + settings.availableLabels.map { Optional($0) },
+                        identifier: "clove.detail.capsule",
+                        labelPickerIdentifier: "clove.detail.labels",
+                        photoID: photo.id,
+                        onRate: { rate($0) }, onReject: { toggleReject() },
+                        onLabel: {
+                            choose($0.map { ColourLabel(colour: $0) } ?? .clear)
+                        },
+                        onBegin: beginToolbarMarking
+                    )
+                    .disabled(!allowsMarkingInput)
+                    .accessibilityValue(
+                        MarkSummary.text(for: displayMarks, language: language)
+                    )
+                    .padding(.horizontal, 16)
                 }
                 .padding(.bottom, 8)
             } else if !showsFilmstrip && chromeIsVisible {
@@ -1188,6 +1283,7 @@ struct DetailMarkingView: View {
                 )
             }
         }
+        .padding(.bottom, (isWidePadLayout && hasWidePadOverlayItems) ? 12 : 0)
         .onGeometryChange(for: CGFloat.self) {
             $0.size.height
         } action: {
@@ -1327,6 +1423,7 @@ struct DetailMarkingView: View {
             onReadOnlyMarkingDrag: isReadOnlyCollapsedGroup
                 ? {
                     dismissGestureGuide()
+                    if hidesChrome { hidesChrome = false }
                     expandPillNudgeCount += 1
                 } : nil,
             hasPrevious: navigationAvailability.previous,
@@ -2360,7 +2457,7 @@ struct DetailMarkingView: View {
 
     /// One hardware key from the PRD keyboard table, resolved by C13's key rule (PRD P0-06).
     ///
-    /// The key reads the marks the rail and the capsule act on, so a disabled level or a key that
+    /// The key reads the marks the capsule acts on, so a disabled level or a key that
     /// would change nothing is the same no-input the rules already report for them.
     private func markKey(_ key: MarkingKey) {
         tapPickerDismissToken += 1
@@ -2473,9 +2570,11 @@ struct DetailMarkingView: View {
     private var tapPickerDismissTrigger: DetailTapPickerDismissTrigger {
         DetailTapPickerDismissTrigger(
             photoID: photo.id,
-            canMark: browsing.canMark,
+            canMark: allowsMarkingInput,
             chromeIsVisible: chromeIsVisible,
             showsInformation: showsInformation,
+            showsPhotoGrid: showsPhotoGrid,
+            expandedGroupID: expandedGroup?.id,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isLandscapeContainer: isLandscapeContainer,
@@ -2572,6 +2671,8 @@ private struct DetailTapPickerDismissTrigger: Equatable {
     let canMark: Bool
     let chromeIsVisible: Bool
     let showsInformation: Bool
+    let showsPhotoGrid: Bool
+    let expandedGroupID: GroupID?
     let horizontalSizeClass: UserInterfaceSizeClass?
     let verticalSizeClass: UserInterfaceSizeClass?
     let isLandscapeContainer: Bool
@@ -2778,5 +2879,70 @@ struct DetailPhotoCornerOverlay: View {
         )
         .allowsHitTesting(false)
         .reportHeaderControlFrame("clove.detail.photoCornerOverlay")
+    }
+}
+
+private enum IPadPhotoPreviewBandRole {
+    case pill
+    case toolbar
+}
+
+private struct IPadPhotoPreviewBandRoleKey: LayoutValueKey {
+    static let defaultValue: IPadPhotoPreviewBandRole = .toolbar
+}
+
+/// Arranges the wide-iPad Photo Preview bottom control row so `MarkingToolbar` stays pinned at
+/// trailing while the active finishing/expand `Stage Pill` sits horizontally centered in the 70%
+/// photo pane and top-aligned with the toolbar without overlapping it on narrow splits.
+private struct IPadPhotoPreviewBandLayout: Layout {
+    let toolbarTrailingInset: CGFloat
+    let pillLeadingInset: CGFloat
+    let pillTrailingGap: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        let toolbarSize =
+            subviews
+            .first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .toolbar })?
+            .sizeThatFits(.unspecified) ?? CGSize(width: 168, height: 48)
+        let pillSize =
+            subviews
+            .first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .pill })?
+            .sizeThatFits(.unspecified) ?? .zero
+        return CGSize(
+            width: proposal.width ?? max(toolbarSize.width + toolbarTrailingInset, pillSize.width),
+            height: max(toolbarSize.height, pillSize.height))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let toolbarView = subviews.first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .toolbar }
+        )
+        let toolbarSize = toolbarView?.sizeThatFits(.unspecified) ?? CGSize(width: 168, height: 48)
+        let toolbarMinX = bounds.maxX - toolbarTrailingInset - toolbarSize.width
+        if let toolbarView {
+            toolbarView.place(
+                at: CGPoint(x: toolbarMinX, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(toolbarSize))
+        }
+
+        if let pillView = subviews.first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .pill }) {
+            let maxPillWidth = max(
+                0, toolbarMinX - pillTrailingGap - (bounds.minX + pillLeadingInset))
+            let measured = pillView.sizeThatFits(
+                ProposedViewSize(width: maxPillWidth, height: bounds.height))
+            let pillWidth = min(measured.width, maxPillWidth)
+            let idealX = bounds.midX - pillWidth / 2
+            let minAllowedX = bounds.minX + pillLeadingInset
+            let maxAllowedX = toolbarMinX - pillTrailingGap - pillWidth
+            let pillX = max(minAllowedX, min(idealX, maxAllowedX))
+            pillView.place(
+                at: CGPoint(x: pillX, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: pillWidth, height: measured.height))
+        }
     }
 }

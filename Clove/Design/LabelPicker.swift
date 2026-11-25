@@ -7,7 +7,6 @@ import SwiftUI
 /// Both horizontal (`288 × 52` pt) and vertical (`52 × 288` pt) orientations preserve the exact
 /// same top-to-bottom / left-to-right choice order (`None, Red, Yellow, Green, Blue, Purple`, plus
 /// extended colours when enabled) with `44 × 44` pt hit targets and a visible selection ring.
-/// The legacy iPad rail embeds an unglassed inline column (`showsGlass: false`).
 struct LabelPicker: View {
     /// The photo's label, or nil when it has none (PRD Marking rules).
     let selection: LabelColour?
@@ -27,12 +26,6 @@ struct LabelPicker: View {
 
     /// Layout orientation: `.horizontal` (`288 × 52`) or `.vertical` (`52 × 288`).
     var axis: Axis = .horizontal
-
-    /// Floating popups draw the shared glass capsule; the iPad rail column omits glass.
-    var showsGlass = true
-
-    /// Neutralises dot fills when the iPad rail displays a rejected photo.
-    var isNeutral = false
 
     /// Optional photo identity so cross-photo switches snap marks instead of animating.
     var photoID: PhotoIdentity? = nil
@@ -67,22 +60,15 @@ struct LabelPicker: View {
 
     var body: some View {
         let markAnimation = shouldAnimateMarks ? CloveMotion.micro(reduceMotion: reduceMotion) : nil
-        Group {
-            if showsGlass {
-                dots(spacing: Self.itemSpacing, targetSize: Self.targetExtent)
-                    .padding(Self.containerPadding)
-                    .cloveGlass(in: Capsule())
-            } else {
-                dots(spacing: 0, targetSize: 32)
+        dots(spacing: Self.itemSpacing, targetSize: Self.targetExtent)
+            .padding(Self.containerPadding)
+            .cloveGlass(in: Capsule())
+            .animation(markAnimation, value: selection)
+            .animation(markAnimation, value: isMixed)
+            .onChange(of: photoID, initial: true) { _, newID in
+                settledPhotoID = newID
             }
-        }
-        .animation(markAnimation, value: selection)
-        .animation(markAnimation, value: isMixed)
-        .animation(markAnimation, value: isNeutral)
-        .onChange(of: photoID, initial: true) { _, newID in
-            settledPhotoID = newID
-        }
-        .reportTapPickerFrame(identifier)
+            .reportTapPickerFrame(identifier)
     }
 
     private func dots(spacing: CGFloat, targetSize: CGFloat) -> some View {
@@ -103,7 +89,7 @@ struct LabelPicker: View {
     /// One dot; the current choice carries a ring (components.md).
     private func dot(_ label: LabelColour?, targetSize: CGFloat) -> some View {
         let isSelected = !isMixed && label == selection
-        let ringSize = targetSize >= Self.targetExtent ? 34.0 : 32.0
+        let ringSize = 34.0
         let accessibleName =
             label.map {
                 AppLocalization.format(
@@ -115,8 +101,7 @@ struct LabelPicker: View {
         } label: {
             ZStack {
                 if let label {
-                    Circle().fill(
-                        isNeutral ? Color.clove.rating.off : Color.clove.label.colour(for: label))
+                    Circle().fill(Color.clove.label.colour(for: label))
                 } else {
                     Image(systemName: "circle.slash")
                         .font(.title3)

@@ -73,6 +73,7 @@ struct PillAction: View {
             isNudged = false
         }
         .accessibilityIdentifier(identifier)
+        .reportTapPickerFrame(identifier)
     }
 }
 
