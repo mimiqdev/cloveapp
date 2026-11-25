@@ -50,6 +50,9 @@ enum FolderLibraryUpdate: Hashable, Sendable {
     /// (PRD P0-01, design handoff: Move Rejects hides while opening).
     case scanStarted
 
+    /// At least one uncached primary file entered metadata parsing during the active scan.
+    case readingUncachedMetadata
+
     /// The open folder's location was reported gone while it was open (PRD P0-02, P0-08).
     ///
     /// C11's watch reports one loss and stops. The folder stays open so the user can reopen it,

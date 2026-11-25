@@ -1,5 +1,19 @@
 import Foundation
 
+/// Size and modification date prefetched for a scanned file during enumeration.
+public struct ScannedFileRevision: Hashable, Sendable {
+    /// Size from G1's prefetched keys, or nil when the file system reported none.
+    public let size: Int?
+    /// Modification date from G1's prefetched keys; cache data, never a capture time.
+    public let modificationDate: Date?
+
+    /// Wraps a file's prefetched size and modification date.
+    public init(size: Int?, modificationDate: Date?) {
+        self.size = size
+        self.modificationDate = modificationDate
+    }
+}
+
 /// One image file as a scan listed it, with the values later lanes reuse.
 /// G1's scan approach prefetches size and modification date so I1 can key a thumbnail
 /// revision; the file itself is still C1's `PhotoFile` (PRD Supported files).
@@ -55,13 +69,21 @@ public struct ScannedPhotoSet: Hashable, Sendable {
     /// What the walk found for the set's sidecar; `.resolved` is also passed into `photoSet`
     /// so C1 reuses the actual spelling (G1 sidecar naming).
     public let sidecar: SidecarState
+    /// Prefetched size and modification date of a `.resolved` sidecar, or nil otherwise.
+    public let sidecarRevision: ScannedFileRevision?
     /// The image members in `photoSet.imageFiles` order, with size and modification date.
     public let imageFiles: [ScannedImageFile]
 
     /// Combines a set with what the same walk discovered for it (G1 scan approach).
-    public init(photoSet: PhotoSet, sidecar: SidecarState, imageFiles: [ScannedImageFile]) {
+    public init(
+        photoSet: PhotoSet,
+        sidecar: SidecarState,
+        imageFiles: [ScannedImageFile],
+        sidecarRevision: ScannedFileRevision? = nil
+    ) {
         self.photoSet = photoSet
         self.sidecar = sidecar
+        self.sidecarRevision = sidecarRevision
         self.imageFiles = imageFiles
     }
 

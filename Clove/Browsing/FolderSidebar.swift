@@ -207,7 +207,7 @@ struct FolderSidebar: View {
                                     .frame(width: 28, height: 28)
                             }
                             .buttonStyle(.borderless)
-                            .disabled(browsing.readingProgress != nil)
+                            .disabled(browsing.isScanning)
                             .accessibilityLabel(
                                 AppLocalization.string(
                                     "Find similar shots again", language: language)

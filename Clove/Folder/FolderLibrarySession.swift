@@ -24,6 +24,8 @@ final class FolderLibrarySession: FolderLibrary {
 
         /// C9's per-folder group cache in Clove's own storage (PRD Similar groups rules).
         let groups: SimilarGroupsCache
+        /// Per-folder photo metadata and marks cache in app-private storage.
+        var metadata: FolderMetadataCache? = nil
         var renamer: BatchRenamer? = nil
 
         /// Prepares the stores below Application Support (PRD P0-02, P0-08, P0-11).
@@ -34,11 +36,13 @@ final class FolderLibrarySession: FolderLibrary {
             let store = try RecentFolderStore.applicationSupport()
             let marksDirectory = try CloveMarkStore.applicationSupportDirectory()
             let groupsDirectory = try SimilarGroupsCache.applicationSupportDirectory()
+            let metadataDirectory = try FolderMetadataCache.applicationSupportDirectory()
             let marks = CloveMarkStore(directory: marksDirectory)
             return Stores(
                 access: FolderAccess(store: store),
                 writes: MarkWriteQueue(store: marks),
                 groups: SimilarGroupsCache(directory: groupsDirectory),
+                metadata: FolderMetadataCache(directory: metadataDirectory),
                 renamer: BatchRenamer(store: marks))
         }
     }
@@ -947,24 +951,144 @@ final class FolderLibrarySession: FolderLibrary {
         do {
             try await session.withAdmittedWork { [weak self] in
                 do {
+                    let loadedCache = await Self.loadMetadataCacheOffPool(
+                        stores.metadata, folderID: session.folder.id)
+                    let cachedEntries: [FolderMetadataCache.Key: FolderMetadataCache.Entry] =
+                        switch loadedCache {
+                        case .loaded(let entries): entries
+                        case .missing, .unusable: [:]
+                        }
+                    var updatedCacheEntries: [FolderMetadataCache.Key: FolderMetadataCache.Entry] =
+                        [:]
+                    var didNotifyUncachedMetadata = false
+
                     for try await batch in scan {
                         try Task.checkCancellation()
                         guard let self else { return }
                         let sets = await self.admit(
                             batch.items, storedMarks: storedMarks, generation: generation)
                         guard !sets.isEmpty else { continue }
-                        // I4 reads the primary file of each set off the main actor; a RAW set's
-                        // capture time comes from the RAW (G1 decision 1, I4).
-                        let reads = await metadata.read(urls: sets.map { $0.photoSet.primary.url })
-                        let marks = await Self.readMarksOffPool(
-                            for: sets, storedMarks: storedMarks, codec: codec,
-                            trustAbsentSidecar: true)
-                        await self.applyReads(
-                            reads, marks: marks, sets: sets, generation: generation)
+
+                        var primaryHits: [PhotoIdentity: FolderMetadataCache.PrimaryPayload] = [:]
+                        var primaryMissSets: [ScannedPhotoSet] = []
+                        var marksHits: [PhotoIdentity: MarkReadEntry] = [:]
+                        var marksMissSets: [ScannedPhotoSet] = []
+
+                        for set in sets {
+                            let key = FolderMetadataCache.Key(photoID: set.id)
+                            let cached = cachedEntries[key]
+                            if let primary = cached?.cachedPrimary(for: set) {
+                                primaryHits[set.id] = primary
+                            } else {
+                                primaryMissSets.append(set)
+                            }
+                            switch cached?.cachedMarks(for: set) ?? .miss {
+                            case .hit(let embedded, let xmp):
+                                let resolved = PhotoMarks(
+                                    stored: storedMarks[set.id],
+                                    embedded: embedded,
+                                    xmp: xmp,
+                                    persistence: set.photoSet.markPersistence)
+                                marksHits[set.id] = MarkReadEntry(
+                                    marks: resolved, embedded: embedded, xmp: xmp)
+                            case .miss:
+                                marksMissSets.append(set)
+                            }
+                        }
+
+                        var immediatelyAppliedIDs: Set<PhotoIdentity> = []
+                        if !primaryMissSets.isEmpty {
+                            var readyPrimaryHits:
+                                [PhotoIdentity: FolderMetadataCache.PrimaryPayload] = [:]
+                            var readyMarksHits: [PhotoIdentity: PhotoMarks] = [:]
+                            for set in sets {
+                                if let primary = primaryHits[set.id],
+                                    let markHit = marksHits[set.id]
+                                {
+                                    readyPrimaryHits[set.id] = primary
+                                    readyMarksHits[set.id] = markHit.marks
+                                    immediatelyAppliedIDs.insert(set.id)
+                                }
+                            }
+                            if !readyPrimaryHits.isEmpty {
+                                await self.applyReads(
+                                    cachedPrimary: readyPrimaryHits,
+                                    metadataReads: [:],
+                                    marks: readyMarksHits,
+                                    sets: sets.filter { immediatelyAppliedIDs.contains($0.id) },
+                                    allBatchMarksSucceeded: true,
+                                    generation: generation)
+                            }
+                            if !didNotifyUncachedMetadata {
+                                didNotifyUncachedMetadata = true
+                                await self.markUncachedMetadataReading(generation: generation)
+                            }
+                        }
+
+                        // I4 reads the primary file of each uncached set off the main actor; a RAW
+                        // set's capture time comes from the RAW (G1 decision 1, I4).
+                        async let readsTask: [MetadataFileResult] =
+                            primaryMissSets.isEmpty
+                            ? []
+                            : metadata.read(urls: primaryMissSets.map { $0.photoSet.primary.url })
+                        async let markReadsTask: [PhotoIdentity: MarkReadEntry] =
+                            marksMissSets.isEmpty
+                            ? [:]
+                            : Self.readMarkEntriesOffPool(
+                                for: marksMissSets, storedMarks: storedMarks, codec: codec,
+                                trustAbsentSidecar: true)
+
+                        let reads = await readsTask
+                        let markReads = await markReadsTask
+                        let readsByURL = Dictionary(
+                            reads.map { ($0.url, $0) },
+                            uniquingKeysWith: { first, _ in first })
+
+                        let remainingSets = sets.filter { !immediatelyAppliedIDs.contains($0.id) }
+                        if !remainingSets.isEmpty {
+                            var remainingCachedPrimary:
+                                [PhotoIdentity: FolderMetadataCache.PrimaryPayload] = [:]
+                            var remainingMarks: [PhotoIdentity: PhotoMarks] = [:]
+                            for set in remainingSets {
+                                if let primary = primaryHits[set.id] {
+                                    remainingCachedPrimary[set.id] = primary
+                                }
+                                if let markHit = marksHits[set.id] {
+                                    remainingMarks[set.id] = markHit.marks
+                                } else if let markRead = markReads[set.id] {
+                                    remainingMarks[set.id] = markRead.marks
+                                }
+                            }
+                            await self.applyReads(
+                                cachedPrimary: remainingCachedPrimary,
+                                metadataReads: readsByURL,
+                                marks: remainingMarks,
+                                sets: remainingSets,
+                                allBatchMarksSucceeded: markReads.count == marksMissSets.count,
+                                generation: generation)
+                        }
+
+                        for set in sets {
+                            if let entry = Self.makeCacheEntry(
+                                for: set,
+                                primaryHit: primaryHits[set.id],
+                                metadataRead: readsByURL[set.photoSet.primary.url],
+                                marksHit: marksHits[set.id],
+                                markRead: markReads[set.id])
+                            {
+                                updatedCacheEntries[FolderMetadataCache.Key(photoID: set.id)] =
+                                    entry
+                            }
+                        }
                     }
                     let summary = try await scan.summary()
                     await self?.finishScan(
-                        summary, session: session, stores: stores, generation: generation)
+                        summary,
+                        session: session,
+                        stores: stores,
+                        loadedCache: loadedCache,
+                        updatedCacheEntries: updatedCacheEntries,
+                        generation: generation)
                 } catch {
                     // The consumer stopped early, but the walk may still be enumerating files.
                     // Awaiting the producer keeps the admitted work, and the scope behind it,
@@ -978,6 +1102,12 @@ final class FolderLibrarySession: FolderLibrary {
         } catch {
             await failedScan(generation: generation)
         }
+    }
+
+    /// Publishes that at least one uncached primary file has entered metadata parsing.
+    private func markUncachedMetadataReading(generation: Int) {
+        guard generation == scanGeneration else { return }
+        publish(.readingUncachedMetadata)
     }
 
     /// Adds one batch's photos, publishing the ones that are new (PRD P0-01, P0-03).
@@ -1003,44 +1133,48 @@ final class FolderLibrarySession: FolderLibrary {
 
     /// Applies one batch's metadata and mark reads (PRD P0-03, P0-07, P0-11).
     private func applyReads(
-        _ reads: [MetadataFileResult],
+        cachedPrimary: [PhotoIdentity: FolderMetadataCache.PrimaryPayload],
+        metadataReads: [URL: MetadataFileResult],
         marks: [PhotoIdentity: PhotoMarks],
         sets: [ScannedPhotoSet],
+        allBatchMarksSucceeded: Bool,
         generation: Int
     ) {
         guard generation == scanGeneration else { return }
         let timeZone = TimeZone.current
-        let setsByURL = Dictionary(
-            sets.map { ($0.photoSet.primary.url, $0) },
-            uniquingKeysWith: { first, _ in first })
         var times: [PhotoIdentity: PhotoTimeState] = [:]
-        for read in reads {
-            guard let set = setsByURL[read.url] else {
-                continue
-            }
-            let time = Self.timeState(for: read.outcome, in: timeZone)
-            times[set.id] = time
-            store.setTime(time, for: set.id)
-            // G1's Grouping row separates photos by camera model plus the serial when the file
-            // carries one, so the read's values are kept beside the time for grouping.
-            if case .success(let metadata) = read.outcome {
-                store.setCameraBody(
-                    CameraBody(
-                        model: metadata.model.value, serial: metadata.bodySerial.value),
-                    for: set.id)
-                store.setFilterMetadata(
-                    PhotoFilterMetadata(
-                        camera: metadata.model.value,
-                        lens: metadata.lens.value,
-                        focalLengthMillimetres: metadata.effectiveFocalLengthMillimetres),
-                    for: set.id)
+        for set in sets {
+            if let cached = cachedPrimary[set.id] {
+                let time = cached.timeSource.photoTimeState(in: timeZone)
+                times[set.id] = time
+                store.setTime(time, for: set.id)
+                store.setCameraBody(cached.cameraBody, for: set.id)
+                store.setFilterMetadata(cached.filterMetadata, for: set.id)
+            } else if let read = metadataReads[set.photoSet.primary.url] {
+                let time = Self.timeState(for: read.outcome, in: timeZone)
+                times[set.id] = time
+                store.setTime(time, for: set.id)
+                // G1's Grouping row separates photos by camera model plus the serial when the file
+                // carries one, so the read's values are kept beside the time for grouping.
+                if case .success(let metadata) = read.outcome {
+                    store.setCameraBody(
+                        CameraBody(
+                            model: metadata.model.value, serial: metadata.bodySerial.value),
+                        for: set.id)
+                    store.setFilterMetadata(
+                        PhotoFilterMetadata(
+                            camera: metadata.model.value,
+                            lens: metadata.lens.value,
+                            focalLengthMillimetres: metadata.effectiveFocalLengthMillimetres),
+                        for: set.id)
+                }
             }
         }
         for (id, marks) in marks {
             store.setMarks(marks, for: id)
         }
         publish(.reads(times: times, marks: marks))
-        if marks.count < sets.count { publish(.markReadFailed) }
+        if !allBatchMarksSucceeded { publish(.markReadFailed) }
     }
 
     /// Records the finished scan's count for Recents and publishes its outcome (PRD P0-02).
@@ -1051,6 +1185,8 @@ final class FolderLibrarySession: FolderLibrary {
         _ summary: ScanSummary,
         session: FolderAccessSession,
         stores: Stores,
+        loadedCache: FolderMetadataCache.LoadOutcome,
+        updatedCacheEntries: [FolderMetadataCache.Key: FolderMetadataCache.Entry],
         generation: Int
     ) async {
         guard generation == scanGeneration else { return }
@@ -1058,6 +1194,23 @@ final class FolderLibrarySession: FolderLibrary {
             photoCount: summary.logicalPhotoCount,
             status: summary.status == .complete ? .complete : .partial)
         try? await stores.access.recordScan(recorded, for: session)
+        if recorded.status == .complete, let metadataCache = stores.metadata {
+            var entriesToSave = updatedCacheEntries
+            for moved in movedRejectIdentities {
+                entriesToSave.removeValue(forKey: FolderMetadataCache.Key(photoID: moved))
+            }
+            let shouldSave: Bool =
+                switch loadedCache {
+                case .loaded(let existing): existing != entriesToSave
+                case .missing: !entriesToSave.isEmpty
+                case .unusable: true
+                }
+            if shouldSave {
+                await Self.saveMetadataCacheOffPool(
+                    metadataCache, entries: entriesToSave, folderID: session.folder.id)
+            }
+        }
+        guard generation == scanGeneration else { return }
         completedScanStatus = recorded.status
         prepareEntryPreviews()
         await recordEntryProgress(lastViewed: lastViewedPhoto)
@@ -1108,6 +1261,112 @@ final class FolderLibrarySession: FolderLibrary {
         }
     }
 
+    private nonisolated static let metadataCacheQueue = DispatchQueue(
+        label: "Clove.FolderLibrarySession.MetadataCache", qos: .userInitiated)
+
+    private nonisolated static func loadMetadataCacheOffPool(
+        _ cache: FolderMetadataCache?,
+        folderID: FolderIdentity
+    ) async -> FolderMetadataCache.LoadOutcome {
+        guard let cache else { return .missing }
+        return await withCheckedContinuation { continuation in
+            metadataCacheQueue.async {
+                continuation.resume(returning: cache.loadWithOutcome(folderID: folderID))
+            }
+        }
+    }
+
+    private nonisolated static func saveMetadataCacheOffPool(
+        _ cache: FolderMetadataCache,
+        entries: [FolderMetadataCache.Key: FolderMetadataCache.Entry],
+        folderID: FolderIdentity
+    ) async {
+        await withCheckedContinuation { continuation in
+            metadataCacheQueue.async {
+                cache.save(entries, folderID: folderID)
+                continuation.resume()
+            }
+        }
+    }
+
+    private nonisolated static func makePrimaryPayload(
+        from metadata: ImageMetadata
+    ) -> FolderMetadataCache.PrimaryPayload {
+        let timeSource: FolderMetadataCache.TimeSource
+        switch metadata.time {
+        case .captureMetadata(let capture):
+            timeSource = .captureMetadata(
+                wallTime: capture.wallTime, utcOffsetSeconds: capture.utcOffsetSeconds)
+        case .fileCreation(let date):
+            timeSource = .fileCreation(date)
+        case .fileModification(let date):
+            timeSource = .fileModification(date)
+        case .unavailable:
+            timeSource = .unavailable
+        }
+        return FolderMetadataCache.PrimaryPayload(
+            timeSource: timeSource,
+            cameraBody: CameraBody(
+                model: metadata.model.value, serial: metadata.bodySerial.value),
+            filterMetadata: PhotoFilterMetadata(
+                camera: metadata.model.value,
+                lens: metadata.lens.value,
+                focalLengthMillimetres: metadata.effectiveFocalLengthMillimetres))
+    }
+
+    private nonisolated static func makeCacheEntry(
+        for set: ScannedPhotoSet,
+        primaryHit: FolderMetadataCache.PrimaryPayload?,
+        metadataRead: MetadataFileResult?,
+        marksHit: MarkReadEntry?,
+        markRead: MarkReadEntry?
+    ) -> FolderMetadataCache.Entry? {
+        var entry = FolderMetadataCache.Entry()
+        if let primaryFP = FolderMetadataCache.PrimaryFingerprint(for: set) {
+            if let primaryHit {
+                entry.primaryFingerprint = primaryFP
+                entry.primary = primaryHit
+            } else if let metadataRead {
+                switch metadataRead.outcome {
+                case .success(let imageMetadata):
+                    entry.primaryFingerprint = primaryFP
+                    entry.primary = makePrimaryPayload(from: imageMetadata)
+                case .failure(.propertiesUnavailable):
+                    entry.primaryFingerprint = primaryFP
+                    entry.primary = FolderMetadataCache.PrimaryPayload(
+                        timeSource: .unavailable,
+                        cameraBody: nil,
+                        filterMetadata: .empty)
+                case .failure(.unreadableFile), .failure(.cancelled):
+                    break
+                }
+            }
+        }
+        if set.photoSet.primary.format == .raw {
+            if let sidecarFP = FolderMetadataCache.SidecarFingerprint(for: set) {
+                if let marksHit {
+                    entry.marks = .raw(sidecar: sidecarFP, xmp: marksHit.xmp)
+                } else if let markRead {
+                    entry.marks = .raw(sidecar: sidecarFP, xmp: markRead.xmp)
+                }
+            }
+        } else if entry.primaryFingerprint != nil {
+            if let marksHit {
+                entry.marks = .standalone(embedded: marksHit.embedded)
+            } else if let markRead {
+                entry.marks = .standalone(embedded: markRead.embedded)
+            }
+        }
+        guard entry.primary != nil || entry.marks != nil else { return nil }
+        return entry
+    }
+
+    private struct MarkReadEntry: Sendable {
+        let marks: PhotoMarks
+        let embedded: XMPMarks?
+        let xmp: XMPMarks?
+    }
+
     private nonisolated static let markReadQueue = DispatchQueue(
         label: "Clove.FolderLibrarySession.MarkRead", qos: .userInitiated, attributes: .concurrent)
 
@@ -1119,10 +1378,22 @@ final class FolderLibrarySession: FolderLibrary {
         codec: XMPCodec,
         trustAbsentSidecar: Bool = false
     ) async -> [PhotoIdentity: PhotoMarks] {
+        await readMarkEntriesOffPool(
+            for: sets, storedMarks: storedMarks, codec: codec,
+            trustAbsentSidecar: trustAbsentSidecar
+        ).mapValues(\.marks)
+    }
+
+    private nonisolated static func readMarkEntriesOffPool(
+        for sets: [ScannedPhotoSet],
+        storedMarks: [PhotoIdentity: CloveStoredMarks],
+        codec: XMPCodec,
+        trustAbsentSidecar: Bool = false
+    ) async -> [PhotoIdentity: MarkReadEntry] {
         await withCheckedContinuation { continuation in
             markReadQueue.async {
                 continuation.resume(
-                    returning: readMarks(
+                    returning: readMarkEntries(
                         for: sets, storedMarks: storedMarks, codec: codec,
                         trustAbsentSidecar: trustAbsentSidecar))
             }
@@ -1143,7 +1414,19 @@ final class FolderLibrarySession: FolderLibrary {
         codec: XMPCodec,
         trustAbsentSidecar: Bool = false
     ) -> [PhotoIdentity: PhotoMarks] {
-        var marks: [PhotoIdentity: PhotoMarks] = [:]
+        readMarkEntries(
+            for: sets, storedMarks: storedMarks, codec: codec,
+            trustAbsentSidecar: trustAbsentSidecar
+        ).mapValues(\.marks)
+    }
+
+    private nonisolated static func readMarkEntries(
+        for sets: [ScannedPhotoSet],
+        storedMarks: [PhotoIdentity: CloveStoredMarks],
+        codec: XMPCodec,
+        trustAbsentSidecar: Bool = false
+    ) -> [PhotoIdentity: MarkReadEntry] {
+        var entries: [PhotoIdentity: MarkReadEntry] = [:]
         for set in sets {
             var packet: XMPMarks?
             var embedded: XMPMarks?
@@ -1177,11 +1460,12 @@ final class FolderLibrarySession: FolderLibrary {
             } else {
                 embedded = EmbeddedPhotoMarksReader.read(at: set.photoSet.primary.url)
             }
-            marks[set.id] = PhotoMarks(
+            let resolved = PhotoMarks(
                 stored: storedMarks[set.id], embedded: embedded, xmp: packet,
                 persistence: set.photoSet.markPersistence)
+            entries[set.id] = MarkReadEntry(marks: resolved, embedded: embedded, xmp: packet)
         }
-        return marks
+        return entries
     }
 
     // MARK: - Thumbnails

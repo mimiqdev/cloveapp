@@ -39,7 +39,7 @@ struct DetailScreen: View {
     private var settings: AppSettings { store.settings }
 
     private var groupsEnabled: Bool {
-        settings.similarGroupsEnabled && browsing.readingProgress == nil
+        settings.similarGroupsEnabled && !browsing.isScanning
     }
 
     private var timeline: DetailTimeline {
