@@ -775,6 +775,172 @@ struct CompareFlowTests {
     }
 
     @Test(
+        "Compare challenger cold switching uses cachedThumbnail fast path, retains stage pixels on cold misses, and clears on error"
+    )
+    func compareChallengerColdSwitchingNeverFlashesNilAndClearsOnFailure() async throws {
+        let base = ControlledPhotoLibrary(
+            rejected: [], stems: ["p1", "p2", "p3", "p4", "p5", "p6"])
+        let p1 = base.identity("p1")
+        let p2 = base.identity("p2")
+        let p3 = base.identity("p3")
+        let p4 = base.identity("p4")
+        let p5 = base.identity("p5")
+        let p6 = base.identity("p6")
+
+        let thumbP3 = makeSolidCGImage(width: 400, height: 400, red: 0.2, green: 0.7, blue: 0.4)
+        let thumbnails = CompareColdThumbnailSource()
+        thumbnails.cachedOverrides[p3] = thumbP3
+        let library = CompareColdSwitchLibrary(base: base, thumbnails: thumbnails)
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 6 }
+
+        model.openPhoto(p1)
+        let timeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: timeline))
+        #expect(model.compareSession?.reference == p1)
+        #expect(model.compareSession?.challenger == p2)
+
+        let images = CompareColdSwitchDetailImages()
+        images.limitedPhotos.insert(p3)
+        images.focusPhotos.insert(p3)
+        images.gatedPreviewPhotos.formUnion([p3, p4, p5])
+        images.gatedPlaceholderPhotos.insert(p4)
+        images.unavailablePhotos.insert(p5)
+        images.deferredPhotos.insert(p6)
+
+        let framesBox = CompareFrameBox()
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+        let host = UIHostingController(
+            rootView: AnyView(
+                DetailScreen(browsing: model, images: images)
+                    .environment(store)
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                        framesBox.frames = $0
+                    }))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 852, height: 393)
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .compact
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        defer {
+            images.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitUntil { self.findPanes(in: window).count == 2 }
+        try await waitUntil {
+            images.delivered.contains { $0.0 == p1 && $0.1 == .screenRender }
+                && images.delivered.contains { $0.0 == p2 && $0.1 == .screenRender }
+        }
+        let (paneA, paneB) = try requirePanes(in: window)
+        try #require(paneB.displayedImage != nil)
+
+        // Zoom Pane A in Sync On so challenger switches preserve synchronized zoom.
+        paneA.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.65, y: 0.42)))
+        try await waitUntil { paneA.isZoomed && paneB.isZoomed }
+        await flushMainRunLoop()
+
+        let recorder = CompareStageImageRecorder(container: paneB)
+        defer { recorder.stop() }
+
+        // 1. Cold step B (p2 -> p3) with synchronous cachedThumbnail hit:
+        // transitions straight to thumbP3 with zero nil frames, skips placeholder(...), then upgrades.
+        #expect(model.stepCompareChallenger(offset: 1))
+        #expect(model.compareSession?.challenger == p3)
+        try await waitUntil {
+            paneB.displayedImage === thumbP3
+                && images.requests.contains { $0.0 == p3 && $0.1 == .preview }
+        }
+        #expect(try requirePanes(in: window).paneB === paneB)
+        #expect(!images.placeholderRequests.contains(p3))
+        #expect(!recorder.sawNilFrame)
+
+        images.releasePreview(for: p3)
+        try await waitUntil {
+            images.delivered.contains { $0.0 == p3 && $0.1 == .screenRender }
+                && !self.findFocusControls(in: paneB).isEmpty
+                && framesBox.frames["clove.compare.paneB.limitation"] != nil
+                && paneB.isZoomed
+        }
+        let p3Pixels = try #require(paneB.displayedImage)
+        #expect(!recorder.sawNilFrame)
+
+        // 2. Cold step B (p3 -> p4) where both warmImage and cachedThumbnail miss and placeholder
+        // is delayed then returns nil: retains p3Pixels, hides stale overlays, then lands on p4.
+        #expect(model.stepCompareChallenger(offset: 1))
+        #expect(model.compareSession?.challenger == p4)
+        try await waitUntil {
+            images.placeholderRequests.contains(p4)
+                && self.findFocusControls(in: paneB).isEmpty
+                && framesBox.frames["clove.compare.paneB.limitation"] == nil
+        }
+        #expect(paneB.displayedImage === p3Pixels)
+        #expect(!recorder.sawNilFrame)
+
+        images.releasePlaceholder(for: p4)
+        try await waitUntil { images.requests.contains { $0.0 == p4 && $0.1 == .preview } }
+        await flushMainRunLoop()
+        #expect(paneB.displayedImage === p3Pixels)
+        #expect(!recorder.sawNilFrame)
+
+        images.releasePreview(for: p4)
+        try await waitUntil {
+            images.delivered.contains { $0.0 == p4 && $0.1 == .screenRender }
+                && paneB.isZoomed
+        }
+        let p4Pixels = try #require(paneB.displayedImage)
+        #expect(!recorder.sawNilFrame)
+
+        // 3. Cold step B (p4 -> p5 .unavailable): retains p4Pixels while pending, then clears and shows copy.
+        #expect(model.stepCompareChallenger(offset: 1))
+        #expect(model.compareSession?.challenger == p5)
+        try await waitUntil { images.requests.contains { $0.0 == p5 && $0.1 == .preview } }
+        #expect(paneB.displayedImage === p4Pixels)
+        #expect(framesBox.frames["clove.compare.paneB.unavailable"] == nil)
+        #expect(!recorder.sawNilFrame)
+
+        images.releasePreview(for: p5)
+        try await waitUntil {
+            paneB.displayedImage == nil
+                && !paneB.isZoomed
+                && framesBox.frames["clove.compare.paneB.unavailable"] != nil
+        }
+
+        // 4. Step back to p4 (restores synced zoom & p4 pixels), then step to p6 (.deferred):
+        // retains p4Pixels across retries, then clears and shows deferred copy.
+        #expect(model.stepCompareChallenger(offset: -1))
+        #expect(model.compareSession?.challenger == p4)
+        try await waitUntil {
+            paneB.displayedImage?.width == SampleDetailImages.fullLongEdge && paneB.isZoomed
+        }
+        await flushMainRunLoop()
+        let restoredP4Pixels = try #require(paneB.displayedImage)
+        recorder.resetRecording()
+
+        #expect(model.selectCompareChallenger(p6))
+        #expect(model.compareSession?.challenger == p6)
+        try await waitUntil { images.requests.contains { $0.0 == p6 && $0.1 == .preview } }
+        #expect(paneB.displayedImage === restoredP4Pixels)
+        #expect(!recorder.sawNilFrame)
+
+        try await waitUntil {
+            paneB.displayedImage == nil
+                && !paneB.isZoomed
+                && framesBox.frames["clove.compare.paneB.unavailable"] != nil
+        }
+    }
+
+    @Test(
         "CompareFilmstrip raises only challenger B with full-opacity two-tone marker across activeSide switches and stepping"
     )
     func compareFilmstripPinsLiftAndTwoToneMarkerToChallengerOnly() async throws {
@@ -1150,6 +1316,17 @@ struct CompareFlowTests {
         return found
     }
 
+    private func findFocusControls(in view: UIView) -> [DetailFocusRegionControl] {
+        var found: [DetailFocusRegionControl] = []
+        if let control = view as? DetailFocusRegionControl {
+            found.append(control)
+        }
+        for child in view.subviews {
+            found.append(contentsOf: findFocusControls(in: child))
+        }
+        return found
+    }
+
     private func findFirstScrollView(in view: UIView) -> UIScrollView? {
         if let scrollView = view as? UIScrollView, !(view is UICollectionView) {
             return scrollView
@@ -1439,5 +1616,227 @@ private struct CompareFilmstripHarnessView: View {
         )
         .frame(maxWidth: .infinity)
         .environment(\.cloveTheme, .light)
+    }
+}
+
+@MainActor
+private final class CompareFrameBox {
+    var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+private final class CompareStageImageRecorder {
+    private(set) var assignments: [CGImage?] = []
+    private(set) var frameSamples: [CGImage?] = []
+    private weak var container: DetailZoomContainerView?
+    private var runLoopObserver: CFRunLoopObserver?
+
+    init(container: DetailZoomContainerView) {
+        self.container = container
+        assignments.append(container.displayedImage)
+        frameSamples.append(container.displayedImage)
+        container.onDisplayedImageChange = { [weak self] image in
+            self?.assignments.append(image)
+        }
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault,
+            CFRunLoopActivity.beforeWaiting.rawValue,
+            true,
+            0
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated {
+                guard let self, let container = self.container else { return }
+                self.frameSamples.append(container.displayedImage)
+            }
+        }
+        if let observer {
+            self.runLoopObserver = observer
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        }
+    }
+
+    func resetRecording() {
+        let current = container?.displayedImage
+        assignments = [current]
+        frameSamples = [current]
+    }
+
+    var sawNilFrame: Bool {
+        assignments.contains(where: { $0 == nil }) || frameSamples.contains(where: { $0 == nil })
+    }
+
+    func stop() {
+        container?.onDisplayedImageChange = nil
+        if let runLoopObserver {
+            CFRunLoopRemoveObserver(CFRunLoopGetMain(), runLoopObserver, .commonModes)
+            self.runLoopObserver = nil
+        }
+    }
+}
+
+@MainActor
+private final class CompareColdThumbnailSource: GridThumbnailSource {
+    var cachedOverrides: [PhotoIdentity: CGImage] = [:]
+
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? {
+        cachedOverrides[photo].map { .image($0) }
+    }
+
+    func companions(for photo: PhotoIdentity) -> GridCompanions { GridCompanions() }
+
+    func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority) async
+        -> GridThumbnailOutcome
+    { .unavailable }
+}
+
+@MainActor
+private final class CompareColdSwitchLibrary: FolderLibrary {
+    private let base: ControlledPhotoLibrary
+    let thumbnails: any GridThumbnailSource
+
+    init(base: ControlledPhotoLibrary, thumbnails: any GridThumbnailSource) {
+        self.base = base
+        self.thumbnails = thumbnails
+    }
+
+    var folder: FolderIdentity { base.folder }
+    var photos: [GridPhoto] { base.photos }
+    var groups: [BrowsingGroup] { base.groups }
+    var updates: AsyncStream<FolderLibraryUpdate> { base.updates }
+    var openGeneration: Int { base.openGeneration }
+    func reportScanFinished() { base.reportScanFinished() }
+}
+
+@MainActor
+private final class CompareColdSwitchDetailImages: DetailImageSource, DetailRegionSharpnessSource {
+    private let sample = SampleDetailImages()
+    var gatedPlaceholderPhotos: Set<PhotoIdentity> = []
+    var gatedPreviewPhotos: Set<PhotoIdentity> = []
+    var unavailablePhotos: Set<PhotoIdentity> = []
+    var deferredPhotos: Set<PhotoIdentity> = []
+    var limitedPhotos: Set<PhotoIdentity> = []
+    var focusPhotos: Set<PhotoIdentity> = []
+
+    private(set) var placeholderRequests: [PhotoIdentity] = []
+    private(set) var requests: [(PhotoIdentity, DetailPixelRequest.Need)] = []
+    private(set) var delivered: [(PhotoIdentity, DetailPixelRequest.Need)] = []
+
+    private var pendingPlaceholders: [PhotoIdentity: [CheckedContinuation<Void, Never>]] = [:]
+    private var pendingPreviews: [PhotoIdentity: [CheckedContinuation<Void, Never>]] = [:]
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        placeholderRequests.append(photo)
+        if gatedPlaceholderPhotos.contains(photo) {
+            await withCheckedContinuation { continuation in
+                pendingPlaceholders[photo, default: []].append(continuation)
+            }
+        }
+        return nil
+    }
+
+    func releasePlaceholder(for photo: PhotoIdentity) {
+        gatedPlaceholderPhotos.remove(photo)
+        let waiting = pendingPlaceholders.removeValue(forKey: photo) ?? []
+        for continuation in waiting {
+            continuation.resume()
+        }
+    }
+
+    func releasePreview(for photo: PhotoIdentity) {
+        gatedPreviewPhotos.remove(photo)
+        let waiting = pendingPreviews.removeValue(forKey: photo) ?? []
+        for continuation in waiting {
+            continuation.resume()
+        }
+    }
+
+    func releaseAll() {
+        for photo in Array(pendingPlaceholders.keys) {
+            releasePlaceholder(for: photo)
+        }
+        for photo in Array(pendingPreviews.keys) {
+            releasePreview(for: photo)
+        }
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async {
+        await sample.prepare(window)
+    }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        requests.append((photo, request.need))
+        if gatedPreviewPhotos.contains(photo), request.need == .preview {
+            await withCheckedContinuation { continuation in
+                pendingPreviews[photo, default: []].append(continuation)
+            }
+        }
+        if unavailablePhotos.contains(photo) {
+            return .unavailable(.cannotOpen)
+        }
+        if deferredPhotos.contains(photo) {
+            return .deferred
+        }
+        let outcome = await sample.image(for: photo, request: request)
+        guard case .image(let image) = outcome else { return outcome }
+        let finalImage: DetailImage =
+            if limitedPhotos.contains(photo) {
+                DetailImage(
+                    image: image.image,
+                    source: image.source,
+                    quality: image.quality,
+                    hasRAW: image.hasRAW,
+                    limitation: .noHigherResolution,
+                    fullResolutionSize: image.fullResolutionSize)
+            } else {
+                image
+            }
+        delivered.append((photo, request.need))
+        return .image(finalImage)
+    }
+
+    func setCompareRetention(active: Bool, keeping photo: PhotoIdentity?) async {
+        await sample.setCompareRetention(active: active, keeping: photo)
+    }
+
+    func releaseComparePhoto(_ photo: PhotoIdentity) async {
+        await sample.releaseComparePhoto(photo)
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async {
+        await sample.leave(window: window)
+    }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        guard focusPhotos.contains(photo) else {
+            return await sample.analyzeRegions(
+                for: photo, group: group, nearby: nearby, onAutofocus: onAutofocus)
+        }
+        let af = RegionSharpnessEvidence(
+            kind: .cameraAutofocus,
+            groupIndex: nil,
+            region: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16),
+            score: nil,
+            unavailableBecause: nil)
+        onAutofocus(.regions([af]))
+        return RegionSharpnessAnalysis(
+            autofocus: .regions([af]),
+            faces: .unavailable(.noFacesDetected),
+            acquisitionFailure: nil,
+            timings: RegionSharpnessTimings())
     }
 }

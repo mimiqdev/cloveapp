@@ -773,6 +773,11 @@ private final class ComparePaneController {
     var phase: Phase = .placeholder(nil)
     var limitation: DetailLimitation?
     var previewOnly = false
+
+    var placeholderPixels: CGImage? {
+        if case .placeholder(let pixels) = phase { return pixels }
+        return nil
+    }
     var scale: CGFloat = 1
     var commandedScale: CGFloat = 1
     var anchor: DetailZoomAnchor = .centre
@@ -1023,8 +1028,9 @@ private struct ComparePaneView: View {
             case .unavailable, .deferred: nil
             }
 
+        let isShowingTarget = controller.shown != nil && controller.loadedPhotoID == photoID
         let focusOverlayRegions = controller.focusRegionState.regions(
-            visible: controller.shown != nil && showsFocusRegions,
+            visible: isShowingTarget && showsFocusRegions,
             inspectedRegionID: controller.inspectedFocusRegionID)
 
         ZStack {
@@ -1105,9 +1111,18 @@ private struct ComparePaneView: View {
                     .multilineTextAlignment(.center)
                     .padding(16)
                     .accessibilityIdentifier("\(identifierPrefix).unavailable")
+                    .reportHeaderControlFrame("\(identifierPrefix).unavailable")
+            } else if case .deferred = controller.phase {
+                Text(AppLocalization.string("The preview did not load.", language: language))
+                    .font(.caption)
+                    .foregroundStyle(Color.clove.text.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(16)
+                    .accessibilityIdentifier("\(identifierPrefix).unavailable")
+                    .reportHeaderControlFrame("\(identifierPrefix).unavailable")
             }
 
-            if let limitation = controller.limitation, controller.shown != nil {
+            if let limitation = controller.limitation, isShowingTarget {
                 VStack {
                     HStack {
                         Text(limitationText(limitation))
@@ -1117,6 +1132,7 @@ private struct ComparePaneView: View {
                             .background(.thinMaterial, in: Capsule())
                             .allowsHitTesting(false)
                             .accessibilityIdentifier("\(identifierPrefix).limitation")
+                            .reportHeaderControlFrame("\(identifierPrefix).limitation")
                         Spacer()
                     }
                     Spacer()
@@ -1134,7 +1150,6 @@ private struct ComparePaneView: View {
         controller.cancelTasks()
         controller.limitation = nil
         controller.previewOnly = false
-        controller.shown = nil
 
         let previewRequest = DetailPixelRequest(
             displayPixels: controller.screenPixels,
@@ -1148,10 +1163,18 @@ private struct ComparePaneView: View {
             show(warm, for: targetID)
             presentedWarm = true
         } else {
-            controller.phase = .placeholder(nil)
-            let thumb = await images.placeholder(for: targetID, gridThumbnails: thumbnails)
-            guard !Task.isCancelled else { return }
-            controller.phase = .placeholder(thumb)
+            let retainedPixels = controller.shown?.image ?? controller.placeholderPixels
+            controller.shown = nil
+            if case .image(let cachedThumbnail) = thumbnails.cachedThumbnail(for: targetID) {
+                controller.phase = .placeholder(cachedThumbnail)
+            } else {
+                controller.phase = .placeholder(retainedPixels)
+                let thumb = await images.placeholder(for: targetID, gridThumbnails: thumbnails)
+                guard !Task.isCancelled else { return }
+                if let thumb {
+                    controller.phase = .placeholder(thumb)
+                }
+            }
         }
 
         if let screen = controller.probe.container?.window?.windowScene?.screen {
@@ -1193,7 +1216,13 @@ private struct ComparePaneView: View {
             case .deferred:
                 attempts += 1
                 guard attempts < 3 else {
-                    if !presentedWarm { controller.phase = .deferred }
+                    if !presentedWarm {
+                        controller.phase = .deferred
+                        controller.loadedPhotoID = nil
+                        controller.keptZoom = nil
+                        controller.zoomMode = .fit
+                        controller.issueZoom(.fit)
+                    }
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(120))
@@ -1382,7 +1411,7 @@ private struct ComparePaneView: View {
             onViewportChanged(DetailZoomSnapshot(scale: 1, anchor: .centre))
             return
         }
-        guard controller.shown != nil else { return }
+        guard controller.shown != nil, controller.loadedPhotoID == photoID else { return }
         if settings.doubleTap == .zoomToFocus,
             let targetRegion = controller.focusRegionState.preferredDoubleTapRegion(
                 at: tap.proximityAnchor,
@@ -1398,7 +1427,8 @@ private struct ComparePaneView: View {
     }
 
     private func handleFocusRegionTap(_ region: DetailFocusRegion) {
-        guard region.isActionable else { return }
+        guard region.isActionable, controller.shown != nil, controller.loadedPhotoID == photoID
+        else { return }
         controller.inspectedFocusRegionID = region.id
         inspectFullResolution(at: region.centre)
     }
