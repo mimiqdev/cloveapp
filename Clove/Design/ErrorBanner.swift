@@ -27,10 +27,12 @@ struct ErrorBanner: View {
                 Text(message)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.clove.text.primary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let detail {
                     Text(detail)
                         .font(.footnote)
                         .foregroundStyle(Color.clove.text.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 8)
@@ -45,9 +47,11 @@ struct ErrorBanner: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(identifier).action")
+            .reportHeaderControlFrame("\(identifier).action")
         }
         .padding(16)
         .cloveGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: 560)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
     }

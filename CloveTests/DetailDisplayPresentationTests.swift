@@ -4955,7 +4955,7 @@ struct DetailDisplayPresentationTests {
 
             // 2. Narrower Photo Preview width + drive loss:
             // - SaveStatusIndicator floats beside focusToggle inside the viewport
-            // - FolderSaveBanner appears above previewArea while overlay stays pinned at (16, 12)
+            // - FolderSaveBanner floats inside previewArea below the viewport overlay without shifting previewArea vertically
             window.frame = CGRect(x: 0, y: 0, width: 760, height: 680)
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
@@ -4984,7 +4984,14 @@ struct DetailDisplayPresentationTests {
             #expect(narrowFocus.maxX < narrowSave.minX)
             #expect(!narrowSave.intersects(narrowReject))
             #expect(narrowSave.maxX <= narrowReject.minX - 4)
-            #expect(narrowStageRect.minY >= narrowBanner.maxY - 1)
+            #expect(abs(narrowStageRect.minY - stagePreviewRect.minY) <= 1.5)
+            #expect(narrowBanner.minY >= narrowStageRect.minY - 1)
+            #expect(narrowBanner.maxY <= narrowStageRect.maxY + 1)
+            #expect(narrowBanner.minY >= narrowFocus.maxY - 1)
+            #expect(!narrowBanner.intersects(narrowOverlay))
+            #expect(!narrowBanner.intersects(narrowFocus))
+            #expect(!narrowBanner.intersects(narrowSave))
+            #expect(!narrowBanner.intersects(narrowReject))
             #expect(abs(narrowOverlay.minX - (narrowStageRect.minX + 16)) <= 1.5)
             #expect(abs(narrowOverlay.minY - (narrowStageRect.minY + 12)) <= 1.5)
             #expect(narrowExt.width >= fullExtensionWidth - 2)

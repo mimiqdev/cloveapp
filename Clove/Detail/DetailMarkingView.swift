@@ -755,8 +755,6 @@ struct DetailMarkingView: View {
     private func duoPhotoPane(showsFilmstrip: Bool) -> some View {
         let activeStagePill = chromeIsVisible ? stagePill : nil
         VStack(spacing: 0) {
-            FolderSaveBanner(
-                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             previewArea
                 .overlay(alignment: .bottom) {
                     // The finishing pill floats over the stage's bottom edge, above the dock. It
@@ -964,8 +962,6 @@ struct DetailMarkingView: View {
                     }
                 }
             }
-            FolderSaveBanner(
-                browsing: browsing, identifierPrefix: "clove.detail.saveStatus.failure")
             Group {
                 if #available(iOS 27.1, *), hasFoldRegion, showsPhotoGrid {
                     PhotoArrangement(
@@ -1352,6 +1348,11 @@ struct DetailMarkingView: View {
                 ? AppLocalization.format("%@, Rejected", language: language, photo.fileName)
                 : photo.fileName
         )
+        .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
+        .animation(
+            CloveMotion.chrome(reduceMotion: reduceMotion),
+            value: browsing.folderLocationLoss == nil
+        )
         .overlay {
             DetailSwipeFeedbackBadge(
                 feedback: swipeFeedback, enabledRatings: settings.enabledRatings,
@@ -1379,6 +1380,13 @@ struct DetailMarkingView: View {
             DetailRejectGlyphOverlay(photoID: photo.id, isRejected: displayMarks.isRejected)
         }
         .overlay { gestureGuideOverlay }
+        .overlay(alignment: .top) {
+            FolderSaveBanner(
+                browsing: browsing,
+                identifierPrefix: "clove.detail.saveStatus.failure"
+            )
+            .padding(.top, usesExpandedDuoViewportOverlay ? 56 : 0)
+        }
         .animation(CloveMotion.chrome(reduceMotion: reduceMotion), value: showsGestureGuide)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clove.bg.stage)

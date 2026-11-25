@@ -992,10 +992,11 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.moves.expand").tap()
         element(app, "clove.moves.keep.mmq02679").tap()
         element(app, "clove.moves.confirm").tap()
-        let undo = element(app, "clove.moves.toast.action")
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
-        XCTAssertEqual(undo.label, "Undo")
-        element(app, "clove.moves.toast.secondaryAction").tap()
+        let details = element(app, "clove.moves.toast.action")
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertEqual(details.label, "Details")
+        XCTAssertFalse(element(app, "clove.moves.toast.secondaryAction").exists)
+        details.tap()
         XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").exists)
         element(app, "clove.moves.details.done").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02685").label.contains("Rejected"))
@@ -1075,7 +1076,7 @@ final class CloveFlowTests: XCTestCase {
             element(partial, "clove.moves.confirm").tap()
             XCTAssertTrue(partial.staticTexts["1 couldn't be moved"].waitForExistence(timeout: 5))
             capture("move-partial-\(theme)")
-            element(partial, "clove.moves.toast.secondaryAction").tap()
+            element(partial, "clove.moves.toast.action").tap()
             XCTAssertTrue(
                 element(partial, "clove.moves.details.sheet").exists)
             capture("move-details-\(theme)")
@@ -3111,8 +3112,18 @@ final class CloveFlowTests: XCTestCase {
         gridPrep.tap()
         let details = element(app, "clove.preparation.details")
         XCTAssertTrue(details.waitForExistence(timeout: 5))
-        XCTAssertEqual(element(app, "clove.preparation.folderName").label, "Coastal light")
-        XCTAssertEqual(element(app, "clove.preparation.summary").label, "15 of 36 ready")
+        XCTAssertEqual(element(app, "clove.preparation.title").label, "Preparing folder")
+        XCTAssertEqual(
+            element(app, "clove.preparation.folderName").label, "Coastal light · 36 photos")
+        XCTAssertEqual(
+            element(app, "clove.preparation.analysis.title").label, "Face & focus analysis")
+        XCTAssertEqual(
+            element(app, "clove.preparation.previews.title").label, "Preview optimization")
+        XCTAssertEqual(
+            element(app, "clove.preparation.summary").label, "15 photos ready for both")
+        XCTAssertEqual(
+            element(app, "clove.preparation.footer").label,
+            "You can keep browsing. The current photo is prioritized. Originals are unchanged.")
         XCTAssertEqual(element(app, "clove.preparation.analysis.count").label, "18 of 36 analyzed")
         XCTAssertEqual(element(app, "clove.preparation.previews.count").label, "29 of 36 prepared")
         XCTAssertEqual(element(app, "clove.preparation.grouping.status").label, "2 groups")
@@ -3160,7 +3171,9 @@ final class CloveFlowTests: XCTestCase {
 
         detailPrep.tap()
         XCTAssertTrue(details.waitForExistence(timeout: 5))
-        XCTAssertEqual(element(app, "clove.preparation.summary").label, "15 of 36 ready")
+        XCTAssertEqual(element(app, "clove.preparation.title").label, "Preparing folder")
+        XCTAssertEqual(
+            element(app, "clove.preparation.summary").label, "15 photos ready for both")
         if UIDevice.current.userInterfaceIdiom == .pad {
             XCTAssertFalse(doneButton.exists)
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)).tap()

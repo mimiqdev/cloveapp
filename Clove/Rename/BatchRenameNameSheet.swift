@@ -15,16 +15,43 @@ struct BatchRenameNameSheet: View {
         _startText = State(initialValue: String(flow.options.start))
     }
 
+    static func subtitleText(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Preview names before applying changes.", language: language)
+    }
+
+    static func previewNoteText(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Replacements are flagged in the preview.", language: language)
+    }
+
+    static func confirmTitle(
+        totalCount: Int, replacementCount: Int, language: ResolvedAppLanguage = .english
+    ) -> String {
+        replacementCount > 0
+            ? AppLocalization.format(
+                "Rename %lld · Replace %lld", language: language,
+                Int64(totalCount), Int64(replacementCount))
+            : AppLocalization.format(
+                "Rename %lld photos", language: language, Int64(totalCount))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(
-                flow.isRunning
-                    ? AppLocalization.format(
-                        "Renaming %lld photos…", language: language, Int64(flow.order.count))
-                    : AppLocalization.format(
-                        "Rename %lld photos", language: language, Int64(flow.order.count))
-            )
-            .font(.title3.bold()).padding(.top, 8)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(
+                    flow.isRunning
+                        ? AppLocalization.format(
+                            "Renaming %lld photos…", language: language, Int64(flow.order.count))
+                        : AppLocalization.format(
+                            "Rename %lld photos", language: language, Int64(flow.order.count))
+                )
+                .font(.title3.bold())
+                Text(Self.subtitleText(language: language))
+                    .font(.footnote)
+                    .foregroundStyle(Color.clove.text.secondary)
+                    .accessibilityIdentifier("clove.rename.subtitle")
+                    .reportHeaderControlFrame("clove.rename.subtitle")
+            }
+            .padding(.top, 8)
             .onTapGesture { editing = false }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -76,6 +103,15 @@ struct BatchRenameNameSheet: View {
                 .accessibilityIdentifier("clove.rename.prefix")
             }
             .frame(minHeight: 44)
+            .reportHeaderControlFrame("clove.rename.prefix")
+            Divider()
+            Toggle(
+                AppLocalization.string("Add capture date", language: language),
+                isOn: $flow.options.addsCaptureDate
+            )
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("clove.rename.captureDate")
+            .reportHeaderControlFrame("clove.rename.captureDate")
             Divider()
             HStack {
                 Text(AppLocalization.string("Separator", language: language))
@@ -95,13 +131,7 @@ struct BatchRenameNameSheet: View {
                 .accessibilityIdentifier("clove.rename.separator")
             }
             .frame(minHeight: 44)
-            Divider()
-            Toggle(
-                AppLocalization.string("Add capture date", language: language),
-                isOn: $flow.options.addsCaptureDate
-            )
-            .frame(minHeight: 44)
-            .accessibilityIdentifier("clove.rename.captureDate")
+            .reportHeaderControlFrame("clove.rename.separator")
             Divider()
             HStack(spacing: 8) {
                 Text(AppLocalization.string("Start number", language: language))
@@ -135,6 +165,7 @@ struct BatchRenameNameSheet: View {
                     }
                     .accessibilityLabel(AppLocalization.string("Start number", language: language))
                     .accessibilityIdentifier("clove.rename.startInput")
+                    .reportHeaderControlFrame("clove.rename.startInput")
                 Stepper(
                     AppLocalization.string("Start number", language: language),
                     value: $flow.options.start,
@@ -154,6 +185,7 @@ struct BatchRenameNameSheet: View {
             }
             .frame(minHeight: 44)
             .accessibilityIdentifier("clove.rename.digits")
+            .reportHeaderControlFrame("clove.rename.digits")
         }
         .padding(.horizontal, 16)
         .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
@@ -216,6 +248,12 @@ struct BatchRenameNameSheet: View {
                 ProgressView(AppLocalization.string("Preparing preview…", language: language))
                     .frame(maxWidth: .infinity).padding()
             }
+            Text(Self.previewNoteText(language: language))
+                .font(.caption)
+                .foregroundStyle(Color.clove.text.secondary)
+                .padding(.horizontal, 16)
+                .accessibilityIdentifier("clove.rename.previewNote")
+                .reportHeaderControlFrame("clove.rename.previewNote")
         }
     }
 
@@ -285,57 +323,67 @@ struct BatchRenameNameSheet: View {
                     .accessibilityIdentifier("clove.rename.failure")
             }
             let replacements = flow.preview?.replacementCount ?? 0
-            if replacements > 0 {
-                Text(
-                    AppLocalization.format(
-                        "%lld name is already used in the destination.", language: language,
-                        Int64(replacements))
-                )
-                .font(.caption)
-                .accessibilityIdentifier("clove.rename.replacementCount")
-            }
-            Text(
+            let undoWarning = Text(
                 replacements > 0
                     ? AppLocalization.format(
                         "Renaming can't be undone. Replaced files move to %@.",
                         language: language, store.settings.rejectsFolderName.rawValue)
                     : AppLocalization.string("Renaming can't be undone.", language: language)
             )
-            .font(.caption).foregroundStyle(Color.clove.text.secondary)
+            .font(.caption)
+            .foregroundStyle(Color.clove.text.secondary)
             .multilineTextAlignment(.center)
+            .accessibilityIdentifier("clove.rename.warning")
+            .reportHeaderControlFrame("clove.rename.warning")
+
             if flow.isRunning {
-                ProgressView(
-                    value: Double(flow.finishedCount), total: Double(max(flow.order.count, 1)))
                 Text(
                     AppLocalization.format(
                         "Renaming %lld of %lld…", language: language,
                         Int64(min(flow.finishedCount + 1, flow.order.count)),
                         Int64(flow.order.count))
                 )
-                .font(.footnote).accessibilityIdentifier("clove.rename.progress")
+                .font(.footnote)
+                .accessibilityIdentifier("clove.rename.progress")
+                .reportHeaderControlFrame("clove.rename.progress")
+                undoWarning
+                ProgressView(
+                    value: Double(flow.finishedCount), total: Double(max(flow.order.count, 1))
+                )
+                .tint(Color.clove.accent)
+                .accessibilityIdentifier("clove.rename.progressBar")
+                .reportHeaderControlFrame("clove.rename.progressBar")
             } else {
-                Button(role: replacements > 0 ? .destructive : nil) {
+                if replacements > 0 {
+                    Text(
+                        AppLocalization.format(
+                            "%lld name is already used in the destination.", language: language,
+                            Int64(replacements))
+                    )
+                    .font(.caption)
+                    .accessibilityIdentifier("clove.rename.replacementCount")
+                }
+                undoWarning
+                Button {
                     editing = false
                     Task { await flow.rename(completion: completion) }
                 } label: {
                     Text(
-                        replacements > 0
-                            ? AppLocalization.format(
-                                "Rename %lld · Replace %lld", language: language,
-                                Int64(flow.order.count), Int64(replacements))
-                            : AppLocalization.format(
-                                "Rename %lld photos", language: language, Int64(flow.order.count))
+                        Self.confirmTitle(
+                            totalCount: flow.order.count,
+                            replacementCount: replacements,
+                            language: language)
                     )
                     .font(.body.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 50)
                     .foregroundStyle(.white)
-                    .background(
-                        replacements > 0 ? Color.clove.reject : Color.clove.accent, in: Capsule()
-                    )
+                    .background(Color.clove.accent, in: Capsule())
                     .opacity(flow.canRename ? 1 : 0.4)
                 }
-                .buttonStyle(.plain).disabled(!flow.canRename)
+                .buttonStyle(.plain)
+                .disabled(!flow.canRename)
                 .accessibilityIdentifier("clove.rename.confirm")
+                .reportHeaderControlFrame("clove.rename.confirm")
             }
         }
         .frame(maxWidth: .infinity)

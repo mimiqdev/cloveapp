@@ -1,14 +1,28 @@
 import CloveCore
 import SwiftUI
 
-/// Move results retain Undo; failure details describe the files left in place.
+/// Move results retain Undo in the top bar; partial failure toasts show only Details.
 struct MoveRejectsToast: View {
+    enum ActionKind: Equatable {
+        case undo
+        case details
+    }
+
+    struct Presentation: Equatable {
+        let message: String
+        let detail: String?
+        let actionTitle: String?
+        let actionKind: ActionKind?
+    }
+
     let browsing: BrowsingModel
     let completed: CompletedRejectMove
     let showDetails: () -> Void
     @Environment(\.appLanguage) private var language
 
-    var body: some View {
+    static func presentation(
+        for completed: CompletedRejectMove, canUndo: Bool, language: ResolvedAppLanguage
+    ) -> Presentation {
         let result = completed.result
         let message = AppLocalization.format(
             "Moved %lld to %@", language: language, Int64(result.movedCount),
@@ -23,17 +37,45 @@ struct MoveRejectsToast: View {
             ? AppLocalization.format(
                 "%lld photos were skipped.", language: language, Int64(result.skippedCount))
             : nil
-        Toast(
+        let isPartialFailure = result.unmovedCount > 0
+        let actionTitle: String?
+        let actionKind: ActionKind?
+        if isPartialFailure {
+            actionTitle = AppLocalization.string("Details", language: language)
+            actionKind = .details
+        } else if canUndo {
+            actionTitle = AppLocalization.string("Undo", language: language)
+            actionKind = .undo
+        } else {
+            actionTitle = nil
+            actionKind = nil
+        }
+        return Presentation(
             message: message,
             detail: [failureMessage, skippedMessage].compactMap { $0 }
                 .joined(separator: " ").nilIfEmpty,
-            actionTitle: browsing.canUndoRejectMove(completed)
-                ? AppLocalization.string("Undo", language: language) : nil,
-            secondaryActionTitle: result.unmovedCount > 0
-                ? AppLocalization.string("Details", language: language) : nil,
-            onSecondaryAction: showDetails,
+            actionTitle: actionTitle,
+            actionKind: actionKind)
+    }
+
+    var body: some View {
+        let presentation = Self.presentation(
+            for: completed, canUndo: browsing.canUndoRejectMove(completed), language: language)
+        Toast(
+            message: presentation.message,
+            detail: presentation.detail,
+            actionTitle: presentation.actionTitle,
             identifier: "clove.moves.toast",
-            onAction: { browsing.undoRejectMove(completed) })
+            onAction: {
+                switch presentation.actionKind {
+                case .details:
+                    showDetails()
+                case .undo:
+                    browsing.undoRejectMove(completed)
+                case .none:
+                    break
+                }
+            })
     }
 }
 

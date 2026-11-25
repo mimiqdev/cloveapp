@@ -835,6 +835,52 @@
         }
       }
     },
+    "%lld photos ready for both": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "1 photo ready for both"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld photos ready for both"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 张照片两项均已就绪"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 張相片兩項均已就緒"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld photos were skipped.": {
       "localizations": {
         "en": {
@@ -1917,6 +1963,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "取消"
+          }
+        }
+      }
+    },
+    "Cancel discards changes to the order.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel discards changes to the order."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消将放弃对顺序的更改。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消將捨棄對順序的變更。"
           }
         }
       }
@@ -3173,6 +3241,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "眼部區域"
+          }
+        }
+      }
+    },
+    "Face & focus analysis": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Face & focus analysis"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "人脸与对焦分析"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "人臉與對焦分析"
           }
         }
       }
@@ -6285,6 +6375,28 @@
         }
       }
     },
+    "Preparing folder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing folder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在准备文件夹"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在準備檔案夾"
+          }
+        }
+      }
+    },
     "Preparing preview…": {
       "localizations": {
         "en": {
@@ -6351,6 +6463,28 @@
         }
       }
     },
+    "Preview names before applying changes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview names before applying changes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用更改前可预览名称。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "套用變更前可預覽名稱。"
+          }
+        }
+      }
+    },
     "Preview only — full resolution is unavailable.": {
       "localizations": {
         "en": {
@@ -6391,6 +6525,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "僅預覽 — RAW 算圖失敗。"
+          }
+        }
+      }
+    },
+    "Preview optimization": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview optimization"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预览优化"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "預覽最佳化"
           }
         }
       }
@@ -7631,6 +7787,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "取代警告"
+          }
+        }
+      }
+    },
+    "Replacements are flagged in the preview.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replacements are flagged in the preview."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替换操作会在预览中标出。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取代項目會在預覽中標示。"
           }
         }
       }
@@ -9469,28 +9647,6 @@
         }
       }
     },
-    "The order lives only here. Cancel drops it.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The order lives only here. Cancel drops it."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "排序仅用于本次重命名，取消后不会保留。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "排序僅用於本次重新命名，取消後不會保留。"
-          }
-        }
-      }
-    },
     "The photo or destination is outside the opened folder.": {
       "localizations": {
         "en": {
@@ -10543,6 +10699,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "黃色"
+          }
+        }
+      }
+    },
+    "You can keep browsing. The current photo is prioritized. Originals are unchanged.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can keep browsing. The current photo is prioritized. Originals are unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可继续浏览。当前照片会优先处理。原图保持不变。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可繼續瀏覽。目前相片會優先處理。原圖保持不變。"
           }
         }
       }

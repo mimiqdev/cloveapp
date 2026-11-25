@@ -128,15 +128,14 @@ struct BatchRenameOrderScreen: View {
             }
 
             RenameOrderGrid(flow: flow, order: flow.order) { checkedPhoto = $0 }
-            Text(
-                AppLocalization.string(
-                    "The order lives only here. Cancel drops it.", language: language)
-            )
-            .font(.footnote)
-            .foregroundStyle(Color.clove.text.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
+            Text(Self.footerText(language: language))
+                .font(.footnote)
+                .foregroundStyle(Color.clove.text.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .accessibilityIdentifier("clove.rename.order.footer")
+                .reportHeaderControlFrame("clove.rename.order.footer")
         }
         .onGeometryChange(for: CGFloat.self) {
             $0.size.width
@@ -158,5 +157,9 @@ struct BatchRenameOrderScreen: View {
         .fullScreenCover(item: $checkedPhoto) { photo in
             BatchRenameCheckViewer(flow: flow, initialPhoto: photo.id)
         }
+    }
+
+    static func footerText(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Cancel discards changes to the order.", language: language)
     }
 }

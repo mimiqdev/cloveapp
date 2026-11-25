@@ -221,8 +221,12 @@ private struct GroupPhotoGridPickerCell: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay(alignment: .bottomLeading) { ratingBadge }
-            .overlay(alignment: .bottomTrailing) { labelDot }
+            .overlay(alignment: .bottomLeading) {
+                PhotoTileRatingBadge(rating: photo.marks.rating)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                PhotoTileLabelDot(label: photo.marks.label)
+            }
             .opacity(photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)
             .overlay {
                 if isCurrent {
@@ -233,31 +237,6 @@ private struct GroupPhotoGridPickerCell: View {
         .aspectRatio(1, contentMode: .fit)
         .task(id: photo.id) {
             await loadThumbnail()
-        }
-    }
-
-    @ViewBuilder private var ratingBadge: some View {
-        if let stars = photo.marks.rating.starCount {
-            HStack(spacing: 1) {
-                Image(systemName: "star.fill").foregroundStyle(Color.clove.rating.on)
-                Text(stars.formatted(.number.locale(language.locale)))
-                    .foregroundStyle(Color.clove.text.primary)
-            }
-            .font(.system(size: 9, weight: .semibold))
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(Color.clove.surface.glass, in: Capsule())
-            .padding(4)
-        }
-    }
-
-    @ViewBuilder private var labelDot: some View {
-        if !photo.marks.label.isClear {
-            Circle()
-                .fill(Color.clove.label.colour(for: photo.marks.label.colour))
-                .frame(width: 8, height: 8)
-                .overlay { Circle().strokeBorder(Color.clove.text.primary, lineWidth: 1) }
-                .padding(5)
         }
     }
 

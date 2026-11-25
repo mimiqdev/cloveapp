@@ -487,26 +487,14 @@ private struct GridTile: View {
     }
 
     @ViewBuilder private var rating: some View {
-        if !isCover, let stars = item.photo.marks.rating.starCount {
-            HStack(spacing: 1) {
-                Image(systemName: "star.fill").foregroundStyle(Color.clove.rating.on)
-                Text(stars.formatted(.number.locale(language.locale))).foregroundStyle(
-                    Color.clove.text.primary)
-            }
-            .font(.system(size: 9, weight: .semibold))
-            .padding(.horizontal, 4).padding(.vertical, 2)
-            .background(Color.clove.surface.glass, in: Capsule())
-            .padding(4)
+        if !isCover {
+            PhotoTileRatingBadge(rating: item.photo.marks.rating)
         }
     }
 
     @ViewBuilder private var label: some View {
-        if !isCover, !item.photo.marks.label.isClear {
-            Circle()
-                .fill(Color.clove.label.colour(for: item.photo.marks.label.colour))
-                .frame(width: 8, height: 8)
-                .overlay { Circle().strokeBorder(Color.clove.text.primary, lineWidth: 1) }
-                .padding(5)
+        if !isCover {
+            PhotoTileLabelDot(label: item.photo.marks.label)
         }
     }
 
