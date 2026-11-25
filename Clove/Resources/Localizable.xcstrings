@@ -1833,6 +1833,28 @@
         }
       }
     },
+    "Burst of %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Burst of %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连拍 %lld 张"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連拍 %lld 張"
+          }
+        }
+      }
+    },
     "Camera": {
       "localizations": {
         "en": {

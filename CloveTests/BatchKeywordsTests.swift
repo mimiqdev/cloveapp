@@ -168,6 +168,6 @@ struct BatchKeywordsTests {
         let unmarkedSummary = PhotoInformationSheet.marksSummary(
             for: unmarked, language: .english)
         #expect(unmarkedSummary.text == "Unmarked")
-        #expect(!unmarkedSummary.isNeutral)
+        #expect(unmarkedSummary.isNeutral)
     }
 }

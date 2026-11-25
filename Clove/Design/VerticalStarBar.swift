@@ -278,9 +278,31 @@ struct VerticalStarBar: View {
 /// A read-out for photo swipes. It installs no gestures, buttons or adjustable actions.
 ///
 /// The ladder mirrors the interactive bar's native glass styling, and the chip below it names the
-/// stage the swipe is on: `star.slash` in secondary text while the swipe previews clear,
+/// stage the swipe is on: `flag.slash` in secondary text during 1–5 star rating swipes,
+/// `star.slash` in secondary text while the swipe previews clear (all stars empty), and
 /// `flag.slash.fill` in `reject` while it previews Reject (owner decision, 2026-11-13, #227).
 struct VerticalStarBarDisplay: View {
+    enum ChipStage: Equatable, Sendable {
+        case ratingSwipe
+        case clear
+        case reject
+
+        var symbolName: String {
+            switch self {
+            case .ratingSwipe: "flag.slash"
+            case .clear: "star.slash"
+            case .reject: "flag.slash.fill"
+            }
+        }
+
+        var token: ThemeToken {
+            switch self {
+            case .ratingSwipe, .clear: .secondaryText
+            case .reject: .reject
+            }
+        }
+    }
+
     let rating: Rating
     var enabledRatings: EnabledRatings = .all
     var isReject = false
@@ -301,19 +323,30 @@ struct VerticalStarBarDisplay: View {
         VerticalStarBarDisplay(rating: .unrated).stageSize
     }
 
+    static func chipStage(for rating: Rating, isReject: Bool) -> ChipStage {
+        if isReject || rating == .rejected {
+            return .reject
+        }
+        if rating.starCount != nil {
+            return .ratingSwipe
+        }
+        return .clear
+    }
+
     var body: some View {
         let stepAnimation = CloveMotion.micro(reduceMotion: reduceMotion)
+        let chipStage = Self.chipStage(for: rating, isReject: isReject)
         VStack(spacing: metrics.chipGap) {
             VerticalStarBarStars(rating: rating, enabledRatings: enabledRatings, size: .phone)
                 .frame(width: metrics.width, height: metrics.height)
                 .cloveGlass(in: RoundedRectangle(cornerRadius: metrics.cornerRadius))
                 .animation(stepAnimation, value: rating)
-            Image(systemName: isReject ? "flag.slash.fill" : "star.slash")
+            Image(systemName: chipStage.symbolName)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(isReject ? Color.clove.reject : Color.clove.text.secondary)
+                .foregroundStyle(CloveColour(chipStage.token))
                 .frame(width: metrics.chip, height: metrics.chip)
                 .cloveGlass(in: Circle())
-                .animation(stepAnimation, value: isReject)
+                .animation(stepAnimation, value: chipStage)
         }
         .allowsHitTesting(false)
     }
