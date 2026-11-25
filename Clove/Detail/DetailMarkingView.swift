@@ -282,6 +282,7 @@ struct DetailMarkingView: View {
                 upgradeTask?.cancel()
                 shown = nil
                 shownPhoto = nil
+                phase = .placeholder(nil)
                 focusTracking.reset()
                 currentWindow = nil
                 Task { await images.leave(window: windowID) }
@@ -1305,7 +1306,7 @@ struct DetailMarkingView: View {
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
-            focusRegions: shown == nil
+            focusRegions: (shown == nil || shownPhoto != photo.id)
                 ? []
                 : focusRegionState.regions(
                     visible: browsing.showsFocusRegions,
@@ -1447,9 +1448,10 @@ struct DetailMarkingView: View {
     /// viewport corner also pins the passive photo identity badge beside the floating focus,
     /// preparation, and save/access controls so the photo stage reclaims the former top header height.
     @ViewBuilder private var topLeadingStageOverlays: some View {
+        let isShowingCurrentPhoto = shown != nil && shownPhoto == photo.id
         let indicators = focusRegionState.resultIndicators(
-            visible: shown != nil && chromeIsVisible && browsing.showsFocusRegions)
-        let showsLimitation = limitation != nil && shown != nil
+            visible: isShowingCurrentPhoto && chromeIsVisible && browsing.showsFocusRegions)
+        let showsLimitation = limitation != nil && isShowingCurrentPhoto
         if usesExpandedDuoViewportOverlay {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 8) {
@@ -1561,7 +1563,7 @@ struct DetailMarkingView: View {
 
     /// The "preview only" note a failed render or a capped source must show (PRD P0-04).
     @ViewBuilder private var limitationNote: some View {
-        if let limitation, shown != nil {
+        if let limitation, shown != nil, shownPhoto == photo.id {
             Text(limitationText(limitation))
                 .font(.caption)
                 .padding(.horizontal, 10)
@@ -1736,13 +1738,7 @@ struct DetailMarkingView: View {
                 guard !Task.isCancelled else { return }
                 previewPrefetchTask = Task { await images.prefetchPreviews(window) }
             } else {
-                shown = nil
-                shownPhoto = nil
-                phase = .placeholder(nil)
-                let thumbnail = await images.placeholder(
-                    for: photo.id, gridThumbnails: browsing.thumbnails)
-                guard !Task.isCancelled else { return }
-                phase = .placeholder(thumbnail)
+                guard await showPlaceholderWhileLoading(for: photo.id) else { return }
                 window = candidateWindow
                 currentWindow = window
                 previousPosition = window.current.position
@@ -1750,13 +1746,7 @@ struct DetailMarkingView: View {
                 guard !Task.isCancelled else { return }
             }
         } else {
-            shown = nil
-            shownPhoto = nil
-            phase = .placeholder(nil)
-            let thumbnail = await images.placeholder(
-                for: photo.id, gridThumbnails: browsing.thumbnails)
-            guard !Task.isCancelled else { return }
-            phase = .placeholder(thumbnail)
+            guard await showPlaceholderWhileLoading(for: photo.id) else { return }
             // Wait for the display, not just layout: the first render must use the
             // same physical screen edge as later photos and their held-render keys.
             for _ in 0..<120 {
@@ -1871,6 +1861,24 @@ struct DetailMarkingView: View {
         let renderAhead =
             shown.quality == .screenRAW || shown.quality == .nativeRAW || !shown.hasRAW
         await images.prefetch(window, renderAhead: renderAhead)
+    }
+
+    private func showPlaceholderWhileLoading(for photoID: PhotoIdentity) async -> Bool {
+        let retainedPixels = shown?.image ?? placeholder
+        shown = nil
+        shownPhoto = nil
+        if case .image(let cachedThumbnail) = browsing.thumbnails.cachedThumbnail(for: photoID) {
+            phase = .placeholder(cachedThumbnail)
+            return true
+        }
+        phase = .placeholder(retainedPixels)
+        let thumbnail = await images.placeholder(
+            for: photoID, gridThumbnails: browsing.thumbnails)
+        guard !Task.isCancelled else { return false }
+        if let thumbnail {
+            phase = .placeholder(thumbnail)
+        }
+        return true
     }
 
     /// Shows pixels, keeping the zoom and the position the policy keeps.
@@ -2072,7 +2080,10 @@ struct DetailMarkingView: View {
             zoomMode = .manual
             focusTracking.reset()
         }
-        guard value > DetailFitScale.tolerance, !previewOnly, let shown else { return }
+        guard value > DetailFitScale.tolerance, !previewOnly, let shown, shownPhoto == photo.id
+        else {
+            return
+        }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
         upgradeTask?.cancel()
         upgradeTask = Task {
@@ -2171,7 +2182,7 @@ struct DetailMarkingView: View {
             setZoom(.fit)
             return
         }
-        guard shown != nil else { return }
+        guard shown != nil, shownPhoto == photo.id else { return }
         if settings.doubleTap == .zoomToFocus,
             let targetRegion = focusRegionState.preferredDoubleTapRegion(
                 at: tap.proximityAnchor,
@@ -2192,7 +2203,7 @@ struct DetailMarkingView: View {
     /// double-tap setting. It neither resolves a marking input nor calls a navigation action.
     private func focusRegionTapped(_ region: DetailFocusRegion) {
         dismissGestureGuide()
-        guard region.isActionable, shown != nil else { return }
+        guard region.isActionable, shown != nil, shownPhoto == photo.id else { return }
         inspectedFocusRegionID = region.id
         focusTracking.beginTracking()
         inspectFullResolution(at: region.centre)
@@ -2240,7 +2251,8 @@ struct DetailMarkingView: View {
     /// nothing better to give returns the preview with a limitation, which turns ``previewOnly``
     /// on, so the same request is never repeated for that photo (PRD P0-04).
     private func upgradeIfNeeded() {
-        guard scale > DetailFitScale.tolerance, !previewOnly, let shown else { return }
+        guard scale > DetailFitScale.tolerance, !previewOnly, let shown, shownPhoto == photo.id
+        else { return }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
         upgradeTask?.cancel()
         upgradeTask = Task {

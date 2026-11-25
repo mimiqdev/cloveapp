@@ -330,6 +330,8 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     }
 
     var onZoomChange: ((CGFloat) -> Void)?
+    var displayedImage: CGImage? { imageView.image?.cgImage }
+    var onDisplayedImageChange: ((CGImage?) -> Void)?
     var isCompareMode = false {
         didSet {
             guard oldValue != isCompareMode else { return }
@@ -478,7 +480,10 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         let previousPixels = shownPixels
         // Read before the pixels change: the point the viewport centres on in the old bitmap.
         let kept = zoomSnapshot
-        imageView.image = pixels.map { UIImage(cgImage: $0) }
+        if pixels !== imageView.image?.cgImage {
+            imageView.image = pixels.map { UIImage(cgImage: $0) }
+            onDisplayedImageChange?(pixels)
+        }
         shownPixels = pixels.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
         self.fullResolutionPixels = fullResolution
         updateMaximumZoom()

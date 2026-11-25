@@ -114,16 +114,16 @@ struct DetailDisplayPresentationTests {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let source = ObservedDetailImages()
         source.prefetchEnabled = false
-        let browsing = BrowsingModel(library: TestLibrary.sample())
+        let sample = TestLibrary.sample()
+        let first = sample.photos[2]
+        let next = sample.photos[3]
+        let coldThumbnails = ColdSwitchThumbnailSource(inner: sample.thumbnails)
+        coldThumbnails.coldMissPhotos.insert(next.id)
+        let library = ColdDetailSwitchLibrary(base: sample, thumbnails: coldThumbnails)
+        let browsing = BrowsingModel(library: library)
         browsing.openFolder()
-        let first = browsing.photos[2]
-        let next = browsing.photos[3]
         source.heldPhoto = next.id
         source.heldPlaceholder = next.id
-        guard
-            case .image(let thumbnail) = await browsing.thumbnails.thumbnail(
-                for: next.id, priority: .visible)
-        else { throw CocoaError(.fileReadUnknown) }
         browsing.openPhoto(first.id)
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
@@ -139,15 +139,20 @@ struct DetailDisplayPresentationTests {
         let preview = try #require(findPreview(in: window))
         let scroll = try #require(preview.subviews.first as? UIScrollView)
         let image = try #require(scroll.subviews.first as? UIImageView)
-        try #require(image.image?.cgImage != nil)
+        let firstImage = try #require(image.image?.cgImage)
+        let recorder = DetailStageImageRecorder(container: preview)
+        defer { recorder.stop() }
         browsing.openPhoto(next.id)
         try await waitFor { source.placeholderRequests.contains(next.id) }
-        try await waitFor { image.image == nil }
+        #expect(image.image?.cgImage === firstImage)
+        #expect(!recorder.sawNilFrame)
         #expect(!source.releasesPlaceholder)
         #expect(!source.requests.contains { $0.0 == next.id })
         source.releasesPlaceholder = true
         try await waitFor { source.requests.contains { $0.0 == next.id } }
+        let thumbnail = try #require(coldThumbnails.deliveredByPhoto[next.id])
         try await waitFor { image.image?.cgImage === thumbnail }
+        #expect(!recorder.sawNilFrame)
         #expect(!source.deliveries.contains { $0.0 == next.id })
         #expect(!(preview.accessibilityValue ?? "").localizedCaseInsensitiveContains("loading"))
         func hasLoadingCue(_ view: UIView) -> Bool {
@@ -2134,6 +2139,379 @@ struct DetailDisplayPresentationTests {
         try await waitFor { spy.warmHits.contains(photos[5].id) && imageView.image?.cgImage != nil }
         #expect(!spy.placeholderPhotos.contains(photos[5].id))
         try await waitFor { spy.prefetched.last?.current.photo == photos[5].id }
+    }
+
+    @Test
+    func coldSwitchWithCachedThumbnailTransitionsWithoutNilFramesAndUpgradesToPreview()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let sample = TestLibrary.sample()
+        let first = sample.photos[2].id
+        let next = sample.photos[5].id
+        let cachedThumb = try testPixels(gray: 0.7)
+
+        let thumbnails = ColdSwitchThumbnailSource(inner: sample.thumbnails)
+        thumbnails.cachedOverrides[next] = cachedThumb
+        let library = ColdDetailSwitchLibrary(base: sample, thumbnails: thumbnails)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+
+        let images = ColdSwitchDetailImages()
+        images.gatedPreviewPhotos.insert(next)
+        browsing.openPhoto(first)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 650)
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: images)
+                .environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor { images.deliveredPreviews.contains(first) }
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let imageView = try #require(scroll.subviews.first as? UIImageView)
+        try #require(imageView.image?.cgImage != nil)
+
+        let recorder = DetailStageImageRecorder(container: preview)
+        defer { recorder.stop() }
+
+        // Cold warmImage miss with synchronous cachedThumbnail hit transitions directly to cachedThumb.
+        browsing.openPhoto(next)
+        try await waitFor {
+            imageView.image?.cgImage === cachedThumb
+                && images.imageRequests.contains { $0.0 == next && $0.1 == .preview }
+        }
+        #expect(findPreview(in: window) === preview)
+        #expect(!images.placeholderRequests.contains(next))
+        #expect(!recorder.sawNilFrame)
+
+        // Releasing the preview upgrades smoothly from cachedThumb to full preview without nil frames.
+        images.releasePreview(for: next)
+        try await waitFor {
+            images.deliveredPreviews.contains(next)
+                && imageView.image?.cgImage === images.previewImages[next]
+        }
+        #expect(!images.placeholderRequests.contains(next))
+        #expect(!recorder.sawNilFrame)
+    }
+
+    @Test
+    func coldSwitchMissRetainsStagePixelsHidesStaleOverlaysAndResetsTimelineZoom()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let sample = TestLibrary.sample()
+        let first = try #require(sample.photos.first { $0.id.stem == "mmq02678" }).id
+        let second = sample.photos[5].id
+        let third = sample.photos[6].id
+        let delayedThumb = try testPixels(gray: 0.62)
+
+        let thumbnails = ColdSwitchThumbnailSource(inner: sample.thumbnails)
+        thumbnails.coldMissPhotos = [second, third]
+        let library = ColdDetailSwitchLibrary(base: sample, thumbnails: thumbnails)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        browsing.showsFocusRegions = true
+
+        let images = ColdSwitchDetailImages()
+        images.limitedPhotos.insert(first)
+        images.gatedPlaceholderPhotos.formUnion([second, third])
+        images.placeholderOverrides[second] = nil
+        images.placeholderOverrides[third] = delayedThumb
+        images.gatedPreviewPhotos.formUnion([second, third])
+        browsing.openPhoto(first)
+
+        let framesBox = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 650)
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: images)
+                .environment(store)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                })
+        window.makeKeyAndVisible()
+        defer {
+            images.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("first screen render settled") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return images.deliveredScreenRenders.contains(first)
+                && !self.findAllFocusControls(in: preview).isEmpty
+                && framesBox.frames["clove.detail.limitation"] != nil
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let imageView = try #require(scroll.subviews.first as? UIImageView)
+        let firstPixels = try #require(imageView.image?.cgImage)
+
+        // Zoom in on first photo so Timeline switch also verifies clean .fit reset.
+        preview.onDoubleTap?(.center)
+        try await waitFor { preview.isZoomed }
+
+        let recorder = DetailStageImageRecorder(container: preview)
+        defer { recorder.stop() }
+
+        // 1. Switch to second (both warmImage and cachedThumbnail miss, placeholder held -> returns nil).
+        browsing.openPhoto(second)
+        try await waitFor {
+            images.placeholderRequests.contains(second)
+                && !preview.isZoomed
+                && self.findAllFocusControls(in: preview).isEmpty
+                && framesBox.frames["clove.detail.limitation"] == nil
+        }
+        #expect(imageView.image?.cgImage === firstPixels)
+        #expect(!recorder.sawNilFrame)
+
+        // Double-tap on retained stale pixels must be ignored while shown == nil.
+        preview.onDoubleTap?(.center)
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(!preview.isZoomed)
+
+        // Releasing placeholder with nil must NOT overwrite retained pixels.
+        images.releasePlaceholder(for: second)
+        try await waitFor { images.imageRequests.contains { $0.0 == second && $0.1 == .preview } }
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(imageView.image?.cgImage === firstPixels)
+        #expect(!recorder.sawNilFrame)
+
+        // Releasing preview transitions cleanly to second's pixels.
+        images.releasePreview(for: second)
+        try await waitFor("second screen render settled") {
+            images.deliveredScreenRenders.contains(second)
+                && imageView.image?.cgImage != nil
+                && imageView.image?.cgImage !== firstPixels
+        }
+        let secondPixels = try #require(imageView.image?.cgImage)
+        #expect(!preview.isZoomed)
+        #expect(!recorder.sawNilFrame)
+
+        // 2. Switch to third (delayed placeholder returns non-nil thumbnail, then full preview).
+        recorder.resetRecording()
+        browsing.openPhoto(third)
+        try await waitFor { images.placeholderRequests.contains(third) }
+        #expect(imageView.image?.cgImage === secondPixels)
+        #expect(!recorder.sawNilFrame)
+
+        images.releasePlaceholder(for: third)
+        try await waitFor {
+            imageView.image?.cgImage === delayedThumb
+                && images.imageRequests.contains { $0.0 == third && $0.1 == .preview }
+        }
+        #expect(!recorder.sawNilFrame)
+
+        images.releasePreview(for: third)
+        try await waitFor {
+            images.deliveredPreviews.contains(third)
+                && imageView.image?.cgImage === images.previewImages[third]
+        }
+        #expect(!recorder.sawNilFrame)
+    }
+
+    @Test
+    func groupFocusColdSwitchRetainsPixelsAndPreservesZoomAndFocusRecenter() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let context = makeGroupFocusTrackingContext()
+        context.browsing.openFolder()
+        try await waitFor {
+            !context.browsing.isFolderOpening && context.browsing.groups.count == 1
+        }
+        let thumbnails = ColdSwitchThumbnailSource()
+        thumbnails.coldMissPhotos = [context.g2]
+        let library = ColdDetailSwitchLibrary(
+            folder: try #require(context.browsing.state.folder),
+            photos: context.browsing.photos,
+            groups: [context.group],
+            thumbnails: thumbnails,
+            detailImages: context.source)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor { !browsing.isFolderOpening && browsing.groups.count == 1 }
+        browsing.showsFocusRegions = true
+        browsing.openGroup(context.group.id, on: context.g1)
+
+        context.source.gatedImagePhotos.insert(context.g2)
+        context.source.gatedFocusPhotos.insert(context.g2)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 650)
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: context.source)
+                .environment(store))
+        window.makeKeyAndVisible()
+        defer {
+            context.source.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("g1 focus regions loaded") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return context.source.finishedAnalysisPhotos.contains(context.g1)
+                && !self.findAllFocusControls(in: preview).isEmpty
+        }
+
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let imageView = try #require(scroll.subviews.first as? UIImageView)
+
+        // Enter 100% inspection on g1's AF focus region.
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.25, y: 0.30)))
+        try await waitFor("g1 zoomed and full resolution delivered") {
+            preview.isZoomed && context.source.deliveredFullPhotos.contains(context.g1)
+                && imageView.image?.cgImage?.width == SampleDetailImages.fullLongEdge
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let g1Pixels = try #require(imageView.image?.cgImage)
+
+        let recorder = DetailStageImageRecorder(container: preview)
+        defer { recorder.stop() }
+
+        // Step to g2 while g2 misses warmImage, misses cachedThumbnail, and returns nil placeholder.
+        browsing.selectGroupPhoto(context.g2)
+        try await waitFor("g2 cleared stale g1 focus controls") {
+            self.findAllFocusControls(in: preview).isEmpty
+        }
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(imageView.image?.cgImage === g1Pixels)
+        #expect(!recorder.sawNilFrame)
+
+        // Release g2's image and focus analysis: zoom is preserved and re-centered on g2's AF region.
+        context.source.releaseImage(for: context.g2)
+        try await waitFor("g2 delivered full resolution") {
+            context.source.deliveredFullPhotos.contains(context.g2)
+        }
+        context.source.deliverAutofocus(for: context.g2)
+        context.source.finishAnalysis(for: context.g2)
+        try await waitFor("g2 zoomed and recentered on AF") {
+            preview.isZoomed
+                && self.findAllFocusControls(in: preview).contains {
+                    $0.region.id == "clove.detail.region.af.0"
+                }
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let snapshot = try #require(preview.zoomSnapshot)
+        #expect(abs(snapshot.anchor.x - 0.70) < 0.05)
+        #expect(abs(snapshot.anchor.y - 0.64) < 0.05)
+        #expect(!recorder.sawNilFrame)
+    }
+
+    @Test
+    func coldSwitchToUnavailableOrDeferredClearsRetainedPixelsAndShowsFailureCopy() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let sample = TestLibrary.sample()
+        let goodPhoto = sample.photos[2].id
+        let unavailablePhoto = sample.photos[3].id
+        let unavailableWithThumbPhoto = sample.photos[4].id
+        let deferredPhoto = sample.photos[5].id
+        let thumb = try testPixels(gray: 0.75)
+
+        let thumbnails = ColdSwitchThumbnailSource(inner: sample.thumbnails)
+        thumbnails.coldMissPhotos = [unavailablePhoto, deferredPhoto]
+        thumbnails.cachedOverrides[unavailableWithThumbPhoto] = thumb
+        let library = ColdDetailSwitchLibrary(base: sample, thumbnails: thumbnails)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+
+        let images = ColdSwitchDetailImages()
+        images.unavailablePhotos.insert(unavailablePhoto)
+        images.unavailablePhotos.insert(unavailableWithThumbPhoto)
+        images.deferredPhotos.insert(deferredPhoto)
+        images.gatedPreviewPhotos.formUnion([unavailablePhoto, unavailableWithThumbPhoto])
+        browsing.openPhoto(goodPhoto)
+
+        let framesBox = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 650)
+        window.rootViewController = UIHostingController(
+            rootView: DetailScreen(browsing: browsing, images: images)
+                .environment(store)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                })
+        window.makeKeyAndVisible()
+        defer {
+            images.releaseAll()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor { images.deliveredPreviews.contains(goodPhoto) }
+        let preview = try #require(findPreview(in: window))
+        let scroll = try #require(preview.subviews.first as? UIScrollView)
+        let imageView = try #require(scroll.subviews.first as? UIImageView)
+        let goodPixels = try #require(imageView.image?.cgImage)
+
+        let recorder = DetailStageImageRecorder(container: preview)
+        defer { recorder.stop() }
+
+        // 1. Cold switch to unavailable (no thumbnail): retains goodPixels while pending, then clears.
+        browsing.openPhoto(unavailablePhoto)
+        try await waitFor {
+            images.imageRequests.contains { $0.0 == unavailablePhoto && $0.1 == .preview }
+        }
+        #expect(imageView.image?.cgImage === goodPixels)
+        #expect(framesBox.frames["clove.detail.unavailable"] == nil)
+        #expect(!recorder.sawNilFrame)
+
+        images.releasePreview(for: unavailablePhoto)
+        try await waitFor {
+            imageView.image == nil && framesBox.frames["clove.detail.unavailable"] != nil
+        }
+
+        // 2. Switch back to goodPhoto, then to unavailableWithThumbPhoto (cachedThumbnail hits, then fails).
+        browsing.openPhoto(goodPhoto)
+        try await waitFor { imageView.image?.cgImage != nil }
+        recorder.resetRecording()
+
+        browsing.openPhoto(unavailableWithThumbPhoto)
+        try await waitFor {
+            imageView.image?.cgImage === thumb
+                && images.imageRequests.contains {
+                    $0.0 == unavailableWithThumbPhoto && $0.1 == .preview
+                }
+        }
+        #expect(!recorder.sawNilFrame)
+        images.releasePreview(for: unavailableWithThumbPhoto)
+        try await waitFor {
+            imageView.image == nil && framesBox.frames["clove.detail.unavailable"] != nil
+        }
+
+        // 3. Switch back to goodPhoto, then to deferredPhoto: retains goodPixels across retries, then clears.
+        browsing.openPhoto(goodPhoto)
+        try await waitFor { imageView.image?.cgImage != nil }
+        recorder.resetRecording()
+
+        browsing.openPhoto(deferredPhoto)
+        try await waitFor {
+            images.imageRequests.contains { $0.0 == deferredPhoto && $0.1 == .preview }
+        }
+        #expect(imageView.image?.cgImage === goodPixels)
+        #expect(!recorder.sawNilFrame)
+
+        try await waitFor {
+            imageView.image == nil && framesBox.frames["clove.detail.unavailable"] != nil
+        }
     }
 
     @Test func duoFocusSplitDoubleTapAndRegionTapKeepZoomCentredOnFocusRegion()
@@ -6934,5 +7312,251 @@ private final class GroupFocusTrackingDetailImages: DetailImageSource, DetailReg
                 autofocus: .regions([af]), faces: .unavailable(.noFacesDetected),
                 acquisitionFailure: nil, timings: RegionSharpnessTimings())
         }
+    }
+}
+
+@MainActor
+private final class DetailStageImageRecorder {
+    private(set) var assignments: [CGImage?] = []
+    private(set) var frameSamples: [CGImage?] = []
+    private weak var container: DetailZoomContainerView?
+    private var runLoopObserver: CFRunLoopObserver?
+
+    init(container: DetailZoomContainerView) {
+        self.container = container
+        assignments.append(container.displayedImage)
+        frameSamples.append(container.displayedImage)
+        container.onDisplayedImageChange = { [weak self] image in
+            self?.assignments.append(image)
+        }
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault,
+            CFRunLoopActivity.beforeWaiting.rawValue,
+            true,
+            0
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated {
+                guard let self, let container = self.container else { return }
+                self.frameSamples.append(container.displayedImage)
+            }
+        }
+        if let observer {
+            self.runLoopObserver = observer
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        }
+    }
+
+    func resetRecording() {
+        let current = container?.displayedImage
+        assignments = [current]
+        frameSamples = [current]
+    }
+
+    var sawNilFrame: Bool {
+        assignments.contains(where: { $0 == nil }) || frameSamples.contains(where: { $0 == nil })
+    }
+
+    func stop() {
+        container?.onDisplayedImageChange = nil
+        if let runLoopObserver {
+            CFRunLoopRemoveObserver(CFRunLoopGetMain(), runLoopObserver, .commonModes)
+            self.runLoopObserver = nil
+        }
+    }
+}
+
+@MainActor
+private final class ColdSwitchThumbnailSource: GridThumbnailSource {
+    private let inner: any GridThumbnailSource
+    var cachedOverrides: [PhotoIdentity: CGImage] = [:]
+    var coldMissPhotos: Set<PhotoIdentity> = []
+    private(set) var deliveredByPhoto: [PhotoIdentity: CGImage] = [:]
+
+    init(inner: any GridThumbnailSource = SampleGridThumbnails()) {
+        self.inner = inner
+    }
+
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? {
+        if coldMissPhotos.contains(photo) {
+            return nil
+        }
+        if let override = cachedOverrides[photo] {
+            return .image(override)
+        }
+        return inner.cachedThumbnail(for: photo)
+    }
+
+    func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority) async
+        -> GridThumbnailOutcome
+    {
+        let outcome = await inner.thumbnail(for: photo, priority: priority)
+        if case .image(let pixels) = outcome {
+            deliveredByPhoto[photo] = pixels
+        }
+        return outcome
+    }
+
+    func companions(for photo: PhotoIdentity) -> GridCompanions {
+        inner.companions(for: photo)
+    }
+}
+
+@MainActor
+private final class ColdDetailSwitchLibrary: FolderLibrary {
+    let folder: FolderIdentity
+    let photos: [GridPhoto]
+    let groups: [BrowsingGroup]
+    let thumbnails: any GridThumbnailSource
+    let detailImages: any DetailImageSource
+    let updates: AsyncStream<FolderLibraryUpdate>
+
+    init(base: TestLibrary, thumbnails: any GridThumbnailSource) {
+        self.folder = base.folder
+        self.photos = base.photos
+        self.groups = base.groups
+        self.thumbnails = thumbnails
+        self.detailImages = base.detailImages
+        self.updates = base.updates
+    }
+
+    init(
+        folder: FolderIdentity,
+        photos: [GridPhoto],
+        groups: [BrowsingGroup],
+        thumbnails: any GridThumbnailSource,
+        detailImages: any DetailImageSource
+    ) {
+        self.folder = folder
+        self.photos = photos
+        self.groups = groups
+        self.thumbnails = thumbnails
+        self.detailImages = detailImages
+        let (stream, continuation) = AsyncStream.makeStream(of: FolderLibraryUpdate.self)
+        continuation.yield(
+            .scanFinished(FolderScanSummary(photoCount: photos.count, status: .complete)))
+        continuation.finish()
+        self.updates = stream
+    }
+}
+
+@MainActor
+private final class ColdSwitchDetailImages: DetailImageSource, DetailRegionSharpnessSource {
+    private let sample = SampleDetailImages()
+    var gatedPlaceholderPhotos: Set<PhotoIdentity> = []
+    var gatedPreviewPhotos: Set<PhotoIdentity> = []
+    var placeholderOverrides: [PhotoIdentity: CGImage?] = [:]
+    var unavailablePhotos: Set<PhotoIdentity> = []
+    var deferredPhotos: Set<PhotoIdentity> = []
+    var limitedPhotos: Set<PhotoIdentity> = []
+
+    private(set) var placeholderRequests: [PhotoIdentity] = []
+    private(set) var imageRequests: [(PhotoIdentity, DetailPixelRequest.Need)] = []
+    private(set) var deliveredPreviews: Set<PhotoIdentity> = []
+    private(set) var deliveredScreenRenders: Set<PhotoIdentity> = []
+    private(set) var previewImages: [PhotoIdentity: CGImage] = [:]
+
+    private var pendingPlaceholders: [PhotoIdentity: [CheckedContinuation<Void, Never>]] = [:]
+    private var pendingPreviews: [PhotoIdentity: [CheckedContinuation<Void, Never>]] = [:]
+
+    func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
+        -> CGImage?
+    {
+        placeholderRequests.append(photo)
+        if gatedPlaceholderPhotos.contains(photo) {
+            await withCheckedContinuation { continuation in
+                pendingPlaceholders[photo, default: []].append(continuation)
+            }
+        }
+        if let override = placeholderOverrides[photo] {
+            return override
+        }
+        return nil
+    }
+
+    func releasePlaceholder(for photo: PhotoIdentity) {
+        gatedPlaceholderPhotos.remove(photo)
+        let waiting = pendingPlaceholders.removeValue(forKey: photo) ?? []
+        for continuation in waiting {
+            continuation.resume()
+        }
+    }
+
+    func releasePreview(for photo: PhotoIdentity) {
+        gatedPreviewPhotos.remove(photo)
+        let waiting = pendingPreviews.removeValue(forKey: photo) ?? []
+        for continuation in waiting {
+            continuation.resume()
+        }
+    }
+
+    func releaseAll() {
+        for photo in Array(pendingPlaceholders.keys) {
+            releasePlaceholder(for: photo)
+        }
+        for photo in Array(pendingPreviews.keys) {
+            releasePreview(for: photo)
+        }
+    }
+
+    func prepare(_ window: DetailPhotoWindow) async {
+        await sample.prepare(window)
+    }
+
+    func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
+        imageRequests.append((photo, request.need))
+        if gatedPreviewPhotos.contains(photo), request.need == .preview {
+            await withCheckedContinuation { continuation in
+                pendingPreviews[photo, default: []].append(continuation)
+            }
+        }
+        if unavailablePhotos.contains(photo) {
+            return .unavailable(.cannotOpen)
+        }
+        if deferredPhotos.contains(photo) {
+            return .deferred
+        }
+        let outcome = await sample.image(for: photo, request: request)
+        guard case .image(let image) = outcome else { return outcome }
+        let finalImage: DetailImage =
+            if limitedPhotos.contains(photo) {
+                DetailImage(
+                    image: image.image,
+                    source: image.source,
+                    quality: image.quality,
+                    hasRAW: image.hasRAW,
+                    limitation: .noHigherResolution,
+                    fullResolutionSize: image.fullResolutionSize)
+            } else {
+                image
+            }
+        if request.need == .preview {
+            deliveredPreviews.insert(photo)
+            previewImages[photo] = finalImage.image
+        } else if request.need == .screenRender {
+            deliveredScreenRenders.insert(photo)
+        }
+        return .image(finalImage)
+    }
+
+    func prefetchPreviews(_ window: DetailPhotoWindow) async {
+        await sample.prefetchPreviews(window)
+    }
+
+    func prefetch(_ window: DetailPhotoWindow, renderAhead: Bool) async {
+        await sample.prefetch(window, renderAhead: renderAhead)
+    }
+
+    func leave(window: UUID) async {
+        await sample.leave(window: window)
+    }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        await sample.analyzeRegions(
+            for: photo, group: group, nearby: nearby, onAutofocus: onAutofocus)
     }
 }
