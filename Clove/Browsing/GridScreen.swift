@@ -127,7 +127,7 @@ struct GridScreen: View {
     static func progressLineState(
         browsing: BrowsingModel, similarGroupsEnabled: Bool
     ) -> (progress: Double?, tone: ProgressLine.Tone) {
-        if let progress = browsing.readingProgress {
+        if let progress = browsing.visibleReadingProgress {
             let value = progress.total > 0 ? Double(progress.read) / Double(progress.total) : 0
             return (value, .reading)
         }
@@ -140,7 +140,7 @@ struct GridScreen: View {
     private var gridDisplay: GridDisplay {
         GridDisplay(
             photos: browsing.photos, groups: browsing.groups,
-            groupsEnabled: store.settings.similarGroupsEnabled && browsing.readingProgress == nil,
+            groupsEnabled: store.settings.similarGroupsEnabled && !browsing.isScanning,
             expandGroupsInline: isSelecting && areGroupsUnfolded)
     }
 
@@ -236,7 +236,7 @@ struct GridScreen: View {
                 }
                 guard !areGroupsUnfolded else { return }
                 if reduceMotion || !store.settings.similarGroupsEnabled
-                    || browsing.readingProgress != nil
+                    || browsing.isScanning
                 {
                     areGroupsUnfolded = true
                     return
@@ -498,7 +498,7 @@ struct GridScreen: View {
                     selection: browsing.state.selection,
                     thumbnails: thumbnails,
                     isSelectingEmpty: selectsEmpty,
-                    placeholderCount: browsing.readingProgress.map {
+                    placeholderCount: browsing.visibleReadingProgress.map {
                         $0.total == 0 ? 9 : max($0.total - $0.read, 0)
                     } ?? 0,
                     columnCount: isDuoExpanded ? 6 : nil,
@@ -957,7 +957,7 @@ struct GridScreen: View {
         language: ResolvedAppLanguage = .english
     ) -> String {
         if isSelecting { return browsing.localizedFolderTitle(language: language) }
-        if let progress = browsing.readingProgress {
+        if let progress = browsing.visibleReadingProgress {
             return progress.total == 0
                 ? AppLocalization.string("Reading photos…", language: language)
                 : AppLocalization.format(

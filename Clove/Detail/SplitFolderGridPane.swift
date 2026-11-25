@@ -18,7 +18,7 @@ struct SplitFolderGridPane: View {
     @Environment(\.isDuoExpanded) private var isDuoExpanded
 
     private var groupsEnabled: Bool {
-        similarGroupsEnabled && browsing.readingProgress == nil
+        similarGroupsEnabled && !browsing.isScanning
     }
 
     private var timeline: DetailTimeline {
@@ -41,7 +41,7 @@ struct SplitFolderGridPane: View {
         let focused = activeExpandedGroup
         let display = gridDisplay(focused: focused)
         VStack(spacing: 0) {
-            if let progress = browsing.readingProgress {
+            if let progress = browsing.visibleReadingProgress {
                 ProgressLine(
                     progress: progress.total > 0
                         ? Double(progress.read) / Double(progress.total) : 0)
@@ -55,7 +55,7 @@ struct SplitFolderGridPane: View {
                     selection: [],
                     thumbnails: thumbnails,
                     isSelectingEmpty: false,
-                    placeholderCount: browsing.readingProgress.map {
+                    placeholderCount: browsing.visibleReadingProgress.map {
                         $0.total == 0 ? 9 : max($0.total - $0.read, 0)
                     } ?? 0,
                     columnCount: 2,

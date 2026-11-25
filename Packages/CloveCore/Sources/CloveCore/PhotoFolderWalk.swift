@@ -194,7 +194,12 @@ struct FolderWalk {
         // filtered here rather than depending on that behavior (S6, PRD scan scope).
         guard !name.hasPrefix(".") else { return }
         if url.pathExtension.lowercased() == "xmp" {
-            directories[relativeFolderPath]?.add(packetURL: url)
+            let values = try? url.resourceValues(forKeys: PhotoFolderWalk.resourceKeySet)
+            let isRegularFile = values?.isRegularFile != false
+            directories[relativeFolderPath]?.add(
+                packetURL: url,
+                size: isRegularFile ? values?.fileSize : nil,
+                modificationDate: isRegularFile ? values?.contentModificationDate : nil)
             return
         }
         guard let file = PhotoFile(url: url) else {
@@ -258,9 +263,16 @@ extension PhotoFolderWalk {
             let heifs = members.filter { $0.file.format == .heif }
             let memberExtensions = Set(members.map { $0.file.url.pathExtension.lowercased() })
             var sidecar = SidecarState.absent
+            var sidecarRevision: ScannedFileRevision?
             if !raws.isEmpty {
                 let packets = contents.packets(forStem: key, memberExtensions: memberExtensions)
                 sidecar = Self.sidecarState(from: packets)
+                if case .resolved = sidecar, let match = packets.first,
+                    match.size != nil || match.modificationDate != nil
+                {
+                    sidecarRevision = ScannedFileRevision(
+                        size: match.size, modificationDate: match.modificationDate)
+                }
                 claimedPackets.formUnion(packets.map(\.url))
             }
             if raws.count > 1 || jpegs.count > 1 || heifs.count > 1 {
@@ -282,7 +294,8 @@ extension PhotoFolderWalk {
                 .photo(
                     ScannedPhotoSet(
                         photoSet: photoSet, sidecar: sidecar,
-                        imageFiles: [raws.first, jpegs.first, heifs.first].compactMap { $0 })))
+                        imageFiles: [raws.first, jpegs.first, heifs.first].compactMap { $0 },
+                        sidecarRevision: sidecarRevision)))
         }
         let orphanSidecarCount = contents.packets.filter {
             !claimedPackets.contains($0.url)
@@ -325,6 +338,10 @@ struct DirectoryContents {
         let url: URL
         /// The last path component without `.xmp`; `NAME.ARW.xmp` has the stem `NAME.ARW`.
         let stem: String
+        /// Prefetched byte size, or nil when unavailable.
+        let size: Int?
+        /// Prefetched modification date, or nil when unavailable.
+        let modificationDate: Date?
     }
 
     /// One packet that could belong to a stem, and whether its name appends an extension.
@@ -333,6 +350,22 @@ struct DirectoryContents {
         let url: URL
         /// True for a name like `NAME.ARW.xmp`, false for a plain `NAME.xmp`.
         let isAppendedExtension: Bool
+        /// Prefetched byte size, or nil when unavailable.
+        let size: Int?
+        /// Prefetched modification date, or nil when unavailable.
+        let modificationDate: Date?
+
+        init(
+            url: URL,
+            isAppendedExtension: Bool,
+            size: Int? = nil,
+            modificationDate: Date? = nil
+        ) {
+            self.url = url
+            self.isAppendedExtension = isAppendedExtension
+            self.size = size
+            self.modificationDate = modificationDate
+        }
     }
 
     /// Stem groups by folded stem, with their actual spelling kept in the group.
@@ -356,9 +389,10 @@ struct DirectoryContents {
     }
 
     /// Adds one `.xmp` file; it is never a photo and never unsupported (G1 sidecar naming).
-    mutating func add(packetURL url: URL) {
+    mutating func add(packetURL url: URL, size: Int? = nil, modificationDate: Date? = nil) {
         let stem = url.deletingPathExtension().lastPathComponent
-        packets.append(Packet(url: url, stem: stem))
+        packets.append(
+            Packet(url: url, stem: stem, size: size, modificationDate: modificationDate))
     }
 
     /// The folder's packets that could belong to one stem, in walk order.
@@ -368,12 +402,18 @@ struct DirectoryContents {
     func packets(forStem key: String, memberExtensions: Set<String>) -> [PacketMatch] {
         packets.compactMap { packet in
             let stem = packet.stem.lowercased()
-            if stem == key { return PacketMatch(url: packet.url, isAppendedExtension: false) }
+            if stem == key {
+                return PacketMatch(
+                    url: packet.url, isAppendedExtension: false, size: packet.size,
+                    modificationDate: packet.modificationDate)
+            }
             guard let dot = stem.lastIndex(of: "."), dot != stem.startIndex else { return nil }
             let base = String(stem[stem.startIndex..<dot])
             let extended = String(stem[stem.index(after: dot)...])
             guard base == key, memberExtensions.contains(extended) else { return nil }
-            return PacketMatch(url: packet.url, isAppendedExtension: true)
+            return PacketMatch(
+                url: packet.url, isAppendedExtension: true, size: packet.size,
+                modificationDate: packet.modificationDate)
         }
     }
 }

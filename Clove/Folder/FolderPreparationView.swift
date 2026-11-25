@@ -739,7 +739,7 @@ struct FolderPreparationDetails: View {
 
     private var groupingRow: some View {
         let title = AppLocalization.string("Similar groups", language: language)
-        let isScanning = browsing.readingProgress != nil
+        let isScanning = browsing.isScanning
         let progress = browsing.groupingProgress
         let statusText = FolderPreparationAccessibility.groupingStatusText(
             for: status,

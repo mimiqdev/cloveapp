@@ -46,9 +46,20 @@ final class BrowsingModel {
     /// Whether the open folder's scan reported itself finished (PRD P0-01).
     private var hasFinishedScan: Bool { finishedScanFor == library.folder }
 
+    /// Whether the open folder's scan is still running.
+    var isScanning: Bool { !hasFinishedScan }
+
     /// Whether the open folder is still opening, so the grid hides actions the handoff hides
     /// until the scan finishes (design handoff, PRD P0-01).
     var isFolderOpening: Bool { !hasFinishedScan || isFindingSimilarShots }
+
+    /// Grace delay before surfacing a reading progress indicator when no uncached primary files
+    /// have triggered metadata parsing.
+    static let readingProgressGraceDelay: Duration = .milliseconds(150)
+
+    private var hasUncachedMetadataReads = false
+    private var hasElapsedReadingGrace = false
+    private var readingProgressGraceTask: Task<Void, Never>?
 
     /// Progress of the folder's visual similarity grouping pass.
     private(set) var groupingProgress: FolderGroupingProgress = .idle
@@ -109,6 +120,20 @@ final class BrowsingModel {
     var readingProgress: (read: Int, total: Int)? {
         guard !hasFinishedScan else { return nil }
         return (storedPhotos.filter { !$0.time.isPending }.count, storedPhotos.count)
+    }
+
+    /// Reading progress surfaced to UI indicators only when uncached metadata parsing runs,
+    /// pending items are already held back, or the scan exceeds ``readingProgressGraceDelay``.
+    var visibleReadingProgress: (read: Int, total: Int)? {
+        guard showsReadingProgress else { return nil }
+        return readingProgress
+    }
+
+    private var showsReadingProgress: Bool {
+        guard !hasFinishedScan else { return false }
+        return hasUncachedMetadataReads
+            || hasElapsedReadingGrace
+            || storedPhotos.contains(where: \.time.isPending)
     }
 
     /// The opened folder's display name, without its device path.
@@ -510,7 +535,7 @@ final class BrowsingModel {
         compareSession = nil
         let timeline = DetailTimeline(
             photos: photos, groups: groups,
-            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+            groupsEnabled: similarGroupsEnabled && !isScanning)
         guard let active = timeline.activeGroup(with: groupID) else {
             if let photo { openPhoto(photo) }
             return
@@ -530,7 +555,7 @@ final class BrowsingModel {
         guard let expanded = expandedGroup else { return }
         let timeline = DetailTimeline(
             photos: photos, groups: groups,
-            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+            groupsEnabled: similarGroupsEnabled && !isScanning)
         guard let active = timeline.activeGroup(with: expanded),
             active.visibleMembers.contains(where: { $0.id == photo })
         else { return }
@@ -546,7 +571,7 @@ final class BrowsingModel {
         expandedGroup = nil
         let timeline = DetailTimeline(
             photos: photos, groups: groups,
-            groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+            groupsEnabled: similarGroupsEnabled && !isScanning)
         if let active = timeline.activeGroup(with: expanded) {
             let representative = active.representative.id
             if state.currentPhoto != representative {
@@ -1198,7 +1223,7 @@ final class BrowsingModel {
         if restoringNavigation, let returnPhoto = undo.photo {
             let timeline = DetailTimeline(
                 photos: photos, groups: groups,
-                groupsEnabled: similarGroupsEnabled && readingProgress == nil)
+                groupsEnabled: similarGroupsEnabled && !isScanning)
             if let active = timeline.activeGroup(containing: returnPhoto) {
                 openGroup(active.id, on: returnPhoto)
             } else {
@@ -1525,6 +1550,10 @@ final class BrowsingModel {
         folderLocationLoss = nil
         folderLocationLossGeneration = nil
         finishedScanFor = nil
+        readingProgressGraceTask?.cancel()
+        readingProgressGraceTask = nil
+        hasUncachedMetadataReads = false
+        hasElapsedReadingGrace = false
         groupingProgress = .idle
         preparationStatus = .idle
         labelFilter = nil
@@ -1677,9 +1706,15 @@ final class BrowsingModel {
             // A reopen of the same folder starts a new scan, so the old finished marker cannot
             // make the folder look ready before its new scan ends (PRD P0-01, P0-10).
             finishedScanFor = nil
+            hasUncachedMetadataReads = false
+            hasElapsedReadingGrace = false
+            restartReadingProgressGraceTimer()
             dismissedPreparationCompletion = nil
             preparationStatus = library.preparationStatus
             refresh()
+        case .readingUncachedMetadata:
+            guard !hasFinishedScan else { return }
+            hasUncachedMetadataReads = true
         case .photos:
             refresh()
             resolvePendingRestore(scanFinished: false)
@@ -1690,6 +1725,10 @@ final class BrowsingModel {
             showFailureToast(Self.readFailureToastMessage)
         case .scanFinished:
             finishedScanFor = library.folder
+            readingProgressGraceTask?.cancel()
+            readingProgressGraceTask = nil
+            hasUncachedMetadataReads = false
+            hasElapsedReadingGrace = false
             refresh()
             resolvePendingRestore(scanFinished: true)
             await reloadRecents()
@@ -1799,6 +1838,10 @@ final class BrowsingModel {
         var generationChanged = false
         if shownGeneration != library.openGeneration {
             shownGeneration = library.openGeneration
+            readingProgressGraceTask?.cancel()
+            readingProgressGraceTask = nil
+            hasUncachedMetadataReads = false
+            hasElapsedReadingGrace = false
             desiredMarks.removeAll()
             recordUndo(for: nil)
             dismissFailureToast()
@@ -1940,13 +1983,32 @@ final class BrowsingModel {
         }
     }
 
+    private func restartReadingProgressGraceTimer() {
+        readingProgressGraceTask?.cancel()
+        let generation = library.openGeneration
+        readingProgressGraceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.readingProgressGraceDelay)
+            } catch {
+                return
+            }
+            guard let self,
+                !Task.isCancelled,
+                !self.hasLeftFolder,
+                !self.hasFinishedScan,
+                self.library.openGeneration == generation
+            else { return }
+            self.hasElapsedReadingGrace = true
+        }
+    }
+
     /// Clears `expandedGroup` whenever leaving Detail, turning grouping off, scanning, or when the
     /// expanded group drops below two visible members (issue #304, decisions 2 & 3).
     private func reconcileExpandedGroup() {
         // Keep group membership intact while Compare is active so marks under filters never dismiss Compare.
         if compareSession != nil { return }
         guard let expanded = expandedGroup else { return }
-        guard state.route == .detail, similarGroupsEnabled, readingProgress == nil,
+        guard state.route == .detail, similarGroupsEnabled, !isScanning,
             DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
                 .activeGroup(with: expanded) != nil
         else {

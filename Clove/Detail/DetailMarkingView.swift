@@ -213,7 +213,7 @@ struct DetailMarkingView: View {
             timeline
             ?? DetailTimeline(
                 photos: browsing.photos, groups: browsing.groups,
-                groupsEnabled: settings.similarGroupsEnabled && browsing.readingProgress == nil)
+                groupsEnabled: settings.similarGroupsEnabled && !browsing.isScanning)
         self.expandedGroup = expandedGroup
         self.order = order
         self.actions = actions
