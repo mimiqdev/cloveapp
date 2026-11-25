@@ -4,6 +4,8 @@ import SwiftUI
 /// One browsing state across widths: sidebar and grid at regular width, one screen at compact
 /// width. Detail and Settings occupy the whole window, preserving the model's current filter.
 struct BrowseShell: View {
+    static let idealSidebarWidth: CGFloat = 280
+
     let browsing: BrowsingModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -126,7 +128,9 @@ struct BrowseShell: View {
     private var folderLayout: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             FolderSidebar(browsing: browsing)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+                .navigationSplitViewColumnWidth(
+                    min: 220, ideal: Self.idealSidebarWidth, max: 300
+                )
                 .toolbar(.hidden, for: .navigationBar)
         } detail: {
             GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)

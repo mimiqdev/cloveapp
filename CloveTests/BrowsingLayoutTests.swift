@@ -1105,6 +1105,481 @@ struct BrowsingLayoutTests {
         }
     }
 
+    @Test func iPadDetailBackButtonShowsSelectedFilterTitleAcrossNativeAndFallbackToolbars()
+        async throws
+    {
+        #expect(
+            DetailMarkingView.resolvedBackTitle(
+                isWidePadLayout: true, isDuoExpanded: false, filterTitle: "All") == "All")
+        #expect(
+            DetailMarkingView.resolvedBackTitle(
+                isWidePadLayout: true, isDuoExpanded: false, filterTitle: "Unmarked")
+                == "Unmarked")
+        #expect(
+            DetailMarkingView.resolvedBackTitle(
+                isWidePadLayout: false, isDuoExpanded: false, filterTitle: "All") == nil)
+        #expect(
+            DetailMarkingView.resolvedBackTitle(
+                isWidePadLayout: true, isDuoExpanded: true, filterTitle: "All") == nil)
+
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let folder = TestLibrary.sampleFolderKey
+        let longSubfolder = "DCIM/101CANON_VERY_LONG_EVENT_FOLDER_NAME_2026"
+        let photos = [
+            GridPhoto(
+                id: PhotoIdentity(folderID: folder, relativeFolderPath: longSubfolder, stem: "p1"),
+                fileName: "P1.ARW",
+                time: .known(
+                    PhotoTime(
+                        captureTime: Date(timeIntervalSince1970: 1_760_000_001),
+                        hasUTCOffset: true)),
+                marks: PhotoMarks()),
+            GridPhoto(
+                id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "p2"),
+                fileName: "P2.ARW",
+                time: .known(
+                    PhotoTime(
+                        captureTime: Date(timeIntervalSince1970: 1_760_000_002),
+                        hasUTCOffset: true)),
+                marks: PhotoMarks(label: ColourLabel(colour: .red))),
+        ]
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let model = BrowsingModel(
+            library: TestLibrary(photos: photos, groups: []), similarGroupsEnabled: false)
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+        model.openPhoto(photos[0].id)
+
+        // 1. iPadOS 27.1+ native system toolbar renders `< {SelectedRowTitle}` cleanly on wide
+        //    iPad while keeping iPhone and Duo icon-only.
+        if #available(iOS 27.1, *) {
+            struct NativeDetailHost: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let idiom: UIUserInterfaceIdiom
+                let isDuoExpanded: Bool
+                let duo: DuoDetailLayout?
+
+                var body: some View {
+                    NavigationStack {
+                        DetailScreen(browsing: browsing, duo: duo)
+                    }
+                    .environment(store)
+                    .environment(\.cloveUserInterfaceIdiom, idiom)
+                    .environment(\.usesSystemBrowsingToolbar, true)
+                    .environment(\.isDuoExpanded, isDuoExpanded)
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+            let padHost = UIHostingController(
+                rootView: NativeDetailHost(
+                    browsing: model, store: store, idiom: .pad, isDuoExpanded: false, duo: nil))
+            padHost.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = padHost
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "native iPad detail nav bar did not lay out: \(self.describeNavBar(in: window))"
+            ) {
+                guard let navBar = self.findNavigationBar(in: window) else { return false }
+                return !(navBar.topItem?.leadingItemGroups.isEmpty ?? true)
+                    && self.leadingBarItemFrame(in: navBar, index: 0, relativeTo: window) != nil
+            }
+            let navBar = try #require(findNavigationBar(in: window))
+            let shortBackFrame = try #require(
+                leadingBarItemFrame(in: navBar, index: 0, relativeTo: window))
+            #expect(shortBackFrame.width > 20 && shortBackFrame.width < 110)
+
+            model.setFilter(.unmarked)
+            try await waitFor(
+                "native iPad detail nav bar did not widen for Unmarked: \(self.describeNavBar(in: window))"
+            ) {
+                guard
+                    let frame = self.leadingBarItemFrame(
+                        in: navBar, index: 0, relativeTo: window)
+                else { return false }
+                return frame.width > shortBackFrame.width + 15
+            }
+
+            model.setFilter(.subfolder(longSubfolder))
+            try await waitFor(
+                "native iPad detail nav bar did not cap long back title width: \(self.describeNavBar(in: window))"
+            ) {
+                guard
+                    let frame = self.leadingBarItemFrame(
+                        in: navBar, index: 0, relativeTo: window)
+                else { return false }
+                return frame.width > shortBackFrame.width + 40 && frame.width <= 190
+            }
+            let longBackFrame = try #require(
+                leadingBarItemFrame(in: navBar, index: 0, relativeTo: window))
+            if let centerFrame = centerBarGroupFrame(in: navBar, relativeTo: window) {
+                #expect(longBackFrame.maxX <= centerFrame.minX + 2)
+            }
+
+            // Ordinary iPhone (even regular width in Pro Max landscape) keeps icon-only Back.
+            model.setFilter(.unmarked)
+            let phoneHost = UIHostingController(
+                rootView: NativeDetailHost(
+                    browsing: model, store: store, idiom: .phone, isDuoExpanded: false, duo: nil))
+            phoneHost.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = phoneHost
+            phoneHost.view.setNeedsLayout()
+            phoneHost.view.layoutIfNeeded()
+            try await waitFor(
+                "native iPhone detail nav bar did not lay out: \(self.describeNavBar(in: window))"
+            ) {
+                guard let phoneNavBar = self.findNavigationBar(in: window),
+                    let frame = self.leadingBarItemFrame(
+                        in: phoneNavBar, index: 0, relativeTo: window)
+                else { return false }
+                return frame.width <= 60
+            }
+
+            // Duo expanded keeps icon-only Back in BrowsingToolbar.
+            let duoPresentation = Binding.constant(DetailPresentation.focus)
+            let duoHost = UIHostingController(
+                rootView: NativeDetailHost(
+                    browsing: model,
+                    store: store,
+                    idiom: .phone,
+                    isDuoExpanded: true,
+                    duo: DuoDetailLayout(
+                        presentation: duoPresentation,
+                        filter: AnyView(EmptyView()),
+                        more: AnyView(EmptyView()),
+                        bottom: AnyView(EmptyView()),
+                        showsGrid: true)))
+            duoHost.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = duoHost
+            duoHost.view.setNeedsLayout()
+            duoHost.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(120))
+            if let duoNavBar = findNavigationBar(in: window),
+                let duoBackFrame = leadingBarItemFrame(
+                    in: duoNavBar, index: 0, relativeTo: window)
+            {
+                #expect(duoBackFrame.width <= 60)
+            }
+        }
+
+        // 2. Fallback BrowsingHeader on wide iPad also renders `< {SelectedRowTitle}`.
+        model.setFilter(.unmarked)
+        let fallbackFrames = TestHeaderFramesBox()
+        let fallbackWindow = UIWindow(windowScene: scene)
+        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let fallbackHost = UIHostingController(
+            rootView: DetailScreen(browsing: model)
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.usesSystemBrowsingToolbar, false)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    fallbackFrames.frames = frames
+                })
+        fallbackHost.traitOverrides.horizontalSizeClass = .regular
+        fallbackWindow.rootViewController = fallbackHost
+        fallbackWindow.makeKeyAndVisible()
+        defer {
+            fallbackWindow.isHidden = true
+            fallbackWindow.rootViewController = nil
+        }
+        try await waitFor("fallback wide iPad detail header did not render Unmarked back title") {
+            guard let backFrame = fallbackFrames.frames["clove.nav.back"] else { return false }
+            return backFrame.width > 60 && backFrame.width <= 165
+        }
+    }
+
+    @Test func iPadSidebarUses280WidthProminentTitleCasingAnd10PtDots() async throws {
+        #expect(BrowseShell.idealSidebarWidth == 280)
+        #expect(FolderSidebar.labelDotSize == 10)
+
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let folder = TestLibrary.sampleFolderKey
+        let photos = [
+            GridPhoto(
+                id: PhotoIdentity(
+                    folderID: folder, relativeFolderPath: "DCIM/100CANON", stem: "p1"),
+                fileName: "P1.ARW",
+                time: .known(
+                    PhotoTime(
+                        captureTime: Date(timeIntervalSince1970: 1_760_000_001),
+                        hasUTCOffset: true)),
+                marks: PhotoMarks(
+                    rating: try #require(Rating(rawValue: 4)),
+                    label: ColourLabel(colour: .red),
+                    keywords: ["portrait"]),
+                metadata: PhotoFilterMetadata(
+                    camera: "ILCE-1M2", lens: "FE 50mm F1.2 GM", focalLengthMillimetres: 50)),
+            GridPhoto(
+                id: PhotoIdentity(
+                    folderID: folder, relativeFolderPath: "DCIM/101CANON", stem: "p2"),
+                fileName: "P2.ARW",
+                time: .known(
+                    PhotoTime(
+                        captureTime: Date(timeIntervalSince1970: 1_760_000_002),
+                        hasUTCOffset: true)),
+                marks: PhotoMarks(label: ColourLabel(colour: .green), keywords: ["street"]),
+                metadata: PhotoFilterMetadata(
+                    camera: "ILCE-7M4", lens: "FE 35mm F1.4 GM", focalLengthMillimetres: 35)),
+        ]
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "g1"), members: [photos[0].id, photos[1].id])
+        let model = BrowsingModel(library: TestLibrary(photos: photos, groups: [group]))
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+
+        // 1. BrowseShell regular iPad split view sets sidebar column width to 280 pt.
+        let shellWindow = UIWindow(windowScene: scene)
+        shellWindow.frame = CGRect(x: 0, y: 0, width: 1180, height: 820)
+        let shellHost = UIHostingController(
+            rootView: BrowseShell(browsing: model)
+                .environment(SettingsStore.sample)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.usesSystemBrowsingToolbar, true))
+        shellHost.traitOverrides.horizontalSizeClass = .regular
+        shellWindow.rootViewController = shellHost
+        shellWindow.makeKeyAndVisible()
+        defer {
+            shellWindow.isHidden = true
+            shellWindow.rootViewController = nil
+        }
+
+        try await waitFor("iPad BrowseShell sidebar did not lay out") {
+            guard let split = self.findSplitViewController(in: shellHost) else { return false }
+            return abs(split.primaryColumnWidth - 280) <= 2
+        }
+        let split = try #require(findSplitViewController(in: shellHost))
+        #expect(abs(split.primaryColumnWidth - 280) <= 2)
+
+        // 2. FolderSidebar retains `<` back button with 22 pt bold folder title, updated section
+        //    casing, metadata sections, and 10 x 10 pt color label dots.
+        let sidebarFrames = TestHeaderFramesBox()
+        let sidebarWindow = UIWindow(windowScene: scene)
+        sidebarWindow.frame = CGRect(x: 0, y: 0, width: 280, height: 1400)
+        let sidebarHost = UIHostingController(
+            rootView: FolderSidebar(browsing: model)
+                .environment(SettingsStore.sample)
+                .environment(\.cloveTheme, .light)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    sidebarFrames.frames = frames
+                })
+        sidebarWindow.rootViewController = sidebarHost
+        sidebarWindow.makeKeyAndVisible()
+        defer {
+            sidebarWindow.isHidden = true
+            sidebarWindow.rootViewController = nil
+        }
+
+        try await waitFor(
+            "FolderSidebar content did not mount (frames=\(sidebarFrames.frames.keys.sorted()))"
+        ) {
+            sidebarHost.view.setNeedsLayout()
+            sidebarHost.view.layoutIfNeeded()
+            return sidebarFrames.frames["clove.nav.back"] != nil
+                && sidebarFrames.frames["clove.sidebar.folderTitle"] != nil
+                && sidebarFrames.frames["clove.sidebar.label.red.dot"] != nil
+        }
+
+        let backFrame = try #require(sidebarFrames.frames["clove.nav.back"])
+        let titleFrame = try #require(sidebarFrames.frames["clove.sidebar.folderTitle"])
+        #expect(backFrame.minX >= 0 && backFrame.maxX <= 280)
+        // 22 pt bold title (`title2.bold()`) renders taller than 17 pt `.headline`.
+        #expect(titleFrame.height >= 24)
+        #expect(titleFrame.maxX <= 280)
+
+        let redDotFrame = try #require(sidebarFrames.frames["clove.sidebar.label.red.dot"])
+        #expect(abs(redDotFrame.width - 10) <= 0.5)
+        #expect(abs(redDotFrame.height - 10) <= 0.5)
+    }
+
+    @Test func iPadGridHeaderUsesLeading20PtBoldTitleWhileKeepingCompactAndSelectHeaders()
+        async throws
+    {
+        #expect(GridScreen.usesLeadingRegularHeader(isRegular: true, isSelecting: false))
+        #expect(!GridScreen.usesLeadingRegularHeader(isRegular: true, isSelecting: true))
+        #expect(!GridScreen.usesLeadingRegularHeader(isRegular: false, isSelecting: false))
+
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let model = BrowsingModel(library: TestLibrary.sample(), similarGroupsEnabled: false)
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+
+        struct GridHost: View {
+            let browsing: BrowsingModel
+            let idiom: UIUserInterfaceIdiom
+            let isDuoExpanded: Bool
+
+            var body: some View {
+                NavigationStack {
+                    GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+                }
+                .environment(SettingsStore.sample)
+                .environment(\.cloveUserInterfaceIdiom, idiom)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.isDuoExpanded, isDuoExpanded)
+            }
+        }
+
+        // 1. Regular-width iPad Grid (non-selecting): leading-aligned `.topBarLeading` item,
+        //    never centered `.principal`, preserving subtitle and Select mode header.
+        let padWindow = UIWindow(windowScene: scene)
+        padWindow.frame = CGRect(x: 0, y: 0, width: 900, height: 820)
+        let padHost = UIHostingController(
+            rootView: GridHost(browsing: model, idiom: .pad, isDuoExpanded: false))
+        padHost.traitOverrides.horizontalSizeClass = .regular
+        padWindow.rootViewController = padHost
+        padWindow.makeKeyAndVisible()
+        defer {
+            padWindow.isHidden = true
+            padWindow.rootViewController = nil
+        }
+
+        try await waitFor(
+            "iPad Grid nav bar leading header did not mount: \(self.describeNavBar(in: padWindow))"
+        ) {
+            guard let navBar = self.findNavigationBar(in: padWindow) else { return false }
+            return !(navBar.topItem?.leadingItemGroups.isEmpty ?? true)
+                && (navBar.topItem?.centerItemGroups.isEmpty ?? true)
+                && self.leadingBarItemFrame(in: navBar, index: 0, relativeTo: padWindow) != nil
+        }
+
+        let padNavBar = try #require(findNavigationBar(in: padWindow))
+        let padHeaderFrame = try #require(
+            leadingBarItemFrame(in: padNavBar, index: 0, relativeTo: padWindow))
+        #expect(padHeaderFrame.midX < padWindow.bounds.width * 0.35)
+        // Two-line `.title3.bold()` (~24 pt) + `.caption` subtitle (~14 pt) sits taller than
+        // `.subheadline` single-line height, and wide enough for `"36 photos"` without truncating.
+        #expect(padHeaderFrame.height >= 34)
+        #expect(padHeaderFrame.width >= 50)
+
+        // Select mode switches back to the centered `.principal` selection header (`N selected`).
+        let firstPhoto = try #require(model.photos.first?.id)
+        model.toggleSelection(firstPhoto)
+        try await waitFor(
+            "iPad Grid select header did not switch to centered principal header: \(self.describeNavBar(in: padWindow))"
+        ) {
+            guard
+                let titleFrame = self.centerBarGroupFrame(
+                    in: padNavBar, relativeTo: padWindow)
+            else { return false }
+            let leadingVisible = self.barButtonSubviews(in: padNavBar, relativeTo: padWindow)
+                .filter { $0.frame.midX < padWindow.bounds.width * 0.35 }
+            return leadingVisible.isEmpty
+                && abs(titleFrame.midX - padWindow.bounds.midX) < 80
+        }
+        model.clearSelection()
+
+        // 2. iPhone Grid keeps centered `.principal` folder title.
+        let phoneWindow = UIWindow(windowScene: scene)
+        phoneWindow.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let phoneHost = UIHostingController(
+            rootView: GridHost(browsing: model, idiom: .phone, isDuoExpanded: false))
+        phoneHost.traitOverrides.horizontalSizeClass = .compact
+        phoneWindow.rootViewController = phoneHost
+        phoneWindow.makeKeyAndVisible()
+        defer {
+            phoneWindow.isHidden = true
+            phoneWindow.rootViewController = nil
+        }
+
+        try await waitFor(
+            "iPhone Grid nav bar center header did not mount: \(self.describeNavBar(in: phoneWindow))"
+        ) {
+            guard let navBar = self.findNavigationBar(in: phoneWindow) else { return false }
+            return self.centerBarGroupFrame(in: navBar, relativeTo: phoneWindow) != nil
+        }
+        let phoneNavBar = try #require(findNavigationBar(in: phoneWindow))
+        let phoneTitleFrame = try #require(
+            centerBarGroupFrame(in: phoneNavBar, relativeTo: phoneWindow))
+        #expect(abs(phoneTitleFrame.midX - phoneWindow.bounds.midX) < 60)
+    }
+
+    private func leadingBarItemFrame(
+        in navBar: UINavigationBar, index: Int, relativeTo window: UIWindow
+    ) -> CGRect? {
+        let items = navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems) ?? []
+        if items.indices.contains(index), let custom = items[index].customView {
+            return custom.convert(custom.bounds, to: window)
+        }
+        let leadingButtons = barButtonSubviews(in: navBar, relativeTo: window)
+            .filter { $0.frame.midX < window.bounds.midX }
+            .sorted { $0.frame.minX < $1.frame.minX }
+        guard leadingButtons.indices.contains(index) else { return nil }
+        return leadingButtons[index].frame
+    }
+
+    private func centerBarGroupFrame(in navBar: UINavigationBar, relativeTo window: UIWindow)
+        -> CGRect?
+    {
+        if let titleView = navBar.topItem?.titleView {
+            return titleView.convert(titleView.bounds, to: window)
+        }
+        let centerItems = navBar.topItem?.centerItemGroups.flatMap(\.barButtonItems) ?? []
+        if let custom = centerItems.first?.customView {
+            return custom.convert(custom.bounds, to: window)
+        }
+        let candidates = barButtonSubviews(in: navBar, relativeTo: window)
+            .filter { abs($0.frame.midX - window.bounds.midX) < window.bounds.width * 0.25 }
+        return candidates.first?.frame
+    }
+
+    private func barButtonSubviews(
+        in navBar: UINavigationBar, relativeTo window: UIWindow
+    ) -> [(view: UIView, frame: CGRect)] {
+        var result: [(UIView, CGRect)] = []
+        func walk(_ view: UIView) {
+            let typeName = String(describing: type(of: view))
+            if typeName.contains("ButtonBarButton") || typeName.contains("UIHostingView")
+                || view is UIControl
+            {
+                let frame = view.convert(view.bounds, to: window)
+                if frame.width > 0 && frame.height > 0 {
+                    result.append((view, frame))
+                }
+            }
+            for child in view.subviews {
+                walk(child)
+            }
+        }
+        walk(navBar)
+        return result
+    }
+
+    private func describeNavBar(in window: UIWindow) -> String {
+        guard let navBar = findNavigationBar(in: window) else { return "no navBar" }
+        let leading = navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems).count ?? 0
+        let center = navBar.topItem?.centerItemGroups.flatMap(\.barButtonItems).count ?? 0
+        let trailing = navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0
+        let titleViewDesc =
+            navBar.topItem?.titleView.map {
+                "\(type(of: $0))=\(NSCoder.string(for: $0.convert($0.bounds, to: window)))"
+            } ?? "nil"
+        let buttons = barButtonSubviews(in: navBar, relativeTo: window).map {
+            "\(type(of: $0.view))=\(NSCoder.string(for: $0.frame))"
+        }
+        return
+            "leading=\(leading) center=\(center) trailing=\(trailing) titleView=\(titleViewDesc) views=\(buttons)"
+    }
+
+    private func findNavigationBar(in view: UIView) -> UINavigationBar? {
+        if let navBar = view as? UINavigationBar { return navBar }
+        for child in view.subviews {
+            if let navBar = findNavigationBar(in: child) { return navBar }
+        }
+        return nil
+    }
+
     private func findCollectionView(in view: UIView) -> UICollectionView? {
         if let collection = view as? UICollectionView { return collection }
         for child in view.subviews {

@@ -424,51 +424,21 @@ struct GridScreen: View {
                         } bottom: {
                             if usesDock { dockBottom }
                         }
-                        ToolbarItem(placement: .principal) {
-                            VStack(alignment: .leading, spacing: 0) {
-                                HStack(spacing: 0) {
-                                    Text(
-                                        isSelecting
-                                            ? AppLocalization.format(
-                                                "%lld selected", language: language,
-                                                Int64(browsing.batchTargets.count))
-                                            : (isRegular
-                                                ? browsing.localizedFilterTitle(language: language)
-                                                : browsing.localizedFolderTitle(language: language))
-                                    )
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
-                                    .accessibilityIdentifier(
-                                        isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
-                                    if !isRegular && !isSelecting {
-                                        FolderPreparationIndicator(
-                                            browsing: browsing,
-                                            identifierPrefix: "clove.grid.preparation"
-                                        )
-                                        .layoutPriority(1)
-                                    }
+                        if Self.usesLeadingRegularHeader(
+                            isRegular: isRegular, isSelecting: isSelecting)
+                        {
+                            ToolbarItem(placement: .topBarLeading) {
+                                ToolbarTitleBoundingLayout(maxWidth: regularHeaderMaxTitleWidth) {
+                                    regularGridHeaderTitle
                                 }
-                                HStack(spacing: 0) {
-                                    if let hiddenSelectedSubtitle {
-                                        Text(hiddenSelectedSubtitle)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.85)
-                                            .accessibilityIdentifier("clove.grid.batch.hiddenCount")
-                                            .reportHeaderControlFrame(
-                                                "clove.grid.batch.hiddenCount")
-                                    } else {
-                                        Text(subtitle)
-                                            .lineLimit(1)
-                                            .accessibilityIdentifier("clove.grid.subtitle")
-                                    }
-                                    SaveStatusIndicator(
-                                        browsing: browsing, identifierPrefix: "clove.grid.saveState"
-                                    )
-                                }
-                                .font(.caption)
                             }
+                            .sharedBackgroundVisibility(.hidden)
+                        } else {
+                            ToolbarItem(placement: .principal) {
+                                compactOrSelectingToolbarTitle
+                            }
+                            .axisBehavior(.horizontalOnly)
                         }
-                        .axisBehavior(.horizontalOnly)
                     }
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbarVerticalBehavior(.automatic)
@@ -476,6 +446,81 @@ struct GridScreen: View {
             }
         } else {
             grid
+        }
+    }
+
+    static func usesLeadingRegularHeader(isRegular: Bool, isSelecting: Bool) -> Bool {
+        isRegular && !isSelecting
+    }
+
+    private var regularHeaderMaxTitleWidth: CGFloat {
+        containerSize.width > 0 ? max(containerSize.width - 180, 140) : 320
+    }
+
+    private var regularGridHeaderTitle: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(browsing.localizedFilterTitle(language: language))
+                .font(.title3.bold())
+                .foregroundStyle(Color.clove.text.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .accessibilityIdentifier("clove.grid.title")
+            HStack(spacing: 0) {
+                Text(subtitle)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityIdentifier("clove.grid.subtitle")
+                SaveStatusIndicator(
+                    browsing: browsing, identifierPrefix: "clove.grid.saveState"
+                )
+            }
+            .font(.caption)
+            .foregroundStyle(Color.clove.text.secondary)
+        }
+    }
+
+    private var compactOrSelectingToolbarTitle: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Text(
+                    isSelecting
+                        ? AppLocalization.format(
+                            "%lld selected", language: language,
+                            Int64(browsing.batchTargets.count))
+                        : (isRegular
+                            ? browsing.localizedFilterTitle(language: language)
+                            : browsing.localizedFolderTitle(language: language))
+                )
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .accessibilityIdentifier(
+                    isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
+                if !isRegular && !isSelecting {
+                    FolderPreparationIndicator(
+                        browsing: browsing,
+                        identifierPrefix: "clove.grid.preparation"
+                    )
+                    .layoutPriority(1)
+                }
+            }
+            HStack(spacing: 0) {
+                if let hiddenSelectedSubtitle {
+                    Text(hiddenSelectedSubtitle)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("clove.grid.batch.hiddenCount")
+                        .reportHeaderControlFrame(
+                            "clove.grid.batch.hiddenCount")
+                } else {
+                    Text(subtitle)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("clove.grid.subtitle")
+                }
+                SaveStatusIndicator(
+                    browsing: browsing, identifierPrefix: "clove.grid.saveState"
+                )
+            }
+            .font(.caption)
         }
     }
 
@@ -561,7 +606,7 @@ struct GridScreen: View {
                                 Int64(browsing.batchTargets.count))
                             : browsing.localizedFilterTitle(language: language)
                     )
-                    .font(.subheadline.weight(.semibold))
+                    .font(isSelecting ? .subheadline.weight(.semibold) : .title3.bold())
                     .lineLimit(1)
                     .accessibilityIdentifier(
                         isSelecting ? "clove.grid.batch.count" : "clove.grid.title"
@@ -1103,6 +1148,31 @@ struct GridScreen: View {
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isLandscapeContainer: isLandscapeContainer)
+    }
+}
+
+private struct ToolbarTitleBoundingLayout: Layout {
+    let maxWidth: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let ideal = child.sizeThatFits(.unspecified)
+        let targetWidth = min(ideal.width, maxWidth)
+        let fitted = child.sizeThatFits(
+            ProposedViewSize(width: targetWidth, height: proposal.height))
+        return CGSize(width: max(targetWidth, fitted.width), height: fitted.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        guard let child = subviews.first else { return }
+        child.place(
+            at: CGPoint(x: bounds.minX, y: bounds.midY),
+            anchor: .leading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
     }
 }
 

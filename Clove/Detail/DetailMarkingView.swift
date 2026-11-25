@@ -356,6 +356,21 @@ struct DetailMarkingView: View {
         !isOrdinaryPhone && horizontalSizeClass == .regular && duo == nil
     }
 
+    private var detailBackTitle: String? {
+        Self.resolvedBackTitle(
+            isWidePadLayout: isWidePadLayout,
+            isDuoExpanded: isDuoExpanded,
+            filterTitle: browsing.localizedFilterTitle(language: language))
+    }
+
+    static func resolvedBackTitle(
+        isWidePadLayout: Bool,
+        isDuoExpanded: Bool,
+        filterTitle: String
+    ) -> String? {
+        isWidePadLayout && !isDuoExpanded ? filterTitle : nil
+    }
+
     private var usesExpandedDuoViewportOverlay: Bool {
         isDuoExpanded && (usesVerticalToolbar || !hasFoldRegion)
     }
@@ -484,7 +499,8 @@ struct DetailMarkingView: View {
             .toolbar {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
-                    showsUndo: chromeIsVisible
+                    showsUndo: chromeIsVisible,
+                    backTitle: detailBackTitle
                 ) {
                     if presentationPolicy.supportsPhotoPreview {
                         photoGridToggle
@@ -902,8 +918,7 @@ struct DetailMarkingView: View {
                 BrowsingHeader(
                     title: photo.fileName,
                     titleIdentifier: "clove.detail.fileName",
-                    backTitle: (!isOrdinaryPhone && horizontalSizeClass == .regular)
-                        ? browsing.localizedFilterTitle(language: language) : nil,
+                    backTitle: detailBackTitle,
                     usesInlineFlow: isOrdinaryPhoneLandscape,
                     height: isOrdinaryPhoneLandscape ? 44 : 64,
                     back: { browsing.back() }
