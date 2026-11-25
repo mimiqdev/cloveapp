@@ -605,5 +605,14 @@ struct AppLocalizationTests {
         #expect(
             AppLocalization.format("%lld photos", language: .traditionalChinese, Int64(12))
                 == "12 張相片")
+        #expect(
+            AppLocalization.format("Burst of %lld", language: .english, Int64(11))
+                == "Burst of 11")
+        #expect(
+            AppLocalization.format("Burst of %lld", language: .simplifiedChinese, Int64(11))
+                == "连拍 11 张")
+        #expect(
+            AppLocalization.format("Burst of %lld", language: .traditionalChinese, Int64(11))
+                == "連拍 11 張")
     }
 }

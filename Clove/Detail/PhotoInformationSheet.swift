@@ -4,13 +4,60 @@ import SwiftUI
 
 /// Read-only metadata, loaded on demand through the folder session. Missing fields are omitted.
 struct PhotoInformationSheet: View {
+    enum MarkSegmentTone: Equatable, Sendable {
+        case rating
+        case reject
+        case secondary
+
+        var token: ThemeToken {
+            switch self {
+            case .rating: .ratingOn
+            case .reject: .reject
+            case .secondary: .secondaryText
+            }
+        }
+    }
+
+    struct MarkSegment: Equatable, Sendable {
+        let text: String
+        let tone: MarkSegmentTone
+    }
+
+    struct MarksSummary: Equatable, Sendable {
+        let segments: [MarkSegment]
+
+        var text: String {
+            segments.map(\.text).joined()
+        }
+
+        var isNeutral: Bool {
+            segments.allSatisfy { $0.tone == .secondary }
+        }
+    }
+
     let browsing: BrowsingModel
     let photo: GridPhoto
+    private let explicitGroupMemberCount: Int?
+    private let usesExplicitGroupMemberCount: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
     @State private var information: PhotoInformation?
     @State private var isLoading = true
+
+    init(browsing: BrowsingModel, photo: GridPhoto) {
+        self.browsing = browsing
+        self.photo = photo
+        self.explicitGroupMemberCount = nil
+        self.usesExplicitGroupMemberCount = false
+    }
+
+    init(browsing: BrowsingModel, photo: GridPhoto, groupMemberCount: Int?) {
+        self.browsing = browsing
+        self.photo = photo
+        self.explicitGroupMemberCount = groupMemberCount
+        self.usesExplicitGroupMemberCount = true
+    }
 
     var body: some View {
         NavigationStack {
@@ -49,19 +96,9 @@ struct PhotoInformationSheet: View {
             .scrollContentBackground(.hidden)
             .foregroundStyle(Color.clove.text.primary)
             .background(Color.clove.surface.sheet)
-            .navigationTitle(photo.fileName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 2) {
-                        Text(photo.fileName).font(.headline).lineLimit(1)
-                        if let information, !information.companions.isEmpty {
-                            Text("+ " + information.companions.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(Color.clove.text.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
+                leadingHeaderToolbarItem
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(AppLocalization.string("Done", language: language)) { dismiss() }
                         .foregroundStyle(Color.clove.accent)
@@ -84,6 +121,72 @@ struct PhotoInformationSheet: View {
 
     private var currentMarks: PhotoMarks {
         browsing.state.folder != nil ? browsing.shownMarks(for: photo.id) : photo.marks
+    }
+
+    private var resolvedGroupMemberCount: Int? {
+        if usesExplicitGroupMemberCount {
+            guard let explicitGroupMemberCount, explicitGroupMemberCount >= 2 else { return nil }
+            return explicitGroupMemberCount
+        }
+        guard browsing.similarGroupsEnabled, !browsing.isScanning else { return nil }
+        return DetailTimeline(
+            photos: browsing.photos,
+            groups: browsing.groups,
+            groupsEnabled: true
+        )
+        .activeGroup(containing: photo.id)?.visibleMembers.count
+    }
+
+    @ToolbarContentBuilder
+    private var leadingHeaderToolbarItem: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .topBarLeading) {
+                headerTitleView
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarLeading) {
+                headerTitleView
+            }
+        }
+    }
+
+    private var headerTitleView: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(photo.fileName)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let subtitle = Self.headerSubtitle(
+                companions: information?.companions ?? [],
+                groupMemberCount: resolvedGroupMemberCount,
+                language: language)
+            {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(Color.clove.text.secondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("clove.detail.info.subtitle")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    static func headerSubtitle(
+        companions: [String],
+        groupMemberCount: Int?,
+        language: ResolvedAppLanguage
+    ) -> String? {
+        var parts: [String] = []
+        if !companions.isEmpty {
+            parts.append("+ " + companions.joined(separator: " · "))
+        }
+        if let groupMemberCount, groupMemberCount >= 2 {
+            parts.append(
+                AppLocalization.format(
+                    "Burst of %lld", language: language, Int64(groupMemberCount)))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     @ViewBuilder private func capture(_ image: ImageInformation?) -> some View {
@@ -116,22 +219,14 @@ struct PhotoInformationSheet: View {
     }
 
     private func row(
-        _ name: String, _ value: String, trailing marks: (spacing: CGFloat, content: Text)?
+        _ name: String, _ value: String, trailing marks: Text?
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(name)
             Spacer(minLength: 8)
             if let marks {
-                HStack(spacing: marks.spacing) {
-                    marks.content
-                    Text("·").foregroundStyle(Color.clove.text.secondary)
-                    Text(
-                        AppLocalization.string(
-                            information?.usesSidecar == true ? "XMP sidecar" : "Clove only",
-                            language: language)
-                    )
-                    .foregroundStyle(Color.clove.text.secondary)
-                }
+                marks
+                    .multilineTextAlignment(.trailing)
             } else {
                 Text(value).foregroundStyle(Color.clove.text.secondary).multilineTextAlignment(
                     .trailing)
@@ -141,46 +236,78 @@ struct PhotoInformationSheet: View {
         .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
     }
 
-    /// The frame's marks column: filled stars in `rating/on`, the label as its colour name, and
-    /// Reject as ✕ glyphs (handoff screens.md §03 Info sheet, screens/03-detail-info-sheet.png).
-    /// When a photo carries only keywords, shows the keyword count in neutral secondary text
-    /// instead of "Unmarked".
-    private func marksTrailing() -> (spacing: CGFloat, content: Text) {
-        let summary = Self.marksSummary(for: currentMarks, language: language)
-        let colour = summary.isNeutral ? Color.clove.text.secondary : Color.clove.rating.on
-        return (6, Text(summary.text).foregroundStyle(colour))
+    /// The frame's marks column: only star glyphs in `rating/on`, Reject in `reject`, and
+    /// separators, colour label name, keyword-only count, `"Unmarked"`, and storage source in
+    /// `text/secondary` (handoff screens.md §03 Info sheet, screens/03-detail-info-sheet.png).
+    private func marksTrailing() -> Text {
+        let segments = Self.marksRowSegments(
+            for: currentMarks,
+            usesSidecar: information?.usesSidecar == true,
+            language: language)
+        var attributed = AttributedString()
+        for segment in segments {
+            var part = AttributedString(segment.text)
+            part.foregroundColor = theme.tokens[segment.tone.token].color
+            attributed.append(part)
+        }
+        return Text(attributed)
     }
 
     static func keywordsText(for marks: PhotoMarks) -> String? {
         marks.keywords.isEmpty ? nil : marks.keywords.joined(separator: ", ")
     }
 
-    static func marksSummary(for marks: PhotoMarks, language: ResolvedAppLanguage) -> (
-        text: String, isNeutral: Bool
-    ) {
-        var parts: [String] = []
+    static func marksSummary(for marks: PhotoMarks, language: ResolvedAppLanguage) -> MarksSummary {
+        var segments: [MarkSegment] = []
+
+        func appendSegment(_ text: String, tone: MarkSegmentTone) {
+            if !segments.isEmpty {
+                segments.append(MarkSegment(text: " · ", tone: .secondary))
+            }
+            segments.append(MarkSegment(text: text, tone: tone))
+        }
+
         if let stars = marks.rating.starCount {
-            parts.append(String(repeating: "★", count: stars))
+            appendSegment(String(repeating: "★", count: stars), tone: .rating)
         }
         if let colour = marks.label.colour {
-            parts.append(AppLocalization.colourName(colour, language: language))
+            appendSegment(AppLocalization.colourName(colour, language: language), tone: .secondary)
         } else if !marks.label.isClear {
-            parts.append(marks.label.rawValue)
+            appendSegment(marks.label.rawValue, tone: .secondary)
         }
         if marks.isRejected {
-            parts.append("✕")
+            appendSegment(AppLocalization.string("Rejected", language: language), tone: .reject)
         }
-        if !parts.isEmpty {
-            return (parts.joined(separator: " · "), false)
+        if !segments.isEmpty {
+            return MarksSummary(segments: segments)
         }
         if !marks.keywords.isEmpty {
-            return (
-                AppLocalization.format(
-                    "%lld keywords", language: language, Int64(marks.keywords.count)),
-                true
-            )
+            return MarksSummary(segments: [
+                MarkSegment(
+                    text: AppLocalization.format(
+                        "%lld keywords", language: language, Int64(marks.keywords.count)),
+                    tone: .secondary)
+            ])
         }
-        return (AppLocalization.string("Unmarked", language: language), false)
+        return MarksSummary(segments: [
+            MarkSegment(
+                text: AppLocalization.string("Unmarked", language: language), tone: .secondary)
+        ])
+    }
+
+    static func marksRowSegments(
+        for marks: PhotoMarks,
+        usesSidecar: Bool,
+        language: ResolvedAppLanguage
+    ) -> [MarkSegment] {
+        let summary = marksSummary(for: marks, language: language)
+        let storage = AppLocalization.string(
+            usesSidecar ? "XMP sidecar" : "Clove only",
+            language: language)
+        return summary.segments + [
+            MarkSegment(text: " · ", tone: .secondary),
+            MarkSegment(text: storage, tone: .secondary),
+        ]
     }
 
     private func takenText(_ image: ImageInformation) -> String? {

@@ -445,8 +445,35 @@ struct DetailMarkingView: View {
             }
         }
         .sheet(isPresented: $showsInformation) {
-            PhotoInformationSheet(browsing: browsing, photo: photo)
+            PhotoInformationSheet(
+                browsing: browsing,
+                photo: photo,
+                groupMemberCount: activePhotoGroupCount)
         }
+    }
+
+    private var activePhotoGroupCount: Int? {
+        Self.groupMemberCount(
+            for: photo.id,
+            timeline: timeline,
+            expandedGroup: expandedGroup)
+    }
+
+    static func groupMemberCount(
+        for photoID: PhotoIdentity,
+        timeline: DetailTimeline,
+        expandedGroup: ActiveBrowsingGroup?
+    ) -> Int? {
+        let group =
+            if let expandedGroup,
+                expandedGroup.visibleMembers.contains(where: { $0.id == photoID })
+            {
+                expandedGroup
+            } else {
+                timeline.activeGroup(containing: photoID)
+            }
+        guard let count = group?.visibleMembers.count, count >= 2 else { return nil }
+        return count
     }
 
     @available(iOS 27.1, *)

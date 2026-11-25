@@ -40,6 +40,63 @@ struct DetailSwipeIndicatorTests {
             position(at: CGPoint(x: 29, y: 300), in: CGSize(width: 90, height: 650)).x == 58)
     }
 
+    @Test func verticalStarBarDisplayChipMatchesStarSwipeClearAndRejectStages() throws {
+        for raw in 1...5 {
+            let rating = try #require(Rating(rawValue: raw))
+            let stage = VerticalStarBarDisplay.chipStage(for: rating, isReject: false)
+            #expect(stage == .ratingSwipe)
+            #expect(stage.symbolName == "flag.slash")
+            #expect(stage.token == .secondaryText)
+        }
+
+        let clearStage = VerticalStarBarDisplay.chipStage(for: .unrated, isReject: false)
+        #expect(clearStage == .clear)
+        #expect(clearStage.symbolName == "star.slash")
+        #expect(clearStage.token == .secondaryText)
+
+        for rejectStage in [
+            VerticalStarBarDisplay.chipStage(for: .rejected, isReject: true),
+            VerticalStarBarDisplay.chipStage(for: .rejected, isReject: false),
+            VerticalStarBarDisplay.chipStage(for: .unrated, isReject: true),
+        ] {
+            #expect(rejectStage == .reject)
+            #expect(rejectStage.symbolName == "flag.slash.fill")
+            #expect(rejectStage.token == .reject)
+        }
+    }
+
+    @Test func markingSwipeSessionTransitionsProduceMatchingDisplayChipStages() throws {
+        let threeStars = try #require(Rating(rawValue: 3))
+        var session = MarkingSwipeSession(
+            startingRating: threeStars, containerHeight: 650)
+
+        let startingStage = VerticalStarBarDisplay.chipStage(
+            for: session.rating, isReject: session.rating == .rejected)
+        #expect(startingStage.symbolName == "flag.slash")
+        #expect(startingStage.token == .secondaryText)
+
+        session.update(travel: 30)
+        let fourStarStage = VerticalStarBarDisplay.chipStage(
+            for: session.rating, isReject: session.rating == .rejected)
+        #expect(session.rating.rawValue == 4)
+        #expect(fourStarStage.symbolName == "flag.slash")
+        #expect(fourStarStage.token == .secondaryText)
+
+        session.update(travel: -36)
+        let clearStage = VerticalStarBarDisplay.chipStage(
+            for: session.rating, isReject: session.rating == .rejected)
+        #expect(session.rating == .unrated)
+        #expect(clearStage.symbolName == "star.slash")
+        #expect(clearStage.token == .secondaryText)
+
+        session.update(travel: -120)
+        let rejectStage = VerticalStarBarDisplay.chipStage(
+            for: session.rating, isReject: session.rating == .rejected)
+        #expect(session.rating == .rejected)
+        #expect(rejectStage.symbolName == "flag.slash.fill")
+        #expect(rejectStage.token == .reject)
+    }
+
     private func position(
         at start: CGPoint, in size: CGSize = CGSize(width: 390, height: 650),
         chromeIsVisible: Bool = true
