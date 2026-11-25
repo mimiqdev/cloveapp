@@ -483,7 +483,18 @@ struct GridScreen: View {
         VStack(spacing: 0) {
             if !usesSystemToolbar { header }
             ProgressLine(progress: gridProgressLine.progress, tone: gridProgressLine.tone)
-            FolderSaveBanner(browsing: browsing, identifierPrefix: "clove.grid.saveState.failure")
+            gridContent
+                .overlay(alignment: .top) {
+                    FolderSaveBanner(
+                        browsing: browsing, identifierPrefix: "clove.grid.saveState.failure")
+                }
+        }
+        .background(Color.clove.bg.canvas)
+        .ignoresSafeArea(.container, edges: usesDock ? .bottom : [])
+    }
+
+    private var gridContent: some View {
+        VStack(spacing: 0) {
             if !browsing.metadataFilter.isEmpty {
                 ActiveMetadataFilterBar(
                     browsing: browsing,
@@ -491,6 +502,10 @@ struct GridScreen: View {
             }
             if cells.isEmpty && !browsing.isFolderOpening {
                 emptyState
+                    .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
+                    .animation(
+                        CloveMotion.chrome(reduceMotion: reduceMotion),
+                        value: browsing.folderLocationLoss == nil)
             } else {
                 GridCollectionView(
                     sections: gridDisplay.sections, currentPhoto: browsing.state.currentPhoto,
@@ -519,8 +534,6 @@ struct GridScreen: View {
                     value: browsing.folderLocationLoss == nil)
             }
         }
-        .background(Color.clove.bg.canvas)
-        .ignoresSafeArea(.container, edges: usesDock ? .bottom : [])
     }
 
     private var dockBottom: some View {

@@ -39,6 +39,23 @@ struct FolderPreparationPresentationTests {
                 == "Scanning folder")
         #expect(FolderPreparationAccessibility.summaryText(for: enumerating) == "Scanning folder…")
         #expect(
+            FolderPreparationAccessibility.detailsHeading() == "Preparing folder")
+        #expect(
+            FolderPreparationAccessibility.headerSummaryText(
+                folderName: "Coastal light", status: enumerating)
+                == "Coastal light · Scanning folder…")
+        #expect(
+            FolderPreparationAccessibility.readyForBothText(for: enumerating)
+                == "Scanning folder…")
+        #expect(
+            FolderPreparationAccessibility.analysisRowTitle() == "Face & focus analysis")
+        #expect(
+            FolderPreparationAccessibility.previewsRowTitle() == "Preview optimization")
+        #expect(
+            FolderPreparationAccessibility.reassuranceFooterText()
+                == "You can keep browsing. The current photo is prioritized. Originals are unchanged."
+        )
+        #expect(
             FolderPreparationAccessibility.analysisCountText(for: enumerating)
                 == "Waiting for photo count")
         #expect(
@@ -60,6 +77,13 @@ struct FolderPreparationPresentationTests {
             issues: [])
         #expect(preparing.phase == .preparing)
         #expect(FolderPreparationAccessibility.summaryText(for: preparing) == "15 of 36 ready")
+        #expect(
+            FolderPreparationAccessibility.headerSummaryText(
+                folderName: "Coastal light", status: preparing)
+                == "Coastal light · 36 photos")
+        #expect(
+            FolderPreparationAccessibility.readyForBothText(for: preparing)
+                == "15 photos ready for both")
         #expect(
             FolderPreparationAccessibility.analysisCountText(for: preparing) == "18 of 36 analyzed")
         #expect(
@@ -553,6 +577,142 @@ struct FolderPreparationPresentationTests {
         #expect(renderedImages[1] != renderedImages[2])
     }
 
+    @Test
+    func preparationPopoverAndSheetShowAlignedHeadingLabelsReadyCountFooterAndPreservedStates()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = GroupingPresentationStubLibrary(initialPhaseIdle: false)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("stub folder opened") {
+            browsing.preparationStatus.totalPhotos == 12
+        }
+
+        let issue = FolderPreparationIssue(
+            photo: PhotoIdentity(
+                folderID: library.folder, relativeFolderPath: "", stem: "MMQ02700"),
+            fileName: "MMQ02700.ARW",
+            task: .analysis,
+            reason: "The RAW render failed.")
+        let detailedStatus = FolderPreparationStatus(
+            folder: library.folder,
+            folderName: "Coastal light",
+            generation: 1,
+            isEnumerating: false,
+            isPartialScan: false,
+            waitingReason: .memoryPressure,
+            totalPhotos: 12,
+            analysis: FolderPreparationTaskCounts(completed: 9, failed: 1),
+            previews: FolderPreparationTaskCounts(completed: 10),
+            readyForBothCount: 8,
+            bothSettledCount: 9,
+            issues: [issue])
+        library.emit(.preparation(detailedStatus))
+        library.emit(.groupingProgress(.analyzing(completed: 4, total: 12)))
+        try await waitFor("detailed preparation state applied") {
+            browsing.preparationStatus.issues.count == 1
+                && browsing.preparationStatus.waitingReason == .memoryPressure
+                && browsing.groupingProgress == .analyzing(completed: 4, total: 12)
+        }
+
+        for showsDoneButton in [false, true] {
+            let presentation = FolderPreparationDetails.Presentation(
+                browsing: browsing, showsDoneButton: showsDoneButton)
+            #expect(presentation.heading == "Preparing folder")
+            #expect(presentation.showsPopoverHeading == !showsDoneButton)
+            #expect(presentation.headerSummary == "Coastal light · 12 photos")
+            #expect(presentation.analysisTitle == "Face & focus analysis")
+            #expect(presentation.previewsTitle == "Preview optimization")
+            #expect(presentation.groupingTitle == "Similar groups")
+            #expect(presentation.groupingStatus == "Paused")
+            #expect(presentation.readyForBothText == "8 photos ready for both")
+            #expect(presentation.waitingTitle == "Paused for memory")
+            #expect(presentation.showsIssues)
+            #expect(!presentation.canRetryIssues)
+            #expect(
+                presentation.reassuranceFooter
+                    == "You can keep browsing. The current photo is prioritized. Originals are unchanged."
+            )
+
+            let frameBox = FrameStoreBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 420, height: 760)
+            let host = UIHostingController(
+                rootView: FolderPreparationDetails(
+                    browsing: browsing, showsDoneButton: showsDoneButton
+                )
+                .environment(\.cloveTheme, .light)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    frameBox.frames = frames
+                })
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("preparation details elements laid out (done=\(showsDoneButton))") {
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                let hasSharedFrames =
+                    frameBox.frames["clove.preparation.folderName"] != nil
+                    && frameBox.frames["clove.preparation.waiting"] != nil
+                    && frameBox.frames["clove.preparation.analysis.title"] != nil
+                    && frameBox.frames["clove.preparation.previews.title"] != nil
+                    && frameBox.frames["clove.preparation.summary"] != nil
+                    && frameBox.frames["clove.preparation.issues"] != nil
+                    && frameBox.frames["clove.preparation.retry"] != nil
+                    && frameBox.frames["clove.preparation.footer"] != nil
+                if showsDoneButton {
+                    let navBar = self.findNavigationBar(in: window)
+                    return hasSharedFrames
+                        && navBar != nil
+                        && (navBar?.topItem?.title == "Preparing folder"
+                            || navBar?.topItem?.titleView != nil)
+                } else {
+                    return hasSharedFrames
+                        && frameBox.frames["clove.preparation.title"] != nil
+                }
+            }
+
+            let folderFrame = try #require(frameBox.frames["clove.preparation.folderName"])
+            let waitingFrame = try #require(frameBox.frames["clove.preparation.waiting"])
+            let analysisFrame = try #require(frameBox.frames["clove.preparation.analysis.title"])
+            let previewsFrame = try #require(frameBox.frames["clove.preparation.previews.title"])
+            let summaryFrame = try #require(frameBox.frames["clove.preparation.summary"])
+            let issuesFrame = try #require(frameBox.frames["clove.preparation.issues"])
+            let footerFrame = try #require(frameBox.frames["clove.preparation.footer"])
+
+            if showsDoneButton {
+                let navBar = try #require(findNavigationBar(in: window))
+                let navBarFrame = navBar.convert(navBar.bounds, to: window)
+                #expect(
+                    navBar.topItem?.title == "Preparing folder" || navBar.topItem?.titleView != nil
+                )
+                if let reportedTitle = frameBox.frames["clove.preparation.title"] {
+                    #expect(reportedTitle.maxY <= folderFrame.minY + 1)
+                } else if let titleView = navBar.topItem?.titleView {
+                    let titleRect = titleView.convert(titleView.bounds, to: window)
+                    #expect(titleRect.maxY <= folderFrame.minY + 1)
+                } else {
+                    #expect(navBarFrame.minY < folderFrame.minY)
+                }
+            } else {
+                let titleFrame = try #require(frameBox.frames["clove.preparation.title"])
+                #expect(titleFrame.maxY <= folderFrame.minY + 1)
+            }
+            #expect(folderFrame.maxY <= waitingFrame.minY + 1)
+            #expect(waitingFrame.maxY <= analysisFrame.minY + 1)
+            #expect(analysisFrame.maxY <= previewsFrame.minY + 1)
+            #expect(previewsFrame.maxY <= summaryFrame.minY + 1)
+            #expect(summaryFrame.maxY <= issuesFrame.minY + 1)
+            #expect(issuesFrame.maxY <= footerFrame.minY + 1)
+            #expect(try #require(findRenderedPixels(in: window)).isEmpty == false)
+        }
+    }
+
     @Test func inlineDetailRingDoesNotCollideWithDuoFocusToggleAndKeeps44PtHitTarget() async throws
     {
         guard #available(iOS 27.1, *) else { return }
@@ -651,10 +811,16 @@ struct FolderPreparationPresentationTests {
         presentationBox.value = .focus
         let photoPreviewOverlayMinX = overlay.minX
         try await waitFor("Focus View viewport overlay did not lay out") {
-            guard let focusOverlay = frameBox.frames["clove.detail.photoCornerOverlay"] else {
+            guard let preview = self.findPreview(in: window),
+                let focusOverlay = frameBox.frames["clove.detail.photoCornerOverlay"]
+            else {
                 return false
             }
-            return focusOverlay.minX < photoPreviewOverlayMinX - 40
+            let stageRect = preview.convert(preview.bounds, to: window)
+            return self.findCollectionView(in: window) == nil
+                && focusOverlay.minX < photoPreviewOverlayMinX - 40
+                && abs(focusOverlay.minX - (stageRect.minX + 16)) <= 1.5
+                && abs(focusOverlay.minY - (stageRect.minY + 12)) <= 1.5
         }
         let previewInFocus = try #require(findPreview(in: window))
         let focusPreviewRect = previewInFocus.convert(previewInFocus.bounds, to: window)
@@ -933,6 +1099,22 @@ struct FolderPreparationPresentationTests {
         if let preview = view as? DetailZoomContainerView { return preview }
         for child in view.subviews {
             if let found = findPreview(in: child) { return found }
+        }
+        return nil
+    }
+
+    private func findCollectionView(in view: UIView) -> UICollectionView? {
+        if let collection = view as? UICollectionView { return collection }
+        for child in view.subviews {
+            if let found = findCollectionView(in: child) { return found }
+        }
+        return nil
+    }
+
+    private func findNavigationBar(in view: UIView) -> UINavigationBar? {
+        if let navBar = view as? UINavigationBar { return navBar }
+        for child in view.subviews {
+            if let found = findNavigationBar(in: child) { return found }
         }
         return nil
     }

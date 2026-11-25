@@ -11,6 +11,52 @@ enum FolderPreparationPresentationMode: Equatable, Sendable {
 }
 
 enum FolderPreparationAccessibility {
+    static func detailsHeading(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Preparing folder", language: language)
+    }
+
+    static func headerSummaryText(
+        folderName: String,
+        status: FolderPreparationStatus,
+        language: ResolvedAppLanguage = .english
+    ) -> String {
+        let detailText: String =
+            if status.phase == .enumeratingUnknown {
+                AppLocalization.string("Scanning folder…", language: language)
+            } else {
+                AppLocalization.format(
+                    "%lld photos", language: language, Int64(status.totalPhotos))
+            }
+        return AppLocalization.format("%@ · %@", language: language, folderName, detailText)
+    }
+
+    static func readyForBothText(
+        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+    ) -> String {
+        if status.phase == .enumeratingUnknown {
+            return AppLocalization.string("Scanning folder…", language: language)
+        }
+        if let reason = status.waitingReason, status.totalPhotos == 0 {
+            return waitingTitle(for: reason, language: language)
+        }
+        return AppLocalization.format(
+            "%lld photos ready for both", language: language, Int64(status.readyForBothCount))
+    }
+
+    static func analysisRowTitle(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Face & focus analysis", language: language)
+    }
+
+    static func previewsRowTitle(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string("Preview optimization", language: language)
+    }
+
+    static func reassuranceFooterText(language: ResolvedAppLanguage = .english) -> String {
+        AppLocalization.string(
+            "You can keep browsing. The current photo is prioritized. Originals are unchanged.",
+            language: language)
+    }
+
     static func summaryText(
         for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
     ) -> String {
@@ -576,6 +622,74 @@ struct FolderPreparationIndicator: View {
 }
 
 struct FolderPreparationDetails: View {
+    struct Presentation: Equatable {
+        let heading: String
+        let showsPopoverHeading: Bool
+        let headerSummary: String
+        let analysisTitle: String
+        let analysisCount: String
+        let previewsTitle: String
+        let previewsCount: String
+        let groupingTitle: String?
+        let groupingStatus: String?
+        let readyForBothText: String
+        let waitingTitle: String?
+        let waitingDetail: String?
+        let showsIssues: Bool
+        let canRetryIssues: Bool
+        let reassuranceFooter: String
+
+        @MainActor
+        init(
+            browsing: BrowsingModel, showsDoneButton: Bool,
+            language: ResolvedAppLanguage = .english
+        ) {
+            let status = browsing.preparationStatus
+            let folderName =
+                status.folderName.isEmpty
+                ? browsing.localizedFolderTitle(language: language) : status.folderName
+            self.heading = FolderPreparationAccessibility.detailsHeading(language: language)
+            self.showsPopoverHeading = !showsDoneButton
+            self.headerSummary = FolderPreparationAccessibility.headerSummaryText(
+                folderName: folderName, status: status, language: language)
+            self.analysisTitle = FolderPreparationAccessibility.analysisRowTitle(
+                language: language)
+            self.analysisCount = FolderPreparationAccessibility.analysisCountText(
+                for: status, language: language)
+            self.previewsTitle = FolderPreparationAccessibility.previewsRowTitle(
+                language: language)
+            self.previewsCount = FolderPreparationAccessibility.previewsCountText(
+                for: status, language: language)
+            if browsing.similarGroupsEnabled {
+                self.groupingTitle = AppLocalization.string("Similar groups", language: language)
+                self.groupingStatus = FolderPreparationAccessibility.groupingStatusText(
+                    for: status,
+                    progress: browsing.groupingProgress,
+                    groupCount: browsing.groups.count,
+                    isScanning: browsing.isScanning,
+                    language: language)
+            } else {
+                self.groupingTitle = nil
+                self.groupingStatus = nil
+            }
+            self.readyForBothText = FolderPreparationAccessibility.readyForBothText(
+                for: status, language: language)
+            if let reason = status.waitingReason {
+                self.waitingTitle = FolderPreparationAccessibility.waitingTitle(
+                    for: reason, language: language)
+                self.waitingDetail = FolderPreparationAccessibility.waitingDetail(
+                    for: reason, language: language)
+            } else {
+                self.waitingTitle = nil
+                self.waitingDetail = nil
+            }
+            self.showsIssues = !status.issues.isEmpty
+            self.canRetryIssues = status.canRetryIssues
+            self.reassuranceFooter = FolderPreparationAccessibility.reassuranceFooterText(
+                language: language)
+        }
+    }
+
     let browsing: BrowsingModel
     let showsDoneButton: Bool
 
@@ -602,10 +716,20 @@ struct FolderPreparationDetails: View {
                     }
                     .background(Color.clove.surface.sheet)
                     .navigationTitle(
-                        AppLocalization.string("Folder preparation", language: language)
+                        FolderPreparationAccessibility.detailsHeading(language: language)
                     )
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
+                        ToolbarItem(placement: .principal) {
+                            Text(
+                                FolderPreparationAccessibility.detailsHeading(language: language)
+                            )
+                            .font(.headline)
+                            .lineLimit(1)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("clove.preparation.title")
+                            .reportHeaderControlFrame("clove.preparation.title")
+                        }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button(AppLocalization.string("Done", language: language)) { dismiss() }
                                 .foregroundStyle(Color.clove.accent)
@@ -636,6 +760,13 @@ struct FolderPreparationDetails: View {
 
     private var detailsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !showsDoneButton {
+                Text(FolderPreparationAccessibility.detailsHeading(language: language))
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("clove.preparation.title")
+                    .reportHeaderControlFrame("clove.preparation.title")
+            }
             headerCard
             if let reason = status.waitingReason {
                 waitingBanner(reason)
@@ -644,6 +775,12 @@ struct FolderPreparationDetails: View {
             if !status.issues.isEmpty {
                 issuesCard
             }
+            Text(FolderPreparationAccessibility.reassuranceFooterText(language: language))
+                .font(.footnote)
+                .foregroundStyle(Color.clove.text.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("clove.preparation.footer")
+                .reportHeaderControlFrame("clove.preparation.footer")
         }
     }
 
@@ -653,15 +790,15 @@ struct FolderPreparationDetails: View {
                 Image(systemName: "folder")
                     .foregroundStyle(Color.clove.text.secondary)
                     .accessibilityHidden(true)
-                Text(folderDisplayName)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .accessibilityIdentifier("clove.preparation.folderName")
+                Text(
+                    FolderPreparationAccessibility.headerSummaryText(
+                        folderName: folderDisplayName, status: status, language: language)
+                )
+                .font(.headline)
+                .lineLimit(2)
+                .accessibilityIdentifier("clove.preparation.folderName")
+                .reportHeaderControlFrame("clove.preparation.folderName")
             }
-            Text(FolderPreparationAccessibility.summaryText(for: status, language: language))
-                .font(.subheadline)
-                .foregroundStyle(Color.clove.text.secondary)
-                .accessibilityIdentifier("clove.preparation.summary")
             if status.isEnumerating && status.totalPhotos > 0 {
                 Text(
                     AppLocalization.string(
@@ -699,6 +836,7 @@ struct FolderPreparationDetails: View {
         .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("clove.preparation.waiting")
+        .reportHeaderControlFrame("clove.preparation.waiting")
     }
 
     private var tasksCard: some View {
@@ -708,7 +846,7 @@ struct FolderPreparationDetails: View {
             : theme.tokens.accent.color
         return VStack(alignment: .leading, spacing: 12) {
             taskRow(
-                title: AppLocalization.string("Focus analysis", language: language),
+                title: FolderPreparationAccessibility.analysisRowTitle(language: language),
                 countText: FolderPreparationAccessibility.analysisCountText(
                     for: status, language: language),
                 completed: status.analysis.completed,
@@ -719,7 +857,7 @@ struct FolderPreparationDetails: View {
                 identifierPrefix: "clove.preparation.analysis")
             Divider()
             taskRow(
-                title: AppLocalization.string("Previews", language: language),
+                title: FolderPreparationAccessibility.previewsRowTitle(language: language),
                 countText: FolderPreparationAccessibility.previewsCountText(
                     for: status, language: language),
                 completed: status.previews.completed,
@@ -732,6 +870,12 @@ struct FolderPreparationDetails: View {
                 Divider()
                 groupingRow
             }
+            Divider()
+            Text(FolderPreparationAccessibility.readyForBothText(for: status, language: language))
+                .font(.footnote)
+                .foregroundStyle(Color.clove.text.secondary)
+                .accessibilityIdentifier("clove.preparation.summary")
+                .reportHeaderControlFrame("clove.preparation.summary")
         }
         .padding(14)
         .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
@@ -816,6 +960,8 @@ struct FolderPreparationDetails: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(title)
                     .font(.subheadline.weight(.medium))
+                    .accessibilityIdentifier("\(identifierPrefix).title")
+                    .reportHeaderControlFrame("\(identifierPrefix).title")
                 Spacer(minLength: 8)
                 Text(countText)
                     .font(.caption.monospacedDigit())
@@ -877,6 +1023,7 @@ struct FolderPreparationDetails: View {
                             for: status, language: language)
                     )
                     .accessibilityIdentifier("clove.preparation.retry")
+                    .reportHeaderControlFrame("clove.preparation.retry")
                 }
             }
             ForEach(status.issues) { issue in
@@ -918,6 +1065,7 @@ struct FolderPreparationDetails: View {
         .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.preparation.issues")
+        .reportHeaderControlFrame("clove.preparation.issues")
     }
 }
 

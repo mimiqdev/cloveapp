@@ -653,4 +653,56 @@ struct AppLocalizationTests {
         #expect(AppLocalization.themeTitle(.darkroom, language: .simplifiedChinese) == "暗房")
         #expect(AppLocalization.themeTitle(.night, language: .traditionalChinese) == "夜間")
     }
+
+    @Test func workflowsFigmaStringsLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Preparing folder", "Preparing folder", "正在准备文件夹", "正在準備檔案夾"),
+            ("Face & focus analysis", "Face & focus analysis", "人脸与对焦分析", "人臉與對焦分析"),
+            ("Preview optimization", "Preview optimization", "预览优化", "預覽最佳化"),
+            (
+                "You can keep browsing. The current photo is prioritized. Originals are unchanged.",
+                "You can keep browsing. The current photo is prioritized. Originals are unchanged.",
+                "可继续浏览。当前照片会优先处理。原图保持不变。",
+                "可繼續瀏覽。目前相片會優先處理。原圖保持不變。"
+            ),
+            (
+                "Cancel discards changes to the order.",
+                "Cancel discards changes to the order.",
+                "取消将放弃对顺序的更改。",
+                "取消將捨棄對順序的變更。"
+            ),
+            (
+                "Preview names before applying changes.",
+                "Preview names before applying changes.",
+                "应用更改前可预览名称。",
+                "套用變更前可預覽名稱。"
+            ),
+            (
+                "Replacements are flagged in the preview.",
+                "Replacements are flagged in the preview.",
+                "替换操作会在预览中标出。",
+                "取代項目會在預覽中標示。"
+            ),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+
+        #expect(
+            AppLocalization.format("%lld photos ready for both", language: .english, Int64(1))
+                == "1 photo ready for both")
+        #expect(
+            AppLocalization.format("%lld photos ready for both", language: .english, Int64(15))
+                == "15 photos ready for both")
+        #expect(
+            AppLocalization.format(
+                "%lld photos ready for both", language: .simplifiedChinese, Int64(15))
+                == "15 张照片两项均已就绪")
+        #expect(
+            AppLocalization.format(
+                "%lld photos ready for both", language: .traditionalChinese, Int64(15))
+                == "15 張相片兩項均已就緒")
+    }
 }

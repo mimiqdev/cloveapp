@@ -8,6 +8,9 @@ extension CloveFlowTests {
         defer { app.terminate() }
         openLibrary(app)
         selectRenamePhotos(app)
+        XCTAssertEqual(
+            element(app, "clove.rename.order.footer").label,
+            "Cancel discards changes to the order.")
         let third = element(app, "clove.rename.tile.mmq02680")
         let first = element(app, "clove.rename.tile.mmq02678")
         third.press(forDuration: 0.7, thenDragTo: first)
@@ -30,6 +33,12 @@ extension CloveFlowTests {
         element(app, "clove.nav.back").tap()
         XCTAssertEqual(third.value as? String, "Position 1 of 3")
         element(app, "clove.rename.next").tap()
+        let subtitle = element(app, "clove.rename.subtitle")
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(subtitle.label, "Preview names before applying changes.")
+        XCTAssertEqual(
+            element(app, "clove.rename.previewNote").label,
+            "Replacements are flagged in the preview.")
         let prefix = app.textFields["clove.rename.prefix"]
         prefix.tap()
         prefix.typeText("Test_")
@@ -53,6 +62,12 @@ extension CloveFlowTests {
         openLibrary(app)
         selectRenamePhotos(app)
         element(app, "clove.rename.next").tap()
+        let subtitle = element(app, "clove.rename.subtitle")
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(subtitle.label, "Preview names before applying changes.")
+        XCTAssertEqual(
+            element(app, "clove.rename.previewNote").label,
+            "Replacements are flagged in the preview.")
         let prefix = app.textFields["clove.rename.prefix"]
         prefix.tap()
         prefix.typeText("Test_")
@@ -141,6 +156,12 @@ extension CloveFlowTests {
 
         // Configure prefix, hyphen separator, and direct numeric start input.
         element(app, "clove.rename.next").tap()
+        let subtitle = element(app, "clove.rename.subtitle")
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(subtitle.label, "Preview names before applying changes.")
+        XCTAssertEqual(
+            element(app, "clove.rename.previewNote").label,
+            "Replacements are flagged in the preview.")
         let prefix = app.textFields["clove.rename.prefix"]
         XCTAssertTrue(prefix.waitForExistence(timeout: 5))
         prefix.tap()

@@ -92,6 +92,14 @@ struct RenameOrderGrid: UIViewRepresentable {
                             .frame(minWidth: 26, minHeight: 26)
                             .background(Color.clove.accent, in: Circle()).padding(6)
                     }
+                    .overlay(alignment: .bottomLeading) {
+                        PhotoTileRatingBadge(rating: photo.marks.rating)
+                            .allowsHitTesting(false)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        PhotoTileLabelDot(label: photo.marks.label)
+                            .allowsHitTesting(false)
+                    }
                     .environment(\.cloveTheme, theme ?? .light)
                     .environment(\.appLanguage, appLanguage)
                     .environment(\.locale, appLanguage.locale)
