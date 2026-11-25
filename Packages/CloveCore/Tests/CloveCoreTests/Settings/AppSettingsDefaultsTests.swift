@@ -13,6 +13,7 @@ import CloveCore
     #expect(settings.doubleTap == .zoomToFocus)
     #expect(settings.zoomedGestures == .rateAndSwitch)
     #expect(!settings.extendedColourLabelsEnabled)
+    #expect(!settings.confirmBatchActions)
     #expect(settings.rejectsFolderName == .defaultFolderName)
     #expect(settings.rejectsFolderName.rawValue == "_Rejected")
     #expect(settings.moveRejectsEnabled)

@@ -10,40 +10,83 @@ struct BatchKeywordsSheet: View {
     @FocusState private var isInputFocused: Bool
     @State private var inputText = ""
     @State private var hasAppliedInSheet = false
+    @State private var stagedKeywords: [String] = []
 
+    static func navigationTitle(isStagedConfirmation: Bool, language: ResolvedAppLanguage) -> String
+    {
+        AppLocalization.string(
+            isStagedConfirmation ? "Add Keywords" : "Keywords", language: language)
+    }
+
+    static func confirmTitle(targetCount: Int, language: ResolvedAppLanguage) -> String {
+        AppLocalization.format("Add to %lld Photos", language: language, Int64(targetCount))
+    }
+
+    static func stagedAfterAdding(_ tokens: [String], to staged: [String]) -> [String] {
+        PhotoKeywords.deduplicated(staged + tokens)
+    }
+
+    static func combinedStagedKeywords(_ staged: [String], entered: [String]) -> [String] {
+        PhotoKeywords.deduplicated(staged + entered)
+    }
+
+    private var isStagedConfirmation: Bool { store.settings.confirmBatchActions }
     private var targets: [GridPhoto] { browsing.batchTargets }
     private var canOperate: Bool { !targets.isEmpty && browsing.canMark }
     private var enteredKeywords: [String] { BatchKeywords.parse(inputText) }
     private var canSubmitEntered: Bool { canOperate && !enteredKeywords.isEmpty }
+    private var canConfirmStaged: Bool { canOperate && !stagedKeywords.isEmpty }
     private var commonKeywords: [String] { BatchKeywords.commonKeywords(in: targets) }
     private var mixedKeywords: [String] { BatchKeywords.mixedKeywords(in: targets) }
     private var suggestions: [String] {
         BatchKeywords.suggestions(
-            in: browsing.allPlacedPhotos, targets: targets, excluding: enteredKeywords)
+            in: browsing.allPlacedPhotos,
+            targets: targets,
+            excluding: isStagedConfirmation ? stagedKeywords : enteredKeywords)
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    selectionSummary
-                    inputSection
-                    if !commonKeywords.isEmpty || !mixedKeywords.isEmpty {
-                        commonSection
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        selectionSummary
+                        inputSection
+                        if isStagedConfirmation {
+                            if !stagedKeywords.isEmpty {
+                                stagedSection
+                            }
+                            if !suggestions.isEmpty {
+                                suggestionsSection(
+                                    title: AppLocalization.string("Recent", language: language))
+                            }
+                        } else {
+                            if !commonKeywords.isEmpty || !mixedKeywords.isEmpty {
+                                commonSection
+                            }
+                            if !suggestions.isEmpty {
+                                suggestionsSection(
+                                    title: AppLocalization.string(
+                                        "Suggestions", language: language))
+                            }
+                        }
                     }
-                    if !suggestions.isEmpty {
-                        suggestionsSection
-                    }
+                    .padding(20)
                 }
-                .padding(20)
+                .scrollDismissesKeyboard(.interactively)
+
+                if isStagedConfirmation {
+                    stagedConfirmFooter
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
             .foregroundStyle(Color.clove.text.primary)
             .background(Color.clove.surface.sheet)
-            .navigationTitle(AppLocalization.string("Keywords", language: language))
+            .navigationTitle(
+                Self.navigationTitle(isStagedConfirmation: isStagedConfirmation, language: language)
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if !hasAppliedInSheet {
+                if isStagedConfirmation || !hasAppliedInSheet {
                     ToolbarItem(placement: .topBarLeading) {
                         Button(AppLocalization.string("Cancel", language: language)) {
                             dismiss()
@@ -52,7 +95,7 @@ struct BatchKeywordsSheet: View {
                         .accessibilityIdentifier("clove.keywords.cancel")
                     }
                 }
-                if hasAppliedInSheet {
+                if !isStagedConfirmation && hasAppliedInSheet {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(AppLocalization.string("Done", language: language)) {
                             dismiss()
@@ -196,13 +239,52 @@ struct BatchKeywordsSheet: View {
         }
     }
 
-    private var suggestionsSection: some View {
+    private var stagedSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(AppLocalization.string("Suggestions", language: language))
+            KeywordChipLayout(spacing: 8) {
+                ForEach(stagedKeywords, id: \.self) { keyword in
+                    Button {
+                        unstageKeyword(keyword)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(keyword)
+                                .lineLimit(1)
+                            Image(systemName: "xmark.circle.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(Color.clove.text.secondary)
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .frame(minHeight: 36)
+                        .foregroundStyle(Color.clove.text.primary)
+                        .background(Color.clove.surface.card, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.clove.separator, lineWidth: 1))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canOperate)
+                    .opacity(canOperate ? 1 : 0.4)
+                    .accessibilityLabel(
+                        AppLocalization.format("Remove %@", language: language, keyword)
+                    )
+                    .accessibilityIdentifier("clove.keywords.staged.\(keyword)")
+                }
+            }
+        }
+    }
+
+    private func suggestionsSection(title: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(title)
             KeywordChipLayout(spacing: 8) {
                 ForEach(suggestions, id: \.self) { keyword in
                     Button {
-                        applySuggestion(keyword)
+                        if isStagedConfirmation {
+                            stageKeywords([keyword])
+                        } else {
+                            applySuggestion(keyword)
+                        }
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "plus")
@@ -228,12 +310,37 @@ struct BatchKeywordsSheet: View {
                     )
                     .accessibilityHint(
                         AppLocalization.string(
-                            "Adds this keyword to all selected photos.", language: language)
+                            isStagedConfirmation
+                                ? "Stages this keyword to add to selected photos."
+                                : "Adds this keyword to all selected photos.",
+                            language: language)
                     )
                     .accessibilityIdentifier("clove.keywords.suggestion.\(keyword)")
                 }
             }
         }
+    }
+
+    private var stagedConfirmFooter: some View {
+        VStack(spacing: 0) {
+            Divider().overlay(Color.clove.separator)
+            Button {
+                confirmStagedKeywords()
+            } label: {
+                Text(Self.confirmTitle(targetCount: targets.count, language: language))
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .foregroundStyle(.white)
+                    .background(Color.clove.accent, in: Capsule())
+                    .opacity(canConfirmStaged ? 1 : 0.4)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canConfirmStaged)
+            .accessibilityIdentifier("clove.keywords.confirm")
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+        }
+        .background(Color.clove.surface.sheet)
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -246,8 +353,30 @@ struct BatchKeywordsSheet: View {
     private func submitEnteredKeywords() {
         let tokens = enteredKeywords
         guard canOperate, !tokens.isEmpty else { return }
+        if isStagedConfirmation {
+            stageKeywords(tokens)
+            inputText = ""
+            return
+        }
         isInputFocused = false
         browsing.applyBatch(.addKeywords(tokens), settings: store.settings)
+        dismiss()
+    }
+
+    private func stageKeywords(_ tokens: [String]) {
+        guard canOperate else { return }
+        stagedKeywords = Self.stagedAfterAdding(tokens, to: stagedKeywords)
+    }
+
+    private func unstageKeyword(_ keyword: String) {
+        stagedKeywords.removeAll { $0 == keyword }
+    }
+
+    private func confirmStagedKeywords() {
+        let combined = Self.combinedStagedKeywords(stagedKeywords, entered: enteredKeywords)
+        guard canOperate, !stagedKeywords.isEmpty, !combined.isEmpty else { return }
+        isInputFocused = false
+        browsing.applyBatch(.addKeywords(combined), settings: store.settings)
         dismiss()
     }
 

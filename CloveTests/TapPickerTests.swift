@@ -762,24 +762,29 @@ struct TapPickerTests {
 
             try await waitFor("narrow grid batch bar mounted (\(language.rawValue))") {
                 box.frames["clove.grid.batch"] != nil
+                    && box.frames["clove.grid.batch.bar"] != nil
                     && box.frames["clove.grid.batch.actions"] != nil
             }
 
             let bar = try #require(box.frames["clove.grid.batch"])
+            let markingCapsule = try #require(box.frames["clove.grid.batch.bar"])
             let reject = try #require(box.frames["clove.grid.batch.reject"])
             let rating = try #require(box.frames["clove.grid.batch.rating"])
             let label = try #require(box.frames["clove.grid.batch.label"])
             let actions = try #require(box.frames["clove.grid.batch.actions"])
 
             #expect(abs(bar.height - 48) < 1)
+            #expect(abs(markingCapsule.width - 168) < 1)
+            #expect(abs(markingCapsule.height - 48) < 1)
             #expect(bar.minX >= 16 - 1.5)
             #expect(bar.maxX <= 320 - 16 + 1.5)
             #expect((52...56).contains(reject.width))
             #expect((52...56).contains(rating.width))
             #expect((52...56).contains(label.width))
-            #expect(actions.width >= 44)
+            #expect(abs(actions.width - 110) < 1)
             #expect(abs(actions.height - 48) < 1)
-            #expect(actions.minX >= label.maxX - 0.5)
+            #expect(abs(actions.minX - markingCapsule.maxX - 8) < 1)
+            #expect(box.frames["clove.grid.batch.compare"] == nil)
 
             // With zero targets selected, the bar remains visible and rating trigger does not open.
             #expect(browsing.batchTargets.isEmpty)
@@ -809,6 +814,142 @@ struct TapPickerTests {
             try await Task.sleep(for: .milliseconds(120))
             #expect(box.frames["clove.grid.batch.stars"] == nil)
             #expect(box.frames["clove.grid.batch"] != nil)
+        }
+    }
+
+    @Test func gridBatchBarSplitsMarkingAndActionsCapsulesAndShowsConditionalCompareCapsule()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+
+        // 1. Direct GridBatchBar with showsCompare: true renders three separate capsules separated by 8 pt gaps.
+        do {
+            let browsing = BrowsingModel(library: TestLibrary.sample(), similarGroupsEnabled: false)
+            browsing.openFolder()
+            for photo in browsing.photos.prefix(2) { browsing.toggleSelection(photo.id) }
+            let box = TapPickerTestBox()
+
+            struct BarHost: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let box: TapPickerTestBox
+                var showsCompare: Bool
+
+                var body: some View {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        GridBatchBar(
+                            browsing: browsing,
+                            showsCompare: showsCompare,
+                            onCompare: {}
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .tapPickerContainer()
+                    .environment(store)
+                    .environment(\.scenePhase, .active)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) { box.frames = $0 }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 700, height: 420)
+            let host = UIHostingController(
+                rootView: BarHost(
+                    browsing: browsing, store: store, box: box, showsCompare: true))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("batch bar with Compare mounted") {
+                box.frames["clove.grid.batch.bar"] != nil
+                    && box.frames["clove.grid.batch.actions"] != nil
+                    && box.frames["clove.grid.batch.compare"] != nil
+            }
+
+            let markingCapsule = try #require(box.frames["clove.grid.batch.bar"])
+            let actionsCapsule = try #require(box.frames["clove.grid.batch.actions"])
+            let compareCapsule = try #require(box.frames["clove.grid.batch.compare"])
+
+            #expect(abs(markingCapsule.width - 168) < 1)
+            #expect(abs(markingCapsule.height - 48) < 1)
+            #expect(abs(actionsCapsule.width - 110) < 1)
+            #expect(abs(actionsCapsule.height - 48) < 1)
+            #expect(abs(compareCapsule.height - 48) < 1)
+            #expect(abs(actionsCapsule.minX - markingCapsule.maxX - 8) < 1)
+            #expect(abs(compareCapsule.minX - actionsCapsule.maxX - 8) < 1)
+        }
+
+        // 2. GridScreen shows Compare capsule only for 2 visible targets on compare-capable layouts.
+        do {
+            let browsing = BrowsingModel(library: TestLibrary.sample(), similarGroupsEnabled: false)
+            browsing.openFolder()
+            let box = TapPickerTestBox()
+
+            struct GridCompareHost: View {
+                let browsing: BrowsingModel
+                let store: SettingsStore
+                let box: TapPickerTestBox
+                var isDuoCover = false
+
+                var body: some View {
+                    GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
+                        .environment(store)
+                        .environment(\.cloveUserInterfaceIdiom, .phone)
+                        .environment(\.isDuoCover, isDuoCover)
+                        .environment(\.scenePhase, .active)
+                        .onPreferenceChange(TapPickerFramesPreferenceKey.self) { box.frames = $0 }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            // Portrait iPhone with 2 selected: Compare remains hidden.
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            let host = UIHostingController(
+                rootView: GridCompareHost(browsing: browsing, store: store, box: box))
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.traitOverrides.verticalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            let first = try #require(browsing.photos.first)
+            let second = try #require(browsing.photos.dropFirst().first)
+            let third = try #require(browsing.photos.dropFirst(2).first)
+            browsing.toggleSelection(first.id)
+            browsing.toggleSelection(second.id)
+
+            try await waitFor("portrait batch bar mounted") {
+                box.frames["clove.grid.batch.bar"] != nil
+                    && box.frames["clove.grid.batch.actions"] != nil
+            }
+            #expect(box.frames["clove.grid.batch.compare"] == nil)
+
+            // Landscape iPhone with 2 selected: Compare capsule mounts beside Actions.
+            window.frame = CGRect(x: 0, y: 0, width: 844, height: 390)
+            host.traitOverrides.verticalSizeClass = .compact
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+
+            try await waitFor("landscape Compare capsule mounted for 2 selected") {
+                box.frames["clove.grid.batch.compare"] != nil
+            }
+
+            // Selecting a 3rd photo hides Compare again.
+            browsing.toggleSelection(third.id)
+            try await waitFor("Compare capsule hidden when 3 photos selected") {
+                box.frames["clove.grid.batch.compare"] == nil
+            }
         }
     }
 

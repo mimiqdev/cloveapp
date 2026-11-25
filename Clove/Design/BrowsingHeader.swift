@@ -48,7 +48,7 @@ struct BrowsingHeader<
         let backLabel = AppLocalization.string("Back", language: language)
         Group {
             if usesInlineFlow {
-                HStack(spacing: 8) {
+                HStack(spacing: showsBack ? 8 : 6) {
                     if showsBack {
                         backButton(label: backLabel)
                             .layoutPriority(1)

@@ -1,6 +1,8 @@
 import CloveCore
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 
 @testable import Clove
 
@@ -169,5 +171,107 @@ struct BatchKeywordsTests {
             for: unmarked, language: .english)
         #expect(unmarkedSummary.text == "Unmarked")
         #expect(unmarkedSummary.isNeutral)
+    }
+
+    @Test func batchKeywordsSheetStagesAndCommitsInConfirmModeWithoutPrematureWrites() async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["a", "b", "c"])
+        let a = library.identity("a")
+        let b = library.identity("b")
+        let c = library.identity("c")
+        library.photos[2].marks = PhotoMarks(keywords: ["Harbour", "Dawn"])
+
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        browsing.toggleSelection(a)
+        browsing.toggleSelection(b)
+        #expect(browsing.batchTargets.count == 2)
+
+        let storage = SampleSettingsStorage()
+        let store = SettingsStore(
+            persistence: SettingsPersistence(storage: storage),
+            rememberedAdvanceStorage: storage,
+            physicalMemory: 8 * 1024 * 1024 * 1024)
+        store.update { $0.confirmBatchActions = true }
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 700)
+        let host = UIHostingController(
+            rootView: BatchKeywordsSheet(browsing: browsing)
+                .environment(store)
+                .environment(\.cloveTheme, .light)
+                .environment(\.appLanguage, .english))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitForCondition("BatchKeywordsSheet mounted") {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            guard host.view.bounds.size.width > 0, !host.children.isEmpty else { return false }
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            return image.size.width > 0 && image.size.height > 0
+        }
+
+        #expect(
+            BatchKeywordsSheet.navigationTitle(isStagedConfirmation: true, language: .english)
+                == "Add Keywords")
+        #expect(
+            BatchKeywordsSheet.navigationTitle(isStagedConfirmation: false, language: .english)
+                == "Keywords")
+        #expect(
+            BatchKeywordsSheet.confirmTitle(
+                targetCount: browsing.batchTargets.count, language: .english) == "Add to 2 Photos")
+
+        // Staging and unstaging mutate in-memory state with zero writes until confirmed.
+        var staged = BatchKeywordsSheet.stagedAfterAdding(["Harbour", "Dawn"], to: [])
+        #expect(staged == ["Harbour", "Dawn"])
+        staged = BatchKeywordsSheet.stagedAfterAdding(["Harbour"], to: staged)
+        #expect(staged == ["Harbour", "Dawn"])
+        staged.removeAll { $0 == "Dawn" }
+        #expect(staged == ["Harbour"])
+        await browsing.drainActions()
+        #expect(browsing.shownMarks(for: a).keywords.isEmpty)
+        #expect(browsing.shownMarks(for: b).keywords.isEmpty)
+        #expect(library.writes.isEmpty)
+
+        // Confirming commits staged (+ entered, deduplicated) keywords in one undoable batch.
+        let committed = BatchKeywordsSheet.combinedStagedKeywords(
+            staged, entered: ["Harbour", "Coast"])
+        #expect(committed == ["Harbour", "Coast"])
+        browsing.applyBatch(.addKeywords(committed), settings: store.settings)
+        await browsing.drainActions()
+
+        #expect(browsing.shownMarks(for: a).keywords == ["Harbour", "Coast"])
+        #expect(browsing.shownMarks(for: b).keywords == ["Harbour", "Coast"])
+        #expect(browsing.shownMarks(for: c).keywords == ["Harbour", "Dawn"])
+        #expect(browsing.canUndoMark)
+
+        browsing.undoLastMark()
+        await browsing.drainActions()
+        #expect(browsing.shownMarks(for: a).keywords.isEmpty)
+        #expect(browsing.shownMarks(for: b).keywords.isEmpty)
+    }
+
+    private func waitForCondition(
+        _ message: String,
+        timeout: Duration = .seconds(3),
+        condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            if ContinuousClock.now >= deadline {
+                Issue.record(Comment(rawValue: message))
+                throw CancellationError()
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
     }
 }

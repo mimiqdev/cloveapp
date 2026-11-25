@@ -1395,6 +1395,28 @@
         }
       }
     },
+    "Add Keywords": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Keywords"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加关键词"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入關鍵字"
+          }
+        }
+      }
+    },
     "Add keywords, separated by commas": {
       "localizations": {
         "en": {
@@ -1435,6 +1457,52 @@
           "stringUnit": {
             "state": "translated",
             "value": "加入關鍵字…"
+          }
+        }
+      }
+    },
+    "Add to %lld Photos": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Add to 1 Photo"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Add to %lld Photos"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "添加到 %lld 张照片"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "加入到 %lld 張相片"
+                }
+              }
+            }
           }
         }
       }
@@ -1831,6 +1899,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "返回"
+          }
+        }
+      }
+    },
+    "Batch actions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batch actions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "批量操作"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "批次動作"
           }
         }
       }
@@ -2495,6 +2585,28 @@
         }
       }
     },
+    "Confirm Save to Photos & Keywords": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm Save to Photos & Keywords"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确认存储到照片与关键词"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "確認儲存到相片與關鍵字"
+          }
+        }
+      }
+    },
     "Continue · %@": {
       "localizations": {
         "en": {
@@ -2777,6 +2889,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "預設"
+          }
+        }
+      }
+    },
+    "Deselect All": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deselect All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消全选"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消全選"
           }
         }
       }
@@ -7235,6 +7369,28 @@
         }
       }
     },
+    "RAW only · skipped": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW only · skipped"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅 RAW · 已跳过"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅 RAW · 已略過"
+          }
+        }
+      }
+    },
     "RAW shows the file's own colours; the camera's preview fills the wait. Camera preview is quicker and lighter.": {
       "localizations": {
         "en": {
@@ -7275,6 +7431,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在讀取相片…"
+          }
+        }
+      }
+    },
+    "Ready to save": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready to save"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "准备存储"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "準備儲存"
+          }
+        }
+      }
+    },
+    "Recent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近"
           }
         }
       }
@@ -8233,6 +8433,52 @@
         }
       }
     },
+    "Save %lld Photos": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Save 1 Photo"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Save %lld Photos"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "存储 %lld 张照片"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "儲存 %lld 張相片"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Save %lld photos to Photos?": {
       "localizations": {
         "en": {
@@ -8297,6 +8543,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "儲存到相片"
+          }
+        }
+      }
+    },
+    "Save to Photos…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save to Photos…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储到照片…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存到相片…"
           }
         }
       }
@@ -8409,6 +8677,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "選擇"
+          }
+        }
+      }
+    },
+    "Select All": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全选"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全選"
           }
         }
       }
@@ -9071,6 +9361,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "排序方式"
+          }
+        }
+      }
+    },
+    "Stages this keyword to add to selected photos.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stages this keyword to add to selected photos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂存此关键词，确认后添加到所选照片。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫存此關鍵字，確認後加入到所選相片。"
           }
         }
       }
@@ -10809,6 +11121,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "等待統計相片數量"
+          }
+        }
+      }
+    },
+    "When enabled, Save to Photos and Add Keywords show a confirmation sheet before applying. When off, they apply immediately.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When enabled, Save to Photos and Add Keywords show a confirmation sheet before applying. When off, they apply immediately."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后，存储到照片和添加关键词会在应用前显示确认表单；关闭时立即应用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟後，儲存到相片與加入關鍵字會在套用前顯示確認表單；關閉時會立即套用。"
           }
         }
       }

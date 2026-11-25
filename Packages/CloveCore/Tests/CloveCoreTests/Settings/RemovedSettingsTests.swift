@@ -12,6 +12,7 @@ import CloveCore
             "doubleTap",
             "zoomedGestures",
             "extendedColourLabelsEnabled",
+            "confirmBatchActions",
             "rejectsFolderName",
             "moveRejectsEnabled",
             "similarGroupsEnabled",

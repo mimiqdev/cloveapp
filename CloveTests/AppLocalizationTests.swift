@@ -771,4 +771,63 @@ struct AppLocalizationTests {
                 "%lld photos ready for both", language: .traditionalChinese, Int64(15))
                 == "15 張相片兩項均已就緒")
     }
+
+    @Test func batchToolbarHeaderAndConfirmationStringsLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Save to Photos…", "Save to Photos…", "存储到照片…", "儲存到相片…"),
+            ("Select All", "Select All", "全选", "全選"),
+            ("Deselect All", "Deselect All", "取消全选", "取消全選"),
+            ("Batch actions", "Batch actions", "批量操作", "批次動作"),
+            (
+                "Confirm Save to Photos & Keywords",
+                "Confirm Save to Photos & Keywords",
+                "确认存储到照片与关键词",
+                "確認儲存到相片與關鍵字"
+            ),
+            (
+                "When enabled, Save to Photos and Add Keywords show a confirmation sheet before applying. When off, they apply immediately.",
+                "When enabled, Save to Photos and Add Keywords show a confirmation sheet before applying. When off, they apply immediately.",
+                "开启后，存储到照片和添加关键词会在应用前显示确认表单；关闭时立即应用。",
+                "開啟後，儲存到相片與加入關鍵字會在套用前顯示確認表單；關閉時會立即套用。"
+            ),
+            ("Ready to save", "Ready to save", "准备存储", "準備儲存"),
+            ("RAW only · skipped", "RAW only · skipped", "仅 RAW · 已跳过", "僅 RAW · 已略過"),
+            ("Add Keywords", "Add Keywords", "添加关键词", "加入關鍵字"),
+            ("Recent", "Recent", "最近", "最近"),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+
+        #expect(
+            AppLocalization.format("Save %lld Photos", language: .english, Int64(0))
+                == "Save 0 Photos")
+        #expect(
+            AppLocalization.format("Save %lld Photos", language: .english, Int64(1))
+                == "Save 1 Photo")
+        #expect(
+            AppLocalization.format("Save %lld Photos", language: .english, Int64(3))
+                == "Save 3 Photos")
+        #expect(
+            AppLocalization.format("Save %lld Photos", language: .simplifiedChinese, Int64(3))
+                == "存储 3 张照片")
+        #expect(
+            AppLocalization.format("Save %lld Photos", language: .traditionalChinese, Int64(3))
+                == "儲存 3 張相片")
+
+        #expect(
+            AppLocalization.format("Add to %lld Photos", language: .english, Int64(1))
+                == "Add to 1 Photo")
+        #expect(
+            AppLocalization.format("Add to %lld Photos", language: .english, Int64(4))
+                == "Add to 4 Photos")
+        #expect(
+            AppLocalization.format("Add to %lld Photos", language: .simplifiedChinese, Int64(4))
+                == "添加到 4 张照片")
+        #expect(
+            AppLocalization.format("Add to %lld Photos", language: .traditionalChinese, Int64(4))
+                == "加入到 4 張相片")
+    }
 }

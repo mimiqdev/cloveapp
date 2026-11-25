@@ -17,6 +17,7 @@ struct GridScreen: View {
     @State private var showsKeywordsSheet = false
     @State private var showsRenameDetails = false
     @State private var pendingPhotosConfirmationPlan: PhotosSavePlan?
+    @State private var pendingPhotosConfirmationSheetRequest: PhotosSaveSheetRequest?
     @State private var showsNoEligiblePhotosAlert = false
     @State private var isPickingEmptyFolder = false
     @State private var showsFilters = false
@@ -157,12 +158,14 @@ struct GridScreen: View {
                 selectsEmpty = false
                 areGroupsUnfolded = browsing.isSelecting
                 pendingPhotosConfirmationPlan = nil
+                pendingPhotosConfirmationSheetRequest = nil
                 showsNoEligiblePhotosAlert = false
                 showsMetadataFilters = false
             }
             .onChange(of: browsing.folderLocationLoss != nil) { _, isLost in
                 if isLost {
                     pendingPhotosConfirmationPlan = nil
+                    pendingPhotosConfirmationSheetRequest = nil
                     showsNoEligiblePhotosAlert = false
                 }
             }
@@ -339,6 +342,16 @@ struct GridScreen: View {
             .sheet(isPresented: $showsKeywordsSheet) {
                 BatchKeywordsSheet(browsing: browsing)
             }
+            .sheet(item: $pendingPhotosConfirmationSheetRequest) { request in
+                SaveToPhotosConfirmationSheet(
+                    plan: request.plan,
+                    hiddenSelectedCount: browsing.hiddenSelectedCount
+                ) {
+                    Task {
+                        await browsing.saveToPhotos(request.plan, language: language)
+                    }
+                }
+            }
             .sheet(isPresented: $showsMetadataFilters) {
                 MetadataFilterSheet(browsing: browsing)
             }
@@ -417,13 +430,20 @@ struct GridScreen: View {
                             canUndo: browsing.canUndoMark,
                             showsBack: !isRegular && (usesDock || !isSelecting),
                             showsUndo: isDuoExpanded,
-                            showsNavigationTools: false,
+                            showsNavigationTools: isSelecting,
+                            showsHorizontalLeadingTools: isSelecting,
                             showsStandaloneDockTool: isDuoCover && !isSelecting && showsMoveRejects,
                             showsHorizontalTools: isDuoCover,
                             showsTools: !isDuoCover,
                             showsBottom: isDuoCover || isDuoExpanded
                         ) {
-                            EmptyView()
+                            if isSelecting {
+                                systemSelectAllButton
+                            }
+                        } horizontalLeadingTools: {
+                            if isSelecting {
+                                systemSelectAllButton
+                            }
                         } standaloneDockTool: {
                             if isDuoCover && !isSelecting && showsMoveRejects {
                                 moveRejectsToolbarButton
@@ -528,7 +548,7 @@ struct GridScreen: View {
                 if let hiddenSelectedSubtitle {
                     Text(hiddenSelectedSubtitle)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .minimumScaleFactor(0.75)
                         .accessibilityIdentifier("clove.grid.batch.hiddenCount")
                         .reportHeaderControlFrame(
                             "clove.grid.batch.hiddenCount")
@@ -623,6 +643,9 @@ struct GridScreen: View {
     @ViewBuilder private var header: some View {
         if isRegular {
             HStack(spacing: 8) {
+                if isSelecting {
+                    selectAllButton
+                }
                 VStack(alignment: .leading, spacing: 0) {
                     Text(
                         isSelecting
@@ -642,7 +665,7 @@ struct GridScreen: View {
                         if let hiddenSelectedSubtitle {
                             Text(hiddenSelectedSubtitle)
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.85)
+                                .minimumScaleFactor(0.75)
                                 .accessibilityIdentifier("clove.grid.batch.hiddenCount")
                                 .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
                         } else {
@@ -683,7 +706,7 @@ struct GridScreen: View {
                 if let hiddenSelectedSubtitle {
                     Text(hiddenSelectedSubtitle)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .minimumScaleFactor(0.75)
                         .accessibilityIdentifier("clove.grid.batch.hiddenCount")
                         .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
                 } else {
@@ -701,7 +724,9 @@ struct GridScreen: View {
                     identifierPrefix: "clove.grid.preparation")
             }
         } leadingTools: {
-            if isDuoCover && !isSelecting && showsMoveRejects {
+            if isSelecting {
+                selectAllButton
+            } else if isDuoCover && showsMoveRejects {
                 GlassIconButton(
                     label: AppLocalization.string("Move rejects", language: language),
                     symbol: "tray.and.arrow.down",
@@ -716,32 +741,55 @@ struct GridScreen: View {
         }
     }
 
-    @ViewBuilder private var selectionOptionsMenuItems: some View {
-        if !browsing.showsAllVisibleSelected {
-            Button(AppLocalization.string("Select all", language: language)) {
-                completeGroupUnfoldImmediately()
-                browsing.selectAllVisible()
-            }
-            .accessibilityIdentifier("clove.grid.batch.selectAll")
-        }
-        if !browsing.batchTargets.isEmpty {
-            Button(AppLocalization.string("Deselect all", language: language)) {
-                selectsEmpty = true
-                browsing.deselectAllVisible()
-            }
-            .accessibilityIdentifier("clove.grid.batch.deselectAll")
+    private var selectAllTitle: String {
+        AppLocalization.string(
+            browsing.showsAllVisibleSelected ? "Deselect All" : "Select All",
+            language: language)
+    }
+
+    private func toggleSelectAllVisible() {
+        if browsing.showsAllVisibleSelected {
+            selectsEmpty = true
+            browsing.deselectAllVisible()
+        } else {
+            completeGroupUnfoldImmediately()
+            browsing.selectAllVisible()
         }
     }
 
-    @ViewBuilder private var systemSelectionToolbarTools: some View {
-        Menu {
-            selectionOptionsMenuItems
-        } label: {
-            Label(
-                AppLocalization.string("Selection options", language: language),
-                systemImage: "ellipsis")
+    private var systemSelectAllButton: some View {
+        Button(selectAllTitle) {
+            toggleSelectAllVisible()
         }
-        .accessibilityIdentifier("clove.grid.selectionOptions")
+        .disabled(browsing.photos.isEmpty)
+        .accessibilityIdentifier("clove.grid.selectAll")
+    }
+
+    private var selectAllButton: some View {
+        Button {
+            toggleSelectAllVisible()
+        } label: {
+            Text(selectAllTitle)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundStyle(
+                    browsing.photos.isEmpty
+                        ? Color.clove.text.secondary : Color.clove.text.primary
+                )
+                .opacity(browsing.photos.isEmpty ? 0.45 : 1)
+                .padding(.horizontal, isRegular ? 14 : 12)
+                .frame(height: isRegular ? 40 : 44)
+                .cloveGlass(in: Capsule())
+        }
+        .buttonStyle(.cloveGlassPress)
+        .disabled(browsing.photos.isEmpty)
+        .accessibilityLabel(selectAllTitle)
+        .accessibilityIdentifier("clove.grid.selectAll")
+        .reportHeaderControlFrame("clove.grid.selectAll")
+    }
+
+    @ViewBuilder private var systemSelectionToolbarTools: some View {
         Button(
             AppLocalization.string("Done", language: language),
             systemImage: "checkmark"
@@ -772,17 +820,6 @@ struct GridScreen: View {
         if isSelecting && usesSystemToolbar {
             systemSelectionToolbarTools
         } else if isSelecting {
-            Menu {
-                selectionOptionsMenuItems
-            } label: {
-                Image(systemName: "ellipsis")
-                    .foregroundStyle(Color.clove.text.primary)
-                    .frame(width: isRegular ? 40 : 44, height: isRegular ? 40 : 44)
-                    .cloveGlass(in: Circle())
-            }
-            .accessibilityLabel(AppLocalization.string("Selection options", language: language))
-            .accessibilityIdentifier("clove.grid.selectionOptions")
-            .reportHeaderControlFrame("clove.grid.selectionOptions")
             Button {
                 browsing.clearSelection()
                 selectsEmpty = false
@@ -792,7 +829,7 @@ struct GridScreen: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(Color.clove.accent)
-                    .padding(.horizontal, isRegular ? 16 : 14)
+                    .padding(.horizontal, isRegular ? 16 : 12)
                     .frame(height: isRegular ? 40 : 44)
                     .cloveGlass(in: Capsule())
             }
@@ -1150,6 +1187,10 @@ struct GridScreen: View {
         guard browsing.canSaveToPhotos else { return }
         let plan = browsing.planSaveToPhotos()
         guard !plan.isEmpty else { return }
+        if store.settings.confirmBatchActions {
+            pendingPhotosConfirmationSheetRequest = PhotosSaveSheetRequest(plan: plan)
+            return
+        }
         if plan.eligibleCount == 0 && plan.skippedRawCount > 0 {
             showsNoEligiblePhotosAlert = true
         } else if plan.skippedRawCount > 0 {
@@ -1191,6 +1232,7 @@ struct GridScreen: View {
             hasKeywordsSheet: showsKeywordsSheet,
             hasMetadataFiltersSheet: showsMetadataFilters,
             hasPendingPhotosAlert: pendingPhotosConfirmationPlan != nil
+                || pendingPhotosConfirmationSheetRequest != nil
                 || showsNoEligiblePhotosAlert,
             showsFilters: showsFilters,
             horizontalSizeClass: horizontalSizeClass,
