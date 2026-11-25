@@ -80,6 +80,8 @@ struct DetailFilmstrip: View {
     @State private var trackWidth: CGFloat = 0
     @State private var pendingTimelineScroll: Task<Void, Never>?
     @State private var pendingGroupScroll: Task<Void, Never>?
+    @State private var isUserDraggingTimeline = false
+    @State private var isUserDraggingGroup = false
     @State private var isTrackingVerticalStackDrag = false
     @State private var lastVerticalStackDragDate = Date.distantPast
     @State private var isTrackingVerticalGroupDrag = false
@@ -231,6 +233,8 @@ struct DetailFilmstrip: View {
             exitingGroupTask?.cancel()
             pendingTimelineScroll?.cancel()
             pendingGroupScroll?.cancel()
+            isUserDraggingTimeline = false
+            isUserDraggingGroup = false
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.filmstrip")
@@ -262,13 +266,26 @@ struct DetailFilmstrip: View {
                         timelineSlotView(slot)
                     }
                 }
+                .frame(
+                    minHeight: metrics.bandHeight - 2 * metrics.verticalTrackPadding,
+                    alignment: .bottom
+                )
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("clove.detail.filmstrip.timeline")
                 .reportTapPickerFrame("clove.detail.filmstrip.timeline")
                 .padding(.horizontal, metrics.horizontalPadding)
                 .padding(.vertical, metrics.verticalTrackPadding)
             }
+            .frame(height: metrics.bandHeight)
+            .contentShape(Rectangle())
             .filmstripScrollEdgeEffectHidden()
+            .onScrollPhaseChange { _, newPhase in
+                isUserDraggingTimeline = newPhase == .interacting || newPhase == .decelerating
+                if newPhase == .interacting {
+                    pendingTimelineScroll?.cancel()
+                    pendingTimelineScroll = nil
+                }
+            }
             .onChange(of: timelineScrollTrigger, initial: true) { old, new in
                 let isInitial = old == new
                 let didLayoutChange =
@@ -285,7 +302,7 @@ struct DetailFilmstrip: View {
                 if isInitial || (old.viewportWidth == 0 && new.viewportWidth > 0) {
                     scheduleTimelineScroll(for: new.current, using: proxy, animated: false)
                 } else if new.expandedGroupID == nil {
-                    if didCollapseToTimeline || didLayoutChange {
+                    if didCollapseToTimeline || (didLayoutChange && !isUserDraggingTimeline) {
                         scheduleTimelineScroll(for: new.current, using: proxy, animated: false)
                     } else if old.current != new.current {
                         scheduleTimelineScroll(for: new.current, using: proxy, animated: true)
@@ -346,6 +363,7 @@ struct DetailFilmstrip: View {
                                 width: metrics.groupActionButtonSize,
                                 height: metrics.thumbnailHeight
                             )
+                            .padding(.vertical, metrics.verticalTrackPadding)
                             .layoutPriority(1)
                     }
 
@@ -367,8 +385,23 @@ struct DetailFilmstrip: View {
                                     }
                                 }
                             }
+                            .frame(
+                                minHeight: metrics.bandHeight - 2 * metrics.verticalTrackPadding,
+                                alignment: .bottom
+                            )
+                            .padding(.vertical, metrics.verticalTrackPadding)
                         }
+                        .frame(height: metrics.bandHeight)
+                        .contentShape(Rectangle())
                         .filmstripScrollEdgeEffectHidden()
+                        .onScrollPhaseChange { _, newPhase in
+                            isUserDraggingGroup =
+                                newPhase == .interacting || newPhase == .decelerating
+                            if newPhase == .interacting {
+                                pendingGroupScroll?.cancel()
+                                pendingGroupScroll = nil
+                            }
+                        }
                         .onChange(of: groupScrollTrigger(for: group), initial: true) { old, new in
                             guard new.expandedGroupID != nil else { return }
                             let isInitial = old == new
@@ -385,7 +418,9 @@ struct DetailFilmstrip: View {
                                 || (old.current == new.current
                                     && old.currentMemberIndex != new.currentMemberIndex)
 
-                            if isInitial || didEnterOrSwitchGroup || didLayoutChange {
+                            if isInitial || didEnterOrSwitchGroup
+                                || (didLayoutChange && !isUserDraggingGroup)
+                            {
                                 scheduleGroupScroll(
                                     for: new.current, using: proxy, animated: false)
                             } else if old.current != new.current {
@@ -395,51 +430,39 @@ struct DetailFilmstrip: View {
                         }
                     }
                     .frame(maxWidth: currentMembersWidth)
-                    .frame(height: metrics.thumbnailHeight + FilmstripCurrentPhotoMarker.lift)
 
                     collapseButton
                         .frame(
                             width: metrics.groupActionButtonSize,
                             height: metrics.thumbnailHeight
                         )
+                        .padding(.vertical, metrics.verticalTrackPadding)
                         .layoutPriority(1)
+                }
+                .frame(height: metrics.bandHeight, alignment: .bottom)
+                .background {
+                    Color.clear
+                        .reportTapPickerFrame("clove.detail.filmstrip.expandedGroup")
+                        .padding(.vertical, metrics.verticalTrackPadding)
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
-                .reportTapPickerFrame("clove.detail.filmstrip.expandedGroup")
                 .padding(.horizontal, metrics.horizontalPadding)
             }
             .contentShape(Rectangle())
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
+            .gesture(
+                FilmstripVerticalPanGesture(
+                    direction: .up,
+                    isEnabled: expandedGroup != nil,
+                    onDragChanged: { isTracking in
+                        isTrackingVerticalGroupDrag = isTracking
+                        lastVerticalGroupDragDate = Date()
+                    },
+                    onTrigger: {
                         guard expandedGroup != nil else { return }
-                        if abs(value.translation.height) >= 12,
-                            abs(value.translation.height)
-                                > FilmstripVerticalGesture.dominanceRatio
-                                * abs(value.translation.width)
-                        {
-                            isTrackingVerticalGroupDrag = true
-                            lastVerticalGroupDragDate = Date()
-                        }
+                        collapseGroup()
                     }
-                    .onEnded { value in
-                        let shouldCollapse =
-                            expandedGroup != nil
-                            && FilmstripVerticalGesture.shouldCollapse(
-                                horizontal: Double(value.translation.width),
-                                vertical: Double(value.translation.height))
-                        let wasVerticalDominant =
-                            abs(value.translation.height)
-                            > FilmstripVerticalGesture.dominanceRatio * abs(value.translation.width)
-                        isTrackingVerticalGroupDrag = false
-                        if shouldCollapse || wasVerticalDominant {
-                            lastVerticalGroupDragDate = Date()
-                        }
-                        if shouldCollapse {
-                            collapseGroup()
-                        }
-                    }
+                )
             )
             .rotation3DEffect(
                 .degrees(groupTilt),
@@ -482,6 +505,8 @@ struct DetailFilmstrip: View {
     private func gridPickerButton(for group: ActiveBrowsingGroup) -> some View {
         Button {
             guard let expandedGroup,
+                !isTrackingVerticalGroupDrag,
+                Date().timeIntervalSince(lastVerticalGroupDragDate) >= 0.25,
                 showsGridPicker(for: expandedGroup),
                 isGridPickerAnchorReady,
                 scenePhase == .active
@@ -586,8 +611,10 @@ struct DetailFilmstrip: View {
 
         if newID != nil {
             isTrackingVerticalStackDrag = false
+            isUserDraggingGroup = false
         } else {
             isTrackingVerticalGroupDrag = false
+            isUserDraggingGroup = false
         }
 
         if oldID == nil, newID != nil {
@@ -778,35 +805,19 @@ struct DetailFilmstrip: View {
             }
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 12)
-                .onChanged { value in
+        .gesture(
+            FilmstripVerticalPanGesture(
+                direction: .down,
+                isEnabled: expandedGroup == nil,
+                onDragChanged: { isTracking in
+                    isTrackingVerticalStackDrag = isTracking
+                    lastVerticalStackDragDate = Date()
+                },
+                onTrigger: {
                     guard expandedGroup == nil else { return }
-                    if abs(value.translation.height) >= 12,
-                        abs(value.translation.height)
-                            > FilmstripVerticalGesture.dominanceRatio * abs(value.translation.width)
-                    {
-                        isTrackingVerticalStackDrag = true
-                        lastVerticalStackDragDate = Date()
-                    }
+                    expandGroup(active.id)
                 }
-                .onEnded { value in
-                    let shouldExpand =
-                        expandedGroup == nil
-                        && FilmstripVerticalGesture.shouldExpand(
-                            horizontal: Double(value.translation.width),
-                            vertical: Double(value.translation.height))
-                    let wasVerticalDominant =
-                        abs(value.translation.height)
-                        > FilmstripVerticalGesture.dominanceRatio * abs(value.translation.width)
-                    isTrackingVerticalStackDrag = false
-                    if shouldExpand || wasVerticalDominant {
-                        lastVerticalStackDragDate = Date()
-                    }
-                    if shouldExpand {
-                        expandGroup(active.id)
-                    }
-                }
+            )
         )
         .id(GridCellItem.ID.group(active.id))
         .accessibilityLabel(
