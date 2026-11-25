@@ -1535,7 +1535,9 @@ struct CompareFilmstrip: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .bottom, spacing: 6) {
+                LazyHStack(
+                    alignment: .bottom, spacing: FilmstripCurrentPhotoMarker.thumbnailSpacing
+                ) {
                     ForEach(photos) { photo in
                         filmstripItem(photo)
                     }

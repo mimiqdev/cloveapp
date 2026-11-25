@@ -25,13 +25,16 @@ struct GroupPhotoGridPicker: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.appLanguage) private var language
 
-    private static let popoverWidth: CGFloat = 340
-    private static let popoverColumns = 4
-    private static let gridPadding: CGFloat = 12
-    private static let gridSpacing: CGFloat = 6
+    static let popoverWidth: CGFloat = 444
+    static let popoverColumns = 3
+    static let gridPadding: CGFloat = 12
+    static let gridSpacing: CGFloat = 4
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 74, maximum: 96), spacing: Self.gridSpacing)]
+        Array(
+            repeating: GridItem(.flexible(), spacing: Self.gridSpacing),
+            count: Self.popoverColumns
+        )
     }
 
     private var countText: String {
@@ -49,7 +52,7 @@ struct GroupPhotoGridPicker: View {
             + CGFloat(rows) * cellSide
             + CGFloat(max(rows - 1, 0)) * gridSpacing
         let headerHeight: CGFloat = 41
-        let maxAllowed: CGFloat = compactHeight ? 240 : 400
+        let maxAllowed: CGFloat = compactHeight ? 280 : 520
         return min(maxAllowed, max(142, headerHeight + gridContentHeight))
     }
 

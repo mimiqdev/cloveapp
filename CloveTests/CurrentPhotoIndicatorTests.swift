@@ -279,7 +279,7 @@ struct CurrentPhotoIndicatorTests {
             #expect(baselineSpans[1] == stackSpans[1])
 
             let expectedWidthPx = Int(metrics.thumbnailWidth * 2)
-            let expectedGapPx = Int(metrics.timelineSpacing * 2)
+            let expectedGapPx = Int(DetailFilmstrip.thumbnailSpacing * 2)
             for span in baselineSpans {
                 #expect(abs((span.upperBound - span.lowerBound + 1) - expectedWidthPx) <= 1)
             }
@@ -363,7 +363,7 @@ struct CurrentPhotoIndicatorTests {
                 #expect(abs(lhs.upperBound - rhs.upperBound) <= 1)
             }
 
-            // Locate the two 54/48 pt member spans (skipping the 30/28 pt end caps).
+            // Locate the two 54/48 pt member spans (skipping the 36 pt trailing glass button).
             let memberSpansFirst = focusSpansFirst.filter {
                 abs(($0.upperBound - $0.lowerBound + 1) - expectedWidthPx) <= 1
             }
@@ -372,6 +372,11 @@ struct CurrentPhotoIndicatorTests {
             }
             #expect(memberSpansFirst.count == 2)
             #expect(memberSpansSecond.count == 2)
+            #expect(
+                abs(
+                    (memberSpansFirst[1].lowerBound - memberSpansFirst[0].upperBound - 1)
+                        - expectedGapPx)
+                    <= 1)
             let m0CenterX = (memberSpansFirst[0].lowerBound + memberSpansFirst[0].upperBound) / 2
             let m1CenterX = (memberSpansFirst[1].lowerBound + memberSpansFirst[1].upperBound) / 2
             let firstSelectedY = try #require(
@@ -518,7 +523,7 @@ struct CurrentPhotoIndicatorTests {
             // slot 0 [10..64], slot 1 [72..126], slot 2 (collapsed stack) [134..188] -> center = 161 pt = 322 px.
             let stackCenterPt =
                 metrics.horizontalPadding
-                + 2 * (metrics.thumbnailWidth + metrics.timelineSpacing)
+                + 2 * (metrics.thumbnailWidth + DetailFilmstrip.thumbnailSpacing)
                 + metrics.thumbnailWidth / 2
             let stackCenterX = Int(stackCenterPt * 2)
             let slotBottomPx = Int((metrics.bandHeight - metrics.verticalTrackPadding) * 2)
@@ -531,9 +536,15 @@ struct CurrentPhotoIndicatorTests {
 
             let groupPixels = try await renderFilmstrip(
                 current: rejectedMemberA.id, expanded: expandedGroup)
-            // Group Focus with 2 members + 2 caps (30, 3, 54, 3, 54, 3, 30) = 177 pt + 6 padding = 183 pt centered in 390 pt:
-            // member 0 starts at 195 - 91.5 + 3 + 30 + 3 = 139.5 pt, width 54 -> center = 166.5 pt = 333 px.
-            let groupMemberCenterX = 333
+            // Small Group Focus (2 members, no overflow -> no leading picker button):
+            // [member 0 (54), spacing (3), member 1 (54), buttonSpacing (8), fold (36)] = 155 pt centered in 390 pt.
+            let groupTotalWidth =
+                2 * metrics.thumbnailWidth
+                + DetailFilmstrip.thumbnailSpacing
+                + metrics.groupActionSpacing
+                + metrics.groupActionButtonSize
+            let groupMemberCenterPt = (390 - groupTotalWidth) / 2 + metrics.thumbnailWidth / 2
+            let groupMemberCenterX = Int((groupMemberCenterPt * 2).rounded())
             let trayContentBottomPx = Int(metrics.bandHeight) + Int(metrics.thumbnailHeight + 6)
             assertColorClose(
                 groupPixels.pixel(x: groupMemberCenterX, y: trayContentBottomPx - 4), expectedCore,

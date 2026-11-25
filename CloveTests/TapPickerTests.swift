@@ -393,9 +393,19 @@ struct TapPickerTests {
         let foldCapFrame = try #require(box.frames["clove.detail.filmstrip.group.fold"])
         let groupFilmstripFrame = try #require(box.frames["clove.detail.filmstrip"])
         expectSameMarkingCapsuleFrame(initialPreviewCapsule, groupCapsule)
+        #expect(box.frames["clove.detail.filmstrip.group.gridPicker"] == nil)
+        #expect(
+            abs(foldCapFrame.width - DetailFilmstrip.Metrics.standard.groupActionButtonSize) <= 0.5)
+        #expect(
+            abs(foldCapFrame.height - DetailFilmstrip.Metrics.standard.groupActionButtonSize) <= 0.5
+        )
         #expect(abs(groupCapsule.midY - groupTrayFrame.midY) <= 1.0)
-        #expect(abs((groupTrayFrame.maxY - 3) - foldCapFrame.maxY) <= 1.0)
+        #expect(
+            abs(
+                (groupTrayFrame.maxY - DetailFilmstrip.Metrics.standard.thumbnailHeight / 2)
+                    - foldCapFrame.midY) <= 1.0)
         #expect(foldCapFrame.minY >= groupTrayFrame.minY - 0.5)
+        #expect(foldCapFrame.maxY <= groupTrayFrame.maxY + 0.5)
         #expect(abs(groupCapsule.midY - groupFilmstripFrame.midY) <= 1.0)
         #expect(groupFilmstripFrame.maxX <= groupCapsule.minX)
         #expect(groupTrayFrame.maxX <= groupCapsule.minX)
