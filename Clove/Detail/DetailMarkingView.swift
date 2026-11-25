@@ -500,7 +500,10 @@ struct DetailMarkingView: View {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
                     showsUndo: chromeIsVisible,
-                    backTitle: detailBackTitle
+                    backTitle: detailBackTitle,
+                    showsNavigationTools: true,
+                    showsTools: chromeIsVisible,
+                    showsBottom: false
                 ) {
                     if presentationPolicy.supportsPhotoPreview {
                         photoGridToggle
@@ -693,18 +696,24 @@ struct DetailMarkingView: View {
             }
             .toolbar {
                 BrowsingToolbar(
-                    back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark
+                    back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
+                    showsNavigationTools: isDuoExpanded && !usesExpandedDuoViewportOverlay,
+                    showsStandaloneDockTool: duo.showsGrid
+                        && presentationPolicy.supportsPhotoPreview,
+                    showsTools: true,
+                    showsBottom: duo.showsGrid
                 ) {
                     if isDuoExpanded && !usesExpandedDuoViewportOverlay {
                         focusRegionsToggle
+                    }
+                } standaloneDockTool: {
+                    if duo.showsGrid && presentationPolicy.supportsPhotoPreview {
+                        photoGridToggle
                     }
                 } tools: {
                     if duo.showsGrid {
                         duo.filter
                         duo.more
-                        if presentationPolicy.supportsPhotoPreview {
-                            photoGridToggle
-                        }
                     }
                     if !isDuoExpanded {
                         focusRegionsToggle

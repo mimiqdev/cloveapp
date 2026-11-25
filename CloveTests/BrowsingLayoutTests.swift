@@ -1505,6 +1505,913 @@ struct BrowsingLayoutTests {
         #expect(abs(phoneTitleFrame.midX - phoneWindow.bounds.midX) < 60)
     }
 
+    @Test func expandedDuoDetailDockPlacesGridToggleBetweenBackAndToolsCapsule() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let library = TestLibrary.sample()
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+        let photo = try #require(model.photos.first?.id)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        model.openPhoto(photo)
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                GridScreen(
+                    browsing: model,
+                    thumbnails: model.thumbnails,
+                    initialPresentation: .focus)
+            }
+            .environment(store)
+            .environment(\.cloveUserInterfaceIdiom, .phone)
+            .environment(\.isDuoExpanded, true)
+            .environment(\.usesSystemBrowsingToolbar, true)
+            .environment(\.usesVerticalBrowsingToolbar, true)
+            .environment(\.hasFoldRegion, true))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor(
+            "expanded Duo Detail toolbar items did not mount: \(self.describeToolbarState(in: host, window: window))"
+        ) {
+            self.hasToolbarItem(identifier: "clove.nav.back", in: host, window: window)
+                && self.hasToolbarItem(
+                    identifier: "clove.detail.gridToggle", in: host, window: window)
+                && self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
+                && self.hasToolbarItem(identifier: "clove.grid.more", in: host, window: window)
+                && self.hasToolbarItem(identifier: "clove.detail.info", in: host, window: window)
+                && (self.hasToolbarItem(identifier: "clove.duo.undo", in: host, window: window)
+                    || self.hasToolbarItem(
+                        identifier: "clove.detail.undo", in: host, window: window))
+        }
+
+        let snapshot = inspectToolbarState(in: host, window: window)
+        let backFrame = try #require(
+            snapshot.frame(for: "clove.nav.back"),
+            Comment(rawValue: "missing back in \(snapshot.description)"))
+        let toggleFrame = try #require(
+            snapshot.frame(for: "clove.detail.gridToggle"),
+            Comment(rawValue: "missing gridToggle in \(snapshot.description)"))
+        let filterFrame = try #require(
+            snapshot.frame(for: "clove.grid.filter"),
+            Comment(rawValue: "missing filter in \(snapshot.description)"))
+        let moreFrame = try #require(
+            snapshot.frame(for: "clove.grid.more"),
+            Comment(rawValue: "missing more in \(snapshot.description)"))
+        let infoFrame = try #require(
+            snapshot.frame(for: "clove.detail.info"),
+            Comment(rawValue: "missing info in \(snapshot.description)"))
+        let moveRejectsFrame = try #require(
+            snapshot.frame(for: "clove.grid.moveRejects"),
+            Comment(rawValue: "missing moveRejects in \(snapshot.description)"))
+
+        if host.traitCollection.verticalBarEdge != .unspecified {
+            let undoFrame = try #require(
+                snapshot.frame(for: "clove.duo.undo"),
+                Comment(rawValue: "missing duo undo in \(snapshot.description)"))
+            #expect(
+                backFrame.maxY < toggleFrame.minY,
+                Comment(rawValue: "expected Back above gridToggle: \(snapshot.description)"))
+            // Back -> photoGridToggle -> view-tools capsule are separated standalone controls (~22-23pt gap).
+            #expect(
+                toggleFrame.minY - backFrame.maxY >= 18,
+                Comment(
+                    rawValue:
+                        "expected standalone gap between Back and gridToggle: \(snapshot.description)"
+                ))
+            #expect(
+                toggleFrame.maxY < filterFrame.minY,
+                Comment(rawValue: "expected gridToggle above Filter: \(snapshot.description)"))
+            #expect(
+                filterFrame.minY - toggleFrame.maxY >= 18,
+                Comment(
+                    rawValue:
+                        "expected standalone gap between gridToggle and tools capsule: \(snapshot.description)"
+                ))
+            // Filter -> More -> [Compare] -> Info share a single capsule (~14pt internal gap).
+            #expect(filterFrame.maxY < moreFrame.minY)
+            #expect(moreFrame.minY - filterFrame.maxY <= 16)
+            if let compareFrame = snapshot.frame(for: "clove.detail.compare") {
+                #expect(moreFrame.maxY < compareFrame.minY)
+                #expect(compareFrame.minY - moreFrame.maxY <= 16)
+                #expect(compareFrame.maxY < infoFrame.minY)
+                #expect(infoFrame.minY - compareFrame.maxY <= 16)
+            } else {
+                #expect(moreFrame.maxY < infoFrame.minY)
+                #expect(infoFrame.minY - moreFrame.maxY <= 16)
+            }
+            #expect(infoFrame.maxY < undoFrame.minY)
+            #expect(undoFrame.maxY < moveRejectsFrame.minY)
+            #expect(moveRejectsFrame.minY - undoFrame.maxY <= 16)
+
+            // Toolbar tokens verify photoGridToggle sits before a spacer preceding Filter/More/Info.
+            #expect(snapshot.leadingIDs == ["clove.nav.back"])
+            let toggleIdx = try #require(
+                snapshot.trailingRawTokens.firstIndex(of: "clove.detail.gridToggle"))
+            let filterIdx = try #require(
+                snapshot.trailingRawTokens.firstIndex(of: "clove.grid.filter"))
+            #expect(toggleIdx < filterIdx)
+            #expect(snapshot.trailingRawTokens[toggleIdx..<filterIdx].contains("<spacer>"))
+            #expect(!snapshot.trailingRawTokens[filterIdx...].contains("<spacer>"))
+            #expect(
+                snapshot.trailingIDs == [
+                    "clove.detail.gridToggle", "clove.grid.filter", "clove.grid.more",
+                    "clove.detail.compare", "clove.detail.info",
+                ]
+                    || snapshot.trailingIDs == [
+                        "clove.detail.gridToggle", "clove.grid.filter", "clove.grid.more",
+                        "clove.detail.info",
+                    ])
+            #expect(snapshot.bottomToolbarIDs == ["clove.duo.undo", "clove.grid.moveRejects"])
+        } else {
+            #expect(
+                snapshot.leadingIDs == ["clove.nav.back", "clove.detail.gridToggle"],
+                Comment(rawValue: "unexpected leadingIDs: \(snapshot.description)"))
+            #expect(backFrame.maxX <= toggleFrame.minX + 2)
+            #expect(toggleFrame.maxX < filterFrame.minX)
+            #expect(filterFrame.maxX <= moreFrame.minX + 2)
+            #expect(moreFrame.maxX <= infoFrame.minX + 2)
+            #expect(
+                snapshot.trailingIDs == [
+                    "clove.grid.filter", "clove.grid.more", "clove.detail.compare",
+                    "clove.detail.info", "clove.detail.undo", "clove.grid.moveRejects",
+                ]
+                    || snapshot.trailingIDs == [
+                        "clove.grid.filter", "clove.grid.more", "clove.detail.info",
+                        "clove.detail.undo", "clove.grid.moveRejects",
+                    ])
+        }
+
+        // Non-system BrowsingHeader fallback also keeps photoGridToggle right after Back before tools.
+        let fallbackFrames = TestHeaderFramesBox()
+        let fallbackWindow = UIWindow(windowScene: scene)
+        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+        let fallbackHost = UIHostingController(
+            rootView: DetailScreen(browsing: model)
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.usesSystemBrowsingToolbar, false)
+                .environment(\.hasFoldRegion, true)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    fallbackFrames.frames = frames
+                })
+        fallbackHost.traitOverrides.horizontalSizeClass = .regular
+        fallbackWindow.rootViewController = fallbackHost
+        fallbackWindow.makeKeyAndVisible()
+        defer {
+            fallbackWindow.isHidden = true
+            fallbackWindow.rootViewController = nil
+        }
+        try await waitFor("fallback detail header did not mount") {
+            fallbackFrames.frames["clove.nav.back"] != nil
+                && fallbackFrames.frames["clove.detail.focusToggle"] != nil
+                && fallbackFrames.frames["clove.detail.info"] != nil
+        }
+        if let fBack = fallbackFrames.frames["clove.nav.back"],
+            let fFocus = fallbackFrames.frames["clove.detail.focusToggle"],
+            let fInfo = fallbackFrames.frames["clove.detail.info"]
+        {
+            #expect(fBack.maxX <= fFocus.minX + 1)
+            #expect(fFocus.maxX < fInfo.minX)
+        }
+    }
+
+    @Test func duoCoverGridDockPlacesMoreInHeaderBackMoveRejectsTopFilterBottomAndOmitsUndo()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let model = BrowsingModel(library: TestLibrary.sample())
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+        #expect(model.rejectedPhotoCount > 0)
+        let store = SettingsStore.sample
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                GridScreen(browsing: model, thumbnails: model.thumbnails)
+            }
+            .environment(store)
+            .environment(\.cloveUserInterfaceIdiom, .phone)
+            .environment(\.isDuoCover, true)
+            .environment(\.isDuoExpanded, false)
+            .environment(\.usesSystemBrowsingToolbar, true)
+            .environment(\.usesVerticalBrowsingToolbar, true))
+        host.traitOverrides.horizontalSizeClass = .compact
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor(
+            "Duo Cover Grid controls did not mount: \(self.describeToolbarState(in: host, window: window))"
+        ) {
+            self.hasToolbarItem(identifier: "clove.nav.back", in: host, window: window)
+                && self.hasToolbarItem(
+                    identifier: "clove.grid.moveRejects", in: host, window: window)
+                && self.hasToolbarItem(identifier: "clove.grid.more", in: host, window: window)
+                && self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
+        }
+
+        let snapshot = inspectToolbarState(in: host, window: window)
+        // Undo is never shown on Duo Cover Grid.
+        #expect(!snapshot.contains("clove.duo.undo"))
+        #expect(!snapshot.contains("clove.detail.undo"))
+        #expect(!snapshot.contains("clove.grid.undo"))
+
+        let backFrame = try #require(
+            snapshot.frame(for: "clove.nav.back"),
+            Comment(rawValue: "missing back in \(snapshot.description)"))
+        let moveRejectsFrame = try #require(
+            snapshot.frame(for: "clove.grid.moveRejects"),
+            Comment(rawValue: "missing moveRejects in \(snapshot.description)"))
+        let moreFrame = try #require(
+            snapshot.frame(for: "clove.grid.more"),
+            Comment(rawValue: "missing more in \(snapshot.description)"))
+        let filterFrame = try #require(
+            snapshot.frame(for: "clove.grid.filter"),
+            Comment(rawValue: "missing filter in \(snapshot.description)"))
+
+        if host.traitCollection.verticalBarEdge != .unspecified {
+            let navBar = try #require(findNavigationBar(in: window))
+            let navBarFrame = navBar.convert(navBar.bounds, to: window)
+            // More sits in the top horizontal header (to the left of the vertical dock).
+            #expect(
+                moreFrame.maxX <= backFrame.minX + 2,
+                Comment(rawValue: "expected More left of dock: \(snapshot.description)"))
+            #expect(
+                moreFrame.midY <= navBarFrame.maxY + 4,
+                Comment(
+                    rawValue: "expected More in top horizontal header: \(snapshot.description)"))
+            // Back + Move Rejects sit at the top of the right dock; Filter sits at the bottom.
+            #expect(
+                backFrame.maxY < moveRejectsFrame.minY,
+                Comment(rawValue: "expected Back above Move Rejects: \(snapshot.description)"))
+            #expect(
+                moveRejectsFrame.maxY + 120 < filterFrame.minY,
+                Comment(
+                    rawValue:
+                        "expected Move Rejects at top, Filter at bottom: \(snapshot.description)"
+                ))
+            #expect(
+                filterFrame.midY > window.bounds.height * 0.65,
+                Comment(rawValue: "expected Filter in lower dock: \(snapshot.description)"))
+            #expect(abs(backFrame.midX - filterFrame.midX) <= 8)
+            #expect(abs(moveRejectsFrame.midX - filterFrame.midX) <= 8)
+        } else {
+            #expect(
+                snapshot.leadingIDs == ["clove.nav.back", "clove.grid.moveRejects"],
+                Comment(rawValue: "unexpected leadingIDs: \(snapshot.description)"))
+            #expect(snapshot.trailingIDs == ["clove.grid.more", "clove.grid.filter"])
+            #expect(backFrame.maxX <= moveRejectsFrame.minX + 2)
+            #expect(moveRejectsFrame.maxX < moreFrame.minX)
+            #expect(moreFrame.maxX <= filterFrame.minX + 2)
+        }
+
+        // Cover Select mode keeps selection controls and Filter working cleanly with no Undo/Move Rejects.
+        let firstPhoto = try #require(model.photos.first?.id)
+        model.toggleSelection(firstPhoto)
+        try await waitFor(
+            "Duo Cover Select mode controls did not mount: \(self.describeToolbarState(in: host, window: window))"
+        ) {
+            self.hasToolbarItem(identifier: "clove.grid.selectionOptions", in: host, window: window)
+                && self.hasToolbarItem(
+                    identifier: "clove.grid.batch.done", in: host, window: window)
+                && self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
+                && !self.hasAnyToolbarIdentifier(
+                    "clove.grid.moveRejects", in: host, window: window)
+        }
+        let selectSnapshot = inspectToolbarState(in: host, window: window)
+        #expect(!selectSnapshot.contains("clove.duo.undo"))
+        #expect(!selectSnapshot.contains("clove.detail.undo"))
+        #expect(!selectSnapshot.contains("clove.grid.undo"))
+        #expect(!selectSnapshot.contains("clove.grid.moveRejects"))
+        if host.traitCollection.verticalBarEdge != .unspecified,
+            let navBar = findNavigationBar(in: window),
+            let selectionOptionsFrame = selectSnapshot.frame(for: "clove.grid.selectionOptions"),
+            let doneFrame = selectSnapshot.frame(for: "clove.grid.batch.done"),
+            let selectFilterFrame = selectSnapshot.frame(for: "clove.grid.filter")
+        {
+            let navBarFrame = navBar.convert(navBar.bounds, to: window)
+            #expect(selectionOptionsFrame.midY <= navBarFrame.maxY + 4)
+            #expect(doneFrame.midY <= navBarFrame.maxY + 4)
+            #expect(selectFilterFrame.midY > window.bounds.height * 0.65)
+        }
+        model.clearSelection()
+
+        // Non-system BrowsingHeader fallback on Duo Cover Grid also omits Undo and exposes Move Rejects, Filter, More.
+        let fallbackFrames = TestHeaderFramesBox()
+        let fallbackWindow = UIWindow(windowScene: scene)
+        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let fallbackHost = UIHostingController(
+            rootView: GridScreen(browsing: model, thumbnails: model.thumbnails)
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoCover, true)
+                .environment(\.isDuoExpanded, false)
+                .environment(\.usesSystemBrowsingToolbar, false)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    fallbackFrames.frames = frames
+                })
+        fallbackHost.traitOverrides.horizontalSizeClass = .compact
+        fallbackWindow.rootViewController = fallbackHost
+        fallbackWindow.makeKeyAndVisible()
+        defer {
+            fallbackWindow.isHidden = true
+            fallbackWindow.rootViewController = nil
+        }
+        try await waitFor("fallback Duo Cover Grid did not mount") {
+            fallbackFrames.frames["clove.nav.back"] != nil
+                && fallbackFrames.frames["clove.grid.filter"] != nil
+        }
+        let fallbackSnapshot = inspectToolbarState(in: fallbackHost, window: fallbackWindow)
+        #expect(!fallbackSnapshot.contains("clove.duo.undo"))
+        #expect(!fallbackSnapshot.contains("clove.detail.undo"))
+        #expect(!fallbackSnapshot.contains("clove.grid.undo"))
+    }
+
+    @Test func expandedDuoGridAndPhoneAndIPadGridsPreserveExistingToolbarLayouts() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let model = BrowsingModel(library: TestLibrary.sample())
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+        let store = SettingsStore.sample
+
+        // 1. Expanded Duo Grid keeps Back, Filter + More, and Undo + Move Rejects unchanged.
+        do {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, true))
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "expanded Duo Grid controls did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                self.hasToolbarItem(identifier: "clove.nav.back", in: host, window: window)
+                    && self.hasToolbarItem(
+                        identifier: "clove.grid.filter", in: host, window: window)
+                    && self.hasToolbarItem(identifier: "clove.grid.more", in: host, window: window)
+                    && self.hasToolbarItem(
+                        identifier: "clove.grid.moveRejects", in: host, window: window)
+            }
+            let snapshot = inspectToolbarState(in: host, window: window)
+            if host.traitCollection.verticalBarEdge == .unspecified {
+                #expect(snapshot.leadingIDs == ["clove.nav.back"])
+                #expect(
+                    snapshot.trailingIDs == [
+                        "clove.grid.filter", "clove.grid.more", "clove.detail.undo",
+                        "clove.grid.moveRejects",
+                    ])
+            } else {
+                #expect(snapshot.contains("clove.duo.undo"))
+                let filterFrame = try #require(snapshot.frame(for: "clove.grid.filter"))
+                let moreFrame = try #require(snapshot.frame(for: "clove.grid.more"))
+                let undoFrame = try #require(snapshot.frame(for: "clove.duo.undo"))
+                let moveRejectsFrame = try #require(snapshot.frame(for: "clove.grid.moveRejects"))
+                #expect(filterFrame.maxY < moreFrame.minY)
+                #expect(moreFrame.minY - filterFrame.maxY <= 16)
+                #expect(moreFrame.maxY < undoFrame.minY)
+                #expect(undoFrame.maxY < moveRejectsFrame.minY)
+                #expect(moveRejectsFrame.minY - undoFrame.maxY <= 16)
+                #expect(filterFrame.midY < window.bounds.height * 0.5)
+            }
+        }
+
+        // 2. iPhone Grid keeps Back, Filter, More, and no Undo.
+        do {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, false)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true))
+            host.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "iPhone Grid controls did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                self.hasToolbarItem(identifier: "clove.nav.back", in: host, window: window)
+                    && self.hasToolbarItem(
+                        identifier: "clove.grid.filter", in: host, window: window)
+                    && self.hasToolbarItem(identifier: "clove.grid.more", in: host, window: window)
+            }
+            let snapshot = inspectToolbarState(in: host, window: window)
+            #expect(snapshot.leadingIDs == ["clove.nav.back"])
+            #expect(snapshot.trailingIDs == ["clove.grid.filter", "clove.grid.more"])
+            #expect(snapshot.bottomToolbarIDs.isEmpty)
+            #expect(!snapshot.contains("clove.duo.undo"))
+            #expect(!snapshot.contains("clove.detail.undo"))
+            #expect(!snapshot.contains("clove.grid.undo"))
+        }
+
+        // 3. iPad Grid keeps Move Rejects + More and omits Filter, Back, Undo.
+        do {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 900, height: 820)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.isDuoExpanded, false)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true))
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "iPad Grid controls did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                self.hasToolbarItem(
+                    identifier: "clove.grid.moveRejects", in: host, window: window)
+                    && self.hasToolbarItem(identifier: "clove.grid.more", in: host, window: window)
+            }
+            let snapshot = inspectToolbarState(in: host, window: window)
+            #expect(!snapshot.contains("clove.grid.filter"))
+            #expect(!snapshot.contains("clove.nav.back"))
+            #expect(!snapshot.contains("clove.duo.undo"))
+            #expect(!snapshot.contains("clove.detail.undo"))
+            #expect(!snapshot.contains("clove.grid.undo"))
+        }
+
+        // 4. Native iPad Detail keeps navigationTools (photoGridToggle + focusToggle) mounted after Back.
+        do {
+            let photo = try #require(model.photos.first?.id)
+            model.openPhoto(photo)
+            defer { model.back() }
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    DetailScreen(browsing: model)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.isDuoExpanded, false)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true))
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            if host.traitCollection.verticalBarEdge == .unspecified {
+                try await waitFor(
+                    "iPad Detail navigation tools did not mount: \(self.describeToolbarState(in: host, window: window))"
+                ) {
+                    let state = self.inspectToolbarState(in: host, window: window)
+                    return state.rawLeadingItemCount == 3
+                        && state.contains("clove.detail.info")
+                }
+            }
+        }
+    }
+
+    private struct ToolbarSnapshot {
+        struct Entry {
+            let identifier: String
+            let groupIndex: Int
+            let frame: CGRect?
+        }
+
+        let leadingGroupIDs: [[String]]
+        let trailingGroupIDs: [[String]]
+        let bottomToolbarIDs: [String]
+        let trailingRawTokens: [String]
+        let rawLeadingItemCount: Int
+        let entries: [Entry]
+        let overlayIdentifiers: [String: CGRect]
+        let debugSummary: String
+
+        var leadingIDs: [String] { leadingGroupIDs.flatMap { $0 } }
+        var trailingIDs: [String] { trailingGroupIDs.flatMap { $0 } }
+
+        func contains(_ identifier: String) -> Bool {
+            entries.contains { $0.identifier == identifier }
+                || overlayIdentifiers[identifier] != nil
+        }
+
+        func frame(for identifier: String) -> CGRect? {
+            if let entryFrame = entries.first(where: { $0.identifier == identifier })?.frame {
+                return entryFrame
+            }
+            return overlayIdentifiers[identifier]
+        }
+
+        func groupIndex(for identifier: String) -> Int? {
+            entries.first(where: { $0.identifier == identifier })?.groupIndex
+        }
+
+        func groupIDs(containing identifier: String) -> [String]? {
+            (leadingGroupIDs + trailingGroupIDs + [bottomToolbarIDs]).first {
+                $0.contains(identifier)
+            }
+        }
+
+        var description: String { debugSummary }
+    }
+
+    private func findNavigationController(in controller: UIViewController)
+        -> UINavigationController?
+    {
+        if let nav = controller as? UINavigationController { return nav }
+        for child in controller.children {
+            if let nav = findNavigationController(in: child) { return nav }
+        }
+        return nil
+    }
+
+    private func hasToolbarItem(
+        identifier: String, in host: UIViewController, window: UIWindow
+    ) -> Bool {
+        inspectToolbarState(in: host, window: window).frame(for: identifier) != nil
+    }
+
+    private func hasAnyToolbarIdentifier(
+        _ identifier: String, in host: UIViewController, window: UIWindow
+    ) -> Bool {
+        inspectToolbarState(in: host, window: window).contains(identifier)
+    }
+
+    private func describeToolbarState(in host: UIViewController, window: UIWindow) -> String {
+        inspectToolbarState(in: host, window: window).description
+    }
+
+    private func inspectToolbarState(in host: UIViewController, window: UIWindow) -> ToolbarSnapshot
+    {
+        window.setNeedsLayout()
+        window.layoutIfNeeded()
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+
+        let navBar = findNavigationBar(in: window)
+        let navItem =
+            navBar?.topItem ?? findNavigationController(in: host)?.topViewController?.navigationItem
+        let topVC = findNavigationController(in: host)?.topViewController
+        let leadingGroups = navItem?.leadingItemGroups ?? []
+        let centerGroups = navItem?.centerItemGroups ?? []
+        let trailingGroups = navItem?.trailingItemGroups ?? []
+        let bottomItems = topVC?.toolbarItems ?? []
+        let usesVerticalBar =
+            if #available(iOS 27.1, *) {
+                host.traitCollection.verticalBarEdge != .unspecified
+            } else {
+                false
+            }
+
+        var rawBarViews: [(view: UIView, frame: CGRect)] = []
+        var barButtonViews: [(view: UIView, frame: CGRect)] = []
+        func collectBarViews(_ view: UIView) {
+            let typeName = String(describing: type(of: view))
+            let frame = view.convert(view.bounds, to: window)
+            if frame.width > 0 && frame.height > 0 {
+                if typeName.contains("ButtonBarButton") {
+                    barButtonViews.append((view, frame))
+                }
+                if typeName.contains("ButtonBarButton") || typeName.contains("BarItemHost")
+                    || typeName.contains("UIHostingView") || typeName.contains("VerticalBar")
+                    || typeName.contains("Toolbar") || view is UIControl
+                    || !(view.accessibilityIdentifier?.isEmpty ?? true)
+                {
+                    rawBarViews.append((view, frame))
+                }
+            }
+            for child in view.subviews {
+                collectBarViews(child)
+            }
+        }
+        collectBarViews(window)
+
+        var overlayIdentifiers: [String: CGRect] = [:]
+        func collectIdentified(_ view: UIView) {
+            if let id = view.accessibilityIdentifier, !id.isEmpty {
+                let frame = view.convert(view.bounds, to: window)
+                if frame.width > 0 && frame.height > 0 {
+                    overlayIdentifiers[id] = frame
+                }
+            }
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let identification = element as? UIAccessibilityIdentification,
+                        let id = identification.accessibilityIdentifier, !id.isEmpty
+                    {
+                        let accFrame = (element as? NSObject)?.accessibilityFrame ?? .zero
+                        let frame =
+                            (accFrame.width > 0 && accFrame.height > 0)
+                            ? window.convert(accFrame, from: nil)
+                            : view.convert(view.bounds, to: window)
+                        if frame.width > 0 && frame.height > 0 {
+                            overlayIdentifiers[id] = frame
+                        }
+                    }
+                    if let nested = element as? UIView {
+                        collectIdentified(nested)
+                    }
+                }
+            }
+            for child in view.subviews {
+                collectIdentified(child)
+            }
+        }
+        collectIdentified(window)
+
+        func firstIdentifiedDescendant(in view: UIView) -> String? {
+            if let id = view.accessibilityIdentifier, !id.isEmpty { return id }
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let identification = element as? UIAccessibilityIdentification,
+                        let id = identification.accessibilityIdentifier, !id.isEmpty
+                    {
+                        return id
+                    }
+                    if let nested = element as? UIView,
+                        let id = firstIdentifiedDescendant(in: nested)
+                    {
+                        return id
+                    }
+                }
+            }
+            for child in view.subviews {
+                if let id = firstIdentifiedDescendant(in: child) { return id }
+            }
+            return nil
+        }
+
+        func firstAccessibilityLabelDescendant(in view: UIView) -> String? {
+            if let label = view.accessibilityLabel, !label.isEmpty { return label }
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let obj = element as? NSObject, let label = obj.accessibilityLabel,
+                        !label.isEmpty
+                    {
+                        return label
+                    }
+                    if let nested = element as? UIView,
+                        let label = firstAccessibilityLabelDescendant(in: nested)
+                    {
+                        return label
+                    }
+                }
+            }
+            for child in view.subviews {
+                if let label = firstAccessibilityLabelDescendant(in: child) { return label }
+            }
+            return nil
+        }
+
+        func knownIdentifier(forText text: String) -> String? {
+            switch text {
+            case "Back": return "clove.nav.back"
+            case "Filter": return "clove.grid.filter"
+            case "More": return "clove.grid.more"
+            case "Compare": return "clove.detail.compare"
+            case "Info": return "clove.detail.info"
+            case "Undo": return usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo"
+            case "Move rejects": return "clove.grid.moveRejects"
+            case "Done": return "clove.grid.batch.done"
+            case "Selection options": return "clove.grid.selectionOptions"
+            case "Hide photo grid", "Show photo grid": return "clove.detail.gridToggle"
+            case "Focus regions": return "clove.detail.focusToggle"
+            default: return nil
+            }
+        }
+
+        func itemIdentifier(_ item: UIBarButtonItem) -> String? {
+            if let id = item.accessibilityIdentifier, !id.isEmpty { return id }
+            if let custom = item.customView {
+                if let id = firstIdentifiedDescendant(in: custom) { return id }
+                if let label = firstAccessibilityLabelDescendant(in: custom),
+                    let mapped = knownIdentifier(forText: label)
+                {
+                    return mapped
+                }
+                if String(describing: type(of: custom)).contains("BarItemHost") {
+                    return "clove.detail.gridToggle"
+                }
+            }
+            for text in [item.accessibilityLabel, item.title].compactMap({ $0 }) where !text.isEmpty
+            {
+                if let mapped = knownIdentifier(forText: text) { return mapped }
+            }
+            return nil
+        }
+
+        let navBarMaxY = navBar.map { $0.convert($0.bounds, to: window).maxY } ?? 120
+        let horizontalBarButtons =
+            barButtonViews
+            .filter { !usesVerticalBar || $0.frame.minY <= navBarMaxY + 8 }
+            .sorted { $0.frame.minX < $1.frame.minX }
+        let verticalBarButtons =
+            usesVerticalBar
+            ? barButtonViews
+                .filter { $0.frame.minY > navBarMaxY + 8 }
+                .sorted { $0.frame.minY < $1.frame.minY }
+            : []
+
+        let allItemsInOrder =
+            (leadingGroups + trailingGroups).flatMap(\.barButtonItems) + bottomItems
+        let allPlainItems = allItemsInOrder.filter {
+            $0.customView == nil && itemIdentifier($0) != nil
+        }
+
+        let horizontalOnlyIDs: Set<String> = [
+            "clove.grid.more", "clove.grid.selectionOptions", "clove.grid.batch.done",
+        ]
+        var plainItemFrames: [ObjectIdentifier: CGRect] = [:]
+        if !usesVerticalBar {
+            if allPlainItems.count == horizontalBarButtons.count {
+                for (item, barView) in zip(allPlainItems, horizontalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                }
+            }
+        } else if horizontalBarButtons.isEmpty {
+            if allPlainItems.count == verticalBarButtons.count {
+                for (item, barView) in zip(allPlainItems, verticalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                }
+            }
+        } else {
+            let horizItems = allPlainItems.filter {
+                itemIdentifier($0).map(horizontalOnlyIDs.contains) ?? false
+            }
+            let vertItems = allPlainItems.filter {
+                !(itemIdentifier($0).map(horizontalOnlyIDs.contains) ?? false)
+            }
+            if horizItems.count == horizontalBarButtons.count {
+                for (item, barView) in zip(horizItems, horizontalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                }
+            }
+            if vertItems.count == verticalBarButtons.count {
+                for (item, barView) in zip(vertItems, verticalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                }
+            }
+        }
+
+        func frameForBarItem(_ item: UIBarButtonItem) -> CGRect? {
+            if let matched = plainItemFrames[ObjectIdentifier(item)] {
+                return matched
+            }
+            if let id = itemIdentifier(item) {
+                if let found = overlayIdentifiers[id] { return found }
+                if let match = rawBarViews.first(where: { $0.view.accessibilityIdentifier == id }) {
+                    return match.frame
+                }
+            }
+            if let custom = item.customView {
+                let frame = custom.convert(custom.bounds, to: window)
+                if frame.width > 0 && frame.height > 0 { return frame }
+            }
+            let labels = [item.accessibilityLabel, item.title].compactMap { $0 }.filter {
+                !$0.isEmpty
+            }
+            for label in labels {
+                if let match = rawBarViews.first(where: { $0.view.accessibilityLabel == label }) {
+                    return match.frame
+                }
+            }
+            return nil
+        }
+
+        func describeRawItem(_ item: UIBarButtonItem) -> String {
+            let customFrame =
+                item.customView.map {
+                    NSCoder.string(for: $0.convert($0.bounds, to: window))
+                } ?? "-"
+            let customLabel = item.customView.flatMap(firstAccessibilityLabelDescendant) ?? "-"
+            let customID = item.customView.flatMap(firstIdentifiedDescendant) ?? "-"
+            return
+                "id=\(item.accessibilityIdentifier ?? "-")/lbl=\(item.accessibilityLabel ?? "-")/ttl=\(item.title ?? "-")/cv=\(item.customView.map { String(describing: type(of: $0)) } ?? "-")/cid=\(customID)/clbl=\(customLabel)/cf=\(customFrame)"
+        }
+
+        var entries: [ToolbarSnapshot.Entry] = []
+        var groupIdx = 0
+        var leadingGroupIDs: [[String]] = []
+        for group in leadingGroups {
+            let ids = group.barButtonItems.compactMap(itemIdentifier)
+            if !ids.isEmpty {
+                leadingGroupIDs.append(ids)
+            }
+            for item in group.barButtonItems {
+                if let id = itemIdentifier(item) {
+                    entries.append(
+                        ToolbarSnapshot.Entry(
+                            identifier: id, groupIndex: groupIdx, frame: frameForBarItem(item)))
+                }
+            }
+            if !ids.isEmpty { groupIdx += 1 }
+        }
+        var trailingGroupIDs: [[String]] = []
+        var trailingRawTokens: [String] = []
+        for group in trailingGroups {
+            let ids = group.barButtonItems.compactMap(itemIdentifier)
+            for item in group.barButtonItems {
+                if let id = itemIdentifier(item) {
+                    trailingRawTokens.append(id)
+                    entries.append(
+                        ToolbarSnapshot.Entry(
+                            identifier: id, groupIndex: groupIdx, frame: frameForBarItem(item)))
+                } else if item.customView == nil {
+                    trailingRawTokens.append("<spacer>")
+                }
+            }
+            if !ids.isEmpty {
+                trailingGroupIDs.append(ids)
+                groupIdx += 1
+            }
+        }
+        var bottomIDs: [String] = []
+        for item in bottomItems {
+            if let id = itemIdentifier(item) {
+                bottomIDs.append(id)
+                entries.append(
+                    ToolbarSnapshot.Entry(
+                        identifier: id, groupIndex: groupIdx, frame: frameForBarItem(item)))
+            }
+        }
+
+        let barViewDebug = rawBarViews.map {
+            "\(String(describing: type(of: $0.view)))(\($0.view.accessibilityIdentifier ?? "-")/\($0.view.accessibilityLabel ?? "-"))@\(NSCoder.string(for: $0.frame))"
+        }
+        let edgeValue =
+            if #available(iOS 27.1, *) {
+                host.traitCollection.verticalBarEdge.rawValue
+            } else {
+                -1
+            }
+        let rawLeading = leadingGroups.map { $0.barButtonItems.map(describeRawItem) }
+        let rawCenter = centerGroups.map { $0.barButtonItems.map(describeRawItem) }
+        let rawTrailing = trailingGroups.map { $0.barButtonItems.map(describeRawItem) }
+        let rawBottom = bottomItems.map(describeRawItem)
+        let summary =
+            "verticalEdge=\(edgeValue) navBar=\(navBar != nil) leading=\(leadingGroupIDs) trailing=\(trailingGroupIDs) bottom=\(bottomIDs) trailingTokens=\(trailingRawTokens) rawL=\(rawLeading) rawC=\(rawCenter) rawT=\(rawTrailing) rawB=\(rawBottom) ids=\(overlayIdentifiers.keys.sorted()) views=\(barViewDebug)"
+        return ToolbarSnapshot(
+            leadingGroupIDs: leadingGroupIDs,
+            trailingGroupIDs: trailingGroupIDs,
+            bottomToolbarIDs: bottomIDs,
+            trailingRawTokens: trailingRawTokens,
+            rawLeadingItemCount: leadingGroups.flatMap(\.barButtonItems).count,
+            entries: entries,
+            overlayIdentifiers: overlayIdentifiers,
+            debugSummary: summary)
+    }
+
     private func leadingBarItemFrame(
         in navBar: UINavigationBar, index: Int, relativeTo window: UIWindow
     ) -> CGRect? {
@@ -1623,14 +2530,14 @@ struct BrowsingLayoutTests {
     }
 
     private func waitFor(
-        _ message: String,
+        _ message: @autoclosure () -> String,
         timeout: Duration = .seconds(3),
         condition: @MainActor () -> Bool
     ) async throws {
         let deadline = ContinuousClock.now + timeout
         while !condition() {
             if ContinuousClock.now >= deadline {
-                Issue.record(Comment(rawValue: message))
+                Issue.record(Comment(rawValue: message()))
                 throw CancellationError()
             }
             try await Task.sleep(for: .milliseconds(25))

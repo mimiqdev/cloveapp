@@ -416,13 +416,34 @@ struct GridScreen: View {
                             back: { browsing.back() }, undo: { browsing.undoLastMark() },
                             canUndo: browsing.canUndoMark,
                             showsBack: !isRegular && (usesDock || !isSelecting),
-                            showsUndo: usesDock
+                            showsUndo: isDuoExpanded,
+                            showsNavigationTools: false,
+                            showsStandaloneDockTool: isDuoCover && !isSelecting && showsMoveRejects,
+                            showsHorizontalTools: isDuoCover,
+                            showsTools: !isDuoCover,
+                            showsBottom: isDuoCover || isDuoExpanded
                         ) {
-                            headerTools
+                            EmptyView()
+                        } standaloneDockTool: {
+                            if isDuoCover && !isSelecting && showsMoveRejects {
+                                moveRejectsToolbarButton
+                            }
+                        } horizontalTools: {
+                            if isDuoCover {
+                                coverHorizontalTools
+                            }
+                        } tools: {
+                            if !isDuoCover {
+                                headerTools
+                            }
                         } marks: {
                             Optional<ToolbarItem<Void, EmptyView>>.none
                         } bottom: {
-                            if usesDock { dockBottom }
+                            if isDuoCover {
+                                filterButton
+                            } else if isDuoExpanded {
+                                dockBottom
+                            }
                         }
                         if Self.usesLeadingRegularHeader(
                             isRegular: isRegular, isSelecting: isSelecting)
@@ -581,16 +602,20 @@ struct GridScreen: View {
         }
     }
 
+    private var moveRejectsToolbarButton: some View {
+        Button(
+            AppLocalization.string("Move rejects", language: language),
+            systemImage: "tray.and.arrow.down"
+        ) {
+            moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+        }
+        .accessibilityIdentifier("clove.grid.moveRejects")
+    }
+
     private var dockBottom: some View {
         Group {
             if showsMoveRejects {
-                Button(
-                    AppLocalization.string("Move rejects", language: language),
-                    systemImage: "tray.and.arrow.down"
-                ) {
-                    moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
-                }
-                .accessibilityIdentifier("clove.grid.moveRejects")
+                moveRejectsToolbarButton
             }
         }
     }
@@ -675,6 +700,17 @@ struct GridScreen: View {
                     browsing: browsing,
                     identifierPrefix: "clove.grid.preparation")
             }
+        } leadingTools: {
+            if isDuoCover && !isSelecting && showsMoveRejects {
+                GlassIconButton(
+                    label: AppLocalization.string("Move rejects", language: language),
+                    symbol: "tray.and.arrow.down",
+                    size: .phone,
+                    identifier: "clove.grid.moveRejects"
+                ) {
+                    moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                }
+            }
         } tools: {
             headerTools
         }
@@ -697,6 +733,33 @@ struct GridScreen: View {
         }
     }
 
+    @ViewBuilder private var systemSelectionToolbarTools: some View {
+        Menu {
+            selectionOptionsMenuItems
+        } label: {
+            Label(
+                AppLocalization.string("Selection options", language: language),
+                systemImage: "ellipsis")
+        }
+        .accessibilityIdentifier("clove.grid.selectionOptions")
+        Button(
+            AppLocalization.string("Done", language: language),
+            systemImage: "checkmark"
+        ) {
+            browsing.clearSelection()
+            selectsEmpty = false
+        }
+        .accessibilityIdentifier("clove.grid.batch.done")
+    }
+
+    @ViewBuilder private var coverHorizontalTools: some View {
+        if isSelecting {
+            systemSelectionToolbarTools
+        } else {
+            moreMenu
+        }
+    }
+
     @ViewBuilder private var headerTools: some View {
         if !isRegular {
             if usesSystemToolbar {
@@ -707,22 +770,7 @@ struct GridScreen: View {
             }
         }
         if isSelecting && usesSystemToolbar {
-            Menu {
-                selectionOptionsMenuItems
-            } label: {
-                Label(
-                    AppLocalization.string("Selection options", language: language),
-                    systemImage: "ellipsis")
-            }
-            .accessibilityIdentifier("clove.grid.selectionOptions")
-            Button(
-                AppLocalization.string("Done", language: language),
-                systemImage: "checkmark"
-            ) {
-                browsing.clearSelection()
-                selectsEmpty = false
-            }
-            .accessibilityIdentifier("clove.grid.batch.done")
+            systemSelectionToolbarTools
         } else if isSelecting {
             Menu {
                 selectionOptionsMenuItems
@@ -755,7 +803,7 @@ struct GridScreen: View {
         } else {
             if isRegular, showsMoveRejects {
                 if usesSystemToolbar {
-                    dockBottom
+                    moveRejectsToolbarButton
                 } else {
                     GlassIconButton(
                         label: AppLocalization.string("Move rejects", language: language),

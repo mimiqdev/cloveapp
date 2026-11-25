@@ -55,18 +55,30 @@ struct DuoDetailLayout {
 /// One set of semantic toolbar groups for both axes. The navigation container owns
 /// placement, chrome, spacing, overflow, and safe areas, including the cover's camera.
 @available(iOS 27.1, *)
-struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent, Bottom: View>:
-    ToolbarContent
-{
+struct BrowsingToolbar<
+    NavigationTools: View,
+    StandaloneDockTool: View,
+    HorizontalTools: View,
+    Tools: View,
+    Marks: ToolbarContent,
+    Bottom: View
+>: ToolbarContent {
     let back: () -> Void
     let undo: () -> Void
     let canUndo: Bool
     var showsBack = true
     var showsUndo = true
     var backTitle: String? = nil
+    var showsNavigationTools = true
+    var showsStandaloneDockTool = false
+    var showsHorizontalTools = false
+    var showsTools = true
+    var showsBottom = true
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @Environment(\.appLanguage) private var language
     @ViewBuilder var navigationTools: NavigationTools
+    @ViewBuilder var standaloneDockTool: StandaloneDockTool
+    @ViewBuilder var horizontalTools: HorizontalTools
     @ViewBuilder var tools: Tools
     @ToolbarContentBuilder var marks: Marks
     @ViewBuilder var bottom: Bottom
@@ -78,7 +90,14 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
         showsBack: Bool = true,
         showsUndo: Bool = true,
         backTitle: String? = nil,
+        showsNavigationTools: Bool = NavigationTools.self != EmptyView.self,
+        showsStandaloneDockTool: Bool = StandaloneDockTool.self != EmptyView.self,
+        showsHorizontalTools: Bool = HorizontalTools.self != EmptyView.self,
+        showsTools: Bool = true,
+        showsBottom: Bool = Bottom.self != EmptyView.self,
         @ViewBuilder navigationTools: () -> NavigationTools = { EmptyView() },
+        @ViewBuilder standaloneDockTool: () -> StandaloneDockTool = { EmptyView() },
+        @ViewBuilder horizontalTools: () -> HorizontalTools = { EmptyView() },
         @ViewBuilder tools: () -> Tools,
         @ToolbarContentBuilder marks: () -> Marks,
         @ViewBuilder bottom: () -> Bottom
@@ -89,7 +108,14 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
         self.showsBack = showsBack
         self.showsUndo = showsUndo
         self.backTitle = backTitle
+        self.showsNavigationTools = showsNavigationTools
+        self.showsStandaloneDockTool = showsStandaloneDockTool
+        self.showsHorizontalTools = showsHorizontalTools
+        self.showsTools = showsTools
+        self.showsBottom = showsBottom
         self.navigationTools = navigationTools()
+        self.standaloneDockTool = standaloneDockTool()
+        self.horizontalTools = horizontalTools()
         self.tools = tools()
         self.marks = marks()
         self.bottom = bottom()
@@ -103,28 +129,48 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
                 }
                 .axisBehavior(.verticalPreferred)
             }
-        } else if showsBack || NavigationTools.self != EmptyView.self {
+            if showsStandaloneDockTool {
+                ToolbarItem(placement: .topBarTrailing) {
+                    standaloneDockTool
+                }
+                .axisBehavior(.verticalPreferred)
+                if showsTools {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+            }
+        } else if showsBack || showsStandaloneDockTool || showsNavigationTools {
             ToolbarItemGroup(placement: .topBarLeading) {
                 if showsBack { backButton }
-                navigationTools
+                if showsStandaloneDockTool { standaloneDockTool }
+                if showsNavigationTools { navigationTools }
             }
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            tools
+        if showsHorizontalTools {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                horizontalTools
+            }
+            .axisBehavior(.horizontalOnly)
         }
-        .axisBehavior(.verticalPreferred)
-        marks
-        if usesVerticalBar {
-            ToolbarSpacer(.flexible, placement: .bottomBar)
-            ToolbarItemGroup(placement: .bottomBar) {
-                if showsUndo { undoButton }
-                bottom
+        if showsTools {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                tools
             }
             .axisBehavior(.verticalPreferred)
-        } else {
+        }
+        marks
+        if usesVerticalBar {
+            if showsUndo || showsBottom {
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItemGroup(placement: .bottomBar) {
+                    if showsUndo { undoButton }
+                    if showsBottom { bottom }
+                }
+                .axisBehavior(.verticalPreferred)
+            }
+        } else if showsUndo || showsBottom {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if showsUndo { undoButton }
-                bottom
+                if showsBottom { bottom }
             }
         }
     }
