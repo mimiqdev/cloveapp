@@ -4,8 +4,8 @@ import SwiftUI
 /// The marking key a hardware key press makes on the detail view (PRD Gestures and keyboard).
 ///
 /// This is the app's only translation from a hardware key to ``MarkingKey``. The detail view
-/// hands the result to the same marking path as the rail, the capsule and the swipe, so the
-/// keyboard carries no marking rules of its own (PRD P0-06).
+/// hands the result to the same marking path as the capsule and the swipe, so the keyboard
+/// carries no marking rules of its own (PRD P0-06).
 ///
 /// Command, Control and Option belong to the system, except `⌘Z`, which undoes (PRD keyboard
 /// table). Shift and the keypad's own flags are ignored, so `X` rejects like `x` and a keypad `3`

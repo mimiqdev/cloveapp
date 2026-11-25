@@ -397,12 +397,10 @@ extension CloveFlowTests {
         XCTAssertTrue(
             element(in: app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5),
             "Opening a grid stack did not enter Group Focus")
-        if !element(in: app, "clove.detail.rail").exists {
-            let capsule = element(in: app, "clove.detail.capsule")
-            XCTAssertTrue(capsule.exists)
-            XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
-            XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
-        }
+        let capsule = element(in: app, "clove.detail.capsule")
+        XCTAssertTrue(capsule.exists)
+        XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
+        XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
         XCTAssertTrue(element(in: app, "clove.detail.info").exists)
         XCTAssertTrue(element(in: app, "clove.detail.undo").exists)
 
@@ -415,8 +413,7 @@ extension CloveFlowTests {
 
     @MainActor
     private func detailMarksControl(in app: XCUIApplication) -> XCUIElement {
-        let rail = element(in: app, "clove.detail.rail")
-        return rail.exists ? rail : element(in: app, "clove.detail.capsule")
+        element(in: app, "clove.detail.capsule")
     }
 
     @MainActor

@@ -1115,6 +1115,161 @@ struct TapPickerTests {
         #expect(clearRatingPlan.photos == [p1.id, p2.id])
     }
 
+    @Test func widePadDetailPlacesHorizontalPickersAboveBottomRightToolbarAndFallsBackVertically()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        let standalone = try #require(browsing.photos.first { $0.fileName == "MMQ02680.ARW" })
+        browsing.openPhoto(standalone.id)
+
+        let presentationBox = PresentationStateBox(value: .photoPreview)
+        let box = TapPickerTestBox()
+
+        struct PadDetailHost: View {
+            let browsing: BrowsingModel
+            let store: SettingsStore
+            @Bindable var presentation: PresentationStateBox
+            let box: TapPickerTestBox
+            @State private var settingsStore: SettingsStore = {
+                let configured = SettingsStore.sample
+                configured.markGestureGuideSeen()
+                return configured
+            }()
+
+            var body: some View {
+                DetailScreen(
+                    browsing: browsing, images: SampleDetailImages(),
+                    presentation: $presentation.value
+                )
+                .environment(settingsStore)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.scenePhase, .active)
+                .environment(\.tapPickerTriggerRequest, box.trigger)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    box.frames = frames
+                }
+            }
+        }
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1180, height: 820)
+        let host = UIHostingController(
+            rootView: PadDetailHost(
+                browsing: browsing, store: store, presentation: presentationBox, box: box))
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 24, left: 0, bottom: 21, right: 0)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("iPad Photo Preview capsule mounted") {
+            box.frames["clove.detail.capsule"] != nil
+                && box.frames["clove.detail.bottomBand"] != nil
+                && self.findZoomPreview(in: window) != nil
+        }
+        let preview = try #require(findZoomPreview(in: window))
+        let photoPreviewCapsule = try #require(box.frames["clove.detail.capsule"])
+        let photoPreviewBand = try #require(box.frames["clove.detail.bottomBand"])
+        let safeBottomY = host.view.safeAreaLayoutGuide.layoutFrame.maxY
+        #expect(box.frames["clove.detail.rail"] == nil)
+        #expect(abs(photoPreviewCapsule.width - 168) <= 1)
+        #expect(abs(photoPreviewCapsule.height - 48) <= 1)
+        #expect(abs((window.frame.maxX - 24) - photoPreviewCapsule.maxX) <= 1.5)
+        #expect(abs((safeBottomY - 10) - photoPreviewCapsule.maxY) <= 1.5)
+        #expect(abs(photoPreviewBand.height - 84) <= 1.5)
+
+        let stageBeforePhotoPreviewPickers = preview.convert(preview.bounds, to: window)
+        for (buttonID, pickerID) in [
+            ("clove.detail.capsule.rating", "clove.detail.capsule.stars"),
+            ("clove.detail.capsule.label", "clove.detail.labels"),
+        ] {
+            box.sendTrigger(buttonID)
+            try await waitFor("iPad Photo Preview picker \(pickerID) visible") {
+                box.frames[pickerID] != nil
+            }
+            let pickerFrame = try #require(box.frames[pickerID])
+            #expect(pickerFrame.width > pickerFrame.height)
+            #expect(abs(pickerFrame.width - 288) <= 2)
+            #expect(abs(pickerFrame.height - 52) <= 2)
+            #expect(abs((photoPreviewCapsule.minY - 12) - pickerFrame.maxY) <= 1.5)
+            #expect(abs((window.frame.maxX - 16) - pickerFrame.maxX) <= 1.5)
+            let stageDuringPicker = preview.convert(preview.bounds, to: window)
+            #expect(abs(stageDuringPicker.height - stageBeforePhotoPreviewPickers.height) <= 1)
+            #expect(abs(stageDuringPicker.minY - stageBeforePhotoPreviewPickers.minY) <= 1)
+            box.sendTrigger(buttonID)
+            try await waitFor("iPad Photo Preview picker \(pickerID) dismissed") {
+                box.frames[pickerID] == nil
+            }
+        }
+
+        // Switching to Focus View keeps MarkingToolbar stationary and preserves horizontal pickers.
+        presentationBox.value = .focus
+        try await waitFor("iPad Focus View band mounted") {
+            box.frames["clove.detail.filmstrip"] != nil
+                && abs((box.frames["clove.detail.bottomBand"]?.height ?? 0) - 78) <= 1.5
+        }
+        let focusCapsule = try #require(box.frames["clove.detail.capsule"])
+        let focusBand = try #require(box.frames["clove.detail.bottomBand"])
+        let filmstrip = try #require(box.frames["clove.detail.filmstrip"])
+        expectSameMarkingCapsuleFrame(photoPreviewCapsule, focusCapsule, tolerance: 1)
+        #expect(abs(focusBand.height - 78) <= 1.5)
+        #expect(abs((focusCapsule.minX - filmstrip.maxX) - 24) <= 1.5)
+
+        let stageBeforeFocusPickers = preview.convert(preview.bounds, to: window)
+        for (buttonID, pickerID) in [
+            ("clove.detail.capsule.rating", "clove.detail.capsule.stars"),
+            ("clove.detail.capsule.label", "clove.detail.labels"),
+        ] {
+            box.sendTrigger(buttonID)
+            try await waitFor("iPad Focus View picker \(pickerID) visible") {
+                box.frames[pickerID] != nil
+            }
+            let pickerFrame = try #require(box.frames[pickerID])
+            #expect(pickerFrame.width > pickerFrame.height)
+            #expect(abs(pickerFrame.width - 288) <= 2)
+            #expect(abs(pickerFrame.height - 52) <= 2)
+            #expect(abs((focusCapsule.minY - 12) - pickerFrame.maxY) <= 1.5)
+            #expect(abs((window.frame.maxX - 16) - pickerFrame.maxX) <= 1.5)
+            let stageDuringPicker = preview.convert(preview.bounds, to: window)
+            #expect(abs(stageDuringPicker.height - stageBeforeFocusPickers.height) <= 1)
+            box.sendTrigger(buttonID)
+            try await waitFor("iPad Focus View picker \(pickerID) dismissed") {
+                box.frames[pickerID] == nil
+            }
+        }
+
+        // Constrained horizontal width falls back to vertical 52 × 288 pickers cleanly.
+        window.frame = CGRect(x: 0, y: 0, width: 310, height: 820)
+        try await waitFor("narrowed iPad capsule settled") {
+            guard let narrowed = box.frames["clove.detail.capsule"] else { return false }
+            return narrowed.maxX <= 310
+        }
+        for (buttonID, pickerID) in [
+            ("clove.detail.capsule.rating", "clove.detail.capsule.stars"),
+            ("clove.detail.capsule.label", "clove.detail.labels"),
+        ] {
+            box.sendTrigger(buttonID)
+            try await waitFor("narrowed vertical picker \(pickerID) visible") {
+                box.frames[pickerID] != nil
+            }
+            let pickerFrame = try #require(box.frames[pickerID])
+            #expect(pickerFrame.height > pickerFrame.width)
+            #expect(abs(pickerFrame.width - 52) <= 2)
+            #expect(abs(pickerFrame.height - 288) <= 2)
+            box.sendTrigger(buttonID)
+            try await waitFor("narrowed vertical picker \(pickerID) dismissed") {
+                box.frames[pickerID] == nil
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func verifyPickers(

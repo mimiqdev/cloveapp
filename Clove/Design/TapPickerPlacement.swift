@@ -285,6 +285,8 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
     @Environment(\.scenePhase) private var scenePhase
     @State private var controller = TapPickerController()
     let dismissTrigger: Trigger
+    let margin: CGFloat
+    let gap: CGFloat
 
     func body(content: Content) -> some View {
         content
@@ -317,7 +319,9 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
                                 containerSize: proxy.size,
                                 horizontalSize: active.horizontalSize,
                                 verticalSize: active.verticalSize,
-                                preferredEdge: active.preferredEdge)
+                                preferredEdge: active.preferredEdge,
+                                margin: margin,
+                                gap: gap)
                             let bloomAnchor = TapPickerPlacement.bloomAnchor(
                                 for: placement.frame,
                                 anchor: localAnchor,
@@ -365,13 +369,15 @@ extension View {
     ///
     /// Changing `dismissWhen` automatically closes any open picker (for example, switching photos,
     /// losing write permission, or leaving selection mode).
-    func tapPickerContainer<Trigger: Equatable>(dismissWhen trigger: Trigger) -> some View {
-        modifier(TapPickerContainerModifier(dismissTrigger: trigger))
+    func tapPickerContainer<Trigger: Equatable>(
+        dismissWhen trigger: Trigger, margin: CGFloat = 12, gap: CGFloat = 10
+    ) -> some View {
+        modifier(TapPickerContainerModifier(dismissTrigger: trigger, margin: margin, gap: gap))
     }
 
     /// Installs an adaptive floating tap-picker host and outside-tap dismisser over this view.
-    func tapPickerContainer() -> some View {
-        modifier(TapPickerContainerModifier(dismissTrigger: 0))
+    func tapPickerContainer(margin: CGFloat = 12, gap: CGFloat = 10) -> some View {
+        modifier(TapPickerContainerModifier(dismissTrigger: 0, margin: margin, gap: gap))
     }
 
     func reportTapPickerFrame(_ identifier: String) -> some View {

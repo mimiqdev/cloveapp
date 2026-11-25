@@ -102,9 +102,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(element(app, "clove.entry").exists)
     }
 
-    /// Rail input and chrome share the detail actions; screenshots use only the sample library.
+    /// Shared bottom-right marking toolbar and tap-picker input replace the retired rail;
+    /// screenshots use only the sample library.
     @MainActor
-    func testIPadDetailRailMarkingAndChrome() throws {
+    func testIPadDetailMarkingToolbarPickersAndChrome() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
         let app = launchSample()
         defer {
@@ -113,21 +114,28 @@ final class CloveFlowTests: XCTestCase {
         }
         XCUIDevice.shared.orientation = .landscapeLeft
         openLibrary(app)
-        prepareRailComparison(app)
+        prepareIPadMarkingSettings(app)
         element(app, "clove.grid.photo.mmq02680").tap()
-        let rail = element(app, "clove.detail.rail")
-        let stars = element(app, "clove.detail.rail.stars.3")
-        let reject = element(app, "clove.detail.rail.reject")
-        let green = element(app, "clove.detail.rail.label.green")
+        let capsule = element(app, "clove.detail.capsule")
+        let rating = element(app, "clove.detail.capsule.rating")
+        let reject = element(app, "clove.detail.capsule.reject")
+        let labelButton = element(app, "clove.detail.capsule.label")
+        let starsPicker = element(app, "clove.detail.capsule.stars")
+        let labelsPicker = element(app, "clove.detail.labels")
         let preview = element(app, "clove.detail.preview")
         let strip = element(app, "clove.detail.filmstrip")
         let splitGrid = element(app, "clove.detail.photoGrid")
         let gridToggle = element(app, "clove.detail.gridToggle")
         let undoButton = element(app, "clove.detail.undo")
-        XCTAssertTrue(rail.exists)
-        XCTAssertFalse(element(app, "clove.detail.capsule").exists)
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.rail").exists)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
-        XCTAssertEqual(rail.frame.width, 96, accuracy: 1)
+        XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
+        XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
+        XCTAssertEqual(capsule.frame.maxX, app.frame.maxX - 24, accuracy: 2)
+        XCTAssertLessThan(capsule.frame.maxY, app.frame.maxY)
+        let photoPreviewCapsuleFrame = capsule.frame
+
         // iPad opens in Photo Preview (30% folder grid + 70% photo stage, no filmstrip).
         XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
         XCTAssertFalse(strip.exists)
@@ -138,22 +146,38 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertLessThanOrEqual(
             element(app, "clove.nav.back").frame.maxX, gridToggle.frame.minX + 1)
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
-        stars.tap()
-        XCTAssertTrue(stars.isSelected)
+        let photoPreviewStageFrame = preview.frame
+
+        // Rating tap picker opens horizontally 12 pt above MarkingToolbar and 16 pt from trailing edge
+        // without shifting the stage.
+        rating.tap()
+        XCTAssertTrue(starsPicker.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(starsPicker.frame.width, starsPicker.frame.height)
+        XCTAssertEqual(starsPicker.frame.width, 288, accuracy: 2)
+        XCTAssertEqual(starsPicker.frame.height, 52, accuracy: 2)
+        XCTAssertEqual(starsPicker.frame.maxY, capsule.frame.minY - 12, accuracy: 2)
+        XCTAssertEqual(starsPicker.frame.maxX, app.frame.maxX - 16, accuracy: 2)
+        assertSameFrame(preview.frame, photoPreviewStageFrame, "picker moved iPad stage")
+        element(app, "clove.detail.capsule.stars.3").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), starsPicker))
+        XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
         capture("ipad-detail-photo-preview-light")
 
-        // Toggle to Focus View: same photo, marks, and Undo stay intact; filmstrip appears.
+        // Toggle to Focus View: same photo, marks, stationary MarkingToolbar, and Undo stay intact.
         gridToggle.tap()
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
         XCTAssertFalse(splitGrid.exists)
         XCTAssertEqual(gridToggle.label, "Show photo grid")
         XCTAssertEqual(gridToggle.value as? String, "Focus View")
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
-        XCTAssertTrue(stars.isSelected)
+        XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
         XCTAssertTrue(undoButton.isEnabled)
-        XCTAssertLessThanOrEqual(strip.frame.maxX, rail.frame.minX + 1)
+        assertSameFrame(
+            capsule.frame, photoPreviewCapsuleFrame,
+            "MarkingToolbar shifted between Photo Preview and Focus View")
+        XCTAssertEqual(capsule.frame.minX - strip.frame.maxX, 24, accuracy: 2)
         undoButton.tap()
-        XCTAssertFalse(stars.isSelected)
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
 
         // Toggle back to Photo Preview, step to another photo, then return to Focus View to
         // verify presentation preference persists across photo navigation in Focus View.
@@ -174,50 +198,63 @@ final class CloveFlowTests: XCTestCase {
         } else {
             XCTAssertEqual(element(app, "clove.detail.info").frame.width, 40, accuracy: 1)
         }
-        stars.tap()
-        XCTAssertTrue(stars.isSelected)
-        stars.tap()
-        XCTAssertFalse(stars.isSelected)
-        // The rail embeds the shared picker's unglassed column: dots are tapped directly
-        // (#229), and tapping the current colour again clears it.
-        green.tap()
-        XCTAssertTrue(green.isSelected)
-        green.tap()
-        XCTAssertFalse(green.isSelected)
-        green.tap()
-        let bar = element(app, "clove.detail.rail.stars")
-        let bottom = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
-        let middle = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        bottom.press(forDuration: 0.1, thenDragTo: middle)
-        XCTAssertTrue(stars.isSelected)
-        // A drag back to the same rating keeps it; a tap clears it.
-        bottom.press(forDuration: 0.1, thenDragTo: middle)
-        XCTAssertTrue(stars.isSelected)
-        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: -6)))
-        XCTAssertTrue(stars.isSelected)
-        capture("ipad-detail-rail-light")
+        rate(3, in: app)
+        XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
+        rate(3, in: app)
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+
+        // Label picker opens horizontally 12 pt above MarkingToolbar and 16 pt from trailing edge.
+        let focusStageFrameBeforePicker = preview.frame
+        labelButton.tap()
+        XCTAssertTrue(labelsPicker.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(labelsPicker.frame.width, labelsPicker.frame.height)
+        XCTAssertEqual(labelsPicker.frame.width, 288, accuracy: 2)
+        XCTAssertEqual(labelsPicker.frame.height, 52, accuracy: 2)
+        XCTAssertEqual(labelsPicker.frame.maxY, capsule.frame.minY - 12, accuracy: 2)
+        XCTAssertEqual(labelsPicker.frame.maxX, app.frame.maxX - 16, accuracy: 2)
+        assertSameFrame(preview.frame, focusStageFrameBeforePicker, "label picker moved iPad stage")
+        element(app, "clove.detail.labels.green").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), labelsPicker))
+        XCTAssertEqual(capsule.value as? String, "Green")
+        labelButton.tap()
+        XCTAssertTrue(labelsPicker.waitForExistence(timeout: 5))
+        element(app, "clove.detail.labels.green").tap()
+        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        labelButton.tap()
+        XCTAssertTrue(labelsPicker.waitForExistence(timeout: 5))
+        element(app, "clove.detail.labels.green").tap()
+        rate(3, in: app)
+        XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
+        capture("ipad-detail-toolbar-light")
+
         XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(stars.isSelected)
-        XCTAssertTrue(green.isSelected)
+        XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
+        XCTAssertTrue(String(describing: capsule.value).contains("Green"))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
+        XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
+        XCTAssertEqual(capsule.frame.maxX, app.frame.maxX - 24, accuracy: 2)
+
         XCUIDevice.shared.orientation = .landscapeLeft
         let stageFrame = preview.frame
-        let railFrame = rail.frame
+        let capsuleFrame = capsule.frame
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
-        XCTAssertTrue(rail.isHittable)
-        XCTAssertEqual(preview.frame, stageFrame)
-        XCTAssertEqual(rail.frame, railFrame)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
+        XCTAssertGreaterThan(preview.frame.height, stageFrame.height)
         XCTAssertFalse(element(app, "clove.detail.info").exists)
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        assertSameFrame(preview.frame, stageFrame, "restoring chrome resized iPad stage")
+        assertSameFrame(capsule.frame, capsuleFrame, "restoring chrome moved iPad MarkingToolbar")
         centre.doubleTap()
         XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
         XCTAssertTrue(strip.exists)
         // Chrome is one visibility across fit and zoom (#302).
         XCTAssertTrue(element(app, "clove.detail.info").exists)
-        XCTAssertTrue(rail.isHittable)
+        XCTAssertTrue(capsule.exists)
         XCTAssertEqual(preview.frame, stageFrame)
         // Toggling to Photo Preview while zoomed preserves zoom at 100%, then back to Focus View.
         gridToggle.tap()
@@ -228,25 +265,28 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
         XCTAssertFalse(splitGrid.exists)
         XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
-        // Single-tapping while zoomed toggles the filmstrip without stepping photos.
+        // Single-tapping while zoomed toggles the bottom control band without stepping or losing 100%.
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
+        XCTAssertEqual(element(app, "clove.detail.zoom").label, "2 / 32 · 100%")
         // Swiping/dragging on the filmstrip while zoomed must not pan the photo or rate via swipe.
         let zoomedPosition = preview.value as? String
-        let railMarksBeforeStrip = rail.value as? String
+        let marksBeforeStrip = capsule.value as? String
         strip.swipeLeft()
         XCTAssertEqual(preview.value as? String, zoomedPosition)
-        XCTAssertEqual(rail.value as? String, railMarksBeforeStrip)
+        XCTAssertEqual(capsule.value as? String, marksBeforeStrip)
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         let stripVertical = strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         stripVertical.press(
             forDuration: 0.05, thenDragTo: stripVertical.withOffset(CGVector(dx: 0, dy: -200)))
-        XCTAssertEqual(rail.value as? String, railMarksBeforeStrip)
+        XCTAssertEqual(capsule.value as? String, marksBeforeStrip)
         XCTAssertEqual(preview.value as? String, zoomedPosition)
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         // Double-tapping near an edge/corner returns to fit without stepping.
@@ -259,42 +299,44 @@ final class CloveFlowTests: XCTestCase {
         // Corner and edge single taps at fit toggle chrome and never step photos.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.08)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         reject.tap()
         XCTAssertEqual(reject.label, "Rejected")
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
-        XCTAssertFalse(stars.isSelected)
-        // Reject neutralises the rail's dots; the ladder keeps no selection.
-        XCTAssertFalse(green.isSelected)
-        XCTAssertLessThan(element(app, "clove.detail.rejectGlyph").frame.maxX, rail.frame.minX)
-        capture("ipad-detail-rail-rejected")
+        XCTAssertTrue(String(describing: capsule.value).contains("Rejected"))
+        XCTAssertLessThanOrEqual(
+            element(app, "clove.detail.rejectGlyph").frame.maxX, preview.frame.maxX)
+        capture("ipad-detail-toolbar-rejected")
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
-        XCTAssertTrue(reject.isHittable)
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
         reject.tap()
         XCTAssertEqual(reject.label, "Reject")
         XCTAssertFalse(element(app, "clove.detail.rejectGlyph").exists)
         let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
         start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -130)))
-        XCTAssertTrue(String(describing: rail.value).contains("stars"))
+        XCTAssertTrue(String(describing: capsule.value).contains("stars"))
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
-        chooseRailTheme("dark", app)
+        chooseTheme("dark", app)
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02680").tap()
-        XCTAssertTrue(rail.exists)
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
         XCTAssertTrue(splitGrid.waitForExistence(timeout: 5))
         capture("ipad-detail-photo-preview-dark")
         gridToggle.tap()
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
-        capture("ipad-detail-rail-dark")
+        capture("ipad-detail-toolbar-dark")
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02683").tap()
         let focusToggle = element(app, "clove.detail.focusToggle")
@@ -352,11 +394,12 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(faceIndicator.label, "Face detected")
         XCTAssertFalse(missingAFIndicator.exists)
         app.terminate()
-        checkDisabledRail()
+        checkDisabledMarkingToolbar()
     }
 
-    /// #305 on iPad: the pill floats over the stage in Photo Preview and Focus View alike, so the
-    /// stage keeps its frame while the pill's availability and the fit–zoom transitions change.
+    /// #305 on iPad: the pill sits inside the reserved bottom band in Photo Preview (top-aligned
+    /// with the toolbar and clear of it) and floats 12 pt above the filmstrip band in Focus View,
+    /// so the stage keeps its frame while availability and fit–zoom transitions change.
     @MainActor
     func testIPadFinishingPillNeverResizesTheStage() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
@@ -371,19 +414,23 @@ final class CloveFlowTests: XCTestCase {
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         let pill = element(app, "clove.detail.rejectUnmarked")
+        let capsule = element(app, "clove.detail.capsule")
         XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
-        // Photo Preview has no filmstrip: the pill floats 12 pt above the stage's bottom edge.
-        XCTAssertEqual(pill.frame.minY, preview.frame.maxY - 12 - pill.frame.height, accuracy: 1)
+        // Photo Preview places the pill inside the 84 pt bottom band, top-aligned with MarkingToolbar.
+        XCTAssertLessThanOrEqual(preview.frame.maxY, pill.frame.minY + 1)
+        XCTAssertEqual(pill.frame.minY, capsule.frame.minY, accuracy: 1.5)
+        XCTAssertLessThanOrEqual(pill.frame.maxX, capsule.frame.minX - 10)
         XCTAssertTrue(pill.isHittable)
 
-        // Focus View replaces the 30/70 split with the full stage and the strip under it, which is
-        // its own presentation; from there the stage must not move again (#305).
+        // Focus View replaces the 30/70 split with the full stage and the 78 pt bottom band,
+        // keeping the pill 12 pt above the filmstrip band without moving the stage (#305).
         element(app, "clove.detail.gridToggle").tap()
         let strip = element(app, "clove.detail.filmstrip")
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
         let focusStage = preview.frame
-        XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
+        XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY - 10)
         XCTAssertTrue(pill.isHittable)
 
         // 100% zoom and then finishing never resize this stage, and the pill stays above the strip.
@@ -391,7 +438,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(
             wait(NSPredicate(format: "value BEGINSWITH %@", "Loaded, centred at"), preview))
         assertSameFrame(preview.frame, focusStage, "zoom resized the iPad stage")
-        XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
+        XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY - 10)
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         pill.tap()
@@ -400,10 +447,10 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func prepareRailComparison(_ app: XCUIApplication) {
+    private func prepareIPadMarkingSettings(_ app: XCUIApplication) {
         element(app, "clove.grid.more").tap()
         app.buttons["Settings"].tap()
-        chooseRailTheme("light", app)
+        chooseTheme("light", app)
         turnOffAutoAdvance(app)
         element(app, "clove.nav.back").tap()
     }
@@ -427,27 +474,23 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func chooseRailTheme(_ theme: String, _ app: XCUIApplication) {
-        chooseTheme(theme, app)
-    }
-
-    @MainActor
-    private func checkDisabledRail() {
+    private func checkDisabledMarkingToolbar() {
         let disconnected = launchSample(["CLOVE_TEST_LIBRARY_LOCATION_LOSS": "location"])
         defer { disconnected.terminate() }
         openLibrary(disconnected)
-        element(disconnected, "clove.grid.photo.mmq02680").tap()
-        let rail = element(disconnected, "clove.detail.rail")
-        XCTAssertTrue(rail.exists)
-        XCTAssertFalse(element(disconnected, "clove.detail.rail.stars.3").isEnabled)
-        XCTAssertFalse(element(disconnected, "clove.detail.rail.reject").isEnabled)
-        XCTAssertFalse(element(disconnected, "clove.detail.rail.label").isEnabled)
-        let marks = rail.value as? String
-        let bar = element(disconnected, "clove.detail.rail.stars")
-        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).press(
-            forDuration: 0.1,
-            thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)))
-        XCTAssertEqual(rail.value as? String, marks)
+        // Tap near the lower edge of the first-row tile, clear of the top location-loss banner.
+        element(disconnected, "clove.grid.photo.mmq02680")
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
+        let capsule = element(disconnected, "clove.detail.capsule")
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(disconnected, "clove.detail.rail").exists)
+        XCTAssertFalse(element(disconnected, "clove.detail.capsule.rating").isEnabled)
+        XCTAssertFalse(element(disconnected, "clove.detail.capsule.reject").isEnabled)
+        XCTAssertFalse(element(disconnected, "clove.detail.capsule.label").isEnabled)
+        let marks = capsule.value as? String
+        element(disconnected, "clove.detail.capsule.rating").tap()
+        XCTAssertFalse(element(disconnected, "clove.detail.capsule.stars").exists)
+        XCTAssertEqual(capsule.value as? String, marks)
     }
 
     /// #309: Photo Preview's split grid isolates the active group the same way Focus View's
@@ -508,7 +551,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(count.exists)
         XCTAssertFalse(element(app, "clove.grid.photo.mmq02699").exists)
         // A mark stays with the member and is readable in the split grid.
-        element(app, "clove.detail.rail.stars.4").tap()
+        rate(4, in: app)
         XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "4 stars"), third))
 
         // Folding returns to the full folder Timeline on the Representative Photo (the rated
@@ -609,10 +652,9 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(info.exists)
         let navigationPreview = element(app, "clove.detail.preview")
         let fileName = element(app, "clove.detail.fileName")
-        let isRail = element(app, "clove.detail.rail").exists
-        let marksControl = element(app, isRail ? "clove.detail.rail" : "clove.detail.capsule")
+        let marksControl = element(app, "clove.detail.capsule")
         let strip = element(app, "clove.detail.filmstrip")
-        let chromeTarget = isRail ? strip : marksControl
+        let chromeTarget = marksControl
         XCTAssertEqual(navigationPreview.label, "MMQ02680.ARW")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), navigationPreview))
         XCTAssertFalse(
@@ -642,13 +684,9 @@ final class CloveFlowTests: XCTestCase {
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", ":05.42")).firstMatch
                 .exists)
         element(app, "clove.detail.info.done").tap()
-        if isRail {
-            element(app, "clove.detail.rail.label.green").tap()
-        } else {
-            element(app, "clove.detail.capsule.label").tap()
-            element(app, "clove.detail.labels.green").tap()
-            XCTAssertFalse(element(app, "clove.detail.labels").exists)
-        }
+        element(app, "clove.detail.capsule.label").tap()
+        element(app, "clove.detail.labels.green").tap()
+        XCTAssertFalse(element(app, "clove.detail.labels").exists)
         let preview = navigationPreview
         let zoom = element(app, "clove.detail.zoom")
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
@@ -656,9 +694,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(zoom.label, "2 / 32 · 100%")
         // Chrome is one visibility across fit and zoom: the marking controls, Info, Undo and the
         // filmstrip all stay put until a single tap hides them (#302).
-        if !isRail {
-            XCTAssertTrue(element(app, "clove.detail.capsule").exists)
-        }
+        XCTAssertTrue(element(app, "clove.detail.capsule").exists)
         XCTAssertTrue(element(app, "clove.detail.info").exists)
         XCTAssertTrue(element(app, "clove.detail.undo").exists)
         XCTAssertTrue(strip.exists)
@@ -670,16 +706,14 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         // Filmstrip interactions while zoomed do not pan the preview or trigger rating swipes.
         let zoomedPosition = preview.value as? String
-        let marksBeforeStrip = isRail ? (marksControl.value as? String) : nil
+        let marksBeforeStrip = marksControl.value as? String
         strip.swipeLeft()
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertEqual(preview.value as? String, zoomedPosition)
         let stripVertical = strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         stripVertical.press(
             forDuration: 0.05, thenDragTo: stripVertical.withOffset(CGVector(dx: 0, dy: -200)))
-        if isRail {
-            XCTAssertEqual(marksControl.value as? String, marksBeforeStrip)
-        }
+        XCTAssertEqual(marksControl.value as? String, marksBeforeStrip)
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         XCTAssertEqual(preview.value as? String, zoomedPosition)
         // A horizontal drag while zoomed switches photos in the default mode, and a photo outside
@@ -706,11 +740,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(fileName.label, "MMQ02680.ARW")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.4)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), chromeTarget))
-        if isRail {
-            element(app, "clove.detail.rail.stars.4").tap()
-        } else {
-            rate(4, in: app)
-        }
+        rate(4, in: app)
         // A mark waits out the advance pause before the file name changes. On a loaded runner
         // one accessibility query can consume most of a short window while the app is already
         // correct (#203), so this boundary keeps the 10-second budget the browsing flow uses.
@@ -2660,8 +2690,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.batch.done").tap()
 
         rated.tap()
-        let rail = element(app, "clove.detail.rail")
-        let marksControl = rail.exists ? rail : element(app, "clove.detail.capsule")
+        let marksControl = element(app, "clove.detail.capsule")
         XCTAssertTrue(marksControl.waitForExistence(timeout: 5))
         XCTAssertEqual(marksControl.value as? String, "Unmarked")
     }
@@ -3183,10 +3212,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), details))
 
         // Culling remains active and responsive with preparation ring shown.
-        let rejectButton = element(
-            app,
-            UIDevice.current.userInterfaceIdiom == .pad
-                ? "clove.detail.rail.reject" : "clove.detail.capsule.reject")
+        let rejectButton = element(app, "clove.detail.capsule.reject")
         rejectButton.tap()
         XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
     }

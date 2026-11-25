@@ -3823,7 +3823,7 @@ struct DetailDisplayPresentationTests {
                 && tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
                 && tapFrames.frames["clove.detail.capsule"] != nil
         }
-        // Ordinary iPhones must never mount Photo Preview's split grid or iPad's mark rail.
+        // Ordinary iPhones must never mount Photo Preview's split grid or iPad's wide bottom band.
         #expect(findCollectionView(in: window) == nil)
         #expect(tapFrames.frames["clove.detail.gridToggle"] == nil)
         #expect(
@@ -6684,6 +6684,205 @@ struct DetailDisplayPresentationTests {
             width: size.width, height: size.height)
         return imageView.convert(rect, to: window)
     }
+
+    @Test func widePadBottomBandPillTooltipsReadOnlyOpacityChromeHideAndZoomPreservation()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let source = ObservedFocusDetailImages(
+            overrideFullResolutionSize: CGSize(width: 6000, height: 4000))
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let burst = try #require(browsing.groups.first { $0.id == GroupID(rawValue: "burst-2678") })
+        let target = try #require(
+            BrowsingGroup.representative(
+                of: browsing.photos.filter { burst.members.contains($0.id) }
+            )?.id)
+        browsing.openPhoto(target)
+
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let tapFrames = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1180, height: 820)
+        let host = UIHostingController(
+            rootView: TestDetailPresentationHost(
+                browsing: browsing, images: source, presentation: presentationBox,
+                usesSystemToolbar: false, idiom: .pad
+            )
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                tapFrames.frames = frames
+            })
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 24, left: 0, bottom: 21, right: 0)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // 1. Collapsed Timeline group in Photo Preview: 84 pt bottom band, centered/top-aligned
+        // Expand pill, stationary bottom-right MarkingToolbar, 0.32 opacity disabled styling,
+        // and pointer hover tooltips on all three actions.
+        try await waitFor("iPad Photo Preview settled") {
+            guard self.findPreview(in: window) != nil,
+                self.findCollectionView(in: window) != nil
+            else { return false }
+            return source.delivered.contains(.screenRAW)
+                && tapFrames.frames["clove.detail.bottomBand"] != nil
+                && tapFrames.frames["clove.detail.capsule"] != nil
+                && tapFrames.frames["clove.detail.expandGroup"] != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let safeBottomY = host.view.safeAreaLayoutGuide.layoutFrame.maxY
+        let photoPreviewStageFrame = preview.convert(preview.bounds, to: window)
+        let photoPreviewBand = try #require(tapFrames.frames["clove.detail.bottomBand"])
+        let photoPreviewCapsule = try #require(tapFrames.frames["clove.detail.capsule"])
+        let photoPreviewExpand = try #require(tapFrames.frames["clove.detail.expandGroup"])
+        #expect(tapFrames.frames["clove.detail.rail"] == nil)
+        #expect(abs(photoPreviewBand.height - 84) <= 1.5)
+        #expect(photoPreviewStageFrame.maxY <= photoPreviewBand.minY + 1)
+        #expect(abs(photoPreviewCapsule.width - 168) <= 1)
+        #expect(abs(photoPreviewCapsule.height - 48) <= 1)
+        #expect(abs((window.frame.maxX - 24) - photoPreviewCapsule.maxX) <= 1.5)
+        #expect(abs((safeBottomY - 10) - photoPreviewCapsule.maxY) <= 1.5)
+        #expect(abs(photoPreviewExpand.minY - photoPreviewCapsule.minY) <= 1.5)
+        #expect(abs(photoPreviewExpand.midX - photoPreviewStageFrame.midX) <= 2)
+        #expect(photoPreviewExpand.maxX <= photoPreviewCapsule.minX - 12 + 1)
+
+        // Collapsed Timeline stack applies 0.32 read-only opacity and keeps marking disabled.
+        let collapsedToolbarAlpha = effectiveRenderedOpacity(
+            atCenterOf: photoPreviewCapsule, in: window)
+        if let collapsedToolbarAlpha {
+            #expect(abs(collapsedToolbarAlpha - 0.32) < 0.05)
+        }
+        #expect(!preview.allowsMarking)
+        #expect(preview.onReadOnlyMarkingDrag != nil)
+
+        // Vertical drag on collapsed stack restores hidden chrome to surface Expand pill.
+        preview.onChromeToggle?()
+        try await waitFor("iPad Photo Preview chrome hidden") {
+            tapFrames.frames["clove.detail.bottomBand"] == nil
+                && tapFrames.frames["clove.detail.expandGroup"] == nil
+        }
+        preview.onReadOnlyMarkingDrag?()
+        try await waitFor("collapsed drag surfaced Expand pill") {
+            tapFrames.frames["clove.detail.bottomBand"] != nil
+                && tapFrames.frames["clove.detail.expandGroup"] != nil
+        }
+
+        // 2. Focus View on collapsed Timeline group: 78 pt band, 24 pt filmstrip gap, Expand pill
+        // centered 12 pt above the band, identical stationary MarkingToolbar frame.
+        presentationBox.value = .focus
+        try await waitFor("iPad Focus View settled") {
+            self.findCollectionView(in: window) == nil
+                && tapFrames.frames["clove.detail.filmstrip"] != nil
+                && abs((tapFrames.frames["clove.detail.bottomBand"]?.height ?? 0) - 78) <= 1.5
+                && tapFrames.frames["clove.detail.expandGroup"] != nil
+                && abs(preview.bounds.width - window.frame.width) <= 1.5
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        let focusBand = try #require(tapFrames.frames["clove.detail.bottomBand"])
+        let focusCapsule = try #require(tapFrames.frames["clove.detail.capsule"])
+        let focusStrip = try #require(tapFrames.frames["clove.detail.filmstrip"])
+        let focusExpand = try #require(tapFrames.frames["clove.detail.expandGroup"])
+        #expect(abs(focusBand.height - 78) <= 1.5)
+        #expect(abs(focusCapsule.minX - photoPreviewCapsule.minX) <= 1)
+        #expect(abs(focusCapsule.maxX - photoPreviewCapsule.maxX) <= 1)
+        #expect(abs(focusCapsule.minY - photoPreviewCapsule.minY) <= 1)
+        #expect(abs((focusCapsule.minX - focusStrip.maxX) - 24) <= 1.5)
+        #expect(abs(focusExpand.midX - 590) <= 2)
+        #expect(abs((focusBand.minY - 12) - focusExpand.maxY) <= 1.5)
+
+        // 3. Expanding Group Focus restores full opacity and surfaces "Reject N unmarked" cleanly.
+        let stageBeforeRejectPill = preview.convert(preview.bounds, to: window)
+        browsing.openGroup(burst.id, on: target)
+        try await waitFor("Reject unmarked pill shown in Focus View") {
+            tapFrames.frames["clove.detail.rejectUnmarked"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(250))
+        let focusRejectPill = try #require(tapFrames.frames["clove.detail.rejectUnmarked"])
+        #expect(abs((focusBand.minY - 12) - focusRejectPill.maxY) <= 1.5)
+        let stageWithRejectPill = preview.convert(preview.bounds, to: window)
+        #expect(abs(stageWithRejectPill.height - stageBeforeRejectPill.height) <= 1)
+        if let activeAlpha = effectiveRenderedOpacity(atCenterOf: focusCapsule, in: window) {
+            #expect(activeAlpha > 0.9)
+        }
+        #expect(preview.allowsMarking)
+
+        // 4. Chrome hiding expands the stage without breaking 100% zoom or pan anchor in Focus View
+        // and Photo Preview.
+        preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.36, y: 0.42)))
+        try await waitFor("iPad Focus View zoomed to 100%") {
+            preview.isZoomed && source.delivered.contains(.nativeRAW)
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        let anchorBeforeHide = try #require(preview.zoomSnapshot?.anchor)
+        let heightBeforeHide = preview.bounds.height
+
+        preview.onChromeToggle?()
+        try await waitFor("iPad Focus View bottom band hidden while zoomed") {
+            tapFrames.frames["clove.detail.bottomBand"] == nil
+                && preview.bounds.height > heightBeforeHide + 60
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(preview.isZoomed)
+        let anchorWhileHidden = try #require(preview.zoomSnapshot?.anchor)
+        #expect(abs(anchorWhileHidden.x - anchorBeforeHide.x) < 0.05)
+        #expect(abs(anchorWhileHidden.y - anchorBeforeHide.y) < 0.05)
+
+        preview.onChromeToggle?()
+        try await waitFor("iPad Focus View bottom band restored while zoomed") {
+            tapFrames.frames["clove.detail.bottomBand"] != nil
+                && abs(preview.bounds.height - heightBeforeHide) <= 2
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(preview.isZoomed)
+        let restoredFocusCapsule = try #require(tapFrames.frames["clove.detail.capsule"])
+        #expect(abs(restoredFocusCapsule.minY - focusCapsule.minY) <= 1)
+
+        presentationBox.value = .photoPreview
+        try await waitFor("iPad Photo Preview bottom band with Reject pill") {
+            tapFrames.frames["clove.detail.rejectUnmarked"] != nil
+                && abs((tapFrames.frames["clove.detail.bottomBand"]?.height ?? 0) - 84) <= 1.5
+                && self.findCollectionView(in: window) != nil
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        let previewHeightBeforeHide = preview.bounds.height
+        preview.onChromeToggle?()
+        try await waitFor("iPad Photo Preview bottom band hidden while zoomed") {
+            tapFrames.frames["clove.detail.bottomBand"] == nil
+                && preview.bounds.height > previewHeightBeforeHide + 60
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(preview.isZoomed)
+        preview.onChromeToggle?()
+        try await waitFor("iPad Photo Preview bottom band restored while zoomed") {
+            tapFrames.frames["clove.detail.bottomBand"] != nil
+                && abs(preview.bounds.height - previewHeightBeforeHide) <= 2
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(preview.isZoomed)
+    }
+
+    private func effectiveRenderedOpacity(atCenterOf rect: CGRect, in window: UIWindow) -> CGFloat?
+    {
+        let point = CGPoint(x: rect.midX, y: rect.midY)
+        func walk(_ view: UIView, inherited: CGFloat) -> [CGFloat] {
+            let viewInWindow = view.convert(view.bounds, to: window)
+            guard viewInWindow.contains(point) else { return [] }
+            let local = inherited * view.alpha
+            var matches = view.subviews.flatMap { walk($0, inherited: local) }
+            if abs(viewInWindow.width - rect.width) <= 4,
+                abs(viewInWindow.height - rect.height) <= 4
+            {
+                matches.append(local)
+            }
+            return matches
+        }
+        return walk(window, inherited: 1).min()
+    }
 }
 
 /// The sample's photos with a portrait raster, so the fitted band fills the stage's height the way
@@ -6816,11 +7015,16 @@ private final class PortraitFocusDetailImages: DetailImageSource, DetailRegionSh
 @MainActor
 private final class ObservedFocusDetailImages: DetailImageSource, DetailRegionSharpnessSource {
     let sample = SampleDetailImages()
+    let overrideFullResolutionSize: CGSize?
     private(set) var requests: [(PhotoIdentity, DetailPixelRequest)] = []
     private(set) var delivered: [DetailQuality] = []
     private(set) var windows: [DetailPhotoWindow] = []
     private(set) var prefetched: [DetailPhotoWindow] = []
     private(set) var analyzeCalls: [PhotoIdentity] = []
+
+    init(overrideFullResolutionSize: CGSize? = nil) {
+        self.overrideFullResolutionSize = overrideFullResolutionSize
+    }
 
     func placeholder(for photo: PhotoIdentity, gridThumbnails: any GridThumbnailSource) async
         -> CGImage?
@@ -6840,8 +7044,17 @@ private final class ObservedFocusDetailImages: DetailImageSource, DetailRegionSh
     func image(for photo: PhotoIdentity, request: DetailPixelRequest) async -> DetailImageOutcome {
         requests.append((photo, request))
         let outcome = await sample.image(for: photo, request: request)
-        if case .image(let image) = outcome { delivered.append(image.quality) }
-        return outcome
+        guard case .image(let image) = outcome else { return outcome }
+        delivered.append(image.quality)
+        guard let overrideFullResolutionSize else { return outcome }
+        return .image(
+            DetailImage(
+                image: image.image,
+                source: image.source,
+                quality: image.quality,
+                hasRAW: image.hasRAW,
+                limitation: image.limitation,
+                fullResolutionSize: overrideFullResolutionSize))
     }
 
     func prefetchPreviews(_ window: DetailPhotoWindow) async {
