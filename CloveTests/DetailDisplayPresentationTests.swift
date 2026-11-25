@@ -2527,10 +2527,14 @@ struct DetailDisplayPresentationTests {
 
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 820, height: 600)
-        let rootView = GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
-            .environment(store)
-            .environment(\.isDuoExpanded, true)
-            .environment(\.usesSystemBrowsingToolbar, true)
+        let rootView = GridScreen(
+            browsing: browsing,
+            thumbnails: browsing.thumbnails,
+            initialPresentation: .photoPreview
+        )
+        .environment(store)
+        .environment(\.isDuoExpanded, true)
+        .environment(\.usesSystemBrowsingToolbar, true)
         let host = UIHostingController(rootView: NavigationStack { rootView })
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
@@ -2852,7 +2856,7 @@ struct DetailDisplayPresentationTests {
         let photo = try #require(browsing.photos.first?.id)
         browsing.openPhoto(photo)
 
-        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let presentationBox = TestPresentationBox(value: .focus)
 
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
@@ -2867,18 +2871,28 @@ struct DetailDisplayPresentationTests {
             window.rootViewController = nil
         }
 
-        try await waitFor("Expanded Duo Photo Preview did not settle") {
+        try await waitFor("Expanded Duo Focus View did not settle") {
             let preview = self.findPreview(in: window)
             return preview != nil
-                && self.findCollectionView(in: window) != nil
-                && self.findFilmstripScrollView(in: window, excluding: preview!) == nil
+                && self.findCollectionView(in: window) == nil
+                && self.findFilmstripScrollView(in: window, excluding: preview!) != nil
         }
 
         // Drive the presentation binding the grid toggle sets (#288); CloveFlowTests covers the
         // button itself on a Duo or iPad destination.
         presentationBox.value = presentationBox.value.toggled
 
-        try await waitFor("Expanded Duo Focus View did not settle") {
+        try await waitFor("Expanded Duo Photo Preview did not settle") {
+            let preview = self.findPreview(in: window)
+            return presentationBox.value == .photoPreview
+                && preview != nil
+                && self.findCollectionView(in: window) != nil
+                && self.findFilmstripScrollView(in: window, excluding: preview!) == nil
+        }
+
+        presentationBox.value = presentationBox.value.toggled
+
+        try await waitFor("Expanded Duo Focus View did not return") {
             let preview = self.findPreview(in: window)
             return presentationBox.value == .focus
                 && preview != nil
