@@ -204,18 +204,32 @@ extension View {
     )
         -> some View
     {
-        self
+        modifier(
+            BrowsingChromeModifier(
+                title: title, browsing: browsing, usesSystemBar: usesSystemBar,
+                backTitle: backTitle, language: language))
+    }
+}
+
+private struct BrowsingChromeModifier: ViewModifier {
+    let title: String
+    let browsing: BrowsingModel
+    let usesSystemBar: Bool
+    let backTitle: String?
+    let language: ResolvedAppLanguage
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let hidesBar =
+            !usesSystemBar
+            && (browsing.state.route == .grid || browsing.state.route == .detail
+                || browsing.state.route == .entry)
+        let base =
+            content
             .navigationTitle(
                 browsing.state.route == .grid
                     || browsing.state.route == .detail
                     || browsing.state.route == .entry ? "" : title
-            )
-            .toolbar(
-                !usesSystemBar
-                    && (browsing.state.route == .grid || browsing.state.route == .detail
-                        || browsing.state.route == .entry)
-                    ? .hidden : .visible,
-                for: .navigationBar
             )
             .toolbar {
                 if browsing.state.route == .settings, let backTitle {
@@ -242,5 +256,14 @@ extension View {
                 // Entry owns its header (screens.md §01): its own large title and gear,
                 // so no toolbar item is added there.
             }
+        if hidesBar {
+            base.toolbarVisibility(.hidden, for: .navigationBar)
+        } else if browsing.state.route == .grid || browsing.state.route == .settings {
+            base.toolbarVisibility(.visible, for: .navigationBar)
+        } else {
+            // Let `.detail` (including Compare and landscape Detail chrome hiding) and `.entry`
+            // control navigation bar visibility without an outer override.
+            base
+        }
     }
 }

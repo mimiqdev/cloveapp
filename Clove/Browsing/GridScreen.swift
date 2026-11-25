@@ -593,7 +593,7 @@ struct GridScreen: View {
             titleIdentifier: isSelecting ? "clove.grid.batch.count" : "clove.grid.title",
             showsBack: !isSelecting,
             usesInlineFlow: isOrdinaryPhoneLandscape || isSelecting,
-            height: isOrdinaryPhoneLandscape ? 54 : 64,
+            height: isOrdinaryPhoneLandscape ? 44 : 64,
             back: { browsing.back() }
         ) {
             HStack(spacing: 0) {

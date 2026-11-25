@@ -3345,6 +3345,22 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertLessThanOrEqual(rejectPill.frame.maxX, info.frame.minX + 1)
         XCTAssertLessThanOrEqual(info.frame.maxX, undo.frame.minX + 1)
 
+        // Single tap on stage in landscapeLeft hides top nav bar and bottom row, second tap restores cleanly.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), bottomRow))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), back))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), info))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undo))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+        XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertTrue(fileName.waitForExistence(timeout: 5))
+        XCTAssertTrue(info.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(back.frame.minX, 0)
+        XCTAssertLessThanOrEqual(undo.frame.maxX, app.frame.maxX)
+
         // Collapse Group Focus via trailing chevron.up -> returns to Timeline & Expand pill in header.
         let foldButton = element(app, "clove.detail.filmstrip.group.fold")
         XCTAssertTrue(foldButton.waitForExistence(timeout: 5))
@@ -3368,11 +3384,22 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.detail.capsule.stars.4").tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), stars))
 
-        // Single tap on stage hides chrome including landscapeBottomRow, second tap restores it.
+        // Single tap on stage in landscapeRight hides top nav bar and landscapeBottomRow,
+        // second tap restores them cleanly within safe bounds.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), bottomRow))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), back))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), info))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undo))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
         XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertTrue(fileName.waitForExistence(timeout: 5))
+        XCTAssertTrue(info.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(back.frame.minX, 0)
+        XCTAssertLessThanOrEqual(undo.frame.maxX, app.frame.maxX)
 
         // Rotate back to portrait -> returns to stacked portrait layout and Back exits to Grid.
         XCUIDevice.shared.orientation = .portrait

@@ -3919,6 +3919,9 @@ struct DetailDisplayPresentationTests {
 
                 try expectHeaderOrder("clove.detail.expandGroup")
 
+                let headerFrame = try #require(headerFrames.frames["clove.browsing.header"])
+                #expect(abs(headerFrame.height - 44) <= 0.5)
+
                 let stripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
                 let capsuleFrame = try #require(tapFrames.frames["clove.detail.capsule"])
                 #expect(abs(stripFrame.height - DetailFilmstrip.Metrics.compact.bandHeight) <= 0.5)
@@ -3969,6 +3972,7 @@ struct DetailDisplayPresentationTests {
         browsing.apply(.rating(four), to: rep)
 
         let tapFrames = DetailFrameBox()
+        let headerFrames = DetailFrameBox()
         let triggerBox = DetailPickerTriggerBox()
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
@@ -3990,6 +3994,9 @@ struct DetailDisplayPresentationTests {
             rootView: HostView(browsing: browsing, source: source, triggerBox: triggerBox)
                 .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
                     tapFrames.frames = $0
+                }
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    headerFrames.frames = $0
                 })
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .regular
@@ -4048,12 +4055,16 @@ struct DetailDisplayPresentationTests {
         #expect(abs(anchorAfterRotate.x - anchorBeforeRotate.x) < 0.08)
         #expect(abs(anchorAfterRotate.y - anchorBeforeRotate.y) < 0.08)
 
-        // Single tap to hide chrome removes landscapeBottomRow and expands previewArea height cleanly.
+        // Single tap to hide chrome removes BrowsingHeader and landscapeBottomRow and expands previewArea height cleanly.
+        let headerHeightWithChrome = try #require(
+            headerFrames.frames["clove.browsing.header"]?.height)
+        #expect(abs(headerHeightWithChrome - 44) <= 0.5)
         let stageHeightWithChrome = preview.bounds.height
         preview.onChromeToggle?()
         try await waitFor("chrome did not hide and expand stage in landscape") {
-            tapFrames.frames["clove.detail.landscapeBottomRow"] == nil
-                && preview.bounds.height > stageHeightWithChrome + 30
+            headerFrames.frames["clove.browsing.header"] == nil
+                && tapFrames.frames["clove.detail.landscapeBottomRow"] == nil
+                && preview.bounds.height > stageHeightWithChrome + 80
         }
         try await Task.sleep(for: .milliseconds(350))
         #expect(preview.isZoomed)
@@ -4065,7 +4076,12 @@ struct DetailDisplayPresentationTests {
         preview.onChromeToggle?()
         try await waitFor("chrome did not restore in landscape") {
             tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
+                && headerFrames.frames["clove.browsing.header"] != nil
+                && abs(preview.bounds.height - stageHeightWithChrome) <= 1.0
         }
+        let restoredHeaderHeight = try #require(
+            headerFrames.frames["clove.browsing.header"]?.height)
+        #expect(abs(restoredHeaderHeight - 44) <= 0.5)
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .regular
         window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
@@ -4078,6 +4094,224 @@ struct DetailDisplayPresentationTests {
         #expect(browsing.state.currentPhoto == rep)
         #expect(browsing.expandedGroup == group.id)
         #expect(preview.isZoomed)
+    }
+
+    @Test func ordinaryPhoneLandscapeChromeHideHidesTopBarAtFitAndZoomWhilePortraitPreservesHeader()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+
+        // 1. Native BrowseShell navigation bar in iPhone landscape (iOS 27.1+): hiding chrome hides
+        //    both the navigation bar and bottom review row so fitted photo height expands into full
+        //    viewport height, and restores cleanly without shifting zoom scale or anchor.
+        if #available(iOS 27.1, *) {
+            let store = SettingsStore.sample
+            store.markGestureGuideSeen()
+            store.update { $0.doubleTap = .zoomToTapPoint }
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            try await waitFor("folder did not open") { !browsing.isFolderOpening }
+            let target = try #require(browsing.photos.first { $0.id.stem == "mmq02678" }?.id)
+            browsing.openPhoto(target)
+
+            let tapFrames = DetailFrameBox()
+            let host = UIHostingController(
+                rootView: BrowseShell(browsing: browsing)
+                    .environment(store)
+                    .environment(\.cloveUserInterfaceIdiom, .phone)
+                    .environment(\.usesSystemBrowsingToolbar, true)
+                    .environment(\.scenePhase, .active)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    })
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.traitOverrides.verticalSizeClass = .compact
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 852, height: 393)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("native landscape detail did not settle") {
+                guard let preview = self.findPreview(in: window) else { return false }
+                return preview.displayedImage != nil
+                    && tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
+                    && self.findNavigationBar(in: window) != nil
+            }
+
+            let preview = try #require(findPreview(in: window))
+            let stageHeightWithChrome = preview.bounds.height
+            let fitHeightWithChrome = preview.imageRectAtFit().height
+            let navBarWithChrome = try #require(findNavigationBar(in: window))
+            #expect(!navBarWithChrome.isHidden && navBarWithChrome.alpha > 0.9)
+
+            // Hide chrome at fit: navigation bar and bottom row hide; stage + fitted photo expand.
+            preview.onChromeToggle?()
+            try await waitFor("native landscape chrome did not hide at fit") {
+                let navBar = self.findNavigationBar(in: window)
+                let navBarHidden =
+                    navBar == nil || navBar?.isHidden == true || (navBar?.alpha ?? 1) < 0.05
+                    || (navBar?.frame.maxY ?? 100) <= window.safeAreaInsets.top + 1
+                return navBarHidden
+                    && tapFrames.frames["clove.detail.landscapeBottomRow"] == nil
+                    && preview.bounds.height > stageHeightWithChrome + 80
+            }
+            try await Task.sleep(for: .milliseconds(250))
+            let fitHeightHidden = preview.imageRectAtFit().height
+            #expect(fitHeightHidden > fitHeightWithChrome + 60)
+
+            // Restore chrome at fit: navigation bar and bottom row return cleanly to exact stage height.
+            preview.onChromeToggle?()
+            try await waitFor("native landscape chrome did not restore at fit") {
+                guard let navBar = self.findNavigationBar(in: window) else { return false }
+                return !navBar.isHidden && navBar.alpha > 0.9 && navBar.frame.height >= 40
+                    && tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
+                    && abs(preview.bounds.height - stageHeightWithChrome) <= 1.0
+            }
+            #expect(abs(preview.imageRectAtFit().height - fitHeightWithChrome) <= 1.0)
+
+            // Zoom to non-center tap point (no focus tracking), hide chrome, then restore chrome:
+            // 100% scale retargets to new bounds and anchor remains steady.
+            preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.28, y: 0.34)))
+            try await waitFor("native landscape 100% zoom did not settle") {
+                preview.isZoomed
+            }
+            try await Task.sleep(for: .milliseconds(350))
+            let zoomBeforeHide = try #require(preview.zoomSnapshot)
+            #expect(abs(zoomBeforeHide.anchor.x - 0.28) < 0.05)
+            #expect(abs(zoomBeforeHide.anchor.y - 0.34) < 0.05)
+
+            preview.onChromeToggle?()
+            try await waitFor("native landscape chrome did not hide while zoomed") {
+                tapFrames.frames["clove.detail.landscapeBottomRow"] == nil
+                    && preview.bounds.height > stageHeightWithChrome + 80
+            }
+            try await Task.sleep(for: .milliseconds(350))
+            #expect(preview.isZoomed)
+            let zoomWhileHidden = try #require(preview.zoomSnapshot)
+            #expect(abs(zoomWhileHidden.anchor.x - zoomBeforeHide.anchor.x) < 0.05)
+            #expect(abs(zoomWhileHidden.anchor.y - zoomBeforeHide.anchor.y) < 0.05)
+
+            preview.onChromeToggle?()
+            try await waitFor("native landscape chrome did not restore while zoomed") {
+                tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
+                    && abs(preview.bounds.height - stageHeightWithChrome) <= 1.0
+            }
+            try await Task.sleep(for: .milliseconds(350))
+            #expect(preview.isZoomed)
+            let zoomAfterRestore = try #require(preview.zoomSnapshot)
+            #expect(abs(zoomAfterRestore.scale - zoomBeforeHide.scale) < 0.03)
+            #expect(abs(zoomAfterRestore.anchor.x - zoomBeforeHide.anchor.x) < 0.05)
+            #expect(abs(zoomAfterRestore.anchor.y - zoomBeforeHide.anchor.y) < 0.05)
+        }
+
+        // 2. Portrait iPhone fallback layout keeps BrowsingHeader mounted (64 pt) when chrome hides,
+        //    hiding only trailing tools and the bottom filmstrip/capsule.
+        do {
+            let store = SettingsStore.sample
+            store.markGestureGuideSeen()
+            let source = SampleDetailImages()
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            try await waitFor("folder did not open") { !browsing.isFolderOpening }
+            let target = try #require(browsing.photos.first?.id)
+            browsing.openPhoto(target)
+
+            let headerFrames = DetailFrameBox()
+            let tapFrames = DetailFrameBox()
+            let host = UIHostingController(
+                rootView: DetailScreen(browsing: browsing, images: source)
+                    .environment(store)
+                    .environment(\.cloveUserInterfaceIdiom, .phone)
+                    .environment(\.scenePhase, .active)
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                        headerFrames.frames = $0
+                    }
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    })
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.traitOverrides.verticalSizeClass = .regular
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("portrait detail did not settle") {
+                headerFrames.frames["clove.browsing.header"] != nil
+                    && headerFrames.frames["clove.detail.info"] != nil
+                    && tapFrames.frames["clove.detail.filmstrip"] != nil
+            }
+            let portraitHeader = try #require(headerFrames.frames["clove.browsing.header"])
+            #expect(abs(portraitHeader.height - 64) <= 0.5)
+
+            let preview = try #require(findPreview(in: window))
+            preview.onChromeToggle?()
+            try await waitFor("portrait chrome did not hide bottom controls and trailing tools") {
+                tapFrames.frames["clove.detail.filmstrip"] == nil
+                    && headerFrames.frames["clove.detail.info"] == nil
+            }
+            let portraitHeaderHiddenChrome = try #require(
+                headerFrames.frames["clove.browsing.header"])
+            #expect(abs(portraitHeaderHiddenChrome.height - 64) <= 0.5)
+            #expect(headerFrames.frames["clove.nav.back"] != nil)
+        }
+
+        // 3. Portrait iPhone native BrowseShell layout (iOS 27.1+) also preserves navigation bar
+        //    when chrome hides, while hiding bottom filmstrip/capsule.
+        if #available(iOS 27.1, *) {
+            let store = SettingsStore.sample
+            store.markGestureGuideSeen()
+            let browsing = BrowsingModel(library: TestLibrary.sample())
+            browsing.openFolder()
+            try await waitFor("folder did not open") { !browsing.isFolderOpening }
+            let target = try #require(browsing.photos.first?.id)
+            browsing.openPhoto(target)
+
+            let tapFrames = DetailFrameBox()
+            let host = UIHostingController(
+                rootView: BrowseShell(browsing: browsing)
+                    .environment(store)
+                    .environment(\.cloveUserInterfaceIdiom, .phone)
+                    .environment(\.usesSystemBrowsingToolbar, true)
+                    .environment(\.scenePhase, .active)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    })
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.traitOverrides.verticalSizeClass = .regular
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("native portrait detail did not settle") {
+                self.findPreview(in: window) != nil
+                    && tapFrames.frames["clove.detail.filmstrip"] != nil
+                    && self.findNavigationBar(in: window) != nil
+            }
+
+            let preview = try #require(findPreview(in: window))
+            let stageHeightBefore = preview.bounds.height
+            preview.onChromeToggle?()
+            try await waitFor("native portrait chrome did not hide filmstrip") {
+                tapFrames.frames["clove.detail.filmstrip"] == nil
+            }
+            let navBarAfterHide = try #require(findNavigationBar(in: window))
+            #expect(!navBarAfterHide.isHidden && navBarAfterHide.alpha > 0.9)
+            #expect(abs(preview.bounds.height - stageHeightBefore) <= 1.0)
+        }
     }
 
     @Test
@@ -6341,6 +6575,14 @@ struct DetailDisplayPresentationTests {
         if let preview = view as? DetailZoomContainerView { return preview }
         for child in view.subviews {
             if let preview = findPreview(in: child) { return preview }
+        }
+        return nil
+    }
+
+    private func findNavigationBar(in view: UIView) -> UINavigationBar? {
+        if let navBar = view as? UINavigationBar { return navBar }
+        for child in view.subviews {
+            if let navBar = findNavigationBar(in: child) { return navBar }
         }
         return nil
     }
