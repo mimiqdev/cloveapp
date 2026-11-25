@@ -432,6 +432,243 @@ struct SettingsAdaptiveTests {
         }
         return matches
     }
+
+    @Test func pairedThemeTileMatchesReferenceGeometryAndRendersLightDarkMiniCards() throws {
+        #expect(ThemeTile.tileSize == CGSize(width: 108, height: 94))
+        #expect(ThemeTile.previewSize == CGSize(width: 108, height: 68))
+        #expect(ThemeTile.previewCornerRadius == 10)
+        #expect(ThemeTile.previewPadding == 4)
+        #expect(ThemeTile.cardGap == 4)
+        #expect(ThemeTile.cardSize == CGSize(width: 48, height: 60))
+        #expect(ThemeTile.cardCornerRadius == 6)
+        #expect(ThemeTile.selectionBorderWidth == 1.5)
+
+        let hosted = UIHostingController(
+            rootView: ThemeTile(family: .catppuccin, isSelected: true)
+                .environment(\.cloveTheme, .light))
+        let fittedSize = hosted.sizeThatFits(in: CGSize(width: 400, height: 400))
+        #expect(abs(fittedSize.width - 108) <= 0.5)
+        #expect(abs(fittedSize.height - 94) <= 1.0)
+
+        let lightSample = try renderTilePixels(
+            ThemeTile(family: .catppuccin, isSelected: false),
+            theme: .light)
+        let darkSelectedSample = try renderTilePixels(
+            ThemeTile(family: .catppuccin, isSelected: true),
+            theme: .dark)
+        let lightSelectedSample = try renderTilePixels(
+            ThemeTile(family: .catppuccin, isSelected: true),
+            theme: .light)
+
+        // Left mini-card stage uses Catppuccin Latte (`stage` = #DCE0E8), right uses Mocha (#11111B).
+        let expectedLatteStage = try renderedRGBA(
+            ThemeFamily.catppuccin.lightTheme.tokens.stage.color)
+        let expectedMochaStage = try renderedRGBA(
+            ThemeFamily.catppuccin.darkTheme.tokens.stage.color)
+        assertRGBAClose(lightSample.pixel(x: 20, y: 40), expectedLatteStage, "left mini-card stage")
+        assertRGBAClose(
+            lightSample.pixel(x: 196, y: 40), expectedMochaStage, "right mini-card stage")
+
+        // Sample photo pixels stay identical across Light/Dark mini-cards and active themes.
+        let leftPhotoPixel = lightSample.pixel(x: 56, y: 46)
+        let rightPhotoPixel = lightSample.pixel(x: 160, y: 46)
+        let darkThemeLeftPhotoPixel = darkSelectedSample.pixel(x: 56, y: 46)
+        assertRGBAClose(leftPhotoPixel, rightPhotoPixel, "photo untinted between light/dark")
+        assertRGBAClose(
+            leftPhotoPixel, darkThemeLeftPhotoPixel, "photo untinted across active themes")
+
+        // Selected tile renders the 1.5 pt accent selection border and bottom-right checkmark badge.
+        let expectedLightAccent = try renderedRGBA(CloveTheme.light.tokens.accent.color)
+        let expectedDarkAccent = try renderedRGBA(CloveTheme.dark.tokens.accent.color)
+        assertRGBAClose(
+            lightSelectedSample.pixel(x: 108, y: 1), expectedLightAccent,
+            "selected light border top")
+        assertRGBAClose(
+            darkSelectedSample.pixel(x: 108, y: 1), expectedDarkAccent,
+            "selected dark border top")
+
+        // Badge area near bottom-right corner of 108 x 68 preview frame (scale 2 => 216 x 136):
+        // unselected shows Mocha canvas (#1E1E2E), selected shows accent circle + white glyph.
+        let unselectedCornerRegion = (182...202).flatMap { x in
+            (102...122).map { y in lightSample.pixel(x: x, y: y) }
+        }
+        let selectedCornerRegion = (182...202).flatMap { x in
+            (102...122).map { y in lightSelectedSample.pixel(x: x, y: y) }
+        }
+        #expect(!unselectedCornerRegion.contains { rgbaClose($0, expectedLightAccent) })
+        #expect(selectedCornerRegion.contains { rgbaClose($0, expectedLightAccent) })
+        #expect(
+            selectedCornerRegion.contains {
+                rgbaClose($0, TileRGBA(r: 255, g: 255, b: 255, a: 255), tolerance: 24)
+            })
+    }
+
+    @Test func themePickerLayoutAdaptsAcrossWidthsWithoutHorizontalOverflow() {
+        let narrow = ThemePickerLayout.resolve(availableWidth: 280)
+        #expect(narrow.scale < 1)
+        #expect(
+            3 * narrow.tileWidth + 2 * narrow.columnSpacing <= 280.01)
+
+        let compact375 = ThemePickerLayout.resolve(availableWidth: 335)
+        #expect(compact375.scale < 1)
+        #expect(
+            3 * compact375.tileWidth + 2 * compact375.columnSpacing <= 335.01)
+
+        let standard390 = ThemePickerLayout.resolve(availableWidth: 350)
+        #expect(standard390.scale == 1)
+        #expect(standard390.tileWidth == 108)
+        #expect(abs(standard390.columnSpacing - 13) <= 0.01)
+        #expect(
+            3 * standard390.tileWidth + 2 * standard390.columnSpacing <= 350.01)
+
+        let phone402 = ThemePickerLayout.resolve(availableWidth: 370)
+        #expect(phone402.scale == 1)
+        #expect(phone402.tileWidth == 108)
+        #expect(abs(phone402.columnSpacing - 23) <= 0.01)
+        #expect(3 * phone402.tileWidth + 2 * phone402.columnSpacing <= 370.01)
+
+        let wideSplit = ThemePickerLayout.resolve(availableWidth: 364)
+        #expect(wideSplit.scale == 1)
+        #expect(wideSplit.tileWidth == 108)
+        #expect(wideSplit.columnSpacing <= ThemePickerLayout.maxColumnSpacing)
+
+        let ipad = ThemePickerLayout.resolve(availableWidth: 640)
+        #expect(ipad.scale == 1)
+        #expect(ipad.tileWidth == 108)
+        #expect(ipad.columnSpacing == ThemePickerLayout.maxColumnSpacing)
+    }
+
+    @Test func appearanceSettingsUsesSeparateCheckmarkListAndUnboxedThemeSection() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore(
+            persistence: SettingsPersistence(storage: SampleSettingsStorage()),
+            rememberedAdvanceStorage: SampleSettingsStorage(),
+            physicalMemory: 8 * 1024 * 1024 * 1024)
+
+        for width in [CGFloat(320), CGFloat(390), CGFloat(680), CGFloat(1024)] {
+            let host = UIHostingController(
+                rootView: List {
+                    AppearanceSettingsSections(showsCategoryTitle: width >= 680)
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color.clove.surface.sheet)
+                .environment(store)
+                .environment(\.cloveTheme, .light))
+            host.traitOverrides.horizontalSizeClass = width >= 680 ? .regular : .compact
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: width, height: 844)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitForLayout("appearance settings list did not settle at width \(width)") {
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                guard
+                    let collection = self.findSubviews(ofType: UICollectionView.self, in: window)
+                        .first
+                else {
+                    return false
+                }
+                return collection.numberOfSections == 2
+                    && collection.numberOfItems(inSection: 0) == 3
+                    && collection.numberOfItems(inSection: 1) == 1
+                    && !collection.visibleCells.isEmpty
+            }
+
+            let collection = try #require(
+                findSubviews(ofType: UICollectionView.self, in: window).first)
+            #expect(collection.numberOfSections == 2)
+            #expect(collection.numberOfItems(inSection: 0) == 3)
+            #expect(collection.numberOfItems(inSection: 1) == 1)
+            #expect(collection.contentSize.width <= collection.bounds.width + 1)
+
+            // Section 1 (THEME) row sits unboxed directly on `surface/sheet` with zero card fill.
+            let themeCell = try #require(
+                collection.cellForItem(at: IndexPath(item: 0, section: 1)))
+            let bgColor =
+                themeCell.backgroundConfiguration?.backgroundColor ?? themeCell.backgroundColor
+            let alpha = bgColor?.cgColor.alpha ?? 0
+            #expect(alpha == 0)
+        }
+    }
+
+    private func renderTilePixels<V: View>(_ view: V, theme: CloveTheme) throws -> TilePixelBuffer {
+        let renderer = ImageRenderer(
+            content:
+                view
+                .environment(\.cloveTheme, theme)
+                .environment(\.appLanguage, .english))
+        renderer.scale = 2
+        let image = try #require(renderer.cgImage)
+        return try tilePixels(from: image)
+    }
+
+    private func renderedRGBA(_ color: Color) throws -> TileRGBA {
+        let renderer = ImageRenderer(content: Rectangle().fill(color).frame(width: 4, height: 4))
+        renderer.scale = 1
+        let image = try #require(renderer.cgImage)
+        return try tilePixels(from: image).pixel(x: 2, y: 2)
+    }
+
+    private func tilePixels(from image: CGImage) throws -> TilePixelBuffer {
+        let width = image.width
+        let height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let bitmapInfo =
+            CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let context = try #require(
+            CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return TilePixelBuffer(width: width, height: height, bytes: bytes)
+    }
+
+    private func assertRGBAClose(
+        _ actual: TileRGBA, _ expected: TileRGBA, _ label: String, tolerance: Int = 12,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(
+            rgbaClose(actual, expected, tolerance: tolerance),
+            "\(label): actual \(actual) != expected \(expected)",
+            sourceLocation: sourceLocation)
+    }
+
+    private func rgbaClose(_ actual: TileRGBA, _ expected: TileRGBA, tolerance: Int = 12) -> Bool {
+        abs(Int(actual.r) - Int(expected.r)) <= tolerance
+            && abs(Int(actual.g) - Int(expected.g)) <= tolerance
+            && abs(Int(actual.b) - Int(expected.b)) <= tolerance
+            && abs(Int(actual.a) - Int(expected.a)) <= tolerance
+    }
+}
+
+private struct TileRGBA: CustomStringConvertible {
+    let r: UInt8
+    let g: UInt8
+    let b: UInt8
+    let a: UInt8
+
+    var description: String { "(\(r), \(g), \(b), \(a))" }
+}
+
+private struct TilePixelBuffer {
+    let width: Int
+    let height: Int
+    let bytes: [UInt8]
+
+    func pixel(x: Int, y: Int) -> TileRGBA {
+        let offset = (y * width + x) * 4
+        return TileRGBA(
+            r: bytes[offset], g: bytes[offset + 1], b: bytes[offset + 2], a: bytes[offset + 3])
+    }
 }
 
 @MainActor
