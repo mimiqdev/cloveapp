@@ -1708,10 +1708,10 @@ final class BrowsingModel {
             finishedScanFor = nil
             hasUncachedMetadataReads = false
             hasElapsedReadingGrace = false
-            restartReadingProgressGraceTimer()
             dismissedPreparationCompletion = nil
             preparationStatus = library.preparationStatus
             refresh()
+            restartReadingProgressGraceTimer()
         case .readingUncachedMetadata:
             guard !hasFinishedScan else { return }
             hasUncachedMetadataReads = true
