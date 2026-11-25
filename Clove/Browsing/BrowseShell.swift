@@ -155,14 +155,12 @@ struct BrowseShell: View {
         case .settings:
             SettingsScreen(
                 navigation: settingsNavigation, availableWidth: availableWidth
-            )
+            ) {
+                browsing.back()
+            }
             .browsingChrome(
                 title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
-                backTitle: isRegular && browsing.state.folder != nil
-                    ? AppLocalization.filterTitle(
-                        for: browsing.state.filter, labelFilter: browsing.labelFilter,
-                        language: language)
-                    : nil,
+                hidesSettingsBar: isWideSettings,
                 language: language
             )
             .navigationBarBackButtonHidden()
@@ -176,6 +174,7 @@ struct BrowseShell: View {
                         .accessibilityIdentifier("clove.nav.back")
                     }
                 }
+                .toolbarVisibility(.visible, for: .navigationBar)
         case .settingsSubpage(let subpage):
             SettingsSubpageScreen(subpage: subpage)
                 .toolbar {
@@ -186,6 +185,7 @@ struct BrowseShell: View {
                         .accessibilityIdentifier("clove.nav.back")
                     }
                 }
+                .toolbarVisibility(.visible, for: .navigationBar)
         }
     }
 
@@ -201,17 +201,17 @@ struct BrowseShell: View {
 }
 
 extension View {
-    /// Entry owns its header; regular-width Settings returns to the named grid filter.
+    /// Entry owns its header; wide Settings owns its split headers and Done button.
     func browsingChrome(
         title: String, browsing: BrowsingModel, usesSystemBar: Bool = false,
-        backTitle: String? = nil, language: ResolvedAppLanguage = .english
+        hidesSettingsBar: Bool = false, language: ResolvedAppLanguage = .english
     )
         -> some View
     {
         modifier(
             BrowsingChromeModifier(
                 title: title, browsing: browsing, usesSystemBar: usesSystemBar,
-                backTitle: backTitle, language: language))
+                hidesSettingsBar: hidesSettingsBar, language: language))
     }
 }
 
@@ -219,15 +219,16 @@ private struct BrowsingChromeModifier: ViewModifier {
     let title: String
     let browsing: BrowsingModel
     let usesSystemBar: Bool
-    let backTitle: String?
+    let hidesSettingsBar: Bool
     let language: ResolvedAppLanguage
 
     @ViewBuilder
     func body(content: Content) -> some View {
         let hidesBar =
-            !usesSystemBar
-            && (browsing.state.route == .grid || browsing.state.route == .detail
-                || browsing.state.route == .entry)
+            (browsing.state.route == .settings && hidesSettingsBar)
+            || (!usesSystemBar
+                && (browsing.state.route == .grid || browsing.state.route == .detail
+                    || browsing.state.route == .entry))
         let base =
             content
             .navigationTitle(
@@ -236,20 +237,7 @@ private struct BrowsingChromeModifier: ViewModifier {
                     || browsing.state.route == .entry ? "" : title
             )
             .toolbar {
-                if browsing.state.route == .settings, let backTitle {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            browsing.back()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                Text(backTitle)
-                            }
-                        }
-                        .accessibilityLabel(AppLocalization.string("Back", language: language))
-                        .accessibilityIdentifier("clove.nav.back")
-                    }
-                } else if browsing.state.route == .settings {
+                if browsing.state.route == .settings, !hidesSettingsBar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(AppLocalization.string("Done", language: language)) {
                             browsing.back()

@@ -245,6 +245,65 @@ struct AppLocalizationTests {
         #expect(languageIndex == 1)
     }
 
+    @Test func settingsHomeAndSubpagesLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Workspace", "Workspace", "工作区", "工作區"),
+            ("Workflow", "Workflow", "工作流程", "工作流程"),
+            (
+                "Light, dark, or system mode and theme.",
+                "Light, dark, or system mode and theme.",
+                "浅色、深色或跟随系统模式与主题。",
+                "淺色、深色或跟隨系統模式與主題。"
+            ),
+            (
+                "App language for controls and menus.",
+                "App language for controls and menus.",
+                "应用控件与菜单的显示语言。",
+                "應用程式控制項與選單的顯示語言。"
+            ),
+            (
+                "Similar shot grouping, time window, and detail zoom.",
+                "Similar shot grouping, time window, and detail zoom.",
+                "相似照片分组、时间窗口与大图缩放。",
+                "相似相片群組、時間窗口與大圖縮放。"
+            ),
+            (
+                "Choose camera previews or full RAW colors.",
+                "Choose camera previews or full RAW colors.",
+                "选择相机预览或 RAW 文件原本色彩。",
+                "選擇相機預覽或 RAW 檔案原本色彩。"
+            ),
+            (
+                "Gestures, rating scale, color labels, and auto-advance.",
+                "Gestures, rating scale, color labels, and auto-advance.",
+                "手势、评分范围、颜色标签与自动跳转。",
+                "手勢、評分範圍、顏色標籤與自動跳轉。"
+            ),
+            (
+                "Move rejected photos to a subfolder instead of deleting.",
+                "Move rejected photos to a subfolder instead of deleting.",
+                "将淘汰照片移至子文件夹，而不是删除。",
+                "將淘汰相片移至子檔案夾，而非刪除。"
+            ),
+            (
+                "Your preferences apply to every layout.",
+                "Your preferences apply to every layout.",
+                "你的偏好设置会应用于所有布局。",
+                "你的偏好設定會套用於所有版面。"
+            ),
+            ("Quicker and lighter", "Quicker and lighter", "更快更轻量", "更快更輕量"),
+            ("The file's own colors", "The file's own colors", "文件本身的色彩", "檔案本身的色彩"),
+            ("Enabled levels", "Enabled levels", "启用的评分等级", "已啟用的評分等級"),
+            ("Offer Move Rejects", "Offer Move Rejects", "提供整理淘汰片", "提供整理淘汰片"),
+            ("After marking", "After marking", "标记后跳转", "標記後跳轉"),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+    }
+
     @Test func helpersAndStatesLocalizeAcrossLanguages() throws {
         let ratedAndLabelled = PhotoMarks(
             rating: try #require(Rating(rawValue: 4)),

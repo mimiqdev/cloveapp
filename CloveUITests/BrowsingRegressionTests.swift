@@ -306,12 +306,27 @@ extension CloveFlowTests {
             ).firstMatch.exists)
         attachScreenshot(named: "entry-resume")
         element(in: app, "clove.nav.settings").tap()
-        XCTAssertTrue(element(in: app, "clove.settings.category.appearance").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.category.culling").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.category.browsing").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.category.photoDisplay").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.category.moveRejects").exists)
-        XCTAssertTrue(element(in: app, "clove.settings.reset").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.section.workspace").exists)
+        XCTAssertTrue(element(in: app, "clove.settings.section.workflow").exists)
+        let appearance = element(in: app, "clove.settings.category.appearance")
+        let language = element(in: app, "clove.settings.category.language")
+        let browsing = element(in: app, "clove.settings.category.browsing")
+        let photoDisplay = element(in: app, "clove.settings.category.photoDisplay")
+        let culling = element(in: app, "clove.settings.category.culling")
+        let moveRejects = element(in: app, "clove.settings.category.moveRejects")
+        XCTAssertTrue(appearance.exists)
+        XCTAssertTrue(language.exists)
+        XCTAssertTrue(browsing.exists)
+        XCTAssertTrue(photoDisplay.exists)
+        XCTAssertTrue(culling.exists)
+        XCTAssertTrue(moveRejects.exists)
+        XCTAssertLessThan(appearance.frame.minY, language.frame.minY)
+        XCTAssertLessThan(language.frame.minY, browsing.frame.minY)
+        XCTAssertLessThan(browsing.frame.minY, photoDisplay.frame.minY)
+        XCTAssertLessThan(photoDisplay.frame.minY, culling.frame.minY)
+        XCTAssertLessThan(culling.frame.minY, moveRejects.frame.minY)
+        let reset = scrollToSettingsControl("clove.settings.reset", in: app)
+        XCTAssertTrue(reset.exists)
         attachScreenshot(named: "settings-sections")
         back(in: app)
     }
@@ -639,6 +654,8 @@ extension CloveFlowTests {
         let ratingScaleLink = scrollToSettingsControl("clove.settings.ratingScale", in: app)
         XCTAssertTrue(ratingScaleLink.exists)
         ratingScaleLink.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.enabledLevels").waitForExistence(timeout: 5))
 
         for level in 1...4 {
             let toggle = app.switches["clove.settings.rating.\(level)"]
@@ -665,6 +682,8 @@ extension CloveFlowTests {
             "clove.settings.autoAdvanceDestination", in: app)
         XCTAssertTrue(destinationLink.waitForExistence(timeout: 5))
         destinationLink.tap()
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.afterMarking").waitForExistence(timeout: 5))
         let stayRow = element(in: app, "clove.settings.autoAdvance.stay")
         XCTAssertTrue(stayRow.waitForExistence(timeout: 5))
         stayRow.tap()
@@ -681,6 +700,8 @@ extension CloveFlowTests {
 
         // Move rejects folder validation shows inline error on invalid folder name.
         openSettingsCategory("clove.settings.category.moveRejects", in: app)
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.moveRejects").waitForExistence(timeout: 5))
         let folderField = scrollToSettingsControl("clove.settings.rejectsFolderName", in: app)
         XCTAssertTrue(folderField.waitForExistence(timeout: 5))
         folderField.tap()
