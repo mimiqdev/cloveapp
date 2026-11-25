@@ -553,6 +553,213 @@ struct GroupAnchorTests {
         }
     }
 
+    @Test func filmstripScrollViewsSpanFullBandHeightAcrossMetrics() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let (photos, groups, groupID, members) = makeSyntheticGrid(
+            beforeCount: 4, groupMemberCount: 8, afterCount: 4)
+        let firstMember = try #require(members.first)
+
+        for metrics in [DetailFilmstrip.Metrics.standard, .compact] {
+            let state = FilmstripAnchorHarnessState(
+                photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
+                current: firstMember, expandedGroup: groupID, metrics: metrics)
+            let host = UIHostingController(
+                rootView: FilmstripAnchorHarness(state: state, theme: .light))
+            host.safeAreaRegions = []
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 110)
+            window.rootViewController = host
+            window.isHidden = false
+            defer { window.isHidden = true }
+
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(350))
+
+            let scrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+            #expect(scrollViews.count == 2)
+            for scrollView in scrollViews {
+                #expect(abs(scrollView.bounds.height - metrics.bandHeight) <= 0.5)
+            }
+        }
+    }
+
+    @Test func filmstripVerticalPanGestureGatesAxisAndDirectionBeforeRecognizing() {
+        var dragEvents: [Bool] = []
+        var triggerCount = 0
+        let downGesture = FilmstripVerticalPanGesture(
+            direction: .down,
+            isEnabled: true,
+            onDragChanged: { dragEvents.append($0) },
+            onTrigger: { triggerCount += 1 })
+        let downCoordinator = FilmstripVerticalPanGesture.Coordinator(downGesture)
+        let pan = FilmstripTestPan()
+        let hostView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 76))
+        hostView.addGestureRecognizer(pan)
+
+        // Horizontal and slightly diagonal horizontal drags fail before recognition begins.
+        pan.travel = CGPoint(x: -36, y: 4)
+        #expect(!downCoordinator.gestureRecognizerShouldBegin(pan))
+        pan.travel = CGPoint(x: 20, y: 12)
+        #expect(!downCoordinator.gestureRecognizerShouldBegin(pan))
+
+        // Opposite vertical direction (upward) fails on downward recognizer.
+        pan.travel = CGPoint(x: 0, y: -32)
+        #expect(!downCoordinator.gestureRecognizerShouldBegin(pan))
+
+        // Zero translation falls back to velocity for axis & direction check.
+        pan.travel = .zero
+        pan.velocityPoint = CGPoint(x: 180, y: 20)
+        #expect(!downCoordinator.gestureRecognizerShouldBegin(pan))
+        pan.velocityPoint = CGPoint(x: 0, y: 220)
+        #expect(downCoordinator.gestureRecognizerShouldBegin(pan))
+
+        // Disabled state rejects both touch reception and recognition.
+        downCoordinator.parent = FilmstripVerticalPanGesture(
+            direction: .down,
+            isEnabled: false,
+            onDragChanged: { dragEvents.append($0) },
+            onTrigger: { triggerCount += 1 })
+        pan.travel = CGPoint(x: 0, y: 36)
+        #expect(
+            !downCoordinator.gestureRecognizer(pan, shouldReceive: FilmstripTestTouch(hostView)))
+        #expect(!downCoordinator.gestureRecognizerShouldBegin(pan))
+
+        // Re-enable and verify downward vertical drag >= 24 pt tracks and triggers once.
+        downCoordinator.parent = downGesture
+        #expect(downCoordinator.gestureRecognizerShouldBegin(pan))
+        pan.sampleState = .began
+        downCoordinator.handle(pan)
+        pan.travel = CGPoint(x: 4, y: 28)
+        pan.sampleState = .ended
+        downCoordinator.handle(pan)
+        #expect(dragEvents == [true, false])
+        #expect(triggerCount == 1)
+
+        // Sub-threshold downward drag (< 24 pt) clears tracking without firing trigger.
+        pan.travel = CGPoint(x: 0, y: 16)
+        pan.sampleState = .began
+        downCoordinator.handle(pan)
+        pan.sampleState = .ended
+        downCoordinator.handle(pan)
+        #expect(dragEvents == [true, false, true, false])
+        #expect(triggerCount == 1)
+
+        // Upward recognizer accepts upward drags, rejects horizontal/downward drags.
+        var upTriggers = 0
+        let upGesture = FilmstripVerticalPanGesture(
+            direction: .up,
+            isEnabled: true,
+            onDragChanged: { _ in },
+            onTrigger: { upTriggers += 1 })
+        let upCoordinator = FilmstripVerticalPanGesture.Coordinator(upGesture)
+        pan.sampleState = .possible
+        pan.travel = CGPoint(x: -40, y: -6)
+        #expect(!upCoordinator.gestureRecognizerShouldBegin(pan))
+        pan.travel = CGPoint(x: 0, y: 36)
+        #expect(!upCoordinator.gestureRecognizerShouldBegin(pan))
+        pan.travel = .zero
+        pan.velocityPoint = CGPoint(x: 0, y: -200)
+        #expect(upCoordinator.gestureRecognizerShouldBegin(pan))
+        pan.travel = CGPoint(x: -4, y: -30)
+        #expect(upCoordinator.gestureRecognizerShouldBegin(pan))
+        pan.sampleState = .began
+        upCoordinator.handle(pan)
+        pan.sampleState = .ended
+        upCoordinator.handle(pan)
+        #expect(upTriggers == 1)
+    }
+
+    @Test func filmstripScrollPhaseProtectsManualDragAgainstBackgroundSlotCountUpdates()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let (photos, _, _, _) = makeSyntheticGrid(
+            beforeCount: 24, groupMemberCount: 0, afterCount: 0)
+        let currentPhoto = photos[20].id
+        let state = FilmstripAnchorHarnessState(
+            photos: photos, groups: [], thumbnails: TestLibrary.sampleThumbnails,
+            current: currentPhoto, expandedGroup: nil)
+        let host = UIHostingController(
+            rootView: FilmstripAnchorHarness(state: state, theme: .light))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 110)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(450))
+
+        let timelineScrollView = try #require(
+            findSubviews(ofType: UIScrollView.self, in: window).first)
+        let centeredOffset = timelineScrollView.contentOffset.x
+        #expect(centeredOffset > 300)
+
+        // Simulate active user drag to the leading edge and notify scroll phase (.interacting).
+        timelineScrollView.delegate?.scrollViewWillBeginDragging?(timelineScrollView)
+        timelineScrollView.setContentOffset(.zero, animated: false)
+        timelineScrollView.delegate?.scrollViewDidScroll?(timelineScrollView)
+        try await Task.sleep(for: .milliseconds(50))
+
+        // Background grouping update changes slotCount and currentSlotIndex while `current` is
+        // unchanged; the active drag must not be yanked back toward `current`.
+        state.groups = [
+            BrowsingGroup(
+                id: GroupID(rawValue: "bg-group-1"),
+                members: Array(photos[0..<4].map(\.id))),
+            BrowsingGroup(
+                id: GroupID(rawValue: "bg-group-2"),
+                members: Array(photos[4..<8].map(\.id))),
+        ]
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(abs(timelineScrollView.contentOffset.x - 0) <= 1.0)
+
+        // End dragging -> decelerating still protects against background slotCount updates.
+        timelineScrollView.delegate?.scrollViewDidEndDragging?(
+            timelineScrollView, willDecelerate: true)
+        state.groups.append(
+            BrowsingGroup(
+                id: GroupID(rawValue: "bg-group-3"),
+                members: Array(photos[8..<12].map(\.id))))
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(abs(timelineScrollView.contentOffset.x - 0) <= 1.0)
+
+        // Explicit `current` change still centers the new selection once scrolling ends.
+        timelineScrollView.delegate?.scrollViewDidEndDecelerating?(timelineScrollView)
+        state.current = photos[19].id
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(timelineScrollView.contentOffset.x > 200)
+
+        // Group Focus also protects active drags against background memberCount updates.
+        let groupID = GroupID(rawValue: "bg-group-overflow")
+        var members = Array(photos[12..<23].map(\.id))
+        state.groups = [BrowsingGroup(id: groupID, members: members)]
+        state.current = members[9]
+        state.expandedGroup = groupID
+        try await Task.sleep(for: .milliseconds(500))
+
+        let expandedScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+        let groupScrollView = try #require(
+            expandedScrollViews.first { $0 !== timelineScrollView })
+        #expect(groupScrollView.contentOffset.x > 120)
+
+        groupScrollView.delegate?.scrollViewWillBeginDragging?(groupScrollView)
+        groupScrollView.setContentOffset(.zero, animated: false)
+        groupScrollView.delegate?.scrollViewDidScroll?(groupScrollView)
+        try await Task.sleep(for: .milliseconds(50))
+
+        members.append(photos[23].id)
+        state.groups = [BrowsingGroup(id: groupID, members: members)]
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(abs(groupScrollView.contentOffset.x - 0) <= 1.0)
+
+        groupScrollView.delegate?.scrollViewDidEndDragging?(groupScrollView, willDecelerate: false)
+    }
+
     /// Entering Group Focus starts the run at its count header and fold control, and a group that
     /// fits is reviewable in the pane without scrolling. Folding restores the folder's viewport
     /// and its stack in place (#309).
@@ -1079,7 +1286,7 @@ private struct GridAnchorHarness: View {
 @Observable
 private final class FilmstripAnchorHarnessState {
     var photos: [GridPhoto]
-    let groups: [BrowsingGroup]
+    var groups: [BrowsingGroup]
     let thumbnails: any GridThumbnailSource
     var current: PhotoIdentity?
     var expandedGroup: GroupID?
@@ -1126,5 +1333,36 @@ private struct FilmstripAnchorHarness: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.tokens.stage.color)
         .environment(\.cloveTheme, theme)
+    }
+}
+
+@MainActor
+private final class FilmstripTestPan: UIPanGestureRecognizer {
+    var travel: CGPoint = .zero
+    var velocityPoint: CGPoint = .zero
+    var sampleState: UIGestureRecognizer.State = .possible
+
+    override var state: UIGestureRecognizer.State {
+        get { sampleState }
+        set { sampleState = newValue }
+    }
+
+    override func translation(in view: UIView?) -> CGPoint { travel }
+    override func velocity(in view: UIView?) -> CGPoint { velocityPoint }
+}
+
+@MainActor
+private final class FilmstripTestTouch: UITouch {
+    private let target: UIView
+
+    init(_ target: UIView) {
+        self.target = target
+        super.init()
+    }
+
+    override var view: UIView? { target }
+
+    override func location(in view: UIView?) -> CGPoint {
+        target.convert(CGPoint(x: 20, y: 20), to: view)
     }
 }

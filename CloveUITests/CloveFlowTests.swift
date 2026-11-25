@@ -2194,6 +2194,142 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testFilmstripHorizontalScrollOverCollapsedStacksAndOverflowingGroupFocus() {
+        let app = launchSample([
+            "CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked",
+            "CLOVE_TEST_LIBRARY_DENSE_GROUPS": "1",
+            "CLOVE_TEST_LIBRARY_OVERFLOW_GROUP": "1",
+        ])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.photo.mmq02678").tap()
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+
+        let strip = element(app, "clove.detail.filmstrip")
+        let expandedTray = element(app, "clove.detail.filmstrip.expandedGroup")
+        let visibleStack = element(app, "clove.detail.filmstrip.group.burst-2685")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), visibleStack))
+
+        // Horizontal and slightly diagonal drags starting directly on a collapsed group stack
+        // in a Timeline packed with consecutive stacks scroll smoothly without expanding or stalling.
+        let initialMidX = visibleStack.frame.midX
+        let stackOrigin = visibleStack.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        stackOrigin.press(
+            forDuration: 0.03,
+            thenDragTo: stackOrigin.withOffset(CGVector(dx: -160, dy: 14)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 0.25)
+        XCTAssertFalse(expandedTray.exists)
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+        XCTAssertTrue(!visibleStack.isHittable || visibleStack.frame.midX < initialMidX - 60)
+
+        // Continue horizontal scrolling starting from the top edge and bottom edge of the band,
+        // and directly over subsequent collapsed stacks until burst-2696 arrives.
+        let topBandPoint = strip.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: 0.05))
+        topBandPoint.press(
+            forDuration: 0.03,
+            thenDragTo: strip.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.05)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 0.2)
+        XCTAssertFalse(expandedTray.exists)
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+
+        let overflowStack = element(app, "clove.detail.filmstrip.group.burst-2696")
+        for _ in 0..<8 where !overflowStack.isHittable {
+            let bottomBandPoint = strip.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.75, dy: 0.95))
+            bottomBandPoint.press(
+                forDuration: 0.03,
+                thenDragTo: strip.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.95)),
+                withVelocity: .slow, thenHoldForDuration: 0)
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertTrue(overflowStack.isHittable, "Timeline never scrolled to burst-2696")
+        XCTAssertFalse(expandedTray.exists)
+        XCTAssertEqual(fileName.label, "MMQ02678.ARW")
+
+        // Downward vertical swipe directly on the collapsed stack still expands Group Focus.
+        let overflowCenter = overflowStack.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        overflowCenter.press(
+            forDuration: 0.05,
+            thenDragTo: overflowCenter.withOffset(CGVector(dx: 0, dy: 70)))
+        XCTAssertTrue(expandedTray.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.group.gridPicker").waitForExistence(timeout: 5))
+
+        // Horizontal drags starting directly on a member tile inside overflowing Group Focus
+        // scroll the member strip without collapsing or firing the member tap.
+        let member2697 = element(app, "clove.detail.filmstrip.mmq02697")
+        let tailMember = element(app, "clove.detail.filmstrip.mmq02806")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), member2697))
+        XCTAssertFalse(tailMember.isHittable)
+        let memberStart = member2697.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        memberStart.press(
+            forDuration: 0.03,
+            thenDragTo: memberStart.withOffset(CGVector(dx: -180, dy: -12)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 0.25)
+        XCTAssertTrue(expandedTray.exists)
+        XCTAssertEqual(fileName.label, "MMQ02696.ARW")
+
+        for _ in 0..<6 where !tailMember.isHittable {
+            let focusBandBottom = expandedTray.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.72, dy: 0.97))
+            focusBandBottom.press(
+                forDuration: 0.03,
+                thenDragTo: expandedTray.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.25, dy: 0.97)),
+                withVelocity: .slow, thenHoldForDuration: 0)
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertTrue(tailMember.isHittable, "Group Focus never scrolled to tail member")
+        XCTAssertTrue(expandedTray.exists)
+        XCTAssertEqual(fileName.label, "MMQ02696.ARW")
+
+        // Dragging horizontally along the top margin of the 76 pt band scrolls Group Focus back
+        // toward its first member instead of hitting a dead Color.clear margin.
+        let tailMidXBeforeTopDrag = tailMember.frame.midX
+        let focusBandTop = expandedTray.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.25, dy: 0.03))
+        focusBandTop.press(
+            forDuration: 0.03,
+            thenDragTo: expandedTray.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.03)),
+            withVelocity: .slow, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 0.25)
+        XCTAssertTrue(expandedTray.exists)
+        XCTAssertEqual(fileName.label, "MMQ02696.ARW")
+        XCTAssertTrue(
+            !tailMember.isHittable || tailMember.frame.midX > tailMidXBeforeTopDrag + 40,
+            "Top margin drag did not scroll Group Focus")
+
+        // Swipe back to tail member if needed, then upward vertical swipe over a member collapses
+        // cleanly back to Timeline.
+        for _ in 0..<4 where !tailMember.isHittable {
+            let focusBandBottom = expandedTray.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.72, dy: 0.97))
+            focusBandBottom.press(
+                forDuration: 0.03,
+                thenDragTo: expandedTray.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.25, dy: 0.97)),
+                withVelocity: .slow, thenHoldForDuration: 0)
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertTrue(tailMember.isHittable)
+
+        // Upward vertical swipe directly on the scrolled tail member collapses back to Timeline.
+        let tailCenter = tailMember.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        tailCenter.press(
+            forDuration: 0.05,
+            thenDragTo: tailCenter.withOffset(CGVector(dx: 0, dy: -80)))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), expandedTray))
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+    }
+
+    @MainActor
     func testDetailFocusRegionsCentreNativeZoom() throws {
         let app = launchSample()
         defer { app.terminate() }

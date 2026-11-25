@@ -81,6 +81,10 @@ final class TestLibrary: FolderLibrary {
     /// overflows an iPhone portrait filmstrip for Group Focus grid-picker UI tests.
     static let overflowGroupVariable = "CLOVE_TEST_LIBRARY_OVERFLOW_GROUP"
 
+    /// The launch environment value that packs the sample timeline with consecutive groups so
+    /// collapsed group stacks fill the filmstrip viewport for gesture-contention UI tests.
+    static let denseGroupsVariable = "CLOVE_TEST_LIBRARY_DENSE_GROUPS"
+
     /// The launch environment value that holds a synthetic folder-preparation status for UI tests.
     static let preparationVariable = "CLOVE_TEST_LIBRARY_PREPARATION"
 
@@ -116,6 +120,7 @@ final class TestLibrary: FolderLibrary {
                 Int(environment[drainDelayVariable] ?? "") ?? 0),
             includeRasterSamples: environment[rasterSamplesVariable] == "1",
             overflowGroup: environment[overflowGroupVariable] == "1",
+            denseGroups: environment[denseGroupsVariable] == "1",
             simulatedPhotosAuthorization: photosAuthorization(
                 named: environment[photosAuthorizationVariable]),
             simulatedPhotosSaveError: photosSaveError(
@@ -1143,6 +1148,7 @@ final class TestLibrary: FolderLibrary {
         drainDelay: Duration = .zero,
         includeRasterSamples: Bool = false,
         overflowGroup: Bool = false,
+        denseGroups: Bool = false,
         photosSaver: (any PhotosLibrarySaving)? = nil,
         simulatedPhotosAuthorization: PhotosAuthorizationState = .authorized,
         simulatedPhotosSaveError: PhotosSaveError? = nil,
@@ -1161,7 +1167,7 @@ final class TestLibrary: FolderLibrary {
                         hasUTCOffset: true)),
                 marks: sampleMarks[index])
         }
-        var groups = sampleGroups
+        var groups = denseGroups ? denseSampleGroups : sampleGroups
         if overflowGroup {
             let extraNumbers = Array(2801...2806)
             for (offset, number) in extraNumbers.enumerated() {
@@ -1225,6 +1231,23 @@ final class TestLibrary: FolderLibrary {
             BrowsingGroup(
                 id: GroupID(rawValue: "burst-2696"),
                 members: samplePhotos(2696...2698)),
+        ]
+    }
+
+    private static var denseSampleGroups: [BrowsingGroup] {
+        [
+            BrowsingGroup(id: GroupID(rawValue: "burst-2679"), members: samplePhotos(2679...2681)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2682"), members: samplePhotos(2682...2684)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2685"), members: samplePhotos(2685...2687)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2688"), members: samplePhotos(2688...2690)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2691"), members: samplePhotos(2691...2693)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2694"), members: samplePhotos(2694...2695)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2696"), members: samplePhotos(2696...2698)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2699"), members: samplePhotos(2699...2702)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2703"), members: samplePhotos(2703...2705)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2706"), members: samplePhotos(2706...2708)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2709"), members: samplePhotos(2709...2711)),
+            BrowsingGroup(id: GroupID(rawValue: "burst-2712"), members: samplePhotos(2712...2713)),
         ]
     }
 

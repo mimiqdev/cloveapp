@@ -538,6 +538,7 @@ struct CurrentPhotoIndicatorTests {
                 current: rejectedMemberA.id, expanded: expandedGroup)
             // Small Group Focus (2 members, no overflow -> no leading picker button):
             // [member 0 (54), spacing (3), member 1 (54), buttonSpacing (8), fold (36)] = 155 pt centered in 390 pt.
+            // Tiles align identically at the bottom with `verticalTrackPadding`, matching Timeline.
             let groupTotalWidth =
                 2 * metrics.thumbnailWidth
                 + DetailFilmstrip.thumbnailSpacing
@@ -545,12 +546,11 @@ struct CurrentPhotoIndicatorTests {
                 + metrics.groupActionButtonSize
             let groupMemberCenterPt = (390 - groupTotalWidth) / 2 + metrics.thumbnailWidth / 2
             let groupMemberCenterX = Int((groupMemberCenterPt * 2).rounded())
-            let trayContentBottomPx = Int(metrics.bandHeight) + Int(metrics.thumbnailHeight + 6)
             assertColorClose(
-                groupPixels.pixel(x: groupMemberCenterX, y: trayContentBottomPx - 4), expectedCore,
+                groupPixels.pixel(x: groupMemberCenterX, y: slotBottomPx - 4), expectedCore,
                 "\(theme.rawValue) rejected group focus marker core")
             assertColorClose(
-                groupPixels.pixel(x: groupMemberCenterX, y: trayContentBottomPx - 7), expectedEdge,
+                groupPixels.pixel(x: groupMemberCenterX, y: slotBottomPx - 7), expectedEdge,
                 "\(theme.rawValue) rejected group focus marker edge", tolerance: 24)
         }
     }
