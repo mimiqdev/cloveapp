@@ -562,10 +562,19 @@ struct BrowsingLayoutTests {
     @Test func ordinaryPhoneLandscapeGridAdaptsColumnsAndPreservesScrollAnchorAcrossRotation()
         async throws
     {
+        #expect(GridCollectionView.columns(width: 393, regular: false) == 3)
         #expect(GridCollectionView.columns(width: 430, regular: false) == 3)
         #expect(GridCollectionView.columns(width: 667, regular: false) >= 4)
-        #expect(GridCollectionView.columns(width: 844, regular: false) >= 5)
+        #expect(GridCollectionView.columns(width: 734, regular: false) == 6)
+        #expect(GridCollectionView.columns(width: 740, regular: false) == 6)
+        #expect(GridCollectionView.columns(width: 750, regular: false) == 6)
+        #expect(GridCollectionView.columns(width: 844, regular: false) == 6)
+        #expect(GridCollectionView.columns(width: 814, regular: true, compactHeight: true) == 6)
         #expect(GridCollectionView.columns(width: 932, regular: false) >= 5)
+        // Regular-height iPad widths keep the 140 pt adaptive density.
+        #expect(GridCollectionView.columns(width: 584, regular: true) == 4)
+        #expect(GridCollectionView.columns(width: 944, regular: true) == 6)
+        #expect(GridCollectionView.columns(width: 1116, regular: true) == 7)
 
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -631,6 +640,80 @@ struct BrowsingLayoutTests {
 
         let visibleBackInPortrait = grid.indexPathsForVisibleItems.map(\.item)
         #expect((visibleBackInPortrait.min() ?? 0) >= 3)
+    }
+
+    @Test func ordinaryPhoneLandscapeGridUses44PtHeaderAndSixColumnsAtLandscapeUsableWidths()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let model = BrowsingModel(library: TestLibrary.sample(), similarGroupsEnabled: false)
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+
+        let headerFrames = TestHeaderFramesBox()
+        let host = UIHostingController(
+            rootView: NavigationStack {
+                GridScreen(browsing: model, thumbnails: model.thumbnails)
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .phone)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                headerFrames.frames = frames
+            })
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .compact
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 750, height: 390)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        var collectionView: UICollectionView?
+        try await waitFor("landscape grid header and collection did not lay out") {
+            collectionView = self.findCollectionView(in: window)
+            return headerFrames.frames["clove.browsing.header"] != nil
+                && collectionView?.visibleCells.isEmpty == false
+        }
+
+        let landscapeHeader = try #require(headerFrames.frames["clove.browsing.header"])
+        #expect(abs(landscapeHeader.height - 44) <= 0.5)
+
+        let grid = try #require(collectionView)
+        let row0Cells = grid.visibleCells.filter { cell in
+            guard let indexPath = grid.indexPath(for: cell) else { return false }
+            return indexPath.section == 0 && indexPath.item < 6
+        }
+        #expect(row0Cells.count == 6)
+        if let firstMinY = row0Cells.first?.frame.minY {
+            for cell in row0Cells {
+                #expect(abs(cell.frame.minY - firstMinY) <= 0.5)
+            }
+        }
+
+        // Portrait keeps the 64 pt header and 3-column grid.
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor("portrait grid header did not update") {
+            abs((headerFrames.frames["clove.browsing.header"]?.height ?? 0) - 64) <= 0.5
+        }
+        let portraitCellsRow0 = grid.visibleCells.filter { cell in
+            guard let indexPath = grid.indexPath(for: cell) else { return false }
+            return indexPath.section == 0 && indexPath.item < 3
+        }
+        #expect(portraitCellsRow0.count == 3)
+        let fourthCell = grid.layoutAttributesForItem(at: IndexPath(item: 3, section: 0))
+        let firstCell = grid.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))
+        if let firstCell, let fourthCell {
+            #expect(fourthCell.frame.minY > firstCell.frame.maxY)
+        }
     }
 
     @Test func gridFilterPopoverDismissesOnOrientationChange() async throws {

@@ -153,6 +153,7 @@ struct GridCollectionView: UIViewRepresentable {
             sections: sections, groups: groups, shownPhotos: shownPhotos,
             currentPhoto: currentPhoto, selection: selection,
             sizeClass: context.environment.horizontalSizeClass,
+            verticalSizeClass: context.environment.verticalSizeClass,
             theme: context.environment.cloveTheme,
             language: context.environment.appLanguage,
             isSelectingEmpty: isSelectingEmpty,
@@ -170,31 +171,37 @@ struct GridCollectionView: UIViewRepresentable {
         for case let footer as GridPlaceholderFooter in collectionView.visibleSupplementaryViews(
             ofKind: UICollectionView.elementKindSectionFooter)
         {
+            let safeWidth = collectionView.safeAreaLayoutGuide.layoutFrame.width
+            let footerWidth = safeWidth > 0 ? safeWidth : collectionView.bounds.width
             let columns =
                 columnCount
                 ?? Self.columns(
-                    width: collectionView.bounds.width,
-                    regular: context.environment.horizontalSizeClass == .regular)
+                    width: footerWidth,
+                    regular: context.environment.horizontalSizeClass == .regular,
+                    compactHeight: context.environment.verticalSizeClass == .compact)
             footer.configure(
                 count: placeholderCount, columns: columns, theme: context.environment.cloveTheme)
         }
     }
 
     /// About six square tiles beside the sidebar on an 11-inch iPad in landscape;
-    /// compact landscape widths (>= 500 pt) adapt cleanly from 4 columns upward, while
+    /// compact-width or compact-height landscape widths (>= 500 pt) use a 120 pt minimum tile
+    /// width so standard iPhone landscape usable widths (~740+ pt) yield 6 columns, while
     /// narrower compact widths (portrait phone, Duo cover, narrow splits) keep 3 columns.
-    static func columns(width: CGFloat, regular: Bool) -> Int {
-        if regular {
+    static func columns(
+        width: CGFloat, regular: Bool, compactHeight: Bool = false
+    ) -> Int {
+        if regular && !compactHeight {
             return max(1, Int((width + 1.5) / (140 + 1.5)))
         }
         if width >= 500 {
-            return max(4, Int((width + 1.5) / (140 + 1.5)))
+            return max(4, Int((width + 1.5) / (120 + 1.5)))
         }
         return 3
     }
 
-    /// Narrow compact widths keep three columns; landscape compact and regular widths fit tiles at
-    /// a minimum of 140 points.
+    /// Narrow compact widths keep three columns; iPhone landscape fits tiles at a minimum of
+    /// 120 points, and regular-height regular widths fit tiles at a minimum of 140 points.
     ///
     /// A group run adds its header and its surface; a run of the folder's own cells keeps the
     /// layout the grid always had (owner decision, #225).
@@ -211,7 +218,8 @@ struct GridCollectionView: UIViewRepresentable {
                 columnCount()
                 ?? columns(
                     width: environment.container.effectiveContentSize.width,
-                    regular: environment.traitCollection.horizontalSizeClass == .regular)
+                    regular: environment.traitCollection.horizontalSizeClass == .regular,
+                    compactHeight: environment.traitCollection.verticalSizeClass == .compact)
             let spacing: CGFloat = 1.5
             let side =
                 (environment.container.effectiveContentSize.width - CGFloat(columns - 1) * spacing)
@@ -354,6 +362,7 @@ extension GridCollectionView {
         private weak var collectionView: UICollectionView?
         private var prefetchRequests: [GridCellItem.ID: PrefetchRequest] = [:]
         private var lastSizeClass: UserInterfaceSizeClass?
+        private var lastVerticalSizeClass: UserInterfaceSizeClass?
         private var theme = CloveTheme.light
         private var language = ResolvedAppLanguage.english
         private var isSelectingEmpty = false
@@ -463,11 +472,15 @@ extension GridCollectionView {
             let isRegular =
                 lastSizeClass == .regular
                 || collectionView.traitCollection.horizontalSizeClass == .regular
+            let isCompactHeight =
+                lastVerticalSizeClass == .compact
+                || collectionView.traitCollection.verticalSizeClass == .compact
             guard width > 0 else {
-                return columnCount ?? (isRegular ? 6 : 3)
+                return columnCount ?? (isRegular && !isCompactHeight ? 6 : 3)
             }
             return columnCount
-                ?? GridCollectionView.columns(width: width, regular: isRegular)
+                ?? GridCollectionView.columns(
+                    width: width, regular: isRegular, compactHeight: isCompactHeight)
         }
 
         private func computeTrayPositions(
@@ -615,11 +628,14 @@ extension GridCollectionView {
                 let footer = view.dequeueReusableSupplementaryView(
                     ofKind: kind, withReuseIdentifier: "placeholders", for: indexPath)
                 if let footer = footer as? GridPlaceholderFooter {
+                    let safeWidth = view.safeAreaLayoutGuide.layoutFrame.width
+                    let footerWidth = safeWidth > 0 ? safeWidth : view.bounds.width
                     let columns =
                         self.columnCount
                         ?? GridCollectionView.columns(
-                            width: view.bounds.width,
-                            regular: view.traitCollection.horizontalSizeClass == .regular)
+                            width: footerWidth,
+                            regular: view.traitCollection.horizontalSizeClass == .regular,
+                            compactHeight: view.traitCollection.verticalSizeClass == .compact)
                     footer.configure(
                         count: self.placeholderCount, columns: columns, theme: self.theme)
                 }
@@ -658,6 +674,7 @@ extension GridCollectionView {
             sections newSections: [GridSection], groups newGroups: [BrowsingGroup],
             shownPhotos newShownPhotos: Set<PhotoIdentity>, currentPhoto: PhotoIdentity?,
             selection newSelection: Set<PhotoIdentity>, sizeClass: UserInterfaceSizeClass?,
+            verticalSizeClass: UserInterfaceSizeClass?,
             theme newTheme: CloveTheme,
             language newLanguage: ResolvedAppLanguage,
             isSelectingEmpty newSelectingEmpty: Bool,
@@ -698,8 +715,9 @@ extension GridCollectionView {
             theme = newTheme
             language = newLanguage
             isSelectingEmpty = newSelectingEmpty
-            if sizeClass != lastSizeClass {
+            if sizeClass != lastSizeClass || verticalSizeClass != lastVerticalSizeClass {
                 lastSizeClass = sizeClass
+                lastVerticalSizeClass = verticalSizeClass
                 collectionView.collectionViewLayout.invalidateLayout()
             }
 

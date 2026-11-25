@@ -428,11 +428,17 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     /// opens on the same spot at the same zoom (PRD In-group culling, comparison and elimination).
     /// A view at fit has no position to keep and answers nil.
     var zoomSnapshot: DetailZoomSnapshot? {
-        if needsResetBeforeZoom,
-            case .layoutRetarget(let pendingScale, let pendingAnchor) = pendingZoom,
-            pendingScale > DetailFitScale.tolerance
-        {
-            return DetailZoomSnapshot(scale: pendingScale, anchor: pendingAnchor)
+        if needsResetBeforeZoom, let pendingZoom {
+            switch pendingZoom {
+            case .layoutRetarget(let pendingScale, let pendingAnchor),
+                .scale(let pendingScale, let pendingAnchor):
+                if pendingScale > DetailFitScale.tolerance {
+                    return DetailZoomSnapshot(scale: pendingScale, anchor: pendingAnchor)
+                }
+                return nil
+            case .fit:
+                return nil
+            }
         }
         let referenceSize = laidOutSize != .zero ? laidOutSize : bounds.size
         guard
@@ -690,12 +696,23 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         defer { isLayingOut = false }
         let previous = laidOutSize
         let previousScale = scrollView.zoomScale
-        let previousAnchor =
-            previous != .zero && previousScale > 1
-            ? DetailZoom.centreAnchor(
-                scale: previousScale, contentOffset: scrollView.contentOffset,
-                imagePixels: shownPixels, viewSize: previous)
-            : nil
+        let pendingTarget: (scale: CGFloat, anchor: DetailZoomAnchor)? =
+            switch pendingZoom {
+            case .layoutRetarget(let scale, let anchor), .scale(let scale, let anchor):
+                scale > DetailFitScale.tolerance ? (scale, anchor) : nil
+            case .fit, nil:
+                nil
+            }
+        let previousAnchor: DetailZoomAnchor? =
+            if needsResetBeforeZoom, let pendingTarget {
+                pendingTarget.anchor
+            } else if previous != .zero, previousScale > 1 {
+                DetailZoom.centreAnchor(
+                    scale: previousScale, contentOffset: scrollView.contentOffset,
+                    imagePixels: shownPixels, viewSize: previous)
+            } else {
+                nil
+            }
         laidOutSize = bounds.size
         scrollView.frame = bounds
         previewAccessibilityView.frame = bounds
@@ -703,6 +720,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         // bounds and scroll contentSize matching the current scale, and defer the anchor-preserving
         // #272 retarget to the next runloop tick unless a newer explicit command supersedes it.
         if abs(previousScale - 1) > 0.0001 {
+            let effectiveScale = pendingTarget?.scale ?? previousScale
             let scaled = CGSize(
                 width: bounds.width * previousScale, height: bounds.height * previousScale)
             imageView.bounds = CGRect(origin: .zero, size: bounds.size)
@@ -710,9 +728,9 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
             scrollView.contentSize = scaled
             updateMaximumZoom()
             needsResetBeforeZoom = true
-            if previous != .zero, previousScale > 1, !scrollView.isZooming, pendingZoom == nil {
+            if previous != .zero, effectiveScale > 1, !scrollView.isZooming, pendingZoom == nil {
                 pendingZoom = .layoutRetarget(
-                    scale: previousScale, anchor: previousAnchor ?? .centre)
+                    scale: effectiveScale, anchor: previousAnchor ?? .centre)
             }
         } else {
             imageView.frame = bounds

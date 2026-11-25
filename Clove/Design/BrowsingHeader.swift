@@ -86,6 +86,7 @@ struct BrowsingHeader<
         .frame(height: height)
         .foregroundStyle(Color.clove.text.primary)
         .background(Color.clove.bg.canvas)
+        .reportHeaderControlFrame("clove.browsing.header")
     }
 
     private var titleBlock: some View {

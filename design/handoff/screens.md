@@ -57,7 +57,7 @@ Devices:
 - When Similar groups is on (default), a **group** with at least 2 visible members appears as one collapsed stacked tile using its **Representative Photo** (`Highest rated > Non-rejected labeled > First unmarked > First visible`) with peeking visible-member cards and a neutral count badge (`visibleMembers.count`). Tapping a stack opens Detail directly in **Group Focus** (`expandedGroup = group.id`) at the Representative Photo; tapping a standalone tile opens Detail in **Timeline**. Groups with only 1 visible member behave as standalone tiles.
 - A **rejected** photo is dimmed (`opacity/rejected`) with no ✕ badge (collapsed stacks dim only when all visible members are rejected). The rating badge and label dot stay. The RAW+JPEG badge is only in Info.
 - **Move Rejects** is a 48 pt round glass icon button (a tray with a down arrow) at the bottom right. It has no count and shows only when rejects exist. It always opens the confirm sheet first.
-- **Landscape**: uses the full safe width with an adaptive column count (`3` columns below `500 pt` width, scaling up from `4+` columns in landscape), preserving the scroll anchor across rotation behind the compact 54 pt inline top bar.
+- **Landscape**: uses the full safe width with an adaptive column count (`3` columns below `500 pt` width, `6` columns across standard iPhone landscape usable widths ~`740+ pt`), preserving the scroll anchor across rotation behind the compact 44 pt inline top bar.
 
 **Filter menu**: All, Unmarked and Rejected with counts, then Rating ≥ and Label. While a filter is active the button is filled with `accent` and the subtitle names the filter ("Unmarked · 812").
 
@@ -94,9 +94,9 @@ Devices:
 - The **filmstrip** floats just above the marking toolbar. Both stay in place at fit and while zoomed, and a single tap on the photo toggles them with the rest of the chrome (#302).
 - **Landscape (iPhone)**:
   - Ordinary iPhone (including Max/Plus models reporting a regular horizontal size class in landscape) always stays in single-photo Focus View — never offering iPad's `30/70` Photo Preview (`sidebar.left`) or `DetailMarkRail`.
-  - A compact 54 pt inline top bar places Back and Focus regions (`viewfinder`) leading, filename and subtitle centered (truncating cleanly without overlapping controls), any active group pill (`"Expand {n} photos"` / `"Reject {n} unmarked"`), Info, and Undo trailing.
+  - A compact 44 pt inline top bar places Back and Focus regions (`viewfinder`) leading, filename and subtitle centered (truncating cleanly without overlapping controls), any active group pill (`"Expand {n} photos"` / `"Reject {n} unmarked"`), Info, and Undo trailing.
   - One compact bottom review row below the stage (`landscapeBottomReviewRow`) pairs the `48 × 48` two-level filmstrip (`62 pt` band, `3 pt` Timeline and Group Focus gaps; background-free Group Focus strip with `36 × 36` Liquid Glass circular `chevron.up` collapse button and overflow-gated leading `square.grid.2x2` picker button; current item raised `6 pt` with the `12 × 4 pt` two-tone marker `2 pt` below) beside the shared `168 × 48` marking toolbar within horizontal safe-area insets for both `landscapeLeft` and `landscapeRight`; tapping Rating or Label opens the horizontal `RatingPicker` / `LabelPicker` above the toolbar.
-  - Hiding chrome on a single tap removes the bottom review row and top-bar tools so the photo stage expands into the reclaimed vertical space (enlarging fitted photos and preserving zoom scale and normalized anchor when zoomed).
+  - Hiding chrome on a single tap removes the top header/navigation bar as well as trailing tools and the bottom review row so a fitted photo expands into the full viewport height (while preserving zoom scale and normalized anchor when zoomed); tapping again restores them cleanly.
 
 **Label popover**: tapping the label action pops 5 color dots (plus none) above the toolbar. Picking one closes it.
 

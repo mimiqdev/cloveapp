@@ -516,6 +516,9 @@ struct DetailMarkingView: View {
                     .axisBehavior(.horizontalOnly)
             }
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarVisibility(
+                isOrdinaryPhoneLandscape && !chromeIsVisible ? .hidden : .visible,
+                for: .navigationBar)
     }
 
     @ViewBuilder private var photoGridToggle: some View {
@@ -895,14 +898,14 @@ struct DetailMarkingView: View {
 
     private var standardLayout: some View {
         VStack(spacing: 0) {
-            if !usesSystemToolbar {
+            if !usesSystemToolbar && (!isOrdinaryPhoneLandscape || chromeIsVisible) {
                 BrowsingHeader(
                     title: photo.fileName,
                     titleIdentifier: "clove.detail.fileName",
                     backTitle: (!isOrdinaryPhone && horizontalSizeClass == .regular)
                         ? browsing.localizedFilterTitle(language: language) : nil,
                     usesInlineFlow: isOrdinaryPhoneLandscape,
-                    height: isOrdinaryPhoneLandscape ? 54 : 64,
+                    height: isOrdinaryPhoneLandscape ? 44 : 64,
                     back: { browsing.back() }
                 ) {
                     HStack(spacing: 0) {
