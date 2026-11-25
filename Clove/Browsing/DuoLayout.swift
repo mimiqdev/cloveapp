@@ -63,6 +63,7 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
     let canUndo: Bool
     var showsBack = true
     var showsUndo = true
+    var backTitle: String? = nil
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @Environment(\.appLanguage) private var language
     @ViewBuilder var navigationTools: NavigationTools
@@ -76,6 +77,7 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
         canUndo: Bool,
         showsBack: Bool = true,
         showsUndo: Bool = true,
+        backTitle: String? = nil,
         @ViewBuilder navigationTools: () -> NavigationTools = { EmptyView() },
         @ViewBuilder tools: () -> Tools,
         @ToolbarContentBuilder marks: () -> Marks,
@@ -86,6 +88,7 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
         self.canUndo = canUndo
         self.showsBack = showsBack
         self.showsUndo = showsUndo
+        self.backTitle = backTitle
         self.navigationTools = navigationTools()
         self.tools = tools()
         self.marks = marks()
@@ -128,12 +131,27 @@ struct BrowsingToolbar<NavigationTools: View, Tools: View, Marks: ToolbarContent
 
     private var usesVerticalBar: Bool { verticalEdge != nil }
 
+    @ViewBuilder
     private var backButton: some View {
-        Button(
-            AppLocalization.string("Back", language: language), systemImage: "chevron.left",
-            action: back
-        )
-        .accessibilityIdentifier("clove.nav.back")
+        if !usesVerticalBar, let backTitle, !backTitle.isEmpty {
+            Button(action: back) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                    Text(backTitle)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: 160, alignment: .leading)
+            }
+            .accessibilityLabel(AppLocalization.string("Back", language: language))
+            .accessibilityIdentifier("clove.nav.back")
+        } else {
+            Button(
+                AppLocalization.string("Back", language: language), systemImage: "chevron.left",
+                action: back
+            )
+            .accessibilityIdentifier("clove.nav.back")
+        }
     }
 
     private var undoButton: some View {

@@ -2363,12 +2363,12 @@
         }
       }
     },
-    "Color labels": {
+    "Color Labels": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Color labels"
+            "value": "Color Labels"
           }
         },
         "zh-Hans": {
@@ -8697,6 +8697,28 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Similar Groups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Similar Groups"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似照片组"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相似相片組"
           }
         }
       }

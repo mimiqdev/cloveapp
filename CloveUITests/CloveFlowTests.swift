@@ -18,14 +18,22 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         let sidebar = element(app, "clove.sidebar")
         XCTAssertTrue(sidebar.exists)
+        XCTAssertEqual(sidebar.frame.width, 280, accuracy: 2)
         XCTAssertTrue(element(app, "clove.sidebar.rejected").isHittable)
         XCTAssertTrue(element(app, "clove.nav.back").isHittable)
+        XCTAssertTrue(app.staticTexts["Color Labels"].exists)
+        XCTAssertTrue(app.staticTexts["Similar Groups"].exists)
         capture("ipad-sidebar-grid-portrait")
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(element(app, "clove.sidebar.rejected").isHittable)
         XCTAssertFalse(element(app, "clove.grid.filter").exists)
         let title = element(app, "clove.grid.title")
         XCTAssertEqual(title.label, "All")
+        XCTAssertEqual(element(app, "clove.grid.subtitle").label, "36 photos")
+        XCTAssertGreaterThanOrEqual(title.frame.minX, sidebar.frame.maxX - 1)
+        XCTAssertLessThan(
+            title.frame.midX,
+            sidebar.frame.maxX + (app.frame.width - sidebar.frame.maxX) * 0.35)
         let move = element(app, "clove.grid.moveRejects")
         XCTAssertTrue(move.exists)
         XCTAssertLessThan(abs(move.frame.midY - title.frame.midY), 40)

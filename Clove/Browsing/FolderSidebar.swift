@@ -3,6 +3,8 @@ import SwiftUI
 
 /// The regular-width grid's filters. Counts and the active filter belong to the browsing model.
 struct FolderSidebar: View {
+    static let labelDotSize: CGFloat = 10
+
     let browsing: BrowsingModel
     @Environment(SettingsStore.self) private var store
     @Environment(\.cloveTheme) private var theme
@@ -52,13 +54,23 @@ struct FolderSidebar: View {
                         Button {
                             browsing.back()
                         } label: {
-                            Label(folderDisplayName, systemImage: "chevron.left")
-                                .font(.headline)
-                                .lineLimit(1)
+                            HStack(spacing: 6) {
+                                Image(systemName: "chevron.left")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(Color.clove.accent)
+                                Text(folderDisplayName)
+                                    .font(.title2.bold())
+                                    .foregroundStyle(Color.clove.text.primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .reportHeaderControlFrame("clove.sidebar.folderTitle")
+                            }
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(AppLocalization.string("Back", language: language))
                         .accessibilityIdentifier("clove.nav.back")
+                        .reportHeaderControlFrame("clove.nav.back")
                         FolderPreparationIndicator(
                             browsing: browsing,
                             identifierPrefix: "clove.grid.preparation",
@@ -107,7 +119,7 @@ struct FolderSidebar: View {
                 }
             }
             if !counts.labels.isEmpty {
-                Section(AppLocalization.string("Color labels", language: language)) {
+                Section {
                     ForEach(LabelColour.allCases, id: \.self) { colour in
                         if let count = counts.labels[colour], count > 0 {
                             row(
@@ -120,10 +132,13 @@ struct FolderSidebar: View {
                             }
                         }
                     }
+                } header: {
+                    Text(AppLocalization.string("Color Labels", language: language))
+                        .reportHeaderControlFrame("clove.sidebar.section.colorLabels")
                 }
             }
             if !cameras.isEmpty {
-                Section(AppLocalization.string("Camera", language: language)) {
+                Section {
                     ForEach(cameras, id: \.value) { option in
                         row(
                             option.value,
@@ -134,10 +149,13 @@ struct FolderSidebar: View {
                             browsing.toggleCameraFilter(option.value)
                         }
                     }
+                } header: {
+                    Text(AppLocalization.string("Camera", language: language))
+                        .reportHeaderControlFrame("clove.sidebar.section.camera")
                 }
             }
             if !lenses.isEmpty {
-                Section(AppLocalization.string("Lens", language: language)) {
+                Section {
                     ForEach(lenses, id: \.value) { option in
                         row(
                             option.value,
@@ -148,10 +166,13 @@ struct FolderSidebar: View {
                             browsing.toggleLensFilter(option.value)
                         }
                     }
+                } header: {
+                    Text(AppLocalization.string("Lens", language: language))
+                        .reportHeaderControlFrame("clove.sidebar.section.lens")
                 }
             }
             if !focalLengths.isEmpty {
-                Section(AppLocalization.string("Focal length", language: language)) {
+                Section {
                     ForEach(focalLengths, id: \.value) { option in
                         row(
                             AppLocalization.focalLengthBucketLabel(
@@ -163,10 +184,13 @@ struct FolderSidebar: View {
                             browsing.toggleFocalLengthFilter(option.value)
                         }
                     }
+                } header: {
+                    Text(AppLocalization.string("Focal length", language: language))
+                        .reportHeaderControlFrame("clove.sidebar.section.focalLength")
                 }
             }
             if !keywords.isEmpty {
-                Section(AppLocalization.string("Keywords", language: language)) {
+                Section {
                     ForEach(keywords, id: \.value) { option in
                         row(
                             option.value,
@@ -177,10 +201,13 @@ struct FolderSidebar: View {
                             browsing.toggleKeywordFilter(option.value)
                         }
                     }
+                } header: {
+                    Text(AppLocalization.string("Keywords", language: language))
+                        .reportHeaderControlFrame("clove.sidebar.section.keywords")
                 }
             }
             if store.settings.similarGroupsEnabled {
-                Section(AppLocalization.string("Similar groups", language: language)) {
+                Section {
                     HStack {
                         Text(
                             AppLocalization.format(
@@ -215,6 +242,9 @@ struct FolderSidebar: View {
                             .accessibilityIdentifier("clove.sidebar.grouping.runAgain")
                         }
                     }
+                } header: {
+                    Text(AppLocalization.string("Similar Groups", language: language))
+                        .reportHeaderControlFrame("clove.sidebar.section.similarGroups")
                 }
             }
         }
@@ -243,7 +273,10 @@ struct FolderSidebar: View {
         Button(action: action) {
             HStack {
                 if let colour {
-                    Circle().fill(Color.clove.label.colour(for: colour)).frame(width: 8, height: 8)
+                    Circle().fill(Color.clove.label.colour(for: colour))
+                        .frame(width: Self.labelDotSize, height: Self.labelDotSize)
+                        .reportHeaderControlFrame(
+                            "clove.sidebar.label.\(colour.rawValue.lowercased()).dot")
                 }
                 Text(title)
                 Spacer()
