@@ -615,4 +615,42 @@ struct AppLocalizationTests {
             AppLocalization.format("Burst of %lld", language: .traditionalChinese, Int64(11))
                 == "連拍 11 張")
     }
+
+    @Test func appearanceAndThemeStringsLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Appearance", "Appearance", "外观", "外觀"),
+            ("Theme", "Theme", "主题", "主題"),
+            ("Light", "Light", "浅色", "淺色"),
+            ("Dark", "Dark", "深色", "深色"),
+            ("System", "System", "跟随系统", "跟隨系統"),
+            (
+                "System follows your device's appearance and keeps your selected theme.",
+                "System follows your device's appearance and keeps your selected theme.",
+                "“跟随系统”会跟随设备外观，并保留你选择的主题。",
+                "「跟隨系統」會跟隨裝置外觀，並保留你選擇的主題。"
+            ),
+            (
+                "Each theme includes Light and Dark. Photos are never tinted.",
+                "Each theme includes Light and Dark. Photos are never tinted.",
+                "每个主题均包含浅色和深色。照片本身绝不会偏色。",
+                "每個主題均包含淺色與深色。相片本身絕不會偏色。"
+            ),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+
+        for family in ThemeFamily.allCases {
+            for language in [ResolvedAppLanguage.english, .simplifiedChinese, .traditionalChinese] {
+                let localized = AppLocalization.themeTitle(family, language: language)
+                #expect(!localized.isEmpty)
+            }
+        }
+        #expect(AppLocalization.themeTitle(.default, language: .simplifiedChinese) == "默认")
+        #expect(AppLocalization.themeTitle(.default, language: .traditionalChinese) == "預設")
+        #expect(AppLocalization.themeTitle(.darkroom, language: .simplifiedChinese) == "暗房")
+        #expect(AppLocalization.themeTitle(.night, language: .traditionalChinese) == "夜間")
+    }
 }

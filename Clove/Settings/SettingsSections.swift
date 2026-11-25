@@ -35,36 +35,51 @@ struct AppearanceSettingsSections: View {
 
     var body: some View {
         Section {
-            Picker(
-                AppLocalization.string("Appearance mode", language: language),
-                selection: settingsBinding(store, \.appearance.mode)
-            ) {
-                ForEach(AppearanceMode.allCases) { mode in
-                    Text(AppLocalization.appearanceTitle(mode, language: language)).tag(mode)
+            ForEach(AppearanceMode.allCases) { mode in
+                let isSelected = store.settings.appearance.mode == mode
+                SettingsCheckmarkRow(
+                    title: AppLocalization.appearanceTitle(mode, language: language),
+                    isSelected: isSelected,
+                    identifier: "clove.settings.appearance.mode.\(mode.rawValue)"
+                ) {
+                    store.update { $0.appearance.mode = mode }
                 }
             }
-            .pickerStyle(.segmented)
-            .accessibilityLabel(AppLocalization.string("Appearance mode", language: language))
-            .accessibilityIdentifier("clove.settings.appearance.mode")
-
-            ThemePicker(selection: store.settings.appearance.family) { family in
-                store.update { $0.appearance.family = family }
-            }
-            .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
         } header: {
-            if showsCategoryTitle {
-                SettingsDetailTitleHeader(
-                    title: SettingsCategory.appearance.title(language: language))
-            }
+            SettingsCategorySectionHeader(
+                categoryTitle: showsCategoryTitle
+                    ? SettingsCategory.appearance.title(language: language) : nil,
+                sectionTitle: AppLocalization.string("Appearance", language: language),
+                identifier: "appearance")
         } footer: {
             Text(
                 AppLocalization.string(
-                    "Photos are never tinted. Only the app around them changes.", language: language
-                )
+                    "System follows your device's appearance and keeps your selected theme.",
+                    language: language)
             )
             .foregroundStyle(Color.clove.text.secondary)
         }
         .listRowBackground(theme.tokens.card.color)
+
+        Section {
+            ThemePicker(selection: store.settings.appearance.family) { family in
+                store.update { $0.appearance.family = family }
+            }
+            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } header: {
+            SettingsSectionHeader(
+                AppLocalization.string("Theme", language: language),
+                identifier: "theme")
+        } footer: {
+            Text(
+                AppLocalization.string(
+                    "Each theme includes Light and Dark. Photos are never tinted.",
+                    language: language)
+            )
+            .foregroundStyle(Color.clove.text.secondary)
+        }
 
         SettingsSaveFailureSection()
     }
@@ -79,28 +94,13 @@ struct LanguageSettingsSections: View {
     var body: some View {
         Section {
             ForEach(AppLanguage.allCases) { option in
-                let isSelected = store.settings.language == option
-                let optionTitle = AppLocalization.languageDisplayName(option, language: language)
-                Button {
+                SettingsCheckmarkRow(
+                    title: AppLocalization.languageDisplayName(option, language: language),
+                    isSelected: store.settings.language == option,
+                    identifier: "clove.settings.language.\(option.rawValue)"
+                ) {
                     store.update { $0.language = option }
-                } label: {
-                    HStack(spacing: 12) {
-                        Text(optionTitle)
-                            .foregroundStyle(Color.clove.text.primary)
-                        Spacer(minLength: 8)
-                        if isSelected {
-                            Image(systemName: "checkmark")
-                                .fontWeight(.semibold)
-                                .foregroundStyle(Color.clove.accent)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(optionTitle)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-                .accessibilityIdentifier("clove.settings.language.\(option.rawValue)")
             }
         } header: {
             if showsCategoryTitle {
@@ -173,19 +173,11 @@ struct CullingAndMarkingSettingsSections: View {
                 DetailGestureGuideSheet()
             }
         } header: {
-            if showsCategoryTitle {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsDetailTitleHeader(
-                        title: SettingsCategory.cullingAndMarking.title(language: language))
-                    SettingsSectionHeader(
-                        AppLocalization.string("Marking & gestures", language: language),
-                        identifier: "markingGestures")
-                }
-            } else {
-                SettingsSectionHeader(
-                    AppLocalization.string("Marking & gestures", language: language),
-                    identifier: "markingGestures")
-            }
+            SettingsCategorySectionHeader(
+                categoryTitle: showsCategoryTitle
+                    ? SettingsCategory.cullingAndMarking.title(language: language) : nil,
+                sectionTitle: AppLocalization.string("Marking & gestures", language: language),
+                identifier: "markingGestures")
         } footer: {
             Text(
                 AppLocalization.string(
@@ -354,17 +346,11 @@ struct BrowsingAndGroupsSettingsSections: View {
             )
             .accessibilityIdentifier("clove.settings.groupingSensitivity")
         } header: {
-            if showsCategoryTitle {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsDetailTitleHeader(
-                        title: SettingsCategory.browsingAndGroups.title(language: language))
-                    SettingsSectionHeader(
-                        AppLocalization.string("Groups", language: language), identifier: "groups")
-                }
-            } else {
-                SettingsSectionHeader(
-                    AppLocalization.string("Groups", language: language), identifier: "groups")
-            }
+            SettingsCategorySectionHeader(
+                categoryTitle: showsCategoryTitle
+                    ? SettingsCategory.browsingAndGroups.title(language: language) : nil,
+                sectionTitle: AppLocalization.string("Groups", language: language),
+                identifier: "groups")
         } footer: {
             Text(groupsFooterText)
                 .foregroundStyle(Color.clove.text.secondary)
@@ -627,37 +613,14 @@ struct AutoAdvanceDestinationSettingsList: View {
         List {
             Section {
                 ForEach(AutoAdvanceDestination.allCases, id: \.rawValue) { destination in
-                    let isSelected = store.settings.autoAdvance.destination == destination
-                    Button {
+                    SettingsCheckmarkRow(
+                        title: AutoAdvanceCopy.title(for: destination, language: language),
+                        subtitle: AutoAdvanceCopy.subtitle(for: destination, language: language),
+                        isSelected: store.settings.autoAdvance.destination == destination,
+                        identifier: "clove.settings.autoAdvance.\(destination.rawValue)"
+                    ) {
                         store.update { $0.autoAdvance.destination = destination }
-                    } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(AutoAdvanceCopy.title(for: destination, language: language))
-                                    .foregroundStyle(Color.clove.text.primary)
-                                Text(
-                                    AutoAdvanceCopy.subtitle(for: destination, language: language)
-                                )
-                                .font(.caption)
-                                .foregroundStyle(Color.clove.text.secondary)
-                            }
-                            Spacer(minLength: 8)
-                            if isSelected {
-                                Image(systemName: "checkmark")
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(Color.clove.accent)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(AutoAdvanceCopy.title(for: destination, language: language))
-                    .accessibilityValue(
-                        AutoAdvanceCopy.subtitle(for: destination, language: language)
-                    )
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .accessibilityIdentifier("clove.settings.autoAdvance.\(destination.rawValue)")
                 }
             } footer: {
                 Text(
@@ -761,6 +724,65 @@ private struct SettingsDetailTitleHeader: View {
             .foregroundStyle(Color.clove.text.primary)
             .textCase(nil)
             .reportHeaderControlFrame("clove.settings.detailTitle")
+    }
+}
+
+private struct SettingsCategorySectionHeader: View {
+    let categoryTitle: String?
+    let sectionTitle: String
+    let identifier: String
+
+    var body: some View {
+        if let categoryTitle {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsDetailTitleHeader(title: categoryTitle)
+                SettingsSectionHeader(sectionTitle, identifier: identifier)
+            }
+        } else {
+            SettingsSectionHeader(sectionTitle, identifier: identifier)
+        }
+    }
+}
+
+private struct SettingsCheckmarkRow: View {
+    let title: String
+    var subtitle: String? = nil
+    let isSelected: Bool
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        let button = Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(Color.clove.text.primary)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(Color.clove.text.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.clove.accent)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
+
+        if let subtitle {
+            button.accessibilityValue(subtitle)
+        } else {
+            button
+        }
     }
 }
 

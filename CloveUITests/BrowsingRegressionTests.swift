@@ -23,24 +23,30 @@ extension CloveFlowTests {
         openSettings(in: app)
         openSettingsCategory("clove.settings.category.appearance", in: app)
         _ = scrollToSettingsControl(
-            "clove.settings.appearance.mode", in: app, scrollsUp: false)
+            "clove.settings.appearance.mode.system", in: app, scrollsUp: false)
 
-        let modePicker = element(in: app, "clove.settings.appearance.mode")
-        XCTAssertTrue(modePicker.exists, "Settings had no appearance mode picker")
         XCTAssertTrue(
-            modePicker.buttons["System"].isSelected,
-            "System mode did not start selected")
+            element(in: app, "clove.settings.section.appearance").exists,
+            "Settings had no APPEARANCE section header")
+        XCTAssertTrue(
+            element(in: app, "clove.settings.section.theme").exists,
+            "Settings had no THEME section header")
+
+        let systemRow = element(in: app, "clove.settings.appearance.mode.system")
+        XCTAssertTrue(systemRow.exists, "Settings had no System appearance mode row")
+        XCTAssertTrue(systemRow.isSelected, "System mode did not start selected")
         XCTAssertTrue(
             app.buttons["clove.settings.appearance.family.default"].isSelected,
             "Default family did not start selected")
 
         // Choosing a non-default family preserves System mode.
-        let catppuccin = app.buttons["clove.settings.appearance.family.catppuccin"]
+        let catppuccin = scrollToSettingsControl(
+            "clove.settings.appearance.family.catppuccin", in: app)
         XCTAssertTrue(catppuccin.exists, "The theme picker had no Catppuccin tile")
         catppuccin.tap()
         XCTAssertTrue(catppuccin.isSelected, "Catppuccin did not become selected")
         XCTAssertTrue(
-            modePicker.buttons["System"].isSelected,
+            systemRow.isSelected,
             "Selecting a non-default family unexpectedly changed System mode")
 
         // Changing mode preserves the chosen family.
@@ -61,9 +67,9 @@ extension CloveFlowTests {
             XCTAssertEqual(summary, "Dark · Catppuccin")
         }
         openSettingsCategory("clove.settings.category.appearance", in: app)
-        let relaunchedMode = element(in: app, "clove.settings.appearance.mode")
+        let relaunchedDark = element(in: app, "clove.settings.appearance.mode.dark")
         XCTAssertTrue(
-            relaunchedMode.buttons["Dark"].isSelected,
+            relaunchedDark.waitForExistence(timeout: 5) && relaunchedDark.isSelected,
             "The relaunch lost the Dark mode")
         XCTAssertTrue(
             app.buttons["clove.settings.appearance.family.catppuccin"].isSelected,
@@ -95,25 +101,25 @@ extension CloveFlowTests {
         }
         openSettingsCategory("clove.settings.category.appearance", in: app)
 
-        let nord = app.buttons["clove.settings.appearance.family.nord"]
+        let nord = scrollToSettingsControl("clove.settings.appearance.family.nord", in: app)
         XCTAssertTrue(nord.waitForExistence(timeout: 5), "Nord family tile missing")
         nord.tap()
         XCTAssertTrue(nord.isSelected)
-        XCTAssertTrue(
-            element(in: app, "clove.settings.appearance.mode").buttons["System"].isSelected)
+        let systemRow = scrollToSettingsControl(
+            "clove.settings.appearance.mode.system", in: app, scrollsUp: false)
+        XCTAssertTrue(systemRow.isSelected)
 
         let lightSystemShot = XCUIScreen.main.screenshot().pngRepresentation
 
         XCUIDevice.shared.appearance = .dark
-        let modeControl = element(in: app, "clove.settings.appearance.mode")
         XCTAssertTrue(
             wait(
                 NSPredicate { _, _ in
                     XCUIScreen.main.screenshot().pngRepresentation != lightSystemShot
                 },
-                modeControl),
+                systemRow),
             "System + Nord did not update UI when device switched from Light to Dark")
-        XCTAssertTrue(modeControl.buttons["System"].isSelected)
+        XCTAssertTrue(systemRow.isSelected)
         XCTAssertTrue(nord.isSelected, "System appearance change fell back away from Nord")
 
         // Explicit Light ignores dark system appearance; explicit Dark stays dark even on light system.
@@ -122,7 +128,7 @@ extension CloveFlowTests {
         let forcedLightOnDarkSystem = XCUIScreen.main.screenshot().pngRepresentation
         XCUIDevice.shared.appearance = .light
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        XCTAssertTrue(modeControl.buttons["Light"].isSelected)
+        XCTAssertTrue(element(in: app, "clove.settings.appearance.mode.light").isSelected)
         XCTAssertTrue(nord.isSelected)
 
         setAppearanceMode(in: app, to: "Dark")
@@ -172,11 +178,10 @@ extension CloveFlowTests {
         if appearanceCategory.exists {
             appearanceCategory.tap()
         }
-        let modeControl = app.descendants(matching: .any)["clove.settings.appearance.mode"]
-        guard modeControl.waitForExistence(timeout: 5) else { return }
-        let systemButton = modeControl.buttons["System"]
-        if systemButton.exists, !systemButton.isSelected {
-            systemButton.tap()
+        let systemRow = app.descendants(matching: .any)["clove.settings.appearance.mode.system"]
+        guard systemRow.waitForExistence(timeout: 5) else { return }
+        if !systemRow.isSelected {
+            systemRow.tap()
         }
         let defaultFamily = app.buttons["clove.settings.appearance.family.default"]
         if defaultFamily.exists, !defaultFamily.isSelected {
@@ -184,13 +189,18 @@ extension CloveFlowTests {
         }
     }
 
-    /// Selects one of the segmented appearance modes (`Light`, `Dark`, or `System`).
+    /// Selects one of the appearance mode rows (`Light`, `Dark`, or `System`).
     @MainActor
     func setAppearanceMode(in app: XCUIApplication, to modeTitle: String) {
-        let picker = element(in: app, "clove.settings.appearance.mode")
-        XCTAssertTrue(picker.waitForExistence(timeout: 5), "Settings had no appearance mode picker")
-        let option = picker.buttons[modeTitle]
-        XCTAssertTrue(option.exists, "Appearance mode picker had no \(modeTitle) option")
+        let modeIdentifier =
+            switch modeTitle {
+            case "Light": "clove.settings.appearance.mode.light"
+            case "Dark": "clove.settings.appearance.mode.dark"
+            default: "clove.settings.appearance.mode.system"
+            }
+        let option = scrollToSettingsControl(modeIdentifier, in: app, scrollsUp: false)
+        XCTAssertTrue(
+            option.waitForExistence(timeout: 5), "Appearance list had no \(modeTitle) row")
         if !option.isSelected {
             option.tap()
         }
@@ -203,7 +213,7 @@ extension CloveFlowTests {
         openSettingsCategory("clove.settings.category.appearance", in: app)
         let (modeTitle, familyID) = Self.modeAndFamily(for: theme)
         setAppearanceMode(in: app, to: modeTitle)
-        let tile = element(in: app, "clove.settings.appearance.family.\(familyID)")
+        let tile = scrollToSettingsControl("clove.settings.appearance.family.\(familyID)", in: app)
         XCTAssertTrue(tile.exists, "Theme family tile missing for \(familyID)")
         tile.tap()
         XCTAssertTrue(tile.isSelected, "Theme family \(familyID) did not become selected")

@@ -2933,6 +2933,28 @@
         }
       }
     },
+    "Each theme includes Light and Dark. Photos are never tinted.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each theme includes Light and Dark. Photos are never tinted."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个主题均包含浅色和深色。照片本身绝不会偏色。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每個主題均包含淺色與深色。相片本身絕不會偏色。"
+          }
+        }
+      }
+    },
     "Earlier": {
       "localizations": {
         "en": {
@@ -8985,6 +9007,28 @@
         }
       }
     },
+    "System follows your device's appearance and keeps your selected theme.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System follows your device's appearance and keeps your selected theme."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“跟随系统”会跟随设备外观，并保留你选择的主题。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「跟隨系統」會跟隨裝置外觀，並保留你選擇的主題。"
+          }
+        }
+      }
+    },
     "Taken": {
       "localizations": {
         "en": {
@@ -9641,6 +9685,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "編號數值過大。"
+          }
+        }
+      }
+    },
+    "Theme": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Theme"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主题"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主題"
           }
         }
       }
