@@ -992,6 +992,109 @@ struct CompareFlowTests {
         }
     }
 
+    @Test(
+        "CompareFilmstrip centers middle challengers, clamps head/tail edges, and preserves manual scroll"
+    )
+    func compareFilmstripCentersMiddleChallengerAndClampsHeadAndTail() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let folder = FolderIdentity(rawValue: "compare-filmstrip-centering")
+        let photos = (0..<12).map { index in
+            let stem = String(format: "CMP%04d", index)
+            return GridPhoto(
+                id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: stem),
+                fileName: "\(stem).ARW",
+                time: .unavailable,
+                marks: PhotoMarks())
+        }
+        let whiteThumb = makeSolidCGImage(width: 32, height: 32, red: 1, green: 1, blue: 1)
+        let thumbnails = CompareStaticThumbnails(image: whiteThumb)
+
+        let state = CompareFilmstripHarnessState(challenger: photos[6].id)
+        let host = UIHostingController(
+            rootView: CompareFilmstripHarnessView(
+                state: state,
+                photos: photos,
+                reference: photos[0].id,
+                thumbnails: thumbnails))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 80)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+
+        let scrollView = try #require(findFirstScrollView(in: window))
+        let expectedWidth =
+            4 * 2
+            + CGFloat(photos.count) * 44
+            + CGFloat(photos.count - 1) * FilmstripCurrentPhotoMarker.thumbnailSpacing
+        #expect(abs(scrollView.contentSize.width - expectedWidth) <= 1.5)
+
+        func expectedOffset(for index: Int) -> CGFloat {
+            let itemCenterX =
+                4
+                + CGFloat(index) * (44 + FilmstripCurrentPhotoMarker.thumbnailSpacing)
+                + 22
+            let maxOffset = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+            return min(maxOffset, max(0, itemCenterX - scrollView.bounds.width / 2))
+        }
+
+        // Initial appearance centers middle challenger (index 6) without padding.
+        #expect(abs(scrollView.contentOffset.x - expectedOffset(for: 6)) <= 2.0)
+
+        // Stepping to adjacent middle challengers keeps each centered.
+        for index in [7, 5] {
+            state.challenger = photos[index].id
+            try await Task.sleep(for: .milliseconds(450))
+            #expect(abs(scrollView.contentOffset.x - expectedOffset(for: index)) <= 2.0)
+        }
+
+        // Switching activeSide without changing challenger leaves the strip settled.
+        let settledOffset = scrollView.contentOffset.x
+        state.activeSide = .reference
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(abs(scrollView.contentOffset.x - settledOffset) <= 0.5)
+
+        // Stepping challenger while reference is active still centers the new challenger.
+        state.challenger = photos[6].id
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(abs(scrollView.contentOffset.x - expectedOffset(for: 6)) <= 2.0)
+
+        // Resizing strip width recenters current challenger at the new width.
+        let offset320 = scrollView.contentOffset.x
+        window.frame = CGRect(x: 0, y: 0, width: 420, height: 80)
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+        let offset420 = expectedOffset(for: 6)
+        #expect(abs(scrollView.contentOffset.x - offset420) <= 2.0)
+        #expect(abs(offset420 - offset320) > 20)
+
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 80)
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+
+        // Near head clamps to leading edge; tail clamps to trailing edge.
+        state.challenger = photos[1].id
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(scrollView.contentOffset.x <= 0.5)
+
+        state.challenger = photos[11].id
+        try await Task.sleep(for: .milliseconds(450))
+        let maxOffset = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+        #expect(abs(scrollView.contentOffset.x - maxOffset) <= 2.0)
+    }
+
     private struct HostedCompare {
         let window: UIWindow
         let host: UIHostingController<AnyView>
@@ -1045,6 +1148,16 @@ struct CompareFlowTests {
             found.append(contentsOf: findPanes(in: child))
         }
         return found
+    }
+
+    private func findFirstScrollView(in view: UIView) -> UIScrollView? {
+        if let scrollView = view as? UIScrollView, !(view is UICollectionView) {
+            return scrollView
+        }
+        for child in view.subviews {
+            if let found = findFirstScrollView(in: child) { return found }
+        }
+        return nil
     }
 
     private func applyUserZoom(
@@ -1295,5 +1408,36 @@ private final class CompareTestDetailImages: DetailImageSource {
             quality: quality,
             hasRAW: true,
             fullResolutionSize: fullSize)
+    }
+}
+
+@MainActor
+@Observable
+private final class CompareFilmstripHarnessState {
+    var challenger: PhotoIdentity
+    var activeSide: CompareSide = .challenger
+
+    init(challenger: PhotoIdentity) {
+        self.challenger = challenger
+    }
+}
+
+private struct CompareFilmstripHarnessView: View {
+    @Bindable var state: CompareFilmstripHarnessState
+    let photos: [GridPhoto]
+    let reference: PhotoIdentity
+    let thumbnails: any GridThumbnailSource
+
+    var body: some View {
+        CompareFilmstrip(
+            photos: photos,
+            reference: reference,
+            challenger: state.challenger,
+            activeSide: state.activeSide,
+            thumbnails: thumbnails,
+            onSelectCandidate: { state.challenger = $0 }
+        )
+        .frame(maxWidth: .infinity)
+        .environment(\.cloveTheme, .light)
     }
 }

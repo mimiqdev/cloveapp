@@ -143,7 +143,7 @@ struct GroupAnchorTests {
         #expect(abs(collectionView.contentOffset.y - initialY) <= 0.5)
     }
 
-    @Test func filmstripAnchorsGroupExpandFoldAndStillCentersOffscreenNavigation() async throws {
+    @Test func filmstripAnchorsGroupExpandFoldAndCentersAcrossSelection() async throws {
         let model = BrowsingModel(library: TestLibrary.sample)
         model.openFolder()
         let scene = try #require(
@@ -176,21 +176,37 @@ struct GroupAnchorTests {
             let timelineScrollView = try #require(initialScrollViews.first)
             let timelineContentWidth = timelineScrollView.contentSize.width
             #expect(timelineContentWidth > 1200)
-            let sxTimeline = timelineScrollView.contentOffset.x
+            let p2695Slot = try #require(state.timeline.slotIndex(containing: p2695))
+            let sxP2695 = expectedFilmstripCenteredOffset(
+                itemIndex: p2695Slot,
+                itemCount: state.timeline.slots.count,
+                scrollView: timelineScrollView,
+                metrics: .standard,
+                includesPadding: true)
+            #expect(abs(timelineScrollView.contentOffset.x - sxP2695) <= 2.0)
 
-            // Selecting burst-2696 in Timeline while stack is already on screen: strip must not jump.
+            // Selecting burst-2696 in Timeline centers the collapsed stack even though it was visible.
             state.current = p2696
             try await Task.sleep(for: .milliseconds(500))
-            #expect(abs(timelineScrollView.contentOffset.x - sxTimeline) <= 0.5)
+            let burstSlot = try #require(state.timeline.slotIndex(forGroup: burstID))
+            let sxBurst = expectedFilmstripCenteredOffset(
+                itemIndex: burstSlot,
+                itemCount: state.timeline.slots.count,
+                scrollView: timelineScrollView,
+                metrics: .standard,
+                includesPadding: true)
+            #expect(abs(timelineScrollView.contentOffset.x - sxBurst) <= 2.0)
+            #expect(timelineScrollView.contentOffset.x > sxP2695 + 40)
 
-            // Expanding burst-2696 mounts Group Focus as a second track while keeping Timeline alive.
+            // Expanding burst-2696 mounts Group Focus as a second track while keeping Timeline alive
+            // and centered on the stack.
             state.expandedGroup = burstID
             try await Task.sleep(for: .milliseconds(450))
             let expandedScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
             #expect(expandedScrollViews.count == 2)
             #expect(expandedScrollViews.contains { $0 === timelineScrollView })
             #expect(timelineScrollView.contentSize.width > 1200)
-            #expect(abs(timelineScrollView.contentOffset.x - sxTimeline) <= 0.5)
+            #expect(abs(timelineScrollView.contentOffset.x - sxBurst) <= 0.5)
 
             let groupScrollView = try #require(
                 expandedScrollViews.first { $0 !== timelineScrollView })
@@ -201,12 +217,14 @@ struct GroupAnchorTests {
             #expect(focusedWidth < 300)
             let sxFocused = groupScrollView.contentOffset.x
 
-            // Switching to the next visible member inside Group Focus does not jump.
+            // Switching to the next visible member inside a short non-overflowing Group Focus
+            // keeps the short group centered without scrolling.
             state.current = p2697
             try await Task.sleep(for: .milliseconds(450))
             #expect(abs(groupScrollView.contentOffset.x - sxFocused) <= 0.5)
 
-            // Collapsing back to Timeline exits Group Focus cleanly without resetting Timeline's offset.
+            // Collapsing back to Timeline exits Group Focus cleanly without shifting Timeline's
+            // already-centered offset.
             state.expandedGroup = nil
             state.current = p2696
             try await Task.sleep(for: .milliseconds(550))
@@ -215,18 +233,273 @@ struct GroupAnchorTests {
             #expect(collapsedScrollViews.first === timelineScrollView)
             #expect(timelineScrollView.contentSize.width > 1200)
             let sxAfterCollapse = timelineScrollView.contentOffset.x
-            #expect(abs(sxAfterCollapse - sxTimeline) <= 0.5)
+            #expect(abs(sxAfterCollapse - sxBurst) <= 0.5)
 
-            // Leaving the collapsed stack back to visible p2695 does not jump.
+            // Leaving the collapsed stack back to p2695 re-centers p2695.
             state.current = p2695
             try await Task.sleep(for: .milliseconds(450))
-            #expect(abs(timelineScrollView.contentOffset.x - sxAfterCollapse) <= 0.5)
+            #expect(abs(timelineScrollView.contentOffset.x - sxP2695) <= 2.0)
 
-            // Jumping to an off-screen photo (last photo) still scrolls it into view.
+            // Jumping to the last photo clamps cleanly to the trailing edge with no extra padding.
             state.current = p2713
             try await Task.sleep(for: .milliseconds(600))
-            #expect(timelineScrollView.contentOffset.x > sxAfterCollapse + 100)
+            let maxOffset = max(
+                0, timelineScrollView.contentSize.width - timelineScrollView.bounds.width)
+            #expect(abs(timelineScrollView.contentOffset.x - maxOffset) <= 2.0)
         }
+    }
+
+    @Test func timelineFilmstripCentersMiddleClampsEdgesPreservesManualScrollAndRecentersOnResize()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let (photos, groups, _, _) = makeSyntheticGrid(
+            beforeCount: 20, groupMemberCount: 0, afterCount: 0)
+        let first = try #require(photos.first?.id)
+        let midA = photos[8].id
+        let midB = photos[10].id
+        let midC = photos[12].id
+        let last = try #require(photos.last?.id)
+
+        let state = FilmstripAnchorHarnessState(
+            photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
+            current: first, expandedGroup: nil)
+        let host = UIHostingController(
+            rootView: FilmstripAnchorHarness(state: state, theme: .light))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 110)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+
+        let scrollView = try #require(findSubviews(ofType: UIScrollView.self, in: window).first)
+        let metrics = DetailFilmstrip.Metrics.standard
+        let expectedContentWidth =
+            2 * metrics.horizontalPadding
+            + CGFloat(photos.count) * metrics.thumbnailWidth
+            + CGFloat(photos.count - 1) * DetailFilmstrip.thumbnailSpacing
+        #expect(abs(scrollView.contentSize.width - expectedContentWidth) <= 1.5)
+
+        // Head photo clamps at leading edge (x = 0) with no empty half-viewport padding.
+        #expect(scrollView.contentOffset.x <= 0.5)
+
+        // Stepping to middle-range items centers each item in the viewport.
+        for (index, target) in [(8, midA), (10, midB), (12, midC)] {
+            state.current = target
+            try await Task.sleep(for: .milliseconds(450))
+            let expected = expectedFilmstripCenteredOffset(
+                itemIndex: index,
+                itemCount: photos.count,
+                scrollView: scrollView,
+                metrics: metrics,
+                includesPadding: true)
+            #expect(abs(scrollView.contentOffset.x - expected) <= 2.0)
+        }
+
+        // Non-navigation updates (e.g. changing marks on `current`) do not alter the offset.
+        let centeredMidC = scrollView.contentOffset.x
+        var markedPhotos = state.photos
+        markedPhotos[12].marks.rating = try #require(Rating(rawValue: 4))
+        state.photos = markedPhotos
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(abs(scrollView.contentOffset.x - centeredMidC) <= 0.5)
+
+        // Subsequent selection change re-centers the newly chosen item.
+        state.current = midB
+        try await Task.sleep(for: .milliseconds(450))
+        let expectedMidB390 = expectedFilmstripCenteredOffset(
+            itemIndex: 10,
+            itemCount: photos.count,
+            scrollView: scrollView,
+            metrics: metrics,
+            includesPadding: true)
+        #expect(abs(scrollView.contentOffset.x - expectedMidB390) <= 2.0)
+
+        // Width / rotation change recenters `current` without changing `current`.
+        window.frame = CGRect(x: 0, y: 0, width: 640, height: 110)
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+        let expectedMidB640 = expectedFilmstripCenteredOffset(
+            itemIndex: 10,
+            itemCount: photos.count,
+            scrollView: scrollView,
+            metrics: metrics,
+            includesPadding: true)
+        #expect(abs(scrollView.contentOffset.x - expectedMidB640) <= 2.0)
+        #expect(abs(expectedMidB640 - expectedMidB390) > 40)
+
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 110)
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(abs(scrollView.contentOffset.x - expectedMidB390) <= 2.0)
+
+        // Metrics change (.standard -> .compact) recenters `current` immediately.
+        state.metrics = .compact
+        try await Task.sleep(for: .milliseconds(350))
+        let expectedCompactMidB = expectedFilmstripCenteredOffset(
+            itemIndex: 10,
+            itemCount: photos.count,
+            scrollView: scrollView,
+            metrics: .compact,
+            includesPadding: true)
+        #expect(abs(scrollView.contentOffset.x - expectedCompactMidB) <= 2.0)
+        #expect(abs(expectedCompactMidB - expectedMidB390) > 20)
+
+        state.metrics = .standard
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(abs(scrollView.contentOffset.x - expectedMidB390) <= 2.0)
+
+        // Tail photo clamps cleanly at the trailing edge.
+        state.current = last
+        try await Task.sleep(for: .milliseconds(450))
+        let maxOffset = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+        #expect(abs(scrollView.contentOffset.x - maxOffset) <= 2.0)
+    }
+
+    @Test func overflowingGroupFocusCentersMiddleMembersClampsEdgesAndPreservesTimelineOffset()
+        async throws
+    {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let (photos, groups, groupID, members) = makeSyntheticGrid(
+            beforeCount: 8, groupMemberCount: 12, afterCount: 8)
+        let metrics = DetailFilmstrip.Metrics.standard
+
+        let state = FilmstripAnchorHarnessState(
+            photos: photos, groups: groups, thumbnails: TestLibrary.sampleThumbnails,
+            current: members[0], expandedGroup: nil)
+        let host = UIHostingController(
+            rootView: FilmstripAnchorHarness(state: state, theme: .light))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 110)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(400))
+
+        let timelineScrollView = try #require(
+            findSubviews(ofType: UIScrollView.self, in: window).first)
+        let timelineGroupSlot = try #require(state.timeline.slotIndex(forGroup: groupID))
+        let expectedTimelineOffset = expectedFilmstripCenteredOffset(
+            itemIndex: timelineGroupSlot,
+            itemCount: state.timeline.slots.count,
+            scrollView: timelineScrollView,
+            metrics: metrics,
+            includesPadding: true)
+        #expect(abs(timelineScrollView.contentOffset.x - expectedTimelineOffset) <= 2.0)
+
+        // Enter overflowing Group Focus directly on a middle member (like a late Representative).
+        state.current = members[6]
+        state.expandedGroup = groupID
+        try await Task.sleep(for: .milliseconds(550))
+
+        let expandedScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+        #expect(expandedScrollViews.count == 2)
+        #expect(expandedScrollViews.contains { $0 === timelineScrollView })
+        #expect(abs(timelineScrollView.contentOffset.x - expectedTimelineOffset) <= 0.5)
+
+        let groupScrollView = try #require(expandedScrollViews.first { $0 !== timelineScrollView })
+        let expectedMid6 = expectedFilmstripCenteredOffset(
+            itemIndex: 6,
+            itemCount: members.count,
+            scrollView: groupScrollView,
+            metrics: metrics,
+            includesPadding: false)
+        #expect(abs(groupScrollView.contentOffset.x - expectedMid6) <= 2.0)
+
+        // Stepping within overflowing Group Focus centers middle members and clamps head/tail.
+        state.current = members[7]
+        try await Task.sleep(for: .milliseconds(450))
+        let expectedMid7 = expectedFilmstripCenteredOffset(
+            itemIndex: 7,
+            itemCount: members.count,
+            scrollView: groupScrollView,
+            metrics: metrics,
+            includesPadding: false)
+        #expect(abs(groupScrollView.contentOffset.x - expectedMid7) <= 2.0)
+
+        state.current = members[6]
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(abs(groupScrollView.contentOffset.x - expectedMid6) <= 2.0)
+
+        // Resizing while in overflowing Group Focus recenters the active member cleanly.
+        window.frame = CGRect(x: 0, y: 0, width: 520, height: 110)
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+        let expectedMid6At520 = expectedFilmstripCenteredOffset(
+            itemIndex: 6,
+            itemCount: members.count,
+            scrollView: groupScrollView,
+            metrics: metrics,
+            includesPadding: false)
+        #expect(abs(groupScrollView.contentOffset.x - expectedMid6At520) <= 2.0)
+
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 110)
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(abs(groupScrollView.contentOffset.x - expectedMid6) <= 2.0)
+
+        state.current = members[0]
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(groupScrollView.contentOffset.x <= 0.5)
+
+        state.current = members[11]
+        try await Task.sleep(for: .milliseconds(450))
+        let groupMaxOffset = max(
+            0, groupScrollView.contentSize.width - groupScrollView.bounds.width)
+        #expect(abs(groupScrollView.contentOffset.x - groupMaxOffset) <= 2.0)
+
+        // Collapsing back to Timeline keeps Timeline's ScrollView alive and centered on the stack.
+        state.current = members[0]
+        state.expandedGroup = nil
+        try await Task.sleep(for: .milliseconds(500))
+        let collapsedScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+        #expect(collapsedScrollViews.count == 1)
+        #expect(collapsedScrollViews.first === timelineScrollView)
+        #expect(abs(timelineScrollView.contentOffset.x - expectedTimelineOffset) <= 0.5)
+
+        // Entering Group Focus directly on the tail member lands clamped at the trailing edge.
+        state.current = members[11]
+        state.expandedGroup = groupID
+        try await Task.sleep(for: .milliseconds(550))
+        let reenteredScrollViews = findSubviews(ofType: UIScrollView.self, in: window)
+        let reenteredGroupScroll = try #require(
+            reenteredScrollViews.first { $0 !== timelineScrollView })
+        let reenteredMaxOffset = max(
+            0, reenteredGroupScroll.contentSize.width - reenteredGroupScroll.bounds.width)
+        #expect(abs(reenteredGroupScroll.contentOffset.x - reenteredMaxOffset) <= 2.0)
+    }
+
+    private func expectedFilmstripCenteredOffset(
+        itemIndex: Int,
+        itemCount: Int,
+        scrollView: UIScrollView,
+        metrics: DetailFilmstrip.Metrics,
+        includesPadding: Bool
+    ) -> CGFloat {
+        let leadingPadding = includesPadding ? metrics.horizontalPadding : 0
+        let itemCenterX =
+            leadingPadding
+            + CGFloat(itemIndex) * (metrics.thumbnailWidth + DetailFilmstrip.thumbnailSpacing)
+            + metrics.thumbnailWidth / 2
+        let maxOffset = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+        return min(maxOffset, max(0, itemCenterX - scrollView.bounds.width / 2))
     }
 
     @Test func filmstripGroupFocusPinsTrailingCollapseCapAndHugsShortGroup() async throws {
@@ -805,11 +1078,12 @@ private struct GridAnchorHarness: View {
 @MainActor
 @Observable
 private final class FilmstripAnchorHarnessState {
-    let photos: [GridPhoto]
+    var photos: [GridPhoto]
     let groups: [BrowsingGroup]
     let thumbnails: any GridThumbnailSource
     var current: PhotoIdentity?
     var expandedGroup: GroupID?
+    var metrics: DetailFilmstrip.Metrics
 
     var timeline: DetailTimeline {
         DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
@@ -817,13 +1091,15 @@ private final class FilmstripAnchorHarnessState {
 
     init(
         photos: [GridPhoto], groups: [BrowsingGroup], thumbnails: any GridThumbnailSource,
-        current: PhotoIdentity?, expandedGroup: GroupID?
+        current: PhotoIdentity?, expandedGroup: GroupID?,
+        metrics: DetailFilmstrip.Metrics = .standard
     ) {
         self.photos = photos
         self.groups = groups
         self.thumbnails = thumbnails
         self.current = current
         self.expandedGroup = expandedGroup
+        self.metrics = metrics
     }
 }
 
@@ -838,6 +1114,7 @@ private struct FilmstripAnchorHarness: View {
             expandedGroup: state.expandedGroup.flatMap { timeline.activeGroup(with: $0) },
             current: state.current,
             thumbnails: state.thumbnails,
+            metrics: state.metrics,
             openPhoto: {
                 state.expandedGroup = nil
                 state.current = $0
