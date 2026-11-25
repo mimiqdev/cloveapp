@@ -2924,10 +2924,13 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(element(app, "clove.preparation.summary").label, "15 of 36 ready")
         XCTAssertEqual(element(app, "clove.preparation.analysis.count").label, "18 of 36 analyzed")
         XCTAssertEqual(element(app, "clove.preparation.previews.count").label, "29 of 36 prepared")
+        XCTAssertEqual(element(app, "clove.preparation.grouping.status").label, "2 groups")
         XCTAssertTrue(
             element(app, "clove.preparation.analysis.progress").waitForExistence(timeout: 5))
         XCTAssertTrue(
             element(app, "clove.preparation.previews.progress").waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            element(app, "clove.preparation.grouping.progress").waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Pause"].exists)
         XCTAssertFalse(app.buttons["Cancel"].exists)
 
@@ -2996,14 +2999,14 @@ final class CloveFlowTests: XCTestCase {
 
         let prep = element(activeApp, "clove.grid.preparation")
         XCTAssertTrue(prep.waitForExistence(timeout: 5))
-        XCTAssertEqual(prep.value as? String, "Finding similar shots")
+        XCTAssertEqual(prep.value as? String, "Finding similar shots, 12 of 24 analyzed")
 
         prep.tap()
         let details = element(activeApp, "clove.preparation.details")
         XCTAssertTrue(details.waitForExistence(timeout: 5))
         XCTAssertEqual(
             element(activeApp, "clove.preparation.grouping.status").label,
-            "Finding similar shots…")
+            "12 of 24 analyzed")
         XCTAssertTrue(
             element(activeApp, "clove.preparation.grouping.progress").waitForExistence(timeout: 5))
         activeApp.terminate()

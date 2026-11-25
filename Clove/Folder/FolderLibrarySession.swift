@@ -310,6 +310,7 @@ final class FolderLibrarySession: FolderLibrary {
         thumbnailSource = nil
         detailSource = nil
         publish(.preparation(.idle))
+        publish(.groupingProgress(.idle))
         publish(.photos([]))
     }
 
@@ -1232,9 +1233,9 @@ final class FolderLibrarySession: FolderLibrary {
                 guard let self, generation == self.scanGeneration else { return }
                 self.publishGroups(groups)
             },
-            analysisChanged: { [weak self] isRunning in
+            progressChanged: { [weak self] progress in
                 guard let self, generation == self.scanGeneration else { return }
-                self.publish(.groupingActivity(isRunning))
+                self.publish(.groupingProgress(progress))
             })
     }
 

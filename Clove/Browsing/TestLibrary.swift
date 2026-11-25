@@ -356,6 +356,7 @@ final class TestLibrary: FolderLibrary {
         updateContinuation.yield(
             .scanFinished(
                 FolderScanSummary(photoCount: stored.count, status: .complete)))
+        updateContinuation.yield(.groupingProgress(.complete))
     }
 
     /// Applies one bar action's per-photo changes as one batch (PRD P0-09).
@@ -503,6 +504,7 @@ final class TestLibrary: FolderLibrary {
         syncCompletedPreparationCount()
         updateContinuation.yield(
             .scanFinished(FolderScanSummary(photoCount: stored.count, status: .complete)))
+        updateContinuation.yield(.groupingProgress(.complete))
     }
 
     func saveToPhotos(fileURLs: [URL]) async throws {
@@ -847,6 +849,7 @@ final class TestLibrary: FolderLibrary {
         openGeneration += 1
         preparationStatus = .idle
         updateContinuation.yield(.preparation(.idle))
+        updateContinuation.yield(.groupingProgress(.idle))
     }
 
     /// Deterministic Info without a file or device path (handoff Detail).
@@ -909,7 +912,7 @@ final class TestLibrary: FolderLibrary {
                 }
                 updateContinuation.yield(.photos(stored))
             } else if opening == "grouping" {
-                updateContinuation.yield(.groupingActivity(true))
+                updateContinuation.yield(.groupingProgress(.analyzing(completed: 12, total: 24)))
             }
         }
         if let preparationMode = environment[Self.preparationVariable] {
@@ -1061,9 +1064,11 @@ final class TestLibrary: FolderLibrary {
     /// path — store, model, library and grid — without a folder, a fixture or a permission.
     func setSimilarGroupsEnabled(_ enabled: Bool) async {
         let published = enabled ? allGroups : []
-        guard published != groups else { return }
-        groups = published
-        updateContinuation.yield(.groups(published))
+        if published != groups {
+            groups = published
+            updateContinuation.yield(.groups(published))
+        }
+        updateContinuation.yield(.groupingProgress(enabled ? .complete : .idle))
     }
 
     /// Whether this photo's first write should fail, and records that it did (PRD P0-08, P0-09).

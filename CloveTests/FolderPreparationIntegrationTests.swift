@@ -38,6 +38,7 @@ struct FolderPreparationIntegrationTests {
         }
 
         let baseline = model.preparationStatus
+        #expect(model.groupingProgress == .idle)
         #expect(baseline.totalPhotos == 3)
         #expect(baseline.analysis.completed == 3)
         #expect(baseline.previews.completed == 3)
@@ -423,12 +424,55 @@ struct FolderPreparationIntegrationTests {
         #expect(!workspace.library.isPausedForMemoryPressure)
         try await waitUntil {
             !model.isFolderOpening
+                && model.groupingProgress == .complete
                 && model.preparationStatus.waitingReason == nil
                 && model.preparationStatus.phase == .complete
                 && model.preparationStatus.readyForBothCount == 4
         }
 
         await workspace.library.closeFolder()
+    }
+
+    @Test
+    func realFolderWithBurstReportsDeterminateGroupingProgressToCompleteAndWarmCacheSkipsAnalyzing()
+        async throws
+    {
+        let workspace = try PreparationTestWorkspace(similarGroupsEnabled: true)
+        defer { workspace.remove() }
+
+        for index in 1...4 {
+            try PreparationTestWorkspace.writeJPEG(
+                to: workspace.folderA.appendingPathComponent("BURST_\(index).jpg"),
+                gray: 0.4,
+                subjectArea: nil)
+        }
+
+        let model1 = BrowsingModel(library: workspace.library, similarGroupsEnabled: true)
+        await model1.openPickedFolder(workspace.folderA)
+
+        try await waitUntil {
+            !model1.isFolderOpening
+                && model1.groupingProgress == .complete
+                && model1.preparationStatus.phase == .complete
+        }
+        #expect(model1.groupingProgress == .complete)
+        #expect(model1.groups.count == 1)
+
+        await workspace.library.reloadRecents()
+        let recent = try #require(workspace.library.recents.first)
+        await workspace.library.closeFolder()
+        try await waitUntil { model1.groupingProgress == .idle }
+
+        let secondLibrary = workspace.makeSecondLibrary(similarGroupsEnabled: true)
+        let model2 = BrowsingModel(library: secondLibrary, similarGroupsEnabled: true)
+        await model2.reopen(recent)
+        try await waitUntil {
+            !model2.isFolderOpening
+                && model2.groupingProgress == .complete
+                && model2.preparationStatus.phase == .complete
+        }
+        #expect(model2.groups.count == 1)
+        await secondLibrary.closeFolder()
     }
 
     private func waitUntil(
@@ -467,11 +511,12 @@ private final class PreparationTestWorkspace {
             similarGroupsEnabled: similarGroupsEnabled)
     }
 
-    func makeSecondLibrary() -> FolderLibrarySession {
+    func makeSecondLibrary(similarGroupsEnabled: Bool = false) -> FolderLibrarySession {
         Self.makeLibrary(
             in: root.appendingPathComponent("second-stores"),
             recentsRoot: root,
-            cacheRoot: cacheRoot)
+            cacheRoot: cacheRoot,
+            similarGroupsEnabled: similarGroupsEnabled)
     }
 
     private static func makeLibrary(

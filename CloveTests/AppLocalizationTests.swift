@@ -349,23 +349,80 @@ struct AppLocalizationTests {
         #expect(AppLocalization.string("Paused", language: .simplifiedChinese) == "已暂停")
         #expect(AppLocalization.string("Paused", language: .traditionalChinese) == "已暫停")
         #expect(
-            FolderPreparationAccessibility.groupingStatusText(for: status, language: .english)
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .analyzing(completed: 0, total: 0), language: .english)
                 == "Finding similar shots…")
         #expect(
             FolderPreparationAccessibility.groupingStatusText(
-                for: status, language: .simplifiedChinese) == "正在查找相似照片…")
+                for: status, progress: .analyzing(completed: 0, total: 0),
+                language: .simplifiedChinese) == "正在查找相似照片…")
         #expect(
             FolderPreparationAccessibility.groupingStatusText(
-                for: status, language: .traditionalChinese) == "正在尋找相似相片…")
+                for: status, progress: .analyzing(completed: 0, total: 0),
+                language: .traditionalChinese) == "正在尋找相似相片…")
         #expect(
-            FolderPreparationAccessibility.groupingStatusText(for: pausedStatus, language: .english)
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .analyzing(completed: 12, total: 24), language: .english)
+                == "12 of 24 analyzed")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .analyzing(completed: 12, total: 24),
+                language: .simplifiedChinese) == "已分析 12 / 24")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .analyzing(completed: 12, total: 24),
+                language: .traditionalChinese) == "已分析 12 / 24")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .idle, language: .english) == "Waiting for photo count")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .idle, language: .simplifiedChinese) == "等待统计照片数量")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .idle, language: .traditionalChinese) == "等待統計相片數量")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .complete, groupCount: 1, language: .english) == "1 group")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .complete, groupCount: 3, language: .english) == "3 groups")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .complete, groupCount: 3, language: .simplifiedChinese)
+                == "3 组")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: status, progress: .complete, groupCount: 3, language: .traditionalChinese)
+                == "3 組")
+        #expect(
+            FolderPreparationAccessibility.groupingStatusText(
+                for: pausedStatus, progress: .analyzing(completed: 12, total: 24),
+                language: .english)
                 == "Paused")
         #expect(
             FolderPreparationAccessibility.groupingStatusText(
-                for: pausedStatus, language: .simplifiedChinese) == "已暂停")
+                for: pausedStatus, progress: .analyzing(completed: 12, total: 24),
+                language: .simplifiedChinese) == "已暂停")
         #expect(
             FolderPreparationAccessibility.groupingStatusText(
-                for: pausedStatus, language: .traditionalChinese) == "已暫停")
+                for: pausedStatus, progress: .analyzing(completed: 12, total: 24),
+                language: .traditionalChinese) == "已暫停")
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: .idle, isFindingSimilarShots: true,
+                groupingProgress: .analyzing(completed: 12, total: 24), language: .english)
+                == "Finding similar shots, 12 of 24 analyzed")
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: .idle, isFindingSimilarShots: true,
+                groupingProgress: .analyzing(completed: 12, total: 24),
+                language: .simplifiedChinese) == "正在查找相似照片，已分析 12 / 24")
+        #expect(
+            FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: .idle, isFindingSimilarShots: true,
+                groupingProgress: .analyzing(completed: 12, total: 24),
+                language: .traditionalChinese) == "正在尋找相似相片，已分析 12 / 24")
 
         let detected = DetailFocusFaceIndicator.detected
         let none = DetailFocusFaceIndicator.noFacesDetected

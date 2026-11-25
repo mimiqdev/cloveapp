@@ -133,16 +133,39 @@ enum FolderPreparationAccessibility {
     }
 
     static func groupingStatusText(
-        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
+        for status: FolderPreparationStatus,
+        progress: FolderGroupingProgress = .analyzing(completed: 0, total: 0),
+        groupCount: Int = 0,
+        isScanning: Bool = false,
+        language: ResolvedAppLanguage = .english
     ) -> String {
-        status.waitingReason != nil
-            ? AppLocalization.string("Paused", language: language)
-            : AppLocalization.string("Finding similar shots…", language: language)
+        if isScanning || progress == .idle {
+            if status.waitingReason != nil, status.totalPhotos > 0, !isScanning {
+                return AppLocalization.string("Paused", language: language)
+            }
+            return AppLocalization.string("Waiting for photo count", language: language)
+        }
+        switch progress {
+        case .idle:
+            return AppLocalization.string("Waiting for photo count", language: language)
+        case .analyzing(let completed, let total):
+            if status.waitingReason != nil {
+                return AppLocalization.string("Paused", language: language)
+            }
+            if total > 0 {
+                return AppLocalization.format(
+                    "%lld of %lld analyzed", language: language, Int64(completed), Int64(total))
+            }
+            return AppLocalization.string("Finding similar shots…", language: language)
+        case .complete:
+            return AppLocalization.format("%lld group", language: language, Int64(groupCount))
+        }
     }
 
     static func indicatorAccessibilityValue(
         for status: FolderPreparationStatus,
         isFindingSimilarShots: Bool = false,
+        groupingProgress: FolderGroupingProgress = .idle,
         language: ResolvedAppLanguage = .english
     ) -> String {
         switch status.phase {
@@ -151,7 +174,7 @@ enum FolderPreparationAccessibility {
             if let reason = status.waitingReason {
                 return waitingTitle(for: reason, language: language)
             }
-            return AppLocalization.string("Finding similar shots", language: language)
+            return groupingAccessibilityText(progress: groupingProgress, language: language)
         case .enumeratingUnknown:
             return AppLocalization.string("Scanning folder", language: language)
         case .preparing:
@@ -172,7 +195,7 @@ enum FolderPreparationAccessibility {
                 if let reason = status.waitingReason {
                     return waitingTitle(for: reason, language: language)
                 }
-                return AppLocalization.string("Finding similar shots", language: language)
+                return groupingAccessibilityText(progress: groupingProgress, language: language)
             }
             let ready = AppLocalization.format(
                 "%lld of %lld ready", language: language, Int64(status.readyForBothCount),
@@ -190,6 +213,18 @@ enum FolderPreparationAccessibility {
             return AppLocalization.format(
                 "Finished with %@, %@", language: language, issues, ready)
         }
+    }
+
+    private static func groupingAccessibilityText(
+        progress: FolderGroupingProgress, language: ResolvedAppLanguage
+    ) -> String {
+        let base = AppLocalization.string("Finding similar shots", language: language)
+        if case .analyzing(let completed, let total) = progress, total > 0 {
+            let count = AppLocalization.format(
+                "%lld of %lld analyzed", language: language, Int64(completed), Int64(total))
+            return AppLocalization.format("%@, %@", language: language, base, count)
+        }
+        return base
     }
 }
 
@@ -328,6 +363,14 @@ struct FolderPreparationIndicator: View {
         }
     }
 
+    private var indicatorAccessibilityValue: String {
+        FolderPreparationAccessibility.indicatorAccessibilityValue(
+            for: status,
+            isFindingSimilarShots: isGroupingInProgress,
+            groupingProgress: isGroupingInProgress ? browsing.groupingProgress : .idle,
+            language: language)
+    }
+
     @ViewBuilder
     private var indicatorButton: some View {
         let styledButton = Group {
@@ -347,12 +390,7 @@ struct FolderPreparationIndicator: View {
                     .accessibilityLabel(
                         AppLocalization.string("Folder preparation", language: language)
                     )
-                    .accessibilityValue(
-                        FolderPreparationAccessibility.indicatorAccessibilityValue(
-                            for: status,
-                            isFindingSimilarShots: isGroupingInProgress,
-                            language: language)
-                    )
+                    .accessibilityValue(indicatorAccessibilityValue)
                     .accessibilityHint(
                         AppLocalization.string(
                             "Shows folder analysis and preview preparation details.",
@@ -376,12 +414,7 @@ struct FolderPreparationIndicator: View {
                     .accessibilityLabel(
                         AppLocalization.string("Folder preparation", language: language)
                     )
-                    .accessibilityValue(
-                        FolderPreparationAccessibility.indicatorAccessibilityValue(
-                            for: status,
-                            isFindingSimilarShots: isGroupingInProgress,
-                            language: language)
-                    )
+                    .accessibilityValue(indicatorAccessibilityValue)
                     .accessibilityHint(
                         AppLocalization.string(
                             "Shows folder analysis and preview preparation details.",
@@ -405,12 +438,7 @@ struct FolderPreparationIndicator: View {
                 .accessibilityLabel(
                     AppLocalization.string("Folder preparation", language: language)
                 )
-                .accessibilityValue(
-                    FolderPreparationAccessibility.indicatorAccessibilityValue(
-                        for: status,
-                        isFindingSimilarShots: isGroupingInProgress,
-                        language: language)
-                )
+                .accessibilityValue(indicatorAccessibilityValue)
                 .accessibilityHint(
                     AppLocalization.string(
                         "Shows folder analysis and preview preparation details.",
@@ -472,10 +500,14 @@ struct FolderPreparationIndicator: View {
         {
             pausedGlyph
         } else if isGroupingInProgress, status.phase == .complete || status.phase == .idle {
-            ProgressView()
-                .controlSize(.small)
-                .tint(theme.tokens.group.color)
-                .scaleEffect(0.75)
+            if let fraction = browsing.groupingFraction {
+                progressRing(fraction: fraction, tint: theme.tokens.group.color)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(theme.tokens.group.color)
+                    .scaleEffect(0.75)
+            }
         } else {
             switch status.phase {
             case .idle:
@@ -486,21 +518,7 @@ struct FolderPreparationIndicator: View {
                     .tint(theme.tokens.accent.color)
                     .scaleEffect(0.75)
             case .preparing:
-                let fraction = status.readyFraction ?? 0
-                ZStack {
-                    Circle()
-                        .stroke(theme.tokens.secondaryText.color.opacity(0.24), lineWidth: 2)
-                    Circle()
-                        .trim(from: 0, to: fraction)
-                        .stroke(
-                            theme.tokens.accent.color,
-                            style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                        .animation(
-                            CloveMotion.progress(reduceMotion: reduceMotion),
-                            value: fraction)
-                }
+                progressRing(fraction: status.readyFraction ?? 0, tint: theme.tokens.accent.color)
             case .waiting:
                 pausedGlyph
             case .complete:
@@ -516,6 +534,23 @@ struct FolderPreparationIndicator: View {
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(Color.clove.status.failed)
             }
+        }
+    }
+
+    private func progressRing(fraction: Double, tint: Color) -> some View {
+        ZStack {
+            Circle()
+                .stroke(theme.tokens.secondaryText.color.opacity(0.24), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(
+                    tint,
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(
+                    CloveMotion.progress(reduceMotion: reduceMotion),
+                    value: fraction)
         }
     }
 
@@ -693,7 +728,7 @@ struct FolderPreparationDetails: View {
                     status.previews, language: language),
                 tint: barTint,
                 identifierPrefix: "clove.preparation.previews")
-            if browsing.isGroupingInProgress {
+            if browsing.similarGroupsEnabled {
                 Divider()
                 groupingRow
             }
@@ -704,31 +739,66 @@ struct FolderPreparationDetails: View {
 
     private var groupingRow: some View {
         let title = AppLocalization.string("Similar groups", language: language)
+        let isScanning = browsing.readingProgress != nil
+        let progress = browsing.groupingProgress
         let statusText = FolderPreparationAccessibility.groupingStatusText(
-            for: status, language: language)
+            for: status,
+            progress: progress,
+            groupCount: browsing.groups.count,
+            isScanning: isScanning,
+            language: language)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(title)
                     .font(.subheadline.weight(.medium))
                 Spacer(minLength: 8)
                 Text(statusText)
-                    .font(.caption)
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(Color.clove.text.secondary)
                     .accessibilityIdentifier("clove.preparation.grouping.status")
             }
-            Group {
+            groupingProgressView(progress: progress, isScanning: isScanning)
+                .progressViewStyle(.linear)
+                .accessibilityLabel(title)
+                .accessibilityValue(statusText)
+                .accessibilityIdentifier("clove.preparation.grouping.progress")
+        }
+    }
+
+    @ViewBuilder
+    private func groupingProgressView(
+        progress: FolderGroupingProgress, isScanning: Bool
+    ) -> some View {
+        if isScanning || progress == .idle {
+            let tint =
+                (status.waitingReason != nil && !isScanning && status.totalPhotos > 0)
+                ? theme.tokens.secondaryText.color
+                : theme.tokens.group.color
+            ProgressView(value: 0, total: 1)
+                .tint(tint)
+        } else {
+            switch progress {
+            case .idle:
+                ProgressView(value: 0, total: 1)
+                    .tint(theme.tokens.group.color)
+            case .analyzing(let completed, let total):
                 if status.waitingReason != nil {
-                    ProgressView(value: 0, total: 1)
+                    let clampedTotal = Double(max(total, 1))
+                    let clampedValue = Double(min(max(completed, 0), max(total, 1)))
+                    ProgressView(value: clampedValue, total: clampedTotal)
                         .tint(theme.tokens.secondaryText.color)
+                } else if total > 0 {
+                    let clampedValue = Double(min(max(completed, 0), total))
+                    ProgressView(value: clampedValue, total: Double(total))
+                        .tint(theme.tokens.group.color)
                 } else {
                     ProgressView()
                         .tint(theme.tokens.group.color)
                 }
+            case .complete:
+                ProgressView(value: 1, total: 1)
+                    .tint(theme.tokens.group.color)
             }
-            .progressViewStyle(.linear)
-            .accessibilityLabel(title)
-            .accessibilityValue(statusText)
-            .accessibilityIdentifier("clove.preparation.grouping.progress")
         }
     }
 

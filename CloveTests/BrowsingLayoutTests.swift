@@ -719,8 +719,10 @@ struct BrowsingLayoutTests {
                 ]) as? TestLibrary)
         let model = BrowsingModel(library: library)
         model.openFolder()
-        try await waitFor("grouping activity applied to model") {
-            model.isFindingSimilarShots && model.readingProgress == nil
+        try await waitFor("grouping progress applied to model") {
+            model.isFindingSimilarShots
+                && model.groupingProgress == .analyzing(completed: 12, total: 24)
+                && model.readingProgress == nil
         }
 
         // Subtitle helper returns real photo count and active filter counts while grouping runs.
@@ -738,10 +740,10 @@ struct BrowsingLayoutTests {
                 == "Rejected · \(rejectedCount)")
         model.setFilter(.all)
 
-        // Progress line is active when grouping without a waiting reason.
+        // Grouping never renders a static 100% top progress line; only scanning shows the line.
         let activeLine = GridScreen.progressLineState(browsing: model, similarGroupsEnabled: true)
-        #expect(activeLine.progress == 1)
-        #expect(activeLine.tone == .grouping)
+        #expect(activeLine.progress == nil)
+        #expect(activeLine.tone == .reading)
 
         // GridScreen mounts preparation indicator beside title during grouping.
         let box = TestHeaderFramesBox()
@@ -771,13 +773,32 @@ struct BrowsingLayoutTests {
                 && box.frames["clove.grid.preparation"] != nil
         }
 
-        // Pausing via location loss / waitingReason hides the active grouping line.
+        // Pausing via location loss / waitingReason also keeps progress line hidden.
         library.reportLocationLoss(.externalVolumeDisconnected)
         try await waitFor("waiting reason applied to model") {
             model.preparationStatus.waitingReason != nil
         }
         let pausedLine = GridScreen.progressLineState(browsing: model, similarGroupsEnabled: true)
         #expect(pausedLine.progress == nil)
+        #expect(pausedLine.tone == .reading)
+
+        // Scanning/reading progress still renders the top ProgressLine with tone .reading.
+        let readingLibrary = try #require(
+            TestLibrary.forLaunch(
+                environment: [
+                    TestLibrary.launchVariable: "1",
+                    "CLOVE_TEST_LIBRARY_OPENING": "reading",
+                ]) as? TestLibrary)
+        let readingModel = BrowsingModel(library: readingLibrary)
+        readingModel.openFolder()
+        try await waitFor("reading progress applied to model") {
+            readingModel.readingProgress != nil
+        }
+        let readingLine = GridScreen.progressLineState(
+            browsing: readingModel, similarGroupsEnabled: true)
+        let readingProgress = try #require(readingLine.progress)
+        #expect(abs(readingProgress - (12.0 / 36.0)) < 0.001)
+        #expect(readingLine.tone == .reading)
     }
 
     private func findCollectionView(in view: UIView) -> UICollectionView? {

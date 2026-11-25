@@ -131,11 +131,6 @@ struct GridScreen: View {
             let value = progress.total > 0 ? Double(progress.read) / Double(progress.total) : 0
             return (value, .reading)
         }
-        if browsing.isFindingSimilarShots, similarGroupsEnabled,
-            browsing.preparationStatus.waitingReason == nil
-        {
-            return (1, .grouping)
-        }
         return (nil, .reading)
     }
 
