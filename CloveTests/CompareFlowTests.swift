@@ -894,6 +894,9 @@ struct CompareFlowTests {
             // verify horizontal spans dynamically from mid-band pixels so center scrolling doesn't shift coordinates.
             let spans = try horizontalTileSpans(in: bActiveImage, y: 56)
             #expect(spans.count == 3)
+            let expectedGapPx = Int(FilmstripCurrentPhotoMarker.thumbnailSpacing * 2)
+            #expect(abs((spans[1].lowerBound - spans[0].upperBound - 1) - expectedGapPx) <= 1)
+            #expect(abs((spans[2].lowerBound - spans[1].upperBound - 1) - expectedGapPx) <= 1)
             let xA = (spans[0].lowerBound + spans[0].upperBound) / 2
             let xB = (spans[1].lowerBound + spans[1].upperBound) / 2
             let x3 = (spans[2].lowerBound + spans[2].upperBound) / 2

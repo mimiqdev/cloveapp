@@ -77,6 +77,10 @@ final class TestLibrary: FolderLibrary {
     /// names the pinned count. Nothing is written, and no cell names a photo the sample lacks.
     static let groupCountVariable = "CLOVE_TEST_LIBRARY_GROUP_COUNT"
 
+    /// The launch environment value that widens `burst-2696` with real additional photos so it
+    /// overflows an iPhone portrait filmstrip for Group Focus grid-picker UI tests.
+    static let overflowGroupVariable = "CLOVE_TEST_LIBRARY_OVERFLOW_GROUP"
+
     /// The launch environment value that holds a synthetic folder-preparation status for UI tests.
     static let preparationVariable = "CLOVE_TEST_LIBRARY_PREPARATION"
 
@@ -111,6 +115,7 @@ final class TestLibrary: FolderLibrary {
             drainDelay: Duration.milliseconds(
                 Int(environment[drainDelayVariable] ?? "") ?? 0),
             includeRasterSamples: environment[rasterSamplesVariable] == "1",
+            overflowGroup: environment[overflowGroupVariable] == "1",
             simulatedPhotosAuthorization: photosAuthorization(
                 named: environment[photosAuthorizationVariable]),
             simulatedPhotosSaveError: photosSaveError(
@@ -1137,6 +1142,7 @@ final class TestLibrary: FolderLibrary {
         locationLoss: FolderLocationLoss.Reason? = nil,
         drainDelay: Duration = .zero,
         includeRasterSamples: Bool = false,
+        overflowGroup: Bool = false,
         photosSaver: (any PhotosLibrarySaving)? = nil,
         simulatedPhotosAuthorization: PhotosAuthorizationState = .authorized,
         simulatedPhotosSaveError: PhotosSaveError? = nil,
@@ -1154,6 +1160,25 @@ final class TestLibrary: FolderLibrary {
                         captureTime: captureBase.addingTimeInterval(Double(index) * 4),
                         hasUTCOffset: true)),
                 marks: sampleMarks[index])
+        }
+        var groups = sampleGroups
+        if overflowGroup {
+            let extraNumbers = Array(2801...2806)
+            for (offset, number) in extraNumbers.enumerated() {
+                let stem = String(format: "MMQ%05d", number)
+                let captureTime = captureBase.addingTimeInterval(20 * 4 + Double(offset + 1) * 0.5)
+                photos.append(
+                    GridPhoto(
+                        id: samplePhoto(number),
+                        fileName: "\(stem).ARW",
+                        time: .known(PhotoTime(captureTime: captureTime, hasUTCOffset: true)),
+                        marks: PhotoMarks()))
+            }
+            if let burstIndex = groups.firstIndex(where: { $0.id.rawValue == "burst-2696" }) {
+                groups[burstIndex] = BrowsingGroup(
+                    id: groups[burstIndex].id,
+                    members: groups[burstIndex].members + extraNumbers.map(samplePhoto))
+            }
         }
         var companions = sampleCompanions
         if includeRasterSamples {
@@ -1177,7 +1202,7 @@ final class TestLibrary: FolderLibrary {
             companions[samplePhoto(2716)] = GridCompanions(hasHEIF: true)
         }
         return TestLibrary(
-            photos: photos, groups: sampleGroups, companions: companions,
+            photos: photos, groups: groups, companions: companions,
             failingMoveStemSuffix: failingMoveStemSuffix, readOnly: readOnly,
             detailImages: sampleDetailImages, failingStems: failingStems,
             failureReason: failureReason, locationLoss: locationLoss,

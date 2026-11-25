@@ -3194,17 +3194,38 @@ final class CloveFlowTests: XCTestCase {
 
     @MainActor
     func testGroupFocusGridPickerListsMembersSelectsAndDismisses() {
-        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        let app = launchSample([
+            "CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked",
+            "CLOVE_TEST_LIBRARY_OVERFLOW_GROUP": "1",
+        ])
         defer { app.terminate() }
         openLibrary(app)
 
-        // Timeline must keep the leading grid picker button hidden.
-        element(app, "clove.grid.photo.mmq02695").tap()
+        // Small group (3 members) fits in the filmstrip, so only the 36 pt fold button renders.
+        element(app, "clove.grid.group.burst-2678").tap()
         let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(waitForLabel("MMQ02678.ARW", fileName))
+        XCTAssertTrue(
+            element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        let foldButton = element(app, "clove.detail.filmstrip.group.fold")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), foldButton))
+        XCTAssertEqual(foldButton.frame.width, 36, accuracy: 1)
+        XCTAssertEqual(foldButton.frame.height, 36, accuracy: 1)
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.group.gridPicker").exists)
+        foldButton.tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "exists == false"),
+                element(app, "clove.detail.filmstrip.expandedGroup")))
+
+        // Timeline must keep the leading grid picker button hidden.
+        element(app, "clove.nav.back").tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+        element(app, "clove.grid.photo.mmq02695").tap()
         XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
         XCTAssertFalse(element(app, "clove.detail.filmstrip.group.gridPicker").exists)
 
-        // Enter Group Focus via the burst-2696 stack and Expand Group pill.
+        // Enter Group Focus on the overflowing burst-2696 (9 members) via the stack & Expand pill.
         let stack = element(app, "clove.detail.filmstrip.group.burst-2696")
         XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), stack))
         stack.tap()
@@ -3216,17 +3237,17 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
 
         let gridPickerButton = element(app, "clove.detail.filmstrip.group.gridPicker")
-        let foldButton = element(app, "clove.detail.filmstrip.group.fold")
         let firstMember = element(app, "clove.detail.filmstrip.mmq02696")
-        let thirdMember = element(app, "clove.detail.filmstrip.mmq02698")
         XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), gridPickerButton))
         XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), foldButton))
         XCTAssertLessThanOrEqual(gridPickerButton.frame.maxX, firstMember.frame.minX + 1)
-        XCTAssertGreaterThanOrEqual(foldButton.frame.minX, thirdMember.frame.maxX - 1)
+        XCTAssertGreaterThan(foldButton.frame.minX, firstMember.frame.maxX)
+        XCTAssertEqual(gridPickerButton.frame.width, 36, accuracy: 1)
+        XCTAssertEqual(gridPickerButton.frame.height, 36, accuracy: 1)
         XCTAssertEqual(gridPickerButton.frame.width, foldButton.frame.width, accuracy: 1)
         XCTAssertEqual(gridPickerButton.frame.height, foldButton.frame.height, accuracy: 1)
 
-        // Open the picker: shows every visible member, marks current, dismisses on Done.
+        // Open the picker: shows larger 3-column square thumbnails for visible members only.
         gridPickerButton.tap()
         let picker = element(app, "clove.detail.groupPicker")
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
@@ -3234,9 +3255,18 @@ final class CloveFlowTests: XCTestCase {
         let pick2696 = element(app, "clove.detail.groupPicker.photo.mmq02696")
         let pick2697 = element(app, "clove.detail.groupPicker.photo.mmq02697")
         let pick2698 = element(app, "clove.detail.groupPicker.photo.mmq02698")
+        let pick2801 = element(app, "clove.detail.groupPicker.photo.mmq02801")
+        let pick2806 = element(app, "clove.detail.groupPicker.photo.mmq02806")
         XCTAssertTrue(pick2696.waitForExistence(timeout: 5))
         XCTAssertTrue(pick2697.exists)
         XCTAssertTrue(pick2698.exists)
+        XCTAssertTrue(pick2801.exists)
+        XCTAssertTrue(pick2806.exists)
+        XCTAssertGreaterThan(pick2696.frame.width, 100)
+        XCTAssertEqual(pick2696.frame.width, pick2696.frame.height, accuracy: 2)
+        XCTAssertEqual(pick2696.frame.minY, pick2697.frame.minY, accuracy: 2)
+        XCTAssertEqual(pick2697.frame.minY, pick2698.frame.minY, accuracy: 2)
+        XCTAssertGreaterThan(pick2801.frame.minY, pick2696.frame.maxY)
         XCTAssertFalse(element(app, "clove.detail.groupPicker.photo.mmq02695").exists)
         XCTAssertFalse(element(app, "clove.detail.groupPicker.photo.mmq02699").exists)
         XCTAssertTrue(pick2696.isSelected)
@@ -3269,6 +3299,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.group.burst-2696").tap()
         XCTAssertTrue(
             element(app, "clove.detail.filmstrip.expandedGroup").waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), gridPickerButton))
         gridPickerButton.tap()
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
         XCTAssertTrue(

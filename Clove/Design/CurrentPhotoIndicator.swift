@@ -32,6 +32,7 @@ struct FilmstripCurrentPhotoMarker: View {
     static let size = CGSize(width: 12, height: 4)
     static let lift: CGFloat = 6
     static let gap: CGFloat = 2
+    static let thumbnailSpacing: CGFloat = 3
 
     var body: some View {
         Capsule()

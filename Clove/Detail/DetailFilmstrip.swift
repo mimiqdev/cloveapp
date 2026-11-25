@@ -8,10 +8,11 @@ import UIKit
 ///   collapsed group stacks (at `visibleMembers.count >= 2`). Never expands inline. Tapping the
 ///   already-selected collapsed stack, or dragging downward on any collapsed stack, enters Group
 ///   Focus. Tapping an unselected stack opens its Representative Photo in Timeline.
-/// - Group Focus (`expandedGroup != nil`): renders ONLY the expanded group's `visibleMembers` inside
-///   `ExpandedGroupSurface`, framed by permanently visible, non-scrolling high-contrast end caps: a
-///   leading `square.grid.2x2` grid picker button and a trailing `chevron.up` collapse cap. Dragging
-///   upward anywhere on the strip collapses back to Timeline.
+/// - Group Focus (`expandedGroup != nil`): renders ONLY the expanded group's `visibleMembers` with
+///   the same background-free floating presentation as Timeline, flanked by `36 × 36 pt` native
+///   Liquid Glass circular controls: a trailing `chevron.up` collapse button (always shown) and a
+///   leading `square.grid.2x2` grid picker button shown only when `visibleMembers` overflow the
+///   current filmstrip width. Dragging upward anywhere on the strip collapses back to Timeline.
 ///
 /// Both tracks live independently inside one constant-height band (`body`: `76 pt` standard,
 /// `62 pt` compact), keeping Timeline's `ScrollView` alive across Group Focus so collapsing never
@@ -24,24 +25,22 @@ struct DetailFilmstrip: View {
         let thumbnailWidth: CGFloat
         let thumbnailHeight: CGFloat
         let stackHeight: CGFloat
-        let timelineSpacing: CGFloat
         let bandHeight: CGFloat
-        let collapseCapWidth: CGFloat
+        let groupActionButtonSize: CGFloat
+        let groupActionSpacing: CGFloat
         let horizontalPadding: CGFloat
         let verticalTrackPadding: CGFloat
-        let groupTrayCornerRadius: CGFloat
         let groupStackPeek: CGFloat
 
         static let standard = Metrics(
             thumbnailWidth: 54,
             thumbnailHeight: 60,
             stackHeight: 64,
-            timelineSpacing: 8,
             bandHeight: 76,
-            collapseCapWidth: 30,
+            groupActionButtonSize: 36,
+            groupActionSpacing: 8,
             horizontalPadding: 10,
             verticalTrackPadding: 3,
-            groupTrayCornerRadius: 9,
             groupStackPeek: 4
         )
 
@@ -49,15 +48,16 @@ struct DetailFilmstrip: View {
             thumbnailWidth: 48,
             thumbnailHeight: 48,
             stackHeight: 52,
-            timelineSpacing: 4,
             bandHeight: 62,
-            collapseCapWidth: 28,
+            groupActionButtonSize: 36,
+            groupActionSpacing: 6,
             horizontalPadding: 8,
             verticalTrackPadding: 2,
-            groupTrayCornerRadius: 8,
             groupStackPeek: 4
         )
     }
+
+    static let thumbnailSpacing: CGFloat = FilmstripCurrentPhotoMarker.thumbnailSpacing
 
     let timeline: DetailTimeline
     let expandedGroup: ActiveBrowsingGroup?
@@ -73,7 +73,7 @@ struct DetailFilmstrip: View {
 
     private static let timelineViewportSpace = "clove.detail.filmstrip.timeline.viewport"
     private static let groupViewportSpace = "clove.detail.filmstrip.group.viewport"
-    private static let groupRestingSpacing: CGFloat = 3
+    private static let groupRestingSpacing: CGFloat = thumbnailSpacing
     private static let groupCompressedSpacing: CGFloat = -8
     private static let rollOffset: CGFloat = 18
     private static let rollDegrees: Double = 24
@@ -81,6 +81,7 @@ struct DetailFilmstrip: View {
 
     @State private var timelineLayoutState = FilmstripLayoutState()
     @State private var groupLayoutState = FilmstripLayoutState()
+    @State private var groupTrackWidth: CGFloat = 0
     @State private var isTrackingVerticalStackDrag = false
     @State private var lastVerticalStackDragDate = Date.distantPast
     @State private var isTrackingVerticalGroupDrag = false
@@ -147,6 +148,36 @@ struct DetailFilmstrip: View {
         _groupOpacity = State(initialValue: isExpanded ? 1 : 0)
     }
 
+    static func showsGridPickerButton(
+        memberCount: Int,
+        trackWidth: CGFloat,
+        metrics: Metrics
+    ) -> Bool {
+        guard trackWidth > 0, memberCount > 1 else { return false }
+        let availableWithoutPicker =
+            trackWidth
+            - 2 * metrics.horizontalPadding
+            - metrics.groupActionButtonSize
+            - metrics.groupActionSpacing
+        let totalMembersWidth =
+            CGFloat(memberCount) * metrics.thumbnailWidth
+            + CGFloat(max(0, memberCount - 1)) * Self.thumbnailSpacing
+        return totalMembersWidth > availableWithoutPicker + 0.5
+    }
+
+    private func showsGridPicker(for group: ActiveBrowsingGroup) -> Bool {
+        Self.showsGridPickerButton(
+            memberCount: group.visibleMembers.count,
+            trackWidth: groupTrackWidth,
+            metrics: metrics
+        )
+    }
+
+    private var activeShowsGridPicker: Bool {
+        guard let expandedGroup else { return false }
+        return showsGridPicker(for: expandedGroup)
+    }
+
     var body: some View {
         ZStack {
             timelineTrack
@@ -164,6 +195,32 @@ struct DetailFilmstrip: View {
         .onChange(of: expandedGroup?.id) { oldID, newID in
             handleLevelTransition(from: oldID, to: newID)
         }
+        .onChange(of: gridPickerDismissTrigger) { _, _ in
+            presentedGridPickerMode = nil
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                presentedGridPickerMode = nil
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: {
+                    presentedGridPickerMode == .sheet
+                        && expandedGroup != nil
+                        && activeShowsGridPicker
+                        && scenePhase == .active
+                },
+                set: {
+                    if !$0, presentedGridPickerMode == .sheet {
+                        presentedGridPickerMode = nil
+                    }
+                })
+        ) {
+            if let sheetGroup = expandedGroup ?? lastActiveGroup {
+                gridPickerContent(for: sheetGroup, showsDoneButton: true)
+            }
+        }
         .onDisappear {
             levelTransitionTask?.cancel()
             exitingGroupTask?.cancel()
@@ -180,7 +237,7 @@ struct DetailFilmstrip: View {
     private var timelineTrack: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .bottom, spacing: metrics.timelineSpacing) {
+                LazyHStack(alignment: .bottom, spacing: Self.thumbnailSpacing) {
                     ForEach(timeline.slots) { slot in
                         timelineSlotView(slot)
                     }
@@ -239,16 +296,29 @@ struct DetailFilmstrip: View {
             CGFloat(group.visibleMembers.count) * metrics.thumbnailWidth
                 + CGFloat(max(0, group.visibleMembers.count - 1)) * groupMemberSpacing
         )
+        let showsPicker = showsGridPicker(for: group)
 
         return Color.clear
             .frame(
                 maxWidth: .infinity, minHeight: metrics.bandHeight, maxHeight: metrics.bandHeight
             )
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.width
+            } action: {
+                if abs(groupTrackWidth - $0) > 0.5 {
+                    groupTrackWidth = $0
+                }
+            }
             .overlay {
-                HStack(alignment: .bottom, spacing: 3) {
-                    gridPickerCapButton(for: group)
-                        .reportTapPickerFrame("clove.detail.filmstrip.group.gridPicker")
-                        .layoutPriority(1)
+                HStack(alignment: .bottom, spacing: metrics.groupActionSpacing) {
+                    if showsPicker {
+                        gridPickerButton(for: group)
+                            .frame(
+                                width: metrics.groupActionButtonSize,
+                                height: metrics.thumbnailHeight
+                            )
+                            .layoutPriority(1)
+                    }
 
                     ScrollViewReader { proxy in
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -299,13 +369,12 @@ struct DetailFilmstrip: View {
                     .frame(maxWidth: currentMembersWidth)
                     .frame(height: metrics.thumbnailHeight + FilmstripCurrentPhotoMarker.lift)
 
-                    collapseCapButton
-                        .reportTapPickerFrame("clove.detail.filmstrip.group.fold")
+                    collapseButton
+                        .frame(
+                            width: metrics.groupActionButtonSize,
+                            height: metrics.thumbnailHeight
+                        )
                         .layoutPriority(1)
-                }
-                .padding(3)
-                .background {
-                    ExpandedGroupSurface(cornerRadius: metrics.groupTrayCornerRadius)
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("clove.detail.filmstrip.expandedGroup")
@@ -356,10 +425,6 @@ struct DetailFilmstrip: View {
             .accessibilityHidden(expandedGroup == nil)
     }
 
-    private var groupCapCornerRadius: CGFloat {
-        max(5, metrics.groupTrayCornerRadius - 3)
-    }
-
     private var gridPickerPresentationMode: GroupPhotoGridPickerPresentationMode {
         GroupPhotoGridPickerPresentationMode.resolved(horizontalSizeClass: horizontalSizeClass)
     }
@@ -367,6 +432,7 @@ struct DetailFilmstrip: View {
     private var gridPickerDismissTrigger: FilmstripGridPickerDismissTrigger {
         FilmstripGridPickerDismissTrigger(
             expandedGroupID: expandedGroup?.id,
+            showsGridPicker: activeShowsGridPicker,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isDuoExpanded: isDuoExpanded,
@@ -376,28 +442,39 @@ struct DetailFilmstrip: View {
             externalToken: gridPickerDismissToken)
     }
 
-    private func gridPickerCapButton(for group: ActiveBrowsingGroup) -> some View {
+    private func groupActionButtonLabel(symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Color.clove.text.primary)
+            .frame(width: metrics.groupActionButtonSize, height: metrics.groupActionButtonSize)
+            .contentShape(Circle())
+            .cloveGlass(in: Circle())
+    }
+
+    private func gridPickerButton(for group: ActiveBrowsingGroup) -> some View {
         Button {
-            guard expandedGroup != nil, isGridPickerAnchorReady, scenePhase == .active else {
+            guard let expandedGroup,
+                showsGridPicker(for: expandedGroup),
+                isGridPickerAnchorReady,
+                scenePhase == .active
+            else {
                 return
             }
             tapPicker?.dismiss()
             presentedGridPickerMode = gridPickerPresentationMode
         } label: {
-            ExpandedGroupCapLabel(
-                symbol: "square.grid.2x2",
-                width: metrics.collapseCapWidth,
-                height: metrics.thumbnailHeight,
-                cornerRadius: groupCapCornerRadius)
+            groupActionButtonLabel(symbol: "square.grid.2x2")
         }
         .buttonStyle(.cloveGlassPress)
         .accessibilityLabel(AppLocalization.string("Show group photos", language: language))
         .accessibilityIdentifier("clove.detail.filmstrip.group.gridPicker")
+        .reportTapPickerFrame("clove.detail.filmstrip.group.gridPicker")
         .popover(
             isPresented: Binding(
                 get: {
                     presentedGridPickerMode == .popover
                         && expandedGroup != nil
+                        && activeShowsGridPicker
                         && isGridPickerAnchorReady
                         && scenePhase == .active
                 },
@@ -411,25 +488,10 @@ struct DetailFilmstrip: View {
         ) {
             gridPickerContent(for: expandedGroup ?? group, showsDoneButton: false)
         }
-        .sheet(
-            isPresented: Binding(
-                get: {
-                    presentedGridPickerMode == .sheet
-                        && expandedGroup != nil
-                        && isGridPickerAnchorReady
-                        && scenePhase == .active
-                },
-                set: {
-                    if !$0, presentedGridPickerMode == .sheet {
-                        presentedGridPickerMode = nil
-                    }
-                })
-        ) {
-            gridPickerContent(for: expandedGroup ?? group, showsDoneButton: true)
-        }
         .onChange(of: tapPickerTriggerRequest) { _, request in
             if request?.id == "clove.detail.filmstrip.group.gridPicker",
-                expandedGroup != nil,
+                let expandedGroup,
+                showsGridPicker(for: expandedGroup),
                 isGridPickerAnchorReady,
                 scenePhase == .active
             {
@@ -438,17 +500,13 @@ struct DetailFilmstrip: View {
             }
         }
         .onChange(of: gridPickerPresentTrigger) { _, _ in
-            if expandedGroup != nil, isGridPickerAnchorReady, scenePhase == .active {
+            if let expandedGroup,
+                showsGridPicker(for: expandedGroup),
+                isGridPickerAnchorReady,
+                scenePhase == .active
+            {
                 tapPicker?.dismiss()
                 presentedGridPickerMode = gridPickerPresentationMode
-            }
-        }
-        .onChange(of: gridPickerDismissTrigger) { _, _ in
-            presentedGridPickerMode = nil
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active {
-                presentedGridPickerMode = nil
             }
         }
         .onAppear {
@@ -479,20 +537,17 @@ struct DetailFilmstrip: View {
         .environment(\.locale, language.locale)
     }
 
-    private var collapseCapButton: some View {
+    private var collapseButton: some View {
         Button {
             guard expandedGroup != nil else { return }
             collapseGroup()
         } label: {
-            ExpandedGroupCapLabel(
-                symbol: "chevron.up",
-                width: metrics.collapseCapWidth,
-                height: metrics.thumbnailHeight,
-                cornerRadius: groupCapCornerRadius)
+            groupActionButtonLabel(symbol: "chevron.up")
         }
         .buttonStyle(.cloveGlassPress)
         .accessibilityLabel(AppLocalization.string("Collapse group", language: language))
         .accessibilityIdentifier("clove.detail.filmstrip.group.fold")
+        .reportTapPickerFrame("clove.detail.filmstrip.group.fold")
     }
 
     // MARK: - Level Transition Choreography
@@ -927,33 +982,9 @@ private struct FilmstripGroupStack: View {
     }
 }
 
-private struct ExpandedGroupCapLabel: View {
-    let symbol: String
-    let width: CGFloat
-    let height: CGFloat
-    let cornerRadius: CGFloat
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Color.clove.bg.canvas)
-            .frame(width: width, height: height)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.clove.text.primary)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .strokeBorder(
-                                Color.clove.bg.canvas.opacity(0.24),
-                                lineWidth: 0.75)
-                    }
-            }
-            .contentShape(Rectangle())
-    }
-}
-
 private struct FilmstripGridPickerDismissTrigger: Equatable {
     let expandedGroupID: GroupID?
+    let showsGridPicker: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
     let verticalSizeClass: UserInterfaceSizeClass?
     let isDuoExpanded: Bool

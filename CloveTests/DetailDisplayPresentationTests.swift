@@ -5189,25 +5189,101 @@ struct DetailDisplayPresentationTests {
         #expect(halfFoldFrames.frames["clove.detail.photoCornerOverlay"] == nil)
     }
 
-    @Test func expandedFilmstripEndCapsStaySymmetricalHighContrastAndKeepTimelineClean()
+    @Test func showsGridPickerButtonTracksOuterTrackWidthWithoutOscillation() {
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 10, trackWidth: 0, metrics: .standard))
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 1, trackWidth: 200, metrics: .standard))
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 0, trackWidth: 200, metrics: .standard))
+
+        // iPhone portrait (402 pt standard): 5 members (282 pt) fit; 6 members (339 pt > 338 pt) overflow.
+        for count in 2...5 {
+            #expect(
+                !DetailFilmstrip.showsGridPickerButton(
+                    memberCount: count, trackWidth: 402, metrics: .standard))
+        }
+        #expect(
+            DetailFilmstrip.showsGridPickerButton(
+                memberCount: 6, trackWidth: 402, metrics: .standard))
+        #expect(
+            DetailFilmstrip.showsGridPickerButton(
+                memberCount: 8, trackWidth: 390, metrics: .standard))
+
+        // Wider iPhone Pro Max portrait (440 pt): 6 members (339 pt) fit; 7 members (396 pt) overflow.
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 6, trackWidth: 440, metrics: .standard))
+        #expect(
+            DetailFilmstrip.showsGridPickerButton(
+                memberCount: 7, trackWidth: 440, metrics: .standard))
+
+        // Compact iPhone landscape (540 pt): 9 members (456 pt) fit; 10 members (507 pt) overflow.
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 9, trackWidth: 540, metrics: .compact))
+        #expect(
+            DetailFilmstrip.showsGridPickerButton(
+                memberCount: 10, trackWidth: 540, metrics: .compact))
+
+        // Expanded Duo Focus (650 pt) & iPad Focus (900 pt).
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 10, trackWidth: 650, metrics: .standard))
+        #expect(
+            DetailFilmstrip.showsGridPickerButton(
+                memberCount: 11, trackWidth: 650, metrics: .standard))
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 14, trackWidth: 900, metrics: .standard))
+        #expect(
+            DetailFilmstrip.showsGridPickerButton(
+                memberCount: 15, trackWidth: 900, metrics: .standard))
+
+        // Exact fit with +0.5 tolerance does not oscillate or show spuriously.
+        let exactFiveTrackWidth =
+            2 * DetailFilmstrip.Metrics.standard.horizontalPadding
+            + DetailFilmstrip.Metrics.standard.groupActionButtonSize
+            + DetailFilmstrip.Metrics.standard.groupActionSpacing
+            + (5 * DetailFilmstrip.Metrics.standard.thumbnailWidth
+                + 4 * DetailFilmstrip.thumbnailSpacing)
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 5, trackWidth: exactFiveTrackWidth, metrics: .standard))
+        #expect(
+            !DetailFilmstrip.showsGridPickerButton(
+                memberCount: 5, trackWidth: exactFiveTrackWidth - 0.4, metrics: .standard))
+        #expect(
+            DetailFilmstrip.showsGridPickerButton(
+                memberCount: 5, trackWidth: exactFiveTrackWidth - 0.6, metrics: .standard))
+    }
+
+    @Test func expandedFilmstripUsesGlassControlsWithoutTrayAndGatesGridPickerByOverflow()
         async throws
     {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let folder = FolderIdentity(rawValue: "filmstrip-caps-test")
-        let photos = (1...5).map { index in
+        let photos = (1...12).map { index in
             GridPhoto(
                 id: PhotoIdentity(
-                    folderID: folder, relativeFolderPath: "", stem: "CAP00\(index)"),
-                fileName: "CAP00\(index).ARW",
+                    folderID: folder, relativeFolderPath: "",
+                    stem: String(format: "CAP%03d", index)),
+                fileName: String(format: "CAP%03d.ARW", index),
                 time: .unavailable,
                 marks: PhotoMarks())
         }
-        let groupID = GroupID(rawValue: "caps-group")
+        let smallGroupID = GroupID(rawValue: "small-group")
+        let wideGroupID = GroupID(rawValue: "wide-group")
         let groups = [
-            BrowsingGroup(id: groupID, members: [photos[1].id, photos[2].id, photos[3].id])
+            BrowsingGroup(id: smallGroupID, members: Array(photos[1...3].map(\.id))),
+            BrowsingGroup(id: wideGroupID, members: Array(photos[4...11].map(\.id))),
         ]
         let timeline = DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
-        let expanded = try #require(timeline.activeGroup(with: groupID))
+        let smallExpanded = try #require(timeline.activeGroup(with: smallGroupID))
+        let wideExpanded = try #require(timeline.activeGroup(with: wideGroupID))
 
         for metrics in [DetailFilmstrip.Metrics.standard, .compact] {
             for theme in [CloveTheme.light, CloveTheme.dark, CloveTheme.nord] {
@@ -5272,8 +5348,32 @@ struct DetailDisplayPresentationTests {
                     #expect(framesBox.frames["clove.detail.filmstrip.group.fold"] == nil)
                     #expect(framesBox.frames["clove.detail.filmstrip.expandedGroup"] == nil)
 
-                    state.expandedGroup = expanded
-                    try await waitFor("Expanded group caps did not lay out") {
+                    // 1. Small 3-photo group fits within 402 pt: only trailing 36 pt fold renders.
+                    state.expandedGroup = smallExpanded
+                    try await waitFor("Small expanded group fold button did not lay out") {
+                        framesBox.frames["clove.detail.filmstrip.group.fold"] != nil
+                            && framesBox.frames["clove.detail.filmstrip.expandedGroup"] != nil
+                    }
+                    try await Task.sleep(for: .milliseconds(320))
+                    #expect(framesBox.frames["clove.detail.filmstrip.group.gridPicker"] == nil)
+
+                    let smallStripFrame = try #require(framesBox.frames["clove.detail.filmstrip"])
+                    let smallGroupFrame = try #require(
+                        framesBox.frames["clove.detail.filmstrip.expandedGroup"])
+                    let smallFoldFrame = try #require(
+                        framesBox.frames["clove.detail.filmstrip.group.fold"])
+                    #expect(abs(smallStripFrame.height - metrics.bandHeight) <= 0.5)
+                    #expect(abs(smallFoldFrame.width - metrics.groupActionButtonSize) <= 0.5)
+                    #expect(abs(smallFoldFrame.height - metrics.groupActionButtonSize) <= 0.5)
+                    #expect(
+                        abs(
+                            (smallGroupFrame.maxY - metrics.thumbnailHeight / 2)
+                                - smallFoldFrame.midY) <= 0.5)
+
+                    // 2. Overflowing 8-photo group renders both 36 pt circular buttons cleanly.
+                    state.current = photos[4].id
+                    state.expandedGroup = wideExpanded
+                    try await waitFor("Overflowing expanded group buttons did not lay out") {
                         framesBox.frames["clove.detail.filmstrip.group.gridPicker"] != nil
                             && framesBox.frames["clove.detail.filmstrip.group.fold"] != nil
                             && framesBox.frames["clove.detail.filmstrip.expandedGroup"] != nil
@@ -5282,7 +5382,7 @@ struct DetailDisplayPresentationTests {
 
                     let expandedStripFrame = try #require(
                         framesBox.frames["clove.detail.filmstrip"])
-                    let trayFrame = try #require(
+                    let groupFrame = try #require(
                         framesBox.frames["clove.detail.filmstrip.expandedGroup"])
                     let gridPickerFrame = try #require(
                         framesBox.frames["clove.detail.filmstrip.group.gridPicker"])
@@ -5290,19 +5390,22 @@ struct DetailDisplayPresentationTests {
                         framesBox.frames["clove.detail.filmstrip.group.fold"])
 
                     #expect(abs(expandedStripFrame.height - metrics.bandHeight) <= 0.5)
-                    #expect(abs(gridPickerFrame.width - metrics.collapseCapWidth) <= 0.5)
-                    #expect(abs(foldFrame.width - metrics.collapseCapWidth) <= 0.5)
-                    #expect(abs(gridPickerFrame.height - metrics.thumbnailHeight) <= 0.5)
-                    #expect(abs(foldFrame.height - metrics.thumbnailHeight) <= 0.5)
+                    #expect(abs(gridPickerFrame.width - metrics.groupActionButtonSize) <= 0.5)
+                    #expect(abs(gridPickerFrame.height - metrics.groupActionButtonSize) <= 0.5)
+                    #expect(abs(foldFrame.width - metrics.groupActionButtonSize) <= 0.5)
+                    #expect(abs(foldFrame.height - metrics.groupActionButtonSize) <= 0.5)
                     #expect(gridPickerFrame.maxX < foldFrame.minX)
                     #expect(abs(gridPickerFrame.midY - foldFrame.midY) <= 0.5)
-                    #expect(gridPickerFrame.minX >= trayFrame.minX - 0.5)
-                    #expect(foldFrame.maxX <= trayFrame.maxX + 0.5)
-                    #expect(abs((trayFrame.maxY - 3) - gridPickerFrame.maxY) <= 0.5)
-                    #expect(abs((trayFrame.maxY - 3) - foldFrame.maxY) <= 0.5)
+                    #expect(gridPickerFrame.minX >= groupFrame.minX - 0.5)
+                    #expect(foldFrame.maxX <= groupFrame.maxX + 0.5)
+                    #expect(
+                        abs((groupFrame.maxY - metrics.thumbnailHeight / 2) - gridPickerFrame.midY)
+                            <= 0.5)
+                    #expect(
+                        abs((groupFrame.maxY - metrics.thumbnailHeight / 2) - foldFrame.midY)
+                            <= 0.5)
 
-                    // Sample the solid top-interior corner of each end cap to confirm both render
-                    // the opaque inverted primaryText backing over both white and black backdrops.
+                    // Verify no ExpandedGroupSurface tray tint and circular glass button bounds.
                     let format = UIGraphicsImageRendererFormat()
                     format.scale = 1
                     let snapshot = UIGraphicsImageRenderer(
@@ -5311,14 +5414,24 @@ struct DetailDisplayPresentationTests {
                         _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
                     }
                     let cgImage = try #require(snapshot.cgImage)
-                    let expectedBacking = theme.tokens.primaryText
-                    for capFrame in [gridPickerFrame, foldFrame] {
-                        let sample = try rgbaPixel(
+                    let expectedBackdrop = backdrop == .white ? 1.0 : 0.0
+                    let gapSample = try rgbaPixel(
+                        in: cgImage,
+                        at: CGPoint(
+                            x: foldFrame.minX - metrics.groupActionSpacing / 2,
+                            y: groupFrame.maxY - 4))
+                    #expect(abs(gapSample.r - expectedBackdrop) < 0.03)
+                    #expect(abs(gapSample.g - expectedBackdrop) < 0.03)
+                    #expect(abs(gapSample.b - expectedBackdrop) < 0.03)
+
+                    // Corners outside the inscribed circle show raw backdrop (not opaque rectangles).
+                    for buttonFrame in [gridPickerFrame, foldFrame] {
+                        let cornerSample = try rgbaPixel(
                             in: cgImage,
-                            at: CGPoint(x: capFrame.minX + 5, y: capFrame.minY + 5))
-                        #expect(abs(sample.r - expectedBacking.red) < 0.08)
-                        #expect(abs(sample.g - expectedBacking.green) < 0.08)
-                        #expect(abs(sample.b - expectedBacking.blue) < 0.08)
+                            at: CGPoint(x: buttonFrame.minX + 1, y: buttonFrame.minY + 1))
+                        #expect(abs(cornerSample.r - expectedBackdrop) < 0.06)
+                        #expect(abs(cornerSample.g - expectedBackdrop) < 0.06)
+                        #expect(abs(cornerSample.b - expectedBackdrop) < 0.06)
                     }
                 }
             }
@@ -5332,29 +5445,35 @@ struct DetailDisplayPresentationTests {
         #expect(
             GroupPhotoGridPickerPresentationMode.resolved(horizontalSizeClass: .compact) == .sheet)
         #expect(GroupPhotoGridPickerPresentationMode.resolved(horizontalSizeClass: nil) == .sheet)
-        #expect(GroupPhotoGridPicker.popoverHeight(memberCount: 3, compactHeight: false) < 200)
-        #expect(GroupPhotoGridPicker.popoverHeight(memberCount: 40, compactHeight: false) <= 400)
-        #expect(GroupPhotoGridPicker.popoverHeight(memberCount: 40, compactHeight: true) <= 240)
+        #expect(GroupPhotoGridPicker.popoverHeight(memberCount: 3, compactHeight: false) < 220)
+        let tallRegular = GroupPhotoGridPicker.popoverHeight(memberCount: 40, compactHeight: false)
+        #expect(tallRegular > 400 && tallRegular <= 520)
+        let tallCompact = GroupPhotoGridPicker.popoverHeight(memberCount: 40, compactHeight: true)
+        #expect(tallCompact > 240 && tallCompact <= 280)
 
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let folder = FolderIdentity(rawValue: "grid-picker-presentation")
-        let photos = (1...8).map { index in
+        let photos = (1...16).map { index in
             GridPhoto(
                 id: PhotoIdentity(
-                    folderID: folder, relativeFolderPath: "", stem: "GRP00\(index)"),
-                fileName: "GRP00\(index).ARW",
+                    folderID: folder, relativeFolderPath: "",
+                    stem: String(format: "GRP%03d", index)),
+                fileName: String(format: "GRP%03d.ARW", index),
                 time: .unavailable,
                 marks: PhotoMarks())
         }
         let firstGroupID = GroupID(rawValue: "group-a")
         let secondGroupID = GroupID(rawValue: "group-b")
         let groups = [
-            BrowsingGroup(id: firstGroupID, members: Array(photos[0..<4].map(\.id))),
-            BrowsingGroup(id: secondGroupID, members: Array(photos[4..<8].map(\.id))),
+            BrowsingGroup(id: firstGroupID, members: Array(photos[0..<8].map(\.id))),
+            BrowsingGroup(id: secondGroupID, members: Array(photos[8..<16].map(\.id))),
         ]
         let timeline = DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
         let firstGroup = try #require(timeline.activeGroup(with: firstGroupID))
         let secondGroup = try #require(timeline.activeGroup(with: secondGroupID))
+        let filteredFirstTimeline = DetailTimeline(
+            photos: Array(photos[0..<3]), groups: groups, groupsEnabled: true)
+        let shrunkFirstGroup = try #require(filteredFirstTimeline.activeGroup(with: firstGroupID))
 
         let state = FilmstripCapTestState(
             timeline: timeline,
@@ -5435,7 +5554,7 @@ struct DetailDisplayPresentationTests {
             self.topPresentedViewController(from: host) != nil
         }
         state.expandedGroup = secondGroup
-        state.current = photos[4].id
+        state.current = photos[8].id
         try await waitFor("popover did not dismiss on group ID change") {
             self.topPresentedViewController(from: host) == nil
         }
@@ -5462,6 +5581,20 @@ struct DetailDisplayPresentationTests {
         }
         state.dismissToken += 1
         try await waitFor("popover did not dismiss on dismissToken change") {
+            self.topPresentedViewController(from: host) == nil
+        }
+
+        // 8. Reducing visible members so the group no longer overflows auto-dismisses the picker.
+        state.expandedGroup = firstGroup
+        state.current = photos[0].id
+        try await Task.sleep(for: .milliseconds(80))
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("popover did not re-present before overflow reduction") {
+            self.topPresentedViewController(from: host) != nil
+        }
+        state.timeline = filteredFirstTimeline
+        state.expandedGroup = shrunkFirstGroup
+        try await waitFor("popover did not dismiss when group stopped overflowing") {
             self.topPresentedViewController(from: host) == nil
         }
     }
@@ -5578,8 +5711,9 @@ struct DetailDisplayPresentationTests {
 
         host.dismiss(animated: false)
 
-        // 3. Visual indicators inside GroupPhotoGridPicker: current ring, green label, reject dim.
+        // 3. Visual indicators and 3-column >130 pt tiles inside GroupPhotoGridPicker popover.
         let fourGroup = try #require(filteredSmall.activeGroup(with: groupID))
+        let pickerWidth = GroupPhotoGridPicker.popoverWidth
         let pickerHeight = GroupPhotoGridPicker.popoverHeight(
             memberCount: fourGroup.visibleMembers.count, compactHeight: false)
         let pickerHost = UIHostingController(
@@ -5593,8 +5727,10 @@ struct DetailDisplayPresentationTests {
             .ignoresSafeArea()
             .environment(\.cloveTheme, .dark))
         pickerHost.safeAreaRegions = []
+        pickerHost.view.backgroundColor = .black
         let pickerWindow = UIWindow(windowScene: scene)
-        pickerWindow.frame = CGRect(x: 0, y: 120, width: 340, height: pickerHeight)
+        pickerWindow.backgroundColor = .black
+        pickerWindow.frame = CGRect(x: 0, y: 120, width: pickerWidth, height: pickerHeight)
         pickerWindow.rootViewController = pickerHost
         pickerWindow.makeKeyAndVisible()
         defer {
@@ -5615,28 +5751,34 @@ struct DetailDisplayPresentationTests {
         }
         let cgImage = try #require(image.cgImage)
 
-        // Locate exact pixel bounds of the unmarked white thumbnail (cell index 3).
-        let cellSide: CGFloat = (340 - 24 - 18) / 4
-        let stepX: CGFloat = cellSide + 6
-        func cellMinX(_ index: Int) -> CGFloat { (12 + CGFloat(index) * stepX) * scale }
-        let normalCenterX = cellMinX(3) + (cellSide * scale) / 2
+        // 3-column grid: indices 0, 1, 2 sit on row 0; index 3 sits on row 1 col 0.
+        let columns = CGFloat(GroupPhotoGridPicker.popoverColumns)
+        let padding = GroupPhotoGridPicker.gridPadding
+        let spacing = GroupPhotoGridPicker.gridSpacing
+        let cellSide = (pickerWidth - padding * 2 - (columns - 1) * spacing) / columns
+        #expect(cellSide > 130)
+        let step = cellSide + spacing
+        func colMinX(_ col: Int) -> CGFloat { (padding + CGFloat(col) * step) * scale }
+        let row0Col2CenterX = colMinX(2) + (cellSide * scale) / 2
         var whiteRowYs: [Int] = []
         for y in 0..<cgImage.height {
-            let probe = try rgbaPixel(in: cgImage, at: CGPoint(x: normalCenterX, y: CGFloat(y)))
+            let probe = try rgbaPixel(
+                in: cgImage, at: CGPoint(x: colMinX(1) + (cellSide * scale) / 2, y: CGFloat(y)))
             if probe.r > 0.9, probe.g > 0.9, probe.b > 0.9 {
                 whiteRowYs.append(y)
             }
         }
-        let cellTopY = CGFloat(try #require(whiteRowYs.first))
-        let cellBottomY = CGFloat(try #require(whiteRowYs.last))
-        let cellCenterY = (cellTopY + cellBottomY) / 2
-        #expect(cellBottomY - cellTopY >= 130)
+        let row0TopY = CGFloat(try #require(whiteRowYs.first))
+        let row0BottomY = CGFloat(try #require(whiteRowYs.last))
+        let row0CenterY = (row0TopY + row0BottomY) / 2
+        let row1CenterY = row0CenterY + step * scale
+        #expect(row0BottomY - row0TopY >= 260)
 
-        // Rejected photo (index 2) renders noticeably dimmer than normal photo (index 3).
+        // Rejected photo (index 2, row 0 col 2) renders noticeably dimmer than normal photo (index 3, row 1 col 0).
         let rejectedCenter = try rgbaPixel(
-            in: cgImage, at: CGPoint(x: cellMinX(2) + (cellSide * scale) / 2, y: cellCenterY))
+            in: cgImage, at: CGPoint(x: row0Col2CenterX, y: row0CenterY))
         let normalCenter = try rgbaPixel(
-            in: cgImage, at: CGPoint(x: normalCenterX, y: cellCenterY))
+            in: cgImage, at: CGPoint(x: colMinX(0) + (cellSide * scale) / 2, y: row1CenterY))
         #expect(normalCenter.r > 0.9)
         #expect(rejectedCenter.r < normalCenter.r - 0.35)
 
@@ -5644,14 +5786,14 @@ struct DetailDisplayPresentationTests {
         let accent = CloveTheme.dark.tokens.accent
         let hasAccentOnCell0 = try (0...10).contains { dx in
             let sample = try rgbaPixel(
-                in: cgImage, at: CGPoint(x: cellMinX(0) - 2 + CGFloat(dx), y: cellCenterY))
+                in: cgImage, at: CGPoint(x: colMinX(0) - 2 + CGFloat(dx), y: row0CenterY))
             return abs(sample.r - accent.red) < 0.15
                 && abs(sample.g - accent.green) < 0.15
                 && abs(sample.b - accent.blue) < 0.15
         }
         let hasAccentOnCell3 = try (0...10).contains { dx in
             let sample = try rgbaPixel(
-                in: cgImage, at: CGPoint(x: cellMinX(3) - 2 + CGFloat(dx), y: cellCenterY))
+                in: cgImage, at: CGPoint(x: colMinX(0) - 2 + CGFloat(dx), y: row1CenterY))
             return abs(sample.r - accent.red) < 0.15
                 && abs(sample.g - accent.green) < 0.15
                 && abs(sample.b - accent.blue) < 0.15
@@ -5659,15 +5801,15 @@ struct DetailDisplayPresentationTests {
         #expect(hasAccentOnCell0)
         #expect(!hasAccentOnCell3)
 
-        // Green label dot appears in the bottom-trailing corner of cell 1 (index 1).
+        // Green label dot appears in the bottom-trailing corner of cell 1 (row 0 col 1).
         var foundGreenDot = false
         for dy in 2...36 {
             for dx in 2...36 {
                 let sample = try rgbaPixel(
                     in: cgImage,
                     at: CGPoint(
-                        x: cellMinX(1) + cellSide * scale - CGFloat(dx),
-                        y: cellBottomY - CGFloat(dy)))
+                        x: colMinX(1) + cellSide * scale - CGFloat(dx),
+                        y: row0BottomY - CGFloat(dy)))
                 if sample.g > sample.r + 0.12, sample.g > sample.b + 0.12 {
                     foundGreenDot = true
                     break
@@ -5676,6 +5818,56 @@ struct DetailDisplayPresentationTests {
             if foundGreenDot { break }
         }
         #expect(foundGreenDot)
+
+        // 4. Compact sheet width (390 pt) also uses 3 columns (> 100 pt square tiles).
+        let sheetWidth: CGFloat = 390
+        let sheetCellSide = (sheetWidth - padding * 2 - (columns - 1) * spacing) / columns
+        #expect(sheetCellSide > 100)
+        let sheetHost = UIHostingController(
+            rootView: GroupPhotoGridPicker(
+                group: fourGroup,
+                current: smallPhotos[0].id,
+                thumbnails: solidThumbnails,
+                showsDoneButton: true,
+                onSelect: { _ in }
+            )
+            .ignoresSafeArea()
+            .environment(\.cloveTheme, .dark))
+        sheetHost.safeAreaRegions = []
+        sheetHost.view.backgroundColor = .black
+        let sheetWindow = UIWindow(windowScene: scene)
+        sheetWindow.backgroundColor = .black
+        sheetWindow.frame = CGRect(x: 0, y: 0, width: sheetWidth, height: 420)
+        sheetWindow.rootViewController = sheetHost
+        sheetWindow.makeKeyAndVisible()
+        defer {
+            sheetWindow.isHidden = true
+            sheetWindow.rootViewController = nil
+        }
+
+        sheetWindow.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(120))
+        sheetWindow.layoutIfNeeded()
+
+        let sheetRendered = UIGraphicsImageRenderer(size: sheetWindow.bounds.size, format: format)
+            .image { _ in
+                sheetWindow.drawHierarchy(in: sheetWindow.bounds, afterScreenUpdates: true)
+            }
+        let sheetCG = try #require(sheetRendered.cgImage)
+        func sheetColCenterX(_ col: Int) -> CGFloat {
+            (padding + CGFloat(col) * (sheetCellSide + spacing) + sheetCellSide / 2) * scale
+        }
+        var sheetCol1Ys: [Int] = []
+        for y in 0..<sheetCG.height {
+            let probe = try rgbaPixel(
+                in: sheetCG, at: CGPoint(x: sheetColCenterX(1), y: CGFloat(y)))
+            if probe.r > 0.9, probe.g > 0.9, probe.b > 0.9 {
+                sheetCol1Ys.append(y)
+            }
+        }
+        let sheetTopY = CGFloat(try #require(sheetCol1Ys.first))
+        let sheetBottomY = CGFloat(try #require(sheetCol1Ys.last))
+        #expect((sheetBottomY - sheetTopY) / scale > 100)
     }
 
     private func rgbaPixel(in image: CGImage, at point: CGPoint) throws -> (
@@ -6507,7 +6699,7 @@ private final class DetailPickerTriggerBox {
 @MainActor
 @Observable
 private final class FilmstripCapTestState {
-    let timeline: DetailTimeline
+    var timeline: DetailTimeline
     var expandedGroup: ActiveBrowsingGroup?
     var current: PhotoIdentity?
     var scenePhase: ScenePhase = .active

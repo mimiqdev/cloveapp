@@ -801,6 +801,102 @@ struct BrowsingLayoutTests {
         #expect(readingLine.tone == .reading)
     }
 
+    @Test func filmstripGridPickerAdaptsAcrossWidthChangesWithoutOscillation() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let folder = FolderIdentity(rawValue: "filmstrip-width-adapt")
+        let photos = (1...8).map { index in
+            GridPhoto(
+                id: PhotoIdentity(
+                    folderID: folder, relativeFolderPath: "",
+                    stem: String(format: "ADP%03d", index)),
+                fileName: String(format: "ADP%03d.ARW", index),
+                time: .unavailable,
+                marks: PhotoMarks())
+        }
+        let groupID = GroupID(rawValue: "adapt-group")
+        let groups = [BrowsingGroup(id: groupID, members: photos.map(\.id))]
+        let timeline = DetailTimeline(photos: photos, groups: groups, groupsEnabled: true)
+        let expanded = try #require(timeline.activeGroup(with: groupID))
+
+        let framesBox = TestTapPickerFramesBox()
+        let triggerBox = TestPickerTriggerBox()
+
+        struct HostView: View {
+            let timeline: DetailTimeline
+            let expandedGroup: ActiveBrowsingGroup
+            let current: PhotoIdentity
+            let triggerBox: TestPickerTriggerBox
+
+            var body: some View {
+                VStack {
+                    Spacer()
+                    DetailFilmstrip(
+                        timeline: timeline,
+                        expandedGroup: expandedGroup,
+                        current: current,
+                        thumbnails: TestLibrary.sampleThumbnails,
+                        openPhoto: { _ in },
+                        selectGroupPhoto: { _ in },
+                        expandGroup: { _ in },
+                        collapseGroup: {}
+                    )
+                }
+                .environment(\.cloveTheme, .light)
+                .environment(\.scenePhase, .active)
+                .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+            }
+        }
+
+        let host = UIHostingController(
+            rootView: HostView(
+                timeline: timeline,
+                expandedGroup: expanded,
+                current: photos[0].id,
+                triggerBox: triggerBox
+            )
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                framesBox.frames = frames
+            })
+        host.traitOverrides.horizontalSizeClass = .regular
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 600)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // At 402 pt (8 members = 453 pt), gridPicker is shown and opens a popover.
+        try await waitFor("gridPicker did not appear at narrow width") {
+            framesBox.frames["clove.detail.filmstrip.group.gridPicker"] != nil
+                && framesBox.frames["clove.detail.filmstrip.group.fold"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        triggerBox.sendTrigger("clove.detail.filmstrip.group.gridPicker")
+        try await waitFor("popover did not open at narrow width") {
+            self.topPresentedViewController(from: host) != nil
+        }
+
+        // Widening to 700 pt (8 members fit without scrolling) hides gridPicker & dismisses popover.
+        window.frame = CGRect(x: 0, y: 0, width: 700, height: 600)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor("gridPicker did not hide and dismiss at wide width") {
+            framesBox.frames["clove.detail.filmstrip.group.gridPicker"] == nil
+                && framesBox.frames["clove.detail.filmstrip.group.fold"] != nil
+                && self.topPresentedViewController(from: host) == nil
+        }
+
+        // Narrowing back to 402 pt restores gridPicker cleanly.
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 600)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitFor("gridPicker did not reappear when narrowed") {
+            framesBox.frames["clove.detail.filmstrip.group.gridPicker"] != nil
+        }
+    }
+
     private func findCollectionView(in view: UIView) -> UICollectionView? {
         if let collection = view as? UICollectionView { return collection }
         for child in view.subviews {
@@ -879,4 +975,22 @@ private final class TestDuoEnvironmentBox {
 @Observable
 private final class TestHeaderFramesBox {
     var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+@Observable
+private final class TestTapPickerFramesBox {
+    var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+@Observable
+private final class TestPickerTriggerBox {
+    var trigger: TapPickerTriggerRequest?
+    private var counter = 0
+
+    func sendTrigger(_ id: String) {
+        counter += 1
+        trigger = TapPickerTriggerRequest(id: id, nonce: counter)
+    }
 }
