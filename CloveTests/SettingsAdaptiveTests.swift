@@ -247,4 +247,195 @@ struct SettingsAdaptiveTests {
         try await Task.sleep(for: .milliseconds(50))
         #expect(reported.last == .light)
     }
+
+    @Test func wideSplitSeparatesSidebarAndDetailCardsFromDivider() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        for size in [
+            CGSize(width: 1024, height: 768),
+            CGSize(width: 840, height: 680),
+            CGSize(width: 680, height: 680),
+        ] {
+            let navigation = SettingsNavigationState()
+            let framesBox = TestSettingsFramesBox()
+            let host = UIHostingController(
+                rootView: SettingsScreen(navigation: navigation, availableWidth: size.width)
+                    .environment(SettingsStore.sample)
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                        framesBox.frames = frames
+                    })
+            host.traitOverrides.horizontalSizeClass = .regular
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: size)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitForLayout("wide split layout did not stabilize at \(size)") {
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                let collections = self.findSubviews(ofType: UICollectionView.self, in: window)
+                return framesBox.frames["clove.settings.wideDivider"] != nil
+                    && framesBox.frames["clove.settings.detailTitle"] != nil
+                    && SettingsCategory.allCases.allSatisfy {
+                        framesBox.frames["\($0.identifier).title"] != nil
+                    }
+                    && collections.count == 2
+                    && collections.allSatisfy { !$0.visibleCells.isEmpty }
+            }
+
+            let divider = try #require(framesBox.frames["clove.settings.wideDivider"])
+            #expect(divider.width > 0 && divider.width <= 1)
+
+            let collections = findSubviews(ofType: UICollectionView.self, in: window)
+                .sorted {
+                    $0.convert($0.bounds, to: window).minX
+                        < $1.convert($1.bounds, to: window).minX
+                }
+            let sidebarCollection = try #require(collections.first)
+            let detailCollection = try #require(collections.last)
+            let sidebarCollectionFrame = sidebarCollection.convert(
+                sidebarCollection.bounds, to: window)
+            let detailCollectionFrame = detailCollection.convert(
+                detailCollection.bounds, to: window)
+
+            // Both Lists span cleanly to the divider so gutters stay touchable and scroll
+            // indicators are not clipped inward against the cards.
+            #expect(abs(sidebarCollectionFrame.maxX - divider.minX) <= 1)
+            #expect(abs(detailCollectionFrame.minX - divider.maxX) <= 1)
+            #expect(sidebarCollection.contentSize.width <= sidebarCollection.bounds.width + 1)
+            #expect(detailCollection.contentSize.width <= detailCollection.bounds.width + 1)
+
+            let sidebarCells = sidebarCollection.visibleCells.sorted {
+                $0.frame.minY < $1.frame.minY
+            }
+            #expect(sidebarCells.count == SettingsCategory.allCases.count + 1)
+            for cell in sidebarCells {
+                let cellFrame = cell.convert(cell.bounds, to: window)
+                #expect(cellFrame.minX >= 14)
+                #expect(divider.minX - cellFrame.maxX >= 14)
+                #expect(divider.minX - cellFrame.maxX >= 16)
+                #expect(cellFrame.height <= 56)
+            }
+
+            let firstSidebarCell = try #require(sidebarCells.first)
+                .convert(try #require(sidebarCells.first).bounds, to: window)
+            try verifySidebarTitlesSingleLineAndUntruncated(
+                frames: framesBox.frames,
+                selected: navigation.selectedCategory,
+                cardMaxX: firstSidebarCell.maxX)
+
+            let appearanceTitle = try #require(framesBox.frames["clove.settings.detailTitle"])
+            #expect(appearanceTitle.minX - divider.maxX >= 16)
+
+            let appearanceDetailCells = detailCollection.visibleCells.sorted {
+                $0.frame.minY < $1.frame.minY
+            }
+            #expect(!appearanceDetailCells.isEmpty)
+            for cell in appearanceDetailCells {
+                let cellFrame = cell.convert(cell.bounds, to: window)
+                #expect(cellFrame.minX - divider.maxX >= 14)
+                #expect(cellFrame.minX - divider.maxX >= 16)
+                #expect(size.width - cellFrame.maxX >= 14)
+            }
+            let firstDetailCell = try #require(appearanceDetailCells.first)
+                .convert(try #require(appearanceDetailCells.first).bounds, to: window)
+            let sidebarGap = divider.minX - firstSidebarCell.maxX
+            let detailGap = firstDetailCell.minX - divider.maxX
+            #expect(abs(sidebarGap - detailGap) <= 1)
+
+            // Switch to Culling & marking (long selected title + dual section header).
+            navigation.selectCategory(.cullingAndMarking, wide: true)
+            try await waitForLayout("culling detail did not update at \(size)") {
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                guard let currentTitle = framesBox.frames["clove.settings.detailTitle"] else {
+                    return false
+                }
+                let updatedCollections = self.findSubviews(
+                    ofType: UICollectionView.self, in: window
+                ).sorted {
+                    $0.convert($0.bounds, to: window).minX
+                        < $1.convert($1.bounds, to: window).minX
+                }
+                return currentTitle.width > appearanceTitle.width + 10
+                    && updatedCollections.count == 2
+                    && !updatedCollections[1].visibleCells.isEmpty
+            }
+
+            try verifySidebarTitlesSingleLineAndUntruncated(
+                frames: framesBox.frames,
+                selected: .cullingAndMarking,
+                cardMaxX: firstSidebarCell.maxX)
+
+            let cullingTitle = try #require(framesBox.frames["clove.settings.detailTitle"])
+            #expect(cullingTitle.minX - divider.maxX >= 16)
+
+            let updatedDetailCollection = try #require(
+                findSubviews(ofType: UICollectionView.self, in: window)
+                    .sorted {
+                        $0.convert($0.bounds, to: window).minX
+                            < $1.convert($1.bounds, to: window).minX
+                    }
+                    .last)
+            for cell in updatedDetailCollection.visibleCells {
+                let cellFrame = cell.convert(cell.bounds, to: window)
+                #expect(cellFrame.minX - divider.maxX >= 14)
+                #expect(cellFrame.minX - divider.maxX >= 16)
+                #expect(size.width - cellFrame.maxX >= 14)
+            }
+        }
+    }
+
+    private func verifySidebarTitlesSingleLineAndUntruncated(
+        frames: [String: CGRect],
+        selected: SettingsCategory,
+        cardMaxX: CGFloat
+    ) throws {
+        let baseBodyFont = UIFont.preferredFont(forTextStyle: .body)
+        for category in SettingsCategory.allCases {
+            let titleFrame = try #require(frames["\(category.identifier).title"])
+            let weight: UIFont.Weight = category == selected ? .medium : .regular
+            let font = UIFont.systemFont(ofSize: baseBodyFont.pointSize, weight: weight)
+            let expectedSize = (category.title as NSString).size(withAttributes: [.font: font])
+
+            #expect(titleFrame.height <= ceil(font.lineHeight) + 4)
+            #expect(titleFrame.width >= floor(expectedSize.width) - 2)
+            #expect(titleFrame.maxX <= cardMaxX - 8)
+        }
+    }
+
+    private func waitForLayout(
+        _ message: String,
+        timeout: Duration = .seconds(3),
+        condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            if ContinuousClock.now >= deadline {
+                Issue.record(Comment(rawValue: message))
+                throw CancellationError()
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    private func findSubviews<T: UIView>(ofType type: T.Type, in root: UIView) -> [T] {
+        var matches: [T] = []
+        if let match = root as? T { matches.append(match) }
+        for subview in root.subviews {
+            matches.append(contentsOf: findSubviews(ofType: type, in: subview))
+        }
+        return matches
+    }
+}
+
+@MainActor
+@Observable
+private final class TestSettingsFramesBox {
+    var frames: [String: CGRect] = [:]
 }

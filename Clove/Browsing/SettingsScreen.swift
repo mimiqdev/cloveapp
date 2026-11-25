@@ -23,13 +23,17 @@ struct SettingsScreen: View {
         self.availableWidth = availableWidth
     }
 
+    /// Matches the outer regular-width `.insetGrouped` margin so both sides of the central divider
+    /// stay visually symmetric without clipping scroll indicators.
+    private static let splitDividerInset: CGFloat = 20
+
     private var isWide: Bool {
         SettingsLayoutMode.isWide(
             horizontalSizeClass: horizontalSizeClass, availableWidth: availableWidth)
     }
 
     private var sidebarWidth: CGFloat {
-        availableWidth >= 960 ? 280 : 260
+        availableWidth >= 960 ? 296 : 276
     }
 
     var body: some View {
@@ -115,13 +119,18 @@ struct SettingsScreen: View {
                         Button {
                             navigation.selectCategory(category, wide: true)
                         } label: {
-                            Label(categoryTitle, systemImage: category.symbol)
-                                .foregroundStyle(
-                                    isSelected ? Color.clove.accent : Color.clove.text.primary
-                                )
-                                .fontWeight(isSelected ? .medium : .regular)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
+                            Label {
+                                Text(categoryTitle)
+                                    .reportHeaderControlFrame("\(category.identifier).title")
+                            } icon: {
+                                Image(systemName: category.symbol)
+                            }
+                            .foregroundStyle(
+                                isSelected ? Color.clove.accent : Color.clove.text.primary
+                            )
+                            .fontWeight(isSelected ? .medium : .regular)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(
@@ -139,6 +148,7 @@ struct SettingsScreen: View {
                 SettingsSaveFailureSection()
             }
             .listStyle(.insetGrouped)
+            .contentMargins(.trailing, Self.splitDividerInset, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(Color.clove.surface.sheet)
             .frame(width: sidebarWidth)
@@ -147,6 +157,7 @@ struct SettingsScreen: View {
                 .fill(Color.clove.separator)
                 .frame(width: 0.5)
                 .ignoresSafeArea(.container, edges: .bottom)
+                .reportHeaderControlFrame("clove.settings.wideDivider")
 
             List {
                 SettingsCategoryContent(
@@ -156,10 +167,12 @@ struct SettingsScreen: View {
             }
             .id(navigation.selectedCategory)
             .listStyle(.insetGrouped)
+            .contentMargins(.leading, Self.splitDividerInset, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(Color.clove.surface.sheet)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(Color.clove.surface.sheet)
     }
 
     private func compactSummary(for category: SettingsCategory) -> String? {

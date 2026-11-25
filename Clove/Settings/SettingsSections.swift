@@ -760,6 +760,7 @@ private struct SettingsDetailTitleHeader: View {
             .font(.title2.bold())
             .foregroundStyle(Color.clove.text.primary)
             .textCase(nil)
+            .reportHeaderControlFrame("clove.settings.detailTitle")
     }
 }
 
