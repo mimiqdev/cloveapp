@@ -41,6 +41,7 @@ struct BrowseShell: View {
                 if browsing.state.route != .entry, browsing.state.folder != nil {
                     if isRegular {
                         folderLayout
+                            .toolbarVisibility(.hidden, for: .navigationBar)
                     } else {
                         GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
                     }
@@ -48,10 +49,7 @@ struct BrowseShell: View {
                     EntryScreen(browsing: browsing)
                 }
             }
-            .browsingChrome(
-                title: title, browsing: browsing, usesSystemBar: usesSystemToolbar && !isRegular,
-                language: language
-            )
+            .navigationTitle("")
             .navigationDestination(for: BrowseDestination.self) { destination in
                 screen(for: destination)
             }
@@ -146,12 +144,14 @@ struct BrowseShell: View {
     private func screen(for destination: BrowseDestination) -> some View {
         switch destination {
         case .detail:
-            DetailScreen(browsing: browsing)
-                .browsingChrome(
-                    title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
-                    language: language
-                )
+            let detail = DetailScreen(browsing: browsing)
+                .navigationTitle("")
                 .navigationBarBackButtonHidden()
+            if usesSystemToolbar {
+                detail
+            } else {
+                detail.toolbarVisibility(.hidden, for: .navigationBar)
+            }
         case .settings:
             SettingsScreen(
                 navigation: settingsNavigation, availableWidth: availableWidth
@@ -201,7 +201,7 @@ struct BrowseShell: View {
 }
 
 extension View {
-    /// Entry owns its header; wide Settings owns its split headers and Done button.
+    /// Applies navigation title, compact Done action, and bar visibility for Settings.
     func browsingChrome(
         title: String, browsing: BrowsingModel, usesSystemBar: Bool = false,
         hidesSettingsBar: Bool = false, language: ResolvedAppLanguage = .english
@@ -222,15 +222,15 @@ private struct BrowsingChromeModifier: ViewModifier {
     let hidesSettingsBar: Bool
     let language: ResolvedAppLanguage
 
-    @ViewBuilder
-    func body(content: Content) -> some View {
+    private var barVisibility: Visibility {
         let hidesBar =
             (browsing.state.route == .settings && hidesSettingsBar)
-            || (!usesSystemBar
-                && (browsing.state.route == .grid || browsing.state.route == .detail
-                    || browsing.state.route == .entry))
-        let base =
-            content
+            || !usesSystemBar
+        return hidesBar ? .hidden : .visible
+    }
+
+    func body(content: Content) -> some View {
+        content
             .navigationTitle(
                 browsing.state.route == .grid
                     || browsing.state.route == .detail
@@ -245,17 +245,7 @@ private struct BrowsingChromeModifier: ViewModifier {
                         .accessibilityIdentifier("clove.nav.back")
                     }
                 }
-                // Entry owns its header (screens.md §01): its own large title and gear,
-                // so no toolbar item is added there.
             }
-        if hidesBar {
-            base.toolbarVisibility(.hidden, for: .navigationBar)
-        } else if browsing.state.route == .grid || browsing.state.route == .settings {
-            base.toolbarVisibility(.visible, for: .navigationBar)
-        } else {
-            // Let `.detail` (including Compare and landscape Detail chrome hiding) and `.entry`
-            // control navigation bar visibility without an outer override.
-            base
-        }
+            .toolbarVisibility(barVisibility, for: .navigationBar)
     }
 }
