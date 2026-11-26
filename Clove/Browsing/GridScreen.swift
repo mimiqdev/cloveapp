@@ -24,10 +24,10 @@ struct GridScreen: View {
     @State private var isLandscapeContainer = false
     @State private var containerSize: CGSize = .zero
     @State private var presentation = DetailPresentation.focus
-    /// Whether this session opened a photo, so the Duo's grid reopens at the photo on screen
-    /// after Back instead of the folder's first row (#225). A launch that restores a photo keeps
-    /// the grid where it opens today.
-    @State private var hasOpenedPhoto = false
+    /// Whether this session opened a photo (or has an active current photo), so returning to the
+    /// grid from Detail brings the active photo into view across iPhone, iPad, and Duo when
+    /// off-screen while preserving the scroll offset when it is already visible.
+    @State private var hasOpenedPhoto: Bool
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
@@ -90,6 +90,8 @@ struct GridScreen: View {
         self.filterPopoverTrigger = filterPopoverTrigger
         _presentation = State(initialValue: initialPresentation)
         _areGroupsUnfolded = State(initialValue: browsing.isSelecting)
+        _hasOpenedPhoto = State(
+            initialValue: browsing.state.route == .detail || browsing.state.currentPhoto != nil)
     }
 
     private var userInterfaceIdiom: UIUserInterfaceIdiom {
@@ -182,7 +184,14 @@ struct GridScreen: View {
                 containerSize = size
                 isLandscapeContainer = size.width > size.height && size.width > 0
             }
+            .onAppear {
+                if browsing.state.route == .detail || browsing.state.currentPhoto != nil {
+                    hasOpenedPhoto = true
+                }
+            }
             .onChange(of: browsing.state.folder) { _, _ in
+                hasOpenedPhoto =
+                    browsing.state.route == .detail || browsing.state.currentPhoto != nil
                 selectsEmpty = false
                 areGroupsUnfolded = browsing.isSelecting
                 pendingPhotosConfirmationPlan = nil
@@ -519,9 +528,11 @@ struct GridScreen: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbarVerticalBehavior(.automatic)
                     .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
+                    .toolbarVisibility(.visible, for: .navigationBar)
             }
         } else {
             grid
+                .toolbarVisibility(.hidden, for: .navigationBar)
         }
     }
 
@@ -639,7 +650,7 @@ struct GridScreen: View {
                     } ?? 0,
                     columnCount: isDuoExpanded ? 6 : nil,
                     highlightsCurrentPhoto: false,
-                    followsCurrentPhoto: isDuoExpanded && hasOpenedPhoto,
+                    followsCurrentPhoto: hasOpenedPhoto,
                     foldExpandedGroup: { _ in },
                     openPhoto: { browsing.openPhoto($0) }, openGroup: openGroup,
                     beginSelection: { browsing.beginSelection(of: $0) },

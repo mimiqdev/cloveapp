@@ -128,7 +128,10 @@ struct GridCollectionView: UIViewRepresentable {
             coordinator?.restoreResizeAnchorIfNeeded()
         }
         collectionView.onSettledLayout = { [weak coordinator] in
-            coordinator?.updateSettledAnchor()
+            coordinator?.handleSettledLayout()
+        }
+        collectionView.onMovedToWindow = { [weak coordinator] in
+            coordinator?.handleMovedToWindow()
         }
         context.coordinator.attach(to: collectionView)
         return collectionView
@@ -276,11 +279,21 @@ private final class AnchoredGridCollectionView: UICollectionView {
     var onWidthWillChange: ((CGFloat) -> Void)?
     var onDidLayoutForWidthChange: (() -> Void)?
     var onSettledLayout: (() -> Void)?
+    var onMovedToWindow: (() -> Void)?
     private(set) var laidOutWidth: CGFloat = 0
+    private(set) var hasAttachedToWindow = false
     private var pendingWidthChangeLayout = false
 
     var isResizingWidth: Bool {
         pendingWidthChangeLayout || (laidOutWidth > 0 && abs(bounds.width - laidOutWidth) > 0.5)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            hasAttachedToWindow = true
+            onMovedToWindow?()
+        }
     }
 
     override var frame: CGRect {
@@ -383,6 +396,9 @@ extension GridCollectionView {
         private var highlightedCellID: GridCellItem.ID?
         private var drawnCurrentPhoto: PhotoIdentity?
         private var drawnHighlight = false
+        private var drawnFollowsCurrentPhoto = false
+        private var pendingFollowCurrentPhoto = false
+        private var isFlushingPendingFollow = false
 
         /// The folder's scroll offset when the grid entered Group Focus, so folding returns the
         /// person to the stack they left on (issue #309).
@@ -433,8 +449,22 @@ extension GridCollectionView {
             self.completeGroupUnfold = completeGroupUnfold
         }
 
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            pendingFollowCurrentPhoto = false
+        }
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateSettledAnchor()
+        }
+
+        func handleSettledLayout() {
+            flushPendingFollowIfNeeded()
+            updateSettledAnchor()
+        }
+
+        func handleMovedToWindow() {
+            guard pendingFollowCurrentPhoto, let collectionView else { return }
+            collectionView.setNeedsLayout()
         }
 
         func updateSettledAnchor() {
@@ -460,6 +490,10 @@ extension GridCollectionView {
         }
 
         func restoreResizeAnchorIfNeeded() {
+            if pendingFollowCurrentPhoto {
+                pendingResizeAnchor = nil
+                return
+            }
             let held = pendingResizeAnchor ?? settledResizeAnchor
             pendingResizeAnchor = nil
             guard let held, let collectionView else { return }
@@ -712,14 +746,20 @@ extension GridCollectionView {
                 : nil
             let highlightChanged =
                 highlightsCurrentPhoto && highlightedCellID != newHighlightedCellID && !styleChanged
-            // The split pane's grid follows the open member, and its grid opens on the photo the
-            // person left (#225, #309).
+            let becameFollowing = followsCurrentPhoto && !drawnFollowsCurrentPhoto
+            // The split pane's grid follows the open member, and the grid returns on the photo the
+            // person left (#225, #309, #481).
             let followsMoved =
-                followsCurrentPhoto && (wasEmpty || drawnCurrentPhoto != currentPhoto)
+                followsCurrentPhoto
+                && (wasEmpty || becameFollowing || drawnCurrentPhoto != currentPhoto)
+            if !followsCurrentPhoto {
+                pendingFollowCurrentPhoto = false
+            }
             let highlightCells = Set([highlightedCellID, newHighlightedCellID].compactMap { $0 })
             highlightedCellID = newHighlightedCellID
             drawnCurrentPhoto = currentPhoto
             drawnHighlight = highlightsCurrentPhoto
+            drawnFollowsCurrentPhoto = followsCurrentPhoto
             self.currentPhoto = currentPhoto
             theme = newTheme
             language = newLanguage
@@ -870,6 +910,7 @@ extension GridCollectionView {
             }
 
             if entersFocus {
+                pendingFollowCurrentPhoto = false
                 folderOffsetBeforeGroupFocus =
                     folderOffsetBeforeFocus ?? -collectionView.adjustedContentInset.top
                 if collectionView.bounds.height > 0 {
@@ -1276,19 +1317,67 @@ extension GridCollectionView {
         }
 
         /// Keeps the photo on screen in view for a change inside a level: the member chosen in
-        /// Group Focus, or the stack a fold leaves (#225, #241, #290). Entry does not use it, so a
-        /// long run's header and fold control stay where the person can find them (#309).
-        private func follow() {
+        /// Group Focus, or the stack a fold leaves (#225, #241, #290, #481). Entry does not use it,
+        /// so a long run's header and fold control stay where the person can find them (#309).
+        private func follow(allowLayoutIfNeeded: Bool = true) {
             guard followsCurrentPhoto, let collectionView, let currentPhoto,
                 let cell = GridCellItem.cell(
                     for: currentPhoto, in: items, groups: groups, shown: shownPhotos),
                 let indexPath = indexPath(of: cell)
-            else { return }
-            if collectionView.bounds.height > 0 {
+            else {
+                pendingFollowCurrentPhoto = false
+                return
+            }
+            guard !isDetachedFromWindow(collectionView),
+                collectionView.bounds.width > 0,
+                collectionView.bounds.height > 0
+            else {
+                pendingFollowCurrentPhoto = true
+                return
+            }
+            if allowLayoutIfNeeded {
                 collectionView.layoutIfNeeded()
             }
+            guard canFollowNow(in: collectionView) else {
+                pendingFollowCurrentPhoto = true
+                return
+            }
+            pendingFollowCurrentPhoto = false
             guard !isItemVisible(at: indexPath, in: collectionView) else { return }
             collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
+            if !allowLayoutIfNeeded {
+                collectionView.setNeedsLayout()
+            }
+        }
+
+        private func flushPendingFollowIfNeeded() {
+            guard pendingFollowCurrentPhoto, !isFlushingPendingFollow,
+                let collectionView = collectionView as? AnchoredGridCollectionView,
+                !collectionView.isResizingWidth,
+                canFollowNow(in: collectionView)
+            else { return }
+            isFlushingPendingFollow = true
+            defer { isFlushingPendingFollow = false }
+            follow(allowLayoutIfNeeded: false)
+        }
+
+        private func isDetachedFromWindow(_ collectionView: UICollectionView) -> Bool {
+            guard let anchored = collectionView as? AnchoredGridCollectionView else {
+                return false
+            }
+            return anchored.hasAttachedToWindow && collectionView.window == nil
+        }
+
+        private func canFollowNow(in collectionView: UICollectionView) -> Bool {
+            guard !isDetachedFromWindow(collectionView) else { return false }
+            let insets = collectionView.adjustedContentInset
+            let visibleWidth = collectionView.bounds.width - insets.left - insets.right
+            let visibleHeight = collectionView.bounds.height - insets.top - insets.bottom
+            return collectionView.bounds.width > 0
+                && collectionView.bounds.height > 0
+                && visibleWidth > 0
+                && visibleHeight > 0
+                && collectionView.contentSize.height > 0
         }
 
         private func isItemVisible(at indexPath: IndexPath, in collectionView: UICollectionView)
