@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Shared Filter toolbar button and popover menu reused by Grid and Detail across all devices.
 ///
-/// Reuses ``GridFilterSheetHandoff`` so tapping `"More filters"` inside the popover waits until
-/// popover dismissal finishes before presenting ``MetadataFilterSheet``.
+/// Reuses ``GridFilterSheetHandoff`` so tapping `"More filters"` inside the popover dismisses the
+/// popover without animation and presents ``MetadataFilterSheet`` once dismissal completes.
 struct PhotoFilterPopoverButton: View {
     let browsing: BrowsingModel
     var controlSize: ControlSize = .phone
@@ -18,6 +18,7 @@ struct PhotoFilterPopoverButton: View {
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.appLanguage) private var language
+    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
     @State private var isAnchorReady = false
     @State private var isPopoverContentMounted = false
 
@@ -83,6 +84,7 @@ struct PhotoFilterPopoverButton: View {
 
     private var popoverContent: some View {
         filterMenu
+            .environment(\.tapPickerTriggerRequest, tapPickerTriggerRequest)
             .presentationCompactAdaptation(.popover)
             .onAppear {
                 isPopoverContentMounted = true
@@ -94,6 +96,28 @@ struct PhotoFilterPopoverButton: View {
                 }
                 onCompleteMetadataFiltersHandoff()
             }
+            .onChange(of: tapPickerTriggerRequest) { _, request in
+                if request?.id == "\(identifierPrefix).more",
+                    isPopoverContentMounted,
+                    canPresentMetadataFilters,
+                    browsing.metadataFilterOptions.hasAnyDimension
+                        || !browsing.metadataFilter.isEmpty
+                {
+                    triggerMoreFilters()
+                }
+            }
+    }
+
+    private func triggerMoreFilters() {
+        guard filterHandoff.showsFilters, isAnchorReady, isPopoverContentMounted,
+            scenePhase == .active
+        else { return }
+        onCancelPendingMetadataFilters()
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            filterHandoff.requestMetadataFiltersFromPopover(folder: browsing.state.folder)
+        }
     }
 
     private func handleTap() {
@@ -176,8 +200,7 @@ struct PhotoFilterPopoverButton: View {
             {
                 Divider().overlay(Color.clove.separator)
                 Button {
-                    onCancelPendingMetadataFilters()
-                    filterHandoff.requestMetadataFiltersFromPopover(folder: browsing.state.folder)
+                    triggerMoreFilters()
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "slider.horizontal.3")
